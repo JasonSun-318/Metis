@@ -1,7 +1,7 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, NotePencil, PuzzlePiece, SidebarSimple } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
@@ -42,8 +42,13 @@ export function clampSessionSidebarWidth(value: number, viewportWidth = window.i
 	return Math.min(maximum, clampSessionSidebarPreferredWidth(value));
 }
 
+export type SessionSidebarState = Pick<
+	AppStoreSnapshot,
+	"sessionsById" | "sessionOrder" | "activeSessionId" | "activeTurnId" | "interactionsById" | "interactionOrder"
+>;
+
 interface SessionSidebarProps {
-	readonly state: AppStoreSnapshot;
+	readonly state: SessionSidebarState;
 	readonly platform: string;
 	readonly destination: SidebarDestination;
 	readonly onSettings: () => void;
@@ -104,7 +109,7 @@ function projectName(cwd: string): string {
 }
 
 export function buildSessionTree(
-	state: AppStoreSnapshot,
+	state: Pick<AppStoreSnapshot, "sessionOrder" | "sessionsById">,
 	mode: AgentMode,
 	preferences: ProjectPreferenceMap,
 	excludedSessionIds: ReadonlySet<string> = new Set(),
@@ -289,7 +294,7 @@ function ProjectGroup({
 	);
 }
 
-export function SessionSidebar({
+export const SessionSidebar = memo(function SessionSidebar({
 	state,
 	platform,
 	destination,
@@ -323,13 +328,19 @@ export function SessionSidebar({
 	} = workspace;
 	const locale = localeForIntl(i18n.resolvedLanguage);
 	const scheduledTaskIds = useMemo(() => new Set(scheduleTasks.map(({ id }) => id)), [scheduleTasks]);
-	const visibleScheduleTasks = scheduleTasks.filter(
-		(task) => task.status === "active" || task.status === "paused",
+	const visibleScheduleTasks = useMemo(
+		() => scheduleTasks.filter((task) => task.status === "active" || task.status === "paused"),
+		[scheduleTasks],
 	);
-	const scheduledSessions = sessionsForMode(state, mode).filter(
-		(session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId),
+	const modeSessions = useMemo(() => sessionsForMode(state, mode), [mode, state]);
+	const scheduledSessions = useMemo(
+		() => modeSessions.filter((session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId)),
+		[modeSessions, scheduledTaskIds],
 	);
-	const tree = buildSessionTree(state, mode, preferences, pinnedSessionIds);
+	const tree = useMemo(
+		() => buildSessionTree(state, mode, preferences, pinnedSessionIds),
+		[mode, pinnedSessionIds, preferences, state],
+	);
 	const [fullscreen, setFullscreen] = useState(windowIsFullscreen);
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
@@ -341,9 +352,18 @@ export function SessionSidebar({
 		}
 	});
 	const grouping = groupingByMode[mode];
-	const allSessions = sessionsForMode(state, mode).filter((session) => session.scheduled === undefined);
-	const pinnedSessions = allSessions.filter((session) => pinnedSessionIds.has(session.sessionId));
-	const sessions = allSessions.filter((session) => !pinnedSessionIds.has(session.sessionId));
+	const allSessions = useMemo(
+		() => modeSessions.filter((session) => session.scheduled === undefined),
+		[modeSessions],
+	);
+	const pinnedSessions = useMemo(
+		() => allSessions.filter((session) => pinnedSessionIds.has(session.sessionId)),
+		[allSessions, pinnedSessionIds],
+	);
+	const sessions = useMemo(
+		() => allSessions.filter((session) => !pinnedSessionIds.has(session.sessionId)),
+		[allSessions, pinnedSessionIds],
+	);
 	const hasSessions = allSessions.length > 0;
 	useEffect(() => {
 		const runtime = globalThis as RendererWindowView;
@@ -543,4 +563,4 @@ export function SessionSidebar({
 			/>
 		</aside>
 	);
-}
+});

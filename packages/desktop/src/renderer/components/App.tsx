@@ -52,6 +52,7 @@ import {
 	type ProjectSessionGroup,
 	type SidebarDestination,
 	SessionSidebar,
+	type SessionSidebarState,
 } from "./SessionSidebar.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
@@ -119,6 +120,7 @@ export function latestAssistantUsageKey(
 
 const TOOLS_SIDEBAR_WIDTH_PREFIX = "metis.tools-sidebar-width.v2:";
 const SESSION_SIDEBAR_WIDTH_KEY = "metis.session-sidebar-width.v1";
+const selectSidebarRevision = (snapshot: AppStoreSnapshot) => snapshot.sidebarRevision;
 
 function loadSessionSidebarPreferredWidth(): number {
 	try {
@@ -138,6 +140,26 @@ function loadToolsSidebarPreferredWidth(sessionId: string, workspaceWidth: numbe
 export function App({ api, store }: AppProps) {
 	const { i18n, t } = useTranslation();
 	const state = useAppStore(store);
+	const sidebarRevision = useAppStore(store, selectSidebarRevision);
+	const sidebarState = useMemo<SessionSidebarState>(
+		() => ({
+			sessionsById: state.sessionsById,
+			sessionOrder: state.sessionOrder,
+			activeSessionId: state.activeSessionId,
+			activeTurnId: state.activeTurnId,
+			interactionsById: state.interactionsById,
+			interactionOrder: state.interactionOrder,
+		}),
+		[
+			sidebarRevision,
+			state.activeSessionId,
+			state.activeTurnId,
+			state.interactionOrder,
+			state.interactionsById,
+			state.sessionOrder,
+			state.sessionsById,
+		],
+	);
 	const scheduleStoreRef = useRef<ScheduleStore | null>(null);
 	if (!scheduleStoreRef.current) scheduleStoreRef.current = new ScheduleStore();
 	const scheduleStore = scheduleStoreRef.current;
@@ -433,33 +455,52 @@ export function App({ api, store }: AppProps) {
 		};
 	}, [api, reportError, requestScheduleSnapshot, workspaceWorkflow]);
 
-	const renameProject = (group: ProjectSessionGroup, alias: string) =>
-		workspaceWorkflow.renameProject(group, alias);
-	const pinProject = (group: ProjectSessionGroup, pinned: boolean) =>
-		workspaceWorkflow.pinProject(group, pinned);
-	const pinSession = (session: SessionSummary, pinned: boolean) =>
-		workspaceWorkflow.pinSession(session, pinned);
-	const previewProjectDelete = (group: ProjectSessionGroup) =>
-		workspaceWorkflow.previewProjectDelete(group);
-	const createEmptySessionInProject = async (projectMode: AgentMode, cwd: string): Promise<void> => {
+	const renameProject = useCallback(
+		(group: ProjectSessionGroup, alias: string) => workspaceWorkflow.renameProject(group, alias),
+		[workspaceWorkflow],
+	);
+	const pinProject = useCallback(
+		(group: ProjectSessionGroup, pinned: boolean) => workspaceWorkflow.pinProject(group, pinned),
+		[workspaceWorkflow],
+	);
+	const pinSession = useCallback(
+		(session: SessionSummary, pinned: boolean) => workspaceWorkflow.pinSession(session, pinned),
+		[workspaceWorkflow],
+	);
+	const previewProjectDelete = useCallback(
+		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete(group),
+		[workspaceWorkflow],
+	);
+	const createEmptySessionInProject = useCallback(async (projectMode: AgentMode, cwd: string): Promise<void> => {
 		setDestination("tasks");
 		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
-	};
-	const createEmptyProjectSession = (group: ProjectSessionGroup): Promise<void> =>
-		createEmptySessionInProject(group.mode, group.cwd);
-	const deleteProject = (group: ProjectSessionGroup, preview: Parameters<SessionWorkspaceWorkflow["deleteProject"]>[1]) =>
-		workspaceWorkflow.deleteProject(group, preview);
-	const renameSession = (session: SessionSummary, name: string) => workspaceWorkflow.renameSession(session, name);
-	const deleteSession = (session: SessionSummary) => workspaceWorkflow.deleteSession(session);
+	}, [workspaceWorkflow]);
+	const createEmptyProjectSession = useCallback(
+		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
+		[createEmptySessionInProject],
+	);
+	const deleteProject = useCallback(
+		(group: ProjectSessionGroup, preview: Parameters<SessionWorkspaceWorkflow["deleteProject"]>[1]) =>
+			workspaceWorkflow.deleteProject(group, preview),
+		[workspaceWorkflow],
+	);
+	const renameSession = useCallback(
+		(session: SessionSummary, name: string) => workspaceWorkflow.renameSession(session, name),
+		[workspaceWorkflow],
+	);
+	const deleteSession = useCallback(
+		(session: SessionSummary) => workspaceWorkflow.deleteSession(session),
+		[workspaceWorkflow],
+	);
 
-	const openVisibleSession = async (sessionId: string) => {
+	const openVisibleSession = useCallback(async (sessionId: string) => {
 		setDestination("tasks");
 		try {
 			await workspaceWorkflow.openVisibleSession(sessionId);
 		} catch {
 			// The workflow reports the error while preserving the current projection.
 		}
-	};
+	}, [workspaceWorkflow]);
 	const forkFromReply = async (entryId: string) => {
 		try {
 			await workspaceWorkflow.forkSession(entryId);
@@ -477,22 +518,22 @@ export function App({ api, store }: AppProps) {
 	const createCodeProjectFolder = (input: Parameters<MetisDesktopApi["createProjectFolder"]>[0]) =>
 		api.createProjectFolder(input);
 
-	const startNewTask = () => {
+	const startNewTask = useCallback(() => {
 		setDestination("tasks");
 		setError(null);
 		workspaceWorkflow.startNewTask();
-	};
+	}, [workspaceWorkflow]);
 	const cancelNewTask = () => {
 		setError(null);
 		workspaceWorkflow.cancelNewTask();
 	};
 
-	const changeMode = (nextMode: AgentMode) => {
+	const changeMode = useCallback((nextMode: AgentMode) => {
 		if (nextMode === mode) return;
 		setDestination("tasks");
 		setError(null);
 		void workspaceWorkflow.selectMode(nextMode);
-	};
+	}, [mode, workspaceWorkflow]);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 
@@ -1162,6 +1203,68 @@ export function App({ api, store }: AppProps) {
 		setSelectedScheduleTaskId((current) => current === result.taskId ? null : current);
 		return result;
 	}, [api, scheduleStore]);
+	const sidebarScheduleTasks = useMemo(
+		() => scheduleState.taskOrder
+			.map((id) => scheduleState.tasksById.get(id))
+			.filter((task): task is ScheduleTaskView => task !== undefined),
+		[scheduleState.taskOrder, scheduleState.tasksById],
+	);
+	const openSkillsDestination = useCallback(() => {
+		setPluginSection("skills");
+		setDestination("skills");
+	}, []);
+	const openSchedulesDestination = useCallback(() => {
+		setDestination("schedules");
+		setSelectedScheduleTaskId(null);
+	}, []);
+	const openSchedule = useCallback((taskId: string) => {
+		setDestination("schedules");
+		setSelectedScheduleTaskId(taskId);
+	}, []);
+	const hideSessionSidebar = useCallback(() => setSessionsSidebarOpen(false), []);
+	const sidebarProjectBusy = useCallback(
+		(group: ProjectSessionGroup) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.mode, group.cwd)),
+		[workspaceState.busyProjectKeys],
+	);
+	const sidebarWorkspace = useMemo(() => ({
+		busy: !bootstrapped || draftBusy || !serverReady,
+		mode,
+		newTaskOpen,
+		onCreateProjectSession: createEmptyProjectSession,
+		onDeleteProject: deleteProject,
+		onDeleteSession: deleteSession,
+		onModeChange: changeMode,
+		onNewTask: startNewTask,
+		onOpen: openVisibleSession,
+		onPinProject: pinProject,
+		onPinSession: pinSession,
+		onPreviewProjectDelete: previewProjectDelete,
+		onRenameProject: renameProject,
+		onRenameSession: renameSession,
+		pinnedSessionIds,
+		preferences: projectPreferences,
+		projectBusy: sidebarProjectBusy,
+	}), [
+		bootstrapped,
+		changeMode,
+		createEmptyProjectSession,
+		deleteProject,
+		deleteSession,
+		draftBusy,
+		mode,
+		newTaskOpen,
+		openVisibleSession,
+		pinProject,
+		pinSession,
+		pinnedSessionIds,
+		previewProjectDelete,
+		projectPreferences,
+		renameProject,
+		renameSession,
+		serverReady,
+		sidebarProjectBusy,
+		startNewTask,
+	]);
 
 	return (
 		<>
@@ -1177,35 +1280,17 @@ export function App({ api, store }: AppProps) {
 				onDeleteSchedule={deleteScheduledTask}
 					onSettings={openSettings}
 					onUpdate={startDesktopUpdate}
-					onSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
-					onSchedules={() => { setDestination("schedules"); setSelectedScheduleTaskId(null); }}
-					onOpenSchedule={(taskId) => { setDestination("schedules"); setSelectedScheduleTaskId(taskId); }}
-				onToggle={() => setSessionsSidebarOpen(false)}
+					onSkills={openSkillsDestination}
+					onSchedules={openSchedulesDestination}
+					onOpenSchedule={openSchedule}
+				onToggle={hideSessionSidebar}
 				onWidthChange={updateSessionSidebarWidth}
-					scheduleTasks={scheduleState.taskOrder.map((id) => scheduleState.tasksById.get(id)).filter((task): task is ScheduleTaskView => task !== undefined)}
+					scheduleTasks={sidebarScheduleTasks}
 					selectedScheduleTaskId={selectedScheduleTaskId}
-					state={state}
+					state={sidebarState}
 					updateState={updateState}
 				width={sessionSidebarWidth}
-				workspace={{
-					busy: !bootstrapped || draftBusy || !serverReady,
-					mode,
-					newTaskOpen,
-					onCreateProjectSession: createEmptyProjectSession,
-					onDeleteProject: deleteProject,
-					onDeleteSession: deleteSession,
-					onModeChange: changeMode,
-					onNewTask: startNewTask,
-					onOpen: openVisibleSession,
-					onPinProject: pinProject,
-					onPinSession: pinSession,
-					onPreviewProjectDelete: previewProjectDelete,
-					onRenameProject: renameProject,
-					onRenameSession: renameSession,
-					pinnedSessionIds,
-					preferences: projectPreferences,
-					projectBusy: (group) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.mode, group.cwd)),
-				}}
+				workspace={sidebarWorkspace}
 			/>}
 			<main
 				className={`workspace${toolsSidebarAvailable && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}

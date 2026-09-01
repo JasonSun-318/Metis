@@ -40,6 +40,7 @@ export interface AgentTranscriptState {
 
 export interface AppStoreSnapshot {
 	readonly version: number;
+	readonly sidebarRevision: number;
 	readonly sessionsById: ReadonlyMap<string, SessionSummary>;
 	readonly sessionOrder: readonly string[];
 	readonly activeSessionId: string | null;
@@ -77,6 +78,7 @@ export class AppStore {
 	private readonly state = createProjectionState();
 	private readonly listeners = new Set<() => void>();
 	private version = 0;
+	private sidebarRevision = 0;
 	private agentCollectionRevision = 0;
 	private supervisor: SupervisorView = {
 		state: "stopped",
@@ -85,6 +87,10 @@ export class AppStore {
 		failure: null,
 	};
 	private snapshot = this.createSnapshot();
+	private pendingNotification?: {
+		kind: "animation-frame" | "timeout";
+		handle: number | ReturnType<typeof setTimeout>;
+	};
 
 	subscribe = (listener: () => void): (() => void) => {
 		this.listeners.add(listener);
@@ -101,6 +107,7 @@ export class AppStore {
 
 	setSessions(result: ClientResult<"session/list">): void {
 		replaceSessionList(this.state, result.sessions);
+		this.sidebarRevision += 1;
 		this.commit();
 	}
 
@@ -108,20 +115,28 @@ export class AppStore {
 		const existed = this.state.sessionsById.has(session.sessionId);
 		this.state.sessionsById.set(session.sessionId, structuredClone(session));
 		if (!existed) this.state.sessionOrder.unshift(session.sessionId);
+		this.sidebarRevision += 1;
 		this.commit();
 	}
 
 	removeModeProject(mode: AgentMode, cwd: string): void {
-		if (removeModeProjectSessions(this.state, mode, cwd)) this.commit();
+		if (removeModeProjectSessions(this.state, mode, cwd)) {
+			this.sidebarRevision += 1;
+			this.commit();
+		}
 	}
 
 	removeSession(sessionId: string): void {
-		if (removeSession(this.state, sessionId)) this.commit();
+		if (removeSession(this.state, sessionId)) {
+			this.sidebarRevision += 1;
+			this.commit();
+		}
 	}
 
 	applySnapshot(snapshot: SessionSnapshot): void {
 		replaceProjectionSnapshot(this.state, snapshot);
 		this.agentCollectionRevision += 1;
+		this.sidebarRevision += 1;
 		this.commit();
 	}
 
@@ -131,7 +146,27 @@ export class AppStore {
 		if (result === "applied" && batch.events.some((event) => event.type === "agent/deleted")) {
 			this.agentCollectionRevision += 1;
 		}
-		if (result === "applied" || previousStatus !== this.state.syncStatus) this.commit();
+		if (
+			result === "applied" &&
+			batch.events.some(
+				(event) =>
+					event.type === "session/updated" ||
+					event.type === "session/invalidated" ||
+					event.type === "project/invalidated" ||
+					event.type === "turn/started" ||
+					event.type === "turn/completed" ||
+					event.type === "turn/interrupted",
+			)
+		) {
+			this.sidebarRevision += 1;
+		}
+		if (result === "applied" || previousStatus !== this.state.syncStatus) {
+			const streamingOnly =
+				result === "applied" &&
+				batch.events.length > 0 &&
+				batch.events.every((event) => event.type === "item/delta" || event.type === "agent/item/delta");
+			this.commit(streamingOnly);
+		}
 		return result;
 	}
 
@@ -179,24 +214,59 @@ export class AppStore {
 
 	addInteraction(interaction: InteractionView): void {
 		addPendingInteraction(this.state, interaction);
+		this.sidebarRevision += 1;
 		this.commit();
 	}
 
 	removeInteraction(interactionId: string): void {
 		const existed = this.state.interactionsById.has(interactionId);
 		removePendingInteraction(this.state, interactionId);
-		if (existed) this.commit();
+		if (existed) {
+			this.sidebarRevision += 1;
+			this.commit();
+		}
 	}
 
-	private commit(): void {
+	private notify(): void {
+		for (const listener of this.listeners) listener();
+	}
+
+	private cancelPendingNotification(): void {
+		const pending = this.pendingNotification;
+		if (!pending) return;
+		this.pendingNotification = undefined;
+		if (pending.kind === "animation-frame") globalThis.cancelAnimationFrame?.(pending.handle as number);
+		else clearTimeout(pending.handle as ReturnType<typeof setTimeout>);
+	}
+
+	private scheduleNotification(): void {
+		if (this.pendingNotification) return;
+		const flush = () => {
+			this.pendingNotification = undefined;
+			this.notify();
+		};
+		if (typeof globalThis.requestAnimationFrame === "function") {
+			this.pendingNotification = { kind: "animation-frame", handle: globalThis.requestAnimationFrame(flush) };
+		} else {
+			this.pendingNotification = { kind: "timeout", handle: setTimeout(flush, 16) };
+		}
+	}
+
+	private commit(deferNotification = false): void {
 		this.version += 1;
 		this.snapshot = this.createSnapshot();
-		for (const listener of this.listeners) listener();
+		if (deferNotification) {
+			this.scheduleNotification();
+			return;
+		}
+		this.cancelPendingNotification();
+		this.notify();
 	}
 
 	private createSnapshot(): AppStoreSnapshot {
 		return {
 			version: this.version,
+			sidebarRevision: this.sidebarRevision,
 			sessionsById: this.state.sessionsById,
 			sessionOrder: this.state.sessionOrder,
 			activeSessionId: this.state.activeSessionId,

@@ -1,5 +1,5 @@
 import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
@@ -76,6 +76,26 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("coalesces streaming-only subscriber notifications to one frame", async () => {
+		vi.useFakeTimers();
+		try {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			const listener = vi.fn();
+			store.subscribe(listener);
+
+			expect(store.applyBatch(batch(EPOCH_A, 1, 1, "B"))).toBe("applied");
+			expect(store.applyBatch(batch(EPOCH_A, 2, 2, "C"))).toBe("applied");
+			expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "ABC" }]);
+			expect(listener).not.toHaveBeenCalled();
+
+			await vi.advanceTimersByTimeAsync(16);
+			expect(listener).toHaveBeenCalledOnce();
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("replaces queued turns from snapshots and queue events", () => {
 		const store = new AppStore();
 		store.applySnapshot({

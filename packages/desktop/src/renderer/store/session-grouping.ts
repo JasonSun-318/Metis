@@ -38,7 +38,10 @@ export function saveSessionGroupingPreferences(
 	storage.setItem(SESSION_GROUPING_KEY, JSON.stringify(preferences));
 }
 
-export function sessionsForMode(state: AppStoreSnapshot, mode: AgentMode): SessionSummary[] {
+export function sessionsForMode(
+	state: Pick<AppStoreSnapshot, "sessionOrder" | "sessionsById">,
+	mode: AgentMode,
+): SessionSummary[] {
 	return state.sessionOrder
 		.map((sessionId) => state.sessionsById.get(sessionId))
 		.filter((session): session is SessionSummary => session?.mode === mode)
