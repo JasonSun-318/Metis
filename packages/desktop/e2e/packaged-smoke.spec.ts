@@ -477,6 +477,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 			"/model",
 			"/thinking",
 			"/status",
+			"/mcp",
 		]);
 		expect(slashLabels).toContain("/mcp");
 		expect(slashLabels).toContain("skill:e2e-skill");
@@ -889,7 +890,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		["case-exact-four", "rm -rf ./build"],
 		["case-changed", "rm -rf ./src"],
 		["case-ask-pwd", "pwd"],
-		["case-host-reject", "git push"],
+		["case-host-reject", "git push https://github.com/example/repo.git"],
 		["case-full-host", `printf full > ${JSON.stringify(fullFile)}`],
 	]);
 	const fakeProvider = createServer(async (request, response) => {
