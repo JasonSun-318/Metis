@@ -12,8 +12,14 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { digestCanonical, ProjectPermissionRuleStore } from "../../src/core/permissions/index.ts";
-import { outsideFile, projectDir } from "./fixtures.ts";
+import {
+	digestCanonical,
+	digestPermissionAction,
+	PermissionPolicy,
+	ProjectPermissionRuleStore,
+	settingsForPreset,
+} from "../../src/core/permissions/index.ts";
+import { outsideFile, projectDir, rootRecursiveDelete, workspaceWrite } from "./fixtures.ts";
 import { ruleInput } from "./project-rule-fixtures.ts";
 
 describe("ProjectPermissionRuleStore", () => {
@@ -56,6 +62,38 @@ describe("ProjectPermissionRuleStore", () => {
 		expect(store.match(input)?.decision).toBe("deny");
 	});
 
+	it("binds the same action and grant digests used by the policy", () => {
+		const action = workspaceWrite();
+		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
+		if (decision.kind === "deny") throw new Error("Expected a grant");
+		const input = ruleInput({
+			projectPath: project,
+			actionDigest: digestPermissionAction(action),
+			grantDigest: digestCanonical(decision.grant),
+		});
+		const stored = new ProjectPermissionRuleStore(agentDir).rememberAllow(input);
+		expect(stored).toMatchObject({ actionDigest: input.actionDigest, grantDigest: input.grantDigest });
+	});
+
+	it("cannot turn a hard-denied action into an allow", () => {
+		const action = rootRecursiveDelete();
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const input = ruleInput({
+			projectPath: project,
+			actionDigest: digestPermissionAction(action),
+			grantDigest: digestCanonical({ requested: "filesystem-root" }),
+			toolName: action.toolName,
+			toolIdentity: action.toolIdentity,
+			riskLevel: "critical",
+		});
+		expect(store.rememberAllow(input).decision).toBe("allow");
+		expect(store.match(input)?.decision).toBe("allow");
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+			kind: "deny",
+			riskLevel: "critical",
+		});
+	});
+
 	it("stores only bounded redacted summaries outside the repository", () => {
 		const store = new ProjectPermissionRuleStore(agentDir);
 		store.rememberAllow(
@@ -73,6 +111,13 @@ describe("ProjectPermissionRuleStore", () => {
 		expect(raw).toContain("<redacted>");
 		expect(realpathSync(rulesPath)).not.toContain(project);
 		expect(lstatSync(rulesPath).mode & 0o777).toBe(0o600);
+		expect(() =>
+			store.rememberAllow({
+				...ruleInput({ projectPath: project }),
+				args: { token: "must-not-be-accepted" },
+			} as never),
+		).toThrow("input");
+		expect(readFileSync(rulesPath, "utf8")).not.toContain("must-not-be-accepted");
 	});
 
 	it("treats version 1 as no authority and replaces it only on an explicit remember", () => {

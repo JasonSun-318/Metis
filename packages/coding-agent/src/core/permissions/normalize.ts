@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
+import { isAbsolute } from "node:path";
 import { canonicalizeActionPath } from "../../utils/paths.ts";
 import type {
 	NetworkEndpoint,
@@ -202,13 +203,53 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 }
 
 export function assertCompleteAction(action: NormalizedPermissionAction): void {
+	const expectedKeys = [
+		"actionId",
+		"toolName",
+		"provenance",
+		"toolIdentity",
+		"argsDigest",
+		"cwd",
+		"workspaceRoots",
+		"readPaths",
+		"writePaths",
+		"networkEndpoints",
+		...(action?.command === undefined ? [] : ["command"]),
+		"effects",
+	].sort();
+	const actualKeys = action && typeof action === "object" ? Object.keys(action).sort() : [];
+	const normalizedEffects = EFFECTS.filter((effect) => action?.effects?.includes(effect));
+	const pathSets = action ? [action.workspaceRoots, action.readPaths, action.writePaths] : [];
+	let canonicalIsBounded = false;
+	let scalarFieldsAreNormalized = false;
+	try {
+		canonicalJson(action);
+		canonicalIsBounded = true;
+	} catch {
+		canonicalIsBounded = false;
+	}
+	try {
+		scalarFieldsAreNormalized =
+			requiredString(action.actionId, "actionId", 1_024) === action.actionId &&
+			requiredString(action.toolName, "toolName", 256) === action.toolName &&
+			requiredString(action.toolIdentity, "toolIdentity", 4_096) === action.toolIdentity &&
+			requiredString(action.cwd, "cwd", 32_768) === action.cwd &&
+			(action.command === undefined ||
+				(requiredString(action.command, "command", MAX_COMMAND_BYTES) === action.command &&
+					Buffer.byteLength(action.command, "utf8") <= MAX_COMMAND_BYTES));
+	} catch {
+		scalarFieldsAreNormalized = false;
+	}
 	const complete =
 		Boolean(action?.actionId) &&
 		Object.isFrozen(action) &&
+		actualKeys.length === expectedKeys.length &&
+		actualKeys.every((key, index) => key === expectedKeys[index]) &&
+		PROVENANCES.includes(action.provenance) &&
 		Boolean(action.toolName) &&
 		Boolean(action.toolIdentity) &&
 		SHA256_PATTERN.test(action.argsDigest) &&
-		Boolean(action.cwd) &&
+		isAbsolute(action.cwd) &&
 		Array.isArray(action.workspaceRoots) &&
 		Array.isArray(action.readPaths) &&
 		Array.isArray(action.writePaths) &&
@@ -220,9 +261,40 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 		Object.isFrozen(action.networkEndpoints) &&
 		Object.isFrozen(action.effects) &&
 		action.networkEndpoints.every(Object.isFrozen) &&
+		pathSets.every(
+			(paths) =>
+				new Set(paths).size === paths.length &&
+				paths.every(
+					(path, index) =>
+						typeof path === "string" &&
+						isAbsolute(path) &&
+						!path.includes("\0") &&
+						(index === 0 || (paths[index - 1] ?? "") < path),
+				),
+		) &&
+		action.networkEndpoints.every((endpoint, index) => {
+			const previous = action.networkEndpoints[index - 1];
+			return (
+				!previous ||
+				previous.hostname < endpoint.hostname ||
+				(previous.hostname === endpoint.hostname && previous.port < endpoint.port)
+			);
+		}) &&
+		action.networkEndpoints.every((endpoint) => {
+			try {
+				const normalized = normalizeEndpoint(endpoint);
+				return normalized.hostname === endpoint.hostname && normalized.port === endpoint.port;
+			} catch {
+				return false;
+			}
+		}) &&
+		action.effects.length === normalizedEffects.length &&
+		action.effects.every((effect, index) => effect === normalizedEffects[index]) &&
 		!action.effects.includes("unknown") &&
 		(!action.effects.includes("sensitive-read") || action.readPaths.length > 0) &&
-		(!action.effects.includes("destructive") || action.writePaths.length > 0);
+		(!action.effects.includes("destructive") || action.writePaths.length > 0) &&
+		scalarFieldsAreNormalized &&
+		canonicalIsBounded;
 	if (!complete) throw new TypeError("Permission action scope is incomplete");
 }
 

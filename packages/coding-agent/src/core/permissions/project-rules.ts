@@ -18,6 +18,15 @@ const MAX_RAW_SUMMARY_VALUE_LENGTH = 4_096;
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const SENSITIVE_LABEL_PATTERN = /(?:auth|cookie|credential|key|password|secret|session|token)/i;
 const RISK_LEVELS: readonly RiskLevel[] = ["low", "medium", "high", "critical"];
+const RULE_INPUT_KEYS = [
+	"projectPath",
+	"actionDigest",
+	"grantDigest",
+	"toolName",
+	"toolIdentity",
+	"riskLevel",
+	"summary",
+] as const;
 
 export interface ProjectPermissionRuleSummary {
 	readonly label: string;
@@ -113,8 +122,10 @@ function ruleIdentity(input: ProjectPermissionRuleInput): string {
 	});
 }
 
-function normalizeInput(input: ProjectPermissionRuleInput): NormalizedRuleInput {
-	if (!isRecord(input)) throw new TypeError("Permission rule input is invalid");
+function normalizeInput(input: ProjectPermissionRuleInput, requireExactKeys = false): NormalizedRuleInput {
+	if (!isRecord(input) || (requireExactKeys && !hasExactKeys(input, RULE_INPUT_KEYS))) {
+		throw new TypeError("Permission rule input is invalid");
+	}
 	const normalized: ProjectPermissionRuleInput = {
 		projectPath: canonicalProjectPath(input.projectPath),
 		actionDigest: requiredDigest(input.actionDigest, "actionDigest"),
@@ -222,7 +233,7 @@ export class ProjectPermissionRuleStore {
 	}
 
 	match(input: ProjectPermissionRuleInput): ProjectPermissionRule | undefined {
-		const normalized = normalizeInput(input);
+		const normalized = normalizeInput(input, true);
 		return this.storage.withLock((current) => {
 			const rule = parseFile(current).rules.find(
 				(candidate) => candidate.projectPath === normalized.projectPath && candidate.id === normalized.id,
@@ -240,7 +251,7 @@ export class ProjectPermissionRuleStore {
 	}
 
 	private remember(input: ProjectPermissionRuleInput, decision: "allow" | "deny"): ProjectPermissionRule {
-		const normalized = normalizeInput(input);
+		const normalized = normalizeInput(input, true);
 		return this.storage.withLock((current) => {
 			const file = parseFile(current);
 			const existingIndex = file.rules.findIndex((rule) => rule.id === normalized.id);

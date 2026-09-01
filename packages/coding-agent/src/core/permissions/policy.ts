@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
 import { assertCompleteAction } from "./normalize.ts";
+import { assertPermissionSettings } from "./settings.ts";
 import type {
 	GrantRequest,
 	MinimumReviewer,
@@ -67,6 +68,15 @@ function isExactEndpoint(endpoint: { readonly hostname: string; readonly port: n
 	);
 }
 
+function isRecursiveDeletionCommand(command: string | undefined): boolean {
+	if (!command) return false;
+	for (const match of command.matchAll(/\brm\b((?:\s+--?[^\s;&|]+)+)/giu)) {
+		const options = (match[1] ?? "").trim().split(/\s+/u);
+		if (options.some((option) => option.startsWith("--recursive") || /^-[^-]*r/iu.test(option))) return true;
+	}
+	return /\bremove-item\b[^;\n]*(?:-recurse|-r\b)/iu.test(command) || /\brmdir\b[^;\n]*\/s\b/iu.test(command);
+}
+
 function hardDenyReason(action: NormalizedPermissionAction): string | undefined {
 	try {
 		assertCompleteAction(action);
@@ -74,7 +84,7 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 		return "Permission action scope is incomplete";
 	}
 	if (!action.networkEndpoints.every(isExactEndpoint)) return "Wildcard or malformed network grants are forbidden";
-	if (!action.effects.includes("destructive")) return undefined;
+	if (!action.effects.includes("destructive") && !isRecursiveDeletionCommand(action.command)) return undefined;
 
 	const home = resolve(homedir());
 	for (const target of action.writePaths) {
@@ -137,6 +147,11 @@ function deny(riskLevel: RiskLevel, reason: string): PermissionPolicyDecision {
 
 export class PermissionPolicy {
 	evaluate(input: PermissionPolicyInput): PermissionPolicyDecision {
+		try {
+			assertPermissionSettings(input.settings);
+		} catch {
+			return deny("critical", "Permission settings are invalid");
+		}
 		const invariant = hardDenyReason(input.action);
 		if (invariant) return deny("critical", invariant);
 

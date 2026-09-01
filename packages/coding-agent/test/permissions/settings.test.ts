@@ -51,4 +51,15 @@ describe("permission settings", () => {
 			true,
 		);
 	});
+
+	it("rejects unknown runtime settings instead of widening them", () => {
+		expect(() => settingsForPreset("legacy" as "ask")).toThrow("preset");
+		expect(() => settingsForPreset("toString" as "ask")).toThrow("preset");
+		expect(() =>
+			intersectPermissionSettings(settingsForPreset("auto"), {
+				sandboxPolicy: "unrestricted" as "read-only",
+				approvalPolicy: "auto-review",
+			}),
+		).toThrow("settings");
+	});
 });

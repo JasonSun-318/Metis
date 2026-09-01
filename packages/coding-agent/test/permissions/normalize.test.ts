@@ -107,4 +107,39 @@ describe("permission action normalization", () => {
 			),
 		).toThrow("256 KiB");
 	});
+
+	it("keeps every action scope immutable and digest-stable", () => {
+		const action = normalizePermissionAction(
+			actionInput({
+				writePaths: [join(projectDir, "out.txt")],
+				networkEndpoints: [{ hostname: "api.example.com", port: 443 }],
+				effects: ["external-side-effect"],
+			}),
+		);
+		const before = digestPermissionAction(action);
+		for (const scope of [
+			action.workspaceRoots,
+			action.readPaths,
+			action.writePaths,
+			action.networkEndpoints,
+			action.effects,
+		]) {
+			expect(() => (scope as unknown[]).push("forged")).toThrow();
+		}
+		expect(() => {
+			(action.networkEndpoints[0] as { hostname: string }).hostname = "attacker.example";
+		}).toThrow();
+		expect(digestPermissionAction(action)).toBe(before);
+	});
+
+	it("rejects deeply frozen values that violate normalization invariants", () => {
+		const action = normalizePermissionAction(actionInput());
+		const unknownEffect = Object.freeze({ ...action, effects: Object.freeze(["made-up-effect"]) });
+		const credentialedEndpoint = Object.freeze({
+			...action,
+			networkEndpoints: Object.freeze([Object.freeze({ hostname: "user@example.com", port: 443 })]),
+		});
+		expect(() => assertCompleteAction(unknownEffect as typeof action)).toThrow("incomplete");
+		expect(() => assertCompleteAction(credentialedEndpoint as typeof action)).toThrow("incomplete");
+	});
 });

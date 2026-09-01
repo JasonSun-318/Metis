@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { parse } from "node:path";
 import { performance } from "node:perf_hooks";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	digestPermissionAction,
 	normalizePermissionAction,
@@ -32,6 +32,42 @@ describe("PermissionPolicy", () => {
 				riskLevel: "critical",
 			});
 		}
+	});
+
+	it("hard-denies protected-root shell scope even when an adapter omits the destructive effect", () => {
+		const action = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "rm -rf /" },
+				command: "rm -rf /",
+				readPaths: [],
+				writePaths: [parse(projectDir).root],
+				effects: [],
+			}),
+		);
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+			kind: "deny",
+			riskLevel: "critical",
+		});
+	});
+
+	it("does not mistake ordinary workspace-scoped shell writes for recursive deletion", () => {
+		const action = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "npm install" },
+				command: "npm install",
+				readPaths: [],
+				writePaths: [projectDir],
+				effects: [],
+			}),
+		);
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "allow",
+			riskLevel: "low",
+		});
 	});
 
 	it("fails closed for incomplete actions and wildcard network grants", () => {
@@ -78,6 +114,15 @@ describe("PermissionPolicy", () => {
 		).toMatchObject({ kind: "deny", riskLevel: "critical" });
 	});
 
+	it("fails closed when runtime settings bypass the typed constructors", () => {
+		expect(
+			new PermissionPolicy().evaluate({
+				settings: { sandboxPolicy: "legacy-full", approvalPolicy: "automatic" } as never,
+				action: workspaceWrite(),
+			}),
+		).toMatchObject({ kind: "deny", riskLevel: "critical" });
+	});
+
 	it("returns exact immutable grant data", () => {
 		const action = workspaceWrite();
 		const result = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
@@ -93,6 +138,14 @@ describe("PermissionPolicy", () => {
 		expect(Object.isFrozen(result.grant)).toBe(true);
 		expect(Object.isFrozen(result.grant.writeRoots)).toBe(true);
 		expect(result.grant.protectedRoots).toContain(canonicalizeActionPath(`${projectDir}/.git`, projectDir));
+		for (const scope of [
+			result.grant.readRoots,
+			result.grant.writeRoots,
+			result.grant.protectedRoots,
+			result.grant.networkEndpoints,
+		]) {
+			expect(() => (scope as unknown[]).push("forged")).toThrow();
+		}
 	});
 
 	it("classifies exact network and outside-workspace scope as medium risk", () => {
@@ -126,5 +179,23 @@ describe("PermissionPolicy", () => {
 		console.info(`permission domain: 10k=${(performance.now() - startedAt).toFixed(1)}ms p95=${p95.toFixed(3)}ms`);
 		expect(policy).not.toHaveProperty("review");
 		expect(p95).toBeLessThan(5);
+	});
+
+	it("imports without loading model, interaction, or execution adapters", async () => {
+		vi.resetModules();
+		vi.doMock("../../src/core/model-registry.ts", () => {
+			throw new Error("model adapter loaded");
+		});
+		vi.doMock("../../src/modes/interactive/interactive-mode.ts", () => {
+			throw new Error("interaction adapter loaded");
+		});
+		vi.doMock("../../src/core/workspace-sandbox.ts", () => {
+			throw new Error("execution adapter loaded");
+		});
+		const domain = await import("../../src/core/permissions/index.ts");
+		expect(domain.PermissionPolicy).toBeTypeOf("function");
+		vi.doUnmock("../../src/core/model-registry.ts");
+		vi.doUnmock("../../src/modes/interactive/interactive-mode.ts");
+		vi.doUnmock("../../src/core/workspace-sandbox.ts");
 	});
 });
