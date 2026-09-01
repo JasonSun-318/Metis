@@ -120,6 +120,29 @@ describe("UserPermissionReviewer", () => {
 		expect(store.match({ ...exactInput, grantDigest: digestCanonical("different") })).toBeUndefined();
 	});
 
+	it("does not override an existing exact deny rule", async () => {
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const request = reviewerRequest(projectPath);
+		const exactInput = {
+			projectPath,
+			actionDigest: digestPermissionAction(request.action),
+			grantDigest: digestCanonical(request.decision.grant),
+			toolName: request.action.toolName,
+			toolIdentity: request.action.toolIdentity,
+			riskLevel: request.decision.riskLevel,
+			summary: [{ label: "Risk", value: request.decision.riskLevel }],
+		};
+		store.rememberDeny(exactInput);
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: interaction({ decision: "allow", remember: "project" }).requestApproval,
+			projectRules: store,
+			projectPath,
+		});
+
+		expect(await reviewer.review(request)).toMatchObject({ kind: "unavailable", reviewer: "user" });
+		expect(store.match(exactInput)).toMatchObject({ decision: "deny" });
+	});
+
 	it("sends only bounded redacted structured details to the interaction", async () => {
 		const ui = interaction({ decision: "deny" });
 		const reviewer = new UserPermissionReviewer({ requestApproval: ui.requestApproval, projectPath });

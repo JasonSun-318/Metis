@@ -39,6 +39,11 @@ export interface PermissionReviewer {
 	review(request: PermissionReviewRequest): Promise<PermissionReviewResult>;
 }
 
+export interface PermissionReviewRouterOptions {
+	readonly model: PermissionReviewer;
+	readonly user?: PermissionReviewer;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -59,7 +64,7 @@ function boundedReason(value: unknown, field: string): string {
 }
 
 export function unavailableReview(reviewer: "model" | "user", reason: string): PermissionReviewResult {
-	let bounded = reason.trim() || "Permission review is unavailable";
+	let bounded = reason.replaceAll("\0", "").trim() || "Permission review is unavailable";
 	if (Buffer.byteLength(bounded, "utf8") > MAX_RATIONALE_BYTES) {
 		bounded = Buffer.from(bounded)
 			.subarray(0, MAX_RATIONALE_BYTES - 3)
@@ -116,7 +121,20 @@ function deniedByValidation(
 }
 
 function normalizedResult(result: unknown): PermissionReviewResult | undefined {
-	if (!isRecord(result) || (result.reviewer !== "model" && result.reviewer !== "user")) return undefined;
+	if (!isRecord(result)) return undefined;
+	const prototype = Object.getPrototypeOf(result);
+	if (prototype !== Object.prototype && prototype !== null) return undefined;
+	const descriptors = Object.getOwnPropertyDescriptors(result);
+	if (
+		Reflect.ownKeys(descriptors).some((key) => {
+			if (typeof key === "symbol") return true;
+			const descriptor = descriptors[key];
+			return !descriptor || !("value" in descriptor) || !descriptor.enumerable;
+		})
+	) {
+		return undefined;
+	}
+	if (result.reviewer !== "model" && result.reviewer !== "user") return undefined;
 	if (result.kind === "unavailable") {
 		if (!exactKeys(result, ["kind", "reviewer", "reason"]) || typeof result.reason !== "string") return undefined;
 		return unavailableReview(result.reviewer, result.reason);
@@ -148,15 +166,36 @@ export function validateReviewResult(
 	request: PermissionReviewRequest,
 	result: PermissionReviewResult,
 ): PermissionReviewResult {
-	const normalized = normalizedResult(result);
+	let normalized: PermissionReviewResult | undefined;
+	try {
+		normalized = normalizedResult(result);
+	} catch {
+		normalized = undefined;
+	}
 	if (!normalized) {
-		const reviewer = isRecord(result) && result.reviewer === "user" ? "user" : "model";
+		let reviewer: "model" | "user" = "model";
+		try {
+			if (isRecord(result)) {
+				const descriptor = Object.getOwnPropertyDescriptor(result, "reviewer");
+				if (descriptor && "value" in descriptor && descriptor.value === "user") reviewer = "user";
+			}
+		} catch {
+			// A hostile adapter result is invalid and remains attributed to the model fallback.
+		}
 		return unavailableReview(reviewer, "Permission reviewer returned an invalid result");
 	}
-	if (normalized.kind !== "allow") return normalized;
+	if (normalized.kind === "unavailable") return normalized;
 	if (RISK_RANK[normalized.assessedRisk] < RISK_RANK[request.decision.riskLevel]) {
+		if (normalized.kind === "deny") {
+			return Object.freeze({
+				...normalized,
+				assessedRisk: request.decision.riskLevel,
+				rationale: "Reviewer cannot lower deterministic risk",
+			});
+		}
 		return deniedByValidation(request, normalized, "Reviewer cannot lower deterministic risk");
 	}
+	if (normalized.kind === "deny") return normalized;
 	if (request.decision.minimumReviewer === "user" && normalized.reviewer !== "user") {
 		return deniedByValidation(request, normalized, "Policy requires a user reviewer");
 	}
@@ -172,4 +211,67 @@ export function validateReviewResult(
 		return deniedByValidation(request, normalized, "Direct-user authorization is insufficient");
 	}
 	return normalized;
+}
+
+function fallbackDeny(
+	request: PermissionReviewRequest,
+	reviewer: "model" | "user",
+	rationale: string,
+): PermissionReviewResult {
+	return Object.freeze({
+		kind: "deny",
+		reviewer,
+		assessedRisk: request.decision.riskLevel,
+		userAuthorization: "unknown",
+		scopeComplete: false,
+		rationale,
+	});
+}
+
+async function runReviewer(
+	reviewer: PermissionReviewer,
+	expectedReviewer: "model" | "user",
+	request: PermissionReviewRequest,
+): Promise<PermissionReviewResult> {
+	try {
+		const result = await reviewer.review(request);
+		if (request.signal.aborted) return unavailableReview(expectedReviewer, "Permission review was cancelled");
+		if (result.reviewer !== expectedReviewer) {
+			return unavailableReview(expectedReviewer, "Permission reviewer provenance is invalid");
+		}
+		return validateReviewResult(request, result);
+	} catch {
+		return unavailableReview(expectedReviewer, "Permission reviewer failed unexpectedly");
+	}
+}
+
+/** Selects one authoritative review path and applies interactive fail-closed fallback. */
+export class PermissionReviewRouter implements PermissionReviewer {
+	private readonly options: PermissionReviewRouterOptions;
+
+	constructor(options: PermissionReviewRouterOptions) {
+		this.options = options;
+	}
+
+	async review(request: PermissionReviewRequest): Promise<PermissionReviewResult> {
+		const requiredReviewer = request.decision.minimumReviewer;
+		if (request.signal.aborted) {
+			return unavailableReview(requiredReviewer, "Permission review was cancelled");
+		}
+		if (requiredReviewer === "user") {
+			if (!request.interactive) {
+				return fallbackDeny(request, "user", "User review is required but no interactive UI is attached");
+			}
+			if (!this.options.user) return unavailableReview("user", "No user permission reviewer is available");
+			return runReviewer(this.options.user, "user", request);
+		}
+
+		const modelResult = await runReviewer(this.options.model, "model", request);
+		if (modelResult.kind !== "unavailable" || request.signal.aborted) return modelResult;
+		if (!request.interactive) {
+			return fallbackDeny(request, "model", "Automatic review is unavailable in a headless session");
+		}
+		if (!this.options.user) return modelResult;
+		return runReviewer(this.options.user, "user", request);
+	}
 }

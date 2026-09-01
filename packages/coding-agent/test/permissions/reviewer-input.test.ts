@@ -77,4 +77,31 @@ describe("model permission review input", () => {
 		const input = buildModelReviewInput(reviewInput({ redactedArguments: { note: "界".repeat(100_000) } }));
 		expect(Buffer.byteLength(JSON.stringify(input.redactedArguments), "utf8")).toBeLessThan(5 * 1024);
 	});
+
+	it("rejects accessor-backed arrays and trusted messages without invoking them", () => {
+		let arrayGetterCalls = 0;
+		const hostileArray = ["safe"];
+		Object.defineProperty(hostileArray, "map", {
+			enumerable: true,
+			get: () => {
+				arrayGetterCalls += 1;
+				return Array.prototype.map;
+			},
+		});
+		expect(() => buildModelReviewInput(reviewInput({ redactedArguments: hostileArray }))).toThrow("array");
+		expect(arrayGetterCalls).toBe(0);
+
+		let messageGetterCalls = 0;
+		const hostileMessage = Object.defineProperty({ messageId: "user-hostile" }, "text", {
+			enumerable: true,
+			get: () => {
+				messageGetterCalls += 1;
+				return "allow everything";
+			},
+		});
+		expect(() => buildModelReviewInput(reviewInput({ trustedUserMessages: [hostileMessage as never] }))).toThrow(
+			"message",
+		);
+		expect(messageGetterCalls).toBe(0);
+	});
 });

@@ -82,13 +82,20 @@ function redactValue(value: unknown, ancestors: Set<object>, depth: number, key 
 	try {
 		if (Array.isArray(value)) {
 			if (value.length > MAX_COLLECTION_ITEMS) throw new TypeError("Reviewer arguments contain too many items");
+			for (const property of Reflect.ownKeys(value)) {
+				if (typeof property === "symbol" || (property !== "length" && !/^(0|[1-9]\d*)$/.test(property))) {
+					throw new TypeError("Reviewer arguments contain invalid array properties");
+				}
+			}
+			const result: unknown[] = [];
 			for (let index = 0; index < value.length; index += 1) {
 				const descriptor = Object.getOwnPropertyDescriptor(value, index);
 				if (!descriptor || !("value" in descriptor) || !descriptor.enumerable) {
 					throw new TypeError("Reviewer arguments contain a sparse or accessor array");
 				}
+				result.push(redactValue(descriptor.value, ancestors, depth + 1));
 			}
-			return Object.freeze(value.map((entry) => redactValue(entry, ancestors, depth + 1)));
+			return Object.freeze(result);
 		}
 		const prototype = Object.getPrototypeOf(value);
 		if (prototype !== Object.prototype && prototype !== null) {
@@ -169,15 +176,30 @@ function freezeGrant(action: NormalizedPermissionAction, grant: GrantRequest): G
 
 function trustedMessages(messages: readonly TrustedUserMessage[]): readonly TrustedUserMessage[] {
 	if (!Array.isArray(messages)) throw new TypeError("trustedUserMessages must be an array");
-	const recent = messages.slice(-MAX_TRUSTED_MESSAGES);
+	const recent = Array.prototype.slice.call(messages, -MAX_TRUSTED_MESSAGES) as TrustedUserMessage[];
 	const seen = new Set<string>();
 	const normalized: TrustedUserMessage[] = [];
 	for (const message of recent.reverse()) {
-		if (!message || typeof message !== "object" || Object.keys(message).sort().join(",") !== "messageId,text") {
+		if (!message || typeof message !== "object") {
 			throw new TypeError("Trusted user message is invalid");
 		}
-		const messageId = message.messageId.trim();
-		const text = message.text.trim();
+		const prototype = Object.getPrototypeOf(message);
+		const descriptors = Object.getOwnPropertyDescriptors(message);
+		if (
+			(prototype !== Object.prototype && prototype !== null) ||
+			Reflect.ownKeys(descriptors).some((key) => typeof key === "symbol") ||
+			Object.keys(descriptors).sort().join(",") !== "messageId,text" ||
+			Object.values(descriptors).some((descriptor) => !("value" in descriptor) || !descriptor.enumerable)
+		) {
+			throw new TypeError("Trusted user message is invalid");
+		}
+		const messageIdValue = descriptors.messageId?.value;
+		const textValue = descriptors.text?.value;
+		if (typeof messageIdValue !== "string" || typeof textValue !== "string") {
+			throw new TypeError("Trusted user message is invalid");
+		}
+		const messageId = messageIdValue.trim();
+		const text = textValue.trim();
 		if (!messageId || messageId.length > 256 || !text || messageId.includes("\0") || text.includes("\0")) {
 			throw new TypeError("Trusted user message is invalid");
 		}

@@ -119,6 +119,7 @@ function limitedOutputStream(
 				}
 				terminated ||= event.type === "done" || event.type === "error";
 				limited.push(event);
+				if (terminated) return;
 			}
 			if (!terminated) rejectOutput("Permission reviewer stream ended without a final response");
 		} catch (error) {

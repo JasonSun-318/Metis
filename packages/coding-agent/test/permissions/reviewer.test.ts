@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	type PermissionReviewResult,
 	parseModelReviewOutput,
@@ -21,6 +21,57 @@ function modelAllow(
 }
 
 describe("permission review contract", () => {
+	it.each([
+		["low", "unknown", "deny"],
+		["low", "low", "allow"],
+		["medium", "low", "deny"],
+		["medium", "medium", "allow"],
+		["high", "medium", "deny"],
+		["high", "high", "allow"],
+		["critical", "high", "deny"],
+	] as const)("validates %s risk against %s model authorization", (riskLevel, userAuthorization, expected) => {
+		const input = reviewInput({ decision: { ...reviewInput().decision, riskLevel } });
+		const result = validateReviewResult(input, {
+			kind: "allow",
+			reviewer: "model",
+			assessedRisk: riskLevel,
+			userAuthorization,
+			scopeComplete: true,
+			rationale: "matrix",
+		});
+		expect(result.kind).toBe(expected);
+	});
+
+	it("allows critical review only from an explicit high-authority user", () => {
+		const input = reviewInput({
+			decision: { ...reviewInput().decision, riskLevel: "critical", minimumReviewer: "user" },
+		});
+		expect(
+			validateReviewResult(input, {
+				kind: "allow",
+				reviewer: "user",
+				assessedRisk: "critical",
+				userAuthorization: "high",
+				scopeComplete: true,
+				rationale: "explicit user approval",
+			}),
+		).toMatchObject({ kind: "allow", reviewer: "user" });
+	});
+
+	it("denies every allow result with incomplete scope", () => {
+		for (const reviewer of ["model", "user"] as const) {
+			const result = validateReviewResult(reviewInput(), {
+				kind: "allow",
+				reviewer,
+				assessedRisk: "high",
+				userAuthorization: "high",
+				scopeComplete: false,
+				rationale: "incomplete",
+			});
+			expect(result.kind).toBe("deny");
+		}
+	});
+
 	it("parses one exact bounded model JSON object", () => {
 		expect(parseModelReviewOutput(validJson())).toEqual({
 			kind: "allow",
@@ -90,6 +141,10 @@ describe("permission review contract", () => {
 		const unavailable: PermissionReviewResult = { kind: "unavailable", reviewer: "model", reason: "timeout" };
 		expect(validateReviewResult(reviewInput(), denied)).toEqual(denied);
 		expect(validateReviewResult(reviewInput(), unavailable)).toEqual(unavailable);
+		expect(validateReviewResult(reviewInput(), { ...denied, assessedRisk: "low" })).toMatchObject({
+			kind: "deny",
+			assessedRisk: "medium",
+		});
 	});
 
 	it("turns structurally invalid adapter results into unavailable", () => {
@@ -99,5 +154,9 @@ describe("permission review contract", () => {
 		expect(
 			validateReviewResult(reviewInput(), { ...modelAllow(), grant: { executionTarget: "host" } } as never),
 		).toMatchObject({ kind: "unavailable", reviewer: "model" });
+		const getter = vi.fn(() => "allow");
+		const hostile = Object.defineProperty({ ...modelAllow() }, "kind", { enumerable: true, get: getter });
+		expect(validateReviewResult(reviewInput(), hostile as never)).toMatchObject({ kind: "unavailable" });
+		expect(getter).not.toHaveBeenCalled();
 	});
 });

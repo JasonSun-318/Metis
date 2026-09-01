@@ -276,7 +276,10 @@ export class UserPermissionReviewer implements PermissionReviewer {
 				return unavailableReview("user", "This permission decision cannot be remembered safely");
 			}
 			try {
-				this.options.projectRules.rememberAllow(ruleInput(request, projectPath));
+				const stored = this.options.projectRules.rememberAllow(ruleInput(request, projectPath));
+				if (stored.decision !== "allow") {
+					return unavailableReview("user", "An existing exact deny rule was not replaced");
+				}
 			} catch {
 				return unavailableReview("user", "The exact project permission rule could not be saved safely");
 			}
