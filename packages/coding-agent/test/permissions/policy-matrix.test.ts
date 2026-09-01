@@ -11,6 +11,7 @@ import {
 	externalWrite,
 	ordinaryRead,
 	outsideRead,
+	protectedWrite,
 	rootRecursiveDelete,
 	sensitiveRead,
 	workspaceWrite,
@@ -38,6 +39,9 @@ describe("permission policy matrix", () => {
 		["root recursive delete in Ask", "ask", rootRecursiveDelete(), "deny", "critical"],
 		["root recursive delete in Auto", "auto", rootRecursiveDelete(), "deny", "critical"],
 		["root recursive delete in Full", "full", rootRecursiveDelete(), "deny", "critical"],
+		["protected metadata write in Ask", "ask", protectedWrite(), "deny", "critical"],
+		["protected metadata write in Auto", "auto", protectedWrite(), "deny", "critical"],
+		["protected metadata write in Full", "full", protectedWrite(), "deny", "critical"],
 	];
 
 	it.each(cases)("routes %s", (_name, preset, action, kind, riskLevel) => {

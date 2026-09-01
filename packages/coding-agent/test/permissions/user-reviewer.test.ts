@@ -120,6 +120,30 @@ describe("UserPermissionReviewer", () => {
 		expect(store.match({ ...exactInput, grantDigest: digestCanonical("different") })).toBeUndefined();
 	});
 
+	it("persists an exact deny rule after Always deny", async () => {
+		const ui = interaction({ decision: "deny", remember: "project" });
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const request = reviewerRequest(projectPath);
+		const reviewer = new UserPermissionReviewer({
+			requestApproval: ui.requestApproval,
+			projectRules: store,
+			projectPath,
+		});
+
+		expect(await reviewer.review(request)).toMatchObject({ kind: "deny", reviewer: "user" });
+		expect(
+			store.match({
+				projectPath,
+				actionDigest: digestPermissionAction(request.action),
+				grantDigest: digestCanonical(request.decision.grant),
+				toolName: request.action.toolName,
+				toolIdentity: request.action.toolIdentity,
+				riskLevel: request.decision.riskLevel,
+				summary: store.list(projectPath)[0]?.summary ?? [],
+			}),
+		).toMatchObject({ decision: "deny" });
+	});
+
 	it("does not override an existing exact deny rule", async () => {
 		const store = new ProjectPermissionRuleStore(agentDir);
 		const request = reviewerRequest(projectPath);

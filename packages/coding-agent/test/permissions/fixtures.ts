@@ -56,3 +56,13 @@ export const rootRecursiveDelete = () =>
 			effects: ["destructive"],
 		}),
 	);
+export const protectedWrite = () =>
+	normalizePermissionAction(
+		actionInput({
+			toolName: "write_file",
+			toolIdentity: "builtin:write_file:v1",
+			args: { path: join(projectDir, ".git", "HEAD"), content: "tamper" },
+			readPaths: [],
+			writePaths: [join(projectDir, ".git", "HEAD")],
+		}),
+	);

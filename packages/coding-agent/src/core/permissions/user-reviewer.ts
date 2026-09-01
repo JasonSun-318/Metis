@@ -72,9 +72,6 @@ function parseApprovalDecision(value: unknown): ParsedApprovalDecision {
 	if (value.remember !== undefined && value.remember !== "project") {
 		throw new TypeError("Approval response is invalid");
 	}
-	if (value.decision === "deny" && value.remember !== undefined) {
-		throw new TypeError("Approval response is invalid");
-	}
 	return Object.freeze({ decision: value.decision, rememberProject: value.remember === "project" });
 }
 
@@ -261,8 +258,11 @@ export class UserPermissionReviewer implements PermissionReviewer {
 				return unavailableReview("user", "This permission decision cannot be remembered safely");
 			}
 			try {
-				const stored = this.options.projectRules.rememberAllow(ruleInput(request, projectPath));
-				if (stored.decision !== "allow") {
+				const stored =
+					approval.decision === "allow"
+						? this.options.projectRules.rememberAllow(ruleInput(request, projectPath))
+						: this.options.projectRules.rememberDeny(ruleInput(request, projectPath));
+				if (stored.decision !== approval.decision) {
 					return unavailableReview("user", "An existing exact deny rule was not replaced");
 				}
 			} catch {

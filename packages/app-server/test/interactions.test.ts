@@ -534,6 +534,25 @@ describe("InteractionBroker", () => {
 		expect(JSON.stringify(peer.requests[0])).not.toContain("does not sandbox");
 	});
 
+	it("returns a project-scoped deny for Always deny", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000323";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "permission_approval", choice: "always-deny-exact" };
+
+		await expect(
+			broker.requestPermissionApproval(
+				SESSION_ID,
+				childApproval({
+					actor: undefined,
+					executionTarget: "sandbox",
+					rememberProjectEligible: true,
+				}),
+			),
+		).resolves.toEqual({ decision: "deny", remember: "project", reason: "Denied by the session owner" });
+	});
+
 	it("summarizes an edit without exposing replacement text", async () => {
 		const interactionId = "00000000-0000-4000-8000-000000000321";
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });

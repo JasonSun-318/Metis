@@ -1511,9 +1511,6 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async setPermissionPreset(
 		input: ClientParams<"session/setPermissionPreset">,
 	): Promise<ClientResult<"session/setPermissionPreset">> {
-		if (this.isActive() || this.hasPendingInteractions()) {
-			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
-		}
 		try {
 			await this.session.setPermissionPreset(input.permissionPreset);
 		} catch {

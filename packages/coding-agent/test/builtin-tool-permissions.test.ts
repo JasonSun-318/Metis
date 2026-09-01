@@ -104,6 +104,17 @@ describe("built-in tool permission descriptors", () => {
 				},
 			),
 		).toThrow("scope is incomplete");
+		const exactPush = describeToolAction(
+			definitions.bash,
+			{ command: "git push https://github.com/example/repo.git" },
+			{
+				...context,
+				provenance: "builtin",
+				toolIdentity: "builtin-bash-exact-push",
+			},
+		);
+		expect(exactPush.networkEndpoints).toEqual([{ hostname: "github.com", port: 443 }]);
+		expect(exactPush.effects).toContain("external-side-effect");
 	});
 
 	it("binds exact shell redirections and rejects dynamic redirection targets", () => {

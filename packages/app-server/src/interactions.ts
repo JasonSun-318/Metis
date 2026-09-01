@@ -446,6 +446,11 @@ export class InteractionBroker {
 				return { decision: "allow" };
 			}
 			if (response.choice === "deny-once" || response.choice === "always-deny-exact") {
+				if (response.choice === "always-deny-exact") {
+					if (!operation.rememberProjectEligible)
+						throw new Error("Approval returned an ineligible project choice");
+					return { decision: "deny", remember: "project", reason: "Denied by the session owner" };
+				}
 				return { decision: "deny", reason: "Denied by the session owner" };
 			}
 			throw new Error("Approval returned an unknown choice");

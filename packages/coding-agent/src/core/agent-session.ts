@@ -855,9 +855,15 @@ export class AgentSession {
 				new PermissionReviewRouter({
 					model: new ModelPermissionReviewer({
 						getActiveModel: () => this.model,
-						transport: new AgentModelReviewTransport((model, context, options) =>
-							this._modelRegistry.streamSimple(model, context, options),
-						),
+						transport: new AgentModelReviewTransport(async (model, context, options) => {
+							const auth = await this._getRequiredRequestAuth(model);
+							return this._modelRegistry.streamSimple(model, context, {
+								...options,
+								apiKey: auth.apiKey,
+								...(auth.headers ? { headers: auth.headers } : {}),
+								...(auth.env ? { env: auth.env } : {}),
+							});
+						}),
 					}),
 					user: new UserPermissionReviewer({
 						requestApproval: (request) => {

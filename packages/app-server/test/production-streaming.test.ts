@@ -263,10 +263,10 @@ describe("production runtime streaming", () => {
 					params: {
 						sessionId: SESSION_REQUEST,
 						requestId: "00000000-0000-4000-8000-000000000103",
-						permissionPreset: "full",
+						permissionPreset: "ask",
 					},
 				}),
-			).toMatchObject({ error: { code: RPC_ERROR_CODES.BUSY } });
+			).toMatchObject({ result: { permissionPreset: "ask" } });
 			expect(
 				await connection.handle({
 					jsonrpc: "2.0",

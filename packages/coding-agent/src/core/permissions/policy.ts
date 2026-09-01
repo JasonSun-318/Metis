@@ -104,6 +104,16 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 	return undefined;
 }
 
+function protectedWriteReason(action: NormalizedPermissionAction): string | undefined {
+	const protectedRoots = protectedRootsFor(action);
+	for (const target of action.writePaths) {
+		if (protectedRoots.some((root) => target === root || isPathInsideNormalized(root, target))) {
+			return "Writes to protected workspace metadata are forbidden";
+		}
+	}
+	return undefined;
+}
+
 function ceilingDenyReason(settings: PermissionSettings, action: NormalizedPermissionAction): string | undefined {
 	if (settings.sandboxPolicy !== "read-only") return undefined;
 	const forbiddenEffects = action.effects.filter((effect) => effect !== "sensitive-read");
@@ -165,6 +175,8 @@ export class PermissionPolicy {
 		}
 		const invariant = hardDenyReason(input.action);
 		if (invariant) return deny("critical", invariant);
+		const protectedWrite = protectedWriteReason(input.action);
+		if (protectedWrite) return deny("critical", protectedWrite);
 
 		const ceiling = ceilingDenyReason(input.settings, input.action);
 		if (ceiling) return deny(riskLevelFor(input.action, grantRequestFor(input.settings, input.action)), ceiling);
