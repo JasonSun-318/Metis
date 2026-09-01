@@ -6,3 +6,4 @@ export * from "./reviewer.ts";
 export * from "./reviewer-input.ts";
 export * from "./settings.ts";
 export * from "./types.ts";
+export * from "./user-reviewer.ts";
