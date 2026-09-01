@@ -93,6 +93,31 @@ describe("PermissionRulesPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("lists exact rule details including an external target", async () => {
+		const client = api();
+		vi.mocked(client.listPermissionRules).mockResolvedValueOnce({
+			projectPath: "/work/project",
+			rules: [{
+				...RULE,
+				executionTarget: "external",
+				details: [
+					{ label: "Address", value: "https://example.test" },
+					{ label: "Details", value: "[REDACTED]" },
+				],
+			}],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<PermissionRulesPanel api={client} serverReady sessionId={SESSION_ID} />));
+		await flush();
+		expect(container.textContent).toContain("External");
+		expect(container.textContent).toContain("https://example.test");
+		expect(container.textContent).toContain("[REDACTED]");
+		expect(container.textContent).not.toContain("sk-");
+		await act(async () => root.unmount());
+	});
+
 	it("does not call the server without an active project session", async () => {
 		const client = api();
 		const container = document.createElement("div");

@@ -1,4 +1,4 @@
-import type { InteractionResponseInput, InteractionView } from "@metis/app-protocol";
+import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
 import { Warning } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
@@ -7,6 +7,21 @@ import { AskUserPanel } from "./AskUserPanel.tsx";
 interface InteractionHostProps {
 	readonly interaction: InteractionView | undefined;
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
+	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
+}
+
+function approvalErrorMessage(cause: unknown): string {
+	const message = cause instanceof Error ? cause.message : "The response could not be sent.";
+	if (/stale|unavailable|cancelled|no longer/i.test(message)) return "This approval is no longer available.";
+	return message;
+}
+
+function priorReviewCopy(
+	outcome: Extract<InteractionView, { kind: "permission_approval" }>["priorReviewerOutcome"],
+): string {
+	if (outcome === "deny") return "Automatic security review denied this action.";
+	if (outcome === "unavailable") return "Automatic security review could not complete.";
+	return "Automatic security review could not approve this action.";
 }
 
 const CHOICE_LABELS = {
@@ -16,7 +31,7 @@ const CHOICE_LABELS = {
 	"always-deny-exact": "Always deny this exact action",
 } as const;
 
-export function InteractionHost({ interaction, onRespond }: InteractionHostProps) {
+export function InteractionHost({ interaction, onRespond, sandboxHealth = "healthy" }: InteractionHostProps) {
 	const { t } = useTranslation();
 	const firstControl = useRef<HTMLElement>(null);
 	const [input, setInput] = useState("");
@@ -40,7 +55,7 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 		try {
 			await onRespond(response);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : "The response could not be sent.");
+			setError(approvalErrorMessage(cause));
 			setBusy(false);
 		}
 	};
@@ -55,14 +70,16 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 		const denyOnce = interaction.choices.includes("deny-once");
 		const alwaysDeny = interaction.choices.includes("always-deny-exact");
 		const escapeChoice = denyOnce ? "deny-once" : alwaysDeny ? "always-deny-exact" : undefined;
-		const approvalBlocked = !interaction.scopeComplete;
+		const sandboxBlocked = sandboxHealth !== "healthy" && interaction.executionTarget === "sandbox";
+		const approvalBlocked = !interaction.scopeComplete || sandboxBlocked;
 		const hostOrExternal = interaction.executionTarget !== "sandbox";
 		const descriptionIds = [
 			"permission-approval-execution-target",
 			"permission-approval-reason",
 			interaction.details.length > 0 ? "permission-approval-details" : undefined,
 			interaction.priorReviewer ? "permission-approval-prior-review" : undefined,
-			approvalBlocked ? "permission-approval-incomplete" : undefined,
+			sandboxBlocked ? "permission-approval-sandbox-blocked" : undefined,
+			!interaction.scopeComplete ? "permission-approval-incomplete" : undefined,
 		].filter(Boolean).join(" ") || undefined;
 		const choose = (choice: (typeof interaction.choices)[number]) =>
 			void respond({ interactionId: interaction.interactionId, kind: "permission_approval", choice });
@@ -113,14 +130,22 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 					)}
 					{interaction.priorReviewer && (
 						<p className="permission-approval-warning" id="permission-approval-prior-review">
-							{t("Automatic security review could not approve this action.")}
+							{t(priorReviewCopy(interaction.priorReviewerOutcome))}
 						</p>
 					)}
-					{approvalBlocked && (
+					{sandboxBlocked && (
+						<p className="permission-approval-warning" id="permission-approval-sandbox-blocked" role="alert">
+							{t("Workspace sandbox is unavailable. This action stays blocked instead of running on the host.")}
+						</p>
+					)}
+					{!interaction.scopeComplete && (
 						<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
 							{t("This tool did not provide enough target details. Deny and retry with a specific target.")}
 						</p>
 					)}
+					<p className="sr-only" aria-live="polite">
+						{busy ? t("Sending your decision…") : error ? t(error) : ""}
+					</p>
 					{error && <p className="error-copy" role="alert">{t(error)}</p>}
 					<footer>
 						{denyOnce && (

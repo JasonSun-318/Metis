@@ -1112,8 +1112,21 @@ export function App({ api, store }: AppProps) {
 	const permissionSessionRunning = permissionSession?.state === "running" ||
 		(permissionSessionId !== undefined && state.activeSessionId === permissionSessionId && state.activeTurnId !== null);
 	const draftCreatePending = workspaceState.draftCreatePending;
+	const permissionView = permissionSessionId && permissionSessionOpen
+		? {
+			constrainedByParent: state.constrainedByParent,
+			sandboxHealth: state.sandboxHealth,
+			activeReview: state.activeReview,
+		}
+		: {
+			constrainedByParent: false,
+			sandboxHealth: "healthy" as const,
+			activeReview: undefined,
+		};
 	const permissionControl = visibleNewTaskDraft ? (
 		<PermissionSelector
+			activeReview={permissionView.activeReview}
+			constrainedByParent={permissionView.constrainedByParent}
 			disabled={
 				draftBusy ||
 				!serverReady ||
@@ -1125,12 +1138,16 @@ export function App({ api, store }: AppProps) {
 			onChange={(permissionPreset) => permissionSessionId
 				? changePermissionPreset(permissionSessionId, permissionPreset)
 				: workspaceWorkflow.setDraftPermission(permissionPreset)}
+			sandboxHealth={permissionView.sandboxHealth}
 			value={permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset}
 		/>
 	) : visibleActiveSession ? (
 		<PermissionSelector
+			activeReview={state.activeReview}
+			constrainedByParent={state.constrainedByParent}
 			disabled={!serverReady || running || visibleInteraction !== undefined}
 			onChange={(permissionPreset) => changePermissionPreset(visibleActiveSession.sessionId, permissionPreset)}
+			sandboxHealth={state.sandboxHealth}
 			value={state.permissionPreset}
 		/>
 	) : undefined;
@@ -1411,7 +1428,7 @@ export function App({ api, store }: AppProps) {
 								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || collaborationModeChanging}
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
-								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} /> : undefined}
+								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} sandboxHealth={state.sandboxHealth} /> : undefined}
 								goalControl={
 									<GoalBar
 										goal={state.goal}
@@ -1475,7 +1492,7 @@ export function App({ api, store }: AppProps) {
 					{!error && notice && <div className="toast" role="status">{t(notice)}</div>}
 					{latestNotification && !error && !notice && <div className="toast" role="status">{t(latestNotification.message)}</div>}
 			</main>
-			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} />
+			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} sandboxHealth={state.sandboxHealth} />
 		</div>
 		{settingsOpen ? (
 			<SettingsDialog

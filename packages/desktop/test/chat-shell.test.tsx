@@ -1846,7 +1846,7 @@ describe("Chat desktop shell", () => {
 		expect(document.activeElement).toBe(trigger);
 
 		await act(async () => trigger.click());
-		await act(async () => menuOption(container, "Full access").click());
+		await act(async () => menuOption(container, "Full").click());
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
 		expect(button(container, "Select permissions, current Full")).not.toBeNull();
 		const textarea = (container.querySelector<HTMLElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!;
@@ -1878,7 +1878,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Select permissions, current Ask").click());
-		await act(async () => menuOption(container, "Full access").click());
+		await act(async () => menuOption(container, "Full").click());
 		const pendingTrigger = button(container, "Select permissions, current Ask");
 		expect(pendingTrigger.disabled).toBe(true);
 		for (const label of ["Chat", "Code", "New task", "Customize", "Chat project task"]) {
@@ -2110,7 +2110,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Select permissions, current Full").click());
-		await act(async () => menuOption(container, "Ask before every change").click());
+		await act(async () => menuOption(container, "Ask").click());
 		await flush();
 		await flush();
 

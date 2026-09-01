@@ -602,14 +602,25 @@ const zhCN = {
 	Full: "完全访问",
 	"Select permissions, current {{label}}": "选择权限，当前为{{label}}",
 	Permissions: "权限",
-	"Ask before every change": "每次更改前询问",
-	"Ask before model changes; approved Bash stays sandboxed unless host access is shown.":
-		"模型更改前询问；获批的 Bash 会留在沙箱内，除非明确显示主机访问。",
-	"Work automatically in this project; ask for dangerous or boundary-crossing actions.":
-		"在当前项目中自动工作；危险或越界操作会先询问。",
-	"Full access": "完全访问",
-	"Run model tools directly as your OS user without Metis approval.":
-		"允许模型工具以当前系统用户身份直接运行，无需 Metis 确认。",
+	"Runs in the workspace sandbox and asks you when approval is needed.": "在工作区沙箱中运行，需要时向你询问。",
+	"Runs in the workspace sandbox. The current model reviews risky actions when needed.":
+		"在工作区沙箱中运行。当前模型会在需要时进行安全审查。",
+	"May run on the host. Critical actions still ask you.": "可在主机上运行。高风险操作仍会向你询问。",
+	"Checking security…": "正在检查安全性…",
+	"A parent session limits the effective permissions for this task.": "父会话限制了此任务的有效权限。",
+	"Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.":
+		"工作区沙箱不可用。询问和自动保持停用，而不会改到主机上运行。",
+	"Workspace sandbox is unavailable. This action stays blocked instead of running on the host.":
+		"工作区沙箱不可用。此操作保持阻止，而不会改到主机上运行。",
+	"Sending your decision…": "正在提交你的决定…",
+	"This approval is no longer available.": "此审批已失效。",
+	"Always allow this exact action": "始终允许此精确操作",
+	"Always deny this exact action": "始终拒绝此精确操作",
+	"This action reaches a network or external service.": "此操作会访问网络或外部服务。",
+	"Automatic security review could not approve this action.": "自动安全审查无法批准此操作。",
+	"Automatic security review denied this action.": "自动安全审查拒绝了此操作。",
+	"Automatic security review could not complete.": "自动安全审查未能完成。",
+	External: "外部",
 	"The last turn was interrupted. Your saved work is intact; send a new message to continue.":
 		"上一次对话被中断。已保存的工作不受影响，请发送新消息继续。",
 	"This session is corrupt. Metis left the source data untouched.": "此会话已损坏，Metis 未改动源数据。",

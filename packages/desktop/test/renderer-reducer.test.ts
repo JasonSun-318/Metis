@@ -579,9 +579,75 @@ describe("renderer projection reducer", () => {
 			}),
 		).toBe("applied");
 		expect(store.getSnapshot().permissionPreset).toBe("full");
+		expect(store.getSnapshot().constrainedByParent).toBe(false);
+		expect(store.getSnapshot().sandboxHealth).toBe("healthy");
 
 		store.applySnapshot({ ...snapshot(EPOCH_B, 4), permissionPreset: "ask" });
 		expect(store.getSnapshot().permissionPreset).toBe("ask");
+	});
+
+	it("tracks model review start and clears only the matching action", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/permissionReviewStarted",
+						sessionId: "session-1",
+						actionId: "action-a",
+						reviewer: "model",
+						riskLevel: "high",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().activeReview).toEqual({
+			actionId: "action-a",
+			reviewer: "model",
+			riskLevel: "high",
+		});
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 2,
+				toCursor: 2,
+				events: [
+					{
+						type: "session/permissionReviewCompleted",
+						sessionId: "session-1",
+						actionId: "action-other",
+						reviewer: "model",
+						outcome: "deny",
+						riskLevel: "high",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().activeReview?.actionId).toBe("action-a");
+
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 3,
+				toCursor: 3,
+				events: [
+					{
+						type: "session/permissionReviewCompleted",
+						sessionId: "session-1",
+						actionId: "action-a",
+						reviewer: "model",
+						outcome: "unavailable",
+						riskLevel: "high",
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().activeReview).toBeUndefined();
 	});
 
 	it("replaces, live-updates, and clears the active session task snapshot", () => {

@@ -77,7 +77,7 @@ export function PermissionRulesPanel({ api, serverReady, sessionId }: Permission
 		{result?.rules.length === 0 ? <p>{t("No actions are always allowed for this project.")}</p> : null}
 		{result?.rules.length ? <ul className="permission-rule-list">
 			{result.rules.map((rule) => <li key={rule.id}>
-				<div className="permission-rule-heading"><strong>{rule.toolName}</strong><span className={`permission-target-${rule.executionTarget}`}>{t(rule.executionTarget === "sandbox" ? "Sandbox" : "Host")}</span></div>
+				<div className="permission-rule-heading"><strong>{rule.toolName}</strong><span className={`permission-target-${rule.executionTarget}`}>{t(rule.executionTarget === "sandbox" ? "Sandbox" : rule.executionTarget === "external" ? "External" : "Host")}</span></div>
 				<div className="permission-rule-details">
 					{rule.details.map((detail, index) => <div key={`${detail.label}:${index}`}><span>{t(detail.label)}</span><code>{detail.value}</code></div>)}
 					<div><span>{t("Rule fingerprint")}</span><code>{rule.id.slice(0, 12)}</code></div>
