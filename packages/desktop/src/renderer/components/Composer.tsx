@@ -107,19 +107,18 @@ function parseComposerContent(container: HTMLElement | null): ParsedComposerCont
 	let hasGoalToken = false;
 	let goalObjective = "";
 	const tokenSkills: string[] = [];
-
-	for (const node of Array.from(container.childNodes)) {
+	const blockTags = new Set(["DIV", "P", "LI"]);
+	const appendText = (text: string) => {
+		cleanText += text;
+		if (hasGoalToken) goalObjective += text;
+	};
+	const visit = (node: Node): void => {
 		if (node.nodeType === Node.TEXT_NODE) {
-			const text = node.textContent ?? "";
-			cleanText += text;
-			if (hasGoalToken) {
-				goalObjective += text;
-			}
+			appendText(node.textContent ?? "");
 		} else if (node.nodeType === Node.ELEMENT_NODE) {
 			const el = node as HTMLElement;
 			if (el.tagName === "BR") {
-				cleanText += "\n";
-				if (hasGoalToken) goalObjective += "\n";
+				appendText("\n");
 			} else if (el.classList.contains("composer-goal-token") || el.getAttribute("data-token-kind") === "goal") {
 				hasGoalToken = true;
 			} else if (el.classList.contains("composer-skill-token")) {
@@ -128,12 +127,12 @@ function parseComposerContent(container: HTMLElement | null): ParsedComposerCont
 					tokenSkills.push(name);
 				}
 			} else {
-				const text = el.textContent ?? "";
-				cleanText += text;
-				if (hasGoalToken) goalObjective += text;
+				for (const child of Array.from(el.childNodes)) visit(child);
+				if (blockTags.has(el.tagName) && !cleanText.endsWith("\n")) appendText("\n");
 			}
 		}
-	}
+	};
+	for (const node of Array.from(container.childNodes)) visit(node);
 
 	return {
 		rawText: container.textContent ?? "",
@@ -142,6 +141,23 @@ function parseComposerContent(container: HTMLElement | null): ParsedComposerCont
 		goalObjective: goalObjective.trim(),
 		tokenSkills,
 	};
+}
+
+function insertPlainTextAtSelection(container: HTMLElement, text: string): void {
+	const textNode = document.createTextNode(text);
+	const selection = window.getSelection();
+	if (!selection || selection.rangeCount === 0 || !container.contains(selection.getRangeAt(0).startContainer)) {
+		container.appendChild(textNode);
+		return;
+	}
+
+	const range = selection.getRangeAt(0);
+	range.deleteContents();
+	range.insertNode(textNode);
+	range.setStartAfter(textNode);
+	range.collapse(true);
+	selection.removeAllRanges();
+	selection.addRange(range);
 }
 
 function getSlashQueryAtCursor(container: HTMLElement): string | undefined {
@@ -400,8 +416,17 @@ export function Composer({
 		if (files.length > 0) {
 			event.preventDefault();
 			void processFiles(files);
+			return;
 		}
-	}, [processFiles]);
+
+		const text = event.clipboardData.getData("text/plain");
+		const editor = editorRef.current;
+		if (text && editor) {
+			event.preventDefault();
+			insertPlainTextAtSelection(editor, text);
+			syncEditorState();
+		}
+	}, [processFiles, syncEditorState]);
 
 	const handleDrop = useCallback((event: React.DragEvent) => {
 		const files = Array.from(event.dataTransfer.files);
@@ -711,7 +736,6 @@ export function Composer({
 							id="composer-input"
 							onInput={syncEditorState}
 							onKeyDown={handleKeyDown}
-							onPaste={handlePaste}
 							onSelect={() => {
 								const sel = window.getSelection();
 								if (sel && sel.rangeCount > 0) {

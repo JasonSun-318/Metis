@@ -13,6 +13,53 @@ function type(editor: HTMLElement, value: string) {
 }
 
 describe("Composer slash commands", () => {
+	it("preserves line breaks from Chromium block markup", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onSubmit = vi.fn(async () => undefined);
+		await act(async () => root.render(
+			<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
+		));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		editor.innerHTML = "<div>first line</div><div>second<br>continued</div><p>third line</p>";
+		await act(async () => editor.dispatchEvent(new Event("input", { bubbles: true })));
+		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
+
+		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+			text: "first line\nsecond\ncontinued\nthird line",
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("inserts multiline clipboard text without browser-generated block nodes", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onSubmit = vi.fn(async () => undefined);
+		await act(async () => root.render(
+			<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
+		));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		const range = document.createRange();
+		range.selectNodeContents(editor);
+		range.collapse(false);
+		window.getSelection()?.removeAllRanges();
+		window.getSelection()?.addRange(range);
+		const paste = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, "clipboardData", {
+			value: { files: [], getData: (type: string) => type === "text/plain" ? "alpha\nbeta\ngamma" : "" },
+		});
+		await act(async () => editor.dispatchEvent(paste));
+
+		expect(paste.defaultPrevented).toBe(true);
+		expect(editor.querySelector("div, p")).toBeNull();
+		expect(editor.textContent).toBe("alpha\nbeta\ngamma");
+		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
+		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ text: "alpha\nbeta\ngamma" }));
+		await act(async () => root.unmount());
+	});
+
 	it("executes a selected built-in without sending it to the model", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
