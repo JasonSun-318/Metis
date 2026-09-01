@@ -468,7 +468,7 @@ export function App({ api, store }: AppProps) {
 		[workspaceWorkflow],
 	);
 	const previewProjectDelete = useCallback(
-		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete(group),
+		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ mode: group.mode, cwd: group.cwd }),
 		[workspaceWorkflow],
 	);
 	const createEmptySessionInProject = useCallback(async (projectMode: AgentMode, cwd: string): Promise<void> => {

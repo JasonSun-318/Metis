@@ -1468,6 +1468,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(group, "Project actions").click());
 		await act(async () => button(group, "Delete").click());
 		await flush();
+		expect(api.previewProjectDelete).toHaveBeenCalledWith({ mode: "chat", cwd: "/work/shared" });
 		expect(projectDialog().textContent).toContain("2 Chat sessions");
 		expect(projectDialog().textContent).toContain("/canonical/shared");
 		expect(projectDialog().textContent).toContain("Code project and its memory are unchanged");
