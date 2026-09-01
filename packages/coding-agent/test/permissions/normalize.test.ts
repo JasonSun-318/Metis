@@ -92,4 +92,19 @@ describe("permission action normalization", () => {
 		);
 		expect(() => normalizePermissionAction(actionInput({ toolIdentity: " " }))).toThrow("toolIdentity");
 	});
+
+	it("bounds scope cardinality and the complete normalized action", () => {
+		expect(() =>
+			normalizePermissionAction(
+				actionInput({ readPaths: Array.from({ length: 4_097 }, (_, index) => `p${index}`) }),
+			),
+		).toThrow("too many entries");
+		expect(() =>
+			normalizePermissionAction(
+				actionInput({
+					readPaths: Array.from({ length: 20 }, (_, index) => `${"x".repeat(16_000)}${index}`),
+				}),
+			),
+		).toThrow("256 KiB");
+	});
 });

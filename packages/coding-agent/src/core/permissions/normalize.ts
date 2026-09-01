@@ -11,6 +11,8 @@ import type {
 
 const MAX_CANONICAL_BYTES = 256 * 1024;
 const MAX_COMMAND_BYTES = 64 * 1024;
+const MAX_PATH_ENTRIES = 4_096;
+const MAX_NETWORK_ENDPOINTS = 1_024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const PROVENANCES: readonly ToolProvenance[] = ["builtin", "host", "extension", "sdk", "mcp"];
 const EFFECTS: readonly PermissionEffect[] = [
@@ -94,6 +96,7 @@ function requiredString(value: unknown, field: string, maxLength: number): strin
 
 function normalizePathSet(value: readonly string[], cwd: string, field: string): readonly string[] {
 	if (!Array.isArray(value)) throw new TypeError(`${field} must be an array`);
+	if (value.length > MAX_PATH_ENTRIES) throw new TypeError(`${field} has too many entries`);
 	const normalized = value.map((path) => {
 		const checked = requiredString(path, field, 32_768);
 		return canonicalizeActionPath(checked, cwd);
@@ -147,6 +150,7 @@ function normalizeEndpoint(endpoint: NetworkEndpoint): Readonly<NetworkEndpoint>
 
 function normalizeEndpoints(value: readonly NetworkEndpoint[]): readonly Readonly<NetworkEndpoint>[] {
 	if (!Array.isArray(value)) throw new TypeError("networkEndpoints must be an array");
+	if (value.length > MAX_NETWORK_ENDPOINTS) throw new TypeError("networkEndpoints has too many entries");
 	const endpoints = value.map(normalizeEndpoint);
 	const unique = new Map(endpoints.map((endpoint) => [JSON.stringify([endpoint.hostname, endpoint.port]), endpoint]));
 	return Object.freeze(
@@ -177,7 +181,7 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 		throw new TypeError("command exceeds 64 KiB");
 	}
 
-	return Object.freeze({
+	const action: NormalizedPermissionAction = {
 		actionId: requiredString(input.actionId, "actionId", 1_024),
 		toolName: requiredString(input.toolName, "toolName", 256),
 		provenance: input.provenance,
@@ -190,7 +194,9 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 		networkEndpoints: normalizeEndpoints(input.networkEndpoints),
 		...(command === undefined ? {} : { command }),
 		effects: normalizeEffects(input.effects),
-	});
+	};
+	canonicalJson(action);
+	return Object.freeze(action);
 }
 
 export function assertCompleteAction(action: NormalizedPermissionAction): void {
