@@ -29,12 +29,14 @@ describe("extensions discovery", () => {
 
 	const extensionCodeWithTool = (toolName: string) => `
 		import { Type } from "typebox";
+		import { permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 		export default function(metis) {
 			metis.registerTool({
 				name: "${toolName}",
 				label: "${toolName}",
 				description: "Test tool",
 				parameters: Type.Object({}),
+				permission: permissionDescriptor(() => permissionClaim()),
 				execute: async () => ({ content: [{ type: "text", text: "ok" }] }),
 			});
 		}

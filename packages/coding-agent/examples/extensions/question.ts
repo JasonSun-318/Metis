@@ -4,7 +4,7 @@
  * Escape in editor returns to options, Escape in options cancels
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Editor, type EditorTheme, Key, matchesKey, Text, visibleWidth, wrapTextWithAnsi } from "@metis/tui";
 import { Type } from "typebox";
 
@@ -39,6 +39,7 @@ export default function question(metis: ExtensionAPI) {
 		label: "Question",
 		description: "Ask the user a question and let them pick from options. Use when you need user input to proceed.",
 		parameters: QuestionParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {

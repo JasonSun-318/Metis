@@ -174,11 +174,7 @@ class DefaultInteractiveBashBoundary implements InteractiveBashBoundary {
 			if (canonicalCwd !== grant.cwd) {
 				return Promise.reject(new Error("Interactive Bash cwd does not match the execution grant"));
 			}
-			const argsDigest = digestCanonical({
-				command,
-				...(options.timeout === undefined ? {} : { timeout: options.timeout }),
-			});
-			if (argsDigest !== grant.argsDigest) {
+			if (command !== grant.command) {
 				return Promise.reject(new Error("Interactive Bash command does not match the execution grant"));
 			}
 			try {

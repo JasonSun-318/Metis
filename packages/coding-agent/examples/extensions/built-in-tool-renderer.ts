@@ -26,22 +26,28 @@
  */
 
 import type { BashToolDetails, EditToolDetails, ExtensionAPI, ReadToolDetails } from "@metis/coding-agent";
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@metis/coding-agent";
+import {
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
+} from "@metis/coding-agent";
 import { Text } from "@metis/tui";
 
 export default function (metis: ExtensionAPI) {
 	const cwd = process.cwd();
 
 	// --- Read tool: show path and line count ---
-	const originalRead = createReadTool(cwd);
+	const originalRead = createReadToolDefinition(cwd);
 	metis.registerTool({
 		name: "read",
 		label: "read",
 		description: originalRead.description,
 		parameters: originalRead.parameters,
+		permission: originalRead.permission,
 
-		async execute(toolCallId, params, signal, onUpdate) {
-			return originalRead.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			return originalRead.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -92,15 +98,16 @@ export default function (metis: ExtensionAPI) {
 	});
 
 	// --- Bash tool: show command and exit code ---
-	const originalBash = createBashTool(cwd);
+	const originalBash = createBashToolDefinition(cwd);
 	metis.registerTool({
 		name: "bash",
 		label: "bash",
 		description: originalBash.description,
 		parameters: originalBash.parameters,
+		permission: originalBash.permission,
 
-		async execute(toolCallId, params, signal, onUpdate) {
-			return originalBash.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			return originalBash.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -151,16 +158,17 @@ export default function (metis: ExtensionAPI) {
 	});
 
 	// --- Edit tool: show path and diff stats ---
-	const originalEdit = createEditTool(cwd);
+	const originalEdit = createEditToolDefinition(cwd);
 	metis.registerTool({
 		name: "edit",
 		label: "edit",
 		description: originalEdit.description,
 		parameters: originalEdit.parameters,
+		permission: originalEdit.permission,
 		renderShell: "self",
 
-		async execute(toolCallId, params, signal, onUpdate) {
-			return originalEdit.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			return originalEdit.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -216,15 +224,16 @@ export default function (metis: ExtensionAPI) {
 	});
 
 	// --- Write tool: show path and size ---
-	const originalWrite = createWriteTool(cwd);
+	const originalWrite = createWriteToolDefinition(cwd);
 	metis.registerTool({
 		name: "write",
 		label: "write",
 		description: originalWrite.description,
 		parameters: originalWrite.parameters,
+		permission: originalWrite.permission,
 
-		async execute(toolCallId, params, signal, onUpdate) {
-			return originalWrite.execute(toolCallId, params, signal, onUpdate);
+		async execute(toolCallId, params, signal, onUpdate, ctx) {
+			return originalWrite.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {

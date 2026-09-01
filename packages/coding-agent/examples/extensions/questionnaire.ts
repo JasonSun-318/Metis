@@ -5,7 +5,7 @@
  * Multiple questions: tab bar navigation between questions
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Editor, type EditorTheme, Key, matchesKey, Text, visibleWidth, wrapTextWithAnsi } from "@metis/tui";
 import { Type } from "typebox";
 
@@ -80,6 +80,7 @@ export default function questionnaire(metis: ExtensionAPI) {
 		description:
 			"Ask the user one or more questions. Use for clarifying requirements, getting preferences, or confirming decisions. For single questions, shows a simple option list. For multiple questions, shows a tab-based interface.",
 		parameters: QuestionnaireParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			if (ctx.mode !== "tui") {

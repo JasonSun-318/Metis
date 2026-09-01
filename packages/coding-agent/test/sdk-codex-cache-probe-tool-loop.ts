@@ -33,6 +33,7 @@ import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 
 type Transport = "sse" | "websocket" | "websocket-cached" | "auto";
 
@@ -258,6 +259,7 @@ function deterministicProbeTool(): ToolDefinition<typeof deterministicProbeParam
 			"After the tool result arrives, reply with the exact final line requested by the user.",
 		],
 		parameters: deterministicProbeParameters,
+		permission: permissionDescriptor(() => permissionClaim()),
 		execute: async (_toolCallId, params) => ({
 			content: [
 				{

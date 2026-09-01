@@ -13,6 +13,7 @@ import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { type SessionEntry, sessionEntryToContextMessages } from "../../src/core/session-manager.ts";
 import type { ExtensionFactory } from "../../src/index.ts";
+import { noEffectTestPermission } from "../helpers/tool-definition.ts";
 import { createHarness } from "./harness.ts";
 
 function messageEntry(message: Record<string, unknown>): SessionEntry {
@@ -34,6 +35,7 @@ describe("lax message content handling", () => {
 					label: "Web Search",
 					description: "Custom tool that returns a result without content",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					// Simulate an untyped JS extension tool that omits content.
 					execute: async () => ({ details: {} }) as unknown as AgentToolResult<unknown>,
 				});

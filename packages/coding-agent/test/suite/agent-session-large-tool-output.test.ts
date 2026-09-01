@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { LARGE_TOOL_OUTPUT_MAX_CHARS } from "../../src/core/large-tool-output.ts";
 import type { SessionMessageEntry } from "../../src/core/session-manager.ts";
 import type { ExtensionFactory } from "../../src/index.ts";
+import { noEffectTestPermission } from "../helpers/tool-definition.ts";
 import { createHarness, getMessageText } from "./harness.ts";
 
 describe("large tool output", () => {
@@ -100,6 +101,7 @@ describe("large tool output", () => {
 					label: "External Search",
 					description: "Return external search output",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "small before message_end" }],
 						details: { preserved: true },
@@ -203,6 +205,7 @@ describe("large tool output", () => {
 					label: "External Failure",
 					description: "Return output that cannot be persisted",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({ content: [{ type: "text", text: fullText }], details: {} }),
 				});
 			},

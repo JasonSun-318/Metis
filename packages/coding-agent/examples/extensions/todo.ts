@@ -11,7 +11,13 @@
  */
 
 import { StringEnum } from "@metis/ai";
-import type { ExtensionAPI, ExtensionContext, Theme } from "@metis/coding-agent";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	permissionClaim,
+	permissionDescriptor,
+	type Theme,
+} from "@metis/coding-agent";
 import { matchesKey, Text, truncateToWidth } from "@metis/tui";
 import { Type } from "typebox";
 
@@ -138,6 +144,7 @@ export default function (metis: ExtensionAPI) {
 		label: "Todo",
 		description: "Manage a todo list. Actions: list, add (text), toggle (id), clear",
 		parameters: TodoParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 			switch (params.action) {

@@ -206,6 +206,7 @@ function sanitizedMessage(error: unknown, fallback: string): string {
 
 export async function runWorkspaceSandboxBroker(): Promise<void> {
 	let workspaceRoots: readonly string[] | undefined;
+	let explicitWriteRoots: readonly string[] = [];
 	let networkEndpoints: readonly SandboxNetworkEndpoint[] = [];
 	let shellPath: string | undefined;
 	let initializationStarted = false;
@@ -249,6 +250,19 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 			void fail("SANDBOX_PROTOCOL", "Sandbox command cwd is outside the workspace", request.id);
 			return;
 		}
+		const managedWorkDir = request.env.METIS_WORK_DIR;
+		if (managedWorkDir) {
+			if (!isAbsolute(managedWorkDir)) {
+				void fail("SANDBOX_PROTOCOL", "Metis work directory must be absolute", request.id);
+				return;
+			}
+			const canonicalWorkDir = canonicalizeActionPath(managedWorkDir, cwd);
+			if (!explicitWriteRoots.some((root) => isPathInside(root, canonicalWorkDir))) {
+				void fail("SANDBOX_PROTOCOL", "Metis work directory is outside explicit write roots", request.id);
+				return;
+			}
+			request.env.METIS_WORK_DIR = canonicalWorkDir;
+		}
 
 		const controller = new AbortController();
 		const state = {
@@ -262,18 +276,38 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 			let timeoutHandle: NodeJS.Timeout | undefined;
 			try {
 				const shell = getShellConfig(shellPath);
-				const wrapped = await SandboxManager.wrapWithSandboxArgv(
-					request.command,
-					shell.shell,
-					undefined,
-					controller.signal,
-					cwd,
-				);
+				const previousSandboxTemporaryDir = process.env.CLAUDE_CODE_TMPDIR;
+				if (managedWorkDir) process.env.CLAUDE_CODE_TMPDIR = request.env.METIS_WORK_DIR;
+				let wrapped: Awaited<ReturnType<typeof SandboxManager.wrapWithSandboxArgv>>;
+				try {
+					wrapped = await SandboxManager.wrapWithSandboxArgv(
+						request.command,
+						shell.shell,
+						undefined,
+						controller.signal,
+						cwd,
+					);
+				} finally {
+					if (managedWorkDir) {
+						if (previousSandboxTemporaryDir === undefined) delete process.env.CLAUDE_CODE_TMPDIR;
+						else process.env.CLAUDE_CODE_TMPDIR = previousSandboxTemporaryDir;
+					}
+				}
 				if (!wrapped.argv[0]) throw new Error("Sandbox runtime returned an empty command");
 				const child = spawnProcess(wrapped.argv[0], wrapped.argv.slice(1), {
 					cwd,
 					detached: process.platform !== "win32",
-					env: { ...request.env, ...wrapped.env },
+					env: {
+						...request.env,
+						...wrapped.env,
+						...(request.env.METIS_WORK_DIR
+							? {
+									TMPDIR: request.env.METIS_WORK_DIR,
+									TMP: request.env.METIS_WORK_DIR,
+									TEMP: request.env.METIS_WORK_DIR,
+								}
+							: {}),
+					},
 					stdio: ["ignore", "pipe", "pipe"],
 					windowsHide: true,
 				});
@@ -356,7 +390,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						Object.freeze([...new Set(roots.map((root) => canonicalizeActionPath(root, request.cwd)))]);
 					workspaceRoots = canonicalRoots(request.workspaceRoots);
 					const readOnlyRoots = canonicalRoots(request.readOnlyRoots);
-					const writeRoots = canonicalRoots(request.writeRoots);
+					explicitWriteRoots = canonicalRoots(request.writeRoots);
 					const protectedRoots = canonicalRoots(request.protectedRoots);
 					const writeProtectedRoots = canonicalRoots(request.writeProtectedRoots);
 					networkEndpoints = Object.freeze(
@@ -372,7 +406,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						if (!statSync(shellPath).isFile()) throw new Error("Sandbox shell path must be a file");
 					}
 					for (const protectedRoot of protectedRoots) {
-						if ([...workspaceRoots, ...writeRoots].some((root) => pathsIntersect(root, protectedRoot))) {
+						if ([...workspaceRoots, ...explicitWriteRoots].some((root) => pathsIntersect(root, protectedRoot))) {
 							throw new Error("Sandbox write roots overlap a protected root");
 						}
 						if (readOnlyRoots.some((root) => isPathInside(root, protectedRoot))) {
@@ -380,7 +414,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						}
 					}
 					for (const protectedRoot of writeProtectedRoots) {
-						if (writeRoots.some((root) => pathsIntersect(root, protectedRoot))) {
+						if (explicitWriteRoots.some((root) => pathsIntersect(root, protectedRoot))) {
 							throw new Error("Sandbox write roots overlap a protected root");
 						}
 					}
@@ -402,7 +436,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						createSandboxRuntimeConfig({
 							workspaceRoots,
 							readOnlyRoots,
-							writeRoots,
+							writeRoots: explicitWriteRoots,
 							protectedRoots,
 							writeProtectedRoots,
 							temporaryDir,

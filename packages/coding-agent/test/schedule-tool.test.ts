@@ -133,6 +133,26 @@ function fakeSession(input: {
 }
 
 describe("schedule host tool", () => {
+	it.each([
+		["list", []],
+		["get", []],
+		["create", ["external-side-effect"]],
+		["update", ["external-side-effect"]],
+		["pause", ["external-side-effect"]],
+		["resume", ["external-side-effect"]],
+		["run_now", ["external-side-effect"]],
+		["delete", ["external-side-effect", "destructive"]],
+	] as const)("describes %s permission effects exactly", (action, expectedEffects) => {
+		const host = fakeSession({ mode: "chat", cwdOrigin: "user-selected", cwd: "/project" });
+		installScheduleHost({ session: host.session, manager: fakeManager(), timezone: "Asia/Shanghai" });
+		const claim = host.tool!.permission.describe({ action } as never, {
+			actionId: `schedule-${action}`,
+			cwd: "/project",
+			workspaceRoots: ["/project"],
+		});
+		expect(claim.effects).toEqual(expectedEffects);
+	});
+
 	it("has a strict schema with no host-owned execution fields", () => {
 		expect(
 			Value.Check(ScheduleToolInputSchema, {
@@ -223,7 +243,7 @@ describe("schedule host tool", () => {
 		const host = fakeSession(source);
 		const manager = fakeManager();
 		const dispose = installScheduleHost({ session: host.session, manager, timezone: "Asia/Shanghai" });
-		expect(host.installOptions).toEqual({ automaticPermissionToolNames: ["schedule"] });
+		expect(host.installOptions).toBeUndefined();
 		await host.tool!.execute(
 			"call-1",
 			{ action: "create", name: "生成摘要", instruction: "生成摘要", schedule: { kind: "daily", time: "09:00" } },

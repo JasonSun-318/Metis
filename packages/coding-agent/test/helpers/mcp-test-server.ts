@@ -65,7 +65,7 @@ export async function createMcpTestServer(options: McpTestServerOptions = {}): P
 				required: ["query"],
 				additionalProperties: false,
 			},
-			annotations: { readOnlyHint: true },
+			annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 		},
 	];
 	let currentResources = options.resources ?? [{ uri: "docs://guide", name: "Guide", mimeType: "text/plain" }];

@@ -51,7 +51,10 @@ function grantRequestFor(settings: PermissionSettings, action: NormalizedPermiss
 	const executionTarget =
 		action.provenance === "mcp" || settings.sandboxPolicy === "external-sandbox"
 			? "external"
-			: settings.sandboxPolicy === "danger-full-access"
+			: action.provenance === "host" ||
+					action.provenance === "extension" ||
+					action.provenance === "sdk" ||
+					settings.sandboxPolicy === "danger-full-access"
 				? "host"
 				: "sandbox";
 	return Object.freeze({
@@ -103,12 +106,10 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 
 function ceilingDenyReason(settings: PermissionSettings, action: NormalizedPermissionAction): string | undefined {
 	if (settings.sandboxPolicy !== "read-only") return undefined;
-	if (
-		action.writePaths.length > 0 ||
-		action.command !== undefined ||
-		action.effects.some((effect) => effect !== "sensitive-read")
-	) {
-		return "The read-only sandbox ceiling forbids this action";
+	const forbiddenEffects = action.effects.filter((effect) => effect !== "sensitive-read");
+	if (action.writePaths.length > 0 || forbiddenEffects.length > 0) {
+		const reasons = [...(action.writePaths.length > 0 ? ["write scope"] : []), ...forbiddenEffects];
+		return `The read-only sandbox ceiling forbids ${reasons.join(", ")}`;
 	}
 	return undefined;
 }
@@ -120,13 +121,17 @@ export function riskLevelFor(action: NormalizedPermissionAction, grant: GrantReq
 	return "low";
 }
 
-function isDeterministicRead(action: NormalizedPermissionAction, riskLevel: RiskLevel): boolean {
+function isDeterministicRead(
+	action: NormalizedPermissionAction,
+	riskLevel: RiskLevel,
+	settings: PermissionSettings,
+): boolean {
 	return (
 		riskLevel === "low" &&
 		action.writePaths.length === 0 &&
-		action.command === undefined &&
 		action.networkEndpoints.length === 0 &&
-		action.effects.length === 0
+		action.effects.length === 0 &&
+		(action.command === undefined || settings.sandboxPolicy === "read-only" || settings.approvalPolicy === "deny")
 	);
 }
 
@@ -166,7 +171,7 @@ export class PermissionPolicy {
 
 		const grant = grantRequestFor(input.settings, input.action);
 		const riskLevel = riskLevelFor(input.action, grant);
-		if (isDeterministicRead(input.action, riskLevel) || isReadOnlyMcp(input.action)) {
+		if (isDeterministicRead(input.action, riskLevel, input.settings) || isReadOnlyMcp(input.action)) {
 			return Object.freeze({
 				kind: "allow",
 				riskLevel,
@@ -176,7 +181,16 @@ export class PermissionPolicy {
 		}
 
 		if (input.settings.approvalPolicy === "deny") {
-			return deny(riskLevel, "The approval ceiling forbids an action that requires review");
+			const categories = [
+				...input.action.effects,
+				...(input.action.networkEndpoints.length > 0 ? ["network"] : []),
+				...(input.action.writePaths.length > 0 ? ["write scope"] : []),
+				...(input.action.command !== undefined ? ["shell"] : []),
+			];
+			return deny(
+				riskLevel,
+				`The approval ceiling forbids an action that requires review${categories.length > 0 ? ` (${[...new Set(categories)].join(", ")})` : ""}`,
+			);
 		}
 
 		const reviewer = minimumReviewerFor(input.settings, riskLevel);

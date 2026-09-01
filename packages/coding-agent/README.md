@@ -359,12 +359,21 @@ Place in `~/.metis/agent/skills/`, `~/.agents/skills/`, `.metis/skills/`, or `.a
 TypeScript modules that extend metis with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
 
 ```typescript
+import { permissionClaim, permissionDescriptor, type ExtensionAPI } from "@metis/coding-agent";
+
 export default function (metis: ExtensionAPI) {
-  metis.registerTool({ name: "deploy", ... });
+  metis.registerTool({
+    name: "greet",
+    // This tool only formats its arguments and has no filesystem, network, or external effects.
+    permission: permissionDescriptor(() => permissionClaim()),
+    ...
+  });
   metis.registerCommand("stats", { ... });
   metis.on("tool_call", async (event, ctx) => { ... });
 }
 ```
+
+Every executable tool must declare the exact paths, network endpoints, command, and effects it may use. Metis rejects tools without a complete permission descriptor.
 
 The default export can also be `async`. metis waits for async extension factories before startup continues, which is useful for one-time initialization such as fetching remote model lists before calling `metis.registerProvider()`.
 

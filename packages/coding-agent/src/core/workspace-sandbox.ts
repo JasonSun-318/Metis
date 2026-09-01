@@ -91,9 +91,10 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 	]) {
 		if (source[key] !== undefined) environment[key] = source[key];
 	}
-	environment.TMPDIR = temporaryDir;
-	environment.TMP = temporaryDir;
-	environment.TEMP = temporaryDir;
+	const commandTemporaryDir = source.METIS_WORK_DIR ?? temporaryDir;
+	environment.TMPDIR = commandTemporaryDir;
+	environment.TMP = commandTemporaryDir;
+	environment.TEMP = commandTemporaryDir;
 	environment.METIS_SANDBOX_TEMP_DIR = temporaryDir;
 	return environment;
 }

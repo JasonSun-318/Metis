@@ -2,6 +2,7 @@ import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ToolDefinition } from "./extensions/types.ts";
 import { MAX_PLAN_MARKDOWN_UTF8_BYTES, type StoredPlan } from "./plan-state.ts";
+import { permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
 export const SubmitPlanParams = Type.Object(
 	{
@@ -22,6 +23,7 @@ export function createSubmitPlanToolDefinition(
 		description:
 			"Submit the complete current implementation plan. This replaces the previous proposal in full and is available only in Plan mode.",
 		parameters: SubmitPlanParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 		execute: async (_toolCallId, raw) => {
 			if (!Value.Check(SubmitPlanParams, raw)) throw new TypeError("Invalid submit_plan arguments");

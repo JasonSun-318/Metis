@@ -9,6 +9,10 @@ export interface SourceInfo {
 	scope: SourceScope;
 	origin: SourceOrigin;
 	baseDir?: string;
+	/** Canonical package/server/source identity, separate from the user-facing path. */
+	sourceIdentity?: string;
+	/** Digest/version of the executable source, used only for stable permission identity. */
+	implementationVersion?: string;
 }
 
 export function createSourceInfo(path: string, metadata: PathMetadata): SourceInfo {
@@ -28,6 +32,8 @@ export function createSyntheticSourceInfo(
 		scope?: SourceScope;
 		origin?: SourceOrigin;
 		baseDir?: string;
+		sourceIdentity?: string;
+		implementationVersion?: string;
 	},
 ): SourceInfo {
 	return {
@@ -36,5 +42,7 @@ export function createSyntheticSourceInfo(
 		scope: options.scope ?? "temporary",
 		origin: options.origin ?? "top-level",
 		baseDir: options.baseDir,
+		sourceIdentity: options.sourceIdentity,
+		implementationVersion: options.implementationVersion,
 	};
 }

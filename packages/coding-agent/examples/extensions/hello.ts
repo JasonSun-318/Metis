@@ -3,7 +3,7 @@
  */
 
 import { Type } from "@metis/ai";
-import { defineTool, type ExtensionAPI } from "@metis/coding-agent";
+import { defineTool, type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 
 const helloTool = defineTool({
 	name: "hello",
@@ -12,6 +12,7 @@ const helloTool = defineTool({
 	parameters: Type.Object({
 		name: Type.String({ description: "Name to greet" }),
 	}),
+	permission: permissionDescriptor(() => permissionClaim()),
 
 	async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
 		return {

@@ -722,6 +722,7 @@ export default function(metis: ExtensionAPI) {
     name: "duplicate-tool",
     description: "First",
     parameters: Type.Object({}),
+    permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
     execute: async () => ({ result: "1" }),
   });
 }`,
@@ -737,6 +738,7 @@ export default function(metis: ExtensionAPI) {
     name: "duplicate-tool",
     description: "Second",
     parameters: Type.Object({}),
+    permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
     execute: async () => ({ result: "2" }),
   });
 }`,
@@ -764,6 +766,7 @@ export default function(metis: ExtensionAPI) {
     name: "duplicate-tool",
     description: "global tool",
     parameters: Type.Object({}),
+    permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
     execute: async () => ({ result: "global" }),
   });
   metis.registerCommand("deploy", {
@@ -783,6 +786,7 @@ export default function(metis: ExtensionAPI) {
     name: "duplicate-tool",
     description: "explicit tool",
     parameters: Type.Object({}),
+    permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
     execute: async () => ({ result: "explicit" }),
   });
   metis.registerCommand("deploy", {

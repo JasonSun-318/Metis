@@ -7,6 +7,7 @@ import { renderDiff } from "../../modes/interactive/components/diff.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { assertNotRestrictedFsWrite } from "../memory/memory-path-guard.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import {
 	applyEditsToNormalizedContent,
 	computeEditsDiff,
@@ -307,6 +308,7 @@ export function createEditToolDefinition(
 			"Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
 		],
 		parameters: editSchema,
+		permission: permissionDescriptor(({ path }) => permissionClaim({ readPaths: [path], writePaths: [path] })),
 		renderShell: "self",
 		prepareArguments: prepareEditArguments,
 		async execute(_toolCallId, input: EditToolInput, signal?: AbortSignal, _onUpdate?, _ctx?) {

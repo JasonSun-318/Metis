@@ -39,6 +39,7 @@ import type {
 	SessionShutdownEvent,
 	SessionStartEvent,
 } from "../../src/index.ts";
+import { noEffectTestPermission } from "../helpers/tool-definition.ts";
 
 type RecordedSessionEvent =
 	| SessionBeforeSwitchEvent
@@ -1507,6 +1508,7 @@ describe("AgentSessionRuntime characterization", () => {
 				label: "Side effect",
 				description: "Count one side effect",
 				parameters: Type.Object({}),
+				permission: noEffectTestPermission(),
 				execute: async () => {
 					toolRuns += 1;
 					return { content: [{ type: "text", text: "ok" }], details: {} };
@@ -1560,6 +1562,7 @@ describe("AgentSessionRuntime characterization", () => {
 				label: "Continued side effect",
 				description: "Count one side effect",
 				parameters: Type.Object({}),
+				permission: noEffectTestPermission(),
 				execute: async () => {
 					toolRuns += 1;
 					return { content: [{ type: "text", text: "ok" }], details: {} };
@@ -1698,6 +1701,7 @@ describe("AgentSessionRuntime characterization", () => {
 				label: "Replaceable side effect",
 				description: "Count one side effect",
 				parameters: Type.Object({}),
+				permission: noEffectTestPermission(),
 				execute: async () => {
 					toolRuns += 1;
 					return { content: [{ type: "text", text: "ok" }], details: {} };
@@ -1791,6 +1795,7 @@ describe("AgentSessionRuntime characterization", () => {
 				label: "Blocked side effect",
 				description: "Must not run without a durable marker",
 				parameters: Type.Object({}),
+				permission: noEffectTestPermission(),
 				execute: async () => {
 					toolRuns += 1;
 					return { content: [{ type: "text", text: "unexpected" }], details: {} };
@@ -1882,6 +1887,7 @@ describe("AgentSessionRuntime characterization", () => {
 					label: "Side effect",
 					description: "Must not run during recovery",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => {
 						toolRuns += 1;
 						return { content: [{ type: "text", text: "unexpected" }], details: {} };
@@ -1929,6 +1935,7 @@ describe("AgentSessionRuntime characterization", () => {
 				label: "Crash side effect",
 				description: "Must not replay after reopen",
 				parameters: Type.Object({}),
+				permission: noEffectTestPermission(),
 				execute: async () => {
 					toolRuns += 1;
 					if (crashPoint === "tool_side_effect") crashed = true;

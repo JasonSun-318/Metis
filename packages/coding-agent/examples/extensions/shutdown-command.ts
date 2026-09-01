@@ -5,7 +5,7 @@
  * Demonstrates how extensions can use ctx.shutdown() to exit metis cleanly.
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 export default function (metis: ExtensionAPI) {
@@ -23,6 +23,7 @@ export default function (metis: ExtensionAPI) {
 		label: "Finish and Exit",
 		description: "Complete a task and exit metis",
 		parameters: Type.Object({}),
+		permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			// Do any final work here...
 			// Request graceful shutdown (deferred until agent is idle)
@@ -44,6 +45,7 @@ export default function (metis: ExtensionAPI) {
 		parameters: Type.Object({
 			environment: Type.String({ description: "Target environment (e.g., production, staging)" }),
 		}),
+		permission: permissionDescriptor(() => permissionClaim({ effects: ["production-mutation"] })),
 		async execute(_toolCallId, params, _signal, onUpdate, ctx) {
 			onUpdate?.({ content: [{ type: "text", text: `Deploying to ${params.environment}...` }], details: {} });
 

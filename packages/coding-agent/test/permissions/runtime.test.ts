@@ -39,6 +39,33 @@ describe("ToolAuthorizationRuntime", () => {
 		expect(reviewerFactory).not.toHaveBeenCalled();
 	});
 
+	it("binds reviewer arguments to the action digest and redacts them before review", async () => {
+		const args = { path: String((actionInput().args as { path: string }).path), token: "secret-value" };
+		const action = normalizePermissionAction(
+			actionInput({
+				args,
+				toolName: "publish",
+				toolIdentity: "mcp:publisher:publish:v1",
+				provenance: "mcp",
+				effects: ["external-side-effect"],
+			}),
+		);
+		const review = vi.fn(async (request: Parameters<PermissionReviewer["review"]>[0]) => {
+			expect(JSON.stringify(request.redactedArguments)).not.toContain("secret-value");
+			return allow();
+		});
+		const runtime = new ToolAuthorizationRuntime({
+			sessionId: "session-args",
+			reviewerFactory: () => ({ review }),
+		});
+
+		await expect(runtime.authorizeAndExecute(highRiskRequest({ action, args }))).resolves.toBe("executed");
+		expect(review).toHaveBeenCalledOnce();
+		await expect(
+			runtime.authorizeAndExecute(highRiskRequest({ action, args: { ...args, path: "/changed" } })),
+		).rejects.toThrow("Tool arguments changed");
+	});
+
 	it("escalates unavailable auto review to the user only when interactive", async () => {
 		const model = reviewer({ kind: "unavailable", reviewer: "model", reason: "timeout" });
 		const user = reviewer(allow("user"));

@@ -14,6 +14,7 @@ import {
 	unavailableReview,
 	validateReviewResult,
 } from "./reviewer.ts";
+import { redactPermissionArguments } from "./reviewer-input.ts";
 import type {
 	ExecutionGrant,
 	NormalizedPermissionAction,
@@ -24,6 +25,7 @@ import type {
 
 export interface PermissionExecutionRequest<T> {
 	readonly action: NormalizedPermissionAction;
+	readonly args: unknown;
 	readonly settings: PermissionSettings;
 	readonly trustedUserMessages: readonly TrustedUserMessage[];
 	readonly interactive: boolean;
@@ -73,8 +75,8 @@ interface RuntimeSnapshot {
 export class PermissionDeniedError extends Error {
 	readonly reasonCode: string;
 
-	constructor(reasonCode: string) {
-		super(`Permission denied: ${reasonCode}`);
+	constructor(reasonCode: string, displayReason = reasonCode) {
+		super(`Permission denied: ${displayReason}`);
 		this.name = "PermissionDeniedError";
 		this.reasonCode = reasonCode;
 	}
@@ -167,6 +169,9 @@ export class ToolAuthorizationRuntime {
 
 	private snapshot<T>(request: PermissionExecutionRequest<T>): RuntimeSnapshot {
 		const action = request.action;
+		if (digestCanonical(request.args) !== action.argsDigest) {
+			throw new PermissionDeniedError("Tool arguments changed");
+		}
 		return Object.freeze({
 			action: Object.freeze({
 				...action,
@@ -294,7 +299,7 @@ export class ToolAuthorizationRuntime {
 		const initialDecision = this.evaluate(initial);
 		if (initialDecision.kind === "deny") {
 			await this.appendAudit(initial.action, initialDecision.riskLevel, "decision", "deny", "policy.deny");
-			throw new PermissionDeniedError("policy.deny");
+			throw new PermissionDeniedError("policy.deny", initialDecision.reason);
 		}
 
 		const initialRule = this.matchRule(initial.action, initialDecision);
@@ -311,13 +316,19 @@ export class ToolAuthorizationRuntime {
 				: "policy";
 		if (initialDecision.kind === "review" && source !== "rule") {
 			const signal = this.linkedSignal(request.signal);
+			let redactedArguments: unknown;
+			try {
+				redactedArguments = redactPermissionArguments(request.args);
+			} catch {
+				throw new PermissionDeniedError("review.arguments.invalid");
+			}
 			const reviewRequest: PermissionReviewRequest = Object.freeze({
 				action: initial.action,
 				decision: initialDecision,
 				trustedUserMessages: Object.freeze(
 					request.trustedUserMessages.map(({ messageId, text }) => Object.freeze({ messageId, text })),
 				),
-				redactedArguments: Object.freeze({}),
+				redactedArguments,
 				interactive: request.interactive,
 				signal,
 			});

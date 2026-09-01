@@ -2,6 +2,7 @@ import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import type { ExtensionFactory } from "../../../src/index.ts";
+import { noEffectTestPermission } from "../../helpers/tool-definition.ts";
 import { createHarness } from "../harness.ts";
 
 describe("extension active tools next-turn refresh", () => {
@@ -14,6 +15,7 @@ describe("extension active tools next-turn refresh", () => {
 					description: "Switch the active extension tool set",
 					promptSnippet: "Switch to the next extension tool",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => {
 						metis.setActiveTools(["after_switch"]);
 						return {
@@ -29,6 +31,7 @@ describe("extension active tools next-turn refresh", () => {
 					description: "Tool that should be available after switching",
 					promptSnippet: "Run after the active tool set changes",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "after" }],
 						details: {},
@@ -74,6 +77,7 @@ describe("extension active tools next-turn refresh", () => {
 					label: "Load More Tools",
 					description: "Load more tools",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => {
 						metis.setActiveTools([...metis.getActiveTools(), "after_load"]);
 						return {
@@ -88,6 +92,7 @@ describe("extension active tools next-turn refresh", () => {
 					label: "After Load",
 					description: "Tool available after loading",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "after" }],
 						details: {},
@@ -135,6 +140,7 @@ describe("extension active tools next-turn refresh", () => {
 					description: "Switch the active extension tool set",
 					promptSnippet: "Switch to the next extension tool",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => {
 						metis.setActiveTools(["after_switch"]);
 						return {
@@ -150,6 +156,7 @@ describe("extension active tools next-turn refresh", () => {
 					description: "Tool that should be available after switching",
 					promptSnippet: "Run after the active tool set changes",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "after" }],
 						details: {},

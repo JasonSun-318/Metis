@@ -64,6 +64,33 @@ afterEach(async () => {
 });
 
 describe("McpManager", () => {
+	it("changes server and tool identities after a transport reconnect", async () => {
+		const { manager } = await managerWithTools("docs", [
+			{
+				name: "read_doc",
+				annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+				inputSchema: {
+					type: "object",
+					properties: { path: { type: "string" } },
+					required: ["path"],
+					additionalProperties: false,
+				},
+			},
+		]);
+		const first = manager.getToolRecords()[0]!;
+		const firstCatalogIdentity = manager.getCatalogIdentity();
+
+		await manager.restart("docs");
+
+		const second = manager.getToolRecords()[0]!;
+		expect(second.serverIdentity).not.toBe(first.serverIdentity);
+		expect(second.implementationVersion).not.toBe(first.implementationVersion);
+		expect(manager.getCatalogIdentity()).not.toBe(firstCatalogIdentity);
+		await expect(
+			manager.callToolExact(first.modelName, first.implementationVersion, { path: "docs/guide.md" }),
+		).rejects.toThrow("identity changed");
+	});
+
 	it("lets an active tool call finish on the retired client generation", async () => {
 		const previousServer = await createMcpTestServer({ callDelayMs: 150 });
 		const nextServer = await createMcpTestServer();

@@ -11,7 +11,7 @@ import type { FauxModelDefinition, FauxProviderRegistration, FauxResponseStep, M
 import { registerFauxProvider } from "@metis/ai/compat";
 import { AgentSession, type AgentSessionEvent } from "../../src/core/agent-session.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
-import type { ExtensionRunner } from "../../src/core/extensions/index.ts";
+import type { ExtensionRunner, ToolDefinition } from "../../src/core/extensions/index.ts";
 import type { InteractiveBashBoundary } from "../../src/core/interactive-bash-boundary.ts";
 import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
@@ -23,6 +23,7 @@ import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
 import type { UnattendedExecutionProfile } from "../../src/core/unattended-execution.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
+import { testToolDefinitions } from "../helpers/tool-definition.ts";
 import {
 	type CreateTestExtensionsResultInput,
 	createTestExtensionsResult,
@@ -65,6 +66,7 @@ export interface HarnessOptions {
 	settings?: Partial<Settings>;
 	systemPrompt?: string;
 	tools?: AgentTool[];
+	toolDefinitions?: readonly ToolDefinition[];
 	initialActiveToolNames?: string[];
 	allowedToolNames?: string[];
 	excludedToolNames?: string[];
@@ -109,17 +111,18 @@ function createTempDir(): string {
 }
 
 export async function createHarness(options: HarnessOptions = {}): Promise<Harness> {
+	if (options.tools && options.toolDefinitions) throw new TypeError("Specify tools or toolDefinitions, not both");
 	const tempDir = createTempDir();
 	const fauxProvider: FauxProviderRegistration = registerFauxProvider({
 		models: options.models,
 	});
 	fauxProvider.setResponses([]);
 	const model = fauxProvider.getModel();
-	const toolMap = options.tools ? Object.fromEntries(options.tools.map((tool) => [tool.name, tool])) : undefined;
+	const toolDefinitions = options.toolDefinitions ?? (options.tools ? testToolDefinitions(options.tools) : undefined);
 	const withConfiguredAuth = options.withConfiguredAuth ?? true;
 	const extensionRunnerRef: { current?: ExtensionRunner } = {};
 
-	const sessionManager = options.sessionManager ?? SessionManager.inMemory();
+	const sessionManager = options.sessionManager ?? SessionManager.inMemory(tempDir);
 	const settingsManager = SettingsManager.inMemory(options.settings);
 
 	const authStorage = AuthStorage.inMemory();
@@ -195,7 +198,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		modelRegistry,
 		mcpManager: options.mcpManager,
 		resourceLoader,
-		baseToolsOverride: toolMap,
+		baseToolDefinitionsOverride: toolDefinitions,
 		initialActiveToolNames: options.initialActiveToolNames,
 		allowedToolNames: options.allowedToolNames,
 		excludedToolNames: options.excludedToolNames,

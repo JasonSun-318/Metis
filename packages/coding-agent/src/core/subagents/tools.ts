@@ -3,6 +3,7 @@ import { Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import type { SubagentManager } from "./manager.ts";
 import { utf8Prefix } from "./trace.ts";
 import { type InspectAgentsResult, MAX_AGENT_INPUT_UTF8_BYTES } from "./types.ts";
@@ -340,6 +341,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			description:
 				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the narrowest fitting agent type.",
 			parameters: Spawn,
+			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				const actor = actorId(host.getSession());
@@ -363,6 +365,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			description:
 				"List owned child agents or inspect one child's recent durable activity. Use it to verify handoffs or inspect state; do not poll running agents.",
 			parameters: Inspect,
+			permission: permissionDescriptor(() => permissionClaim()),
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				const inspected = await manager().inspect(actorId(host.getSession()), {
@@ -379,6 +382,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Send message",
 			description: "Steer a running child task without creating a new task.",
 			parameters: SendMessage,
+			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				signal?.throwIfAborted();
@@ -396,6 +400,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Follow up task",
 			description: "Queue a new bounded task for an existing child agent.",
 			parameters: FollowUp,
+			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				const actor = actorId(host.getSession());
@@ -409,6 +414,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			description:
 				"Wait only when the next critical step depends on a new child terminal event or approval and no useful independent work remains. Completed children notify automatically; do not poll. Returns compact identities, statuses, and terminal results, never transcripts.",
 			parameters: Wait,
+			permission: permissionDescriptor(() => permissionClaim()),
 			renderResult: renderSubagentResult,
 			async execute(_id, params, signal) {
 				const session = host.getSession();
@@ -467,6 +473,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			label: "Interrupt agent",
 			description: "Stop queued or running child work while preserving its session for later follow-up.",
 			parameters: AgentId,
+			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				return result(await manager().interrupt(actorId(host.getSession()), params.agentId));

@@ -5,7 +5,7 @@
  * Requires: npm install in this directory
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import ms from "ms";
 import { Type } from "typebox";
 
@@ -18,6 +18,7 @@ export default function (metis: ExtensionAPI) {
 		parameters: Type.Object({
 			duration: Type.String({ description: "Duration string like '2 days', '1h', '5m'" }),
 		}),
+		permission: permissionDescriptor(() => permissionClaim()),
 		execute: async (_toolCallId, params) => {
 			const result = ms(params.duration as ms.StringValue);
 			if (result === undefined) {

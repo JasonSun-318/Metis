@@ -10,6 +10,7 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { testToolDefinitions } from "./helpers/tool-definition.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
 class MockAssistantStream extends EventStream<AssistantMessageEvent, AssistantMessage> {
@@ -303,7 +304,7 @@ describe("AgentSession retry", () => {
 			cwd: tempDir,
 			modelRegistry,
 			resourceLoader: createTestResourceLoader(),
-			baseToolsOverride: { echo: echoTool },
+			baseToolDefinitionsOverride: testToolDefinitions([echoTool]),
 		});
 
 		await session.prompt("Test");

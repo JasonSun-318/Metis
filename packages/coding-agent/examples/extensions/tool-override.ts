@@ -21,7 +21,13 @@
  */
 
 import type { TextContent } from "@metis/ai";
-import { type ExtensionAPI, getAgentDir, withFileMutationQueue } from "@metis/coding-agent";
+import {
+	type ExtensionAPI,
+	getAgentDir,
+	permissionClaim,
+	permissionDescriptor,
+	withFileMutationQueue,
+} from "@metis/coding-agent";
 import { constants, readFileSync } from "fs";
 import { access, appendFile, readFile } from "fs/promises";
 import { join, resolve } from "path";
@@ -72,6 +78,14 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Read the contents of a file with access logging. Some sensitive paths (.env, secrets, credentials) are blocked.",
 		parameters: readSchema,
+		permission: permissionDescriptor(({ path }, context) => {
+			const absolutePath = resolve(context.cwd, path);
+			return permissionClaim({
+				readPaths: [absolutePath],
+				writePaths: [LOG_FILE],
+				effects: isBlockedPath(absolutePath) ? ["sensitive-read"] : [],
+			});
+		}),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { path, offset, limit } = params;

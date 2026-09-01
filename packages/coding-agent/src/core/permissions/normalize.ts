@@ -292,7 +292,9 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 		action.effects.every((effect, index) => effect === normalizedEffects[index]) &&
 		!action.effects.includes("unknown") &&
 		(!action.effects.includes("sensitive-read") || action.readPaths.length > 0) &&
-		(!action.effects.includes("destructive") || action.writePaths.length > 0) &&
+		(!action.effects.includes("destructive") ||
+			action.writePaths.length > 0 ||
+			action.effects.includes("external-side-effect")) &&
 		scalarFieldsAreNormalized &&
 		canonicalIsBounded;
 	if (!complete) throw new TypeError("Permission action scope is incomplete");
@@ -300,5 +302,6 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 
 export function digestPermissionAction(action: NormalizedPermissionAction): string {
 	assertCompleteAction(action);
-	return digestCanonical(action);
+	const { actionId: _actionId, ...stableAction } = action;
+	return digestCanonical(stableAction);
 }

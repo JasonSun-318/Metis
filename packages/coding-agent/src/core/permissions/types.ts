@@ -81,6 +81,7 @@ export interface ExecutionGrant extends GrantRequest {
 	readonly toolName: string;
 	readonly toolIdentity: string;
 	readonly argsDigest: string;
+	readonly command?: string;
 	readonly cwd: string;
 	readonly workspaceRoots: readonly string[];
 	readonly settingsEpoch: number;

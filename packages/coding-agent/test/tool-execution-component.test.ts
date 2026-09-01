@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { beforeAll, describe, expect, test } from "vitest";
 import { getReadmePath } from "../src/config.ts";
 import type { ToolDefinition } from "../src/core/extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 import { type BashOperations, createBashToolDefinition } from "../src/core/tools/bash.ts";
 import { createReadTool, createReadToolDefinition } from "../src/core/tools/read.ts";
 import { createWriteToolDefinition } from "../src/core/tools/write.ts";
@@ -17,6 +18,7 @@ function createBaseToolDefinition(name = "custom_tool"): ToolDefinition {
 		label: name,
 		description: "custom tool",
 		parameters: Type.Any(),
+		permission: permissionDescriptor(() => permissionClaim()),
 		execute: async () => ({
 			content: [{ type: "text", text: "ok" }],
 			details: {},

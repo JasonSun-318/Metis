@@ -2,7 +2,9 @@ import type { ImageContent as AgentImageContent, TextContent as AgentTextContent
 import type { CallToolResult, ContentBlock, ReadResourceResult } from "@modelcontextprotocol/sdk/types.js";
 import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import type { McpManager, McpToolRecord } from "./manager.ts";
+import { adaptMcpPermissionClaim } from "./permission-adapter.ts";
 
 const searchSchema = Type.Object(
 	{
@@ -123,6 +125,7 @@ function sourceLines(records: readonly McpToolRecord[]): string {
 function createSearchDefinition(
 	manager: McpManager,
 	activation: { getActiveToolNames(): string[]; setActiveToolsByName(names: string[]): void },
+	catalogIdentity: string,
 ): ToolDefinition<
 	typeof searchSchema,
 	{ query: string; tools: Array<{ modelName: string; serverName: string; rawName: string }> }
@@ -139,12 +142,12 @@ You have access to tools from the following sources:
 ${sources}
 Some of the tools may not have been provided to you upfront, and you should use this tool (\`tool_search\`) to search for the required tools. For MCP tool discovery, always use \`tool_search\` instead of \`list_mcp_resources\` or \`list_mcp_resource_templates\`.`,
 		parameters: searchSchema,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "parallel",
 		async execute(_toolCallId, { query, limit }) {
 			const normalizedQuery = query.trim();
 			if (!normalizedQuery) throw new Error("tool_search query must not be empty");
-			await manager.ensureCurrent();
-			const hits = manager.searchTools(normalizedQuery, limit ?? 8);
+			const hits = await manager.searchToolsExact(normalizedQuery, limit ?? 8, catalogIdentity);
 			const before = new Set(activation.getActiveToolNames());
 			activation.setActiveToolsByName([...before, ...hits.map((hit) => hit.modelName)]);
 			return {
@@ -181,9 +184,19 @@ function deferredDefinition(manager: McpManager, record: McpToolRecord): ToolDef
 		label: record.tool.title ?? record.rawName,
 		description: description || "MCP tool",
 		parameters: record.tool.inputSchema as any,
+		permission: permissionDescriptor((params, context) =>
+			adaptMcpPermissionClaim({ annotations: record.tool.annotations, params, context }),
+		),
 		executionMode: record.tool.annotations?.readOnlyHint === true ? "parallel" : "sequential",
 		async execute(_toolCallId, params, signal) {
-			return convertToolResult(await manager.callTool(record.modelName, params as Record<string, unknown>, signal));
+			return convertToolResult(
+				await manager.callToolExact(
+					record.modelName,
+					record.implementationVersion,
+					params as Record<string, unknown>,
+					signal,
+				),
+			);
 		},
 	};
 }
@@ -192,21 +205,28 @@ export function createMcpToolDefinitions(
 	manager: McpManager,
 	activation: { getActiveToolNames(): string[]; setActiveToolsByName(names: string[]): void },
 ): {
-	direct: ToolDefinition<any, any>[];
-	deferred: Array<{ definition: ToolDefinition<any, any>; serverName: string }>;
+	direct: Array<{ definition: ToolDefinition<any, any>; sourceIdentity: string; implementationVersion: string }>;
+	deferred: Array<{
+		definition: ToolDefinition<any, any>;
+		serverName: string;
+		sourceIdentity: string;
+		implementationVersion: string;
+	}>;
 } {
+	const catalogIdentity = manager.getCatalogIdentity();
 	const directNames = new Set(manager.getDirectToolNames());
 	const direct: ToolDefinition<any, any>[] = [];
-	if (directNames.has("tool_search")) direct.push(createSearchDefinition(manager, activation));
+	if (directNames.has("tool_search")) direct.push(createSearchDefinition(manager, activation, catalogIdentity));
 	if (directNames.has("list_mcp_resources")) {
 		direct.push({
 			name: "list_mcp_resources",
 			label: "list_mcp_resources",
 			description: directDescriptions.list_mcp_resources,
 			parameters: optionalServerCursorSchema,
+			permission: permissionDescriptor(() => permissionClaim()),
 			executionMode: "parallel",
 			async execute(_id, { server, cursor }) {
-				return jsonResult(await manager.listResources(server, cursor));
+				return jsonResult(await manager.listResources(server, cursor, catalogIdentity));
 			},
 		});
 	}
@@ -216,9 +236,10 @@ export function createMcpToolDefinitions(
 			label: "list_mcp_resource_templates",
 			description: directDescriptions.list_mcp_resource_templates,
 			parameters: optionalServerCursorSchema,
+			permission: permissionDescriptor(() => permissionClaim()),
 			executionMode: "parallel",
 			async execute(_id, { server, cursor }) {
-				return jsonResult(await manager.listResourceTemplates(server, cursor));
+				return jsonResult(await manager.listResourceTemplates(server, cursor, catalogIdentity));
 			},
 		});
 	}
@@ -228,10 +249,11 @@ export function createMcpToolDefinitions(
 			label: "read_mcp_resource",
 			description: directDescriptions.read_mcp_resource,
 			parameters: readResourceSchema,
+			permission: permissionDescriptor(() => permissionClaim()),
 			executionMode: "parallel",
 			async execute(_id, { server, uri }, signal) {
 				return {
-					content: readResourceContent(await manager.readResource(server, uri, signal)),
+					content: readResourceContent(await manager.readResource(server, uri, signal, catalogIdentity)),
 					details: undefined,
 				};
 			},
@@ -243,9 +265,10 @@ export function createMcpToolDefinitions(
 			label: "list_mcp_prompts",
 			description: directDescriptions.list_mcp_prompts,
 			parameters: optionalServerCursorSchema,
+			permission: permissionDescriptor(() => permissionClaim()),
 			executionMode: "parallel",
 			async execute(_id, { server, cursor }) {
-				return jsonResult(await manager.listPrompts(server, cursor));
+				return jsonResult(await manager.listPrompts(server, cursor, catalogIdentity));
 			},
 		});
 	}
@@ -255,18 +278,25 @@ export function createMcpToolDefinitions(
 			label: "get_mcp_prompt",
 			description: directDescriptions.get_mcp_prompt,
 			parameters: getPromptSchema,
+			permission: permissionDescriptor(() => permissionClaim()),
 			executionMode: "parallel",
 			async execute(_id, { server, name, arguments: args }) {
-				return jsonResult(await manager.getPrompt(server, name, args));
+				return jsonResult(await manager.getPrompt(server, name, args, catalogIdentity));
 			},
 		});
 	}
 
 	return {
-		direct,
+		direct: direct.map((definition) => ({
+			definition,
+			sourceIdentity: "mcp:catalog",
+			implementationVersion: catalogIdentity,
+		})),
 		deferred: manager.getToolRecords().map((record) => ({
 			definition: deferredDefinition(manager, record),
 			serverName: record.serverName,
+			sourceIdentity: record.serverIdentity,
+			implementationVersion: record.implementationVersion,
 		})),
 	};
 }

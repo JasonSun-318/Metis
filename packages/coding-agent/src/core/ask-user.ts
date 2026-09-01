@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import type { ToolDefinition } from "./extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
 export const MAX_ASK_USER_QUESTIONS = 4;
 export const MAX_ASK_USER_OPTIONS = 4;
@@ -147,6 +148,7 @@ export function createAskUserToolDefinition(
 			"Ask the user 1-4 questions when a choice or preference is required to continue. Each question must provide 2-4 options and set multiple. The user can also write a custom answer. Do not use for permissions, destructive confirmations, or secrets.",
 		promptSnippet: "Ask the user to choose a direction",
 		parameters: AskUserParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 		async execute(_toolCallId, input, signal) {
 			if (signal?.aborted) throw new Error("Ask user was aborted");

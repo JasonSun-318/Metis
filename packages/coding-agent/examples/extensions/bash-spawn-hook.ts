@@ -8,14 +8,15 @@
  */
 
 import type { ExtensionAPI } from "@metis/coding-agent";
-import { createBashTool } from "@metis/coding-agent";
+import { createBashToolDefinition } from "@metis/coding-agent";
 
 export default function (metis: ExtensionAPI) {
 	const cwd = process.cwd();
 
-	const bashTool = createBashTool(cwd, {
+	const bashTool = createBashToolDefinition(cwd, {
+		prepareCommand: (command) => `source ~/.profile\n${command}`,
 		spawnHook: ({ command, cwd, env }) => ({
-			command: `source ~/.profile\n${command}`,
+			command,
 			cwd,
 			env: { ...env, METIS_SPAWN_HOOK: "1" },
 		}),
@@ -23,8 +24,8 @@ export default function (metis: ExtensionAPI) {
 
 	metis.registerTool({
 		...bashTool,
-		execute: async (id, params, signal, onUpdate, _ctx) => {
-			return bashTool.execute(id, params, signal, onUpdate);
+		execute: async (id, params, signal, onUpdate, ctx) => {
+			return bashTool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 }

@@ -180,6 +180,9 @@ export type {
 	ToolDefinition,
 	ToolExecutionMode,
 	ToolInfo,
+	ToolPermissionClaim,
+	ToolPermissionContext,
+	ToolPermissionDescriptor,
 	ToolRenderResultOptions,
 	ToolResultEvent,
 	TurnEndEvent,
@@ -347,6 +350,15 @@ export {
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./core/permission-policy.ts";
+export {
+	createPermissionAuditEvent,
+	type PermissionAuditEvent,
+	type PermissionAuditEventInput,
+	type PermissionAuditFailure,
+	type PermissionAuditSink,
+	PermissionAuditWriter,
+} from "./core/permissions/audit.ts";
+export { digestCanonical } from "./core/permissions/normalize.ts";
 export {
 	type CollaborationMode,
 	MAX_PLAN_MARKDOWN_UTF8_BYTES,
@@ -586,6 +598,7 @@ export {
 	isThinkingSelection,
 	type ThinkingSelection,
 } from "./core/thinking-selection.ts";
+export { exactNetworkEndpoint, permissionClaim, permissionDescriptor } from "./core/tool-permission-adapter.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
 export {

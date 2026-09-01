@@ -111,7 +111,7 @@ function approvalAction(action: NormalizedPermissionAction): PermissionAction {
 	return Object.freeze({
 		actionId: action.actionId,
 		toolName: action.toolName,
-		provenance: action.provenance === "host" ? "sdk" : action.provenance,
+		provenance: action.provenance,
 		risks: actionRisks(action),
 		paths: Object.freeze([...new Set([...action.readPaths, ...action.writePaths])].sort()),
 		networkTargets: Object.freeze(
@@ -125,14 +125,6 @@ function scopeIsComplete(request: PermissionReviewRequest): boolean {
 	const { action } = request;
 	if (action.effects.includes("unknown")) return false;
 	if (action.command === undefined && action.toolName === "bash") return false;
-	if (
-		action.effects.some(
-			(effect) => effect === "external-side-effect" || effect === "payment" || effect === "production-mutation",
-		) &&
-		action.networkEndpoints.length === 0
-	) {
-		return false;
-	}
 	return true;
 }
 

@@ -5,6 +5,7 @@ import { type Static, Type } from "typebox";
 import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { exactNetworkEndpoint, permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -145,6 +146,7 @@ export function createWebFetchToolDefinition(): ToolDefinition<typeof webFetchSc
 		promptSnippet: "Fetch an HTTP(S) page and return its content as Markdown",
 		parameters: webFetchSchema,
 		executionMode: "parallel",
+		permission: permissionDescriptor(({ url }) => permissionClaim({ networkEndpoints: [exactNetworkEndpoint(url)] })),
 
 		async execute(_toolCallId, params, signal) {
 			const url = parseUrl(params.url);

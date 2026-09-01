@@ -40,14 +40,13 @@ describe("model permission review input", () => {
 		expect(serialized).not.toContain("toolResults");
 	});
 
-	it("rejects cyclic, non-plain, oversized argument, and oversized complete inputs", () => {
+	it("rejects cyclic, non-plain, and oversized complete inputs while truncating long display values", () => {
 		const cyclic: Record<string, unknown> = {};
 		cyclic.self = cyclic;
 		expect(() => buildModelReviewInput(reviewInput({ redactedArguments: cyclic }))).toThrow("cycle");
 		expect(() => buildModelReviewInput(reviewInput({ redactedArguments: new Date() }))).toThrow("plain");
-		expect(() =>
-			buildModelReviewInput(reviewInput({ redactedArguments: { path: `/${"x".repeat(17 * 1024)}` } })),
-		).toThrow("16 KiB");
+		const bounded = buildModelReviewInput(reviewInput({ redactedArguments: { path: `/${"x".repeat(17 * 1024)}` } }));
+		expect(Buffer.byteLength(JSON.stringify(bounded.redactedArguments), "utf8")).toBeLessThan(5 * 1024);
 		expect(() =>
 			buildModelReviewInput(
 				reviewInput({ trustedUserMessages: [{ messageId: "large", text: "x".repeat(49 * 1024) }] }),

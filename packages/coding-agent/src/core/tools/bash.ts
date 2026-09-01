@@ -16,6 +16,7 @@ import {
 	untrackDetachedChildPid,
 } from "../../utils/shell.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { bashPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { OutputAccumulator } from "./output-accumulator.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -158,7 +159,12 @@ export type BashSpawnHook = (context: BashSpawnContext) => BashSpawnContext;
 
 function resolveSpawnContext(command: string, cwd: string, spawnHook?: BashSpawnHook): BashSpawnContext {
 	const baseContext: BashSpawnContext = { command, cwd, env: { ...getShellEnv() } };
-	return spawnHook ? spawnHook(baseContext) : baseContext;
+	if (!spawnHook) return baseContext;
+	const resolved = spawnHook(baseContext);
+	if (resolved.command !== command || resolved.cwd !== cwd) {
+		throw new TypeError("Bash spawnHook cannot change the authorized command or cwd");
+	}
+	return resolved;
 }
 
 export interface BashToolOptions {
@@ -166,9 +172,11 @@ export interface BashToolOptions {
 	operations?: BashOperations;
 	/** Command prefix prepended to every command (for example shell setup commands) */
 	commandPrefix?: string;
+	/** Pure command preparation applied identically during permission description and execution. */
+	prepareCommand?: (command: string) => string;
 	/** Optional explicit shell path from settings */
 	shellPath?: string;
-	/** Hook to adjust command, cwd, or env before execution */
+	/** Hook to adjust the environment after authorization; command and cwd must remain unchanged. */
 	spawnHook?: BashSpawnHook;
 	/** Directory for complete output files when truncation occurs */
 	outputDir?: string;
@@ -297,7 +305,12 @@ export function createBashToolDefinition(
 ): ToolDefinition<typeof bashSchema, BashToolDetails | undefined, BashRenderState> {
 	const ops = options?.operations ?? createLocalBashOperations({ shellPath: options?.shellPath });
 	const commandPrefix = options?.commandPrefix;
+	const prepareCommand = options?.prepareCommand;
 	const spawnHook = options?.spawnHook;
+	const effectiveCommand = (command: string) => {
+		const prefixed = commandPrefix ? `${commandPrefix}\n${command}` : command;
+		return prepareCommand ? prepareCommand(prefixed) : prefixed;
+	};
 	return {
 		name: "bash",
 		label: "bash",
@@ -305,6 +318,9 @@ export function createBashToolDefinition(
 		description: `Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). If truncated, full output is saved to a temp file. Optionally provide a timeout in seconds.`,
 		promptSnippet: "Execute bash commands (ls, grep, find, etc.)",
 		parameters: bashSchema,
+		permission: permissionDescriptor(({ command }, context) =>
+			bashPermissionClaim(effectiveCommand(command), context),
+		),
 		async execute(
 			toolCallId,
 			{ command, timeout }: { command: string; timeout?: number },
@@ -312,7 +328,7 @@ export function createBashToolDefinition(
 			onUpdate?,
 			_ctx?,
 		) {
-			const resolvedCommand = commandPrefix ? `${commandPrefix}\n${command}` : command;
+			const resolvedCommand = effectiveCommand(command);
 			const spawnContext = resolveSpawnContext(resolvedCommand, cwd, spawnHook);
 			const output = new OutputAccumulator({ tempFilePrefix: "metis-bash", outputDir: options?.outputDir });
 			let acceptingOutput = true;

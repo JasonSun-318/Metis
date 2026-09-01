@@ -1,6 +1,7 @@
 import { type Static, Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import type { SessionManager } from "../session-manager.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import {
 	flushGoalElapsed,
 	goalElapsedSeconds,
@@ -94,6 +95,7 @@ export function createGetGoalToolDefinition(
 		description: "Get the current goal for this thread, including status and elapsed-time usage.",
 		promptSnippet: "Read the current session goal",
 		parameters: GetGoalParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "parallel",
 		async execute() {
 			const goal = currentGoalForAccounting(resolved.getSession);
@@ -116,6 +118,7 @@ export function createCreateGoalToolDefinition(
 			"Create a goal only when explicitly requested by the user or system/developer instructions; do not infer goals from ordinary tasks. Fails if an unfinished goal exists; use update_goal only for status.",
 		promptSnippet: "Create a session goal when explicitly requested",
 		parameters: CreateGoalParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 		async execute(_toolCallId, input) {
 			const session = resolved.getSession();
@@ -158,6 +161,7 @@ Do not mark a goal complete merely because you are stopping work.
 You cannot use this tool to pause, resume, or usage-limit a goal; those status changes are controlled by the user or system.`,
 		promptSnippet: "Mark the session goal complete or blocked",
 		parameters: UpdateGoalParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 		async execute(_toolCallId, input) {
 			if (input.status !== "complete" && input.status !== "blocked") {

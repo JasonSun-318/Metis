@@ -3,6 +3,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool } from "../extensions/types.ts";
 import type { SessionManager } from "../session-manager.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import type { ScheduleManager } from "./manager.ts";
 import type { ScheduleCreateTarget, ScheduleRun, ScheduleTask } from "./types.ts";
 
@@ -92,6 +93,19 @@ export const ScheduleToolInputSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
+
+type ScheduleAction = Static<typeof ScheduleToolInputSchema>["action"];
+
+const SCHEDULE_PERMISSION_EFFECTS = {
+	create: ["external-side-effect"],
+	list: [],
+	get: [],
+	update: ["external-side-effect"],
+	pause: ["external-side-effect"],
+	resume: ["external-side-effect"],
+	delete: ["external-side-effect", "destructive"],
+	run_now: ["external-side-effect"],
+} as const satisfies Record<ScheduleAction, readonly ("external-side-effect" | "destructive")[]>;
 
 function prepareScheduleArguments(input: unknown): Static<typeof ScheduleToolInputSchema> {
 	if (!input || typeof input !== "object") return input as Static<typeof ScheduleToolInputSchema>;
@@ -187,6 +201,9 @@ export function installScheduleHost(input: {
 		label: "定时任务",
 		description: "创建和管理定时任务。创建时，请提供可独立执行的完整任务说明和明确的执行时间；信息不足时先询问用户。",
 		parameters: ScheduleToolInputSchema,
+		permission: permissionDescriptor<Static<typeof ScheduleToolInputSchema>>(({ action }) =>
+			permissionClaim({ effects: SCHEDULE_PERMISSION_EFFECTS[action] }),
+		),
 		prepareArguments: prepareScheduleArguments,
 		executionMode: "sequential" as const,
 		async execute(_toolCallId, params) {
@@ -265,6 +282,6 @@ export function installScheduleHost(input: {
 			}
 		},
 	});
-	input.session.installHostTools([tool], { automaticPermissionToolNames: [tool.name] });
+	input.session.installHostTools([tool]);
 	return () => input.session.removeHostTools([tool.name]);
 }

@@ -21,14 +21,16 @@ import {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
+	permissionClaim,
+	permissionDescriptor,
 	type TruncationResult,
 	truncateHead,
 	withFileMutationQueue,
 } from "@metis/coding-agent";
 import { Text } from "@metis/tui";
 import { tmpdir } from "os";
-import { join } from "path";
-import { Type } from "typebox";
+import { join, resolve } from "path";
+import { type Static, Type } from "typebox";
 
 const RgParams = Type.Object({
 	pattern: Type.String({ description: "Search pattern (regex)" }),
@@ -52,6 +54,13 @@ export default function (metis: ExtensionAPI) {
 		// Document the truncation limits in the tool description so the LLM knows
 		description: `Search file contents using ripgrep. Output is truncated to ${DEFAULT_MAX_LINES} lines or ${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first). If truncated, full output is saved to a temp file.`,
 		parameters: RgParams,
+		permission: permissionDescriptor<Static<typeof RgParams>>((params, context) =>
+			permissionClaim({
+				readPaths: [resolve(context.cwd, params.path ?? ".")],
+				writePaths: [tmpdir()],
+				command: `rg ${JSON.stringify({ pattern: params.pattern, path: params.path, glob: params.glob })}`,
+			}),
+		),
 
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { pattern, path: searchPath, glob } = params;

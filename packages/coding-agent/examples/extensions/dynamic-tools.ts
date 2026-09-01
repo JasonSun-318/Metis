@@ -7,7 +7,7 @@
  * - Registers additional tools at runtime via /add-echo-tool <name>
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 const ECHO_PARAMS = Type.Object({
@@ -37,6 +37,7 @@ export default function dynamicToolsExtension(metis: ExtensionAPI) {
 			promptSnippet: `Echo back user-provided text with ${prefix.trim()} prefix`,
 			promptGuidelines: ["Use echo_session when the user asks for exact echo output."],
 			parameters: ECHO_PARAMS,
+			permission: permissionDescriptor(() => permissionClaim()),
 			async execute(_toolCallId, params) {
 				return {
 					content: [{ type: "text", text: `${prefix}${params.message}` }],

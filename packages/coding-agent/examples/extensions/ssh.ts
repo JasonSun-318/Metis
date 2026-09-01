@@ -22,14 +22,22 @@ import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@metis/coding-agent";
 import {
 	type BashOperations,
-	createBashTool,
-	createEditTool,
-	createReadTool,
-	createWriteTool,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
 	type EditOperations,
+	permissionClaim,
+	permissionDescriptor,
 	type ReadOperations,
 	type WriteOperations,
 } from "@metis/coding-agent";
+
+function sshEndpoint(remote: string) {
+	const hostname = remote.slice(remote.lastIndexOf("@") + 1).replace(/^\[|\]$/gu, "");
+	if (!hostname || hostname.includes("*")) throw new TypeError("SSH remote must name one exact host");
+	return { hostname, port: 22 } as const;
+}
 
 function sshExec(remote: string, command: string): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
@@ -120,10 +128,10 @@ export default function (metis: ExtensionAPI) {
 	metis.registerFlag("ssh", { description: "SSH remote: user@host or user@host:/path", type: "string" });
 
 	const localCwd = process.cwd();
-	const localRead = createReadTool(localCwd);
-	const localWrite = createWriteTool(localCwd);
-	const localEdit = createEditTool(localCwd);
-	const localBash = createBashTool(localCwd);
+	const localRead = createReadToolDefinition(localCwd);
+	const localWrite = createWriteToolDefinition(localCwd);
+	const localEdit = createEditToolDefinition(localCwd);
+	const localBash = createBashToolDefinition(localCwd);
 
 	// Resolved lazily on session_start (CLI flags not available during factory)
 	let resolvedSsh: { remote: string; remoteCwd: string } | null = null;
@@ -132,57 +140,95 @@ export default function (metis: ExtensionAPI) {
 
 	metis.registerTool({
 		...localRead,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		permission: permissionDescriptor<Parameters<typeof localRead.permission.describe>[0]>((params, context) => {
+			const claim = localRead.permission.describe(params, context);
+			const ssh = getSsh();
+			return ssh ? permissionClaim({ ...claim, networkEndpoints: [sshEndpoint(ssh.remote)] }) : claim;
+		}),
+		async execute(id, params, signal, onUpdate, ctx) {
 			const ssh = getSsh();
 			if (ssh) {
-				const tool = createReadTool(localCwd, {
+				const tool = createReadToolDefinition(localCwd, {
 					operations: createRemoteReadOps(ssh.remote, ssh.remoteCwd, localCwd),
 				});
-				return tool.execute(id, params, signal, onUpdate);
+				return tool.execute(id, params, signal, onUpdate, ctx);
 			}
-			return localRead.execute(id, params, signal, onUpdate);
+			return localRead.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
 	metis.registerTool({
 		...localWrite,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		permission: permissionDescriptor<Parameters<typeof localWrite.permission.describe>[0]>((params, context) => {
+			const claim = localWrite.permission.describe(params, context);
+			const ssh = getSsh();
+			return ssh
+				? permissionClaim({
+						...claim,
+						networkEndpoints: [sshEndpoint(ssh.remote)],
+						effects: [...claim.effects, "external-side-effect"],
+					})
+				: claim;
+		}),
+		async execute(id, params, signal, onUpdate, ctx) {
 			const ssh = getSsh();
 			if (ssh) {
-				const tool = createWriteTool(localCwd, {
+				const tool = createWriteToolDefinition(localCwd, {
 					operations: createRemoteWriteOps(ssh.remote, ssh.remoteCwd, localCwd),
 				});
-				return tool.execute(id, params, signal, onUpdate);
+				return tool.execute(id, params, signal, onUpdate, ctx);
 			}
-			return localWrite.execute(id, params, signal, onUpdate);
+			return localWrite.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
 	metis.registerTool({
 		...localEdit,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		permission: permissionDescriptor<Parameters<typeof localEdit.permission.describe>[0]>((params, context) => {
+			const claim = localEdit.permission.describe(params, context);
+			const ssh = getSsh();
+			return ssh
+				? permissionClaim({
+						...claim,
+						networkEndpoints: [sshEndpoint(ssh.remote)],
+						effects: [...claim.effects, "external-side-effect"],
+					})
+				: claim;
+		}),
+		async execute(id, params, signal, onUpdate, ctx) {
 			const ssh = getSsh();
 			if (ssh) {
-				const tool = createEditTool(localCwd, {
+				const tool = createEditToolDefinition(localCwd, {
 					operations: createRemoteEditOps(ssh.remote, ssh.remoteCwd, localCwd),
 				});
-				return tool.execute(id, params, signal, onUpdate);
+				return tool.execute(id, params, signal, onUpdate, ctx);
 			}
-			return localEdit.execute(id, params, signal, onUpdate);
+			return localEdit.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
 	metis.registerTool({
 		...localBash,
-		async execute(id, params, signal, onUpdate, _ctx) {
+		permission: permissionDescriptor<Parameters<typeof localBash.permission.describe>[0]>((params, context) => {
+			const claim = localBash.permission.describe(params, context);
+			const ssh = getSsh();
+			return ssh
+				? permissionClaim({
+						...claim,
+						networkEndpoints: [sshEndpoint(ssh.remote)],
+						effects: [...claim.effects, "external-side-effect"],
+					})
+				: claim;
+		}),
+		async execute(id, params, signal, onUpdate, ctx) {
 			const ssh = getSsh();
 			if (ssh) {
-				const tool = createBashTool(localCwd, {
+				const tool = createBashToolDefinition(localCwd, {
 					operations: createRemoteBashOps(ssh.remote, ssh.remoteCwd, localCwd),
 				});
-				return tool.execute(id, params, signal, onUpdate);
+				return tool.execute(id, params, signal, onUpdate, ctx);
 			}
-			return localBash.execute(id, params, signal, onUpdate);
+			return localBash.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 

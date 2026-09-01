@@ -8,6 +8,7 @@ import { DefaultResourceLoader } from "../../../src/core/resource-loader.ts";
 import { createAgentSession } from "../../../src/core/sdk.ts";
 import { SessionManager } from "../../../src/core/session-manager.ts";
 import { SettingsManager } from "../../../src/core/settings-manager.ts";
+import { noEffectTestPermission } from "../../helpers/tool-definition.ts";
 
 describe("regression #2835: tool allowlists filter extension tools", () => {
 	let tempDir: string;
@@ -41,6 +42,7 @@ describe("regression #2835: tool allowlists filter extension tools", () => {
 							description: "Tool registered from session_start",
 							promptSnippet: "Run dynamic test behavior",
 							parameters: Type.Object({}),
+							permission: noEffectTestPermission(),
 							execute: async () => ({
 								content: [{ type: "text", text: "ok" }],
 								details: {},

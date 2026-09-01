@@ -139,7 +139,7 @@ cp permission-gate.ts ~/.metis/agent/extensions/
 See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { permissionClaim, permissionDescriptor, type ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 export default function (metis: ExtensionAPI) {
@@ -159,6 +159,7 @@ export default function (metis: ExtensionAPI) {
     parameters: Type.Object({
       name: Type.String({ description: "Name to greet" }),
     }),
+    permission: permissionDescriptor(() => permissionClaim()),
     async execute(toolCallId, params, onUpdate, ctx, signal) {
       return {
         content: [{ type: "text", text: `Hello, ${params.name}!` }],

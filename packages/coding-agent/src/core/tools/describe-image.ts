@@ -17,6 +17,7 @@ import { processImage } from "../../utils/image-process.ts";
 import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.ts";
 import type { ExtensionContext, ToolDefinition } from "../extensions/types.ts";
 import type { VisionSettings } from "../settings-manager.ts";
+import { exactNetworkEndpoint, fileReadPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { resolveReadPathAsync } from "./path-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 
@@ -174,6 +175,13 @@ export function createDescribeImageToolDefinition(
 			"Describe ONE image file with the user's dedicated vision service and return a markdown description. Pass exactly one image path per call; to describe multiple images, call this tool once per image. Use this tool ONLY when you cannot see images (this model lacks image input); when reading an image returns '[Current model does not support images...]', call this tool with the same path. If you can see images, use the `read` tool to view image files directly instead.",
 		promptSnippet: "Describe images via the configured vision service when this model cannot see images",
 		parameters: describeImageSchema,
+		permission: permissionDescriptor(({ path }, context) => {
+			const settings = options?.getSettings();
+			if (!settings) throw new Error("describe_image runtime is not configured");
+			return fileReadPermissionClaim(path, context, {
+				networkEndpoints: [exactNetworkEndpoint(settings.baseUrl)],
+			});
+		}),
 		async execute(_toolCallId, params, signal?, _onUpdate?, ctx?) {
 			if (!options) throw new Error("describe_image runtime is not configured");
 			return await describeImage(options, cwd, params.path, signal, ctx);

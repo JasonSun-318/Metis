@@ -202,8 +202,17 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 			expect(readFileSync(join(workspace, "tracked.txt"), "utf8")).toBe("original");
 			await expect(exec("cat tracked.txt")).resolves.toMatchObject({ exitCode: 0 });
 			output = "";
-			const result = await exec('printf ok > "$METIS_WORK_DIR/result.txt"');
+			const result = await exec(
+				'printf "METIS=%s\\nTMPDIR=%s\\nTMP=%s\\nTEMP=%s\\n" "$METIS_WORK_DIR" "$TMPDIR" "$TMP" "$TEMP" && test "$TMPDIR" = "$METIS_WORK_DIR" && test "$TMP" = "$METIS_WORK_DIR" && test "$TEMP" = "$METIS_WORK_DIR" && printf ok > "$METIS_WORK_DIR/result.txt"',
+			);
 			expect(result, output).toMatchObject({ exitCode: 0 });
+			expect(output).toBe(
+				`METIS=${sessionWorkDir}\nTMPDIR=${sessionWorkDir}\nTMP=${sessionWorkDir}\nTEMP=${sessionWorkDir}\n`,
+			);
+			output = "";
+			const temporaryFileResult = await exec('printf second > "$TMPDIR/second.txt"');
+			expect(temporaryFileResult, output).toMatchObject({ exitCode: 0 });
+			expect(readFileSync(join(sessionWorkDir, "second.txt"), "utf8")).toBe("second");
 		} finally {
 			await sandbox.dispose();
 		}

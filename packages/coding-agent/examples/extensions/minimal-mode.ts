@@ -18,13 +18,13 @@
 
 import type { ExtensionAPI } from "@metis/coding-agent";
 import {
-	createBashTool,
-	createEditTool,
-	createFindTool,
-	createGrepTool,
-	createLsTool,
-	createReadTool,
-	createWriteTool,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
+	createLsToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
 } from "@metis/coding-agent";
 import { Text } from "@metis/tui";
 import { homedir } from "os";
@@ -45,13 +45,13 @@ const toolCache = new Map<string, ReturnType<typeof createBuiltInTools>>();
 
 function createBuiltInTools(cwd: string) {
 	return {
-		read: createReadTool(cwd),
-		bash: createBashTool(cwd),
-		edit: createEditTool(cwd),
-		write: createWriteTool(cwd),
-		find: createFindTool(cwd),
-		grep: createGrepTool(cwd),
-		ls: createLsTool(cwd),
+		read: createReadToolDefinition(cwd),
+		bash: createBashToolDefinition(cwd),
+		edit: createEditToolDefinition(cwd),
+		write: createWriteToolDefinition(cwd),
+		find: createFindToolDefinition(cwd),
+		grep: createGrepToolDefinition(cwd),
+		ls: createLsToolDefinition(cwd),
 	};
 }
 
@@ -74,10 +74,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files.",
 		parameters: getBuiltInTools(process.cwd()).read.parameters,
+		permission: getBuiltInTools(process.cwd()).read.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.read.execute(toolCallId, params, signal, onUpdate);
+			return tools.read.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -121,10 +122,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Execute a bash command in the current working directory. Returns stdout and stderr. Output is truncated to last 2000 lines or 50KB (whichever is hit first).",
 		parameters: getBuiltInTools(process.cwd()).bash.parameters,
+		permission: getBuiltInTools(process.cwd()).bash.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.bash.execute(toolCallId, params, signal, onUpdate);
+			return tools.bash.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -170,10 +172,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
 		parameters: getBuiltInTools(process.cwd()).write.parameters,
+		permission: getBuiltInTools(process.cwd()).write.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.write.execute(toolCallId, params, signal, onUpdate);
+			return tools.write.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -212,10 +215,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Edit a file by replacing exact text. The oldText must match exactly (including whitespace). Use this for precise, surgical edits.",
 		parameters: getBuiltInTools(process.cwd()).edit.parameters,
+		permission: getBuiltInTools(process.cwd()).edit.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.edit.execute(toolCallId, params, signal, onUpdate);
+			return tools.edit.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -257,10 +261,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Find files by name pattern (glob). Searches recursively from the specified path. Output limited to 200 results.",
 		parameters: getBuiltInTools(process.cwd()).find.parameters,
+		permission: getBuiltInTools(process.cwd()).find.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.find.execute(toolCallId, params, signal, onUpdate);
+			return tools.find.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -315,10 +320,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"Search file contents by regex pattern. Uses ripgrep for fast searching. Output limited to 200 matches.",
 		parameters: getBuiltInTools(process.cwd()).grep.parameters,
+		permission: getBuiltInTools(process.cwd()).grep.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.grep.execute(toolCallId, params, signal, onUpdate);
+			return tools.grep.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {
@@ -377,10 +383,11 @@ export default function (metis: ExtensionAPI) {
 		description:
 			"List directory contents with file sizes. Shows files and directories with their sizes. Output limited to 500 entries.",
 		parameters: getBuiltInTools(process.cwd()).ls.parameters,
+		permission: getBuiltInTools(process.cwd()).ls.permission,
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
 			const tools = getBuiltInTools(ctx.cwd);
-			return tools.ls.execute(toolCallId, params, signal, onUpdate);
+			return tools.ls.execute(toolCallId, params, signal, onUpdate, ctx);
 		},
 
 		renderCall(args, theme, _context) {

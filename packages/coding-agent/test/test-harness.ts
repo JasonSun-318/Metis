@@ -33,6 +33,7 @@ import { SessionManager } from "../src/core/session-manager.ts";
 import type { Settings } from "../src/core/settings-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import type { InlineExtension, ResourceLoader } from "../src/index.ts";
+import { testToolDefinitions } from "./helpers/tool-definition.ts";
 import {
 	type CreateTestExtensionsResultInput,
 	createTestExtensionsResult,
@@ -402,7 +403,9 @@ function createHarnessWithResourceLoader(
 		cwd: tempDir,
 		modelRegistry,
 		resourceLoader,
-		baseToolsOverride: options.baseToolsOverride,
+		baseToolDefinitionsOverride: options.baseToolsOverride
+			? testToolDefinitions(Object.values(options.baseToolsOverride))
+			: undefined,
 		agentDir: options.agentDir === "temp" ? tempDir : undefined,
 	});
 

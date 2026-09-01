@@ -5,7 +5,7 @@
  * without paying for an extra follow-up LLM turn.
  */
 
-import { defineTool, type ExtensionAPI } from "@metis/coding-agent";
+import { defineTool, type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Text } from "@metis/tui";
 import { Type } from "typebox";
 
@@ -30,6 +30,7 @@ const structuredOutputTool = defineTool({
 		summary: Type.String({ description: "One-paragraph summary" }),
 		actionItems: Type.Array(Type.String(), { description: "Concrete next steps or key bullets" }),
 	}),
+	permission: permissionDescriptor(() => permissionClaim()),
 
 	async execute(_toolCallId, params) {
 		return {

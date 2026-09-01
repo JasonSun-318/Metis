@@ -198,7 +198,10 @@ export class SessionAgentCoordinator {
 				getManager: () => this.managerValue,
 				getSession: () => session,
 			}),
-			{ automaticPermissionToolNames: ["inspect_agents"] },
+			{
+				automaticPermissionToolNames: ["inspect_agents"],
+				delegatableToolNames: INSTALLED_AGENT_TOOLS,
+			},
 		);
 	}
 

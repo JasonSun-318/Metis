@@ -166,6 +166,7 @@ export class ExecutionGrantStore {
 			toolName: input.action.toolName,
 			toolIdentity: input.action.toolIdentity,
 			argsDigest: input.action.argsDigest,
+			...(input.action.command === undefined ? {} : { command: input.action.command }),
 			cwd: input.action.cwd,
 			workspaceRoots: Object.freeze([...input.action.workspaceRoots]),
 			settingsEpoch: epoch,

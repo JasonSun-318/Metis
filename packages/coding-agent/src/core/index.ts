@@ -76,6 +76,9 @@ export {
 	type ToolCallEvent,
 	type ToolCallEventResult,
 	type ToolDefinition,
+	type ToolPermissionClaim,
+	type ToolPermissionContext,
+	type ToolPermissionDescriptor,
 	type ToolRenderResultOptions,
 	type ToolResultEvent,
 	type TurnEndEvent,
@@ -164,6 +167,15 @@ export {
 	type ToolProvenance,
 	unclassifiedAction,
 } from "./permission-policy.ts";
+export {
+	createPermissionAuditEvent,
+	type PermissionAuditEvent,
+	type PermissionAuditEventInput,
+	type PermissionAuditFailure,
+	type PermissionAuditSink,
+	PermissionAuditWriter,
+} from "./permissions/audit.ts";
+export { digestCanonical } from "./permissions/normalize.ts";
 export {
 	PLAN_MODE_SYSTEM_PROMPT,
 	type PlanContextProjectionInput,
@@ -327,6 +339,11 @@ export {
 	isThinkingSelection,
 	type ThinkingSelection,
 } from "./thinking-selection.ts";
+export {
+	exactNetworkEndpoint,
+	permissionClaim,
+	permissionDescriptor,
+} from "./tool-permission-adapter.ts";
 export {
 	authorizeUnattendedAction,
 	createUnattendedExecutionProfile,

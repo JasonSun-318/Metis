@@ -4,6 +4,7 @@ import { type Static, Type } from "typebox";
 import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
 import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "../web-search-config.ts";
 import { getTextOutput, invalidArgText, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
@@ -261,6 +262,11 @@ export function createWebSearchToolDefinition(
 		promptSnippet: "Search the web or find image URLs with the user-configured provider",
 		parameters: webSearchSchema,
 		executionMode: "parallel",
+		permission: permissionDescriptor(() => {
+			if (!options) throw new Error("web_search runtime is not configured");
+			const { host, port } = WEB_SEARCH_PROVIDER_INFO[options.getSettings().provider].networkTarget;
+			return permissionClaim({ networkEndpoints: [{ hostname: host, port }] });
+		}),
 		async execute(_toolCallId, params, signal) {
 			if (!options) throw new Error("web_search runtime is not configured");
 			const settings = options.getSettings();

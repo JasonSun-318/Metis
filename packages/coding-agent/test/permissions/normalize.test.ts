@@ -57,8 +57,10 @@ describe("permission action normalization", () => {
 	it("binds the full normalized action to a stable digest", () => {
 		const first = normalizePermissionAction(actionInput());
 		const second = normalizePermissionAction(actionInput({ args: { path: join(projectDir, "README.md") } }));
+		const laterInvocation = normalizePermissionAction(actionInput({ actionId: "action-2" }));
 		expect(digestPermissionAction(first)).toMatch(/^[a-f0-9]{64}$/);
 		expect(digestPermissionAction(first)).toBe(digestPermissionAction(second));
+		expect(digestPermissionAction(first)).toBe(digestPermissionAction(laterInvocation));
 		expect(Object.isFrozen(first)).toBe(true);
 		expect(Object.isFrozen(first.readPaths)).toBe(true);
 	});

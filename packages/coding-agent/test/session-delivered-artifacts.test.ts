@@ -57,6 +57,17 @@ afterEach(() => {
 });
 
 describe("SessionDeliveredArtifacts", () => {
+	it("marks credential-shaped delivery sources as sensitive external effects", () => {
+		const value = fixture("session-delivered-sensitive");
+		const claim = value.artifacts
+			.createToolDefinition()
+			.permission.describe(
+				{ path: ".env" },
+				{ actionId: "deliver-sensitive", cwd: value.cwd, workspaceRoots: [value.cwd] },
+			);
+		expect(claim.effects).toEqual(["sensitive-read", "external-side-effect"]);
+	});
+
 	it("keeps staged files private until the successful tool result is journaled", async () => {
 		const value = fixture();
 		const source = join(value.cwd, "report.txt");

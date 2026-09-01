@@ -11,8 +11,6 @@ const MAX_DEPTH = 20;
 const MAX_DISPLAY_STRING_BYTES = 4 * 1024;
 const SECRET_KEY_PATTERN =
 	/(?:authorization|cookie|credential|password|privatekey|secret|session|token|(?:api|access|auth)?key)/i;
-const EXACT_VALUE_KEY_PATTERN =
-	/(?:path|root|cwd|destination|host|url|endpoint|command|repository|branch|target|scope|payload|content|body|message)/i;
 
 export interface ModelReviewInput {
 	readonly schemaVersion: 1;
@@ -69,7 +67,7 @@ function redactValue(value: unknown, ancestors: Set<object>, depth: number, key 
 	if (typeof value === "string") {
 		const binary = binaryMetadata(value, key);
 		if (binary) return binary;
-		return EXACT_VALUE_KEY_PATTERN.test(normalizedKey(key)) ? value : truncateUtf8(value, MAX_DISPLAY_STRING_BYTES);
+		return truncateUtf8(value, MAX_DISPLAY_STRING_BYTES);
 	}
 	if (typeof value !== "object") throw new TypeError(`Reviewer arguments contain unsupported ${typeof value}`);
 	if (depth >= MAX_DEPTH) throw new TypeError("Reviewer arguments exceed the maximum depth");
@@ -214,10 +212,7 @@ function trustedMessages(messages: readonly TrustedUserMessage[]): readonly Trus
 export function buildModelReviewInput(request: PermissionReviewRequest): ModelReviewInput {
 	assertCompleteAction(request.action);
 	const grant = freezeGrant(request.action, request.decision.grant);
-	const redactedArguments = redactValue(request.redactedArguments, new Set(), 0);
-	if (Buffer.byteLength(canonicalJson(redactedArguments), "utf8") > MAX_REDACTED_ARGUMENT_BYTES) {
-		throw new TypeError("Redacted reviewer arguments exceed 16 KiB");
-	}
+	const redactedArguments = redactPermissionArguments(request.redactedArguments);
 	const input: ModelReviewInput = Object.freeze({
 		schemaVersion: 1,
 		action: request.action,
@@ -234,4 +229,12 @@ export function buildModelReviewInput(request: PermissionReviewRequest): ModelRe
 		throw new TypeError("Permission reviewer input exceeds 48 KiB");
 	}
 	return input;
+}
+
+export function redactPermissionArguments(value: unknown): unknown {
+	const redactedArguments = redactValue(value, new Set(), 0);
+	if (Buffer.byteLength(canonicalJson(redactedArguments), "utf8") > MAX_REDACTED_ARGUMENT_BYTES) {
+		throw new TypeError("Redacted reviewer arguments exceed 16 KiB");
+	}
+	return redactedArguments;
 }

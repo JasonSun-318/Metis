@@ -6,6 +6,8 @@ import { createMcpToolDefinitions, type McpManager, type McpToolRecord } from ".
 function record(instructions = "Use Drive as the source of truth."): McpToolRecord {
 	return {
 		serverName: "drive",
+		serverIdentity: "mcp-server:drive:session-1",
+		implementationVersion: "mcp-tool:search-files:v1",
 		rawName: "search_files",
 		modelName: "mcp__drive__search_files",
 		tool: {
@@ -17,7 +19,7 @@ function record(instructions = "Use Drive as the source of truth."): McpToolReco
 				required: ["query"],
 				additionalProperties: false,
 			},
-			annotations: { readOnlyHint: true },
+			annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
 		},
 		sourceName: "drive",
 		sourceDescription: instructions,
@@ -32,9 +34,12 @@ function fakeManager(
 	return {
 		ensureCurrent: vi.fn(async () => {}),
 		getToolRecords: () => [tool],
+		getCatalogIdentity: () => "mcp-catalog:session-1",
 		getDirectToolNames: () => options.directNames ?? ["tool_search"],
 		searchTools: vi.fn(() => [tool]),
+		searchToolsExact: vi.fn(async () => [tool]),
 		callTool: vi.fn(async () => options.callResult ?? { content: [{ type: "text", text: "ok" }] }),
+		callToolExact: vi.fn(async () => options.callResult ?? { content: [{ type: "text", text: "ok" }] }),
 		getToolAnnotations: () => tool.tool.annotations,
 		listResources: vi.fn(async () => ({ servers: [] })),
 		listResourceTemplates: vi.fn(async () => ({ servers: [] })),
@@ -62,18 +67,20 @@ describe("MCP model tools", () => {
 	it("shows bounded sources but keeps server schemas deferred", () => {
 		const manager = fakeManager({ instructions: `Use Drive.${"x".repeat(600)}` });
 		const definitions = createMcpToolDefinitions(manager, activation());
-		const search = definitions.direct.find((tool) => tool.name === "tool_search")!;
+		const search = definitions.direct.find(({ definition }) => definition.name === "tool_search")!.definition;
 
 		expect(search.description).toContain("- drive: Use Drive.");
 		expect(search.description).not.toContain("x".repeat(513));
-		expect(definitions.direct.map((tool) => tool.name)).not.toContain("mcp__drive__search_files");
+		expect(definitions.direct.map(({ definition }) => definition.name)).not.toContain("mcp__drive__search_files");
 		expect(definitions.deferred[0].definition.parameters).toEqual(manager.getToolRecords()[0].tool.inputSchema);
 	});
 
 	it("activates hits and records only newly added names", async () => {
 		const manager = fakeManager();
 		const state = activation(["tool_search"]);
-		const search = createMcpToolDefinitions(manager, state).direct.find((tool) => tool.name === "tool_search")!;
+		const search = createMcpToolDefinitions(manager, state).direct.find(
+			({ definition }) => definition.name === "tool_search",
+		)!.definition;
 
 		const result = await search.execute("call", { query: "files", limit: 8 }, undefined, undefined, extensionContext);
 
@@ -96,7 +103,12 @@ describe("MCP model tools", () => {
 
 		const result = await definition.execute("call", { query: "x" }, undefined, undefined, extensionContext);
 
-		expect(manager.callTool).toHaveBeenCalledWith("mcp__drive__search_files", { query: "x" }, undefined);
+		expect(manager.callToolExact).toHaveBeenCalledWith(
+			"mcp__drive__search_files",
+			"mcp-tool:search-files:v1",
+			{ query: "x" },
+			undefined,
+		);
 		expect(result.content).toEqual([
 			{ type: "text", text: "ok" },
 			{ type: "image", mimeType: "image/png", data: "aW1n" },
@@ -116,7 +128,7 @@ describe("MCP model tools", () => {
 				"get_mcp_prompt",
 			],
 		});
-		const direct = createMcpToolDefinitions(manager, activation()).direct;
+		const direct = createMcpToolDefinitions(manager, activation()).direct.map(({ definition }) => definition);
 
 		expect(direct.map((tool) => tool.name)).toEqual(
 			expect.arrayContaining([
@@ -135,7 +147,7 @@ describe("MCP model tools", () => {
 			undefined,
 			extensionContext,
 		);
-		expect(manager.readResource).toHaveBeenCalledWith("drive", "docs://guide", undefined);
+		expect(manager.readResource).toHaveBeenCalledWith("drive", "docs://guide", undefined, "mcp-catalog:session-1");
 		expect(result.content).toEqual([{ type: "text", text: "guide" }]);
 	});
 

@@ -13,6 +13,18 @@ import { canonicalizeActionPath } from "../../src/utils/paths.ts";
 import { actionInput, ordinaryRead, projectDir, workspaceWrite } from "./fixtures.ts";
 
 describe("PermissionPolicy", () => {
+	it.each(["host", "extension", "sdk"] as const)(
+		"routes trusted in-process %s tools to the host target",
+		(provenance) => {
+			const action = normalizePermissionAction(actionInput({ provenance }));
+			const decision = new PermissionPolicy().evaluate({
+				action,
+				settings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+			});
+			expect(decision.kind).toBe("allow");
+			if (decision.kind !== "deny") expect(decision.grant.executionTarget).toBe("host");
+		},
+	);
 	it("hard-denies destructive writes to the filesystem, home, and workspace roots", () => {
 		const protectedTargets = [parse(projectDir).root, homedir(), projectDir];
 		for (const target of protectedTargets) {

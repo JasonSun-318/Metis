@@ -65,6 +65,7 @@ function request(
 	const target = overrides.target ?? "sandbox";
 	return {
 		action: action(command, overrides.timeout, target === "external" ? "mcp" : "builtin"),
+		args: { command, ...(overrides.timeout === undefined ? {} : { timeout: overrides.timeout }) },
 		settings:
 			target === "host"
 				? ({ sandboxPolicy: "danger-full-access", approvalPolicy: "user" } as const)

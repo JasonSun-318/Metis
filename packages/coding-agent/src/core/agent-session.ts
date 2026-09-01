@@ -43,7 +43,7 @@ import {
 	modelsAreEqual,
 	streamSimple,
 } from "@metis/ai/compat";
-import { getProjectConfigDir } from "../config.ts";
+import { getProjectConfigDir, VERSION } from "../config.ts";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
@@ -143,6 +143,27 @@ import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
 import type { RequestPermissionApproval } from "./permission-policy.ts";
+import {
+	AgentModelReviewTransport,
+	claimConsumedExecutionGrant,
+	createPermissionAuditEvent,
+	digestCanonical,
+	intersectPermissionSettings,
+	ModelPermissionReviewer,
+	type PermissionAuditEvent,
+	PermissionAuditWriter,
+	PermissionReviewRouter,
+	ToolAuthorizationRuntime as PermissionToolAuthorizationRuntime,
+	ProjectPermissionRuleStore,
+	settingsForPreset,
+	type TrustedUserMessage,
+	UserPermissionReviewer,
+} from "./permissions/index.ts";
+import type {
+	ExecutionGrant,
+	PermissionSettings as NormalizedPermissionSettings,
+	ToolProvenance as NormalizedToolProvenance,
+} from "./permissions/types.ts";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
@@ -179,7 +200,7 @@ import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildAgentMailboxContent } from "./subagents/prompts.ts";
-import { utf8Length } from "./subagents/trace.ts";
+import { utf8Length, utf8Prefix } from "./subagents/trace.ts";
 import {
 	AGENT_TOOL_NAMES,
 	type AgentMailboxTerminalEvent,
@@ -190,15 +211,19 @@ import {
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
 import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
-import { ToolAuthorizationRuntime } from "./tool-authorization-runtime.ts";
+import {
+	assertToolPermissionDescriptor,
+	createToolIdentity,
+	describeToolAction,
+	ToolPermissionDescriptionError,
+} from "./tool-permission-adapter.ts";
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
-import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
-import { resolveWebSearchApiKey, WEB_SEARCH_PROVIDER_INFO, type WebSearchProvider } from "./web-search-config.ts";
+import { resolveWebSearchApiKey, type WebSearchProvider } from "./web-search-config.ts";
 
 export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
 
@@ -242,6 +267,10 @@ export type AgentSessionEvent =
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
+
+function referencesManagedWorkEnvironment(command: string): boolean {
+	return /\$(?:\{)?(?:METIS_WORK_DIR|TMPDIR|TMP|TEMP)\b/u.test(command);
+}
 
 // ============================================================================
 // Types
@@ -295,7 +324,7 @@ export interface AgentSessionConfig {
 	 * These are synthesized into minimal ToolDefinitions internally so AgentSession can keep
 	 * a definition-first registry even when callers provide plain AgentTool instances.
 	 */
-	baseToolsOverride?: Record<string, AgentTool>;
+	baseToolDefinitionsOverride?: readonly ToolDefinition[];
 	/** Mutable ref used by Agent to access the current ExtensionRunner */
 	extensionRunnerRef?: { current?: ExtensionRunner };
 	/** Session start event metadata emitted when extensions bind to this runtime. */
@@ -376,6 +405,52 @@ export interface SessionStats {
 interface ToolDefinitionEntry {
 	definition: ToolDefinition;
 	sourceInfo: SourceInfo;
+	provenance: NormalizedToolProvenance;
+	toolIdentity: string;
+}
+
+function normalizedToolProvenance(source: string): NormalizedToolProvenance {
+	if (source === "builtin") return "builtin";
+	if (source === "sdk") return "sdk";
+	if (source === "host" || source === "trusted") return "host";
+	if (source === "mcp" || source.startsWith("mcp:")) return "mcp";
+	return "extension";
+}
+
+function toolImplementationVersion(definition: ToolDefinition, sourceInfo: SourceInfo): string {
+	const hash = createHash("sha256");
+	hash.update(sourceInfo.implementationVersion ?? VERSION);
+	hash.update("\0");
+	hash.update(JSON.stringify(definition.parameters));
+	hash.update("\0");
+	hash.update(String(definition.permission.version));
+	hash.update("\0");
+	hash.update(Function.prototype.toString.call(definition.permission.describe));
+	hash.update("\0");
+	hash.update(Function.prototype.toString.call(definition.execute));
+	if (definition.prepareArguments) {
+		hash.update("\0");
+		hash.update(Function.prototype.toString.call(definition.prepareArguments));
+	}
+	return hash.digest("hex");
+}
+
+function createToolDefinitionEntry(definition: ToolDefinition, sourceInfo: SourceInfo): ToolDefinitionEntry {
+	assertToolPermissionDescriptor(definition);
+	const provenance = normalizedToolProvenance(sourceInfo.source);
+	const sourceIdentity = sourceInfo.sourceIdentity ?? `${sourceInfo.source}:${sourceInfo.path}`;
+	return {
+		definition,
+		sourceInfo,
+		provenance,
+		toolIdentity: createToolIdentity({
+			provenance,
+			sourceIdentity,
+			toolName: definition.name,
+			implementationVersion: toolImplementationVersion(definition, sourceInfo),
+			descriptorVersion: definition.permission.version,
+		}),
+	};
 }
 
 function estimateMessagesTokens(messages: AgentMessage[]): number {
@@ -546,7 +621,7 @@ export class AgentSession {
 	private _defaultBuiltinToolsEnabled: boolean;
 	private _allowedToolNames?: Set<string>;
 	private _excludedToolNames?: Set<string>;
-	private _baseToolsOverride?: Record<string, AgentTool>;
+	private _baseToolDefinitionsOverride?: readonly ToolDefinition[];
 	private _sessionStartEvent: SessionStartEvent;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
@@ -577,9 +652,11 @@ export class AgentSession {
 	private _baseSystemPromptParts: readonly SystemPromptPart[] = [];
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
 	private _systemPromptOverride?: string;
-	private readonly _toolAuthorization: ToolAuthorizationRuntime;
+	private readonly _permissionAudit: PermissionAuditWriter;
+	private readonly _permissionRuntime: PermissionToolAuthorizationRuntime;
+	private _permissionApprovalHandler?: RequestPermissionApproval;
+	private readonly _trustedUserMessages: TrustedUserMessage[] = [];
 	private readonly _interactiveBashBoundary?: InteractiveBashBoundary;
-	private _runtimeShellCommandPrefix?: string;
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
@@ -591,6 +668,8 @@ export class AgentSession {
 	private _reportedContextUsage: ReportedContextUsageSnapshot | undefined;
 	private _contextUsageCalibration: ContextUsageCalibration | undefined;
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
+	private readonly _hostTools = new Map<string, ToolDefinition>();
+	private readonly _delegatableHostTools = new Map<string, ToolDefinition>();
 	private _configuredActiveToolNames: string[] = [];
 	private _collaborationModeGuard?: (collaborationMode: CollaborationMode) => void | Promise<void>;
 
@@ -602,7 +681,8 @@ export class AgentSession {
 			if (config.sessionManager.getHeader()?.agent) {
 				throw new TypeError("Unattended execution cannot run as an agent");
 			}
-			if (config.baseToolsOverride) throw new TypeError("Unattended execution cannot override built-in tools");
+			if (config.baseToolDefinitionsOverride)
+				throw new TypeError("Unattended execution cannot override built-in tools");
 			if (config.mcpManager) throw new TypeError("Unattended execution cannot use MCP tools");
 			if (config.customTools?.length) throw new TypeError("Unattended execution cannot use custom tools");
 			if (config.resourceLoader.getExtensions().extensions.length > 0) {
@@ -648,7 +728,7 @@ export class AgentSession {
 			: config.excludedToolNames
 				? new Set(config.excludedToolNames)
 				: undefined;
-		this._baseToolsOverride = config.baseToolsOverride;
+		this._baseToolDefinitionsOverride = config.baseToolDefinitionsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._ultraAvailable = canUseUltra({
 			hostAllowsUltra: config.ultraAvailable === true,
@@ -709,22 +789,57 @@ export class AgentSession {
 						};
 					},
 				}));
-		this._toolAuthorization = new ToolAuthorizationRuntime({
-			agentDir: this._agentDir,
-			sessionManager: this.sessionManager,
-			cwd: () => this._cwd,
-			readOnlyRoots: () => this.resourceLoader.getSkills().skills.map((skill) => skill.baseDir),
-			toolSource: (toolName) => this._toolDefinitions.get(toolName)?.sourceInfo.source,
-			mcpAnnotations: (toolName) => this._mcpManager?.getToolAnnotations(toolName),
-			webSearchNetworkTarget: () =>
-				WEB_SEARCH_PROVIDER_INFO[this.settingsManager.getWebSearchSettings().provider].networkTarget,
-			isTrustedControlTool: (toolName) => this._isTrustedControlTool(toolName),
-			runtimeShellCommandPrefix: () => this._runtimeShellCommandPrefix,
-			permissionModeCeiling: this._permissionModeCeiling,
-			workspaceWritePolicy: this._workspaceWritePolicy,
-			unattendedExecution: this._unattendedExecution,
-			bashBoundary: this._interactiveBashBoundary,
-			requestApproval: config.requestPermissionApproval,
+		this._permissionApprovalHandler = config.requestPermissionApproval;
+		const projectRules =
+			this._agentDir && !this._unattendedExecution ? new ProjectPermissionRuleStore(this._agentDir) : undefined;
+		this._permissionAudit = new PermissionAuditWriter({
+			append: (event) => {
+				if (
+					event.stage === "review" &&
+					(event.outcome === "allow" || event.outcome === "deny") &&
+					!(event.reviewer === "user" && this._permissionApprovalHandler === undefined)
+				) {
+					this.sessionManager.appendPermissionDecision({
+						actionId: event.actionId,
+						toolName: event.toolName,
+						source: event.reviewer === "user" ? "user" : "reviewer",
+						decision: event.outcome === "allow" ? "allow" : "deny",
+						reason: event.reasonCode,
+					});
+				} else if (event.stage === "decision" && event.outcome === "deny") {
+					this.sessionManager.appendPermissionDecision({
+						actionId: event.actionId,
+						toolName: event.toolName,
+						source: "policy",
+						decision: "deny",
+						reason: event.reasonCode,
+					});
+				}
+			},
+		});
+		this._permissionRuntime = new PermissionToolAuthorizationRuntime({
+			sessionId: this.sessionManager.getSessionId(),
+			projectPath: this._cwd,
+			projectRules,
+			audit: this._permissionAudit,
+			reviewerFactory: () =>
+				new PermissionReviewRouter({
+					model: new ModelPermissionReviewer({
+						getActiveModel: () => this.model,
+						transport: new AgentModelReviewTransport((model, context, options) =>
+							this._modelRegistry.streamSimple(model, context, options),
+						),
+					}),
+					user: new UserPermissionReviewer({
+						requestApproval: (request) => {
+							const handler = this._permissionApprovalHandler;
+							if (!handler) return Promise.reject(new Error("No interactive session owner is available"));
+							return handler(request);
+						},
+						projectRules,
+						projectPath: this._cwd,
+					}),
+				}),
 		});
 		this._memorySettingsTransaction = new MemorySettingsTransaction({
 			...(this._agentDir ? { agentDir: this._agentDir } : {}),
@@ -787,6 +902,7 @@ export class AgentSession {
 		if (current === mode) return;
 		if (mode === "full" && current !== "full") await this._interactiveBashBoundary?.reset();
 		this.sessionManager.setPermissionSettings({ mode });
+		this._permissionRuntime.invalidate("settings");
 	}
 
 	async disposeInteractiveExecution(): Promise<void> {
@@ -794,7 +910,7 @@ export class AgentSession {
 	}
 
 	setPermissionApprovalHandler(handler?: RequestPermissionApproval): void {
-		this._toolAuthorization.setApprovalHandler(handler);
+		this._permissionApprovalHandler = handler;
 	}
 
 	setCollaborationModeGuard(guard?: (collaborationMode: CollaborationMode) => void | Promise<void>): void {
@@ -803,23 +919,37 @@ export class AgentSession {
 
 	/** Forward a child approval through the frontend currently attached to this session. */
 	requestPermissionApproval(request: Parameters<RequestPermissionApproval>[0]): ReturnType<RequestPermissionApproval> {
-		return this._toolAuthorization.requestApproval(request);
+		const handler = this._permissionApprovalHandler;
+		if (!handler) return Promise.reject(new Error("No interactive session owner is available"));
+		return handler(request.cwd === undefined ? { ...request, cwd: this._cwd } : request);
+	}
+
+	/** Append a host-owned action to the same redacted audit boundary as tool permissions. */
+	appendPermissionAuditEvent(event: PermissionAuditEvent): Promise<boolean> {
+		return this._permissionAudit.append(event);
 	}
 
 	/** Install runtime-owned tools; only explicitly named no-host controls bypass approval. */
 	installHostTools(
 		definitions: readonly ToolDefinition<any, any, any>[],
-		options?: { readonly automaticPermissionToolNames?: readonly string[] },
+		options?: {
+			readonly automaticPermissionToolNames?: readonly string[];
+			readonly delegatableToolNames?: readonly string[];
+		},
 	): void {
 		if (this._unattendedExecution) throw new Error("Unattended execution cannot install host tools");
 		const active = new Set(this.getConfiguredActiveToolNames());
 		const automatic = new Set(options?.automaticPermissionToolNames);
+		const delegatable = new Set(options?.delegatableToolNames);
 		for (const definition of definitions) {
 			const existing = this._customTools.findIndex((candidate) => candidate.name === definition.name);
 			if (existing < 0) this._customTools.push(definition);
 			else this._customTools[existing] = definition;
+			this._hostTools.set(definition.name, definition);
 			if (automatic.has(definition.name)) this._trustedControlTools.set(definition.name, definition);
 			else this._trustedControlTools.delete(definition.name);
+			if (delegatable.has(definition.name)) this._delegatableHostTools.set(definition.name, definition);
+			else this._delegatableHostTools.delete(definition.name);
 			this._allowedToolNames?.add(definition.name);
 			active.add(definition.name);
 		}
@@ -831,7 +961,9 @@ export class AgentSession {
 		const removed = new Set(names);
 		this._customTools = this._customTools.filter(({ name }) => !removed.has(name));
 		for (const name of removed) {
+			this._hostTools.delete(name);
 			this._trustedControlTools.delete(name);
+			this._delegatableHostTools.delete(name);
 			this._allowedToolNames?.delete(name);
 		}
 		this._refreshToolRegistry({
@@ -842,6 +974,123 @@ export class AgentSession {
 	private _isTrustedControlTool(name: string): boolean {
 		const trusted = this._trustedControlTools.get(name);
 		return trusted !== undefined && this._toolDefinitions.get(name)?.definition === trusted;
+	}
+
+	private _effectiveNormalizedPermissionSettings(): NormalizedPermissionSettings {
+		let settings = settingsForPreset(this.sessionManager.getPermissionSettings().mode);
+		if (this._permissionModeCeiling) {
+			settings = intersectPermissionSettings(settings, settingsForPreset(this._permissionModeCeiling()));
+		}
+		if (this._workspaceWritePolicy === "deny") {
+			settings = intersectPermissionSettings(settings, {
+				sandboxPolicy: "read-only",
+				approvalPolicy: settings.approvalPolicy,
+			});
+		}
+		if (this.sessionManager.getCollaborationMode() === "plan") {
+			settings = intersectPermissionSettings(settings, {
+				sandboxPolicy: "read-only",
+				approvalPolicy: "deny",
+			});
+		}
+		if (this._unattendedExecution) {
+			settings = intersectPermissionSettings(settings, {
+				sandboxPolicy: "workspace-write",
+				approvalPolicy: "deny",
+			});
+		}
+		return settings;
+	}
+
+	private _permissionWorkspaceRoots(toolName: string, managedWorkDir?: string): readonly string[] {
+		const roots = [...this.sessionManager.getWorkspaceRoots()];
+		if (["read", "grep", "find", "ls", "describe_image"].includes(toolName)) {
+			roots.push(...this.resourceLoader.getSkills().skills.map(({ baseDir }) => baseDir));
+		}
+		if (toolName === "bash" && managedWorkDir) roots.push(managedWorkDir);
+		return [...new Set(roots)];
+	}
+
+	private _authorizeTool(tool: AgentTool, entry: ToolDefinitionEntry): AgentTool {
+		if (this._isTrustedControlTool(tool.name)) return tool;
+		return {
+			...tool,
+			execute: async (toolCallId, params, signal, onUpdate) => {
+				const managedBash = tool.name === "bash" && entry.provenance === "builtin";
+				if (
+					managedBash &&
+					!this._unattendedExecution &&
+					this._agentDir &&
+					!this._activeWorkDir &&
+					typeof params === "object" &&
+					params !== null &&
+					"command" in params &&
+					typeof params.command === "string" &&
+					referencesManagedWorkEnvironment(params.command)
+				) {
+					this._activeWorkDir = createSessionWorkDir(this._agentDir, this.sessionManager.getSessionId());
+				}
+				const managedWorkDir = managedBash ? this._activeWorkDir : undefined;
+				const executionSignal = signal ?? new AbortController().signal;
+				const session = this;
+				const request = {
+					args: params,
+					get action() {
+						return describeToolAction(entry.definition, params, {
+							actionId: toolCallId,
+							cwd: session._cwd,
+							workspaceRoots: session._permissionWorkspaceRoots(tool.name, managedWorkDir),
+							...(managedWorkDir ? { managedWorkDir } : {}),
+							provenance: entry.provenance,
+							toolIdentity: entry.toolIdentity,
+						});
+					},
+					get settings() {
+						return session._effectiveNormalizedPermissionSettings();
+					},
+					trustedUserMessages: Object.freeze([...this._trustedUserMessages]),
+					interactive: this._permissionApprovalHandler !== undefined,
+					signal: executionSignal,
+					execute: async (grant: ExecutionGrant) => {
+						const bindBash = tool.name === "bash" && this._interactiveBashBoundary;
+						if (bindBash) this._interactiveBashBoundary!.bind(grant);
+						else claimConsumedExecutionGrant(grant);
+						try {
+							return await tool.execute(toolCallId, params, signal, onUpdate);
+						} finally {
+							if (bindBash) this._interactiveBashBoundary!.unbind(toolCallId);
+						}
+					},
+				};
+				try {
+					return await this._permissionRuntime.authorizeAndExecute(request);
+				} catch (error) {
+					if (error instanceof ToolPermissionDescriptionError) {
+						await this._permissionAudit.append(
+							createPermissionAuditEvent({
+								eventId: randomUUID(),
+								sessionId: this.sessionManager.getSessionId(),
+								actionId: toolCallId,
+								actionDigest: digestCanonical({
+									toolIdentity: entry.toolIdentity,
+									argsDigest: digestCanonical(params),
+									cwd: this._cwd,
+									workspaceRoots: this._permissionWorkspaceRoots(tool.name, managedWorkDir),
+								}),
+								toolName: tool.name,
+								provenance: entry.provenance,
+								riskLevel: "critical",
+								stage: "decision",
+								outcome: "deny",
+								reasonCode: "descriptor.invalid",
+								timestamp: new Date().toISOString(),
+							}),
+						);
+					}
+					throw error;
+				}
+			},
+		};
 	}
 
 	setHostSystemPrompt(additional?: string | (() => string | undefined)): void {
@@ -1009,7 +1258,7 @@ export class AgentSession {
 		const microcompact = createToolResultMicrocompactor({
 			outputDir: this._toolOutputDir,
 			isBuiltinTool: (toolName) => {
-				if (this._baseToolsOverride) return false;
+				if (this._baseToolDefinitionsOverride) return false;
 				const active = this._toolDefinitions.get(toolName)?.definition;
 				const builtin = this._baseToolDefinitions.get(toolName);
 				return active !== undefined && active === builtin;
@@ -1274,51 +1523,42 @@ export class AgentSession {
 				this._markDurableProviderEpoch();
 				this._capturePreparedContextUsage(prepared);
 			},
-			beforeToolExecute: (context, signal) =>
-				this._toolAuthorization.beforeToolExecute(
-					{
-						actionId: context.toolCall.id,
+			beforeToolExecute: async (context) => {
+				let started = false;
+				try {
+					const turn = this._durableTurn;
+					if (!turn) return;
+					const expectedToolName = this._durablePendingToolCalls.get(context.toolCall.id);
+					if (expectedToolName === undefined) {
+						throw new Error(`Durable tool call is not pending: ${context.toolCall.id}`);
+					}
+					if (expectedToolName !== context.toolCall.name) {
+						throw new Error(`Durable tool call name changed for ${context.toolCall.id}`);
+					}
+					if (this._durableStartedTools.has(context.toolCall.id)) {
+						throw new Error(`Durable tool call already started: ${context.toolCall.id}`);
+					}
+					this.sessionManager.appendRuntimeControl({
+						type: "runtime_tool",
+						turnId: turn.turnId,
+						toolCallId: context.toolCall.id,
 						toolName: context.toolCall.name,
-						args: context.args,
-					},
-					signal,
-					() => {
-						let started = false;
-						try {
-							const turn = this._durableTurn;
-							if (!turn) return;
-							const expectedToolName = this._durablePendingToolCalls.get(context.toolCall.id);
-							if (expectedToolName === undefined) {
-								throw new Error(`Durable tool call is not pending: ${context.toolCall.id}`);
-							}
-							if (expectedToolName !== context.toolCall.name) {
-								throw new Error(`Durable tool call name changed for ${context.toolCall.id}`);
-							}
-							if (this._durableStartedTools.has(context.toolCall.id)) {
-								throw new Error(`Durable tool call already started: ${context.toolCall.id}`);
-							}
-							this.sessionManager.appendRuntimeControl({
-								type: "runtime_tool",
-								turnId: turn.turnId,
-								toolCallId: context.toolCall.id,
-								toolName: context.toolCall.name,
-								state: "started",
-							});
-							started = true;
-							this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
-						} catch (error) {
-							try {
-								this._repairRejectedDurableTool(context, started);
-							} catch (repairError) {
-								throw new AggregateError(
-									[error, repairError],
-									"Failed to mark and structurally repair a rejected tool call",
-								);
-							}
-							throw error;
-						}
-					},
-				),
+						state: "started",
+					});
+					started = true;
+					this._durableStartedTools.set(context.toolCall.id, context.toolCall.name);
+				} catch (error) {
+					try {
+						this._repairRejectedDurableTool(context, started);
+					} catch (repairError) {
+						throw new AggregateError(
+							[error, repairError],
+							"Failed to mark and structurally repair a rejected tool call",
+						);
+					}
+					throw error;
+				}
+			},
 		});
 	}
 
@@ -1553,9 +1793,6 @@ export class AgentSession {
 
 	/** Internal event implementation. The subscription wrapper below tracks durable message writes. */
 	private async _processAgentEvent(event: AgentEvent): Promise<void> {
-		if (event.type === "tool_execution_end") {
-			this._toolAuthorization.clear(event.toolCallId);
-		}
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
@@ -2017,7 +2254,8 @@ export class AgentSession {
 					// Continue invalidating the session even if an abort hook throws.
 				}
 				this.deliveredArtifacts?.rollbackAll();
-				this._toolAuthorization.dispose();
+				this._permissionRuntime.invalidate("session");
+				this._permissionApprovalHandler = undefined;
 
 				this._extensionRunner.invalidate(
 					"This extension ctx is stale after session replacement or reload. Do not use a captured metis or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
@@ -2153,8 +2391,10 @@ export class AgentSession {
 	/** Active tools that a persisted child runtime can reconstruct from project resources. */
 	getDelegatableToolNames(writePolicy: "inherit" | "deny" = "inherit"): string[] {
 		return this.getActiveToolNames().filter((name) => {
-			const source = this._toolDefinitions.get(name)?.sourceInfo.source;
+			const entry = this._toolDefinitions.get(name);
+			const source = entry?.sourceInfo.source;
 			if (source === "sdk") return false;
+			if (source === "host" && this._delegatableHostTools.get(name) !== entry?.definition) return false;
 			return writePolicy === "inherit" || (source === "builtin" && !this._mcpToolNames.has(name));
 		});
 	}
@@ -2267,7 +2507,7 @@ export class AgentSession {
 	}
 
 	private _rebuildImageToolDefinitions(): void {
-		if (this._baseToolsOverride) return;
+		if (this._baseToolDefinitionsOverride) return;
 		const describeImage = createDescribeImageToolDefinition(this._cwd, {
 			getSettings: () => this.settingsManager.getVisionSettings(),
 			getApiKey: () => this._modelRegistry.authStorage.getApiKey(VISION_PROVIDER_ID, { includeFallback: false }),
@@ -3089,6 +3329,7 @@ export class AgentSession {
 	 */
 	async prompt(text: string, options?: PromptOptions): Promise<void> {
 		this._assertDurablePromptExecutionOwner();
+		const inputSource = options?.source ?? "interactive";
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
@@ -3159,6 +3400,7 @@ export class AgentSession {
 				} else {
 					await this._queueSteer(expandedText, currentImages);
 				}
+				this._recordTrustedUserMessage(text, inputSource);
 				preflightResult?.(true);
 				return;
 			}
@@ -3254,8 +3496,17 @@ export class AgentSession {
 			return;
 		}
 
+		this._recordTrustedUserMessage(text, inputSource);
 		preflightResult?.(true);
 		await this._runAgentPrompt(messages);
+	}
+
+	private _recordTrustedUserMessage(text: string, source: PromptOptions["source"]): void {
+		if (source !== "interactive" && source !== "rpc") return;
+		this._trustedUserMessages.push(Object.freeze({ messageId: randomUUID(), text: utf8Prefix(text, 16 * 1024) }));
+		if (this._trustedUserMessages.length > 20) {
+			this._trustedUserMessages.splice(0, this._trustedUserMessages.length - 20);
+		}
 	}
 
 	/**
@@ -3648,7 +3899,7 @@ export class AgentSession {
 		} catch (error) {
 			if (!errors.includes(error)) errors.push(error);
 		}
-		this._toolAuthorization.clear();
+		this._permissionRuntime.invalidate("session");
 		if (errors.length === 1) throw errors[0];
 		if (errors.length > 1) throw new AggregateError(errors, "Failed to abort and persist the active agent turn");
 	}
@@ -3668,7 +3919,7 @@ export class AgentSession {
 		try {
 			await this.waitForIdle();
 		} finally {
-			this._toolAuthorization.clear();
+			this._permissionRuntime.invalidate("session");
 		}
 	}
 
@@ -4617,6 +4868,7 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
+		const previousDefinitions = this._toolDefinitions;
 		const previousActiveToolNames =
 			options?.activeToolNames ??
 			(this._configuredActiveToolNames.length > 0 ? this._configuredActiveToolNames : this.getActiveToolNames());
@@ -4629,58 +4881,66 @@ export class AgentSession {
 			this._workspaceWritePolicy === "deny" && this._baseToolDefinitions.has(name);
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
-		const baseToolSource = this._baseToolsOverride ? "sdk" : "builtin";
+		const baseToolSource = this._baseToolDefinitionsOverride ? "sdk" : "builtin";
 		const allCustomTools = [
 			...registeredTools,
-			...this._customTools.map((definition) => ({
-				definition,
-				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
-			})),
+			...this._customTools.map((definition) => {
+				const hostOwned = this._hostTools.get(definition.name) === definition;
+				const source = hostOwned ? "host" : "sdk";
+				return {
+					definition,
+					sourceInfo: createSyntheticSourceInfo(`<${source}:${definition.name}>`, {
+						source,
+						sourceIdentity: `${source}:${definition.name}`,
+						implementationVersion: VERSION,
+					}),
+				};
+			}),
 		].filter((tool) => isAllowedTool(tool.definition.name) && !isProtectedReadOnlyBuiltin(tool.definition.name));
 		const mcpTools = this._mcpManager
 			? createMcpToolDefinitions(this._mcpManager, this)
 			: { direct: [], deferred: [] };
 		const directMcpTools = mcpTools.direct.filter(
-			(definition) => isAllowedTool(definition.name) && !isProtectedReadOnlyBuiltin(definition.name),
+			({ definition }) => isAllowedTool(definition.name) && !isProtectedReadOnlyBuiltin(definition.name),
 		);
 		const deferredMcpTools = mcpTools.deferred.filter(
 			({ definition }) => isAllowedTool(definition.name) && !isProtectedReadOnlyBuiltin(definition.name),
 		);
 		this._mcpToolNames = new Set([
-			...directMcpTools.map((definition) => definition.name),
+			...directMcpTools.map(({ definition }) => definition.name),
 			...deferredMcpTools.map(({ definition }) => definition.name),
 		]);
 		const deferredMcpNames = new Set(deferredMcpTools.map(({ definition }) => definition.name));
 		const definitionRegistry = new Map<string, ToolDefinitionEntry>(
 			Array.from(this._baseToolDefinitions.entries())
 				.filter(([name]) => isAllowedTool(name))
-				.map(([name, definition]) => [
-					name,
-					{
-						definition,
-						sourceInfo: createSyntheticSourceInfo(`<${baseToolSource}:${name}>`, { source: baseToolSource }),
-					},
-				]),
+				.map(([name, definition]) => {
+					const sourceInfo = createSyntheticSourceInfo(`<${baseToolSource}:${name}>`, {
+						source: baseToolSource,
+						sourceIdentity: `@metis/coding-agent:${baseToolSource}`,
+						implementationVersion: VERSION,
+					});
+					return [name, createToolDefinitionEntry(definition, sourceInfo)];
+				}),
 		);
 		for (const tool of allCustomTools) {
-			definitionRegistry.set(tool.definition.name, {
-				definition: tool.definition,
-				sourceInfo: tool.sourceInfo,
-			});
+			definitionRegistry.set(tool.definition.name, createToolDefinitionEntry(tool.definition, tool.sourceInfo));
 		}
-		for (const definition of directMcpTools) {
-			definitionRegistry.set(definition.name, {
-				definition: definition as ToolDefinition,
-				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+		for (const { definition, sourceIdentity, implementationVersion } of directMcpTools) {
+			const sourceInfo = createSyntheticSourceInfo(`<mcp:${definition.name}>`, {
+				source: "mcp",
+				sourceIdentity,
+				implementationVersion,
 			});
+			definitionRegistry.set(definition.name, createToolDefinitionEntry(definition as ToolDefinition, sourceInfo));
 		}
-		for (const { definition, serverName } of deferredMcpTools) {
-			definitionRegistry.set(definition.name, {
-				definition: definition as ToolDefinition,
-				sourceInfo: createSyntheticSourceInfo(`<mcp:${serverName}:${definition.name}>`, {
-					source: `mcp:${serverName}`,
-				}),
+		for (const { definition, serverName, sourceIdentity, implementationVersion } of deferredMcpTools) {
+			const sourceInfo = createSyntheticSourceInfo(`<mcp:${serverName}:${definition.name}>`, {
+				source: `mcp:${serverName}`,
+				sourceIdentity,
+				implementationVersion,
 			});
+			definitionRegistry.set(definition.name, createToolDefinitionEntry(definition as ToolDefinition, sourceInfo));
 		}
 		this._toolDefinitions = definitionRegistry;
 		this._toolPromptSnippets = new Map(
@@ -4713,17 +4973,23 @@ export class AgentSession {
 			runner,
 		);
 		const wrappedDirectMcpTools = wrapRegisteredTools(
-			directMcpTools.map((definition) => ({
+			directMcpTools.map(({ definition, sourceIdentity, implementationVersion }) => ({
 				definition: definition as ToolDefinition,
-				sourceInfo: createSyntheticSourceInfo(`<builtin:${definition.name}>`, { source: "builtin" }),
+				sourceInfo: createSyntheticSourceInfo(`<mcp:${definition.name}>`, {
+					source: "mcp",
+					sourceIdentity,
+					implementationVersion,
+				}),
 			})),
 			runner,
 		);
 		const wrappedDeferredMcpTools = wrapRegisteredTools(
-			deferredMcpTools.map(({ definition, serverName }) => ({
+			deferredMcpTools.map(({ definition, serverName, sourceIdentity, implementationVersion }) => ({
 				definition: definition as ToolDefinition,
 				sourceInfo: createSyntheticSourceInfo(`<mcp:${serverName}:${definition.name}>`, {
 					source: `mcp:${serverName}`,
+					sourceIdentity,
+					implementationVersion,
 				}),
 			})),
 			runner,
@@ -4731,27 +4997,40 @@ export class AgentSession {
 
 		const toolRegistry = new Map(
 			wrappedBuiltInTools.map((tool) => {
-				const guarded = this._toolAuthorization.guard(tool);
+				const entry = definitionRegistry.get(tool.name);
+				if (!entry) throw new Error(`Tool definition is unavailable: ${tool.name}`);
+				const guarded = this._authorizeTool(tool, entry);
 				return [guarded.name, guarded] as const;
 			}),
 		);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {
-			const guarded = this._toolAuthorization.guard(tool);
+			const entry = definitionRegistry.get(tool.name);
+			if (!entry) throw new Error(`Tool definition is unavailable: ${tool.name}`);
+			const guarded = this._authorizeTool(tool, entry);
 			toolRegistry.set(guarded.name, guarded);
 		}
 		for (const tool of [...wrappedDirectMcpTools, ...wrappedDeferredMcpTools]) {
-			const guarded = this._toolAuthorization.guard(tool);
+			const entry = definitionRegistry.get(tool.name);
+			if (!entry) throw new Error(`Tool definition is unavailable: ${tool.name}`);
+			const guarded = this._authorizeTool(tool, entry);
 			toolRegistry.set(guarded.name, guarded);
 		}
 		for (const trustedName of ["ask_user", "submit_plan"] as const) {
 			const definition = this._trustedControlTools.get(trustedName);
 			if (!definition) continue;
 			const sourceInfo = createSyntheticSourceInfo(`<trusted:${trustedName}>`, { source: "trusted" });
-			definitionRegistry.set(trustedName, { definition, sourceInfo });
+			definitionRegistry.set(trustedName, createToolDefinitionEntry(definition, sourceInfo));
 			const wrapped = wrapRegisteredTools([{ definition, sourceInfo }], runner)[0] as AgentTool;
-			toolRegistry.set(trustedName, this._toolAuthorization.guard(wrapped));
+			toolRegistry.set(trustedName, wrapped);
 		}
+		const registryChanged =
+			previousDefinitions.size > 0 &&
+			(previousDefinitions.size !== definitionRegistry.size ||
+				[...definitionRegistry].some(
+					([name, entry]) => previousDefinitions.get(name)?.toolIdentity !== entry.toolIdentity,
+				));
 		this._toolRegistry = toolRegistry;
+		if (registryChanged) this._permissionRuntime.invalidate("tool-registry");
 
 		const nextActiveToolNames = (
 			options?.activeToolNames ? [...options.activeToolNames] : [...previousActiveToolNames]
@@ -4796,14 +5075,8 @@ export class AgentSession {
 					],
 				}
 			: undefined;
-		this._runtimeShellCommandPrefix = shellCommandPrefix;
-		const baseToolDefinitions = this._baseToolsOverride
-			? Object.fromEntries(
-					Object.entries(this._baseToolsOverride).map(([name, tool]) => [
-						name,
-						createToolDefinitionFromAgentTool(tool),
-					]),
-				)
+		const baseToolDefinitions = this._baseToolDefinitionsOverride
+			? Object.fromEntries(this._baseToolDefinitionsOverride.map((definition) => [definition.name, definition]))
 			: createAllToolDefinitions(this._cwd, {
 					read: { memoryReadBoundary },
 					grep: { memoryReadBoundary },
@@ -4812,12 +5085,16 @@ export class AgentSession {
 					bash: {
 						operations: this._unattendedExecution?.bashOperations ?? this._interactiveBashBoundary?.operations,
 						commandPrefix: shellCommandPrefix,
+						prepareCommand: (command) =>
+							this._activeWorkDir || referencesManagedWorkEnvironment(command)
+								? `readonly METIS_WORK_DIR TMPDIR TMP TEMP\n${command}`
+								: command,
 						shellPath,
 						outputDir: this._toolOutputDir,
 						...(!this._unattendedExecution && this._agentDir
 							? {
 									spawnHook: (context) => {
-										if (!this._activeWorkDir && context.command.includes("METIS_WORK_DIR")) {
+										if (!this._activeWorkDir && referencesManagedWorkEnvironment(context.command)) {
 											this._activeWorkDir = createSessionWorkDir(
 												this._agentDir!,
 												this.sessionManager.getSessionId(),
@@ -4825,9 +5102,6 @@ export class AgentSession {
 										}
 										return {
 											...context,
-											command: this._activeWorkDir
-												? `readonly METIS_WORK_DIR\n${context.command}`
-												: context.command,
 											env: {
 												...context.env,
 												METIS_ATTACHMENTS_DIR: getSessionAttachmentDir(
@@ -4899,8 +5173,8 @@ export class AgentSession {
 		this._bindExtensionCore(this._extensionRunner);
 		this._applyExtensionBindings(this._extensionRunner);
 
-		const defaultActiveToolNames = this._baseToolsOverride
-			? Object.keys(this._baseToolsOverride)
+		const defaultActiveToolNames = this._baseToolDefinitionsOverride
+			? this._baseToolDefinitionsOverride.map(({ name }) => name)
 			: [
 					"read",
 					"grep",

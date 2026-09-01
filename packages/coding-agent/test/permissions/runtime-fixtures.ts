@@ -68,6 +68,7 @@ export function auditInputWithSecrets(): PermissionAuditEventInput & {
 
 interface RequestOverrides {
 	readonly action?: PermissionExecutionRequest<string>["action"];
+	readonly args?: unknown;
 	readonly settings?: PermissionSettings;
 	readonly trustedUserMessages?: PermissionExecutionRequest<string>["trustedUserMessages"];
 	readonly interactive?: boolean;
@@ -81,6 +82,7 @@ function executionRequest(
 ): PermissionExecutionRequest<string> {
 	return {
 		action: overrides.action ?? action,
+		args: overrides.args ?? { path: `${projectDir}/README.md` },
 		settings: overrides.settings ?? { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
 		trustedUserMessages: overrides.trustedUserMessages ?? [
 			{ messageId: "user-1", text: "Perform this exact requested action." },

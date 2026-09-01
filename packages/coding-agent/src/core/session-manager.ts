@@ -83,6 +83,7 @@ import {
 	isPlanControlEntryType,
 	isSessionControlEntryType,
 	isSessionDirectoryControlEntryType,
+	type PermissionDecisionSource,
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
@@ -985,7 +986,7 @@ export type RuntimeControlPayload = RuntimePayload<RuntimeControlEntry>;
 export interface PermissionDecisionPayload {
 	readonly actionId: string;
 	readonly toolName: string;
-	readonly source: "user" | "policy";
+	readonly source: PermissionDecisionSource;
 	readonly decision: "allow" | "deny";
 	readonly reason?: string;
 }

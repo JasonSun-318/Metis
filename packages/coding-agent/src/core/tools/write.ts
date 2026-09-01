@@ -7,6 +7,7 @@ import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts"
 import { getLanguageFromPath, highlightCode, type Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { assertNotRestrictedFsWrite } from "../memory/memory-path-guard.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { normalizeDisplayText, renderToolPath, replaceTabs, str } from "./render-utils.ts";
@@ -195,6 +196,7 @@ export function createWriteToolDefinition(
 		promptSnippet: "Create or overwrite files",
 		promptGuidelines: ["Use write only for new files or complete rewrites."],
 		parameters: writeSchema,
+		permission: permissionDescriptor(({ path }) => permissionClaim({ writePaths: [path] })),
 		async execute(
 			_toolCallId,
 			{ path, content }: { path: string; content: string },

@@ -35,6 +35,8 @@ const MAX_TOOL_NAME = 64;
 
 export interface McpToolRecord {
 	serverName: string;
+	serverIdentity: string;
+	implementationVersion: string;
 	rawName: string;
 	modelName: string;
 	tool: Tool;
@@ -227,6 +229,10 @@ function isEnabledTool(config: ResolvedMcpServerConfig, tool: Tool): boolean {
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function identityDigest(value: unknown): string {
+	return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
 function catalogIdentity(value: string, maximumCharacters: number): string {
@@ -468,10 +474,19 @@ export class McpManager {
 		);
 		this.records = candidates.map(({ config, snapshot, tool }) => {
 			const modelName = normalized.get(`${config.name}\0${tool.name}`)!;
+			const serverIdentity = identityDigest({
+				serverName: config.name,
+				transport: config.transport,
+				configuration: mcpServerFingerprint(config),
+				serverInfo: snapshot.serverInfo,
+				sessionIdentity: snapshot.sessionIdentity,
+			});
 			const sourceDescription =
 				[config.description, snapshot.instructions].filter(Boolean).join("\n\n") || undefined;
 			return {
 				serverName: config.name,
+				serverIdentity,
+				implementationVersion: identityDigest({ serverIdentity, tool }),
 				rawName: tool.name,
 				modelName,
 				tool,
@@ -486,6 +501,25 @@ export class McpManager {
 
 	getToolRecords(): readonly McpToolRecord[] {
 		return this.records;
+	}
+
+	getCatalogIdentity(): string {
+		return identityDigest(
+			[...this.clients.values()]
+				.map((client) => {
+					const config = client.resolvedConfig;
+					const snapshot = client.snapshot();
+					return {
+						serverName: config.name,
+						transport: config.transport,
+						configuration: mcpServerFingerprint(config),
+						serverInfo: snapshot.serverInfo,
+						sessionIdentity: snapshot.sessionIdentity,
+						capabilities: snapshot.capabilities,
+					};
+				})
+				.sort((left, right) => left.serverName.localeCompare(right.serverName)),
+		);
 	}
 
 	getDirectToolNames(): string[] {
@@ -505,6 +539,12 @@ export class McpManager {
 		return this.searchIndex.search(query, limit);
 	}
 
+	async searchToolsExact(query: string, limit: number, expectedCatalogIdentity: string): Promise<McpToolRecord[]> {
+		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
+		return this.searchTools(query, limit);
+	}
+
 	private recordFor(modelName: string): McpToolRecord {
 		const record = this.recordByModelName.get(modelName);
 		if (!record) throw new Error(`Unknown MCP tool "${modelName}"`);
@@ -520,11 +560,39 @@ export class McpManager {
 	async callTool(modelName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
 		await this.ensureCurrent();
 		const record = this.recordFor(modelName);
+		return this.callRecord(record, args, signal);
+	}
+
+	async callToolExact(
+		modelName: string,
+		expectedImplementationVersion: string,
+		args: Record<string, unknown>,
+		signal?: AbortSignal,
+	): Promise<CallToolResult> {
+		await this.ensureCurrent();
+		const record = this.recordFor(modelName);
+		if (record.implementationVersion !== expectedImplementationVersion) {
+			throw new Error("MCP tool identity changed; retry the tool call");
+		}
+		return this.callRecord(record, args, signal);
+	}
+
+	private callRecord(
+		record: McpToolRecord,
+		args: Record<string, unknown>,
+		signal?: AbortSignal,
+	): Promise<CallToolResult> {
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(record.serverName);
 			if (!client) throw new Error(`Unknown MCP server "${record.serverName}"`);
 			return client.callTool(record.rawName, args, signal);
 		});
+	}
+
+	private assertCatalogIdentity(expected: string | undefined): void {
+		if (expected !== undefined && this.getCatalogIdentity() !== expected) {
+			throw new Error("MCP catalog identity changed; retry the tool call");
+		}
 	}
 
 	getToolAnnotations(modelName: string): ToolAnnotations | undefined {
@@ -554,9 +622,10 @@ export class McpManager {
 		});
 	}
 
-	async listResources(server?: string, cursor?: string): Promise<unknown> {
+	async listResources(server?: string, cursor?: string, expectedCatalogIdentity?: string): Promise<unknown> {
 		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
 		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -566,9 +635,10 @@ export class McpManager {
 		return this.aggregate("resources", (client) => client.listResources());
 	}
 
-	async listResourceTemplates(server?: string, cursor?: string): Promise<unknown> {
+	async listResourceTemplates(server?: string, cursor?: string, expectedCatalogIdentity?: string): Promise<unknown> {
 		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
 		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -578,8 +648,14 @@ export class McpManager {
 		return this.aggregate("resources", (client) => client.listResourceTemplates());
 	}
 
-	async readResource(server: string, uri: string, signal?: AbortSignal): Promise<ReadResourceResult> {
+	async readResource(
+		server: string,
+		uri: string,
+		signal?: AbortSignal,
+		expectedCatalogIdentity?: string,
+	): Promise<ReadResourceResult> {
 		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(server);
 			if (!client) throw new Error(`Unknown MCP server "${server}"`);
@@ -587,9 +663,10 @@ export class McpManager {
 		});
 	}
 
-	async listPrompts(server?: string, cursor?: string): Promise<unknown> {
+	async listPrompts(server?: string, cursor?: string, expectedCatalogIdentity?: string): Promise<unknown> {
 		if (cursor && !server) throw new Error("cursor can only be used when a server is specified");
 		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
 		if (server)
 			return this.withActiveGeneration((clients) => {
 				const client = clients.get(server);
@@ -599,8 +676,14 @@ export class McpManager {
 		return this.aggregate("prompts", (client) => client.listPrompts());
 	}
 
-	async getPrompt(server: string, name: string, args?: Record<string, string>): Promise<GetPromptResult> {
+	async getPrompt(
+		server: string,
+		name: string,
+		args?: Record<string, string>,
+		expectedCatalogIdentity?: string,
+	): Promise<GetPromptResult> {
 		await this.ensureCurrent();
+		this.assertCatalogIdentity(expectedCatalogIdentity);
 		return this.withActiveGeneration((clients) => {
 			const client = clients.get(server);
 			if (!client) throw new Error(`Unknown MCP server "${server}"`);

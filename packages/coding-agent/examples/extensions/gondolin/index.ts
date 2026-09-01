@@ -24,13 +24,13 @@ import { RealFSProvider, VM } from "@earendil-works/gondolin";
 import type { ExtensionAPI, ExtensionContext } from "@metis/coding-agent";
 import {
 	type BashOperations,
-	createBashTool,
-	createEditTool,
-	createFindTool,
-	createGrepTool,
-	createLsTool,
-	createReadTool,
-	createWriteTool,
+	createBashToolDefinition,
+	createEditToolDefinition,
+	createFindToolDefinition,
+	createGrepToolDefinition,
+	createLsToolDefinition,
+	createReadToolDefinition,
+	createWriteToolDefinition,
 	DEFAULT_MAX_BYTES,
 	type EditOperations,
 	type FindOperations,
@@ -364,13 +364,13 @@ function createGondolinBashOps(vm: VM, localCwd: string, shellPath: string): Bas
 
 export default function (metis: ExtensionAPI) {
 	const localCwd = process.cwd();
-	const localRead = createReadTool(localCwd);
-	const localWrite = createWriteTool(localCwd);
-	const localEdit = createEditTool(localCwd);
-	const localBash = createBashTool(localCwd);
-	const localGrep = createGrepTool(localCwd);
-	const localFind = createFindTool(localCwd);
-	const localLs = createLsTool(localCwd);
+	const localRead = createReadToolDefinition(localCwd);
+	const localWrite = createWriteToolDefinition(localCwd);
+	const localEdit = createEditToolDefinition(localCwd);
+	const localBash = createBashToolDefinition(localCwd);
+	const localGrep = createGrepToolDefinition(localCwd);
+	const localFind = createFindToolDefinition(localCwd);
+	const localLs = createLsToolDefinition(localCwd);
 
 	let vm: VM | undefined;
 	let vmStarting: Promise<VM> | undefined;
@@ -444,10 +444,10 @@ export default function (metis: ExtensionAPI) {
 		...localRead,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createReadTool(GUEST_WORKSPACE, {
+			const tool = createReadToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinReadOps(activeVm, localCwd),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
@@ -455,10 +455,10 @@ export default function (metis: ExtensionAPI) {
 		...localWrite,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createWriteTool(GUEST_WORKSPACE, {
+			const tool = createWriteToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinWriteOps(activeVm, localCwd),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
@@ -466,10 +466,10 @@ export default function (metis: ExtensionAPI) {
 		...localEdit,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createEditTool(GUEST_WORKSPACE, {
+			const tool = createEditToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinEditOps(activeVm, localCwd),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
@@ -477,10 +477,10 @@ export default function (metis: ExtensionAPI) {
 		...localBash,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createBashTool(GUEST_WORKSPACE, {
+			const tool = createBashToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinBashOps(activeVm, localCwd, shellPath),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
@@ -488,10 +488,10 @@ export default function (metis: ExtensionAPI) {
 		...localLs,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createLsTool(GUEST_WORKSPACE, {
+			const tool = createLsToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinLsOps(activeVm, localCwd),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 
@@ -499,10 +499,10 @@ export default function (metis: ExtensionAPI) {
 		...localFind,
 		async execute(id, params, signal, onUpdate, ctx) {
 			const activeVm = await ensureVm(ctx);
-			const tool = createFindTool(GUEST_WORKSPACE, {
+			const tool = createFindToolDefinition(GUEST_WORKSPACE, {
 				operations: createGondolinFindOps(activeVm, localCwd),
 			});
-			return tool.execute(id, params, signal, onUpdate);
+			return tool.execute(id, params, signal, onUpdate, ctx);
 		},
 	});
 

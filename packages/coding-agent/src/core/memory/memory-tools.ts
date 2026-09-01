@@ -3,6 +3,7 @@ import type { AgentToolResult } from "@metis/agent-core";
 import { type Static, Type } from "typebox";
 import { Value } from "typebox/value";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { writeProjection } from "./memory-projection.ts";
 import { looksLikeSecret } from "./memory-secrets.ts";
 import type { MemoryStore } from "./memory-store.ts";
@@ -442,6 +443,7 @@ export function createCommitFactsTool(ctx: MemoryToolContext): ToolDefinition {
 		description:
 			"Submit durable memory facts to append. Call with an empty facts array when nothing should be stored.",
 		parameters: CommitFactsParamsSchema,
+		permission: permissionDescriptor(() => permissionClaim({ writePaths: [ctx.agentDir] })),
 		executionMode: "sequential",
 		async execute(_toolCallId, params, signal) {
 			const executionSignal = signal ?? ctx.signal;
@@ -464,6 +466,7 @@ export function createReconcileFactsTool(ctx: MemoryToolContext): ToolDefinition
 		description:
 			"Reconcile durable memory: merge, supersede, delete, add, or moveScope. Recency is enforced in code.",
 		parameters: ReconcileFactsParamsSchema,
+		permission: permissionDescriptor(() => permissionClaim({ writePaths: [ctx.agentDir] })),
 		executionMode: "sequential",
 		async execute(_toolCallId, params, signal) {
 			const executionSignal = signal ?? ctx.signal;

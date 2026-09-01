@@ -1,6 +1,7 @@
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import type { ExtensionFactory } from "../../../src/index.ts";
+import { noEffectTestPermission } from "../../helpers/tool-definition.ts";
 import { createHarness } from "../harness.ts";
 
 function toolNames(tools: Array<{ name: string }>): string[] {
@@ -17,6 +18,7 @@ describe("regression #5109: exclude tools", () => {
 					description: "Ask a question",
 					promptSnippet: "Ask a question",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "ok" }],
 						details: {},
@@ -28,6 +30,7 @@ describe("regression #5109: exclude tools", () => {
 					description: "Dynamic test tool",
 					promptSnippet: "Run dynamic test behavior",
 					parameters: Type.Object({}),
+					permission: noEffectTestPermission(),
 					execute: async () => ({
 						content: [{ type: "text", text: "ok" }],
 						details: {},

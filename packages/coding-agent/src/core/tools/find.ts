@@ -10,6 +10,7 @@ import { waitForChildProcess } from "../../utils/child-process.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
+import { fileReadPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import type { ToolSubprocessExecutor, WrappedToolSubprocess } from "./subprocess.ts";
@@ -124,6 +125,9 @@ export function createFindToolDefinition(
 		description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects .gitignore. Output is truncated to ${DEFAULT_LIMIT} results or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first).`,
 		promptSnippet: "Find files by glob pattern (respects .gitignore)",
 		parameters: findSchema,
+		permission: permissionDescriptor(({ path }, context) =>
+			fileReadPermissionClaim(path ?? ".", context, { traversal: true }),
+		),
 		async execute(
 			toolCallId,
 			{ pattern, path: searchDir, limit }: { pattern: string; path?: string; limit?: number },

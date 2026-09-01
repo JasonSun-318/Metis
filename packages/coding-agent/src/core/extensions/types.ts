@@ -50,6 +50,7 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.ts";
 import type { KeybindingsManager } from "../keybindings.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
+import type { NetworkEndpoint, NormalizedPermissionAction } from "../permissions/types.ts";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -455,6 +456,27 @@ export interface ToolRenderContext<TState = any, TArgs = any> {
 /**
  * Tool definition for registerTool().
  */
+export interface ToolPermissionContext {
+	readonly actionId: string;
+	readonly cwd: string;
+	readonly workspaceRoots: readonly string[];
+	/** Exact engine-owned temporary directory prepared for this invocation, when present. */
+	readonly managedWorkDir?: string;
+}
+
+export interface ToolPermissionClaim {
+	readonly readPaths: readonly string[];
+	readonly writePaths: readonly string[];
+	readonly networkEndpoints: readonly NetworkEndpoint[];
+	readonly command?: string;
+	readonly effects: NormalizedPermissionAction["effects"];
+}
+
+export interface ToolPermissionDescriptor<TParams> {
+	readonly version: 1;
+	describe(params: TParams, context: ToolPermissionContext): ToolPermissionClaim;
+}
+
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = any> {
 	/** Tool name (used in LLM tool calls) */
 	name: string;
@@ -468,6 +490,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
 	promptGuidelines?: string[];
 	/** Parameter schema (TypeBox) */
 	parameters: TParams;
+	/** Complete, side-effect-free permission semantics for parsed parameters. */
+	permission: ToolPermissionDescriptor<Static<TParams>>;
 	/** Controls whether ToolExecutionComponent renders the standard colored shell or the tool renders its own framing. */
 	renderShell?: "default" | "self";
 

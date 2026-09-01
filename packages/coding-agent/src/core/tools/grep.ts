@@ -11,6 +11,7 @@ import { waitForChildProcess } from "../../utils/child-process.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
+import { fileReadPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { getTextOutput, invalidArgText, shortenPath, str } from "./render-utils.ts";
 import type { ToolSubprocessExecutor, WrappedToolSubprocess } from "./subprocess.ts";
@@ -150,6 +151,9 @@ export function createGrepToolDefinition(
 		description: `Search file contents for a pattern. Returns matching lines with file paths and line numbers. Respects .gitignore. Use offset and limit to page through results. Output is truncated to ${DEFAULT_LIMIT} matches or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Long lines are truncated to ${GREP_MAX_LINE_LENGTH} chars.`,
 		promptSnippet: "Search file contents for patterns (respects .gitignore)",
 		parameters: grepSchema,
+		permission: permissionDescriptor(({ path }, context) =>
+			fileReadPermissionClaim(path ?? ".", context, { traversal: true }),
+		),
 		async execute(
 			toolCallId,
 			{

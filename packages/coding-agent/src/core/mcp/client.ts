@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -34,6 +35,8 @@ export type McpConnectionState =
 
 export interface McpCatalogSnapshot {
 	serverName: string;
+	/** Changes whenever a transport session is replaced, including reconnects. */
+	sessionIdentity: string;
 	serverInfo?: { name: string; version: string };
 	capabilities: ServerCapabilities;
 	instructions?: string;
@@ -55,6 +58,8 @@ function errorMessage(error: unknown): string {
 }
 
 export class McpServerClient {
+	private readonly clientIdentity = randomUUID();
+	private connectionGeneration = 0;
 	private config: ResolvedMcpServerConfig;
 	private readonly authStorage: AuthStorage;
 	private client?: Client;
@@ -76,6 +81,7 @@ export class McpServerClient {
 		this.connectionState = config.enabled ? "closed" : "disabled";
 		this.catalog = {
 			serverName: config.name,
+			sessionIdentity: `${this.clientIdentity}:0`,
 			capabilities: {},
 			tools: [],
 			resources: [],
@@ -293,8 +299,10 @@ export class McpServerClient {
 
 	private async loadCatalog(client: Client): Promise<void> {
 		const serverInfo = client.getServerVersion();
+		this.connectionGeneration += 1;
 		this.catalog = {
 			serverName: this.config.name,
+			sessionIdentity: `${this.clientIdentity}:${this.connectionGeneration}`,
 			serverInfo: serverInfo ? { name: serverInfo.name, version: serverInfo.version } : undefined,
 			capabilities: client.getServerCapabilities() ?? {},
 			instructions: client.getInstructions(),

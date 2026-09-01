@@ -141,7 +141,7 @@ describe("MCP agent loop", () => {
 		}
 	});
 
-	it("uses MCP annotations only to enrich one destructive-tool approval", async () => {
+	it("denies an incompletely annotated destructive MCP tool before approval or execution", async () => {
 		const requestPermissionApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({
 			decision: "allow" as const,
 			reason: "test approval",
@@ -175,13 +175,52 @@ describe("MCP agent loop", () => {
 
 		await harness.session.prompt("Delete it");
 
-		expect(requestPermissionApproval).toHaveBeenCalledTimes(1);
-		expect(requestPermissionApproval.mock.calls[0]?.[0].action).toMatchObject({
-			toolName: "mcp__docs__destructive_tool",
-			provenance: "mcp",
-			risks: ["destructive", "external-side-effect", "custom"],
+		expect(requestPermissionApproval).not.toHaveBeenCalled();
+		expect(server.toolCallCount()).toBe(0);
+	});
+
+	it("reviews and executes one exactly scoped destructive MCP call", async () => {
+		const requestPermissionApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({
+			decision: "allow" as const,
+			reason: "test approval",
+		}));
+		const destructive: Tool = {
+			name: "delete_document",
+			description: "Delete one remote document",
+			inputSchema: {
+				type: "object",
+				properties: { path: { type: "string" } },
+				required: ["path"],
+				additionalProperties: false,
+			},
+			annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+		};
+		const server = await createMcpTestServer({ tools: [destructive] });
+		servers.push(server);
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({ mcpServers: { docs: { url: String(server.url) } } }),
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
 		});
+		const harness = await createHarness({
+			mcpManager: manager,
+			permissionSettings: { mode: "ask" },
+			requestPermissionApproval,
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "delete document" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage(fauxToolCall("mcp__docs__delete_document", { path: "remote/document-1" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("Delete remote document 1");
+
+		expect(requestPermissionApproval).toHaveBeenCalledOnce();
 		expect(server.toolCallCount()).toBe(1);
+		expect(server.lastToolCallName()).toBe("delete_document");
 	});
 
 	it("reloads MCP before resources and disposes an injected manager exactly once", async () => {
@@ -190,6 +229,7 @@ describe("MCP agent loop", () => {
 		const disposeMcp = vi.fn();
 		const manager = {
 			getToolRecords: () => [],
+			getCatalogIdentity: () => "empty-catalog",
 			getDirectToolNames: () => [],
 			subscribeCatalog: vi.fn(() => unsubscribe),
 			reload: reloadMcp,

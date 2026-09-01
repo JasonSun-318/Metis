@@ -2,6 +2,7 @@ import { Text } from "@metis/tui";
 import { type Static, Type } from "typebox";
 import type { Theme } from "../modes/interactive/theme/theme.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
+import { permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 import { getTextOutput } from "./tools/render-utils.ts";
 
 export interface TaskItem {
@@ -72,6 +73,7 @@ export function createSetTasksToolDefinition(): ToolDefinition<typeof SetTasksPa
 			"Send the complete visible task list for multi-step work; skip simple tasks. Each call replaces the previous list. Keep completed=false until finished; multiple tasks may remain false. Call only on meaningful changes. When all tasks are completed, tracking ends automatically; no close call is needed.",
 		promptSnippet: "Set the visible task list",
 		parameters: SetTasksParams,
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
 		renderShell: "self",
 		async execute(_toolCallId, input) {

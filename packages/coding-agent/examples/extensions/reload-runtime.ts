@@ -5,7 +5,7 @@
  * tool that queues a follow-up command to trigger reload.
  */
 
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { type ExtensionAPI, permissionClaim, permissionDescriptor } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 export default function (metis: ExtensionAPI) {
@@ -26,6 +26,7 @@ export default function (metis: ExtensionAPI) {
 		label: "Reload Runtime",
 		description: "Reload extensions, skills, prompts, themes, and context files",
 		parameters: Type.Object({}),
+		permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 		async execute() {
 			metis.sendUserMessage("/reload-runtime", { deliverAs: "followUp" });
 			return {

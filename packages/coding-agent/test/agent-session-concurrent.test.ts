@@ -22,6 +22,7 @@ import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
 import type { BuildSystemPromptOptions } from "../src/core/system-prompt.ts";
+import { testToolDefinitions } from "./helpers/tool-definition.ts";
 import { createTestExtensionsResult, createTestResourceLoader } from "./utilities.ts";
 
 // Mock stream that mimics AssistantMessageEventStream
@@ -438,7 +439,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			cwd: tempDir,
 			modelRegistry,
 			resourceLoader: createTestResourceLoader(),
-			baseToolsOverride: { dummy: tool },
+			baseToolDefinitionsOverride: testToolDefinitions([tool]),
 		});
 
 		const snapshots: string[][] = [];
@@ -585,7 +586,7 @@ describe("AgentSession concurrent prompt guard", () => {
 			cwd: tempDir,
 			modelRegistry,
 			resourceLoader: createTestResourceLoader(),
-			baseToolsOverride: { dummy: tool },
+			baseToolDefinitionsOverride: testToolDefinitions([tool]),
 		});
 
 		const sessionWithRunner = session as unknown as {

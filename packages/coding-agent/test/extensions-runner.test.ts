@@ -357,6 +357,7 @@ describe("ExtensionRunner", () => {
 						label: "${name}",
 						description: "Test tool",
 						parameters: Type.Object({}),
+						permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
 						execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 					});
 				}
@@ -381,6 +382,7 @@ describe("ExtensionRunner", () => {
 						label: "shared",
 						description: "first",
 						parameters: Type.Object({}),
+						permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
 						execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 					});
 				}
@@ -393,6 +395,7 @@ describe("ExtensionRunner", () => {
 						label: "shared",
 						description: "second",
 						parameters: Type.Object({}),
+						permission: { version: 1, describe: () => ({ readPaths: [], writePaths: [], networkEndpoints: [], effects: [] }) },
 						execute: async () => ({ content: [{ type: "text", text: "ok" }], details: {} }),
 					});
 				}

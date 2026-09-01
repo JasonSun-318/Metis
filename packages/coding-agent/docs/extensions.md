@@ -58,7 +58,7 @@ See [examples/extensions/](../examples/extensions/) for working implementations.
 Create `~/.metis/agent/extensions/my-extension.ts`:
 
 ```typescript
-import type { ExtensionAPI } from "@metis/coding-agent";
+import { permissionClaim, permissionDescriptor, type ExtensionAPI } from "@metis/coding-agent";
 import { Type } from "typebox";
 
 export default function (metis: ExtensionAPI) {
@@ -82,6 +82,7 @@ export default function (metis: ExtensionAPI) {
     parameters: Type.Object({
       name: Type.String({ description: "Name to greet" }),
     }),
+    permission: permissionDescriptor(() => permissionClaim()),
     async execute(toolCallId, params, signal, onUpdate, ctx) {
       return {
         content: [{ type: "text", text: `Hello, ${params.name}!` }],
@@ -1328,6 +1329,8 @@ Subscribe to events. See [Events](#events) for event types and return values.
 ### metis.registerTool(definition)
 
 Register a custom tool callable by the LLM. See [Custom Tools](#custom-tools) for full details.
+
+Every executable tool must provide a `permission` descriptor that derives its exact observed paths, network endpoints, command, and effects from the validated parameters. Registration fails when the descriptor is absent or malformed; an incomplete or throwing descriptor denies that invocation. `permissionClaim()` is appropriate only for a pure tool with no filesystem, network, shell, or external effect.
 
 `metis.registerTool()` works both during extension load and after startup. You can call it inside `session_start`, command handlers, or other event handlers. New tools are refreshed immediately in the same session, so they appear in `metis.getAllTools()` and are callable by the LLM without `/reload`.
 

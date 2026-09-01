@@ -18,7 +18,14 @@
  */
 
 import { StringEnum } from "@metis/ai";
-import type { ExtensionAPI, ExtensionContext, Theme, ToolExecutionMode } from "@metis/coding-agent";
+import {
+	type ExtensionAPI,
+	type ExtensionContext,
+	permissionClaim,
+	permissionDescriptor,
+	type Theme,
+	type ToolExecutionMode,
+} from "@metis/coding-agent";
 import { type Component, matchesKey, Text, truncateToWidth, visibleWidth } from "@metis/tui";
 import { Type } from "typebox";
 
@@ -872,6 +879,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 					"The single action to perform this call. Emit multiple tic_tac_toe calls in one response to string actions together.",
 			}),
 		}),
+		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential" as ToolExecutionMode,
 
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
@@ -976,6 +984,7 @@ Decide the target cell first, then dump every action for the turn in one go.
 			"Return the current tic-tac-toe board state and YOUR cursor position (Player O). Takes no arguments. Use this if you need the current state restated mid-turn (for example after a failed play). The user's cursor is never exposed.",
 		promptSnippet: "Inspect the tic-tac-toe board and your cursor",
 		parameters: Type.Object({}),
+		permission: permissionDescriptor(() => permissionClaim()),
 
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
 			const boardAscii = boardToAscii(gameState.board, gameState.agentCursorRow, gameState.agentCursorCol);

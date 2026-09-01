@@ -10,6 +10,7 @@ import { DefaultResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession } from "../src/core/sdk.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 
 describe("AgentSession dynamic tool registration", () => {
 	let tempDir: string;
@@ -45,6 +46,7 @@ describe("AgentSession dynamic tool registration", () => {
 							promptSnippet: "Run dynamic test behavior",
 							promptGuidelines: ["Use dynamic_tool when the user asks for dynamic behavior tests."],
 							parameters: Type.Object({}),
+							permission: permissionDescriptor(() => permissionClaim()),
 							execute: async () => ({
 								content: [{ type: "text", text: "ok" }],
 								details: {},
@@ -119,6 +121,7 @@ describe("AgentSession dynamic tool registration", () => {
 					label: "SDK Tool",
 					description: "Tool registered through createAgentSession",
 					parameters: Type.Object({}),
+					permission: permissionDescriptor(() => permissionClaim()),
 					execute: async () => ({
 						content: [{ type: "text", text: "ok" }],
 						details: {},
@@ -155,6 +158,7 @@ describe("AgentSession dynamic tool registration", () => {
 							label: "Hidden Tool",
 							description: "Description should not appear in available tools",
 							parameters: Type.Object({}),
+							permission: permissionDescriptor(() => permissionClaim()),
 							execute: async () => ({
 								content: [{ type: "text", text: "ok" }],
 								details: {},

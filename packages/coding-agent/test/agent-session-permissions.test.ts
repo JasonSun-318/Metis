@@ -1,33 +1,40 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentTool } from "@metis/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
 import type { BashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
+import { canonicalizeActionPath } from "../src/utils/paths.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";
 import { createTestResourceLoader } from "./utilities.ts";
 
 function customTool(name = "custom_action") {
+	const parameters = Type.Object({ value: Type.String() });
 	const execute = vi.fn(async (_toolCallId: string, _params: unknown) => ({
 		content: [{ type: "text" as const, text: "done" }],
 		details: {},
 	}));
-	const tool: AgentTool = {
+	const tool: ToolDefinition<typeof parameters> = {
 		name,
 		label: "Custom action",
 		description: "Test custom action",
-		parameters: Type.Object({ value: Type.String() }),
+		parameters,
+		permission: permissionDescriptor((_params, context) =>
+			permissionClaim({ writePaths: [join(context.cwd, `.permission-fixture-${name}`)] }),
+		),
 		execute,
 	};
 	return { tool, execute };
 }
 
 function fakeBashBoundary() {
+	let cwd = process.cwd();
 	const hostExec = vi.fn(async () => ({ exitCode: 0 }));
 	const sandboxExec = vi.fn(async () => ({ exitCode: 0 }));
 	const sandbox: WorkspaceSandbox = {
@@ -39,14 +46,22 @@ function fakeBashBoundary() {
 	const boundary = createInteractiveBashBoundary({
 		hostOperations: { exec: hostExec as BashOperations["exec"] },
 		context: () => ({
-			cwd: process.cwd(),
-			workspaceRoots: [process.cwd()],
+			cwd,
+			workspaceRoots: [cwd],
 			readOnlyRoots: [],
 			writeRoots: [],
 		}),
 		createSandbox: createSandbox as never,
 	});
-	return { boundary, hostExec, sandboxExec, createSandbox };
+	return {
+		boundary,
+		hostExec,
+		sandboxExec,
+		createSandbox,
+		setCwd: (next: string) => {
+			cwd = next;
+		},
+	};
 }
 
 describe("AgentSession permission enforcement", () => {
@@ -61,8 +76,8 @@ describe("AgentSession permission enforcement", () => {
 		{ mode: "ask", command: "rm -rf ./build", asks: true, target: "sandbox" },
 		{ mode: "auto", command: "pwd", asks: false, target: "sandbox" },
 		{ mode: "auto", command: "rm -rf ./build", asks: true, target: "sandbox" },
-		{ mode: "auto", command: "git push origin main", asks: true, target: "host" },
-		{ mode: "full", command: "rm -rf ./build", asks: false, target: "host" },
+		{ mode: "auto", command: "curl https://example.test", asks: true, target: "sandbox" },
+		{ mode: "full", command: "rm -rf ./build", asks: true, target: "host" },
 	] as const)("routes $mode Bash '$command' to $target", async ({ mode, command, asks, target }) => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
@@ -71,6 +86,7 @@ describe("AgentSession permission enforcement", () => {
 			requestPermissionApproval: requestApproval,
 			interactiveBashBoundary: fake.boundary,
 		});
+		fake.setCwd(harness.tempDir);
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
@@ -85,6 +101,31 @@ describe("AgentSession permission enforcement", () => {
 		expect(fake.createSandbox).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
 	});
 
+	it("rejects a Bash network command whose destination cannot be bound exactly", async () => {
+		const fake = fakeBashBoundary();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionSettings: { mode: "auto" },
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+		});
+		fake.setCwd(harness.tempDir);
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "git push origin main" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("push it");
+
+		expect(requestApproval).not.toHaveBeenCalled();
+		expect(fake.sandboxExec).not.toHaveBeenCalled();
+		expect(fake.hostExec).not.toHaveBeenCalled();
+		const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
+		expect(toolResult?.isError).toBe(true);
+		expect(getMessageText(toolResult)).toMatch(/scope is incomplete/iu);
+	});
+
 	it("reuses an exact remembered Bash approval but asks again when command text changes", async () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const, remember: "project" as const }));
@@ -94,6 +135,7 @@ describe("AgentSession permission enforcement", () => {
 			interactiveBashBoundary: fake.boundary,
 			withAgentDir: true,
 		});
+		fake.setCwd(harness.tempDir);
 		harnesses.push(harness);
 
 		for (const command of ["rm -rf ./build", "rm -rf ./build", "rm -rf ./cache"]) {
@@ -113,7 +155,7 @@ describe("AgentSession permission enforcement", () => {
 		const { tool, execute } = customTool();
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			tools: [tool],
+			toolDefinitions: [tool],
 			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: requestApproval,
 		});
@@ -126,7 +168,7 @@ describe("AgentSession permission enforcement", () => {
 		await harness.session.prompt("run it");
 
 		expect(requestApproval).toHaveBeenCalledOnce();
-		expect(requestApproval.mock.calls[0]?.[0].cwd).toBe(harness.tempDir);
+		expect(requestApproval.mock.calls[0]?.[0].cwd).toBe(canonicalizeActionPath(harness.tempDir, harness.tempDir));
 		expect(execute).toHaveBeenCalledOnce();
 		expect(
 			harness.sessionManager
@@ -138,7 +180,7 @@ describe("AgentSession permission enforcement", () => {
 	it("denies without execution and writes one user decision", async () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
-			tools: [tool],
+			toolDefinitions: [tool],
 			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: async () => ({ decision: "deny", reason: "No" }),
 		});
@@ -187,7 +229,7 @@ describe("AgentSession permission enforcement", () => {
 	it("fails closed without UI and does not record a false user denial", async () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
-			tools: [tool],
+			toolDefinitions: [tool],
 			permissionSettings: { mode: "ask" },
 		});
 		harnesses.push(harness);
@@ -209,10 +251,12 @@ describe("AgentSession permission enforcement", () => {
 	it("does not let approval UI mutate execution arguments", async () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
-			tools: [tool],
+			toolDefinitions: [tool],
 			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: async (request) => {
-				(request.args as { value: string }).value = "changed-in-ui";
+				expect(() => {
+					(request.args as { value: string }).value = "changed-in-ui";
+				}).toThrow();
 				return { decision: "allow" };
 			},
 		});
@@ -232,7 +276,7 @@ describe("AgentSession permission enforcement", () => {
 		const { tool, execute } = customTool();
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
-			tools: [tool],
+			toolDefinitions: [tool],
 			permissionSettings: { mode: "full" },
 			requestPermissionApproval: requestApproval,
 		});
@@ -367,8 +411,7 @@ describe("AgentSession permission enforcement", () => {
 			expect(existsSync(path)).toBe(false);
 			expect(
 				harness.session.messages.some(
-					(message) =>
-						message.role === "toolResult" && getMessageText(message).includes("workspace roots changed"),
+					(message) => message.role === "toolResult" && /workspace roots changed/iu.test(getMessageText(message)),
 				),
 			).toBe(true);
 		} finally {
@@ -382,7 +425,7 @@ describe("AgentSession permission enforcement", () => {
 		let active = 0;
 		let maximum = 0;
 		const harness = await createHarness({
-			tools: [first.tool, second.tool],
+			toolDefinitions: [first.tool, second.tool],
 			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: async () => {
 				active += 1;
@@ -417,7 +460,7 @@ describe("AgentSession permission enforcement", () => {
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
-		harness.session.installHostTools([inspect.tool, spawn.tool] as never, {
+		harness.session.installHostTools([inspect.tool, spawn.tool], {
 			automaticPermissionToolNames: ["inspect_agents"],
 		});
 		harness.setResponses([
@@ -434,29 +477,22 @@ describe("AgentSession permission enforcement", () => {
 		expect(spawn.execute).toHaveBeenCalledOnce();
 		expect(requestApproval).toHaveBeenCalledOnce();
 		expect(requestApproval.mock.calls[0]?.[0].action.toolName).toBe("spawn_agent");
+		expect(requestApproval.mock.calls[0]?.[0].action.provenance).toBe("host");
 	});
 
 	it("does not transfer host-control trust to a same-name replacement definition", async () => {
 		const inspect = customTool("inspect_agents");
+		const replacement = customTool("inspect_agents");
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
 			permissionSettings: { mode: "ask" },
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
-		harness.session.installHostTools([inspect.tool] as never, {
+		harness.session.installHostTools([inspect.tool], {
 			automaticPermissionToolNames: ["inspect_agents"],
 		});
-		const registry = (
-			harness.session as unknown as {
-				_toolDefinitions: Map<string, { definition: AgentTool; sourceInfo: unknown }>;
-			}
-		)._toolDefinitions;
-		const registered = registry.get("inspect_agents")!;
-		registry.set("inspect_agents", {
-			...registered,
-			definition: { ...registered.definition },
-		});
+		harness.session.installHostTools([replacement.tool]);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("inspect_agents", { value: "inspect" })], { stopReason: "toolUse" }),
 			fauxAssistantMessage("done"),
@@ -465,7 +501,25 @@ describe("AgentSession permission enforcement", () => {
 		await harness.session.prompt("inspect");
 
 		expect(requestApproval).toHaveBeenCalledOnce();
-		expect(inspect.execute).toHaveBeenCalledOnce();
+		expect(inspect.execute).not.toHaveBeenCalled();
+		expect(replacement.execute).toHaveBeenCalledOnce();
+	});
+
+	it("delegates only explicitly reconstructible host tools", async () => {
+		const browser = customTool("browser_act");
+		const spawn = customTool("spawn_agent");
+		const replacement = customTool("spawn_agent");
+		const harness = await createHarness({ permissionSettings: { mode: "full" } });
+		harnesses.push(harness);
+		harness.session.installHostTools([browser.tool, spawn.tool], {
+			delegatableToolNames: ["spawn_agent"],
+		});
+
+		expect(harness.session.getDelegatableToolNames()).toContain("spawn_agent");
+		expect(harness.session.getDelegatableToolNames()).not.toContain("browser_act");
+
+		harness.session.installHostTools([replacement.tool]);
+		expect(harness.session.getDelegatableToolNames()).not.toContain("spawn_agent");
 	});
 
 	describe("Plan mode Bash boundary", () => {
@@ -475,6 +529,7 @@ describe("AgentSession permission enforcement", () => {
 				permissionSettings: { mode: "full" },
 				interactiveBashBoundary: fake.boundary,
 			});
+			fake.setCwd(harness.tempDir);
 			harnesses.push(harness);
 			await harness.session.setCollaborationMode("plan");
 			harness.setResponses([
@@ -488,18 +543,19 @@ describe("AgentSession permission enforcement", () => {
 			expect(fake.hostExec).not.toHaveBeenCalled();
 			const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
 			expect(toolResult?.isError).toBe(true);
-			expect(getMessageText(toolResult)).toMatch(/Plan mode.*sensitive-read/iu);
+			expect(getMessageText(toolResult)).toMatch(/approval ceiling.*sensitive-read/iu);
 		});
 
 		it("routes harmless Bash to sandbox without approval and rejects risky commands", async () => {
 			const fake = fakeBashBoundary();
-			const bindSpy = vi.spyOn(fake.boundary, "bindLegacy");
+			const bindSpy = vi.spyOn(fake.boundary, "bind");
 			const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 			const harness = await createHarness({
 				permissionSettings: { mode: "ask" },
 				requestPermissionApproval: requestApproval,
 				interactiveBashBoundary: fake.boundary,
 			});
+			fake.setCwd(harness.tempDir);
 			harnesses.push(harness);
 			const trackedFile = join(harness.tempDir, "tracked.txt");
 			writeFileSync(trackedFile, "original");
@@ -511,15 +567,15 @@ describe("AgentSession permission enforcement", () => {
 			]);
 			await harness.session.prompt("run pwd");
 			expect(requestApproval).not.toHaveBeenCalled();
-			expect(bindSpy).toHaveBeenCalledWith(expect.any(String), "sandbox");
+			expect(bindSpy).toHaveBeenCalledWith(expect.objectContaining({ executionTarget: "sandbox" }));
 			expect(fake.sandboxExec).toHaveBeenCalledOnce();
 			expect(fake.hostExec).not.toHaveBeenCalled();
 
 			for (const [command, pattern] of [
-				["curl https://example.com", /Plan mode.*network/iu],
-				["sudo true", /Plan mode.*elevation/iu],
-				["cat .env", /Plan mode.*sensitive-read/iu],
-				["bash -c 'cat package.json'", /Plan mode.*unknown/iu],
+				["curl https://example.com", /read-only sandbox.*external-side-effect/iu],
+				["sudo true", /read-only sandbox.*elevation/iu],
+				["cat .env", /approval ceiling.*sensitive-read/iu],
+				["bash -c 'cat package.json'", /read-only sandbox.*write scope/iu],
 			] as const) {
 				fake.sandboxExec.mockClear();
 				fake.hostExec.mockClear();
@@ -586,6 +642,7 @@ describe("AgentSession permission enforcement", () => {
 			initialActiveToolNames: ["bash", "read"],
 			interactiveBashBoundary: fake.boundary,
 		});
+		fake.setCwd(harness.tempDir);
 		harnesses.push(harness);
 		harness.setResponses([
 			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),

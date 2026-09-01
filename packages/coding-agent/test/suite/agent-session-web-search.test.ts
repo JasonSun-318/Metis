@@ -49,7 +49,7 @@ describe("AgentSession web search", () => {
 			const result = harness.session.messages.find(
 				(message) => message.role === "toolResult" && message.toolName === "web_search",
 			);
-			expect(getMessageText(result)).toContain("provider changed after permission approval");
+			expect(getMessageText(result)).toContain("Network scope changed");
 			expect(request).not.toHaveBeenCalled();
 		} finally {
 			request.mockRestore();
