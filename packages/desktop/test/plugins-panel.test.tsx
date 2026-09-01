@@ -690,6 +690,32 @@ describe("PluginsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("disables MCP mutations while a restart is pending", async () => {
+		let resolveRestart!: (value: Awaited<ReturnType<ReturnType<typeof api>["restartMcpServer"]>>) => void;
+		const desktop = api();
+		desktop.restartMcpServer.mockImplementation(
+			() => new Promise((resolve) => { resolveRestart = resolve; }),
+		);
+		const { container, root } = await renderPanel(desktop);
+		await act(async () => button(container, "MCP").click());
+		await flush();
+		await act(async () => button(container, "github").click());
+		await flush();
+		await act(async () => button(container, "Restart").click());
+		expect(button(container, "Delete").disabled).toBe(true);
+		expect(button(container, "Authentication").disabled).toBe(true);
+		await act(async () => resolveRestart({
+			server: mcpServer,
+			tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }],
+			resources: [],
+			resourceTemplates: [],
+			prompts: [],
+		}));
+		await flush();
+		expect(button(container, "Delete").disabled).toBe(false);
+		await act(async () => root.unmount());
+	});
+
 	it("ignores late detail responses without polling an open MCP detail", async () => {
 		const alpha = { ...mcpServer, name: "alpha" };
 		const beta = { ...mcpServer, name: "beta" };

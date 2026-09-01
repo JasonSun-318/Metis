@@ -955,7 +955,7 @@ export class McpManager {
 		await Promise.all(
 			clients.map(async (client) => {
 				await client.close();
-				await client.start();
+				if (client.resolvedConfig.enabled) await client.start();
 			}),
 		);
 		this.rebuildRecords();

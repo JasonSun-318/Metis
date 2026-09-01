@@ -138,6 +138,25 @@ describe("McpManager", () => {
 		expect(manager.getStatus()).toMatchObject([{ name: "external", state: "disabled" }]);
 	});
 
+	it("does not start a disabled server on restart", async () => {
+		const manager = await McpManager.create({
+			settingsManager: SettingsManager.inMemory({
+				mcpServers: { offline: { url: "http://127.0.0.1:1/mcp", enabled: false, startupTimeoutSec: 0.05 } },
+			}),
+			authStorage: AuthStorage.inMemory(),
+			cwd: process.cwd(),
+		});
+		managers.push(manager);
+		const start = vi.spyOn(McpServerClient.prototype, "start");
+		try {
+			await manager.restart("offline");
+			expect(start).not.toHaveBeenCalled();
+			expect(manager.getStatus()).toMatchObject([{ name: "offline", state: "disabled" }]);
+		} finally {
+			start.mockRestore();
+		}
+	});
+
 	it("backs off a failed external revision while allowing a new revision to retry immediately", async () => {
 		const storage = new InMemorySettingsStorage();
 		const runtimeSettings = SettingsManager.fromStorage(storage);

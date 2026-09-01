@@ -560,7 +560,18 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		setDialogError(null);
 		setDialog(next);
 	};
-	const applyMcpRows = (servers: readonly McpServerSummaryView[]) => setMcpState({ status: "success", value: servers });
+		const applyMcpRows = (servers: readonly McpServerSummaryView[]) => setMcpState({ status: "success", value: servers });
+		const applyMcpServer = (server: McpServerSummaryView) =>
+			setMcpState((current) =>
+				current.status === "success"
+					? {
+							status: "success",
+							value: current.value.map((row) =>
+								row.scope === server.scope && row.name === server.name ? server : row,
+							),
+						}
+					: current,
+			);
 	const applySkill = (detail: SkillDetailView) => setSkillsState((current) => {
 		if (current.status !== "success") return current;
 		const summary = { name: detail.name, description: detail.description, source: detail.source };
@@ -663,9 +674,9 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		setPendingAction(kind); setMcpDetailError(null);
 		try {
 			const base = { requestId: crypto.randomUUID(), sessionId: mcpSessionId, scope: server.scope, name: server.name, expectedRevision: server.revision };
-			const detail = kind === "restart" ? await api.restartMcpServer(base) : await api.clearMcpCredential(base);
-			setMcpDetail(detail);
-			if (mcpState.status === "success") applyMcpRows(mcpState.value.map((row) => row.scope === detail.server.scope && row.name === detail.server.name ? detail.server : row));
+				const detail = kind === "restart" ? await api.restartMcpServer(base) : await api.clearMcpCredential(base);
+				setMcpDetail(detail);
+				applyMcpServer(detail.server);
 		} catch (cause) {
 			if (isConflict(cause)) setMcpRefresh((value) => value + 1);
 			setMcpDetailError(isConflict(cause) ? t("This MCP server changed elsewhere. Review the latest settings and try again.") : message(cause));
@@ -674,9 +685,9 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 	const setCredential = async (server: McpServerSummaryView, sessionId: string, credential: ClientParams<"mcp/credential/set">["credential"]) => {
 		setPendingAction("credential"); setDialogError(null);
 		try {
-			const detail = await api.setMcpCredential({ requestId: crypto.randomUUID(), sessionId, scope: server.scope, name: server.name, expectedRevision: server.revision, credential });
-			setMcpDetail(detail);
-			if (mcpState.status === "success") applyMcpRows(mcpState.value.map((row) => row.scope === detail.server.scope && row.name === detail.server.name ? detail.server : row));
+				const detail = await api.setMcpCredential({ requestId: crypto.randomUUID(), sessionId, scope: server.scope, name: server.name, expectedRevision: server.revision, credential });
+				setMcpDetail(detail);
+				applyMcpServer(detail.server);
 			setDialog(null);
 		} catch (cause) {
 			if (isConflict(cause)) setMcpRefresh((value) => value + 1);
@@ -909,6 +920,7 @@ function McpDetail({ actionsEnabled, detail, detailError, headingRef, onCatalogI
 }) {
 	const { t } = useTranslation();
 	const server = detail.server;
+	const busy = pendingAction !== null;
 	const [catalogItem, setCatalogItem] = useState<McpCatalogItemDetailView | null>(null);
 	const [catalogBusy, setCatalogBusy] = useState(false);
 	const [catalogError, setCatalogError] = useState<string | null>(null);
@@ -944,7 +956,7 @@ function McpDetail({ actionsEnabled, detail, detailError, headingRef, onCatalogI
 		}
 	};
 	return <>
-		<header className="plugins-detail-header"><div><h1 id="plugins-title" ref={headingRef} tabIndex={-1}>{server.name}</h1><p>{server.transport === "http" ? server.url : server.command}</p><span>{t(server.scope === "user" ? "User" : "Project")} · {t(stateLabel(server.state))}</span></div><div className="plugins-detail-actions"><button aria-label={t("Edit MCP server")} onClick={(event) => onEdit(server, event.currentTarget)} type="button"><PencilSimple aria-hidden="true" size={17} />{t("Edit")}</button>{actionsEnabled && server.effective && <><button disabled={pendingAction === "restart"} onClick={() => onRestart(server)} type="button"><ArrowsClockwise aria-hidden="true" size={17} />{t(pendingAction === "restart" ? "Restarting…" : "Restart")}</button><button onClick={(event) => onCredential(server, event.currentTarget)} type="button"><Key aria-hidden="true" size={17} />{t("Authentication")}</button>{server.credentialConfigured && <button disabled={pendingAction === "clear"} onClick={() => onClear(server)} type="button">{t(pendingAction === "clear" ? "Clearing…" : "Clear authentication")}</button>}</>}<button className="plugins-danger-action" onClick={(event) => onRemove(server, event.currentTarget)} type="button"><Trash aria-hidden="true" size={17} />{t("Delete")}</button></div></header>
+		<header className="plugins-detail-header"><div><h1 id="plugins-title" ref={headingRef} tabIndex={-1}>{server.name}</h1><p>{server.transport === "http" ? server.url : server.command}</p><span>{t(server.scope === "user" ? "User" : "Project")} · {t(stateLabel(server.state))}</span></div><div className="plugins-detail-actions"><button aria-label={t("Edit MCP server")} disabled={busy} onClick={(event) => onEdit(server, event.currentTarget)} type="button"><PencilSimple aria-hidden="true" size={17} />{t("Edit")}</button>{actionsEnabled && server.effective && <><button disabled={busy} onClick={() => onRestart(server)} type="button"><ArrowsClockwise aria-hidden="true" size={17} />{t(pendingAction === "restart" ? "Restarting…" : "Restart")}</button><button disabled={busy} onClick={(event) => onCredential(server, event.currentTarget)} type="button"><Key aria-hidden="true" size={17} />{t("Authentication")}</button>{server.credentialConfigured && <button disabled={busy} onClick={() => onClear(server)} type="button">{t(pendingAction === "clear" ? "Clearing…" : "Clear authentication")}</button>}</>}<button className="plugins-danger-action" disabled={busy} onClick={(event) => onRemove(server, event.currentTarget)} type="button"><Trash aria-hidden="true" size={17} />{t("Delete")}</button></div></header>
 		{!actionsEnabled && <p className="plugins-detail-note">{t("Open a task in this project to view live status, restart, or change authentication.")}</p>}
 		{detailError && <p className="plugins-detail-error" role="alert">{detailError}</p>}{server.lastError && <p className="plugins-detail-error" role="alert">{server.lastError}</p>}
 		<div className="plugins-detail-grid"><article className="plugins-detail-document"><h2>{t("Connection configuration")}</h2><McpConfiguration server={server} />{catalogError && <p className="mcp-catalog-item-error" role="alert">{catalogError}</p>}<DetailList active={catalogItem} busy={catalogBusy} kind="tool" label={t("Tools")} onSelect={(kind, id) => void loadCatalogItem(kind, id)} values={detail.tools} /><DetailList active={catalogItem} busy={catalogBusy} kind="prompt" label={t("Prompts")} onSelect={(kind, id) => void loadCatalogItem(kind, id)} values={detail.prompts} />{(detail.resources.length > 0 || detail.resourceTemplates.length > 0) && <h2 className="plugins-secondary-heading">{t("Additional information")}</h2>}<DetailList active={catalogItem} busy={catalogBusy} kind="resource" label={t("Resources")} onSelect={(kind, id) => void loadCatalogItem(kind, id)} values={detail.resources} /><DetailList active={catalogItem} busy={catalogBusy} kind="resourceTemplate" label={t("Resource templates")} onSelect={(kind, id) => void loadCatalogItem(kind, id)} values={detail.resourceTemplates} /></article><aside className="plugins-detail-meta"><dl><dt>{t("Scope")}</dt><dd>{t(server.scope === "user" ? "User" : "Project")}</dd><dt>{t("Status")}</dt><dd>{t(stateLabel(server.state))}</dd><dt>{t("Authentication")}</dt><dd>{t(server.credentialConfigured ? "Configured" : "Not configured")}</dd><dt>{t("Tools")}</dt><dd>{server.toolCount}</dd><dt>{t("Prompts")}</dt><dd>{server.promptCount}</dd><dt>{t("Resources")}</dt><dd>{server.resourceCount}</dd><dt>{t("Last refreshed")}</dt><dd>{refreshedAt ? new Date(refreshedAt).toLocaleString(localeForIntl()) : "—"}</dd></dl></aside></div>
