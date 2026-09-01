@@ -2,8 +2,10 @@ import type {
 	ExecutionGrantConsumeInput,
 	ExecutionGrantIssueInput,
 	PermissionAuditEventInput,
+	PermissionExecutionRequest,
+	PermissionSettings,
 } from "../../src/core/permissions/index.ts";
-import { projectDir, workspaceWrite } from "./fixtures.ts";
+import { externalWrite, ordinaryRead, projectDir, workspaceWrite } from "./fixtures.ts";
 
 export function issueInput(overrides: Partial<ExecutionGrantIssueInput> = {}): ExecutionGrantIssueInput {
 	const action = workspaceWrite();
@@ -62,4 +64,44 @@ export function auditInputWithSecrets(): PermissionAuditEventInput & {
 		rawArguments: { token: "secret-value", image: "base64-payload" },
 		reviewerPrompt: "reviewer prompt with secret-value",
 	};
+}
+
+interface RequestOverrides {
+	readonly action?: PermissionExecutionRequest<string>["action"];
+	readonly settings?: PermissionSettings;
+	readonly trustedUserMessages?: PermissionExecutionRequest<string>["trustedUserMessages"];
+	readonly interactive?: boolean;
+	readonly signal?: AbortSignal;
+	readonly execute?: PermissionExecutionRequest<string>["execute"];
+}
+
+function executionRequest(
+	action: PermissionExecutionRequest<string>["action"],
+	overrides: RequestOverrides = {},
+): PermissionExecutionRequest<string> {
+	return {
+		action: overrides.action ?? action,
+		settings: overrides.settings ?? { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+		trustedUserMessages: overrides.trustedUserMessages ?? [
+			{ messageId: "user-1", text: "Perform this exact requested action." },
+		],
+		interactive: overrides.interactive ?? true,
+		signal: overrides.signal ?? new AbortController().signal,
+		execute: overrides.execute ?? (async () => "executed"),
+	};
+}
+
+export function safeRequest(overrides: RequestOverrides = {}): PermissionExecutionRequest<string> {
+	return executionRequest(ordinaryRead(), overrides);
+}
+
+export function highRiskRequest(overrides: RequestOverrides = {}): PermissionExecutionRequest<string> {
+	return executionRequest(externalWrite(), overrides);
+}
+
+export function reviewRequest(
+	onReview: () => void,
+	overrides: RequestOverrides = {},
+): { readonly request: PermissionExecutionRequest<string>; readonly onReview: () => void } {
+	return Object.freeze({ request: highRiskRequest(overrides), onReview });
 }
