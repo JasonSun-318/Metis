@@ -119,7 +119,7 @@ async function createCodeSession(page: Page, sessionId: string): Promise<void> {
 
 interface CodingFixtures {
 	readonly SessionManager: {
-		create(cwd: string, sessionDir: string, options: { id: string; mode: "code"; permissionMode: "full" }): {
+		create(cwd: string, sessionDir: string, options: { id: string; mode: "code"; permissionPreset: "full" }): {
 			appendSessionInfo(name: string): void;
 			close(): void;
 		};
@@ -156,7 +156,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	const manager = fixtures.SessionManager.create(
 		projectDir,
 		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "code", permissionMode: "full" },
+		{ id: sessionId, mode: "code", permissionPreset: "full" },
 	);
 	manager.appendSessionInfo("Plan mode fixture");
 	manager.close();

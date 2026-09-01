@@ -25,7 +25,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat"; permissionMode: "full" }): {
+			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat"; permissionPreset: "full" }): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -46,7 +46,7 @@ test("forks a conversation from an assistant reply and switches to the forked se
 	const sessionManager = sessions.SessionManager.create(
 		projectDir,
 		sessions.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sourceId, mode: "chat", permissionMode: "full" },
+		{ id: sourceId, mode: "chat", permissionPreset: "full" },
 	);
 	sessionManager.appendSessionInfo("Fork source title");
 	sessionManager.close();

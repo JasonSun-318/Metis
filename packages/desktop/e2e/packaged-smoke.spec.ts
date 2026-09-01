@@ -121,7 +121,7 @@ interface CodingFixtures {
 			options: {
 				id: string;
 				mode: "chat" | "code";
-				permissionMode?: "ask" | "auto" | "full";
+				permissionPreset?: "ask" | "auto" | "full";
 				agent?: {
 					agentId: string;
 					name: string;
@@ -132,7 +132,7 @@ interface CodingFixtures {
 					cwd: string;
 					tools: readonly string[];
 					writePolicy: "inherit" | "deny";
-					permissionMode: "ask" | "auto" | "full";
+					permissionPreset: "ask" | "auto" | "full";
 					model: { provider: string; modelId: string };
 					thinkingLevel: string;
 					initialTask: string;
@@ -666,7 +666,7 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 	const manager = fixtures.SessionManager.create(
 		projectDir,
 		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "chat", permissionMode: "full" },
+		{ id: sessionId, mode: "chat", permissionPreset: "full" },
 	);
 	manager.appendSessionInfo("Queued message session");
 	manager.close();
@@ -872,7 +872,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 	const manager = fixtures.SessionManager.create(
 		projectDir,
 		fixtures.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "chat", permissionMode: "auto" },
+		{ id: sessionId, mode: "chat", permissionPreset: "auto" },
 	);
 	manager.appendSessionInfo("Permission sandbox session");
 	manager.close();
@@ -902,6 +902,29 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		const payload = JSON.parse(body) as { messages?: Array<{ role?: string; content?: unknown }> };
 		const transcript = JSON.stringify(payload.messages ?? []);
 		response.writeHead(200, { "content-type": "text/event-stream" });
+		if (transcript.includes("You are an isolated permission reviewer.")) {
+			response.end(`data: ${JSON.stringify({
+				id: "permission-review",
+				object: "chat.completion.chunk",
+				created: 1,
+				model: "permission-model",
+				choices: [{
+					index: 0,
+					delta: {
+						role: "assistant",
+						content: JSON.stringify({
+							decision: "deny",
+							assessedRisk: "medium",
+							userAuthorization: "unknown",
+							scopeComplete: true,
+							rationale: "Fixture denied the reviewed action.",
+						}),
+					},
+					finish_reason: "stop",
+				}],
+			})}\n\ndata: [DONE]\n\n`);
+			return;
+		}
 		if (transcript.includes("conversation title generator")) {
 			response.end(`data: ${JSON.stringify({
 				id: "permission-title",
@@ -1004,12 +1027,13 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
 
 		phase = "remembering one exact destructive sandbox command";
+		await setMode("Auto", "Ask", "Ask");
 		await mkdir(path.join(projectDir, "build"));
 		await writeFile(path.join(projectDir, "build", "artifact.txt"), "artifact");
 		await submit("case-exact-one");
 		const approval = page!.locator(".permission-approval-panel");
 		await expect(approval).toContainText("workspace sandbox");
-		await approval.getByRole("button", { name: "Always allow for this project", exact: true }).click();
+		await approval.getByRole("button", { name: "Always allow this exact action", exact: true }).click();
 		await waitDone("case-exact-one");
 		expect(existsSync(path.join(projectDir, "build"))).toBe(false);
 
@@ -1056,20 +1080,18 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
 		await waitDone("case-exact-four");
 
-		phase = "checking Ask sandbox and Auto host disclosure";
-		await setMode("Auto", "Ask before every change", "Ask");
+		phase = "checking Ask sandbox and Full host disclosure";
 		await submit("case-ask-pwd");
 		await expect(page!.locator(".permission-approval-panel")).toContainText("workspace sandbox");
 		await page!.locator(".permission-approval-panel").getByRole("button", { name: "Allow once", exact: true }).click();
 		await waitDone("case-ask-pwd");
-		await setMode("Ask", "Auto", "Auto");
+		await setMode("Ask", "Full", "Full");
 		await submit("case-host-reject");
 		await expect(page!.locator(".permission-approval-panel")).toContainText("outside the sandbox");
 		await page!.locator(".permission-approval-panel").getByRole("button", { name: /Reject/u }).click();
 		await waitDone("case-host-reject");
 
-		phase = "checking Full direct host execution";
-		await setMode("Auto", "Full access", "Full");
+		phase = "checking Full ordinary host execution";
 		await submit("case-full-host");
 		await waitDone("case-full-host");
 		expect(await readFile(fullFile, "utf8")).toBe("full");
@@ -1866,7 +1888,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 
 		phase = "approving an inline packaged permission request";
 		await page.getByRole("button", { name: "Select permissions, current Auto", exact: true }).click();
-		await page.getByRole("menuitemradio", { name: /Ask before every change/u }).click();
+		await page.getByRole("menuitemradio", { name: /Ask/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Ask", exact: true })).toBeVisible();
 		const transcriptHeightBeforeApproval = await transcriptScroll.evaluate((element) => element.clientHeight);
 		await page.locator("#composer-input").fill("request packaged approval");
@@ -1878,7 +1900,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(approvalPanel.locator("dt", { hasText: "Command" })).toBeVisible();
 		await expect(approvalPanel.locator("dd code", { hasText: "pwd" })).toBeVisible();
 		await expect(approvalPanel.locator("dt", { hasText: "Working directory" })).toBeVisible();
-		await expect(approvalPanel.locator(".permission-approval-complete-details")).toContainText("Arguments:");
+		await expect(approvalPanel).not.toContainText("Arguments:");
+		await expect(approvalPanel.locator(".permission-approval-complete-details")).toHaveCount(0);
 		await expect(approvalPanel).toContainText("workspace sandbox");
 		await expect(approvalPanel.locator('[aria-expanded]')).toHaveCount(0);
 		const approvalSlot = page.locator(".composer-dock > .permission-approval-slot");
@@ -2603,7 +2626,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		cwd: projectDir,
 		tools: ["read"],
 		writePolicy: "inherit" as const,
-		permissionMode: "ask" as const,
+		permissionPreset: "ask" as const,
 		model: { provider: "fixture", modelId: "fixture-model" },
 		thinkingLevel: "off",
 		initialTask: "Inspect packaged project",
@@ -2617,7 +2640,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		{
 			id: childId,
 			mode: "code",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 			agent: agentHeader,
 		},
 	);
@@ -2722,7 +2745,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		{
 			id: nestedId,
 			mode: "code",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 			agent: {
 				agentId: nestedId,
 				name: "Nested verifier",
@@ -2733,7 +2756,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 				cwd: projectDir,
 				tools: ["read"],
 				writePolicy: "deny" as const,
-				permissionMode: "ask" as const,
+				permissionPreset: "ask" as const,
 				model: { provider: "fixture", modelId: "fixture-model" },
 				thinkingLevel: "off",
 				initialTask: "Verify nested packaged state",
@@ -2773,7 +2796,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		{
 			id: archivedId,
 			mode: "code",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 			agent: {
 				agentId: archivedId,
 				name: "Archived result reviewer",
@@ -2784,7 +2807,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 				cwd: projectDir,
 				tools: ["read"],
 				writePolicy: "deny" as const,
-				permissionMode: "ask" as const,
+				permissionPreset: "ask" as const,
 				model: { provider: "fixture", modelId: "fixture-model" },
 				thinkingLevel: "off",
 				initialTask: "Review archived result",
@@ -4379,18 +4402,18 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await group.locator(".session-button").first().click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
 		await page.getByRole("button", { name: "Select permissions, current Auto" }).click();
-		await page.getByRole("menuitemradio", { name: /Full access/u }).click();
+		await page.getByRole("menuitemradio", { name: /Full/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Full" })).toBeVisible();
 		await expect(page.getByRole("dialog")).toHaveCount(0);
-		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionMode":"full"');
+		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionPreset":"full"');
 		await page.getByRole("button", { name: "Select permissions, current Full" }).click();
 		await page.locator(".permission-selector-popover").evaluate(
 			(element) => Promise.all(element.getAnimations().map((animation) => animation.finished)),
 		);
 		await page.screenshot({ path: path.join(qaDir, "permission-menu-normal.png") });
-		await page.getByRole("menuitemradio", { name: /Ask before every change/u }).click();
+		await page.getByRole("menuitemradio", { name: /Ask/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Ask" })).toBeVisible();
-		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionMode":"ask"');
+		await expect.poll(async () => readFile(chatActivePath, "utf8")).toContain('"permissionPreset":"ask"');
 
 		const actionButtons = group.locator(".project-action-buttons");
 		await expect(actionButtons).toHaveCSS("opacity", "0");

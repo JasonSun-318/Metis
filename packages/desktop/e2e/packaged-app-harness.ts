@@ -1,5 +1,6 @@
 import { type ChildProcess, spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
+import { writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
 import { chromium, expect, type Browser, type Page } from "@playwright/test";
@@ -138,6 +139,38 @@ export function messageText(value: unknown): string {
 export function latestToolResult(messages: readonly OpenAiChatMessage[]): string {
 	const message = [...messages].reverse().find((candidate) => candidate.role === "tool");
 	return messageText(message?.content);
+}
+
+export async function writeOfflineProviderConfig(
+	agentDir: string,
+	port: number,
+	options: { readonly providerId?: string; readonly modelId?: string } = {},
+): Promise<void> {
+	const providerId = options.providerId ?? "permission";
+	const modelId = options.modelId ?? "permission-model";
+	await Promise.all([
+		writeFile(
+			path.join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					[providerId]: {
+						baseUrl: `http://127.0.0.1:${port}/v1`,
+						apiKey: "permission-key",
+						api: "openai-completions",
+						models: [{ id: modelId, name: "Permission Model", contextWindow: 32_000, maxTokens: 1_024 }],
+					},
+				},
+			}),
+		),
+		writeFile(
+			path.join(agentDir, "settings.json"),
+			JSON.stringify({
+				defaultProvider: providerId,
+				defaultModel: modelId,
+				retry: { enabled: false },
+			}),
+		),
+	]);
 }
 
 export async function listen(server: Server): Promise<number> {
