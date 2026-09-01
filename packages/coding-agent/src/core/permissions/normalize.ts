@@ -21,6 +21,8 @@ const EFFECTS: readonly PermissionEffect[] = [
 	"destructive",
 	"elevation",
 	"security-weakening",
+	"payment",
+	"production-mutation",
 	"unknown",
 ];
 
@@ -202,6 +204,7 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 export function assertCompleteAction(action: NormalizedPermissionAction): void {
 	const complete =
 		Boolean(action?.actionId) &&
+		Object.isFrozen(action) &&
 		Boolean(action.toolName) &&
 		Boolean(action.toolIdentity) &&
 		SHA256_PATTERN.test(action.argsDigest) &&
@@ -211,6 +214,12 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 		Array.isArray(action.writePaths) &&
 		Array.isArray(action.networkEndpoints) &&
 		Array.isArray(action.effects) &&
+		Object.isFrozen(action.workspaceRoots) &&
+		Object.isFrozen(action.readPaths) &&
+		Object.isFrozen(action.writePaths) &&
+		Object.isFrozen(action.networkEndpoints) &&
+		Object.isFrozen(action.effects) &&
+		action.networkEndpoints.every(Object.isFrozen) &&
 		!action.effects.includes("unknown") &&
 		(!action.effects.includes("sensitive-read") || action.readPaths.length > 0) &&
 		(!action.effects.includes("destructive") || action.writePaths.length > 0);

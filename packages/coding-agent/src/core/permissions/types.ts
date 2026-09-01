@@ -11,6 +11,8 @@ export type PermissionEffect =
 	| "destructive"
 	| "elevation"
 	| "security-weakening"
+	| "payment"
+	| "production-mutation"
 	| "unknown";
 
 export interface PermissionSettings {
