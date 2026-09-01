@@ -508,12 +508,18 @@
 	},
 	{
 		"direction": "client",
-		"method": "session/setPermissionMode",
+		"method": "session/setPermissionPreset",
 		"envelope": {
 			"jsonrpc": "2.0",
 			"id": "client-permissions",
 			"result": {
-				"permissionMode": "full"
+				"permissionPreset": "full",
+				"effectiveSettings": {
+					"sandboxPolicy": "danger-full-access",
+					"approvalPolicy": "user"
+				},
+				"constrainedByParent": false,
+				"sandboxHealth": "healthy"
 			}
 		}
 	},
@@ -1079,7 +1085,13 @@
 						"cwdOrigin": "user-selected"
 					},
 					"collaborationMode": "default",
-					"permissionMode": "ask",
+					"permissionPreset": "ask",
+					"effectiveSettings": {
+						"sandboxPolicy": "workspace-write",
+						"approvalPolicy": "user"
+					},
+					"constrainedByParent": false,
+					"sandboxHealth": "healthy",
 					"turns": [],
 					"recentItems": [],
 					"nextBeforeItemId": null,

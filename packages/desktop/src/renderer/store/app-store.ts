@@ -57,7 +57,11 @@ export interface AppStoreSnapshot {
 	readonly cursor: number;
 	readonly syncStatus: "empty" | "ready" | "resubscribing" | "resnapshot_required";
 	readonly collaborationMode: SessionSnapshot["collaborationMode"];
-	readonly permissionMode: SessionSnapshot["permissionMode"];
+	readonly permissionPreset: SessionSnapshot["permissionPreset"];
+	readonly effectiveSettings: SessionSnapshot["effectiveSettings"];
+	readonly constrainedByParent: boolean;
+	readonly sandboxHealth: SessionSnapshot["sandboxHealth"];
+	readonly activeReview: SessionSnapshot["activeReview"];
 	readonly thinkingSelection: SessionSnapshot["thinkingSelection"];
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	readonly availableThinkingSelections: SessionSnapshot["availableThinkingSelections"];
@@ -283,7 +287,11 @@ export class AppStore {
 			cursor: this.state.cursor,
 			syncStatus: this.state.syncStatus,
 			collaborationMode: this.state.collaborationMode,
-			permissionMode: this.state.permissionMode,
+			permissionPreset: this.state.permissionPreset,
+			effectiveSettings: this.state.effectiveSettings,
+			constrainedByParent: this.state.constrainedByParent,
+			sandboxHealth: this.state.sandboxHealth,
+			activeReview: this.state.activeReview,
 			thinkingSelection: this.state.thinkingSelection,
 			actualThinkingLevel: this.state.actualThinkingLevel,
 			availableThinkingSelections: this.state.availableThinkingSelections,

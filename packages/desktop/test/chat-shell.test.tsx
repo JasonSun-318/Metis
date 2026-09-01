@@ -88,7 +88,10 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 	return {
 		session: summary,
 		collaborationMode: "default",
-		permissionMode: "ask",
+		permissionPreset: "ask",
+		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+		constrainedByParent: false,
+		sandboxHealth: "healthy",
 		model: { provider: "test-provider", modelId: "test-model" },
 		availableModels: [
 			{ provider: "test-provider", modelId: "test-model", name: "Test model" },
@@ -535,7 +538,7 @@ function createHarness(options: {
 		readAgentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		interruptAgent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
-		setPermissionMode: vi.fn(async ({ permissionMode }) => ({ permissionMode })),
+		setPermissionPreset: vi.fn(async ({ permissionPreset }) => ({ permissionPreset })),
 		setCollaborationMode: vi.fn(async ({ collaborationMode }) => ({ collaborationMode })),
 		startPlanExecution: vi.fn(async () => ({})),
 		cancelPlan: vi.fn(async () => ({ collaborationMode: "default" as const })),
@@ -1638,27 +1641,21 @@ describe("Chat desktop shell", () => {
 						interactionId: "00000000-0000-4000-8000-000000000204",
 						sessionId: "chat-existing",
 						title: "Approve bash?",
-						message: "Remove the generated cache.\nRisk: destructive\nCommand: rm cache.tmp",
+						message: "Remove the generated cache.",
 						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "select",
-						presentation: "permission_approval",
-						operation: {
-							toolName: "bash",
-							rows: [
-								{ label: "Command", value: "rm cache.tmp" },
-								{ label: "Working directory", value: "/tmp/work" },
-							],
-							omittedRows: 0,
-							scopeComplete: true,
-							irreversible: true,
-							executionTarget: "sandbox",
-							rememberProjectEligible: true,
-						},
-						choices: [
-							{ id: "permission:allow-once", label: "Allow once" },
-							{ id: "permission:always-project", label: "Always allow for this project" },
-							{ id: "permission:deny", label: "Reject" },
+						kind: "permission_approval",
+						requestId: "00000000-0000-4000-8000-000000000204",
+						actionId: "action-bash-cache",
+						toolLabel: "bash",
+						riskLevel: "critical",
+						executionTarget: "sandbox",
+						reason: "Remove the generated cache.",
+						scopeComplete: true,
+						details: [
+							{ label: "Command", value: "rm cache.tmp" },
+							{ label: "Working directory", value: "/tmp/work" },
 						],
+						choices: ["allow-once", "always-allow-exact", "deny-once"],
 					},
 				},
 			},
@@ -1675,8 +1672,8 @@ describe("Chat desktop shell", () => {
 		expect(panel.textContent).toContain("Working directory");
 		expect(panel.textContent).toContain("/tmp/work");
 		expect(panel.textContent).toContain("workspace sandbox");
-		expect(panel.textContent).toContain("Always allow for this project");
-		expect(panel.querySelector(".permission-approval-complete-details")?.textContent).toContain(
+		expect(panel.textContent).toContain("Always allow this exact action");
+		expect(panel.querySelector("#permission-approval-reason")?.textContent).toContain(
 			"Remove the generated cache.",
 		);
 		expect(panel.textContent).not.toContain("Arguments:");
@@ -1684,8 +1681,8 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(api.respondToInteraction).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000204",
-			kind: "select",
-			choiceId: "permission:allow-once",
+			kind: "permission_approval",
+			choice: "allow-once",
 		});
 		expect(container.querySelector(".permission-approval-panel")).toBeNull();
 		await act(async () => root.unmount());
@@ -1860,9 +1857,9 @@ describe("Chat desktop shell", () => {
 
 		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
 			mode: "chat",
-			permissionMode: "full",
+			permissionPreset: "full",
 		}));
-		expect(api.setPermissionMode).not.toHaveBeenCalled();
+		expect(api.setPermissionPreset).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 
@@ -1870,8 +1867,8 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
-		let resolveChange!: (result: { permissionMode: "full" }) => void;
-		vi.mocked(api.setPermissionMode).mockImplementationOnce(() => new Promise((resolve) => {
+		let resolveChange!: (result: { permissionPreset: "full" }) => void;
+		vi.mocked(api.setPermissionPreset).mockImplementationOnce(() => new Promise((resolve) => {
 			resolveChange = resolve;
 		}));
 		const container = document.createElement("div");
@@ -1888,7 +1885,7 @@ describe("Chat desktop shell", () => {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
-		await act(async () => resolveChange({ permissionMode: "full" }));
+		await act(async () => resolveChange({ permissionPreset: "full" }));
 		expect(button(container, "Select permissions, current Ask").disabled).toBe(false);
 		await act(async () => emitEvent({
 			type: "app-server",
@@ -1900,9 +1897,12 @@ describe("Chat desktop shell", () => {
 					fromCursor: 1,
 					toCursor: 1,
 					events: [{
-						type: "session/permissionModeChanged",
+						type: "session/permissionPresetChanged",
 						sessionId: "chat-existing",
-						permissionMode: "full",
+						permissionPreset: "full",
+						effectiveSettings: { sandboxPolicy: "danger-full-access", approvalPolicy: "user" },
+						constrainedByParent: false,
+						sandboxHealth: "healthy",
 					}],
 				},
 			},
@@ -2100,9 +2100,9 @@ describe("Chat desktop shell", () => {
 		const { api } = createHarness();
 		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
 		vi.mocked(api.openSession)
-			.mockResolvedValueOnce({ ...snapshot(summary), permissionMode: "full" })
-			.mockResolvedValueOnce({ ...snapshot(summary), permissionMode: "ask" });
-		vi.mocked(api.setPermissionMode).mockRejectedValueOnce(new Error("child downgrade failed"));
+			.mockResolvedValueOnce({ ...snapshot(summary), permissionPreset: "full" })
+			.mockResolvedValueOnce({ ...snapshot(summary), permissionPreset: "ask" });
+		vi.mocked(api.setPermissionPreset).mockRejectedValueOnce(new Error("child downgrade failed"));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -3758,7 +3758,7 @@ describe("Chat desktop shell", () => {
 		});
 
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
-		expect(create).toMatchObject({ mode: "chat", cwd: "/work/selected-project", permissionMode: "auto" });
+		expect(create).toMatchObject({ mode: "chat", cwd: "/work/selected-project", permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("name");
 		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
 			sessionId: "chat-created",
@@ -3786,7 +3786,7 @@ describe("Chat desktop shell", () => {
 		});
 
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
-		expect(create).toMatchObject({ mode: "chat", permissionMode: "auto" });
+		expect(create).toMatchObject({ mode: "chat", permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("cwd");
 		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
 			text: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.",

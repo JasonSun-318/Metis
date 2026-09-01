@@ -165,9 +165,9 @@ export const DESKTOP_RPC_FORWARDING = {
 		method: "session/setThinkingSelection",
 		input: "required",
 	},
-	setPermissionMode: {
-		channel: "metis:set-permission-mode",
-		method: "session/setPermissionMode",
+	setPermissionPreset: {
+		channel: "metis:set-permission-preset",
+		method: "session/setPermissionPreset",
 		input: "required",
 	},
 	setCollaborationMode: {

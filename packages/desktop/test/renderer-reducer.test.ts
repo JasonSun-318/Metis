@@ -39,7 +39,10 @@ function snapshot(serverEpoch = EPOCH_A, cursor = 0, recentItems: ItemView[] = [
 	return {
 		session: session(),
 		collaborationMode: "default",
-		permissionMode: "ask",
+		permissionPreset: "ask",
+		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+		constrainedByParent: false,
+		sandboxHealth: "healthy",
 		turns: [],
 		recentItems,
 		nextBeforeItemId: null,
@@ -424,7 +427,7 @@ describe("renderer projection reducer", () => {
 		expect(state.activeSessionId).toBeNull();
 		expect(state.itemOrder).toEqual([]);
 		expect(state.agents).toEqual([]);
-		expect(state.permissionMode).toBe("auto");
+		expect(state.permissionPreset).toBe("auto");
 		expect(state.availableModels).toEqual([{ provider: "test", modelId: "model-a", name: "Model A" }]);
 		expect(state.model).toEqual({ provider: "test", modelId: "model-a" });
 		const afterFirst = store.getSnapshot();
@@ -556,7 +559,7 @@ describe("renderer projection reducer", () => {
 	it("replaces and streams the active session permission mode", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 0));
-		expect(store.getSnapshot().permissionMode).toBe("ask");
+		expect(store.getSnapshot().permissionPreset).toBe("ask");
 
 		expect(
 			store.applyBatch({
@@ -565,17 +568,20 @@ describe("renderer projection reducer", () => {
 				toCursor: 1,
 				events: [
 					{
-						type: "session/permissionModeChanged",
+						type: "session/permissionPresetChanged",
 						sessionId: "session-1",
-						permissionMode: "full",
+						permissionPreset: "full",
+						effectiveSettings: { sandboxPolicy: "danger-full-access", approvalPolicy: "user" },
+						constrainedByParent: false,
+						sandboxHealth: "healthy",
 					},
 				],
 			}),
 		).toBe("applied");
-		expect(store.getSnapshot().permissionMode).toBe("full");
+		expect(store.getSnapshot().permissionPreset).toBe("full");
 
-		store.applySnapshot({ ...snapshot(EPOCH_B, 4), permissionMode: "ask" });
-		expect(store.getSnapshot().permissionMode).toBe("ask");
+		store.applySnapshot({ ...snapshot(EPOCH_B, 4), permissionPreset: "ask" });
+		expect(store.getSnapshot().permissionPreset).toBe("ask");
 	});
 
 	it("replaces, live-updates, and clears the active session task snapshot", () => {

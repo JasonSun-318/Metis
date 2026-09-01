@@ -6,7 +6,7 @@ import {
 	type McpServerSummaryView,
 	type ModelOptionView,
 	type ModelSettingsView,
-	type PermissionModeView,
+	type PermissionPresetView,
 	type PlanView,
 	type QueuedTurnView,
 	RPC_ERROR_CODES,
@@ -663,10 +663,7 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
-	const permissionApproval = visibleInteraction?.kind === "select" &&
-		visibleInteraction.presentation === "permission_approval"
-		? visibleInteraction
-		: undefined;
+	const permissionApproval = visibleInteraction?.kind === "permission_approval" ? visibleInteraction : undefined;
 	const askUserInteraction = visibleInteraction?.kind === "ask_user" ? visibleInteraction : undefined;
 	const inlineInteraction = permissionApproval ?? askUserInteraction;
 	const latestNotification = [...state.notifications]
@@ -856,9 +853,9 @@ export function App({ api, store }: AppProps) {
 		return globalThinkingSelection === "ultra" ? [...base, "ultra"] : base;
 	}, [globalThinkingSelection]);
 
-	const changePermissionMode = async (sessionId: string, permissionMode: PermissionModeView) => {
+	const changePermissionPreset = async (sessionId: string, permissionPreset: PermissionPresetView) => {
 		try {
-			await api.setPermissionMode({ sessionId, requestId: crypto.randomUUID(), permissionMode });
+			await api.setPermissionPreset({ sessionId, requestId: crypto.randomUUID(), permissionPreset });
 		} catch (cause) {
 			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
 			reportError(cause);
@@ -1125,16 +1122,16 @@ export function App({ api, store }: AppProps) {
 				permissionSessionRunning ||
 				visibleInteraction !== undefined
 			}
-			onChange={(permissionMode) => permissionSessionId
-				? changePermissionMode(permissionSessionId, permissionMode)
-				: workspaceWorkflow.setDraftPermission(permissionMode)}
-			value={permissionSessionId && permissionSessionOpen ? state.permissionMode : visibleNewTaskDraft.permissionMode}
+			onChange={(permissionPreset) => permissionSessionId
+				? changePermissionPreset(permissionSessionId, permissionPreset)
+				: workspaceWorkflow.setDraftPermission(permissionPreset)}
+			value={permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset}
 		/>
 	) : visibleActiveSession ? (
 		<PermissionSelector
 			disabled={!serverReady || running || visibleInteraction !== undefined}
-			onChange={(permissionMode) => changePermissionMode(visibleActiveSession.sessionId, permissionMode)}
-			value={state.permissionMode}
+			onChange={(permissionPreset) => changePermissionPreset(visibleActiveSession.sessionId, permissionPreset)}
+			value={state.permissionPreset}
 		/>
 	) : undefined;
 	const collaborationControl = visibleActiveSession && collaborationModeValue === "plan" ? (

@@ -56,9 +56,9 @@ class FakePeer implements InteractionPeer {
 	}
 }
 
-function permissionInteraction(peer: FakePeer): Extract<InteractionView, { kind: "select" }> {
+function permissionInteraction(peer: FakePeer): Extract<InteractionView, { kind: "permission_approval" }> {
 	const interaction = peer.requests[0];
-	if (interaction?.kind !== "select") throw new TypeError("Expected a select interaction");
+	if (interaction?.kind !== "permission_approval") throw new TypeError("Expected a permission_approval interaction");
 	return interaction;
 }
 
@@ -485,39 +485,29 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
+		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
 
 		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toEqual({
 			decision: "allow",
 		});
 		expect(peer.requests[0]).toMatchObject({
-			kind: "select",
-			presentation: "permission_approval",
-			operation: {
-				toolName: "bash",
-				rows: [
-					{ label: "Command", value: "curl https://example.test" },
-					{ label: "Working directory", value: "/tmp/work" },
-					{ label: "Path", value: "/tmp/work/result.txt" },
-				],
-				omittedRows: 0,
-				scopeComplete: true,
-				irreversible: false,
-				executionTarget: "host",
-				rememberProjectEligible: false,
-			},
-			title: "Approve bash?",
-			choices: [
-				{ id: "permission:allow-once", label: "Allow once" },
-				{ id: "permission:deny", label: "Reject" },
+			kind: "permission_approval",
+			toolLabel: "bash",
+			executionTarget: "host",
+			scopeComplete: true,
+			details: [
+				{ label: "Agent", value: "researcher (agent-child-1)" },
+				{ label: "Task", value: "task-1" },
+				{ label: "Command", value: "curl https://example.test" },
+				{ label: "Working directory", value: "/tmp/work" },
+				{ label: "Path", value: "/tmp/work/result.txt" },
 			],
+			title: "Approve bash?",
+			choices: ["allow-once", "deny-once"],
 		});
-		expect(peer.requests[0]?.message).toContain("Agent: researcher (agent-child-1)");
-		expect(peer.requests[0]?.message).toContain("Task: task-1");
-		expect(peer.requests[0]?.message).toContain("Risk: network");
-		expect(peer.requests[0]?.message).toContain('"command": "curl https://example.test"');
-		expect(peer.requests[0]?.message).toContain("Path: /tmp/work/result.txt");
-		expect(peer.requests[0]?.message).toContain("Metis does not sandbox this action");
+		const serialized = JSON.stringify(peer.requests[0]);
+		expect(serialized).not.toContain('"command": "curl https://example.test"');
+		expect(serialized).not.toMatch(/"presentation":"permission_approval"/);
 	});
 
 	it("returns a project-scoped decision only for an eligible primary action", async () => {
@@ -525,7 +515,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "permission:always-project" };
+		peer.response = { interactionId, kind: "permission_approval", choice: "always-allow-exact" };
 
 		await expect(
 			broker.requestPermissionApproval(
@@ -538,11 +528,10 @@ describe("InteractionBroker", () => {
 			),
 		).resolves.toEqual({ decision: "allow", remember: "project" });
 		expect(permissionInteraction(peer)).toMatchObject({
-			operation: { executionTarget: "sandbox", rememberProjectEligible: true },
-			choices: [{ id: "permission:allow-once" }, { id: "permission:always-project" }, { id: "permission:deny" }],
+			executionTarget: "sandbox",
+			choices: ["allow-once", "always-allow-exact", "deny-once", "always-deny-exact"],
 		});
-		expect(peer.requests[0]?.message).toContain("workspace sandbox");
-		expect(peer.requests[0]?.message).not.toContain("does not sandbox");
+		expect(JSON.stringify(peer.requests[0])).not.toContain("does not sandbox");
 	});
 
 	it("summarizes an edit without exposing replacement text", async () => {
@@ -550,7 +539,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
+		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
 
 		await broker.requestPermissionApproval(
 			SESSION_ID,
@@ -574,31 +563,30 @@ describe("InteractionBroker", () => {
 		);
 
 		expect(peer.requests[0]).toMatchObject({
-			operation: {
-				toolName: "edit",
-				rows: [
-					{ label: "File", value: "/tmp/work/src/app.ts" },
-					{ label: "Changes", value: "2" },
-				],
-				omittedRows: 0,
-				scopeComplete: true,
-				irreversible: false,
-				executionTarget: "host",
-				rememberProjectEligible: false,
-			},
+			kind: "permission_approval",
+			toolLabel: "edit",
+			details: [
+				{ label: "Agent", value: "researcher (agent-child-1)" },
+				{ label: "Task", value: "task-1" },
+				{ label: "File", value: "/tmp/work/src/app.ts" },
+				{ label: "Changes", value: "2" },
+			],
+			scopeComplete: true,
+			executionTarget: "host",
 		});
-		const operation = permissionInteraction(peer).operation;
-		expect(JSON.stringify(operation)).not.toContain("before");
-		expect(JSON.stringify(operation)).not.toContain("after");
+		const serialized = JSON.stringify(permissionInteraction(peer));
+		expect(serialized).not.toContain("before");
+		expect(serialized).not.toContain("after");
 	});
 
 	it("summarizes known network, search, path, and external tool targets", async () => {
 		const cases: Array<{
 			request: PermissionApprovalRequest;
-			operation: NonNullable<Extract<InteractionView, { kind: "select" }>["operation"]>;
+			details: Extract<InteractionView, { kind: "permission_approval" }>["details"];
 		}> = [
 			{
 				request: childApproval({
+					actor: undefined,
 					action: {
 						actionId: "web-fetch-1",
 						toolName: "web_fetch",
@@ -609,18 +597,11 @@ describe("InteractionBroker", () => {
 					},
 					args: { url: "https://example.test/docs" },
 				}),
-				operation: {
-					toolName: "web_fetch",
-					rows: [{ label: "Address", value: "https://example.test/docs" }],
-					omittedRows: 0,
-					scopeComplete: true,
-					irreversible: false,
-					executionTarget: "host",
-					rememberProjectEligible: false,
-				},
+				details: [{ label: "Address", value: "https://example.test/docs" }],
 			},
 			{
 				request: childApproval({
+					actor: undefined,
 					action: {
 						actionId: "web-search-1",
 						toolName: "web_search",
@@ -631,21 +612,14 @@ describe("InteractionBroker", () => {
 					},
 					args: { query: "Metis permissions" },
 				}),
-				operation: {
-					toolName: "web_search",
-					rows: [
-						{ label: "Query", value: "Metis permissions" },
-						{ label: "Network", value: "search.example:443" },
-					],
-					omittedRows: 0,
-					scopeComplete: true,
-					irreversible: false,
-					executionTarget: "host",
-					rememberProjectEligible: false,
-				},
+				details: [
+					{ label: "Query", value: "Metis permissions" },
+					{ label: "Network", value: "search.example:443" },
+				],
 			},
 			{
 				request: childApproval({
+					actor: undefined,
 					action: {
 						actionId: "grep-1",
 						toolName: "grep",
@@ -656,21 +630,14 @@ describe("InteractionBroker", () => {
 					},
 					args: { pattern: "TOKEN", path: "/tmp/outside" },
 				}),
-				operation: {
-					toolName: "grep",
-					rows: [
-						{ label: "Path", value: "/tmp/outside" },
-						{ label: "Pattern", value: "TOKEN" },
-					],
-					omittedRows: 0,
-					scopeComplete: true,
-					irreversible: false,
-					executionTarget: "host",
-					rememberProjectEligible: false,
-				},
+				details: [
+					{ label: "Path", value: "/tmp/outside" },
+					{ label: "Pattern", value: "TOKEN" },
+				],
 			},
 			{
 				request: childApproval({
+					actor: undefined,
 					action: {
 						actionId: "mcp-1",
 						toolName: "mcp__service__publish",
@@ -681,15 +648,7 @@ describe("InteractionBroker", () => {
 					},
 					args: { content: "private payload" },
 				}),
-				operation: {
-					toolName: "mcp__service__publish",
-					rows: [{ label: "Details", value: "Network destination needs approval" }],
-					omittedRows: 0,
-					scopeComplete: true,
-					irreversible: true,
-					executionTarget: "host",
-					rememberProjectEligible: false,
-				},
+				details: [{ label: "Details", value: "Network destination needs approval" }],
 			},
 		];
 
@@ -698,14 +657,11 @@ describe("InteractionBroker", () => {
 			const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 			const peer = new FakePeer();
 			broker.assign(SESSION_ID, peer);
-			peer.response = { interactionId, kind: "select", choiceId: "permission:deny" };
+			peer.response = { interactionId, kind: "permission_approval", choice: "deny-once" };
 			await broker.requestPermissionApproval(SESSION_ID, sample.request);
-			const operation = permissionInteraction(peer).operation;
-			expect(operation).toEqual(sample.operation);
-			expect(JSON.stringify(operation)).not.toContain("private payload");
-			if (sample.request.action.actionId === "mcp-1") {
-				expect(peer.requests[0]?.message).toContain('"content": "private payload"');
-			}
+			const interaction = permissionInteraction(peer);
+			expect(interaction.details).toEqual(sample.details);
+			expect(JSON.stringify(interaction)).not.toContain("private payload");
 		}
 	});
 
@@ -714,13 +670,14 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "select", choiceId: "permission:allow-once" };
+		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
 		const paths = Array.from({ length: MAX_PERMISSION_OPERATION_ROWS + 3 }, (_, index) => `/tmp/target-${index}`);
 
 		await expect(
 			broker.requestPermissionApproval(
 				SESSION_ID,
 				childApproval({
+					actor: undefined,
 					rememberProjectEligible: true,
 					action: {
 						actionId: "many-paths",
@@ -734,12 +691,13 @@ describe("InteractionBroker", () => {
 			),
 		).resolves.toEqual({ decision: "allow" });
 
-		const operation = permissionInteraction(peer).operation;
-		expect(operation?.rows).toHaveLength(MAX_PERMISSION_OPERATION_ROWS);
-		expect(operation?.omittedRows).toBe(3);
-		expect(operation?.scopeComplete).toBe(true);
-		expect(operation?.rememberProjectEligible).toBe(true);
-		expect(peer.requests[0]?.message).toContain(`/tmp/target-${MAX_PERMISSION_OPERATION_ROWS + 2}`);
+		const interaction = permissionInteraction(peer);
+		expect(interaction.details).toHaveLength(MAX_PERMISSION_OPERATION_ROWS);
+		expect(interaction.scopeComplete).toBe(true);
+		expect(interaction.choices).toContain("always-allow-exact");
+		const serialized = JSON.stringify(interaction);
+		expect(serialized).not.toContain(`/tmp/target-${MAX_PERMISSION_OPERATION_ROWS + 2}`);
+		expect(serialized).toContain("/tmp/target-0");
 	});
 
 	it("fails a child permission request closed without an owning peer", async () => {

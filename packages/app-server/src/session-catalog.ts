@@ -995,7 +995,7 @@ export class SessionCatalog {
 				throw new AppServerError("BUSY", { requestId: input.requestId });
 			}
 			const requestedName = normalizedSessionName(input.name);
-			const requestedPermissionMode = input.permissionMode ?? "auto";
+			const requestedPermissionPreset = input.permissionPreset ?? "auto";
 			const mutation: DurableSessionMutation = {
 				method: "session/create",
 				kind: "session_create",
@@ -1004,7 +1004,7 @@ export class SessionCatalog {
 					...(input.mode === undefined ? {} : { mode: input.mode }),
 					...(input.cwd === undefined ? {} : { cwd: input.cwd }),
 					...(input.name === undefined ? {} : { name: input.name }),
-					...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+					...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
 				},
 			};
 			const existing = this.sessions.get(input.requestId);
@@ -1035,7 +1035,7 @@ export class SessionCatalog {
 						manager.getMode() !== mode ||
 						!workspaceMatches ||
 						name !== requestedName ||
-						manager.getPermissionPreset() !== requestedPermissionMode
+						manager.getPermissionPreset() !== requestedPermissionPreset
 					) {
 						throw new AppServerError("REQUEST_ID_REUSED", {
 							requestId: input.requestId,
@@ -1073,7 +1073,7 @@ export class SessionCatalog {
 						id: input.requestId,
 						mode,
 						cwdOrigin: workspace.cwdOrigin,
-						...(input.permissionMode === undefined ? {} : { permissionMode: input.permissionMode }),
+						...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
 					});
 				} catch (error) {
 					if (workspace.cwdOrigin === "managed") {

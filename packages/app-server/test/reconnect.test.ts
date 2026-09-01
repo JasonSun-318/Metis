@@ -239,10 +239,20 @@ class PausableRuntime implements OpenedSessionRuntime {
 		};
 	}
 
-	async setPermissionMode(
-		input: ClientParams<"session/setPermissionMode">,
-	): Promise<ClientResult<"session/setPermissionMode">> {
-		return { permissionMode: input.permissionMode };
+	async setPermissionPreset(
+		input: ClientParams<"session/setPermissionPreset">,
+	): Promise<ClientResult<"session/setPermissionPreset">> {
+		return {
+			permissionPreset: input.permissionPreset,
+			effectiveSettings:
+				input.permissionPreset === "full"
+					? { sandboxPolicy: "danger-full-access", approvalPolicy: "user" }
+					: input.permissionPreset === "ask"
+						? { sandboxPolicy: "workspace-write", approvalPolicy: "user" }
+						: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+			constrainedByParent: false,
+			sandboxHealth: "healthy",
+		};
 	}
 
 	async setCollaborationMode(

@@ -731,7 +731,9 @@ describe("golden protocol fixtures", () => {
 				"item/delta",
 				"item/completed",
 				"interaction/notify",
-				"session/permissionModeChanged",
+				"session/permissionPresetChanged",
+				"session/permissionReviewStarted",
+				"session/permissionReviewCompleted",
 				"session/collaborationModeChanged",
 				"session/thinkingSelectionChanged",
 				"session/modelChanged",
@@ -970,12 +972,12 @@ describe("golden protocol fixtures", () => {
 	});
 
 	it("accepts auto and rejects unknown primary session permissions", () => {
-		const request = structuredClone(requestFor("client", "session/setPermissionMode").envelope) as {
-			params: { permissionMode: string };
+		const request = structuredClone(requestFor("client", "session/setPermissionPreset").envelope) as {
+			params: { permissionPreset: string };
 		};
-		request.params.permissionMode = "auto";
+		request.params.permissionPreset = "auto";
 		expect(() => validateClientRequest(request)).not.toThrow();
-		request.params.permissionMode = "automatic";
+		request.params.permissionPreset = "automatic";
 		expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
 	});
 

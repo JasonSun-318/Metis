@@ -37,7 +37,10 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 			archived: false,
 		},
 		collaborationMode: "default",
-		permissionMode: "ask",
+		permissionPreset: "ask",
+		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+		constrainedByParent: false,
+		sandboxHealth: "healthy",
 		turns: [],
 		recentItems: [item("item-1", text)],
 		nextBeforeItemId: null,
@@ -194,27 +197,21 @@ describe("renderer reconnect behavior", () => {
 						interactionId: "00000000-0000-4000-8000-000000000203",
 						sessionId: "session-1",
 						title: "Approve bash?",
-						message: "Delete the generated cache file.\nRisk: destructive\nCommand: rm cache.tmp",
+						message: "Delete the generated cache file.",
 						createdAt: "2026-07-16T00:00:00.000Z",
-						kind: "select",
-						presentation: "permission_approval",
-						operation: {
-							toolName: "bash",
-							rows: [
-								{ label: "Command", value: "rm cache.tmp" },
-								{ label: "Working directory", value: "/tmp/work" },
-							],
-							omittedRows: 0,
-							scopeComplete: true,
-							irreversible: true,
-							executionTarget: "sandbox",
-							rememberProjectEligible: true,
-						},
-						choices: [
-							{ id: "permission:allow-once", label: "Allow once" },
-							{ id: "permission:always-project", label: "Always allow for this project" },
-							{ id: "permission:deny", label: "Reject" },
+						kind: "permission_approval",
+						requestId: "00000000-0000-4000-8000-000000000203",
+						actionId: "action-bash-1",
+						toolLabel: "bash",
+						riskLevel: "critical",
+						executionTarget: "sandbox",
+						reason: "Delete the generated cache file.",
+						scopeComplete: true,
+						details: [
+							{ label: "Command", value: "rm cache.tmp" },
+							{ label: "Working directory", value: "/tmp/work" },
 						],
+						choices: ["allow-once", "always-allow-exact", "deny-once"],
 					}}
 					onRespond={onRespond}
 				/>,
@@ -236,32 +233,28 @@ describe("renderer reconnect behavior", () => {
 		await act(async () => panel.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
 		expect(onRespond).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000203",
-			kind: "select",
-			choiceId: "permission:deny",
+			kind: "permission_approval",
+			choice: "deny-once",
 		});
 		await act(async () => root.unmount());
 	});
 
 	it("allows complete approvals with omitted summary rows but blocks genuinely incomplete approvals", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		for (const [operation, blocked] of [
+		for (const [fixture, blocked] of [
 			[{
-				toolName: "read",
-				rows: [{ label: "Path", value: "/tmp/target-0" }],
-				omittedRows: 2,
+				toolLabel: "read",
+				details: [{ label: "Path", value: "/tmp/target-0" }],
 				scopeComplete: true,
-				irreversible: false,
+				riskLevel: "medium" as const,
 				executionTarget: "sandbox" as const,
-				rememberProjectEligible: false,
 			}, false],
 			[{
-				toolName: "mcp__service__publish",
-				rows: [{ label: "Details", value: "No target details were provided" }],
-				omittedRows: 0,
+				toolLabel: "mcp__service__publish",
+				details: [{ label: "Details", value: "No target details were provided" }],
 				scopeComplete: false,
-				irreversible: true,
+				riskLevel: "critical" as const,
 				executionTarget: "host" as const,
-				rememberProjectEligible: false,
 			}, true],
 		] as const) {
 			const container = document.createElement("div");
@@ -275,13 +268,12 @@ describe("renderer reconnect behavior", () => {
 						title: "Approve operation?",
 						message: "Review the requested operation.",
 						createdAt: "2026-07-16T00:00:00.000Z",
-						kind: "select",
-						presentation: "permission_approval",
-						operation,
-						choices: [
-							{ id: "permission:allow-once", label: "Allow once" },
-							{ id: "permission:deny", label: "Reject" },
-						],
+						kind: "permission_approval",
+						requestId: "00000000-0000-4000-8000-000000000209",
+						actionId: "action-op-1",
+						reason: "Review the requested operation.",
+						choices: ["allow-once", "deny-once"],
+						...fixture,
 					}}
 					onRespond={vi.fn().mockResolvedValue(undefined)}
 				/>,
@@ -289,13 +281,13 @@ describe("renderer reconnect behavior", () => {
 
 			expect([...container.querySelectorAll<HTMLButtonElement>("button")]
 				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(blocked);
-			expect(container.querySelector('[role="alert"]')).not.toBeNull();
+			expect(container.querySelector('[role="alert"]') === null).toBe(!blocked);
 			await act(async () => root.unmount());
 			container.remove();
 		}
 	});
 
-	it("shows complete custom-tool arguments and permits the decision", async () => {
+	it("keeps raw custom-tool arguments out of the approval surface", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -306,29 +298,24 @@ describe("renderer reconnect behavior", () => {
 					interactionId: "00000000-0000-4000-8000-000000000210",
 					sessionId: "session-1",
 					title: "Approve publish?",
-					message: 'Risk: custom, external-side-effect\nArguments:\n{\n  "content": "private payload"\n}',
+					message: "Publish content",
 					createdAt: "2026-07-16T00:00:00.000Z",
-					kind: "select",
-					presentation: "permission_approval",
-					operation: {
-						toolName: "mcp__service__publish",
-						rows: [{ label: "Details", value: "Publish content" }],
-						omittedRows: 0,
-						scopeComplete: true,
-						irreversible: true,
-						executionTarget: "host",
-						rememberProjectEligible: false,
-					},
-					choices: [
-						{ id: "permission:allow-once", label: "Allow once" },
-						{ id: "permission:deny", label: "Reject" },
-					],
+					kind: "permission_approval",
+					requestId: "00000000-0000-4000-8000-000000000210",
+					actionId: "action-publish-1",
+					toolLabel: "mcp__service__publish",
+					riskLevel: "critical",
+					executionTarget: "host",
+					reason: "Publish content",
+					scopeComplete: true,
+					details: [{ label: "Details", value: "Publish content" }],
+					choices: ["allow-once", "deny-once"],
 				}}
 				onRespond={vi.fn().mockResolvedValue(undefined)}
 			/>,
 		));
 
-		expect(container.querySelector(".permission-approval-complete-details")?.textContent).toContain("private payload");
+		expect(container.textContent).not.toContain("private payload");
 		expect([...container.querySelectorAll<HTMLButtonElement>("button")]
 			.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(false);
 		await act(async () => root.unmount());

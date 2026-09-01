@@ -61,9 +61,9 @@ export interface OpenedSessionRuntime {
 	setThinkingSelection(
 		input: ClientParams<"session/setThinkingSelection">,
 	): Promise<ClientResult<"session/setThinkingSelection">>;
-	setPermissionMode(
-		input: ClientParams<"session/setPermissionMode">,
-	): Promise<ClientResult<"session/setPermissionMode">>;
+	setPermissionPreset(
+		input: ClientParams<"session/setPermissionPreset">,
+	): Promise<ClientResult<"session/setPermissionPreset">>;
 	setCollaborationMode(
 		input: ClientParams<"session/setCollaborationMode">,
 	): Promise<ClientResult<"session/setCollaborationMode">>;

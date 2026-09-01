@@ -41,7 +41,11 @@ export interface MutableProjectionState {
 	cursor: number;
 	syncStatus: ProjectionSyncStatus;
 	collaborationMode: SessionSnapshot["collaborationMode"];
-	permissionMode: SessionSnapshot["permissionMode"];
+	permissionPreset: SessionSnapshot["permissionPreset"];
+	effectiveSettings: SessionSnapshot["effectiveSettings"];
+	constrainedByParent: boolean;
+	sandboxHealth: SessionSnapshot["sandboxHealth"];
+	activeReview: SessionSnapshot["activeReview"];
 	thinkingSelection: ThinkingSelectionView;
 	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
 	availableThinkingSelections: ThinkingSelectionView[];
@@ -87,7 +91,11 @@ export function createProjectionState(): MutableProjectionState {
 		cursor: 0,
 		syncStatus: "empty",
 		collaborationMode: "default",
-		permissionMode: "auto",
+		permissionPreset: "auto",
+		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+		constrainedByParent: false,
+		sandboxHealth: "healthy",
+		activeReview: undefined,
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
@@ -147,7 +155,11 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.cursor = 0;
 	state.syncStatus = "empty";
 	state.collaborationMode = "default";
-	state.permissionMode = "auto";
+	state.permissionPreset = "auto";
+	state.effectiveSettings = { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" };
+	state.constrainedByParent = false;
+	state.sandboxHealth = "healthy";
+	state.activeReview = undefined;
 	state.agents = [];
 	state.nextAgentAfterId = null;
 	state.tasks = [];
@@ -187,7 +199,11 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.cursor = 0;
 	state.syncStatus = "empty";
 	state.collaborationMode = "default";
-	state.permissionMode = "auto";
+	state.permissionPreset = "auto";
+	state.effectiveSettings = { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" };
+	state.constrainedByParent = false;
+	state.sandboxHealth = "healthy";
+	state.activeReview = undefined;
 	state.agents = [];
 	state.nextAgentAfterId = null;
 	state.tasks = [];
@@ -233,7 +249,11 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.cursor = snapshot.cursor;
 	state.syncStatus = "ready";
 	state.collaborationMode = snapshot.collaborationMode;
-	state.permissionMode = snapshot.permissionMode;
+	state.permissionPreset = snapshot.permissionPreset;
+	state.effectiveSettings = snapshot.effectiveSettings;
+	state.constrainedByParent = snapshot.constrainedByParent;
+	state.sandboxHealth = snapshot.sandboxHealth;
+	state.activeReview = snapshot.activeReview;
 	state.thinkingSelection = snapshot.thinkingSelection;
 	state.actualThinkingLevel = snapshot.actualThinkingLevel;
 	state.availableThinkingSelections = snapshot.availableThinkingSelections;
@@ -284,7 +304,9 @@ function eventSessionId(event: DomainEvent): string | undefined {
 			return event.item.sessionId;
 		case "item/delta":
 			return event.sessionId;
-		case "session/permissionModeChanged":
+		case "session/permissionPresetChanged":
+		case "session/permissionReviewStarted":
+		case "session/permissionReviewCompleted":
 		case "session/collaborationModeChanged":
 		case "session/thinkingSelectionChanged":
 		case "agent/updated":
@@ -388,8 +410,21 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 				structuredClone(event.session),
 			);
 			return;
-		case "session/permissionModeChanged":
-			state.permissionMode = event.permissionMode;
+		case "session/permissionPresetChanged":
+			state.permissionPreset = event.permissionPreset;
+			state.effectiveSettings = event.effectiveSettings;
+			state.constrainedByParent = event.constrainedByParent;
+			state.sandboxHealth = event.sandboxHealth;
+			return;
+		case "session/permissionReviewStarted":
+			state.activeReview = {
+				actionId: event.actionId,
+				reviewer: event.reviewer,
+				riskLevel: event.riskLevel,
+			};
+			return;
+		case "session/permissionReviewCompleted":
+			if (state.activeReview?.actionId === event.actionId) state.activeReview = undefined;
 			return;
 		case "session/collaborationModeChanged":
 			state.collaborationMode = event.collaborationMode;

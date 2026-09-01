@@ -32,7 +32,39 @@ export const SessionStateSchema = Type.Union([
 ]);
 
 export const AgentModeSchema = Type.Union([Type.Literal("chat"), Type.Literal("code")]);
-export const PermissionModeSchema = Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]);
+export const PermissionPresetSchema = Type.Union([Type.Literal("ask"), Type.Literal("auto"), Type.Literal("full")]);
+export const SandboxPolicySchema = Type.Union([
+	Type.Literal("read-only"),
+	Type.Literal("workspace-write"),
+	Type.Literal("danger-full-access"),
+	Type.Literal("external-sandbox"),
+]);
+export const ApprovalPolicySchema = Type.Union([
+	Type.Literal("user"),
+	Type.Literal("auto-review"),
+	Type.Literal("deny"),
+]);
+export const PermissionSettingsViewSchema = StrictObject({
+	sandboxPolicy: SandboxPolicySchema,
+	approvalPolicy: ApprovalPolicySchema,
+});
+export const PermissionRiskLevelSchema = Type.Union([
+	Type.Literal("low"),
+	Type.Literal("medium"),
+	Type.Literal("high"),
+	Type.Literal("critical"),
+]);
+export const SandboxHealthSchema = Type.Union([
+	Type.Literal("healthy"),
+	Type.Literal("unavailable"),
+	Type.Literal("misconfigured"),
+]);
+export const PermissionReviewerSchema = Type.Union([Type.Literal("model"), Type.Literal("user")]);
+export const PermissionActiveReviewViewSchema = StrictObject({
+	actionId: OpaqueIdSchema,
+	reviewer: PermissionReviewerSchema,
+	riskLevel: PermissionRiskLevelSchema,
+});
 export const CwdOriginSchema = Type.Union([Type.Literal("managed"), Type.Literal("user-selected")]);
 export const ActualThinkingLevelSchema = Type.Union([
 	Type.Literal("off"),
@@ -531,7 +563,11 @@ export const PermissionOperationRowViewSchema = StrictObject({
 	value: PublicTextSchema,
 });
 
-export const PermissionExecutionTargetSchema = Type.Union([Type.Literal("sandbox"), Type.Literal("host")]);
+export const PermissionExecutionTargetSchema = Type.Union([
+	Type.Literal("sandbox"),
+	Type.Literal("host"),
+	Type.Literal("external"),
+]);
 
 export const PermissionOperationViewSchema = StrictObject({
 	toolName: NameSchema,
@@ -555,11 +591,34 @@ export const ProjectPermissionRuleViewSchema = StrictObject({
 	createdAt: TimestampSchema,
 });
 
+export const PermissionApprovalChoiceSchema = Type.Union([
+	Type.Literal("allow-once"),
+	Type.Literal("deny-once"),
+	Type.Literal("always-allow-exact"),
+	Type.Literal("always-deny-exact"),
+]);
+
+export const PermissionApprovalInteractionViewSchema = StrictObject({
+	...InteractionBase,
+	kind: Type.Literal("permission_approval"),
+	requestId: UuidSchema,
+	actionId: OpaqueIdSchema,
+	toolLabel: NameSchema,
+	riskLevel: PermissionRiskLevelSchema,
+	executionTarget: PermissionExecutionTargetSchema,
+	reason: PublicTextSchema,
+	scopeComplete: Type.Boolean(),
+	details: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
+	priorReviewer: Type.Optional(Type.Literal("model")),
+	priorReviewerOutcome: Type.Optional(
+		Type.Union([Type.Literal("deny"), Type.Literal("unavailable"), Type.Literal("insufficient-authorization")]),
+	),
+	choices: Type.Array(PermissionApprovalChoiceSchema, { minItems: 1, maxItems: 4, uniqueItems: true }),
+});
+
 export const SelectInteractionViewSchema = StrictObject({
 	...InteractionBase,
 	kind: Type.Literal("select"),
-	presentation: Type.Optional(Type.Literal("permission_approval")),
-	operation: Type.Optional(PermissionOperationViewSchema),
 	choices: Type.Array(InteractionChoiceSchema, { minItems: 1, maxItems: MAX_INTERACTION_CHOICES }),
 });
 
@@ -600,6 +659,7 @@ export const AskUserInteractionViewSchema = Type.Refine(
 
 export const InteractionViewSchema = Type.Union([
 	TrustInteractionViewSchema,
+	PermissionApprovalInteractionViewSchema,
 	SelectInteractionViewSchema,
 	ConfirmInteractionViewSchema,
 	InputInteractionViewSchema,
@@ -921,7 +981,11 @@ export const SessionStatusViewSchema = Type.Refine(
 export const SessionSnapshotSchema = StrictObject({
 	session: SessionSummarySchema,
 	collaborationMode: CollaborationModeSchema,
-	permissionMode: PermissionModeSchema,
+	permissionPreset: PermissionPresetSchema,
+	effectiveSettings: PermissionSettingsViewSchema,
+	constrainedByParent: Type.Boolean(),
+	sandboxHealth: SandboxHealthSchema,
+	activeReview: Type.Optional(PermissionActiveReviewViewSchema),
 	model: Type.Optional(ModelRefSchema),
 	availableModels: Type.Optional(Type.Array(ModelOptionViewSchema, { maxItems: 512 })),
 	turns: Type.Array(TurnViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
@@ -950,10 +1014,30 @@ export const ThinkingSelectionChangedEventSchema = StrictObject({
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
 
-export const PermissionModeChangedEventSchema = StrictObject({
-	type: Type.Literal("session/permissionModeChanged"),
+export const PermissionPresetChangedEventSchema = StrictObject({
+	type: Type.Literal("session/permissionPresetChanged"),
 	sessionId: SessionIdSchema,
-	permissionMode: PermissionModeSchema,
+	permissionPreset: PermissionPresetSchema,
+	effectiveSettings: PermissionSettingsViewSchema,
+	constrainedByParent: Type.Boolean(),
+	sandboxHealth: SandboxHealthSchema,
+});
+
+export const PermissionReviewStartedEventSchema = StrictObject({
+	type: Type.Literal("session/permissionReviewStarted"),
+	sessionId: SessionIdSchema,
+	actionId: OpaqueIdSchema,
+	reviewer: PermissionReviewerSchema,
+	riskLevel: PermissionRiskLevelSchema,
+});
+
+export const PermissionReviewCompletedEventSchema = StrictObject({
+	type: Type.Literal("session/permissionReviewCompleted"),
+	sessionId: SessionIdSchema,
+	actionId: OpaqueIdSchema,
+	reviewer: PermissionReviewerSchema,
+	outcome: Type.Union([Type.Literal("allow"), Type.Literal("deny"), Type.Literal("unavailable")]),
+	riskLevel: PermissionRiskLevelSchema,
 });
 
 export const CollaborationModeChangedEventSchema = StrictObject({
@@ -1299,7 +1383,9 @@ export const DomainEventSchema = Type.Union([
 	ItemCompletedEventSchema,
 	InteractionNotifyEventSchema,
 	ServerStateEventSchema,
-	PermissionModeChangedEventSchema,
+	PermissionPresetChangedEventSchema,
+	PermissionReviewStartedEventSchema,
+	PermissionReviewCompletedEventSchema,
 	CollaborationModeChangedEventSchema,
 	ThinkingSelectionChangedEventSchema,
 	ModelChangedEventSchema,
@@ -1376,7 +1462,8 @@ export type ContextUsageBreakdownItemView = Static<typeof ContextUsageBreakdownI
 export type SessionStatusView = Static<typeof SessionStatusViewSchema>;
 export type SessionSnapshot = Static<typeof SessionSnapshotSchema>;
 export type ThinkingSelectionView = Static<typeof ThinkingSelectionSchema>;
-export type PermissionModeView = Static<typeof PermissionModeSchema>;
+export type PermissionPresetView = Static<typeof PermissionPresetSchema>;
+export type PermissionSettingsView = Static<typeof PermissionSettingsViewSchema>;
 export type PermissionExecutionTargetView = Static<typeof PermissionExecutionTargetSchema>;
 export type ProjectPermissionRuleView = Static<typeof ProjectPermissionRuleViewSchema>;
 export type ModelOptionView = Static<typeof ModelOptionViewSchema>;

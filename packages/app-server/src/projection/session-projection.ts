@@ -91,7 +91,9 @@ export class SessionProjection {
 			case "server/state":
 			case "interaction/notify":
 				return clone(event);
-			case "session/permissionModeChanged":
+			case "session/permissionPresetChanged":
+			case "session/permissionReviewStarted":
+			case "session/permissionReviewCompleted":
 			case "session/collaborationModeChanged":
 			case "session/thinkingSelectionChanged":
 			case "session/modelChanged":
@@ -187,7 +189,11 @@ export class SessionProjection {
 			SessionSnapshot,
 			| "collaborationMode"
 			| "thinkingSelection"
-			| "permissionMode"
+			| "permissionPreset"
+			| "effectiveSettings"
+			| "constrainedByParent"
+			| "sandboxHealth"
+			| "activeReview"
 			| "actualThinkingLevel"
 			| "availableThinkingSelections"
 			| "agents"
@@ -196,7 +202,10 @@ export class SessionProjection {
 			| "availableModels"
 		> = {
 			collaborationMode: "default",
-			permissionMode: "auto",
+			permissionPreset: "auto",
+			effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+			constrainedByParent: false,
+			sandboxHealth: "healthy",
 			thinkingSelection: "off",
 			actualThinkingLevel: "off",
 			availableThinkingSelections: ["off"],

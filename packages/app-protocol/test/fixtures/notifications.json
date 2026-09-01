@@ -7,7 +7,7 @@
 			"params": {
 				"serverEpoch": "33333333-3333-4333-8333-333333333333",
 				"fromCursor": 43,
-				"toCursor": 68,
+				"toCursor": 70,
 				"events": [
 					{
 						"type": "session/updated",
@@ -126,9 +126,30 @@
 						"availableThinkingSelections": ["off", "high", "max", "ultra"]
 					},
 					{
-						"type": "session/permissionModeChanged",
+						"type": "session/permissionPresetChanged",
 						"sessionId": "11111111-1111-4111-8111-111111111111",
-						"permissionMode": "full"
+						"permissionPreset": "full",
+						"effectiveSettings": {
+							"sandboxPolicy": "danger-full-access",
+							"approvalPolicy": "user"
+						},
+						"constrainedByParent": false,
+						"sandboxHealth": "healthy"
+					},
+					{
+						"type": "session/permissionReviewStarted",
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"actionId": "tool-call-1",
+						"reviewer": "model",
+						"riskLevel": "high"
+					},
+					{
+						"type": "session/permissionReviewCompleted",
+						"sessionId": "11111111-1111-4111-8111-111111111111",
+						"actionId": "tool-call-1",
+						"reviewer": "user",
+						"outcome": "allow",
+						"riskLevel": "high"
 					},
 					{
 						"type": "session/collaborationModeChanged",

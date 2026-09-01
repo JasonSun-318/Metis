@@ -9,7 +9,7 @@ import type {
 	ItemView,
 	McpServerDetailView,
 	McpServerSummaryView,
-	PermissionModeView,
+	PermissionPresetView,
 	ProjectPermissionRuleView,
 	ServerParams,
 	ServerResult,
@@ -284,7 +284,10 @@ const updatePersonalization = {
 const snapshot: SessionSnapshot = {
 	session,
 	collaborationMode: "default",
-	permissionMode: "ask",
+	permissionPreset: "ask",
+	effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+	constrainedByParent: false,
+	sandboxHealth: "healthy",
 	turns,
 	recentItems: items,
 	nextBeforeItemId: null,
@@ -306,7 +309,7 @@ const goalSet = {
 	requestId: "22222222-2222-4222-8222-222222222236",
 	objective: "keep tests green",
 } satisfies ClientParams<"session/goal/set">;
-const permissionMode: PermissionModeView = snapshot.permissionMode;
+const permissionPreset: PermissionPresetView = snapshot.permissionPreset;
 const setCollaborationMode = {
 	sessionId: session.sessionId,
 	requestId: "00000000-0000-4000-8000-000000000001",
@@ -452,7 +455,7 @@ void projectDeleteResult;
 void sessionStatusView;
 void sessionCompactResult;
 void compactedItem;
-void permissionMode;
+void permissionPreset;
 void permissionRule;
 void agentInterruptResult;
 void goalSet;

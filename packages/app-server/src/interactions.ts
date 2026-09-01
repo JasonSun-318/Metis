@@ -24,7 +24,6 @@ import {
 	createDialogExtensionUIContext,
 	type ExtensionUIContext,
 	type ExtensionUIDialogOptions,
-	formatPermissionApproval,
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
@@ -36,9 +35,10 @@ const ASK_USER_TIMEOUT_MS = 15 * 60_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const GENERIC_TARGET_KEY =
 	/^(action|address|branch|command|directory|file|folder|host|id|name|owner|path|port|project|query|repo|repository|resource|target|url|uri)$/iu;
-const ALLOW_ONCE = "permission:allow-once";
-const ALWAYS_PROJECT = "permission:always-project";
-const DENY = "permission:deny";
+
+type PermissionApprovalChoice = Extract<InteractionView, { kind: "permission_approval" }>["choices"][number];
+type PermissionRiskLevel = Extract<InteractionView, { kind: "permission_approval" }>["riskLevel"];
+type PermissionExecutionTarget = Extract<InteractionView, { kind: "permission_approval" }>["executionTarget"];
 
 export interface InteractionPeer {
 	request(request: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>>;
@@ -119,6 +119,44 @@ function preflightBrowserAction(
 	return { target: target?.label ?? target?.role ?? input.action.type };
 }
 
+function recordArgs(value: unknown): Record<string, unknown> | undefined {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: undefined;
+}
+
+function approvalRiskLevel(request: PermissionApprovalRequest): PermissionRiskLevel {
+	const risk = recordArgs(request.args)?.deterministicRisk;
+	if (risk === "low" || risk === "medium" || risk === "high" || risk === "critical") return risk;
+	const risks = request.action.risks;
+	if (risks.includes("destructive") || risks.includes("external-side-effect")) return "critical";
+	if (risks.includes("network") || risks.includes("elevation")) return "high";
+	if (risks.includes("workspace-write") || risks.includes("outside-read")) return "medium";
+	return "low";
+}
+
+function approvalExecutionTarget(request: PermissionApprovalRequest): PermissionExecutionTarget {
+	const requested = recordArgs(request.args)?.requestedTarget;
+	if (requested === "sandbox" || requested === "host" || requested === "external") return requested;
+	return request.executionTarget ?? "host";
+}
+
+function priorReviewFields(
+	request: PermissionApprovalRequest,
+): Pick<Extract<InteractionView, { kind: "permission_approval" }>, "priorReviewer" | "priorReviewerOutcome"> {
+	const automaticReview = recordArgs(request.args)?.automaticReview;
+	if (automaticReview === "unavailable-or-insufficient") {
+		return { priorReviewer: "model", priorReviewerOutcome: "unavailable" };
+	}
+	if (automaticReview === "deny") {
+		return { priorReviewer: "model", priorReviewerOutcome: "deny" };
+	}
+	if (automaticReview === "insufficient-authorization") {
+		return { priorReviewer: "model", priorReviewerOutcome: "insufficient-authorization" };
+	}
+	return {};
+}
+
 function permissionOperation(request: PermissionApprovalRequest) {
 	const rows: Array<{ label: string; value: string }> = [];
 	const args =
@@ -130,6 +168,10 @@ function permissionOperation(request: PermissionApprovalRequest) {
 		if (!rows.some((candidate) => candidate.label === row.label && candidate.value === row.value)) rows.push(row);
 	};
 
+	if (request.actor) {
+		push("Agent", `${request.actor.name} (${request.actor.id})`);
+		push("Task", request.actor.taskId);
+	}
 	if (request.action.command) push("Command", request.action.command);
 	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
@@ -180,6 +222,8 @@ export class InteractionBroker {
 	private readonly onPendingChange?: (sessionId: string, pending: boolean) => void;
 	private readonly owners = new Map<string, InteractionPeer>();
 	private readonly pending = new Map<string, string>();
+	private readonly pendingByAction = new Map<string, string>();
+	private readonly pendingAborts = new Map<string, AbortController>();
 
 	constructor(options: InteractionBrokerOptions) {
 		if (!validTimeout(options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS)) {
@@ -197,16 +241,21 @@ export class InteractionBroker {
 	}
 
 	release(sessionId: string, peer: InteractionPeer): void {
-		if (this.owners.get(sessionId) === peer) this.owners.delete(sessionId);
+		if (this.owners.get(sessionId) !== peer) return;
+		this.owners.delete(sessionId);
+		this.abortPending(sessionId);
 	}
 
 	releaseSession(sessionId: string): void {
 		this.owners.delete(sessionId);
+		this.abortPending(sessionId);
 	}
 
 	releasePeer(peer: InteractionPeer): void {
-		for (const [sessionId, owner] of this.owners) {
-			if (owner === peer) this.owners.delete(sessionId);
+		for (const [sessionId, owner] of [...this.owners]) {
+			if (owner !== peer) continue;
+			this.owners.delete(sessionId);
+			this.abortPending(sessionId);
 		}
 	}
 
@@ -347,48 +396,62 @@ export class InteractionBroker {
 		sessionId: string,
 		approval: PermissionApprovalRequest,
 	): Promise<PermissionApprovalDecision> {
-		const view = formatPermissionApproval(approval);
-		const message = `${view.summary}\n${view.details}`;
-		if (Buffer.byteLength(message, "utf8") > MAX_PUBLIC_TEXT_UTF8_BYTES) {
-			throw new TypeError("Permission action exceeds the App Server protocol limit");
-		}
-		const interactionId = this.createId();
 		const operation = permissionOperation(approval);
-		const response = await this.request(
-			sessionId,
-			{
-				interactionId,
-				sessionId,
-				title: view.title,
-				message,
-				createdAt: new Date(this.now()).toISOString(),
-				expiresAt: deadline(this.now(), this.defaultTimeoutMs),
-				kind: "select",
-				presentation: "permission_approval",
-				operation,
-				choices: [
-					{ id: ALLOW_ONCE, label: "Allow once" },
-					...(operation.rememberProjectEligible
-						? [{ id: ALWAYS_PROJECT, label: "Always allow for this project" }]
-						: []),
-					{ id: DENY, label: "Reject" },
-				],
-			},
-			{ signal: approval.signal },
-		);
-		if (response?.kind !== "select") throw new Error("Approval was unavailable or cancelled");
-		if (response.choiceId === ALLOW_ONCE || response.choiceId === ALWAYS_PROJECT) {
-			if (!operation.scopeComplete) {
-				return { decision: "deny", reason: "Permission target details were incomplete" };
-			}
-			if (response.choiceId === ALWAYS_PROJECT) {
-				if (!operation.rememberProjectEligible) throw new Error("Approval returned an ineligible project choice");
-				return { decision: "allow", remember: "project" };
-			}
-			return { decision: "allow" };
+		const actionId = approval.action.actionId;
+		const actionKey = `${sessionId}\0${actionId}`;
+		if (this.pendingByAction.has(actionKey)) throw new Error("Approval was unavailable or cancelled");
+		const interactionId = this.createId();
+		this.pendingByAction.set(actionKey, interactionId);
+		const choices: PermissionApprovalChoice[] = [];
+		if (operation.scopeComplete) {
+			choices.push("allow-once");
+			if (operation.rememberProjectEligible) choices.push("always-allow-exact");
 		}
-		if (response.choiceId === DENY) return { decision: "deny", reason: "Denied by the session owner" };
-		throw new Error("Approval returned an unknown choice");
+		choices.push("deny-once");
+		if (operation.rememberProjectEligible) choices.push("always-deny-exact");
+		try {
+			const response = await this.request(
+				sessionId,
+				{
+					interactionId,
+					sessionId,
+					title: boundedName(`Approve ${approval.action.toolName}?`, "Approve tool?"),
+					message: boundedPublicText(approval.reason || "This action needs approval."),
+					createdAt: new Date(this.now()).toISOString(),
+					expiresAt: deadline(this.now(), this.defaultTimeoutMs),
+					kind: "permission_approval",
+					requestId: interactionId,
+					actionId,
+					toolLabel: boundedName(approval.action.toolName, "tool"),
+					riskLevel: approvalRiskLevel(approval),
+					executionTarget: approvalExecutionTarget(approval),
+					reason: boundedPublicText(approval.reason || "This action needs approval."),
+					scopeComplete: operation.scopeComplete,
+					details: operation.rows,
+					...priorReviewFields(approval),
+					choices,
+				},
+				{ signal: approval.signal },
+			);
+			if (response?.kind !== "permission_approval") throw new Error("Approval was unavailable or cancelled");
+			if (response.choice === "allow-once" || response.choice === "always-allow-exact") {
+				if (!operation.scopeComplete) {
+					return { decision: "deny", reason: "Permission target details were incomplete" };
+				}
+				if (response.choice === "always-allow-exact") {
+					if (!operation.rememberProjectEligible)
+						throw new Error("Approval returned an ineligible project choice");
+					return { decision: "allow", remember: "project" };
+				}
+				return { decision: "allow" };
+			}
+			if (response.choice === "deny-once" || response.choice === "always-deny-exact") {
+				return { decision: "deny", reason: "Denied by the session owner" };
+			}
+			throw new Error("Approval returned an unknown choice");
+		} finally {
+			this.pendingByAction.delete(actionKey);
+		}
 	}
 
 	async requestUserInput(sessionId: string, input: AskUserRequest): Promise<AskUserResponse> {
@@ -550,6 +613,7 @@ export class InteractionBroker {
 		timer.unref?.();
 		const wasPending = this.hasPending(sessionId);
 		this.pending.set(interactionValue.interactionId, sessionId);
+		this.pendingAborts.set(interactionValue.interactionId, controller);
 		if (!wasPending) this.notifyPendingChange(sessionId, true);
 		try {
 			const aborted = new Promise<never>((_resolve, reject) => {
@@ -566,10 +630,17 @@ export class InteractionBroker {
 		} finally {
 			clearTimeout(timer);
 			options?.signal?.removeEventListener("abort", abort);
+			this.pendingAborts.delete(interactionValue.interactionId);
 			const hadPending = this.hasPending(sessionId);
 			this.pending.delete(interactionValue.interactionId);
 			const pending = this.hasPending(sessionId);
 			if (hadPending !== pending) this.notifyPendingChange(sessionId, pending);
+		}
+	}
+
+	private abortPending(sessionId: string): void {
+		for (const [interactionId, pendingSessionId] of this.pending) {
+			if (pendingSessionId === sessionId) this.pendingAborts.get(interactionId)?.abort();
 		}
 	}
 

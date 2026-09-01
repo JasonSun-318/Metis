@@ -26,7 +26,10 @@ function snapshot(sessionId: string, mode: "chat" | "code" = "chat", unread = fa
 	return {
 		session: summary(sessionId, mode, unread),
 		collaborationMode: "default",
-		permissionMode: "ask",
+		permissionPreset: "ask",
+		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+		constrainedByParent: false,
+		sandboxHealth: "healthy",
 		turns: [],
 		recentItems: [],
 		nextBeforeItemId: null,
@@ -294,7 +297,16 @@ describe("SessionWorkspaceWorkflow", () => {
 					serverEpoch: EPOCH,
 					fromCursor: 1,
 					toCursor: 1,
-					events: [{ type: "session/permissionModeChanged", sessionId: target.sessionId, permissionMode: "ask" }],
+					events: [
+						{
+							type: "session/permissionPresetChanged",
+							sessionId: target.sessionId,
+							permissionPreset: "ask",
+							effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+							constrainedByParent: false,
+							sandboxHealth: "healthy",
+						},
+					],
 				},
 			},
 		});

@@ -184,15 +184,15 @@ describe("agent runtime e2e", () => {
 			if (!("method" in message) || message.method !== "interaction/request") return;
 			const request = message as ServerRpcRequest<"interaction/request">;
 			const interaction = request.params.interaction;
-			if (interaction.kind !== "select" || interaction.presentation !== "permission_approval") return;
+			if (interaction.kind !== "permission_approval") return;
 			permissionApprovals += 1;
 			connection.handleServerResponse({
 				jsonrpc: "2.0",
 				id: request.id,
 				result: {
 					interactionId: interaction.interactionId,
-					kind: "select",
-					choiceId: "permission:allow-once",
+					kind: "permission_approval",
+					choice: "allow-once",
 				},
 			});
 		});
@@ -211,7 +211,7 @@ describe("agent runtime e2e", () => {
 				jsonrpc: "2.0",
 				id: "create",
 				method: "session/create",
-				params: { requestId: SESSION_ID, cwd: projectDir, permissionMode: "full" },
+				params: { requestId: SESSION_ID, cwd: projectDir, permissionPreset: "full" },
 			});
 			await connection.handle({
 				jsonrpc: "2.0",

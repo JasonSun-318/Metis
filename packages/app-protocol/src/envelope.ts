@@ -256,6 +256,11 @@ function validateInteractionCorrelation(
 			throw new ProtocolValidationError("invalid_response", "Interaction response selected an unknown choice");
 		}
 	}
+	if (interaction.kind === "permission_approval") {
+		if (!("choice" in result) || !interaction.choices.includes(result.choice)) {
+			throw new ProtocolValidationError("invalid_response", "Interaction response selected an unknown choice");
+		}
+	}
 	if (interaction.kind === "ask_user") {
 		if (!("answers" in result) || !("cancelled" in result)) {
 			throw new ProtocolValidationError("invalid_response", "ask_user response is incomplete");

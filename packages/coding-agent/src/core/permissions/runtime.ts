@@ -51,6 +51,21 @@ export interface ProjectPermissionRuleMatcher {
 	match(input: ProjectPermissionRuleInput): ProjectRuleMatch | undefined;
 }
 
+export type PermissionReviewBoundaryEvent =
+	| {
+			readonly phase: "started";
+			readonly actionId: string;
+			readonly reviewer: "model" | "user";
+			readonly riskLevel: RiskLevel;
+	  }
+	| {
+			readonly phase: "completed";
+			readonly actionId: string;
+			readonly reviewer: "model" | "user";
+			readonly outcome: "allow" | "deny" | "unavailable";
+			readonly riskLevel: RiskLevel;
+	  };
+
 export interface ToolAuthorizationRuntimeOptions {
 	readonly sessionId: string;
 	readonly policy?: PermissionPolicy;
@@ -61,6 +76,7 @@ export interface ToolAuthorizationRuntimeOptions {
 	readonly audit?: PermissionAuditWriter;
 	readonly now?: () => number;
 	readonly createEventId?: () => string;
+	readonly onReview?: (event: PermissionReviewBoundaryEvent) => void;
 }
 
 type AllowedDecision = Exclude<PermissionPolicyDecision, { readonly kind: "deny" }>;
@@ -220,6 +236,14 @@ export class ToolAuthorizationRuntime {
 		}
 	}
 
+	private notifyReview(event: PermissionReviewBoundaryEvent): void {
+		try {
+			this.options.onReview?.(event);
+		} catch {
+			// Review status projection cannot widen or reverse a decision.
+		}
+	}
+
 	private reviewerForRequest(): PermissionReviewer {
 		if (this.reviewer) return this.reviewer;
 		if (!this.options.reviewerFactory) throw new PermissionDeniedError("review.unavailable");
@@ -351,6 +375,7 @@ export class ToolAuthorizationRuntime {
 				reviewer: initialDecision.minimumReviewer,
 				riskLevel: initialDecision.riskLevel,
 			};
+			this.notifyReview({ phase: "started", ...this.currentReview });
 			let review: PermissionReviewResult;
 			try {
 				review = await this.queueReview(reviewRequest);
@@ -359,6 +384,13 @@ export class ToolAuthorizationRuntime {
 			} finally {
 				this.currentReview = undefined;
 			}
+			this.notifyReview({
+				phase: "completed",
+				actionId: initial.action.actionId,
+				reviewer: review.reviewer,
+				outcome: review.kind === "allow" ? "allow" : review.kind === "deny" ? "deny" : "unavailable",
+				riskLevel: initialDecision.riskLevel,
+			});
 			await this.appendAudit(
 				initial.action,
 				initialDecision.riskLevel,

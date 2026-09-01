@@ -660,6 +660,27 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				actualThinkingLevel: event.actualThinkingLevel,
 				availableThinkingSelections: this.session.getAvailableThinkingSelections(),
 			});
+			return;
+		}
+		if (event.type === "permission_review_started") {
+			this.publish({
+				type: "session/permissionReviewStarted",
+				sessionId: this.sessionId,
+				actionId: event.actionId,
+				reviewer: event.reviewer,
+				riskLevel: event.riskLevel,
+			});
+			return;
+		}
+		if (event.type === "permission_review_completed") {
+			this.publish({
+				type: "session/permissionReviewCompleted",
+				sessionId: this.sessionId,
+				actionId: event.actionId,
+				reviewer: event.reviewer,
+				outcome: event.outcome,
+				riskLevel: event.riskLevel,
+			});
 		}
 	}
 
@@ -1487,25 +1508,22 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		};
 	}
 
-	async setPermissionMode(
-		input: ClientParams<"session/setPermissionMode">,
-	): Promise<ClientResult<"session/setPermissionMode">> {
+	async setPermissionPreset(
+		input: ClientParams<"session/setPermissionPreset">,
+	): Promise<ClientResult<"session/setPermissionPreset">> {
 		if (this.isActive() || this.hasPendingInteractions()) {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		try {
-			await this.session.setPermissionPreset(input.permissionMode);
+			await this.session.setPermissionPreset(input.permissionPreset);
 		} catch {
-			const permissionMode = this.session.sessionManager.getPermissionPreset();
-			this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
+			this.publishPermissionPresetChanged();
 			throw new AppServerError("OPERATION_FAILED", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
 			});
 		}
-		const permissionMode = this.session.sessionManager.getPermissionPreset();
-		this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
-		return { permissionMode };
+		return this.publishPermissionPresetChanged();
 	}
 
 	async setCollaborationMode(
@@ -1609,13 +1627,37 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return result;
 	}
 
+	private permissionProtocolView(): {
+		readonly permissionPreset: SessionSnapshot["permissionPreset"];
+		readonly effectiveSettings: SessionSnapshot["effectiveSettings"];
+		readonly constrainedByParent: boolean;
+		readonly sandboxHealth: SessionSnapshot["sandboxHealth"];
+	} {
+		const view = this.session.permissionView;
+		return {
+			permissionPreset: view.permissionPreset,
+			effectiveSettings: view.effectiveSettings,
+			constrainedByParent: view.constrainedByParent,
+			sandboxHealth: view.sandboxHealth,
+		};
+	}
+
+	private publishPermissionPresetChanged(): ClientResult<"session/setPermissionPreset"> {
+		const result = this.permissionProtocolView();
+		this.publish({ type: "session/permissionPresetChanged", sessionId: this.sessionId, ...result });
+		return result;
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		this.refreshLifecycleProjection();
 		const agentSummaries = this.runtime.subagentManager?.listSummaries(this.sessionId, false) ?? [];
 		const agents = boundedAgentSummaryViews(agentSummaries, 100);
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
 			collaborationMode: this.session.sessionManager.getCollaborationMode(),
-			permissionMode: this.session.sessionManager.getPermissionPreset(),
+			...this.permissionProtocolView(),
+			...(this.session.permissionView.activeReview
+				? { activeReview: this.session.permissionView.activeReview }
+				: {}),
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
 				: {}),
@@ -2029,7 +2071,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
-	async setPermissionMode(): Promise<ClientResult<"session/setPermissionMode">> {
+	async setPermissionPreset(): Promise<ClientResult<"session/setPermissionPreset">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 

@@ -49,11 +49,14 @@ import {
 	ModelOptionViewSchema,
 	ModelRefSchema,
 	ModelSettingsViewSchema,
-	PermissionModeSchema,
+	PermissionApprovalChoiceSchema,
+	PermissionPresetSchema,
+	PermissionSettingsViewSchema,
 	PlanViewSchema,
 	ProfileUsageSummaryViewSchema,
 	ProjectPermissionRuleViewSchema,
 	QueuedTurnViewSchema,
+	SandboxHealthSchema,
 	ScheduleDescriptionInputSchema,
 	ScheduleInputSpecSchema,
 	ScheduleNameSchema,
@@ -373,7 +376,7 @@ export const SessionCreateParamsSchema = StrictObject({
 	mode: Type.Optional(AgentModeSchema),
 	cwd: Type.Optional(PathSchema),
 	name: Type.Optional(OptionalNameSchema),
-	permissionMode: Type.Optional(PermissionModeSchema),
+	permissionPreset: Type.Optional(PermissionPresetSchema),
 });
 export const SessionCreateResultSchema = StrictObject({ session: SessionSummarySchema });
 
@@ -509,12 +512,17 @@ export const SessionThinkingSelectionResultSchema = StrictObject({
 	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
 });
 
-export const SessionSetPermissionModeParamsSchema = StrictObject({
+export const SessionSetPermissionPresetParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	requestId: UuidSchema,
-	permissionMode: PermissionModeSchema,
+	permissionPreset: PermissionPresetSchema,
 });
-export const SessionPermissionModeResultSchema = StrictObject({ permissionMode: PermissionModeSchema });
+export const SessionPermissionPresetResultSchema = StrictObject({
+	permissionPreset: PermissionPresetSchema,
+	effectiveSettings: PermissionSettingsViewSchema,
+	constrainedByParent: Type.Boolean(),
+	sandboxHealth: SandboxHealthSchema,
+});
 
 export const SessionSetCollaborationModeParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -1172,6 +1180,11 @@ export const TrustInteractionResultSchema = StrictObject({
 	kind: Type.Literal("project_trust"),
 	choiceId: OpaqueIdSchema,
 });
+export const PermissionApprovalInteractionResultSchema = StrictObject({
+	interactionId: UuidSchema,
+	kind: Type.Literal("permission_approval"),
+	choice: PermissionApprovalChoiceSchema,
+});
 export const SelectInteractionResultSchema = StrictObject({
 	interactionId: UuidSchema,
 	kind: Type.Literal("select"),
@@ -1211,6 +1224,7 @@ export const AskUserInteractionResultSchema = Type.Refine(
 );
 export const InteractionResultSchema = Type.Union([
 	TrustInteractionResultSchema,
+	PermissionApprovalInteractionResultSchema,
 	SelectInteractionResultSchema,
 	ConfirmInteractionResultSchema,
 	InputInteractionResultSchema,
@@ -1265,7 +1279,7 @@ export const ClientRequestMethods = {
 		SessionSetThinkingSelectionParamsSchema,
 		SessionThinkingSelectionResultSchema,
 	),
-	"session/setPermissionMode": method(SessionSetPermissionModeParamsSchema, SessionPermissionModeResultSchema),
+	"session/setPermissionPreset": method(SessionSetPermissionPresetParamsSchema, SessionPermissionPresetResultSchema),
 	"session/setCollaborationMode": method(
 		SessionSetCollaborationModeParamsSchema,
 		SessionCollaborationModeResultSchema,

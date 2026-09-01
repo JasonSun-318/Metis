@@ -2354,7 +2354,7 @@
                       "maxLength": 256,
                       "x-metis-maxUtf16Units": 256
                     },
-                    "permissionMode": {
+                    "permissionPreset": {
                       "anyOf": [
                         {
                           "type": "string",
@@ -3407,14 +3407,14 @@
                 },
                 "method": {
                   "type": "string",
-                  "const": "session/setPermissionMode"
+                  "const": "session/setPermissionPreset"
                 },
                 "params": {
                   "type": "object",
                   "required": [
                     "sessionId",
                     "requestId",
-                    "permissionMode"
+                    "permissionPreset"
                   ],
                   "properties": {
                     "sessionId": {
@@ -3426,7 +3426,7 @@
                       "type": "string",
                       "format": "uuid"
                     },
-                    "permissionMode": {
+                    "permissionPreset": {
                       "anyOf": [
                         {
                           "type": "string",
@@ -7582,6 +7582,191 @@
                             "message",
                             "createdAt",
                             "kind",
+                            "requestId",
+                            "actionId",
+                            "toolLabel",
+                            "riskLevel",
+                            "executionTarget",
+                            "reason",
+                            "scopeComplete",
+                            "details",
+                            "choices"
+                          ],
+                          "properties": {
+                            "interactionId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "sessionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                            },
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "message": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "createdAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "maxLength": 40
+                            },
+                            "expiresAt": {
+                              "type": "string",
+                              "format": "date-time",
+                              "maxLength": 40
+                            },
+                            "kind": {
+                              "type": "string",
+                              "const": "permission_approval"
+                            },
+                            "requestId": {
+                              "type": "string",
+                              "format": "uuid"
+                            },
+                            "actionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "toolLabel": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "riskLevel": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "low"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "medium"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "high"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "critical"
+                                }
+                              ]
+                            },
+                            "executionTarget": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "sandbox"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "host"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "external"
+                                }
+                              ]
+                            },
+                            "reason": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "scopeComplete": {
+                              "type": "boolean"
+                            },
+                            "details": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "label",
+                                  "value"
+                                ],
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "x-metis-maxUtf16Units": 256
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 65536
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "maxItems": 64
+                            },
+                            "priorReviewer": {
+                              "type": "string",
+                              "const": "model"
+                            },
+                            "priorReviewerOutcome": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "deny"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "unavailable"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "insufficient-authorization"
+                                }
+                              ]
+                            },
+                            "choices": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "allow-once"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "deny-once"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "always-allow-exact"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "always-deny-exact"
+                                  }
+                                ]
+                              },
+                              "minItems": 1,
+                              "maxItems": 4,
+                              "uniqueItems": true
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "required": [
+                            "interactionId",
+                            "sessionId",
+                            "title",
+                            "message",
+                            "createdAt",
+                            "kind",
                             "choices"
                           ],
                           "properties": {
@@ -7617,81 +7802,6 @@
                             "kind": {
                               "type": "string",
                               "const": "select"
-                            },
-                            "presentation": {
-                              "type": "string",
-                              "const": "permission_approval"
-                            },
-                            "operation": {
-                              "type": "object",
-                              "required": [
-                                "toolName",
-                                "rows",
-                                "omittedRows",
-                                "scopeComplete",
-                                "irreversible",
-                                "executionTarget",
-                                "rememberProjectEligible"
-                              ],
-                              "properties": {
-                                "toolName": {
-                                  "type": "string",
-                                  "minLength": 1,
-                                  "maxLength": 256,
-                                  "x-metis-maxUtf16Units": 256
-                                },
-                                "rows": {
-                                  "type": "array",
-                                  "items": {
-                                    "type": "object",
-                                    "required": [
-                                      "label",
-                                      "value"
-                                    ],
-                                    "properties": {
-                                      "label": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 256,
-                                        "x-metis-maxUtf16Units": 256
-                                      },
-                                      "value": {
-                                        "type": "string",
-                                        "x-metis-maxUtf8Bytes": 65536
-                                      }
-                                    },
-                                    "additionalProperties": false
-                                  },
-                                  "maxItems": 64
-                                },
-                                "omittedRows": {
-                                  "type": "integer",
-                                  "minimum": 0,
-                                  "maximum": 9007199254740991
-                                },
-                                "scopeComplete": {
-                                  "type": "boolean"
-                                },
-                                "irreversible": {
-                                  "type": "boolean"
-                                },
-                                "executionTarget": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "sandbox"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "host"
-                                    }
-                                  ]
-                                },
-                                "rememberProjectEligible": {
-                                  "type": "boolean"
-                                }
-                              },
-                              "additionalProperties": false
                             },
                             "choices": {
                               "type": "array",
@@ -10546,19 +10656,22 @@
                             "required": [
                               "type",
                               "sessionId",
-                              "permissionMode"
+                              "permissionPreset",
+                              "effectiveSettings",
+                              "constrainedByParent",
+                              "sandboxHealth"
                             ],
                             "properties": {
                               "type": {
                                 "type": "string",
-                                "const": "session/permissionModeChanged"
+                                "const": "session/permissionPresetChanged"
                               },
                               "sessionId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                               },
-                              "permissionMode": {
+                              "permissionPreset": {
                                 "anyOf": [
                                   {
                                     "type": "string",
@@ -10571,6 +10684,208 @@
                                   {
                                     "type": "string",
                                     "const": "full"
+                                  }
+                                ]
+                              },
+                              "effectiveSettings": {
+                                "type": "object",
+                                "required": [
+                                  "sandboxPolicy",
+                                  "approvalPolicy"
+                                ],
+                                "properties": {
+                                  "sandboxPolicy": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "read-only"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "workspace-write"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "danger-full-access"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "external-sandbox"
+                                      }
+                                    ]
+                                  },
+                                  "approvalPolicy": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "user"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "auto-review"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "deny"
+                                      }
+                                    ]
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "constrainedByParent": {
+                                "type": "boolean"
+                              },
+                              "sandboxHealth": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "healthy"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "misconfigured"
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "sessionId",
+                              "actionId",
+                              "reviewer",
+                              "riskLevel"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "session/permissionReviewStarted"
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "reviewer": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "model"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "user"
+                                  }
+                                ]
+                              },
+                              "riskLevel": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "critical"
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "type",
+                              "sessionId",
+                              "actionId",
+                              "reviewer",
+                              "outcome",
+                              "riskLevel"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "session/permissionReviewCompleted"
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "reviewer": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "model"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "user"
+                                  }
+                                ]
+                              },
+                              "outcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "allow"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "deny"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  }
+                                ]
+                              },
+                              "riskLevel": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "critical"
                                   }
                                 ]
                               }
@@ -20921,7 +21236,10 @@
                       "required": [
                         "session",
                         "collaborationMode",
-                        "permissionMode",
+                        "permissionPreset",
+                        "effectiveSettings",
+                        "constrainedByParent",
+                        "sandboxHealth",
                         "turns",
                         "recentItems",
                         "nextBeforeItemId",
@@ -21093,7 +21411,7 @@
                             }
                           ]
                         },
-                        "permissionMode": {
+                        "permissionPreset": {
                           "anyOf": [
                             {
                               "type": "string",
@@ -21108,6 +21426,120 @@
                               "const": "full"
                             }
                           ]
+                        },
+                        "effectiveSettings": {
+                          "type": "object",
+                          "required": [
+                            "sandboxPolicy",
+                            "approvalPolicy"
+                          ],
+                          "properties": {
+                            "sandboxPolicy": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "read-only"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "workspace-write"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "danger-full-access"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "external-sandbox"
+                                }
+                              ]
+                            },
+                            "approvalPolicy": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "auto-review"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "deny"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "constrainedByParent": {
+                          "type": "boolean"
+                        },
+                        "sandboxHealth": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "healthy"
+                            },
+                            {
+                              "type": "string",
+                              "const": "unavailable"
+                            },
+                            {
+                              "type": "string",
+                              "const": "misconfigured"
+                            }
+                          ]
+                        },
+                        "activeReview": {
+                          "type": "object",
+                          "required": [
+                            "actionId",
+                            "reviewer",
+                            "riskLevel"
+                          ],
+                          "properties": {
+                            "actionId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "reviewer": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "model"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                }
+                              ]
+                            },
+                            "riskLevel": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "low"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "medium"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "high"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "critical"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
                         },
                         "model": {
                           "type": "object",
@@ -21907,6 +22339,191 @@
                                   "message",
                                   "createdAt",
                                   "kind",
+                                  "requestId",
+                                  "actionId",
+                                  "toolLabel",
+                                  "riskLevel",
+                                  "executionTarget",
+                                  "reason",
+                                  "scopeComplete",
+                                  "details",
+                                  "choices"
+                                ],
+                                "properties": {
+                                  "interactionId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "sessionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                                  },
+                                  "title": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "x-metis-maxUtf16Units": 256
+                                  },
+                                  "message": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 65536
+                                  },
+                                  "createdAt": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "maxLength": 40
+                                  },
+                                  "expiresAt": {
+                                    "type": "string",
+                                    "format": "date-time",
+                                    "maxLength": 40
+                                  },
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "permission_approval"
+                                  },
+                                  "requestId": {
+                                    "type": "string",
+                                    "format": "uuid"
+                                  },
+                                  "actionId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "toolLabel": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 256,
+                                    "x-metis-maxUtf16Units": 256
+                                  },
+                                  "riskLevel": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "low"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "medium"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "high"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "critical"
+                                      }
+                                    ]
+                                  },
+                                  "executionTarget": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "sandbox"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "host"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "external"
+                                      }
+                                    ]
+                                  },
+                                  "reason": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 65536
+                                  },
+                                  "scopeComplete": {
+                                    "type": "boolean"
+                                  },
+                                  "details": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "label",
+                                        "value"
+                                      ],
+                                      "properties": {
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 256,
+                                          "x-metis-maxUtf16Units": 256
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "x-metis-maxUtf8Bytes": 65536
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 64
+                                  },
+                                  "priorReviewer": {
+                                    "type": "string",
+                                    "const": "model"
+                                  },
+                                  "priorReviewerOutcome": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "deny"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "unavailable"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "insufficient-authorization"
+                                      }
+                                    ]
+                                  },
+                                  "choices": {
+                                    "type": "array",
+                                    "items": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "allow-once"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "deny-once"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "always-allow-exact"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "always-deny-exact"
+                                        }
+                                      ]
+                                    },
+                                    "minItems": 1,
+                                    "maxItems": 4,
+                                    "uniqueItems": true
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "interactionId",
+                                  "sessionId",
+                                  "title",
+                                  "message",
+                                  "createdAt",
+                                  "kind",
                                   "choices"
                                 ],
                                 "properties": {
@@ -21942,81 +22559,6 @@
                                   "kind": {
                                     "type": "string",
                                     "const": "select"
-                                  },
-                                  "presentation": {
-                                    "type": "string",
-                                    "const": "permission_approval"
-                                  },
-                                  "operation": {
-                                    "type": "object",
-                                    "required": [
-                                      "toolName",
-                                      "rows",
-                                      "omittedRows",
-                                      "scopeComplete",
-                                      "irreversible",
-                                      "executionTarget",
-                                      "rememberProjectEligible"
-                                    ],
-                                    "properties": {
-                                      "toolName": {
-                                        "type": "string",
-                                        "minLength": 1,
-                                        "maxLength": 256,
-                                        "x-metis-maxUtf16Units": 256
-                                      },
-                                      "rows": {
-                                        "type": "array",
-                                        "items": {
-                                          "type": "object",
-                                          "required": [
-                                            "label",
-                                            "value"
-                                          ],
-                                          "properties": {
-                                            "label": {
-                                              "type": "string",
-                                              "minLength": 1,
-                                              "maxLength": 256,
-                                              "x-metis-maxUtf16Units": 256
-                                            },
-                                            "value": {
-                                              "type": "string",
-                                              "x-metis-maxUtf8Bytes": 65536
-                                            }
-                                          },
-                                          "additionalProperties": false
-                                        },
-                                        "maxItems": 64
-                                      },
-                                      "omittedRows": {
-                                        "type": "integer",
-                                        "minimum": 0,
-                                        "maximum": 9007199254740991
-                                      },
-                                      "scopeComplete": {
-                                        "type": "boolean"
-                                      },
-                                      "irreversible": {
-                                        "type": "boolean"
-                                      },
-                                      "executionTarget": {
-                                        "anyOf": [
-                                          {
-                                            "type": "string",
-                                            "const": "sandbox"
-                                          },
-                                          {
-                                            "type": "string",
-                                            "const": "host"
-                                          }
-                                        ]
-                                      },
-                                      "rememberProjectEligible": {
-                                        "type": "boolean"
-                                      }
-                                    },
-                                    "additionalProperties": false
                                   },
                                   "choices": {
                                     "type": "array",
@@ -23369,10 +23911,13 @@
                 "result": {
                   "type": "object",
                   "required": [
-                    "permissionMode"
+                    "permissionPreset",
+                    "effectiveSettings",
+                    "constrainedByParent",
+                    "sandboxHealth"
                   ],
                   "properties": {
-                    "permissionMode": {
+                    "permissionPreset": {
                       "anyOf": [
                         {
                           "type": "string",
@@ -23385,6 +23930,71 @@
                         {
                           "type": "string",
                           "const": "full"
+                        }
+                      ]
+                    },
+                    "effectiveSettings": {
+                      "type": "object",
+                      "required": [
+                        "sandboxPolicy",
+                        "approvalPolicy"
+                      ],
+                      "properties": {
+                        "sandboxPolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "read-only"
+                            },
+                            {
+                              "type": "string",
+                              "const": "workspace-write"
+                            },
+                            {
+                              "type": "string",
+                              "const": "danger-full-access"
+                            },
+                            {
+                              "type": "string",
+                              "const": "external-sandbox"
+                            }
+                          ]
+                        },
+                        "approvalPolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            {
+                              "type": "string",
+                              "const": "auto-review"
+                            },
+                            {
+                              "type": "string",
+                              "const": "deny"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "constrainedByParent": {
+                      "type": "boolean"
+                    },
+                    "sandboxHealth": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "healthy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unavailable"
+                        },
+                        {
+                          "type": "string",
+                          "const": "misconfigured"
                         }
                       ]
                     }
@@ -23711,6 +24321,10 @@
                               {
                                 "type": "string",
                                 "const": "host"
+                              },
+                              {
+                                "type": "string",
+                                "const": "external"
                               }
                             ]
                           },
@@ -23848,6 +24462,10 @@
                               {
                                 "type": "string",
                                 "const": "host"
+                              },
+                              {
+                                "type": "string",
+                                "const": "external"
                               }
                             ]
                           },
@@ -23985,6 +24603,10 @@
                               {
                                 "type": "string",
                                 "const": "host"
+                              },
+                              {
+                                "type": "string",
+                                "const": "external"
                               }
                             ]
                           },
@@ -34417,6 +35039,45 @@
                       "required": [
                         "interactionId",
                         "kind",
+                        "choice"
+                      ],
+                      "properties": {
+                        "interactionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "permission_approval"
+                        },
+                        "choice": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "allow-once"
+                            },
+                            {
+                              "type": "string",
+                              "const": "deny-once"
+                            },
+                            {
+                              "type": "string",
+                              "const": "always-allow-exact"
+                            },
+                            {
+                              "type": "string",
+                              "const": "always-deny-exact"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "interactionId",
+                        "kind",
                         "choiceId"
                       ],
                       "properties": {
@@ -38794,7 +39455,7 @@
                   "maxLength": 256,
                   "x-metis-maxUtf16Units": 256
                 },
-                "permissionMode": {
+                "permissionPreset": {
                   "anyOf": [
                     {
                       "type": "string",
@@ -39847,14 +40508,14 @@
             },
             "method": {
               "type": "string",
-              "const": "session/setPermissionMode"
+              "const": "session/setPermissionPreset"
             },
             "params": {
               "type": "object",
               "required": [
                 "sessionId",
                 "requestId",
-                "permissionMode"
+                "permissionPreset"
               ],
               "properties": {
                 "sessionId": {
@@ -39866,7 +40527,7 @@
                   "type": "string",
                   "format": "uuid"
                 },
-                "permissionMode": {
+                "permissionPreset": {
                   "anyOf": [
                     {
                       "type": "string",
@@ -50645,7 +51306,10 @@
                   "required": [
                     "session",
                     "collaborationMode",
-                    "permissionMode",
+                    "permissionPreset",
+                    "effectiveSettings",
+                    "constrainedByParent",
+                    "sandboxHealth",
                     "turns",
                     "recentItems",
                     "nextBeforeItemId",
@@ -50817,7 +51481,7 @@
                         }
                       ]
                     },
-                    "permissionMode": {
+                    "permissionPreset": {
                       "anyOf": [
                         {
                           "type": "string",
@@ -50832,6 +51496,120 @@
                           "const": "full"
                         }
                       ]
+                    },
+                    "effectiveSettings": {
+                      "type": "object",
+                      "required": [
+                        "sandboxPolicy",
+                        "approvalPolicy"
+                      ],
+                      "properties": {
+                        "sandboxPolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "read-only"
+                            },
+                            {
+                              "type": "string",
+                              "const": "workspace-write"
+                            },
+                            {
+                              "type": "string",
+                              "const": "danger-full-access"
+                            },
+                            {
+                              "type": "string",
+                              "const": "external-sandbox"
+                            }
+                          ]
+                        },
+                        "approvalPolicy": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            {
+                              "type": "string",
+                              "const": "auto-review"
+                            },
+                            {
+                              "type": "string",
+                              "const": "deny"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "constrainedByParent": {
+                      "type": "boolean"
+                    },
+                    "sandboxHealth": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "healthy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "unavailable"
+                        },
+                        {
+                          "type": "string",
+                          "const": "misconfigured"
+                        }
+                      ]
+                    },
+                    "activeReview": {
+                      "type": "object",
+                      "required": [
+                        "actionId",
+                        "reviewer",
+                        "riskLevel"
+                      ],
+                      "properties": {
+                        "actionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "reviewer": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "model"
+                            },
+                            {
+                              "type": "string",
+                              "const": "user"
+                            }
+                          ]
+                        },
+                        "riskLevel": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "low"
+                            },
+                            {
+                              "type": "string",
+                              "const": "medium"
+                            },
+                            {
+                              "type": "string",
+                              "const": "high"
+                            },
+                            {
+                              "type": "string",
+                              "const": "critical"
+                            }
+                          ]
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "model": {
                       "type": "object",
@@ -51631,6 +52409,191 @@
                               "message",
                               "createdAt",
                               "kind",
+                              "requestId",
+                              "actionId",
+                              "toolLabel",
+                              "riskLevel",
+                              "executionTarget",
+                              "reason",
+                              "scopeComplete",
+                              "details",
+                              "choices"
+                            ],
+                            "properties": {
+                              "interactionId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "message": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "createdAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              },
+                              "expiresAt": {
+                                "type": "string",
+                                "format": "date-time",
+                                "maxLength": 40
+                              },
+                              "kind": {
+                                "type": "string",
+                                "const": "permission_approval"
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "actionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "toolLabel": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "riskLevel": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "critical"
+                                  }
+                                ]
+                              },
+                              "executionTarget": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "sandbox"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "host"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "external"
+                                  }
+                                ]
+                              },
+                              "reason": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "scopeComplete": {
+                                "type": "boolean"
+                              },
+                              "details": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ],
+                                  "properties": {
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 256,
+                                      "x-metis-maxUtf16Units": 256
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 65536
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 64
+                              },
+                              "priorReviewer": {
+                                "type": "string",
+                                "const": "model"
+                              },
+                              "priorReviewerOutcome": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "deny"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "unavailable"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "insufficient-authorization"
+                                  }
+                                ]
+                              },
+                              "choices": {
+                                "type": "array",
+                                "items": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "allow-once"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "deny-once"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "always-allow-exact"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "always-deny-exact"
+                                    }
+                                  ]
+                                },
+                                "minItems": 1,
+                                "maxItems": 4,
+                                "uniqueItems": true
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "interactionId",
+                              "sessionId",
+                              "title",
+                              "message",
+                              "createdAt",
+                              "kind",
                               "choices"
                             ],
                             "properties": {
@@ -51666,81 +52629,6 @@
                               "kind": {
                                 "type": "string",
                                 "const": "select"
-                              },
-                              "presentation": {
-                                "type": "string",
-                                "const": "permission_approval"
-                              },
-                              "operation": {
-                                "type": "object",
-                                "required": [
-                                  "toolName",
-                                  "rows",
-                                  "omittedRows",
-                                  "scopeComplete",
-                                  "irreversible",
-                                  "executionTarget",
-                                  "rememberProjectEligible"
-                                ],
-                                "properties": {
-                                  "toolName": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 256,
-                                    "x-metis-maxUtf16Units": 256
-                                  },
-                                  "rows": {
-                                    "type": "array",
-                                    "items": {
-                                      "type": "object",
-                                      "required": [
-                                        "label",
-                                        "value"
-                                      ],
-                                      "properties": {
-                                        "label": {
-                                          "type": "string",
-                                          "minLength": 1,
-                                          "maxLength": 256,
-                                          "x-metis-maxUtf16Units": 256
-                                        },
-                                        "value": {
-                                          "type": "string",
-                                          "x-metis-maxUtf8Bytes": 65536
-                                        }
-                                      },
-                                      "additionalProperties": false
-                                    },
-                                    "maxItems": 64
-                                  },
-                                  "omittedRows": {
-                                    "type": "integer",
-                                    "minimum": 0,
-                                    "maximum": 9007199254740991
-                                  },
-                                  "scopeComplete": {
-                                    "type": "boolean"
-                                  },
-                                  "irreversible": {
-                                    "type": "boolean"
-                                  },
-                                  "executionTarget": {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "sandbox"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "host"
-                                      }
-                                    ]
-                                  },
-                                  "rememberProjectEligible": {
-                                    "type": "boolean"
-                                  }
-                                },
-                                "additionalProperties": false
                               },
                               "choices": {
                                 "type": "array",
@@ -53093,10 +53981,13 @@
             "result": {
               "type": "object",
               "required": [
-                "permissionMode"
+                "permissionPreset",
+                "effectiveSettings",
+                "constrainedByParent",
+                "sandboxHealth"
               ],
               "properties": {
-                "permissionMode": {
+                "permissionPreset": {
                   "anyOf": [
                     {
                       "type": "string",
@@ -53109,6 +54000,71 @@
                     {
                       "type": "string",
                       "const": "full"
+                    }
+                  ]
+                },
+                "effectiveSettings": {
+                  "type": "object",
+                  "required": [
+                    "sandboxPolicy",
+                    "approvalPolicy"
+                  ],
+                  "properties": {
+                    "sandboxPolicy": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "read-only"
+                        },
+                        {
+                          "type": "string",
+                          "const": "workspace-write"
+                        },
+                        {
+                          "type": "string",
+                          "const": "danger-full-access"
+                        },
+                        {
+                          "type": "string",
+                          "const": "external-sandbox"
+                        }
+                      ]
+                    },
+                    "approvalPolicy": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "user"
+                        },
+                        {
+                          "type": "string",
+                          "const": "auto-review"
+                        },
+                        {
+                          "type": "string",
+                          "const": "deny"
+                        }
+                      ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "constrainedByParent": {
+                  "type": "boolean"
+                },
+                "sandboxHealth": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "healthy"
+                    },
+                    {
+                      "type": "string",
+                      "const": "unavailable"
+                    },
+                    {
+                      "type": "string",
+                      "const": "misconfigured"
                     }
                   ]
                 }
@@ -53435,6 +54391,10 @@
                           {
                             "type": "string",
                             "const": "host"
+                          },
+                          {
+                            "type": "string",
+                            "const": "external"
                           }
                         ]
                       },
@@ -53572,6 +54532,10 @@
                           {
                             "type": "string",
                             "const": "host"
+                          },
+                          {
+                            "type": "string",
+                            "const": "external"
                           }
                         ]
                       },
@@ -53709,6 +54673,10 @@
                           {
                             "type": "string",
                             "const": "host"
+                          },
+                          {
+                            "type": "string",
+                            "const": "external"
                           }
                         ]
                       },
@@ -65893,19 +66861,22 @@
                 "required": [
                   "type",
                   "sessionId",
-                  "permissionMode"
+                  "permissionPreset",
+                  "effectiveSettings",
+                  "constrainedByParent",
+                  "sandboxHealth"
                 ],
                 "properties": {
                   "type": {
                     "type": "string",
-                    "const": "session/permissionModeChanged"
+                    "const": "session/permissionPresetChanged"
                   },
                   "sessionId": {
                     "type": "string",
                     "minLength": 1,
                     "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                   },
-                  "permissionMode": {
+                  "permissionPreset": {
                     "anyOf": [
                       {
                         "type": "string",
@@ -65918,6 +66889,208 @@
                       {
                         "type": "string",
                         "const": "full"
+                      }
+                    ]
+                  },
+                  "effectiveSettings": {
+                    "type": "object",
+                    "required": [
+                      "sandboxPolicy",
+                      "approvalPolicy"
+                    ],
+                    "properties": {
+                      "sandboxPolicy": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "read-only"
+                          },
+                          {
+                            "type": "string",
+                            "const": "workspace-write"
+                          },
+                          {
+                            "type": "string",
+                            "const": "danger-full-access"
+                          },
+                          {
+                            "type": "string",
+                            "const": "external-sandbox"
+                          }
+                        ]
+                      },
+                      "approvalPolicy": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "auto-review"
+                          },
+                          {
+                            "type": "string",
+                            "const": "deny"
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "constrainedByParent": {
+                    "type": "boolean"
+                  },
+                  "sandboxHealth": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "healthy"
+                      },
+                      {
+                        "type": "string",
+                        "const": "unavailable"
+                      },
+                      {
+                        "type": "string",
+                        "const": "misconfigured"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
+                  "actionId",
+                  "reviewer",
+                  "riskLevel"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/permissionReviewStarted"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "actionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "reviewer": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "model"
+                      },
+                      {
+                        "type": "string",
+                        "const": "user"
+                      }
+                    ]
+                  },
+                  "riskLevel": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "critical"
+                      }
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
+                  "actionId",
+                  "reviewer",
+                  "outcome",
+                  "riskLevel"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/permissionReviewCompleted"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "actionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "reviewer": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "model"
+                      },
+                      {
+                        "type": "string",
+                        "const": "user"
+                      }
+                    ]
+                  },
+                  "outcome": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "allow"
+                      },
+                      {
+                        "type": "string",
+                        "const": "deny"
+                      },
+                      {
+                        "type": "string",
+                        "const": "unavailable"
+                      }
+                    ]
+                  },
+                  "riskLevel": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "critical"
                       }
                     ]
                   }
@@ -71226,19 +72399,22 @@
           "required": [
             "type",
             "sessionId",
-            "permissionMode"
+            "permissionPreset",
+            "effectiveSettings",
+            "constrainedByParent",
+            "sandboxHealth"
           ],
           "properties": {
             "type": {
               "type": "string",
-              "const": "session/permissionModeChanged"
+              "const": "session/permissionPresetChanged"
             },
             "sessionId": {
               "type": "string",
               "minLength": 1,
               "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
             },
-            "permissionMode": {
+            "permissionPreset": {
               "anyOf": [
                 {
                   "type": "string",
@@ -71251,6 +72427,208 @@
                 {
                   "type": "string",
                   "const": "full"
+                }
+              ]
+            },
+            "effectiveSettings": {
+              "type": "object",
+              "required": [
+                "sandboxPolicy",
+                "approvalPolicy"
+              ],
+              "properties": {
+                "sandboxPolicy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "read-only"
+                    },
+                    {
+                      "type": "string",
+                      "const": "workspace-write"
+                    },
+                    {
+                      "type": "string",
+                      "const": "danger-full-access"
+                    },
+                    {
+                      "type": "string",
+                      "const": "external-sandbox"
+                    }
+                  ]
+                },
+                "approvalPolicy": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "user"
+                    },
+                    {
+                      "type": "string",
+                      "const": "auto-review"
+                    },
+                    {
+                      "type": "string",
+                      "const": "deny"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "constrainedByParent": {
+              "type": "boolean"
+            },
+            "sandboxHealth": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "healthy"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "misconfigured"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "actionId",
+            "reviewer",
+            "riskLevel"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/permissionReviewStarted"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "actionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "reviewer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "model"
+                },
+                {
+                  "type": "string",
+                  "const": "user"
+                }
+              ]
+            },
+            "riskLevel": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "critical"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "actionId",
+            "reviewer",
+            "outcome",
+            "riskLevel"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/permissionReviewCompleted"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "actionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "reviewer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "model"
+                },
+                {
+                  "type": "string",
+                  "const": "user"
+                }
+              ]
+            },
+            "outcome": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "allow"
+                },
+                {
+                  "type": "string",
+                  "const": "deny"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                }
+              ]
+            },
+            "riskLevel": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "critical"
                 }
               ]
             }
@@ -74849,6 +76227,45 @@
           "required": [
             "interactionId",
             "kind",
+            "choice"
+          ],
+          "properties": {
+            "interactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "kind": {
+              "type": "string",
+              "const": "permission_approval"
+            },
+            "choice": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "allow-once"
+                },
+                {
+                  "type": "string",
+                  "const": "deny-once"
+                },
+                {
+                  "type": "string",
+                  "const": "always-allow-exact"
+                },
+                {
+                  "type": "string",
+                  "const": "always-deny-exact"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "interactionId",
+            "kind",
             "choiceId"
           ],
           "properties": {
@@ -75072,6 +76489,191 @@
             "message",
             "createdAt",
             "kind",
+            "requestId",
+            "actionId",
+            "toolLabel",
+            "riskLevel",
+            "executionTarget",
+            "reason",
+            "scopeComplete",
+            "details",
+            "choices"
+          ],
+          "properties": {
+            "interactionId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "title": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "x-metis-maxUtf16Units": 256
+            },
+            "message": {
+              "type": "string",
+              "x-metis-maxUtf8Bytes": 65536
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time",
+              "maxLength": 40
+            },
+            "kind": {
+              "type": "string",
+              "const": "permission_approval"
+            },
+            "requestId": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "actionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "toolLabel": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256,
+              "x-metis-maxUtf16Units": 256
+            },
+            "riskLevel": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "critical"
+                }
+              ]
+            },
+            "executionTarget": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "sandbox"
+                },
+                {
+                  "type": "string",
+                  "const": "host"
+                },
+                {
+                  "type": "string",
+                  "const": "external"
+                }
+              ]
+            },
+            "reason": {
+              "type": "string",
+              "x-metis-maxUtf8Bytes": 65536
+            },
+            "scopeComplete": {
+              "type": "boolean"
+            },
+            "details": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "label",
+                  "value"
+                ],
+                "properties": {
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-metis-maxUtf16Units": 256
+                  },
+                  "value": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  }
+                },
+                "additionalProperties": false
+              },
+              "maxItems": 64
+            },
+            "priorReviewer": {
+              "type": "string",
+              "const": "model"
+            },
+            "priorReviewerOutcome": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "deny"
+                },
+                {
+                  "type": "string",
+                  "const": "unavailable"
+                },
+                {
+                  "type": "string",
+                  "const": "insufficient-authorization"
+                }
+              ]
+            },
+            "choices": {
+              "type": "array",
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "allow-once"
+                  },
+                  {
+                    "type": "string",
+                    "const": "deny-once"
+                  },
+                  {
+                    "type": "string",
+                    "const": "always-allow-exact"
+                  },
+                  {
+                    "type": "string",
+                    "const": "always-deny-exact"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "maxItems": 4,
+              "uniqueItems": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "interactionId",
+            "sessionId",
+            "title",
+            "message",
+            "createdAt",
+            "kind",
             "choices"
           ],
           "properties": {
@@ -75107,81 +76709,6 @@
             "kind": {
               "type": "string",
               "const": "select"
-            },
-            "presentation": {
-              "type": "string",
-              "const": "permission_approval"
-            },
-            "operation": {
-              "type": "object",
-              "required": [
-                "toolName",
-                "rows",
-                "omittedRows",
-                "scopeComplete",
-                "irreversible",
-                "executionTarget",
-                "rememberProjectEligible"
-              ],
-              "properties": {
-                "toolName": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
-                },
-                "rows": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "label",
-                      "value"
-                    ],
-                    "properties": {
-                      "label": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "x-metis-maxUtf16Units": 256
-                      },
-                      "value": {
-                        "type": "string",
-                        "x-metis-maxUtf8Bytes": 65536
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "maxItems": 64
-                },
-                "omittedRows": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "maximum": 9007199254740991
-                },
-                "scopeComplete": {
-                  "type": "boolean"
-                },
-                "irreversible": {
-                  "type": "boolean"
-                },
-                "executionTarget": {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "sandbox"
-                    },
-                    {
-                      "type": "string",
-                      "const": "host"
-                    }
-                  ]
-                },
-                "rememberProjectEligible": {
-                  "type": "boolean"
-                }
-              },
-              "additionalProperties": false
             },
             "choices": {
               "type": "array",
@@ -79705,19 +81232,22 @@
                         "required": [
                           "type",
                           "sessionId",
-                          "permissionMode"
+                          "permissionPreset",
+                          "effectiveSettings",
+                          "constrainedByParent",
+                          "sandboxHealth"
                         ],
                         "properties": {
                           "type": {
                             "type": "string",
-                            "const": "session/permissionModeChanged"
+                            "const": "session/permissionPresetChanged"
                           },
                           "sessionId": {
                             "type": "string",
                             "minLength": 1,
                             "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
                           },
-                          "permissionMode": {
+                          "permissionPreset": {
                             "anyOf": [
                               {
                                 "type": "string",
@@ -79730,6 +81260,208 @@
                               {
                                 "type": "string",
                                 "const": "full"
+                              }
+                            ]
+                          },
+                          "effectiveSettings": {
+                            "type": "object",
+                            "required": [
+                              "sandboxPolicy",
+                              "approvalPolicy"
+                            ],
+                            "properties": {
+                              "sandboxPolicy": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "read-only"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "workspace-write"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "danger-full-access"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "external-sandbox"
+                                  }
+                                ]
+                              },
+                              "approvalPolicy": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "user"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "auto-review"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "deny"
+                                  }
+                                ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "constrainedByParent": {
+                            "type": "boolean"
+                          },
+                          "sandboxHealth": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "healthy"
+                              },
+                              {
+                                "type": "string",
+                                "const": "unavailable"
+                              },
+                              {
+                                "type": "string",
+                                "const": "misconfigured"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "actionId",
+                          "reviewer",
+                          "riskLevel"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/permissionReviewStarted"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "actionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "reviewer": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "model"
+                              },
+                              {
+                                "type": "string",
+                                "const": "user"
+                              }
+                            ]
+                          },
+                          "riskLevel": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "low"
+                              },
+                              {
+                                "type": "string",
+                                "const": "medium"
+                              },
+                              {
+                                "type": "string",
+                                "const": "high"
+                              },
+                              {
+                                "type": "string",
+                                "const": "critical"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "actionId",
+                          "reviewer",
+                          "outcome",
+                          "riskLevel"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/permissionReviewCompleted"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "actionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "reviewer": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "model"
+                              },
+                              {
+                                "type": "string",
+                                "const": "user"
+                              }
+                            ]
+                          },
+                          "outcome": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "allow"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny"
+                              },
+                              {
+                                "type": "string",
+                                "const": "unavailable"
+                              }
+                            ]
+                          },
+                          "riskLevel": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "low"
+                              },
+                              {
+                                "type": "string",
+                                "const": "medium"
+                              },
+                              {
+                                "type": "string",
+                                "const": "high"
+                              },
+                              {
+                                "type": "string",
+                                "const": "critical"
                               }
                             ]
                           }
@@ -83414,6 +85146,191 @@
                         "message",
                         "createdAt",
                         "kind",
+                        "requestId",
+                        "actionId",
+                        "toolLabel",
+                        "riskLevel",
+                        "executionTarget",
+                        "reason",
+                        "scopeComplete",
+                        "details",
+                        "choices"
+                      ],
+                      "properties": {
+                        "interactionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "message": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "expiresAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "maxLength": 40
+                        },
+                        "kind": {
+                          "type": "string",
+                          "const": "permission_approval"
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "actionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "toolLabel": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "riskLevel": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "low"
+                            },
+                            {
+                              "type": "string",
+                              "const": "medium"
+                            },
+                            {
+                              "type": "string",
+                              "const": "high"
+                            },
+                            {
+                              "type": "string",
+                              "const": "critical"
+                            }
+                          ]
+                        },
+                        "executionTarget": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "sandbox"
+                            },
+                            {
+                              "type": "string",
+                              "const": "host"
+                            },
+                            {
+                              "type": "string",
+                              "const": "external"
+                            }
+                          ]
+                        },
+                        "reason": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "scopeComplete": {
+                          "type": "boolean"
+                        },
+                        "details": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "required": [
+                              "label",
+                              "value"
+                            ],
+                            "properties": {
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "value": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "maxItems": 64
+                        },
+                        "priorReviewer": {
+                          "type": "string",
+                          "const": "model"
+                        },
+                        "priorReviewerOutcome": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "deny"
+                            },
+                            {
+                              "type": "string",
+                              "const": "unavailable"
+                            },
+                            {
+                              "type": "string",
+                              "const": "insufficient-authorization"
+                            }
+                          ]
+                        },
+                        "choices": {
+                          "type": "array",
+                          "items": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "allow-once"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny-once"
+                              },
+                              {
+                                "type": "string",
+                                "const": "always-allow-exact"
+                              },
+                              {
+                                "type": "string",
+                                "const": "always-deny-exact"
+                              }
+                            ]
+                          },
+                          "minItems": 1,
+                          "maxItems": 4,
+                          "uniqueItems": true
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "required": [
+                        "interactionId",
+                        "sessionId",
+                        "title",
+                        "message",
+                        "createdAt",
+                        "kind",
                         "choices"
                       ],
                       "properties": {
@@ -83449,81 +85366,6 @@
                         "kind": {
                           "type": "string",
                           "const": "select"
-                        },
-                        "presentation": {
-                          "type": "string",
-                          "const": "permission_approval"
-                        },
-                        "operation": {
-                          "type": "object",
-                          "required": [
-                            "toolName",
-                            "rows",
-                            "omittedRows",
-                            "scopeComplete",
-                            "irreversible",
-                            "executionTarget",
-                            "rememberProjectEligible"
-                          ],
-                          "properties": {
-                            "toolName": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
-                            },
-                            "rows": {
-                              "type": "array",
-                              "items": {
-                                "type": "object",
-                                "required": [
-                                  "label",
-                                  "value"
-                                ],
-                                "properties": {
-                                  "label": {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 256,
-                                    "x-metis-maxUtf16Units": 256
-                                  },
-                                  "value": {
-                                    "type": "string",
-                                    "x-metis-maxUtf8Bytes": 65536
-                                  }
-                                },
-                                "additionalProperties": false
-                              },
-                              "maxItems": 64
-                            },
-                            "omittedRows": {
-                              "type": "integer",
-                              "minimum": 0,
-                              "maximum": 9007199254740991
-                            },
-                            "scopeComplete": {
-                              "type": "boolean"
-                            },
-                            "irreversible": {
-                              "type": "boolean"
-                            },
-                            "executionTarget": {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "sandbox"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "host"
-                                }
-                              ]
-                            },
-                            "rememberProjectEligible": {
-                              "type": "boolean"
-                            }
-                          },
-                          "additionalProperties": false
                         },
                         "choices": {
                           "type": "array",
@@ -84565,6 +86407,45 @@
                       "minLength": 1,
                       "maxLength": 128,
                       "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "interactionId",
+                    "kind",
+                    "choice"
+                  ],
+                  "properties": {
+                    "interactionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "kind": {
+                      "type": "string",
+                      "const": "permission_approval"
+                    },
+                    "choice": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "allow-once"
+                        },
+                        {
+                          "type": "string",
+                          "const": "deny-once"
+                        },
+                        {
+                          "type": "string",
+                          "const": "always-allow-exact"
+                        },
+                        {
+                          "type": "string",
+                          "const": "always-deny-exact"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -85644,7 +87525,10 @@
       "required": [
         "session",
         "collaborationMode",
-        "permissionMode",
+        "permissionPreset",
+        "effectiveSettings",
+        "constrainedByParent",
+        "sandboxHealth",
         "turns",
         "recentItems",
         "nextBeforeItemId",
@@ -85816,7 +87700,7 @@
             }
           ]
         },
-        "permissionMode": {
+        "permissionPreset": {
           "anyOf": [
             {
               "type": "string",
@@ -85831,6 +87715,120 @@
               "const": "full"
             }
           ]
+        },
+        "effectiveSettings": {
+          "type": "object",
+          "required": [
+            "sandboxPolicy",
+            "approvalPolicy"
+          ],
+          "properties": {
+            "sandboxPolicy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "read-only"
+                },
+                {
+                  "type": "string",
+                  "const": "workspace-write"
+                },
+                {
+                  "type": "string",
+                  "const": "danger-full-access"
+                },
+                {
+                  "type": "string",
+                  "const": "external-sandbox"
+                }
+              ]
+            },
+            "approvalPolicy": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "user"
+                },
+                {
+                  "type": "string",
+                  "const": "auto-review"
+                },
+                {
+                  "type": "string",
+                  "const": "deny"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "constrainedByParent": {
+          "type": "boolean"
+        },
+        "sandboxHealth": {
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "healthy"
+            },
+            {
+              "type": "string",
+              "const": "unavailable"
+            },
+            {
+              "type": "string",
+              "const": "misconfigured"
+            }
+          ]
+        },
+        "activeReview": {
+          "type": "object",
+          "required": [
+            "actionId",
+            "reviewer",
+            "riskLevel"
+          ],
+          "properties": {
+            "actionId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "reviewer": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "model"
+                },
+                {
+                  "type": "string",
+                  "const": "user"
+                }
+              ]
+            },
+            "riskLevel": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "critical"
+                }
+              ]
+            }
+          },
+          "additionalProperties": false
         },
         "model": {
           "type": "object",
@@ -86630,6 +88628,191 @@
                   "message",
                   "createdAt",
                   "kind",
+                  "requestId",
+                  "actionId",
+                  "toolLabel",
+                  "riskLevel",
+                  "executionTarget",
+                  "reason",
+                  "scopeComplete",
+                  "details",
+                  "choices"
+                ],
+                "properties": {
+                  "interactionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-metis-maxUtf16Units": 256
+                  },
+                  "message": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "maxLength": 40
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "maxLength": 40
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "permission_approval"
+                  },
+                  "requestId": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "actionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 128,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                  },
+                  "toolLabel": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "x-metis-maxUtf16Units": 256
+                  },
+                  "riskLevel": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "critical"
+                      }
+                    ]
+                  },
+                  "executionTarget": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "sandbox"
+                      },
+                      {
+                        "type": "string",
+                        "const": "host"
+                      },
+                      {
+                        "type": "string",
+                        "const": "external"
+                      }
+                    ]
+                  },
+                  "reason": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "scopeComplete": {
+                    "type": "boolean"
+                  },
+                  "details": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "label",
+                        "value"
+                      ],
+                      "properties": {
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "value": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    "maxItems": 64
+                  },
+                  "priorReviewer": {
+                    "type": "string",
+                    "const": "model"
+                  },
+                  "priorReviewerOutcome": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "const": "deny"
+                      },
+                      {
+                        "type": "string",
+                        "const": "unavailable"
+                      },
+                      {
+                        "type": "string",
+                        "const": "insufficient-authorization"
+                      }
+                    ]
+                  },
+                  "choices": {
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "allow-once"
+                        },
+                        {
+                          "type": "string",
+                          "const": "deny-once"
+                        },
+                        {
+                          "type": "string",
+                          "const": "always-allow-exact"
+                        },
+                        {
+                          "type": "string",
+                          "const": "always-deny-exact"
+                        }
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "uniqueItems": true
+                  }
+                },
+                "additionalProperties": false
+              },
+              {
+                "type": "object",
+                "required": [
+                  "interactionId",
+                  "sessionId",
+                  "title",
+                  "message",
+                  "createdAt",
+                  "kind",
                   "choices"
                 ],
                 "properties": {
@@ -86665,81 +88848,6 @@
                   "kind": {
                     "type": "string",
                     "const": "select"
-                  },
-                  "presentation": {
-                    "type": "string",
-                    "const": "permission_approval"
-                  },
-                  "operation": {
-                    "type": "object",
-                    "required": [
-                      "toolName",
-                      "rows",
-                      "omittedRows",
-                      "scopeComplete",
-                      "irreversible",
-                      "executionTarget",
-                      "rememberProjectEligible"
-                    ],
-                    "properties": {
-                      "toolName": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 256,
-                        "x-metis-maxUtf16Units": 256
-                      },
-                      "rows": {
-                        "type": "array",
-                        "items": {
-                          "type": "object",
-                          "required": [
-                            "label",
-                            "value"
-                          ],
-                          "properties": {
-                            "label": {
-                              "type": "string",
-                              "minLength": 1,
-                              "maxLength": 256,
-                              "x-metis-maxUtf16Units": 256
-                            },
-                            "value": {
-                              "type": "string",
-                              "x-metis-maxUtf8Bytes": 65536
-                            }
-                          },
-                          "additionalProperties": false
-                        },
-                        "maxItems": 64
-                      },
-                      "omittedRows": {
-                        "type": "integer",
-                        "minimum": 0,
-                        "maximum": 9007199254740991
-                      },
-                      "scopeComplete": {
-                        "type": "boolean"
-                      },
-                      "irreversible": {
-                        "type": "boolean"
-                      },
-                      "executionTarget": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "sandbox"
-                          },
-                          {
-                            "type": "string",
-                            "const": "host"
-                          }
-                        ]
-                      },
-                      "rememberProjectEligible": {
-                        "type": "boolean"
-                      }
-                    },
-                    "additionalProperties": false
                   },
                   "choices": {
                     "type": "array",

@@ -9,9 +9,12 @@ interface InteractionHostProps {
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
 }
 
-const ALLOW_ONCE = "permission:allow-once";
-const ALWAYS_PROJECT = "permission:always-project";
-const DENY = "permission:deny";
+const CHOICE_LABELS = {
+	"allow-once": "Allow once",
+	"deny-once": "Reject",
+	"always-allow-exact": "Always allow this exact action",
+	"always-deny-exact": "Always deny this exact action",
+} as const;
 
 export function InteractionHost({ interaction, onRespond }: InteractionHostProps) {
 	const { t } = useTranslation();
@@ -46,26 +49,23 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 		if (interaction.kind !== "input") return;
 		void respond({ interactionId: interaction.interactionId, kind: "input", value: input });
 	};
-	if (
-		interaction.kind === "select" &&
-		interaction.presentation === "permission_approval" &&
-		interaction.operation &&
-		interaction.choices.some((choice) => choice.id === ALLOW_ONCE) &&
-		interaction.choices.some((choice) => choice.id === DENY)
-	) {
-		const allow = interaction.choices.find((choice) => choice.id === ALLOW_ONCE)!;
-		const alwaysProject = interaction.operation.rememberProjectEligible
-			? interaction.choices.find((choice) => choice.id === ALWAYS_PROJECT)
-			: undefined;
-		const deny = interaction.choices.find((choice) => choice.id === DENY)!;
-		const approvalBlocked = !interaction.operation.scopeComplete;
+	if (interaction.kind === "permission_approval") {
+		const allowOnce = interaction.choices.includes("allow-once");
+		const alwaysAllow = interaction.choices.includes("always-allow-exact");
+		const denyOnce = interaction.choices.includes("deny-once");
+		const alwaysDeny = interaction.choices.includes("always-deny-exact");
+		const escapeChoice = denyOnce ? "deny-once" : alwaysDeny ? "always-deny-exact" : undefined;
+		const approvalBlocked = !interaction.scopeComplete;
+		const hostOrExternal = interaction.executionTarget !== "sandbox";
 		const descriptionIds = [
 			"permission-approval-execution-target",
-			"permission-approval-complete-details",
-			interaction.operation.rows.length > 0 ? "permission-approval-details" : undefined,
-			interaction.operation.irreversible ? "permission-approval-irreversible" : undefined,
+			"permission-approval-reason",
+			interaction.details.length > 0 ? "permission-approval-details" : undefined,
+			interaction.priorReviewer ? "permission-approval-prior-review" : undefined,
 			approvalBlocked ? "permission-approval-incomplete" : undefined,
 		].filter(Boolean).join(" ") || undefined;
+		const choose = (choice: (typeof interaction.choices)[number]) =>
+			void respond({ interactionId: interaction.interactionId, kind: "permission_approval", choice });
 		return (
 			<div className="permission-approval-slot">
 				<section
@@ -73,30 +73,32 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 					aria-labelledby="permission-approval-title"
 					className="permission-approval-panel"
 					onKeyDown={(event) => {
-						if (event.key !== "Escape" || busy) return;
+						if (event.key !== "Escape" || busy || !escapeChoice) return;
 						event.preventDefault();
-						void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: deny.id });
+						choose(escapeChoice);
 					}}
 					role="alertdialog"
 				>
 					<header>
 						<Warning aria-hidden="true" size={18} />
 						<h2 id="permission-approval-title">
-							{t("Metis wants to use {{tool}}", { tool: interaction.operation.toolName })}
+							{t("Metis wants to use {{tool}}", { tool: interaction.toolLabel })}
 						</h2>
 					</header>
 					<p
-						className={interaction.operation.executionTarget === "host" ? "permission-approval-warning" : "permission-approval-target"}
+						className={hostOrExternal ? "permission-approval-warning" : "permission-approval-target"}
 						id="permission-approval-execution-target"
 					>
-						{interaction.operation.executionTarget === "host"
-							? t("This action will run outside the sandbox with your current user permissions.")
-							: t("This command remains limited to the displayed workspace sandbox.")}
+						{interaction.executionTarget === "sandbox"
+							? t("This command remains limited to the displayed workspace sandbox.")
+							: interaction.executionTarget === "external"
+								? t("This action reaches a network or external service.")
+								: t("This action will run outside the sandbox with your current user permissions.")}
 					</p>
-					<pre className="permission-approval-complete-details" id="permission-approval-complete-details">{interaction.message}</pre>
-					{interaction.operation.rows.length > 0 && (
+					<p id="permission-approval-reason">{interaction.reason}</p>
+					{interaction.details.length > 0 && (
 						<dl className="permission-approval-details" id="permission-approval-details">
-							{interaction.operation.rows.map((row, index) => (
+							{interaction.details.map((row, index) => (
 								<div key={`${row.label}:${index}`}>
 									<dt>{t(row.label)}</dt>
 									<dd><code>{row.value}</code></dd>
@@ -104,51 +106,63 @@ export function InteractionHost({ interaction, onRespond }: InteractionHostProps
 							))}
 						</dl>
 					)}
-					{interaction.operation.irreversible && (
+					{interaction.riskLevel === "critical" && (
 						<p className="permission-approval-warning" id="permission-approval-irreversible">
 							{t("This operation may not be reversible.")}
 						</p>
 					)}
-					{interaction.operation.omittedRows > 0 && (
-						<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
-							{t("{{count}} additional targets are shown only in the complete details above.", {
-								count: interaction.operation.omittedRows,
-							})}
+					{interaction.priorReviewer && (
+						<p className="permission-approval-warning" id="permission-approval-prior-review">
+							{t("Automatic security review could not approve this action.")}
 						</p>
 					)}
-					{interaction.operation.omittedRows === 0 && !interaction.operation.scopeComplete && (
+					{approvalBlocked && (
 						<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
 							{t("This tool did not provide enough target details. Deny and retry with a specific target.")}
 						</p>
 					)}
 					{error && <p className="error-copy" role="alert">{t(error)}</p>}
 					<footer>
-						<button
-							className="button-secondary"
-							disabled={busy}
-							onClick={() => void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: deny.id })}
-							ref={firstControl as React.RefObject<HTMLButtonElement>}
-							type="button"
-						>
-							{t(deny.label)} <kbd>Esc</kbd>
-						</button>
-						{alwaysProject && (
+						{denyOnce && (
+							<button
+								className="button-secondary"
+								disabled={busy}
+								onClick={() => choose("deny-once")}
+								ref={firstControl as React.RefObject<HTMLButtonElement>}
+								type="button"
+							>
+								{t(CHOICE_LABELS["deny-once"])} <kbd>Esc</kbd>
+							</button>
+						)}
+						{alwaysDeny && (
+							<button
+								className="button-secondary"
+								disabled={busy}
+								onClick={() => choose("always-deny-exact")}
+								type="button"
+							>
+								{t(CHOICE_LABELS["always-deny-exact"])}
+							</button>
+						)}
+						{alwaysAllow && (
 							<button
 								className="button-secondary"
 								disabled={busy || approvalBlocked}
-								onClick={() => void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: alwaysProject.id })}
+								onClick={() => choose("always-allow-exact")}
 								type="button"
 							>
-								{t(alwaysProject.label)}
+								{t(CHOICE_LABELS["always-allow-exact"])}
 							</button>
 						)}
-						<button
-							disabled={busy || approvalBlocked}
-							onClick={() => void respond({ interactionId: interaction.interactionId, kind: "select", choiceId: allow.id })}
-							type="button"
-						>
-							{t(allow.label)}
-						</button>
+						{allowOnce && (
+							<button
+								disabled={busy || approvalBlocked}
+								onClick={() => choose("allow-once")}
+								type="button"
+							>
+								{t(CHOICE_LABELS["allow-once"])}
+							</button>
+						)}
 					</footer>
 				</section>
 			</div>

@@ -1,16 +1,16 @@
-import type { PermissionModeView } from "@metis/app-protocol";
+import type { PermissionPresetView } from "@metis/app-protocol";
 import { CaretDown, Check, Shield } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface PermissionSelectorProps {
 	readonly disabled: boolean;
-	readonly onChange: (mode: PermissionModeView) => void | Promise<void>;
-	readonly value: PermissionModeView;
+	readonly onChange: (mode: PermissionPresetView) => void | Promise<void>;
+	readonly value: PermissionPresetView;
 }
 
 const OPTIONS: ReadonlyArray<{
-	readonly value: PermissionModeView;
+	readonly value: PermissionPresetView;
 	readonly label: string;
 	readonly description: string;
 }> = [
@@ -44,7 +44,7 @@ export function PermissionSelector({ disabled, onChange, value }: PermissionSele
 		if (restoreFocus) triggerRef.current?.focus();
 	}, []);
 	const select = useCallback(
-		async (mode: PermissionModeView) => {
+		async (mode: PermissionPresetView) => {
 			setOpen(false);
 			if (mode === value) return;
 			setPending(true);

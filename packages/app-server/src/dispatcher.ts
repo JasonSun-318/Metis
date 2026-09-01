@@ -699,10 +699,10 @@ export class Dispatcher {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setThinkingSelection(request.params));
 				});
-			case "session/setPermissionMode":
+			case "session/setPermissionPreset":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
-					return await this.registry.run(ref, (runtime) => runtime.setPermissionMode(request.params));
+					return await this.registry.run(ref, (runtime) => runtime.setPermissionPreset(request.params));
 				});
 			case "session/setCollaborationMode":
 				return await this.replayMutation(request, async () => {

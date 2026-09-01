@@ -296,10 +296,20 @@ class FakeRuntime implements OpenedSessionRuntime {
 		};
 	}
 
-	async setPermissionMode(
-		input: ClientParams<"session/setPermissionMode">,
-	): Promise<ClientResult<"session/setPermissionMode">> {
-		return { permissionMode: input.permissionMode };
+	async setPermissionPreset(
+		input: ClientParams<"session/setPermissionPreset">,
+	): Promise<ClientResult<"session/setPermissionPreset">> {
+		return {
+			permissionPreset: input.permissionPreset,
+			effectiveSettings:
+				input.permissionPreset === "full"
+					? { sandboxPolicy: "danger-full-access", approvalPolicy: "user" }
+					: input.permissionPreset === "ask"
+						? { sandboxPolicy: "workspace-write", approvalPolicy: "user" }
+						: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+			constrainedByParent: false,
+			sandboxHealth: "healthy",
+		};
 	}
 
 	async setCollaborationMode(
@@ -339,7 +349,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return {
 			session: this.getSummary(),
 			collaborationMode: "default",
-			permissionMode: "ask",
+			permissionPreset: "ask",
+			effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+			constrainedByParent: false,
+			sandboxHealth: "healthy",
 			turns: [],
 			recentItems: [],
 			nextBeforeItemId: null,
@@ -1134,18 +1147,18 @@ describe("AppServer", () => {
 		const request = {
 			jsonrpc: "2.0" as const,
 			id: "set-permissions",
-			method: "session/setPermissionMode" as const,
-			params: { sessionId: "session-a", requestId: REQUEST_A, permissionMode: "full" as const },
+			method: "session/setPermissionPreset" as const,
+			params: { sessionId: "session-a", requestId: REQUEST_A, permissionPreset: "full" as const },
 		};
-		expect(await connection.handle(request)).toMatchObject({ result: { permissionMode: "full" } });
+		expect(await connection.handle(request)).toMatchObject({ result: { permissionPreset: "full" } });
 		expect(await connection.handle({ ...request, id: "set-permissions-replay" })).toMatchObject({
-			result: { permissionMode: "full" },
+			result: { permissionPreset: "full" },
 		});
 		expectError(
 			await connection.handle({
 				...request,
 				id: "set-permissions-conflict",
-				params: { ...request.params, permissionMode: "ask" },
+				params: { ...request.params, permissionPreset: "ask" },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);
@@ -1857,13 +1870,17 @@ describe("AppServer", () => {
 			jsonrpc: "2.0" as const,
 			id: "create-full",
 			method: "session/create" as const,
-			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, permissionMode: "full" as const },
+			params: { requestId: REQUEST_A, mode: "chat" as const, cwd: projectDir, permissionPreset: "full" as const },
 		};
 
 		expect(await connection.handle(create)).toMatchObject({ result: { session: { sessionId: REQUEST_A } } });
 		const manager = SessionManager.open(server.catalog.get(REQUEST_A).path);
 		try {
-			expect(manager.getPermissionSettings()).toEqual({ mode: "full" });
+			expect(manager.getPermissionPreset()).toBe("full");
+			expect(manager.getPermissionSettings()).toEqual({
+				sandboxPolicy: "danger-full-access",
+				approvalPolicy: "user",
+			});
 		} finally {
 			manager.close();
 		}
@@ -1874,7 +1891,7 @@ describe("AppServer", () => {
 			await connection.handle({
 				...create,
 				id: "create-full-conflict",
-				params: { ...create.params, permissionMode: "ask" },
+				params: { ...create.params, permissionPreset: "ask" },
 			}),
 			RPC_ERROR_CODES.REQUEST_ID_REUSED,
 		);

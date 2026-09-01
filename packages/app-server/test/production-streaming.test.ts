@@ -259,11 +259,11 @@ describe("production runtime streaming", () => {
 				await connection.handle({
 					jsonrpc: "2.0",
 					id: "permissions-running",
-					method: "session/setPermissionMode",
+					method: "session/setPermissionPreset",
 					params: {
 						sessionId: SESSION_REQUEST,
 						requestId: "00000000-0000-4000-8000-000000000103",
-						permissionMode: "full",
+						permissionPreset: "full",
 					},
 				}),
 			).toMatchObject({ error: { code: RPC_ERROR_CODES.BUSY } });
@@ -471,15 +471,15 @@ describe("production runtime streaming", () => {
 				await connection.handle({
 					jsonrpc: "2.0",
 					id: "permissions-idle",
-					method: "session/setPermissionMode",
+					method: "session/setPermissionPreset",
 					params: {
 						sessionId: SESSION_REQUEST,
 						requestId: "00000000-0000-4000-8000-000000000104",
-						permissionMode: "full",
+						permissionPreset: "full",
 					},
 				}),
-			).toMatchObject({ result: { permissionMode: "full" } });
-			expect(readFileSync(server.catalog.get(SESSION_REQUEST).path, "utf8")).toContain('"permissionMode":"full"');
+			).toMatchObject({ result: { permissionPreset: "full" } });
+			expect(readFileSync(server.catalog.get(SESSION_REQUEST).path, "utf8")).toContain('"permissionPreset":"full"');
 			expect(
 				await connection.handle({
 					jsonrpc: "2.0",
@@ -505,7 +505,7 @@ describe("production runtime streaming", () => {
 				method: "session/subscribe",
 				params: { sessionId: SESSION_REQUEST },
 			});
-			expect(subscribed).toMatchObject({ result: { snapshot: { permissionMode: "full" } } });
+			expect(subscribed).toMatchObject({ result: { snapshot: { permissionPreset: "full" } } });
 
 			expect(
 				await connection.handle({

@@ -2,7 +2,7 @@ import type {
 	AgentMode,
 	ClientResult,
 	DomainEvent,
-	PermissionModeView,
+	PermissionPresetView,
 	SessionSnapshot,
 	SessionSummary,
 } from "@metis/app-protocol";
@@ -42,7 +42,7 @@ export interface NewTaskDraft {
 	readonly mode: AgentMode;
 	readonly folder: string | null;
 	readonly sessionId: string | null;
-	readonly permissionMode: PermissionModeView;
+	readonly permissionPreset: PermissionPresetView;
 }
 
 export interface SessionWorkspaceError {
@@ -88,7 +88,7 @@ function activeSessionKey(mode: AgentMode): string {
 }
 
 function emptyDraft(mode: AgentMode): NewTaskDraft {
-	return { mode, folder: null, sessionId: null, permissionMode: "auto" };
+	return { mode, folder: null, sessionId: null, permissionPreset: "auto" };
 }
 
 function failure(operation: string, cause: unknown): SessionWorkspaceError {
@@ -344,9 +344,9 @@ export class SessionWorkspaceWorkflow {
 		this.commit({ draft: { ...this.state.draft, folder } });
 	}
 
-	setDraftPermission(permissionMode: PermissionModeView): void {
+	setDraftPermission(permissionPreset: PermissionPresetView): void {
 		if (!this.state.draft || this.state.draft.sessionId) return;
-		this.commit({ draft: { ...this.state.draft, permissionMode } });
+		this.commit({ draft: { ...this.state.draft, permissionPreset } });
 	}
 
 	async chooseDraftFolder(): Promise<void> {
@@ -384,7 +384,7 @@ export class SessionWorkspaceWorkflow {
 					mode: draft.mode,
 					cwd: draft.folder,
 					name: sessionName ?? null,
-					permissionMode: draft.permissionMode,
+					permissionPreset: draft.permissionPreset,
 				});
 				const request =
 					this.newTaskCreateRequest?.key === createKey
@@ -397,7 +397,7 @@ export class SessionWorkspaceWorkflow {
 					mode: draft.mode,
 					...(draft.folder ? { cwd: draft.folder } : {}),
 					...(sessionName ? { name: sessionName } : {}),
-					permissionMode: draft.permissionMode,
+					permissionPreset: draft.permissionPreset,
 				});
 				if (!this.isCurrentIntent(intent, lifecycle)) return;
 				sessionId = created.session.sessionId;

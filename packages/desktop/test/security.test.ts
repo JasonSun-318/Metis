@@ -1279,8 +1279,8 @@ describe("desktop trust boundaries", () => {
 			if (request.method === "session/delete") {
 				result = { sessionId: request.params.sessionId, deleted: true, method: "trash" };
 			}
-			if (request.method === "session/setPermissionMode") {
-				result = { permissionMode: request.params.permissionMode };
+			if (request.method === "session/setPermissionPreset") {
+				result = { permissionPreset: request.params.permissionPreset };
 			}
 			if (request.method === "session/setCollaborationMode") {
 				result = { collaborationMode: request.params.collaborationMode };
@@ -1358,7 +1358,7 @@ describe("desktop trust boundaries", () => {
 		const deleteProject = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteProject)!;
 		const renameSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.renameSession)!;
 		const deleteSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!;
-		const setPermissionMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionMode)!;
+		const setPermissionPreset = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setPermissionPreset)!;
 		const setCollaborationMode = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setCollaborationMode)!;
 		const startPlanExecution = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.startPlanExecution)!;
 		const cancelPlan = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.cancelPlan)!;
@@ -1618,17 +1618,17 @@ describe("desktop trust boundaries", () => {
 		const permissionInput = {
 			sessionId: "session-a",
 			requestId: "11111111-1111-4111-8111-111111111401",
-			permissionMode: "full",
+			permissionPreset: "full",
 		};
-		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "automatic" })).rejects.toThrow(
-			"Invalid session/setPermissionMode params",
+		await expect(setPermissionPreset(event, { ...permissionInput, permissionPreset: "automatic" })).rejects.toThrow(
+			"Invalid session/setPermissionPreset params",
 		);
-		await expect(setPermissionMode(event, { ...permissionInput, permissionMode: "auto" })).resolves.toEqual({
-			permissionMode: "auto",
+		await expect(setPermissionPreset(event, { ...permissionInput, permissionPreset: "auto" })).resolves.toEqual({
+			permissionPreset: "auto",
 		});
-		await expect(setPermissionMode(event, permissionInput)).resolves.toEqual({ permissionMode: "full" });
+		await expect(setPermissionPreset(event, permissionInput)).resolves.toEqual({ permissionPreset: "full" });
 		expect(supervisor.request).toHaveBeenCalledWith(
-			expect.objectContaining({ method: "session/setPermissionMode", params: permissionInput }),
+			expect.objectContaining({ method: "session/setPermissionPreset", params: permissionInput }),
 		);
 		const collaborationInput = {
 			sessionId: "session-a",

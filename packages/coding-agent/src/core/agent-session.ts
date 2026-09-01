@@ -153,6 +153,7 @@ import {
 	type PermissionAuditEvent,
 	PermissionAuditWriter,
 	type PermissionPreset,
+	type PermissionReviewBoundaryEvent,
 	PermissionReviewRouter,
 	ToolAuthorizationRuntime as PermissionToolAuthorizationRuntime,
 	ProjectPermissionRuleStore,
@@ -265,7 +266,20 @@ export type AgentSessionEvent =
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| { type: "goal_changed"; goal: ThreadGoal | null }
 	| { type: "plan_changed"; entryIds: readonly string[] }
-	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode };
+	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode }
+	| {
+			type: "permission_review_started";
+			actionId: string;
+			reviewer: "model" | "user";
+			riskLevel: RiskLevel;
+	  }
+	| {
+			type: "permission_review_completed";
+			actionId: string;
+			reviewer: "model" | "user";
+			outcome: "allow" | "deny" | "unavailable";
+			riskLevel: RiskLevel;
+	  };
 
 /** Listener function for agent session events */
 export type AgentSessionEventListener = (event: AgentSessionEvent) => void;
@@ -836,6 +850,7 @@ export class AgentSession {
 			projectPath: this._cwd,
 			projectRules,
 			audit: this._permissionAudit,
+			onReview: (event) => this._emitPermissionReview(event),
 			reviewerFactory: () =>
 				new PermissionReviewRouter({
 					model: new ModelPermissionReviewer({
@@ -1781,6 +1796,25 @@ export class AgentSession {
 	// =========================================================================
 	// Event Subscription
 	// =========================================================================
+
+	private _emitPermissionReview(event: PermissionReviewBoundaryEvent): void {
+		if (event.phase === "started") {
+			this._emit({
+				type: "permission_review_started",
+				actionId: event.actionId,
+				reviewer: event.reviewer,
+				riskLevel: event.riskLevel,
+			});
+			return;
+		}
+		this._emit({
+			type: "permission_review_completed",
+			actionId: event.actionId,
+			reviewer: event.reviewer,
+			outcome: event.outcome,
+			riskLevel: event.riskLevel,
+		});
+	}
 
 	/** Emit an event to all listeners */
 	private _emit(event: AgentSessionEvent): void {

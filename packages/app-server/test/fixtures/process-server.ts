@@ -40,7 +40,7 @@ const createSession = SessionManager.create;
 SessionManager.create = function (cwd, sessionDir, options) {
 	return createSession.call(this, cwd, sessionDir, {
 		...options,
-		permissionMode: "full",
+		permissionPreset: "full",
 	});
 };
 
