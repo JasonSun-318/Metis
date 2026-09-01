@@ -137,7 +137,7 @@ describe("createAgentSession session manager defaults", () => {
 			title: "Approve bash?",
 		});
 		expect(request?.details).toContain("Command: git push origin main");
-		expect(request?.details).toContain("Metis does not sandbox this action");
+		expect(request?.details).toContain("This action will run outside the sandbox");
 		session.dispose();
 	});
 
