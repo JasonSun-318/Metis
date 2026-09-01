@@ -633,7 +633,7 @@ function localModuleSpecifiers(source: string): string[] {
 	const add = (token: ModuleToken | undefined) => {
 		if (token?.kind !== "string") return;
 		if (token.escaped) throw new TypeError("Extension module specifiers cannot contain escapes");
-		if (token.value.startsWith(".") || token.value.startsWith("file:")) specifiers.add(token.value);
+		if (token.value.startsWith(".")) specifiers.add(token.value);
 	};
 	const callSpecifier = (index: number) => {
 		const argument = tokens[index + 2];
@@ -664,10 +664,15 @@ function extensionImplementationIdentity(resolvedPath: string): {
 	readonly implementationVersion: string;
 } {
 	const sourceIdentity = resolveExtensionEntry(resolvedPath);
+	const rootDir = path.dirname(sourceIdentity);
 	const files = new Map<string, Buffer>();
 	let totalBytes = 0;
 	const visit = (filePath: string): void => {
 		const canonical = fs.realpathSync(filePath);
+		const relativePath = path.relative(rootDir, canonical);
+		if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+			throw new TypeError("Extension local dependency must stay inside the extension directory");
+		}
 		if (files.has(canonical)) return;
 		if (files.size >= MAX_EXTENSION_IMPLEMENTATION_FILES) {
 			throw new TypeError("Extension implementation has too many local modules");

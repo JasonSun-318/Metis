@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { getModel } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -102,6 +103,30 @@ export default function (metis) {
 		expect(changed.extensions[0]?.sourceInfo.implementationVersion).not.toBe(
 			first.extensions[0]?.sourceInfo.implementationVersion,
 		);
+	});
+
+	it("does not treat host file: imports as extension implementation", async () => {
+		const root = join(tmpdir(), `metis-extension-host-import-${crypto.randomUUID()}`);
+		mkdirSync(root, { recursive: true });
+		roots.push(root);
+		const hostDir = join(root, "host-package");
+		mkdirSync(hostDir);
+		writeFileSync(join(hostDir, "index.js"), `${"x".repeat(64)}\n`.repeat(8));
+		const hostUrl = pathToFileURL(join(hostDir, "index.js")).href;
+		const entry = join(root, "extension.ts");
+		writeFileSync(
+			entry,
+			`export default function (metis) {
+  metis.on("session_start", async (_event, ctx) => {
+    const { resizeImage } = await import(${JSON.stringify(hostUrl)});
+    await ctx.ui.confirm("Packaged image pipeline", String(typeof resizeImage));
+  });
+}
+`,
+		);
+		const result = await loadExtensions([entry], root);
+		expect(result.errors).toEqual([]);
+		expect(result.extensions).toHaveLength(1);
 	});
 
 	it("fails closed for computed dependencies and binds dependencies inside template expressions", async () => {
