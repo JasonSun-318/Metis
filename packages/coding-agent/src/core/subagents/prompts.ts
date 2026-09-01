@@ -43,7 +43,7 @@ Identity and ownership
 Capabilities and safety
 - Agent type: ${safePromptJson(config.agentType)}.
 - Tool snapshot: ${safePromptJson(effectiveAgentToolNames(config))}.
-- Permission mode: ${safePromptJson(config.permissionMode)}.
+- Permission preset: ${safePromptJson(config.permissionPreset)}.
 - Write policy: ${safePromptJson(config.writePolicy)}.
 - Working directory: ${safePromptJson(config.cwd)}.
 - Your effective permission and write policy can only stay the same or narrow when ancestors lower their ceiling.

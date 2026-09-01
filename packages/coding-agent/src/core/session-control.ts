@@ -1,5 +1,5 @@
 import { isAbsolute, normalize } from "node:path";
-import { isPersistedPermissionMode, type PersistedPermissionMode } from "./permission-mode.ts";
+import { isPermissionPreset, type PermissionPreset } from "./permissions/settings.ts";
 import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
 import type { AgentMailboxTerminalEvent, AgentTaskStatus, AgentUsage } from "./subagents/types.ts";
 
@@ -11,9 +11,7 @@ interface SessionControlEntryBase {
 
 export interface SessionPermissionsEntry extends SessionControlEntryBase {
 	readonly type: "session_permissions";
-	readonly permissionMode: PersistedPermissionMode;
-	/** Legacy v6-v8 field. New writers omit it. */
-	readonly reviewerEnabled?: boolean;
+	readonly permissionPreset: PermissionPreset;
 }
 
 export type PermissionDecision = "allow" | "ask" | "deny";
@@ -332,18 +330,24 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 	const type = requiredString(fields, "type");
 	const baseFields = ["type", "id", "parentId", "timestamp"] as const;
 	if (type === "session_permissions") {
-		assertOnlyFields(fields, [...baseFields, "permissionMode", "reviewerEnabled"]);
-		const permissionMode = fields.get("permissionMode");
+		assertOnlyFields(fields, [...baseFields, "permissionPreset", "permissionMode", "reviewerEnabled"]);
 		const reviewerEnabled = fields.get("reviewerEnabled");
-		if (!isPersistedPermissionMode(permissionMode)) invalid("Session control entry.permissionMode is invalid");
 		if (reviewerEnabled !== undefined && typeof reviewerEnabled !== "boolean") {
 			invalid("Session control entry.reviewerEnabled must be a boolean");
+		}
+		const permissionPreset = fields.get("permissionPreset") ?? fields.get("permissionMode");
+		if (!isPermissionPreset(permissionPreset)) invalid("Session control entry.permissionPreset is invalid");
+		if (
+			fields.has("permissionPreset") &&
+			fields.has("permissionMode") &&
+			fields.get("permissionPreset") !== fields.get("permissionMode")
+		) {
+			invalid("Session control entry cannot persist both permissionPreset and permissionMode");
 		}
 		return {
 			type,
 			...parseBase(fields),
-			permissionMode,
-			...(reviewerEnabled === undefined ? {} : { reviewerEnabled }),
+			permissionPreset,
 		};
 	}
 	if (type === "session_permission_decision") {

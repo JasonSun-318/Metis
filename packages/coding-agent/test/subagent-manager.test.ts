@@ -6,8 +6,13 @@ import { getModel, type Model } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentSession, AgentSessionEvent } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
-import type { PermissionMode } from "../src/core/permission-mode.ts";
 import type { PermissionApprovalRequest } from "../src/core/permission-policy.ts";
+import type { PermissionPreset } from "../src/core/permissions/settings.ts";
+import {
+	intersectPermissionSettings,
+	PERMISSION_PRESETS,
+	settingsForPreset,
+} from "../src/core/permissions/settings.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { type ChildRuntimeFactoryInput, SubagentManager } from "../src/core/subagents/manager.ts";
 import { SubagentScheduler } from "../src/core/subagents/scheduler.ts";
@@ -51,9 +56,31 @@ class FakeChildSession {
 	private readonly knownMailbox = new Set<string>();
 	private readonly pendingMailbox = new Set<string>();
 
-	constructor(sessionManager: SessionManager, activeTools: readonly string[]) {
+	private readonly permissionSettingsCeiling?: () => ReturnType<typeof settingsForPreset>;
+
+	constructor(
+		sessionManager: SessionManager,
+		activeTools: readonly string[],
+		permissionSettingsCeiling?: () => ReturnType<typeof settingsForPreset>,
+	) {
 		this.sessionManager = sessionManager;
 		this.activeTools = activeTools;
+		this.permissionSettingsCeiling = permissionSettingsCeiling;
+	}
+
+	get permissionView() {
+		const permissionPreset = this.sessionManager.getPermissionPreset();
+		const requested = settingsForPreset(permissionPreset);
+		const ceiling = this.permissionSettingsCeiling?.() ?? requested;
+		const effectiveSettings = intersectPermissionSettings(requested, ceiling);
+		return {
+			permissionPreset,
+			effectiveSettings,
+			constrainedByParent:
+				effectiveSettings.sandboxPolicy !== requested.sandboxPolicy ||
+				effectiveSettings.approvalPolicy !== requested.approvalPolicy,
+			sandboxHealth: "healthy" as const,
+		};
 	}
 
 	getActiveToolNames(): string[] {
@@ -145,8 +172,12 @@ class FakeChildRuntime {
 	disposeStarted = false;
 	disposeGate: Promise<void> = Promise.resolve();
 
-	constructor(manager: SessionManager, activeTools: readonly string[]) {
-		this.session = new FakeChildSession(manager, activeTools);
+	constructor(
+		manager: SessionManager,
+		activeTools: readonly string[],
+		ceiling?: () => ReturnType<typeof settingsForPreset>,
+	) {
+		this.session = new FakeChildSession(manager, activeTools, ceiling);
 	}
 
 	async submitPrompt(input: { text: string }): Promise<never> {
@@ -179,7 +210,7 @@ interface Harness {
 }
 
 interface SetupOptions {
-	readonly parentPermissionMode?: PermissionMode;
+	readonly parentPermissionPreset?: PermissionPreset;
 	readonly parentThinkingLevel?: ThinkingLevel;
 	readonly onPermissionRequest?: (
 		request: PermissionApprovalRequest,
@@ -198,7 +229,7 @@ function setup(options: SetupOptions = {}): Harness {
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
 		mode: "code",
-		permissionMode: options.parentPermissionMode ?? "full",
+		permissionPreset: options.parentPermissionPreset ?? "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const knownMailbox = new Set<string>();
@@ -247,6 +278,7 @@ function setup(options: SetupOptions = {}): Harness {
 			const runtime = new FakeChildRuntime(
 				input.sessionManager,
 				options.childRuntimeTools ?? [...input.config.tools, ...(input.config.mayDelegate ? AGENT_TOOL_NAMES : [])],
+				input.permissionSettingsCeiling,
 			);
 			runtimes.push(runtime);
 			return runtime as unknown as AgentSessionRuntime;
@@ -439,7 +471,7 @@ describe("SubagentManager", () => {
 			agentType: "explorer",
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("full");
+		expect(harness.factoryInputs[0]!.permissionSettingsCeiling()).toEqual(PERMISSION_PRESETS.full);
 		harness.runtimes[0]!.session.settle("verified handoff");
 		await vi.waitFor(() => expect(harness.manager.listSummaries(ROOT_ID)[0]?.status).toBe("done"));
 		expect(harness.runtimes[0]!.disposed).toBe(true);
@@ -611,21 +643,26 @@ describe("SubagentManager", () => {
 		).rejects.toMatchObject({ code: "INVALID_STATE" });
 	});
 
-	it("inherits the parent mode and rejects broader child permissions at spawn", async () => {
-		const harness = setup({ parentPermissionMode: "ask" });
-		const inherited = await harness.manager.spawn(ROOT_ID, {
+	it("inherits the parent preset and intersects a requested Full child independently", async () => {
+		const harness = setup({ parentPermissionPreset: "auto" });
+		const child = await harness.manager.spawn(ROOT_ID, {
 			name: "narrow",
 			task: "work",
 			agentType: "worker",
+			permissionPreset: "full",
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
-		expect(inherited.status).toMatch(/queued|running/);
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(child.status).toMatch(/queued|running/);
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual({
+			sandboxPolicy: "workspace-write",
+			approvalPolicy: "user",
+		});
 		harness.runtimes[0]!.session.settle();
 	});
 
-	it("narrows a running Full child through Auto and Ask without re-upgrading it", async () => {
-		const harness = setup({ parentPermissionMode: "full" });
+	it("narrows a running Full child through Auto and Ask without rewriting the saved preset", async () => {
+		const harness = setup({ parentPermissionPreset: "full" });
 		const _created = await harness.manager.spawn(ROOT_ID, {
 			name: "permissions",
 			task: "Inspect permissions",
@@ -633,46 +670,53 @@ describe("SubagentManager", () => {
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
 		const childId = harness.factoryInputs[0]!.config.agentId;
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "full" });
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.full);
 
-		harness.parentManager.setPermissionSettings({ mode: "auto" });
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("auto");
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
+		harness.parentManager.setPermissionPreset("auto");
+		const parentAutoCeiling = intersectPermissionSettings(PERMISSION_PRESETS.full, PERMISSION_PRESETS.auto);
+		expect(harness.factoryInputs[0]!.permissionSettingsCeiling()).toEqual(parentAutoCeiling);
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual({
+			sandboxPolicy: "workspace-write",
+			approvalPolicy: "user",
+		});
 		expect(harness.manager.listSummaries(ROOT_ID)[0]).toMatchObject({ agentId: childId, status: "running" });
 
-		harness.parentManager.setPermissionSettings({ mode: "full" });
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("auto");
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
-		harness.parentManager.setPermissionSettings({ mode: "ask" });
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		harness.parentManager.setPermissionPreset("full");
+		expect(harness.factoryInputs[0]!.permissionSettingsCeiling()).toEqual(parentAutoCeiling);
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		harness.parentManager.setPermissionPreset("ask");
+		expect(harness.factoryInputs[0]!.permissionSettingsCeiling()).toEqual(PERMISSION_PRESETS.ask);
+		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.ask);
 		harness.runtimes[0]!.session.settle("foreground complete");
 		await vi.waitFor(() => expect(harness.manager.listSummaries(ROOT_ID)[0]?.status).toBe("done"));
 	});
 
 	it("applies a parent downgrade before a starting child's first prompt", async () => {
 		const gate = deferred();
-		const harness = setup({ parentPermissionMode: "full", factoryGate: gate.promise });
+		const harness = setup({ parentPermissionPreset: "full", factoryGate: gate.promise });
 		const child = await harness.manager.spawn(ROOT_ID, {
 			name: "starting",
 			task: "start later",
 			agentType: "worker",
 		});
 		await vi.waitFor(() => expect(harness.factoryInputs).toHaveLength(1));
-		harness.parentManager.setPermissionSettings({ mode: "ask" });
-		expect(harness.factoryInputs[0]!.permissionModeCeiling()).toBe("ask");
+		harness.parentManager.setPermissionPreset("ask");
+		expect(harness.factoryInputs[0]!.permissionSettingsCeiling()).toEqual(PERMISSION_PRESETS.ask);
 
 		gate.resolve();
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
-		expect(harness.runtimes[0]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.ask);
 		expect(harness.runtimes[0]!.prompts).toEqual(["start later"]);
 		expect(harness.manager.listSummaries(ROOT_ID)[0]).toMatchObject({ agentId: child.agentId, status: "running" });
 		harness.runtimes[0]!.session.settle();
 	});
 
-	it("persists Ask for a queued child before it starts", async () => {
+	it("keeps the queued child's saved preset when the parent ceiling narrows", async () => {
 		const harness = setup({
-			parentPermissionMode: "full",
+			parentPermissionPreset: "full",
 			scheduler: new SubagentScheduler(1, 1),
 		});
 		await harness.manager.spawn(ROOT_ID, { name: "blocker", task: "block", agentType: "worker" });
@@ -684,19 +728,20 @@ describe("SubagentManager", () => {
 		});
 		expect(queued.status).toBe("queued");
 
-		harness.parentManager.setPermissionSettings({ mode: "ask" });
+		harness.parentManager.setPermissionPreset("ask");
 		expect(await harness.manager.readJournal(ROOT_ID, queued.agentId)).toEqual(
-			expect.arrayContaining([expect.objectContaining({ type: "session_permissions", permissionMode: "ask" })]),
+			expect.not.arrayContaining([expect.objectContaining({ type: "session_permissions" })]),
 		);
 
 		harness.runtimes[0]!.session.settle();
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
-		expect(harness.runtimes[1]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(harness.runtimes[1]!.session.sessionManager.getPermissionPreset()).toBe("full");
+		expect(harness.runtimes[1]!.session.permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.ask);
 		harness.runtimes[1]!.session.settle();
 	});
 
-	it("reapplies a cold parent permission ceiling to all descendants when that actor attaches", async () => {
-		const harness = setup({ parentPermissionMode: "full" });
+	it("does not rewrite descendant journals when a cold parent ceiling reapplies", async () => {
+		const harness = setup({ parentPermissionPreset: "full" });
 		const parent = await harness.manager.spawn(ROOT_ID, {
 			name: "permission parent",
 			task: "Coordinate",
@@ -712,8 +757,8 @@ describe("SubagentManager", () => {
 		});
 		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
 		detach();
-		parentSession.sessionManager.setPermissionSettings({ mode: "ask" });
-		expect(harness.runtimes[1]!.session.sessionManager.getPermissionSettings()).toEqual({ mode: "full" });
+		parentSession.sessionManager.setPermissionPreset("ask");
+		expect(harness.runtimes[1]!.session.sessionManager.getPermissionPreset()).toBe("full");
 		await harness.manager.unload("parent_unloaded");
 		const store = new AgentStore(harness.parentManager, join(harness.root, "agent"));
 		const parentPath = store.load(parent.agentId).path;
@@ -737,16 +782,16 @@ describe("SubagentManager", () => {
 		recoveredManager.attachActor(coldParent);
 		const recoveredChild = SessionManager.open(childPath);
 		try {
-			expect(recoveredChild.getPermissionSettings()).toEqual({ mode: "ask" });
+			expect(recoveredChild.getPermissionPreset()).toBe("full");
 		} finally {
 			recoveredChild.close();
 		}
-		coldParentManager.setPermissionSettings({ mode: "full" });
-		const stillNarrow = SessionManager.open(childPath);
+		coldParentManager.setPermissionPreset("full");
+		const stillSaved = SessionManager.open(childPath);
 		try {
-			expect(stillNarrow.getPermissionSettings()).toEqual({ mode: "ask" });
+			expect(stillSaved.getPermissionPreset()).toBe("full");
 		} finally {
-			stillNarrow.close();
+			stillSaved.close();
 			coldParentManager.close();
 		}
 	});

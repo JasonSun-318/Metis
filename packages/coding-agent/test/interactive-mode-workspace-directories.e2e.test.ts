@@ -86,11 +86,11 @@ describe("Code additional directories E2E", () => {
 
 		try {
 			const approvals: PermissionApprovalRequest[] = [];
-			manager = SessionManager.create(primary, sessions, { mode: "code", permissionMode: "ask" });
+			manager = SessionManager.create(primary, sessions, { mode: "code", permissionPreset: "ask" });
 			const sessionFile = manager.getSessionFile()!;
 			harness = await createHarness({
 				sessionManager: manager,
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				requestPermissionApproval: async (request) => {
 					approvals.push(request);
 					return { decision: "deny", reason: "E2E denial" };
@@ -118,7 +118,7 @@ describe("Code additional directories E2E", () => {
 			manager = SessionManager.open(sessionFile, sessions);
 			harness = await createHarness({
 				sessionManager: manager,
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				requestPermissionApproval: async (request) => {
 					approvals.push(request);
 					return { decision: "deny", reason: "E2E denial" };

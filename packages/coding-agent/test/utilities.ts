@@ -270,7 +270,7 @@ export function createTestSession(options: TestSessionOptions = {}): TestSession
 	const modelRegistry = ModelRegistry.create(authStorage, tempDir);
 	const agentDir = options.withAgentDir ? join(tempDir, "agent") : undefined;
 	if (agentDir) mkdirSync(agentDir);
-	sessionManager.setPermissionSettings({ mode: "full" });
+	sessionManager.setPermissionPreset("full");
 
 	const session = new AgentSession({
 		agent,

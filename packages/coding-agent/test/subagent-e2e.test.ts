@@ -105,7 +105,7 @@ function setupHarness() {
 	const parentManager = SessionManager.create(cwd, join(root, "sessions"), {
 		id: ROOT_ID,
 		mode: "code",
-		permissionMode: "full",
+		permissionPreset: "full",
 	});
 	const model = getModel("anthropic", "claude-sonnet-4-5")!;
 	const knownMailbox = new Set<string>();
@@ -203,7 +203,7 @@ describe("agent system e2e", () => {
 			sessionManager,
 			sessionStartEvent,
 			childConfig,
-			permissionModeCeiling,
+			permissionSettingsCeiling,
 			ultraAvailable,
 		}) => {
 			const authStorage = AuthStorage.inMemory();
@@ -248,7 +248,7 @@ describe("agent system e2e", () => {
 				excludeTools: childConfig?.writePolicy === "deny" ? ["edit", "write"] : undefined,
 				additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
 				workspaceWritePolicy: childConfig?.writePolicy,
-				permissionModeCeiling,
+				permissionSettingsCeiling,
 				ultraAvailable,
 			});
 			return { ...created, services, diagnostics: services.diagnostics };
@@ -256,7 +256,7 @@ describe("agent system e2e", () => {
 		const rootManager = SessionManager.create(cwd, join(root, "sessions"), {
 			id: ROOT_ID,
 			mode: "code",
-			permissionMode: "full",
+			permissionPreset: "full",
 		});
 		const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager: rootManager });
 		cleanups.push(async () => {

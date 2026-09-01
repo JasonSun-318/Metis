@@ -12,7 +12,7 @@ import type {
 	SessionStartEvent,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
-import type { PermissionMode } from "./permission-mode.ts";
+import type { PermissionSettings } from "./permissions/settings.ts";
 import { QueuedTurnConflictError, type QueuedTurnDraft, QueuedTurnQueue } from "./queued-turn-queue.ts";
 import {
 	type DurableImageRef,
@@ -90,7 +90,7 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	projectTrustContext?: ProjectTrustContext;
 	ultraAvailable?: boolean;
 	childConfig?: AgentConfig;
-	permissionModeCeiling?: () => PermissionMode;
+	permissionSettingsCeiling?: () => PermissionSettings;
 }) => Promise<CreateAgentSessionRuntimeResult>;
 
 /**
@@ -265,7 +265,7 @@ export class AgentSessionRuntime {
 				this._diagnostics = [...this._diagnostics, { type: "warning", message }];
 			},
 			createChildRuntime: async (
-				{ config, permissionModeCeiling, sessionManager, onPermissionRequest },
+				{ config, permissionSettingsCeiling, sessionManager, onPermissionRequest },
 				manager,
 			) => {
 				const recovered = recoverSessionManager(sessionManager);
@@ -275,7 +275,7 @@ export class AgentSessionRuntime {
 					sessionManager,
 					ultraAvailable: false,
 					childConfig: config,
-					permissionModeCeiling,
+					permissionSettingsCeiling,
 					sessionStartEvent: { type: "session_start", reason: "resume" },
 				});
 				result.session.setPermissionApprovalHandler(onPermissionRequest);

@@ -14,8 +14,8 @@ import { type McpConfigurationCoordinator, McpManager } from "./mcp/index.ts";
 import { convertToLlm } from "./messages.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import { findInitialModel } from "./model-resolver.ts";
-import { normalizePermissionMode, type PermissionMode } from "./permission-mode.ts";
 import { formatPermissionApproval, type PermissionApprovalRequest } from "./permission-policy.ts";
+import { isPermissionPreset, type PermissionPreset } from "./permissions/settings.ts";
 import { mergeProviderAttributionHeaders } from "./provider-attribution.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
 import { DefaultResourceLoader } from "./resource-loader.ts";
@@ -49,10 +49,8 @@ export interface CreateAgentSessionOptions {
 	agentDir?: string;
 	/** Classification mode for a newly-created default session manager. Default: code. */
 	agentMode?: AgentMode;
-	/** Initial permission mode for a newly-created session. */
-	permissionMode?: PermissionMode;
-	/** @deprecated Ignored. Ask/Auto/Full have no reviewer. */
-	reviewerEnabled?: boolean;
+	/** Initial permission preset for a newly-created session. */
+	permissionPreset?: PermissionPreset;
 	/** Host callback for one-action approvals. */
 	onPermissionRequest?: PermissionRequester;
 
@@ -110,7 +108,7 @@ export interface CreateAgentSessionOptions {
 	/** @internal Disable automatic memory context and dream writes for isolated runtimes. */
 	includeAutoMemory?: boolean;
 	/** @internal Host-owned monotonic permission ceiling for a child runtime. */
-	permissionModeCeiling?: AgentSessionConfig["permissionModeCeiling"];
+	permissionSettingsCeiling?: AgentSessionConfig["permissionSettingsCeiling"];
 	/** @internal Host-owned workspace write ceiling for a child runtime. */
 	workspaceWritePolicy?: AgentSessionConfig["workspaceWritePolicy"];
 	/** @internal Host-only fail-closed profile for unattended runs. */
@@ -256,10 +254,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	}
 	const agentDir = options.agentDir ? resolvePath(options.agentDir) : getDefaultAgentDir();
 	const suppliedSessionManager = options.sessionManager;
-	const requestedPermissionMode =
-		options.permissionMode === undefined ? undefined : normalizePermissionMode(options.permissionMode);
-	if (options.permissionMode !== undefined && !requestedPermissionMode) {
-		throw new TypeError("permissionMode must be ask, auto, or full");
+	const requestedPermissionPreset =
+		options.permissionPreset === undefined
+			? undefined
+			: isPermissionPreset(options.permissionPreset)
+				? options.permissionPreset
+				: undefined;
+	if (options.permissionPreset !== undefined && !requestedPermissionPreset) {
+		throw new TypeError("permissionPreset must be ask, auto, or full");
 	}
 	if (
 		suppliedSessionManager &&
@@ -276,9 +278,9 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	) {
 		throw new Error("cwd cannot override the supplied sessionManager cwd");
 	}
-	if (suppliedSessionManager && requestedPermissionMode !== undefined) {
-		if (requestedPermissionMode !== suppliedSessionManager.getPermissionSettings().mode) {
-			throw new Error("permissionMode cannot override the supplied sessionManager permissions");
+	if (suppliedSessionManager && requestedPermissionPreset !== undefined) {
+		if (requestedPermissionPreset !== suppliedSessionManager.getPermissionPreset()) {
+			throw new Error("permissionPreset cannot override the supplied sessionManager permissions");
 		}
 	}
 	if (options.authStorage && options.modelRegistry && options.modelRegistry.authStorage !== options.authStorage) {
@@ -324,7 +326,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				id: sessionId,
 				mode,
 				cwdOrigin: workspace!.cwdOrigin,
-				permissionMode: requestedPermissionMode,
+				permissionPreset: requestedPermissionPreset,
 			});
 	} catch (error) {
 		if (workspace?.cwdOrigin === "managed") {
@@ -634,7 +636,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			ultraAvailable: options.ultraAvailable,
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
-			permissionModeCeiling: options.permissionModeCeiling,
+			permissionSettingsCeiling: options.permissionSettingsCeiling,
 			workspaceWritePolicy: options.workspaceWritePolicy,
 			unattendedExecution: options.unattendedExecution,
 		});

@@ -108,7 +108,7 @@ export function createScheduledRunExecutor(options: {
 				id: sessionId,
 				mode: "chat",
 				cwdOrigin,
-				permissionMode: "ask",
+				permissionPreset: "ask",
 				scheduled: { taskId: claim.taskId, runId: claim.runId },
 			});
 			sessionManager.appendSessionInfo(claim.snapshot.name);

@@ -140,7 +140,7 @@ describe("AgentSessionRuntime characterization", () => {
 			};
 		};
 		const sessionManager = options?.sessionManager ?? SessionManager.create(tempDir, join(tempDir, "sessions"));
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		const sessionCwd = sessionManager.getCwd();
 		const runtime = await createAgentSessionRuntime(createRuntime, {
 			cwd: sessionCwd,

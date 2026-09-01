@@ -141,7 +141,6 @@ import type { MemoryHealth } from "./memory/memory-types.ts";
 import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/session-memory-runtime.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
-import { isPermissionMode, narrowPermissionMode, type PermissionMode } from "./permission-mode.ts";
 import type { RequestPermissionApproval } from "./permission-policy.ts";
 import {
 	AgentModelReviewTransport,
@@ -149,9 +148,11 @@ import {
 	createPermissionAuditEvent,
 	digestCanonical,
 	intersectPermissionSettings,
+	isPermissionPreset,
 	ModelPermissionReviewer,
 	type PermissionAuditEvent,
 	PermissionAuditWriter,
+	type PermissionPreset,
 	PermissionReviewRouter,
 	ToolAuthorizationRuntime as PermissionToolAuthorizationRuntime,
 	ProjectPermissionRuleStore,
@@ -163,6 +164,7 @@ import type {
 	ExecutionGrant,
 	PermissionSettings as NormalizedPermissionSettings,
 	ToolProvenance as NormalizedToolProvenance,
+	RiskLevel,
 } from "./permissions/types.ts";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
@@ -338,13 +340,25 @@ export interface AgentSessionConfig {
 	/** Include automatic memory context and dream writes. Defaults to true. */
 	includeAutoMemory?: boolean;
 	/** Host-owned monotonic upper bound for a child session. */
-	permissionModeCeiling?: () => PermissionMode;
+	permissionSettingsCeiling?: () => NormalizedPermissionSettings;
 	/** Host-owned workspace write ceiling independent of permission mode. */
 	workspaceWritePolicy?: "inherit" | "deny";
 	/** Internal execution boundary override used by runtime tests. */
 	interactiveBashBoundary?: InteractiveBashBoundary;
 	/** Host-only fail-closed profile for unattended runs. Never derive from user or model input. */
 	unattendedExecution?: UnattendedExecutionProfile;
+}
+
+export interface SessionPermissionView {
+	readonly permissionPreset: PermissionPreset;
+	readonly effectiveSettings: NormalizedPermissionSettings;
+	readonly constrainedByParent: boolean;
+	readonly sandboxHealth: "healthy" | "unavailable" | "misconfigured";
+	readonly activeReview?: {
+		readonly actionId: string;
+		readonly reviewer: "model" | "user";
+		readonly riskLevel: RiskLevel;
+	};
 }
 
 export interface ExtensionBindings {
@@ -383,7 +397,7 @@ export interface SessionStats {
 	mode: AgentMode;
 	cwd: string;
 	cwdOrigin: CwdOrigin;
-	permissionMode: PermissionMode;
+	permissionPreset: PermissionPreset;
 	sessionFile: string | undefined;
 	sessionId: string;
 	userMessages: number;
@@ -660,7 +674,7 @@ export class AgentSession {
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
-	private readonly _permissionModeCeiling?: () => PermissionMode;
+	private readonly _permissionSettingsCeiling?: () => NormalizedPermissionSettings;
 	private readonly _workspaceWritePolicy: "inherit" | "deny";
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
@@ -738,7 +752,7 @@ export class AgentSession {
 		});
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
 		this._includeAutoMemory = config.includeAutoMemory !== false;
-		this._permissionModeCeiling = config.permissionModeCeiling;
+		this._permissionSettingsCeiling = config.permissionSettingsCeiling;
 		this._workspaceWritePolicy = config.workspaceWritePolicy ?? "inherit";
 		this._unattendedExecution = config.unattendedExecution;
 		if (this.sessionManager.getUltraSelected() && !this._ultraAvailable) {
@@ -893,16 +907,44 @@ export class AgentSession {
 		return this._modelRegistry;
 	}
 
-	async setPermissionMode(mode: PermissionMode): Promise<void> {
-		if (!isPermissionMode(mode)) throw new TypeError("Invalid permission mode");
-		if (this._permissionModeCeiling && narrowPermissionMode(mode, this._permissionModeCeiling()) !== mode) {
-			throw new Error("Permission mode cannot exceed the parent session");
+	async setPermissionPreset(preset: PermissionPreset): Promise<void> {
+		if (!isPermissionPreset(preset)) throw new TypeError("Invalid permission preset");
+		const current = this.sessionManager.getPermissionPreset();
+		if (current === preset) return;
+		if (
+			settingsForPreset(preset).sandboxPolicy === "danger-full-access" &&
+			settingsForPreset(current).sandboxPolicy !== "danger-full-access"
+		) {
+			await this._interactiveBashBoundary?.reset();
 		}
-		const current = this.sessionManager.getPermissionSettings().mode;
-		if (current === mode) return;
-		if (mode === "full" && current !== "full") await this._interactiveBashBoundary?.reset();
-		this.sessionManager.setPermissionSettings({ mode });
+		this.sessionManager.setPermissionPreset(preset);
 		this._permissionRuntime.invalidate("settings");
+	}
+
+	notifyPermissionCeilingChanged(): void {
+		this._permissionRuntime.invalidate("settings");
+	}
+
+	get permissionView(): SessionPermissionView {
+		const permissionPreset = this.sessionManager.getPermissionPreset();
+		const requested = settingsForPreset(permissionPreset);
+		const effectiveSettings = this._effectiveNormalizedPermissionSettings();
+		const parentCeiling = this._permissionSettingsCeiling?.();
+		const constrainedByParent = parentCeiling
+			? intersectPermissionSettings(requested, parentCeiling).sandboxPolicy !== requested.sandboxPolicy ||
+				intersectPermissionSettings(requested, parentCeiling).approvalPolicy !== requested.approvalPolicy
+			: false;
+		return {
+			permissionPreset,
+			effectiveSettings,
+			constrainedByParent,
+			sandboxHealth: "healthy",
+			...(this._permissionRuntime.activeReview ? { activeReview: this._permissionRuntime.activeReview } : {}),
+		};
+	}
+
+	get permissionGrantCount(): number {
+		return this._permissionRuntime.activeGrantCount;
 	}
 
 	async disposeInteractiveExecution(): Promise<void> {
@@ -977,9 +1019,9 @@ export class AgentSession {
 	}
 
 	private _effectiveNormalizedPermissionSettings(): NormalizedPermissionSettings {
-		let settings = settingsForPreset(this.sessionManager.getPermissionSettings().mode);
-		if (this._permissionModeCeiling) {
-			settings = intersectPermissionSettings(settings, settingsForPreset(this._permissionModeCeiling()));
+		let settings = settingsForPreset(this.sessionManager.getPermissionPreset());
+		if (this._permissionSettingsCeiling) {
+			settings = intersectPermissionSettings(settings, this._permissionSettingsCeiling());
 		}
 		if (this._workspaceWritePolicy === "deny") {
 			settings = intersectPermissionSettings(settings, {
@@ -5732,7 +5774,7 @@ export class AgentSession {
 			mode: this.mode,
 			cwd: this.sessionManager.getCwd(),
 			cwdOrigin: this.sessionManager.getCwdOrigin(),
-			permissionMode: this.sessionManager.getPermissionSettings().mode,
+			permissionPreset: this.sessionManager.getPermissionPreset(),
 			sessionFile: this.sessionFile,
 			sessionId: this.sessionId,
 			userMessages,

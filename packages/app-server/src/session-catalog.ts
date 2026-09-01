@@ -1035,7 +1035,7 @@ export class SessionCatalog {
 						manager.getMode() !== mode ||
 						!workspaceMatches ||
 						name !== requestedName ||
-						manager.getPermissionSettings().mode !== requestedPermissionMode
+						manager.getPermissionPreset() !== requestedPermissionMode
 					) {
 						throw new AppServerError("REQUEST_ID_REUSED", {
 							requestId: input.requestId,

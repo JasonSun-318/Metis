@@ -356,7 +356,7 @@ async function createSessionManager(
 		return SessionManager.inMemory(ephemeralCwd, {
 			id: parsed.sessionId,
 			mode: parsed.agentMode,
-			permissionMode: parsed.permissionMode,
+			permissionPreset: parsed.permissionMode,
 		});
 	}
 
@@ -458,7 +458,7 @@ async function createSessionManager(
 			id: sessionId,
 			mode,
 			cwdOrigin: workspace.cwdOrigin,
-			permissionMode: parsed.permissionMode,
+			permissionPreset: parsed.permissionMode,
 		});
 	} catch (error) {
 		if (workspace.cwdOrigin === "managed") {
@@ -812,9 +812,10 @@ export async function main(args: string[], options?: MainOptions) {
 			projectTrustContext,
 			ultraAvailable,
 			childConfig,
-			permissionModeCeiling,
+			permissionSettingsCeiling,
 		}) => {
-			if (childConfig && !permissionModeCeiling) throw new Error("Child runtime is missing its permission ceiling");
+			if (childConfig && !permissionSettingsCeiling)
+				throw new Error("Child runtime is missing its permission ceiling");
 			// Credentials remain shared through the locked auth file, while OAuth provider
 			// routing stays owned by this runtime's AuthStorage instance.
 			const authStorage = AuthStorage.create();
@@ -957,7 +958,7 @@ export async function main(args: string[], options?: MainOptions) {
 							? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
 							: {}),
 					includeAutoMemory: childConfig ? false : undefined,
-					permissionModeCeiling,
+					permissionSettingsCeiling,
 				});
 				servicesTransferred = true;
 				try {

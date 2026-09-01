@@ -31,7 +31,7 @@ function config(agentType: string): AgentConfig {
 		initialTask: "task",
 		tools: ["read"],
 		writePolicy: "deny",
-		permissionMode: "ask",
+		permissionPreset: "ask",
 		model: { provider: "fixture", modelId: "fixture-model" },
 		thinkingLevel: "off",
 		cwd: "/work",

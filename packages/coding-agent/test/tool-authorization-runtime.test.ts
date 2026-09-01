@@ -44,7 +44,7 @@ describe("ToolAuthorizationRuntime", () => {
 		mkdirSync(sessionDir);
 		mkdirSync(agentDir);
 		const sessionManager = SessionManager.create(cwd, sessionDir);
-		sessionManager.setPermissionSettings({ mode: options.mode ?? "ask" });
+		sessionManager.setPermissionPreset(options.mode ?? "ask");
 		const sources = new Map<string, string>([["custom_action", "sdk"]]);
 		const trusted = new Set<string>();
 		let currentCwd = cwd;

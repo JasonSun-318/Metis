@@ -4,8 +4,14 @@ import type { ThinkingLevel } from "@metis/agent-core";
 import { getSupportedThinkingLevels, type Model } from "@metis/ai/compat";
 import type { AgentSession } from "../agent-session.ts";
 import type { AgentSessionRuntime } from "../agent-session-runtime.ts";
-import { narrowPermissionMode, type PermissionMode } from "../permission-mode.ts";
 import type { RequestPermissionApproval } from "../permission-policy.ts";
+import {
+	intersectPermissionSettings,
+	isPermissionPreset,
+	type PermissionPreset,
+	type PermissionSettings,
+	settingsForPreset,
+} from "../permissions/settings.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
 import { loadAgentTypeDefinitions } from "./agent-type-registry.ts";
@@ -50,6 +56,7 @@ export interface SpawnAgentInput {
 	readonly agentType?: string;
 	readonly forkTurns?: AgentForkTurns;
 	readonly model?: string;
+	readonly permissionPreset?: PermissionPreset;
 }
 
 export interface AgentTaskReceipt {
@@ -68,7 +75,7 @@ export interface SpawnAgentReceipt extends AgentTaskReceipt {
 
 export interface ChildRuntimeFactoryInput {
 	readonly config: AgentConfig;
-	readonly permissionModeCeiling: () => PermissionMode;
+	readonly permissionSettingsCeiling: () => PermissionSettings;
 	readonly sessionManager: SessionManager;
 	readonly onPermissionRequest?: RequestPermissionApproval;
 }
@@ -243,7 +250,7 @@ export class SubagentManager implements SubagentManagerApi {
 	private readonly approvalRequests = new Map<string, { readonly taskId: string; readonly toolName: string }>();
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private readonly scheduledRuns = new Map<string, string>();
-	private readonly childPermissionCeilings = new Map<string, PermissionMode>();
+	private readonly childPermissionCeilings = new Map<string, PermissionSettings>();
 	private readonly rootSessionId: string;
 	private unloaded = false;
 	private requestSequence = 0;
@@ -261,7 +268,7 @@ export class SubagentManager implements SubagentManagerApi {
 		this.createId = options.createId ?? createSessionId;
 		this.recoverInterruptedWork();
 		for (const record of this.store.listTree().agents) {
-			this.childPermissionCeilings.set(record.agentId, record.config.permissionMode);
+			this.childPermissionCeilings.set(record.agentId, settingsForPreset(record.config.permissionPreset));
 		}
 	}
 
@@ -272,8 +279,8 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 		const attached: AttachedActor = {
 			session,
-			unsubscribePermissions: session.sessionManager.subscribePermissionSettings((next) => {
-				this.narrowDescendantsTo(sessionId, next.mode);
+			unsubscribePermissions: session.sessionManager.subscribePermissionPreset((next) => {
+				this.narrowDescendantsTo(sessionId, next);
 			}),
 		};
 		this.actors.set(sessionId, attached);
@@ -281,7 +288,7 @@ export class SubagentManager implements SubagentManagerApi {
 			sessionId === this.rootSessionId ||
 			this.store.listTree().agents.some((record) => record.agentId === sessionId)
 		) {
-			this.narrowDescendantsTo(sessionId, session.sessionManager.getPermissionSettings().mode);
+			this.narrowDescendantsTo(sessionId, session.sessionManager.getPermissionPreset());
 		}
 		this.recoverMailboxEvents(session);
 		return () => {
@@ -351,7 +358,9 @@ export class SubagentManager implements SubagentManagerApi {
 			parentTools: actor.getDelegatableToolNames(inheritedWriteDenied ? "deny" : "inherit"),
 			depth,
 		});
-		const parentMode = actor.sessionManager.getPermissionSettings().mode;
+		const parentPreset = actor.sessionManager.getPermissionPreset();
+		const requestedPreset = input.permissionPreset ?? parentPreset;
+		if (!isPermissionPreset(requestedPreset)) throw new AgentError("INVALID_INPUT", "Invalid permission preset");
 		const model = this.resolveModel(actor, input.model);
 		const levels = getSupportedThinkingLevels(model) as ThinkingLevel[];
 		const thinkingLevel = selectChildThinkingLevel(actor.thinkingLevel, levels);
@@ -366,7 +375,7 @@ export class SubagentManager implements SubagentManagerApi {
 			initialTask: input.task,
 			tools: [...profile.tools],
 			writePolicy: inheritedWriteDenied ? "deny" : profile.writePolicy,
-			permissionMode: parentMode,
+			permissionPreset: requestedPreset,
 			model: { provider: model.provider, modelId: model.id },
 			thinkingLevel,
 			cwd,
@@ -378,7 +387,7 @@ export class SubagentManager implements SubagentManagerApi {
 			agentPath: [...actorPath, agentId],
 		};
 		this.store.create(config, actor.messages, taskId);
-		this.childPermissionCeilings.set(agentId, parentMode);
+		this.childPermissionCeilings.set(agentId, this.actorCeiling(actorId, parentPreset));
 		const status = this.scheduleNext(agentId) ?? "queued";
 		this.emitUpdate(this.buildSummary(this.store.load(agentId)));
 		return {
@@ -865,7 +874,7 @@ export class SubagentManager implements SubagentManagerApi {
 			};
 			runtime = await this.createChildRuntime({
 				config,
-				permissionModeCeiling: () => this.childPermissionCeilings.get(agentId) ?? "ask",
+				permissionSettingsCeiling: () => this.childPermissionCeilings.get(agentId) ?? settingsForPreset("ask"),
 				sessionManager: childManager,
 				onPermissionRequest,
 			});
@@ -1121,11 +1130,6 @@ export class SubagentManager implements SubagentManagerApi {
 		};
 	}
 
-	private isScheduledQueued(agentId: string): boolean {
-		const taskId = this.scheduledRuns.get(agentId);
-		return taskId !== undefined && this.scheduler.isQueued(taskId);
-	}
-
 	private recoverInterruptedWork(): void {
 		for (const record of this.store.listTree().agents) {
 			for (const task of record.tasks) {
@@ -1139,66 +1143,38 @@ export class SubagentManager implements SubagentManagerApi {
 		}
 	}
 
-	private narrowDescendantsTo(actorId: string, parentMode: PermissionMode): void {
+	private actorCeiling(actorId: string, actorPreset: PermissionPreset): PermissionSettings {
+		const requested = settingsForPreset(actorPreset);
+		if (actorId === this.rootSessionId) return requested;
+		const inherited = this.childPermissionCeilings.get(actorId);
+		return inherited ? intersectPermissionSettings(requested, inherited) : requested;
+	}
+
+	private notifyChildCeilingChanged(agentId: string): void {
+		const hot = this.hot.get(agentId);
+		const session = hot?.runtime.session as { notifyPermissionCeilingChanged?: () => void } | undefined;
+		session?.notifyPermissionCeilingChanged?.();
+	}
+
+	private narrowDescendantsTo(actorId: string, parentPreset: PermissionPreset): void {
 		const actorPath = this.actorPath(actorId);
+		const parentCeiling = this.actorCeiling(actorId, parentPreset);
 		const records = this.store
 			.listTree()
 			.agents.filter((record) => this.isDescendantPath(actorPath, record.config.agentPath));
-		const changed = records.filter((record) => {
-			const current = this.childPermissionCeilings.get(record.agentId) ?? "ask";
-			return narrowPermissionMode(current, parentMode) !== current;
-		});
-		if (changed.length === 0) return;
-		const failures: unknown[] = [];
-		for (const record of changed) {
-			const current = this.childPermissionCeilings.get(record.agentId) ?? "ask";
-			this.childPermissionCeilings.set(record.agentId, narrowPermissionMode(current, parentMode));
-		}
-		for (const record of changed) {
-			const ceiling = this.childPermissionCeilings.get(record.agentId) ?? "ask";
-			const hot = this.hot.get(record.agentId);
-			if (hot) {
-				try {
-					const manager = hot.runtime.session.sessionManager;
-					const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
-					if (manager.getPermissionSettings().mode !== target) {
-						manager.setPermissionSettings({ mode: target });
-					}
-				} catch (error) {
-					hot.lifecycleError = error instanceof Error ? error : new Error(String(error));
-					failures.push(error);
-					void hot.runtime.interrupt({
-						requestId: this.requestId("permission-downgrade", record.agentId),
-					});
-				}
-				continue;
-			}
-			if (this.starting.has(record.agentId) && !this.isScheduledQueued(record.agentId)) continue;
-			let manager: SessionManager | undefined;
-			try {
-				manager = SessionManager.open(record.path);
-				const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
-				if (manager.getPermissionSettings().mode !== target) manager.setPermissionSettings({ mode: target });
-			} catch (error) {
-				failures.push(error);
-			} finally {
-				try {
-					manager?.close();
-				} catch (error) {
-					failures.push(error);
-				}
-			}
-		}
-		if (failures.length > 0) {
-			throw new AggregateError(failures, "Failed to persist narrowed permission for every child session");
+		for (const record of records) {
+			const current = this.childPermissionCeilings.get(record.agentId);
+			this.childPermissionCeilings.set(
+				record.agentId,
+				current ? intersectPermissionSettings(current, parentCeiling) : parentCeiling,
+			);
+			this.notifyChildCeilingChanged(record.agentId);
 		}
 	}
 
 	private persistRuntimeCeiling(runtime: AgentSessionRuntime, agentId: string): void {
-		const ceiling = this.childPermissionCeilings.get(agentId) ?? "ask";
-		const manager = runtime.session.sessionManager;
-		const target = narrowPermissionMode(manager.getPermissionSettings().mode, ceiling);
-		if (manager.getPermissionSettings().mode !== target) manager.setPermissionSettings({ mode: target });
+		void runtime;
+		this.notifyChildCeilingChanged(agentId);
 	}
 
 	private resolveModel(parent: AgentSession, requested: string | undefined): Model<any> {

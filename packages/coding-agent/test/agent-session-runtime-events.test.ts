@@ -344,7 +344,7 @@ describe("AgentSessionRuntime plan execution", () => {
 			};
 		};
 		const sessionManager = SessionManager.create(tempDir, join(tempDir, "sessions"), { mode: initialMode });
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		const sessionCwd = sessionManager.getCwd();
 		const runtime = await createAgentSessionRuntime(createRuntime, {
 			cwd: sessionCwd,

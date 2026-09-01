@@ -368,14 +368,14 @@ describe("agent runtime e2e", () => {
 		const rootManager = SessionManager.create(projectDir, sessionsRoot, {
 			id: SESSION_ID,
 			mode: "code",
-			permissionMode: "full",
+			permissionPreset: "full",
 		});
 		for (let index = 0; index < 105; index++) {
 			const agentId = `00000000-0000-4000-8000-${String(index + 300).padStart(12, "0")}`;
 			const child = SessionManager.create(projectDir, getSessionAgentDir(agentDir, SESSION_ID), {
 				id: agentId,
 				mode: "code",
-				permissionMode: "full",
+				permissionPreset: "full",
 				agent: {
 					agentId,
 					name: `Worker ${String(index + 1).padStart(3, "0")}`,
@@ -383,7 +383,7 @@ describe("agent runtime e2e", () => {
 					initialTask: `Task ${index + 1}`,
 					tools: ["read"],
 					writePolicy: "inherit",
-					permissionMode: "full",
+					permissionPreset: "full",
 					model: { provider: "local", modelId: "agent-e2e" },
 					thinkingLevel: "off",
 					cwd: projectDir,

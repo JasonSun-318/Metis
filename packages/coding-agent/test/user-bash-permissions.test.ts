@@ -13,7 +13,7 @@ describe("manual bash permissions", () => {
 		it(`treats user-entered commands as explicit authorization in ${mode}`, async () => {
 			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 			const harness = await createHarness({
-				permissionSettings: { mode },
+				permissionPreset: mode,
 				requestPermissionApproval: requestApproval,
 			});
 			harnesses.push(harness);

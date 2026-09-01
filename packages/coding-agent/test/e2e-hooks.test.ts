@@ -42,7 +42,7 @@ describe("declarative hooks end-to-end", () => {
 			id: "e2e-session",
 			mode: "chat",
 			cwdOrigin: "user-selected",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		});
 		const { session } = await createAgentSessionFromServices({ services, sessionManager });
 		// Same call the app-server runtime host makes when a session comes up.
@@ -64,7 +64,7 @@ describe("declarative hooks end-to-end", () => {
 			id: "e2e-session-2",
 			mode: "chat",
 			cwdOrigin: "user-selected",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		});
 		const { session } = await createAgentSessionFromServices({ services, sessionManager });
 		await session.bindExtensions({});

@@ -145,7 +145,7 @@ function headerToConfig(header: NonNullable<SessionHeader["agent"]>): AgentConfi
 		initialTask: header.initialTask,
 		tools: header.tools,
 		writePolicy: header.writePolicy,
-		permissionMode: header.permissionMode,
+		permissionPreset: header.permissionPreset,
 		model: header.model,
 		thinkingLevel: header.thinkingLevel,
 		cwd: header.cwd,
@@ -250,7 +250,7 @@ function agentHeaderFromConfig(config: AgentConfig): NonNullable<SessionHeader["
 		agentType: config.agentType,
 		tools: config.tools,
 		writePolicy: config.writePolicy,
-		permissionMode: config.permissionMode,
+		permissionPreset: config.permissionPreset,
 		model: config.model,
 		thinkingLevel: config.thinkingLevel,
 		cwd: config.cwd,
@@ -323,7 +323,7 @@ export class AgentStore implements AgentStoreApi {
 		const manager = SessionManager.create(config.cwd, this.directory, {
 			id: config.agentId,
 			mode: "code",
-			permissionMode: config.permissionMode,
+			permissionPreset: config.permissionPreset,
 			agent: agentHeaderFromConfig(config),
 		});
 		const path = manager.getSessionFile();

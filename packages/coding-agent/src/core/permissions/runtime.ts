@@ -145,6 +145,9 @@ export class ToolAuthorizationRuntime {
 	private reviewer: PermissionReviewer | undefined;
 	private epoch = 0;
 	private lifecycle = new AbortController();
+	private currentReview:
+		| { readonly actionId: string; readonly reviewer: "model" | "user"; readonly riskLevel: RiskLevel }
+		| undefined;
 
 	constructor(options: ToolAuthorizationRuntimeOptions) {
 		this.options = options;
@@ -157,11 +160,22 @@ export class ToolAuthorizationRuntime {
 			: undefined;
 	}
 
+	get activeReview():
+		| { readonly actionId: string; readonly reviewer: "model" | "user"; readonly riskLevel: RiskLevel }
+		| undefined {
+		return this.currentReview;
+	}
+
+	get activeGrantCount(): number {
+		return this.grants.size;
+	}
+
 	invalidate(reason: PermissionRuntimeInvalidation): number {
 		this.epoch += 1;
 		this.lifecycle.abort(new Error(`Permission runtime invalidated: ${reason}`));
 		this.lifecycle = new AbortController();
 		this.reviewTail = Promise.resolve();
+		this.currentReview = undefined;
 		this.grants.revokeAll();
 		if (reason === "model" || reason === "session") this.reviewer = undefined;
 		return this.epoch;
@@ -332,11 +346,18 @@ export class ToolAuthorizationRuntime {
 				interactive: request.interactive,
 				signal,
 			});
+			this.currentReview = {
+				actionId: initial.action.actionId,
+				reviewer: initialDecision.minimumReviewer,
+				riskLevel: initialDecision.riskLevel,
+			};
 			let review: PermissionReviewResult;
 			try {
 				review = await this.queueReview(reviewRequest);
 			} catch {
 				review = unavailableReview(initialDecision.minimumReviewer, "Permission review was cancelled");
+			} finally {
+				this.currentReview = undefined;
 			}
 			await this.appendAudit(
 				initial.action,

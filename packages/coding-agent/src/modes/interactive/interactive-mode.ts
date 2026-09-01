@@ -4646,9 +4646,9 @@ export class InteractiveMode {
 		if (this.guardSessionMutation()) return;
 		this.showSelector((done) => {
 			const selector = new PermissionsSelectorComponent(
-				this.sessionManager.getPermissionSettings(),
+				{ mode: this.sessionManager.getPermissionPreset() },
 				(settings) => {
-					this.sessionManager.setPermissionSettings(settings);
+					this.sessionManager.setPermissionPreset(settings.mode);
 					done();
 					this.footer.invalidate();
 					this.showStatus(`Permissions: ${settings.mode}`);
@@ -6652,7 +6652,7 @@ export class InteractiveMode {
 		info += `${theme.fg("dim", "ID:")} ${stats.sessionId}\n`;
 		info += `${theme.fg("dim", "Mode:")} ${stats.mode}\n`;
 		info += `${theme.fg("dim", "Workspace:")} ${stats.cwd} (${stats.cwdOrigin})\n`;
-		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionMode}\n\n`;
+		info += `${theme.fg("dim", "Permissions:")} ${stats.permissionPreset}\n\n`;
 		info += `${theme.bold("Messages")}\n`;
 		info += `${theme.fg("dim", "Total:")} ${stats.totalMessages}\n`;
 		info += `${theme.fg("dim", "User:")} ${stats.userMessages}\n`;

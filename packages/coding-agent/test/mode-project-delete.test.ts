@@ -140,7 +140,7 @@ function writeHeader(path: string, id: string, cwd: string, mode: "chat" | "code
 			cwd,
 			mode,
 			cwdOrigin: "user-selected",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		})}\n`,
 	);
 }

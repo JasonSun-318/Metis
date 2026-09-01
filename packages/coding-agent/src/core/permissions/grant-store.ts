@@ -208,6 +208,10 @@ export class ExecutionGrantStore {
 		return this.active.has(id);
 	}
 
+	get size(): number {
+		return this.active.size;
+	}
+
 	revoke(id: string): boolean {
 		const stored = this.active.get(id);
 		if (!stored) return false;

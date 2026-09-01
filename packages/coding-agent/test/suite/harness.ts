@@ -16,8 +16,8 @@ import type { InteractiveBashBoundary } from "../../src/core/interactive-bash-bo
 import type { McpManager } from "../../src/core/mcp/index.ts";
 import { convertToLlm } from "../../src/core/messages.ts";
 import { ModelRegistry } from "../../src/core/model-registry.ts";
-import type { PermissionSettings } from "../../src/core/permission-mode.ts";
 import type { RequestPermissionApproval } from "../../src/core/permission-policy.ts";
+import type { PermissionPreset, PermissionSettings } from "../../src/core/permissions/settings.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
@@ -73,10 +73,10 @@ export interface HarnessOptions {
 	resourceLoader?: ResourceLoader;
 	extensionFactories?: Array<InlineExtension | CreateTestExtensionsResultInput>;
 	withConfiguredAuth?: boolean;
-	permissionSettings?: PermissionSettings;
+	permissionPreset?: PermissionPreset;
 	requestPermissionApproval?: RequestPermissionApproval;
 	mcpManager?: McpManager;
-	permissionModeCeiling?: () => PermissionSettings["mode"];
+	permissionSettingsCeiling?: () => PermissionSettings;
 	includeAutoMemory?: boolean;
 	unattendedExecution?: UnattendedExecutionProfile;
 	interactiveBashBoundary?: InteractiveBashBoundary;
@@ -187,7 +187,13 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		: undefined;
 	const resourceLoader =
 		options.resourceLoader ?? createTestResourceLoader(extensionsResult ? { extensionsResult } : undefined);
-	sessionManager.setPermissionSettings(options.permissionSettings ?? { mode: "full" });
+	if (options.permissionPreset !== undefined) {
+		if (sessionManager.getPermissionPreset() !== options.permissionPreset) {
+			sessionManager.setPermissionPreset(options.permissionPreset);
+		}
+	} else if (!options.sessionManager) {
+		sessionManager.setPermissionPreset("full");
+	}
 
 	const session = new AgentSession({
 		agent,
@@ -204,7 +210,7 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		excludedToolNames: options.excludedToolNames,
 		extensionRunnerRef,
 		requestPermissionApproval: options.requestPermissionApproval,
-		permissionModeCeiling: options.permissionModeCeiling,
+		permissionSettingsCeiling: options.permissionSettingsCeiling,
 		includeAutoMemory: options.includeAutoMemory,
 		unattendedExecution: options.unattendedExecution,
 		interactiveBashBoundary: options.interactiveBashBoundary,

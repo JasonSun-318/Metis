@@ -24,7 +24,7 @@ describe("SDK tool permissions", () => {
 		roots.push(cwd);
 		const settingsManager = SettingsManager.create(cwd, agentDir);
 		const sessionManager = SessionManager.inMemory(cwd);
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
 		await resourceLoader.reload();
 		return { cwd, agentDir, settingsManager, sessionManager, resourceLoader, customTools };

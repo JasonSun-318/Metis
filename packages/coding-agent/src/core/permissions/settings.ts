@@ -1,5 +1,7 @@
 import type { ApprovalPolicy, PermissionPreset, PermissionSettings, SandboxPolicy } from "./types.ts";
 
+export type { PermissionPreset, PermissionSettings };
+
 const ASK_SETTINGS = Object.freeze({ sandboxPolicy: "workspace-write", approvalPolicy: "user" } as const);
 const AUTO_SETTINGS = Object.freeze({ sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const);
 const FULL_SETTINGS = Object.freeze({ sandboxPolicy: "danger-full-access", approvalPolicy: "user" } as const);
@@ -29,6 +31,12 @@ const SANDBOX_POLICIES: readonly SandboxPolicy[] = [
 	"external-sandbox",
 ];
 const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ["deny", "user", "auto-review"];
+
+export const DEFAULT_PERMISSION_PRESET: PermissionPreset = "auto";
+
+export function isPermissionPreset(value: unknown): value is PermissionPreset {
+	return value === "ask" || value === "auto" || value === "full";
+}
 
 export function assertPermissionSettings(settings: PermissionSettings): void {
 	if (

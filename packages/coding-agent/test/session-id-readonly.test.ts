@@ -117,7 +117,7 @@ function writeScheduledSession(sessionDir: string, cwd: string, id: string): voi
 				cwd,
 				mode: "chat",
 				cwdOrigin: "user-selected",
-				permissionMode: "ask",
+				permissionPreset: "ask",
 				scheduled: { taskId: "scheduled-task", runId: "scheduled-run" },
 			},
 			{

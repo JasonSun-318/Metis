@@ -101,7 +101,7 @@ describe("AgentSession retry", () => {
 		});
 
 		const sessionManager = SessionManager.inMemory();
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		const settingsManager = SettingsManager.create(tempDir, tempDir);
 		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
@@ -204,7 +204,7 @@ describe("AgentSession retry", () => {
 			streamFn,
 		});
 		const sessionManager = SessionManager.inMemory();
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		const settingsManager = SettingsManager.create(tempDir, tempDir);
 		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
@@ -296,7 +296,7 @@ describe("AgentSession retry", () => {
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
 		settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 3, baseDelayMs: 1 } });
 
-		sessionManager.setPermissionSettings({ mode: "full" });
+		sessionManager.setPermissionPreset("full");
 		session = new AgentSession({
 			agent,
 			sessionManager,

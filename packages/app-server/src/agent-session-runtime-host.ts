@@ -1494,16 +1494,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			throw new AppServerError("BUSY", { sessionId: input.sessionId, requestId: input.requestId });
 		}
 		try {
-			await this.session.setPermissionMode(input.permissionMode);
+			await this.session.setPermissionPreset(input.permissionMode);
 		} catch {
-			const permissionMode = this.session.sessionManager.getPermissionSettings().mode;
+			const permissionMode = this.session.sessionManager.getPermissionPreset();
 			this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
 			throw new AppServerError("OPERATION_FAILED", {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
 			});
 		}
-		const permissionMode = this.session.sessionManager.getPermissionSettings().mode;
+		const permissionMode = this.session.sessionManager.getPermissionPreset();
 		this.publish({ type: "session/permissionModeChanged", sessionId: this.sessionId, permissionMode });
 		return { permissionMode };
 	}
@@ -1615,7 +1615,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const agents = boundedAgentSummaryViews(agentSummaries, 100);
 		return this.projection.snapshot(serverEpoch, currentCursor(), {
 			collaborationMode: this.session.sessionManager.getCollaborationMode(),
-			permissionMode: this.session.sessionManager.getPermissionSettings().mode,
+			permissionMode: this.session.sessionManager.getPermissionPreset(),
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
 				: {}),
@@ -2154,7 +2154,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 	}
 
 	private readonly createRuntime: CreateAgentSessionRuntimeFactory = async (options) => {
-		if (options.childConfig && !options.permissionModeCeiling) {
+		if (options.childConfig && !options.permissionSettingsCeiling) {
 			throw new Error("Child runtime is missing its permission ceiling");
 		}
 		const projectTrusted = await this.resolveProjectTrust(options.cwd, options.sessionManager.getSessionId());
@@ -2199,7 +2199,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							tools: [...child.tools],
 							additionalSystemPrompt: buildChildSystemPrompt(child),
 							includeAutoMemory: false,
-							permissionModeCeiling: options.permissionModeCeiling,
+							permissionSettingsCeiling: options.permissionSettingsCeiling,
 							workspaceWritePolicy: child.writePolicy,
 						}
 					: scheduleEligible

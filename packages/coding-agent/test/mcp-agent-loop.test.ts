@@ -15,7 +15,7 @@ import { createTestResourceLoader } from "./utilities.ts";
 const servers: McpTestServer[] = [];
 const harnesses: Harness[] = [];
 
-async function setup(tools?: Tool[], permissionSettings?: { mode: "full" | "ask" }) {
+async function setup(tools?: Tool[], permissionPreset?: "full" | "ask") {
 	const server = await createMcpTestServer({ tools });
 	servers.push(server);
 	const manager = await McpManager.create({
@@ -23,7 +23,7 @@ async function setup(tools?: Tool[], permissionSettings?: { mode: "full" | "ask"
 		authStorage: AuthStorage.inMemory(),
 		cwd: process.cwd(),
 	});
-	const harness = await createHarness({ mcpManager: manager, permissionSettings });
+	const harness = await createHarness({ mcpManager: manager, permissionPreset });
 	harnesses.push(harness);
 	return { server, manager, harness };
 }
@@ -161,7 +161,7 @@ describe("MCP agent loop", () => {
 		});
 		const harness = await createHarness({
 			mcpManager: manager,
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval,
 		});
 		harnesses.push(harness);
@@ -204,7 +204,7 @@ describe("MCP agent loop", () => {
 		});
 		const harness = await createHarness({
 			mcpManager: manager,
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval,
 		});
 		harnesses.push(harness);

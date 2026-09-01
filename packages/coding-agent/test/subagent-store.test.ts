@@ -41,7 +41,7 @@ function config(
 			initialTask: overrides?.initialTask ?? "Implement the manager",
 			tools: overrides?.tools ?? ["read", "bash"],
 			writePolicy: overrides?.writePolicy ?? "inherit",
-			permissionMode: overrides?.permissionMode ?? "ask",
+			permissionPreset: overrides?.permissionPreset ?? "ask",
 			model: overrides?.model ?? { provider: "openai", modelId: "gpt-test" },
 			thinkingLevel: overrides?.thinkingLevel ?? "high",
 			cwd: overrides?.cwd ?? join(root, "project"),

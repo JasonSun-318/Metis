@@ -155,7 +155,7 @@ export default function () {}
 		const requestApproval = vi.fn(async (_request: unknown) => "allow-once" as const);
 		const settingsManager = SettingsManager.create(cwd, agentDir);
 		const sessionManager = SessionManager.inMemory(cwd);
-		sessionManager.setPermissionSettings({ mode: "ask" });
+		sessionManager.setPermissionPreset("ask");
 		const resourceLoader = new DefaultResourceLoader({
 			cwd,
 			agentDir,

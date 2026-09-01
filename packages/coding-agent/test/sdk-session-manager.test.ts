@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getModel } from "@metis/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { PERMISSION_PRESETS } from "../src/core/permissions/settings.ts";
 import type { ResourceLoader } from "../src/core/resource-loader.ts";
 import { createAgentSession, type PermissionRequest } from "../src/core/sdk.ts";
 import { getDefaultSessionDir, SessionManager } from "../src/core/session-manager.ts";
@@ -71,7 +72,7 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager.getCwd()).toBe(
 			realpathSync(join(agentDir, "workspaces", session.sessionManager.getSessionId())),
 		);
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
 		session.dispose();
 	});
 
@@ -82,22 +83,24 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.mode).toBe("code");
 		expect(session.sessionManager.getCwd()).toBe(realpathSync(process.cwd()));
 		expect(session.sessionManager.getCwdOrigin()).toBe("user-selected");
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
 		session.dispose();
 	});
 
-	it("preserves SDK Auto and ignores reviewerEnabled", async () => {
+	it("persists SDK Auto as permissionPreset", async () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const { session } = await createAgentSession({
 			cwd,
 			agentDir,
 			model,
 			agentMode: "chat",
-			permissionMode: "auto",
-			reviewerEnabled: false,
+			permissionPreset: "auto",
 		});
 
-		expect(session.sessionManager.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(session.sessionManager.getPermissionPreset()).toBe("auto");
+		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
+		expect(session.sessionManager.getHeader()).toMatchObject({ permissionPreset: "auto" });
+		expect(session.sessionManager.getHeader()).not.toHaveProperty("permissionMode");
 		expect(session.sessionManager.getHeader()).not.toHaveProperty("reviewerEnabled");
 		session.dispose();
 	});
@@ -109,7 +112,7 @@ describe("createAgentSession session manager defaults", () => {
 			cwd,
 			agentDir,
 			model,
-			permissionMode: "ask",
+			permissionPreset: "ask",
 			onPermissionRequest: async (next) => {
 				request = next;
 				return "allow-once";
@@ -152,7 +155,7 @@ describe("createAgentSession session manager defaults", () => {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const sessionManager = SessionManager.inMemory(cwd, {
 			mode: "chat",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		});
 		const otherCwd = join(tempDir, "other-project");
 		mkdirSync(otherCwd);
@@ -160,12 +163,12 @@ describe("createAgentSession session manager defaults", () => {
 		await expect(createAgentSession({ cwd: otherCwd, agentDir, model, sessionManager })).rejects.toThrow(
 			"cwd cannot override the supplied sessionManager cwd",
 		);
-		await expect(createAgentSession({ agentDir, model, sessionManager, permissionMode: "full" })).rejects.toThrow(
-			"permissionMode cannot override the supplied sessionManager permissions",
+		await expect(createAgentSession({ agentDir, model, sessionManager, permissionPreset: "full" })).rejects.toThrow(
+			"permissionPreset cannot override the supplied sessionManager permissions",
 		);
-		const compatible = await createAgentSession({ agentDir, model, sessionManager, reviewerEnabled: true });
+		const compatible = await createAgentSession({ agentDir, model, sessionManager, permissionPreset: "ask" });
 		expect(compatible.session.sessionManager).toBe(sessionManager);
-		expect(sessionManager.getPermissionSettings()).toEqual({ mode: "ask" });
+		expect(sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.ask);
 		compatible.session.dispose();
 	});
 

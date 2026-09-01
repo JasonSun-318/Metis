@@ -142,7 +142,7 @@ describe("v13 agent control records", () => {
 				cwd: join(root, "project"),
 				tools: ["read"],
 				writePolicy: "inherit",
-				permissionMode: "ask",
+				permissionPreset: "ask",
 				model: { provider: "openai", modelId: "gpt-test" },
 				thinkingLevel: "high",
 				initialTask: "Research the session format",
@@ -228,7 +228,7 @@ describe("v13 agent control records", () => {
 			cwd: root,
 			mode: "code",
 			cwdOrigin: "user-selected",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		};
 		const control = {
 			type: "session_directory_added",

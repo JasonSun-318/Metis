@@ -56,7 +56,7 @@ describe("scheduled session metadata", () => {
 			cwd,
 			mode: "code",
 			cwdOrigin: "user-selected",
-			permissionMode: "ask",
+			permissionPreset: "ask",
 		};
 		const malformed = join(sessionDir, "malformed.jsonl");
 		writeFileSync(malformed, `${JSON.stringify({ ...base, scheduled: { taskId: "../escape", runId: "run-1" } })}\n`);
@@ -85,7 +85,7 @@ describe("scheduled session metadata", () => {
 					cwd,
 					tools: ["read"],
 					writePolicy: "inherit",
-					permissionMode: "ask",
+					permissionPreset: "ask",
 					model: { provider: "openai", modelId: "gpt-test" },
 					thinkingLevel: "off",
 					initialTask: "test",

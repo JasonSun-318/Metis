@@ -2,7 +2,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PERMISSION_PRESETS } from "../../src/core/permissions/index.ts";
 import { CURRENT_SESSION_VERSION, SessionManager } from "../../src/core/session-manager.ts";
+import { createPermissionSession, readSessionJson, restartSession } from "../permissions/session-fixtures.ts";
 
 const timestamp = "2026-07-17T00:00:00.000Z";
 
@@ -25,16 +27,28 @@ describe("SessionManager permission settings", () => {
 		const chat = SessionManager.inMemory(directory, { mode: "chat" });
 		const code = SessionManager.inMemory(directory, { mode: "code" });
 
-		expect(chat.getPermissionSettings()).toEqual({ mode: "auto" });
-		expect(code.getPermissionSettings()).toEqual({ mode: "auto" });
-		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionMode: "auto" });
+		expect(chat.getPermissionPreset()).toBe("auto");
+		expect(code.getPermissionPreset()).toBe("auto");
+		expect(chat.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
+		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionPreset: "auto" });
+		expect(chat.getHeader()).not.toHaveProperty("permissionMode");
 		expect(chat.getHeader()).not.toHaveProperty("reviewerEnabled");
 		expect(code.getHeader()).not.toHaveProperty("reviewerEnabled");
 		chat.close();
 		code.close();
 	});
 
-	it("loads Auto and ignores reviewerEnabled", () => {
+	it("persists only permissionPreset and reconstructs effective axes on restart", async () => {
+		const { session, sessionManager, file } = await createPermissionSession("ask");
+		await session.setPermissionPreset("auto");
+		const persisted = readSessionJson(file);
+		expect(sessionManager.getPermissionPreset()).toBe("auto");
+		expect(persisted).not.toHaveProperty("permissionMode");
+		expect(JSON.stringify(sessionManager.getDurableJournalSnapshot())).not.toContain("permissionMode");
+		expect((await restartSession(file)).permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.auto);
+	});
+
+	it("loads Auto from a pre-v14 journal and rewrites the header to permissionPreset", () => {
 		const path = join(directory, "legacy-auto.jsonl");
 		writeRecords(path, [
 			{
@@ -70,28 +84,36 @@ describe("SessionManager permission settings", () => {
 		]);
 
 		const session = SessionManager.open(path, directory);
-		expect(session.getPermissionSettings()).toEqual({ mode: "auto" });
+		expect(session.getPermissionPreset()).toBe("auto");
+		expect(session.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionPreset: "auto" });
+		expect(session.getHeader()).not.toHaveProperty("permissionMode");
 		expect(session.getDurableJournalSnapshot()).toHaveLength(3);
+		expect(session.getDurableJournalSnapshot()[1]).toEqual(
+			expect.objectContaining({ type: "session_permissions", permissionPreset: "auto" }),
+		);
 		session.close();
 	});
 
 	it("writes no legacy permission fields and preserves Auto creation input", () => {
-		const session = SessionManager.create(directory, directory, { mode: "code", permissionMode: "auto" });
-		session.setPermissionSettings({ mode: "full" });
+		const session = SessionManager.create(directory, directory, { mode: "code", permissionPreset: "auto" });
+		session.setPermissionPreset("full");
 		const records = session.getDurableJournalSnapshot();
 
-		expect(session.getPermissionSettings()).toEqual({ mode: "full" });
-		expect(records[0]).toMatchObject({ permissionMode: "auto" });
+		expect(session.getPermissionPreset()).toBe("full");
+		expect(records[0]).toMatchObject({ permissionPreset: "auto" });
+		expect(records[0]).not.toHaveProperty("permissionMode");
 		expect(records[0]).not.toHaveProperty("reviewerEnabled");
-		expect(records.at(-1)).toEqual(expect.objectContaining({ type: "session_permissions", permissionMode: "full" }));
-		expect(records.at(-1)).not.toHaveProperty("reviewerEnabled");
+		expect(records.at(-1)).toEqual(
+			expect.objectContaining({ type: "session_permissions", permissionPreset: "full" }),
+		);
+		expect(records.at(-1)).not.toHaveProperty("permissionMode");
 		session.close();
 	});
 
 	it("reduces permission controls without advancing or exposing the transcript tree", () => {
 		const session = SessionManager.inMemory(directory, { mode: "code" });
 		const leafId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
-		const controlId = session.setPermissionSettings({ mode: "full" });
+		const controlId = session.setPermissionPreset("full");
 		const decisionId = session.appendPermissionDecision({
 			actionId: "action-1",
 			toolName: "bash",
@@ -100,7 +122,7 @@ describe("SessionManager permission settings", () => {
 			reason: "approved once",
 		});
 
-		expect(session.getPermissionSettings()).toEqual({ mode: "full" });
+		expect(session.getPermissionPreset()).toBe("full");
 		expect(session.getLeafId()).toBe(leafId);
 		expect(session.getEntries().map((entry) => entry.id)).toEqual([leafId]);
 		expect(session.getEntry(controlId)).toBeUndefined();
@@ -116,12 +138,12 @@ describe("SessionManager permission settings", () => {
 	it("notifies permission listeners after persistence and supports unsubscribe", () => {
 		const session = SessionManager.inMemory(directory);
 		const listener = vi.fn();
-		const unsubscribe = session.subscribePermissionSettings(listener);
+		const unsubscribe = session.subscribePermissionPreset(listener);
 
-		session.setPermissionSettings({ mode: "full" });
-		expect(listener).toHaveBeenCalledWith({ mode: "full" }, { mode: "auto" });
+		session.setPermissionPreset("full");
+		expect(listener).toHaveBeenCalledWith("full", "auto");
 		unsubscribe();
-		session.setPermissionSettings({ mode: "ask" });
+		session.setPermissionPreset("ask");
 		expect(listener).toHaveBeenCalledOnce();
 		session.close();
 	});
@@ -143,7 +165,8 @@ describe("SessionManager permission settings", () => {
 				},
 			]);
 			const session = SessionManager.open(path, directory);
-			expect(session.getPermissionSettings()).toEqual({ mode: "auto" });
+			expect(session.getPermissionPreset()).toBe("auto");
+			expect(session.getHeader()).toMatchObject({ permissionPreset: "auto" });
 			session.close();
 		}
 	});
@@ -192,27 +215,27 @@ describe("SessionManager permission settings", () => {
 		current.close();
 	});
 
-	it("inherits only effective settings when branching and forking", () => {
+	it("inherits only the effective preset when branching and forking", () => {
 		const source = SessionManager.create(directory, directory, { mode: "chat", cwdOrigin: "user-selected" });
 		const leafId = source.appendMessage({ role: "user", content: "hello", timestamp: 1 });
-		source.setPermissionSettings({ mode: "full" });
+		source.setPermissionPreset("full");
 		const sourcePath = source.getSessionFile()!;
 
 		const branch = source.createBranchedSessionManager(leafId);
-		expect(branch.getPermissionSettings()).toEqual({ mode: "full" });
+		expect(branch.getPermissionPreset()).toBe("full");
 		expect(branch.getDurableJournalSnapshot().some((entry) => entry.type === "session_permissions")).toBe(false);
 		branch.close();
 		source.close();
 
 		const fork = SessionManager.forkFrom(sourcePath, directory, directory);
-		expect(fork.getPermissionSettings()).toEqual({ mode: "full" });
+		expect(fork.getPermissionPreset()).toBe("full");
 		expect(fork.getDurableJournalSnapshot().some((entry) => entry.type === "session_permissions")).toBe(false);
 		fork.close();
 	});
 
 	it("imports the complete settings and decision journal", () => {
 		const source = SessionManager.create(directory, directory);
-		source.setPermissionSettings({ mode: "full" });
+		source.setPermissionPreset("full");
 		source.appendPermissionDecision({
 			actionId: "write-1",
 			toolName: "write",
@@ -225,7 +248,7 @@ describe("SessionManager permission settings", () => {
 
 		const destination = join(directory, "imported.jsonl");
 		const imported = SessionManager.importFrom(sourcePath, destination);
-		expect(imported.getPermissionSettings()).toEqual({ mode: "full" });
+		expect(imported.getPermissionPreset()).toBe("full");
 		expect(imported.getDurableJournalSnapshot()).toEqual(
 			readFileSync(sourcePath, "utf8")
 				.trim()

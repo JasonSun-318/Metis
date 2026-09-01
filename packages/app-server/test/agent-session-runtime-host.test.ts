@@ -71,7 +71,7 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		const manager = SessionManager.create(cwd, sessionsRoot, {
 			id: SESSION_ID,
 			mode: "code",
-			permissionMode: "full",
+			permissionPreset: "full",
 		});
 		const sessionFile = manager.getSessionFile()!;
 		manager.close();

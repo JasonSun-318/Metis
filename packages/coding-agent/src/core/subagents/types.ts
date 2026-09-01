@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@metis/agent-core";
 import type { AgentSessionEvent } from "../agent-session.ts";
-import type { PermissionMode } from "../permission-mode.ts";
+import type { PermissionPreset } from "../permissions/settings.ts";
 
 export type AgentVisibleActivity = Extract<
 	AgentSessionEvent,
@@ -58,7 +58,7 @@ export interface AgentConfig extends AgentRelation {
 	readonly initialTask: string;
 	readonly tools: readonly string[];
 	readonly writePolicy: "inherit" | "deny";
-	readonly permissionMode: PermissionMode;
+	readonly permissionPreset: PermissionPreset;
 	readonly model: AgentModelRef;
 	readonly thinkingLevel: ThinkingLevel;
 	readonly cwd: string;

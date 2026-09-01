@@ -24,7 +24,7 @@ describe("AgentSession goal tools", () => {
 								cwd: process.cwd(),
 								tools: ["read"],
 								writePolicy: "inherit" as const,
-								permissionMode: "ask" as const,
+								permissionPreset: "ask" as const,
 								model: { provider: "anthropic", modelId: "claude-sonnet-4-5" },
 								thinkingLevel: "high" as const,
 								initialTask: "test",

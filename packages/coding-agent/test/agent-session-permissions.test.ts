@@ -82,7 +82,7 @@ describe("AgentSession permission enforcement", () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode },
+			permissionPreset: mode,
 			requestPermissionApproval: requestApproval,
 			interactiveBashBoundary: fake.boundary,
 		});
@@ -105,7 +105,7 @@ describe("AgentSession permission enforcement", () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "auto" },
+			permissionPreset: "auto",
 			requestPermissionApproval: requestApproval,
 			interactiveBashBoundary: fake.boundary,
 		});
@@ -130,7 +130,7 @@ describe("AgentSession permission enforcement", () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const, remember: "project" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "auto" },
+			permissionPreset: "auto",
 			requestPermissionApproval: requestApproval,
 			interactiveBashBoundary: fake.boundary,
 			withAgentDir: true,
@@ -156,7 +156,7 @@ describe("AgentSession permission enforcement", () => {
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
 			toolDefinitions: [tool],
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -181,7 +181,7 @@ describe("AgentSession permission enforcement", () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
 			toolDefinitions: [tool],
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: async () => ({ decision: "deny", reason: "No" }),
 		});
 		harnesses.push(harness);
@@ -230,7 +230,7 @@ describe("AgentSession permission enforcement", () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
 			toolDefinitions: [tool],
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 		});
 		harnesses.push(harness);
 		harness.setResponses([
@@ -252,7 +252,7 @@ describe("AgentSession permission enforcement", () => {
 		const { tool, execute } = customTool();
 		const harness = await createHarness({
 			toolDefinitions: [tool],
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: async (request) => {
 				expect(() => {
 					(request.args as { value: string }).value = "changed-in-ui";
@@ -277,7 +277,7 @@ describe("AgentSession permission enforcement", () => {
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
 			toolDefinitions: [tool],
-			permissionSettings: { mode: "full" },
+			permissionPreset: "full",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -300,7 +300,7 @@ describe("AgentSession permission enforcement", () => {
 	it("runs a proven structured read in Ask without approval", async () => {
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -328,7 +328,7 @@ describe("AgentSession permission enforcement", () => {
 			const baseResourceLoader = createTestResourceLoader();
 			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 			const harness = await createHarness({
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				requestPermissionApproval: requestApproval,
 				resourceLoader: {
 					...baseResourceLoader,
@@ -367,7 +367,7 @@ describe("AgentSession permission enforcement", () => {
 	it("automatically reads from an added directory", async () => {
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -394,7 +394,7 @@ describe("AgentSession permission enforcement", () => {
 			const path = join(external, "new.txt");
 			let harness!: Harness;
 			harness = await createHarness({
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				requestPermissionApproval: async () => {
 					harness.sessionManager.removeWorkspaceDirectory(external);
 					return { decision: "allow" };
@@ -426,7 +426,7 @@ describe("AgentSession permission enforcement", () => {
 		let maximum = 0;
 		const harness = await createHarness({
 			toolDefinitions: [first.tool, second.tool],
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: async () => {
 				active += 1;
 				maximum = Math.max(maximum, active);
@@ -456,7 +456,7 @@ describe("AgentSession permission enforcement", () => {
 		const spawn = customTool("spawn_agent");
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -485,7 +485,7 @@ describe("AgentSession permission enforcement", () => {
 		const replacement = customTool("inspect_agents");
 		const requestApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({ decision: "allow" as const }));
 		const harness = await createHarness({
-			permissionSettings: { mode: "ask" },
+			permissionPreset: "ask",
 			requestPermissionApproval: requestApproval,
 		});
 		harnesses.push(harness);
@@ -509,7 +509,7 @@ describe("AgentSession permission enforcement", () => {
 		const browser = customTool("browser_act");
 		const spawn = customTool("spawn_agent");
 		const replacement = customTool("spawn_agent");
-		const harness = await createHarness({ permissionSettings: { mode: "full" } });
+		const harness = await createHarness({ permissionPreset: "full" });
 		harnesses.push(harness);
 		harness.session.installHostTools([browser.tool, spawn.tool], {
 			delegatableToolNames: ["spawn_agent"],
@@ -526,7 +526,7 @@ describe("AgentSession permission enforcement", () => {
 		it("rejects sensitive Bash reads in full permission mode", async () => {
 			const fake = fakeBashBoundary();
 			const harness = await createHarness({
-				permissionSettings: { mode: "full" },
+				permissionPreset: "full",
 				interactiveBashBoundary: fake.boundary,
 			});
 			fake.setCwd(harness.tempDir);
@@ -551,7 +551,7 @@ describe("AgentSession permission enforcement", () => {
 			const bindSpy = vi.spyOn(fake.boundary, "bind");
 			const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
 			const harness = await createHarness({
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				requestPermissionApproval: requestApproval,
 				interactiveBashBoundary: fake.boundary,
 			});
@@ -605,7 +605,7 @@ describe("AgentSession permission enforcement", () => {
 			const fake = fakeBashBoundary();
 			const resetSpy = vi.spyOn(fake.boundary, "reset");
 			const harness = await createHarness({
-				permissionSettings: { mode: "ask" },
+				permissionPreset: "ask",
 				interactiveBashBoundary: fake.boundary,
 			});
 			harnesses.push(harness);
@@ -636,7 +636,7 @@ describe("AgentSession permission enforcement", () => {
 	it("routes Bash through the read-only sandbox when workspaceWritePolicy is deny", async () => {
 		const fake = fakeBashBoundary();
 		const harness = await createHarness({
-			permissionSettings: { mode: "full" },
+			permissionPreset: "full",
 			workspaceWritePolicy: "deny",
 			excludedToolNames: ["edit", "write"],
 			initialActiveToolNames: ["bash", "read"],

@@ -39,7 +39,7 @@ function agentHeader(
 		cwd,
 		tools: ["read"],
 		writePolicy: "inherit",
-		permissionMode: "ask",
+		permissionPreset: "ask",
 		model: { provider: "faux", modelId: "faux" },
 		thinkingLevel: "high",
 		initialTask: "Coordinate work",

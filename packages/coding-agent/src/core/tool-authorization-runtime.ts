@@ -173,11 +173,11 @@ export class ToolAuthorizationRuntime {
 	}
 
 	private effectivePermissionSettings(): { readonly mode: PermissionMode } {
-		const stored = this.options.sessionManager.getPermissionSettings();
+		const stored = this.options.sessionManager.getPermissionPreset();
 		return {
 			mode: this.options.permissionModeCeiling
-				? narrowPermissionMode(stored.mode, this.options.permissionModeCeiling())
-				: stored.mode,
+				? narrowPermissionMode(stored, this.options.permissionModeCeiling())
+				: stored,
 		};
 	}
 
