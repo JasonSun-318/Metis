@@ -91,6 +91,14 @@ jobs:
       - name: Verify packaged runtime assets
         run: npm run verify:package --workspace @metis/desktop
 
+      - name: Probe packaged sandbox health
+        if: runner.os != 'Linux'
+        run: npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
+
+      - name: Probe packaged sandbox health (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:e2e --workspace @metis/desktop -- permission-performance.spec.ts
+
       - name: Run packaged E2E (macOS and Windows)
         if: runner.os != 'Linux'
         run: npm run test:e2e --workspace @metis/desktop
