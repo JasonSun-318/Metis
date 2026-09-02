@@ -256,7 +256,7 @@ function validateInteractionCorrelation(
 			throw new ProtocolValidationError("invalid_response", "Interaction response selected an unknown choice");
 		}
 	}
-	if (interaction.kind === "permission_approval") {
+	if (interaction.kind === "session_permission_approval") {
 		if (!("choice" in result) || !interaction.choices.includes(result.choice)) {
 			throw new ProtocolValidationError("invalid_response", "Interaction response selected an unknown choice");
 		}

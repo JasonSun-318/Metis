@@ -72,6 +72,7 @@ function request(
 				: target === "external"
 					? ({ sandboxPolicy: "external-sandbox", approvalPolicy: "auto-review" } as const)
 					: ({ sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const),
+		sandboxHealth: "healthy" as const,
 		trustedUserMessages: [{ messageId: "user-1", text: `Run ${command}` }],
 		interactive: true,
 		signal: new AbortController().signal,

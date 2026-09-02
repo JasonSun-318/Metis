@@ -160,7 +160,7 @@ describe("unattended workspace-write execution", () => {
 			expect(
 				harness.sessionManager
 					.getDurableJournalSnapshot()
-					.filter((entry) => entry.type === "session_permission_decision"),
+					.filter((entry) => entry.type === "session_permission_audit"),
 			).toEqual([expect.objectContaining({ source: "policy", decision: "deny", toolName: "write" })]);
 		} finally {
 			await harness.cleanup();
@@ -188,7 +188,7 @@ describe("unattended workspace-write execution", () => {
 			expect(
 				harness.sessionManager
 					.getDurableJournalSnapshot()
-					.filter((entry) => entry.type === "session_permission_decision"),
+					.filter((entry) => entry.type === "session_permission_audit"),
 			).toEqual([expect.objectContaining({ source: "policy", decision: "deny", toolName: "bash" })]);
 		} finally {
 			await harness.cleanup();

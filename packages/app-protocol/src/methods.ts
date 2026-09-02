@@ -1182,7 +1182,7 @@ export const TrustInteractionResultSchema = StrictObject({
 });
 export const PermissionApprovalInteractionResultSchema = StrictObject({
 	interactionId: UuidSchema,
-	kind: Type.Literal("permission_approval"),
+	kind: Type.Literal("session_permission_approval"),
 	choice: PermissionApprovalChoiceSchema,
 });
 export const SelectInteractionResultSchema = StrictObject({

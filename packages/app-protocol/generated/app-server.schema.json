@@ -7624,7 +7624,7 @@
                             },
                             "kind": {
                               "type": "string",
-                              "const": "permission_approval"
+                              "const": "session_permission_approval"
                             },
                             "requestId": {
                               "type": "string",
@@ -22381,7 +22381,7 @@
                                   },
                                   "kind": {
                                     "type": "string",
-                                    "const": "permission_approval"
+                                    "const": "session_permission_approval"
                                   },
                                   "requestId": {
                                     "type": "string",
@@ -24239,6 +24239,7 @@
                         "type": "object",
                         "required": [
                           "id",
+                          "decision",
                           "toolName",
                           "paths",
                           "details",
@@ -24253,6 +24254,18 @@
                             "minLength": 1,
                             "maxLength": 128,
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "decision": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "allow"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny"
+                              }
+                            ]
                           },
                           "toolName": {
                             "type": "string",
@@ -24380,6 +24393,7 @@
                         "type": "object",
                         "required": [
                           "id",
+                          "decision",
                           "toolName",
                           "paths",
                           "details",
@@ -24394,6 +24408,18 @@
                             "minLength": 1,
                             "maxLength": 128,
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "decision": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "allow"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny"
+                              }
+                            ]
                           },
                           "toolName": {
                             "type": "string",
@@ -24521,6 +24547,7 @@
                         "type": "object",
                         "required": [
                           "id",
+                          "decision",
                           "toolName",
                           "paths",
                           "details",
@@ -24535,6 +24562,18 @@
                             "minLength": 1,
                             "maxLength": 128,
                             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "decision": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "allow"
+                              },
+                              {
+                                "type": "string",
+                                "const": "deny"
+                              }
+                            ]
                           },
                           "toolName": {
                             "type": "string",
@@ -35048,7 +35087,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "const": "permission_approval"
+                          "const": "session_permission_approval"
                         },
                         "choice": {
                           "anyOf": [
@@ -52451,7 +52490,7 @@
                               },
                               "kind": {
                                 "type": "string",
-                                "const": "permission_approval"
+                                "const": "session_permission_approval"
                               },
                               "requestId": {
                                 "type": "string",
@@ -54309,6 +54348,7 @@
                     "type": "object",
                     "required": [
                       "id",
+                      "decision",
                       "toolName",
                       "paths",
                       "details",
@@ -54323,6 +54363,18 @@
                         "minLength": 1,
                         "maxLength": 128,
                         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "decision": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "allow"
+                          },
+                          {
+                            "type": "string",
+                            "const": "deny"
+                          }
+                        ]
                       },
                       "toolName": {
                         "type": "string",
@@ -54450,6 +54502,7 @@
                     "type": "object",
                     "required": [
                       "id",
+                      "decision",
                       "toolName",
                       "paths",
                       "details",
@@ -54464,6 +54517,18 @@
                         "minLength": 1,
                         "maxLength": 128,
                         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "decision": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "allow"
+                          },
+                          {
+                            "type": "string",
+                            "const": "deny"
+                          }
+                        ]
                       },
                       "toolName": {
                         "type": "string",
@@ -54591,6 +54656,7 @@
                     "type": "object",
                     "required": [
                       "id",
+                      "decision",
                       "toolName",
                       "paths",
                       "details",
@@ -54605,6 +54671,18 @@
                         "minLength": 1,
                         "maxLength": 128,
                         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "decision": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "allow"
+                          },
+                          {
+                            "type": "string",
+                            "const": "deny"
+                          }
+                        ]
                       },
                       "toolName": {
                         "type": "string",
@@ -76236,7 +76314,7 @@
             },
             "kind": {
               "type": "string",
-              "const": "permission_approval"
+              "const": "session_permission_approval"
             },
             "choice": {
               "anyOf": [
@@ -76531,7 +76609,7 @@
             },
             "kind": {
               "type": "string",
-              "const": "permission_approval"
+              "const": "session_permission_approval"
             },
             "requestId": {
               "type": "string",
@@ -85188,7 +85266,7 @@
                         },
                         "kind": {
                           "type": "string",
-                          "const": "permission_approval"
+                          "const": "session_permission_approval"
                         },
                         "requestId": {
                           "type": "string",
@@ -86425,7 +86503,7 @@
                     },
                     "kind": {
                       "type": "string",
-                      "const": "permission_approval"
+                      "const": "session_permission_approval"
                     },
                     "choice": {
                       "anyOf": [
@@ -88670,7 +88748,7 @@
                   },
                   "kind": {
                     "type": "string",
-                    "const": "permission_approval"
+                    "const": "session_permission_approval"
                   },
                   "requestId": {
                     "type": "string",

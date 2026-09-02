@@ -730,7 +730,7 @@ describe("SubagentManager", () => {
 
 		harness.parentManager.setPermissionPreset("ask");
 		expect(await harness.manager.readJournal(ROOT_ID, queued.agentId)).toEqual(
-			expect.not.arrayContaining([expect.objectContaining({ type: "session_permissions" })]),
+			expect.not.arrayContaining([expect.objectContaining({ type: "session_permission_preset" })]),
 		);
 
 		harness.runtimes[0]!.session.settle();
@@ -1048,6 +1048,7 @@ describe("SubagentManager", () => {
 				},
 				args: { command: "curl example.test" },
 				reason: "network requires confirmation",
+				scopeComplete: true,
 			}),
 		).resolves.toEqual({ decision: "allow" });
 		expect(approvals.mock.calls[0]?.[0].actor).toEqual({
@@ -1469,6 +1470,7 @@ describe("SubagentManager", () => {
 			},
 			args: { command: "curl example.test" },
 			reason: "network requires confirmation",
+			scopeComplete: true,
 		});
 		await expect(waitPromise).resolves.toMatchObject({
 			timedOut: false,

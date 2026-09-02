@@ -4,6 +4,9 @@ import {
 	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,
 } from "../src/core/interactive-bash-boundary.ts";
+import type { PermissionExecutionTarget } from "../src/core/permissions/approval.ts";
+import { ExecutionGrantStore } from "../src/core/permissions/grant-store.ts";
+import { normalizePermissionAction } from "../src/core/permissions/normalize.ts";
 import type { BashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
 
@@ -11,6 +14,47 @@ describe("interactive Bash boundary", () => {
 	const boundaries: Array<ReturnType<typeof createInteractiveBashBoundary>> = [];
 	const cwd = process.cwd();
 	const options = (actionId?: string, signal?: AbortSignal) => ({ actionId, signal, onData: () => {} });
+	let grantSequence = 0;
+	const bind = (
+		value: ReturnType<typeof createInteractiveBashBoundary>,
+		actionId: string,
+		target: Exclude<PermissionExecutionTarget, "external">,
+		command: string,
+		profile: {
+			workspaceRoots?: readonly string[];
+			readRoots?: readonly string[];
+			writeRoots?: readonly string[];
+			protectedRoots?: readonly string[];
+		} = {},
+	) => {
+		const action = normalizePermissionAction({
+			actionId,
+			toolName: "bash",
+			provenance: "builtin",
+			toolIdentity: "builtin:bash:test",
+			args: { command },
+			cwd,
+			workspaceRoots: profile.workspaceRoots ?? [cwd],
+			readPaths: profile.readRoots ?? [],
+			writePaths: profile.writeRoots ?? [],
+			networkEndpoints: [],
+			command,
+			effects: [],
+		});
+		const store = new ExecutionGrantStore({ createId: () => `grant-${actionId}-${grantSequence++}` });
+		const grant = store.issue({
+			action,
+			grant: {
+				executionTarget: target,
+				readRoots: action.readPaths,
+				writeRoots: action.writePaths,
+				protectedRoots: profile.protectedRoots ?? [],
+				networkEndpoints: [],
+			},
+			settingsEpoch: 0,
+		});
+		value.bind(store.consumeExact(grant.grantId, { action, settingsEpoch: 0, executionTarget: target }));
+	};
 	const sandbox = (exec: BashOperations["exec"] = vi.fn(async () => ({ exitCode: 0 }))): WorkspaceSandbox => ({
 		operations: { exec },
 		dispose: vi.fn(async () => {}),
@@ -46,15 +90,15 @@ describe("interactive Bash boundary", () => {
 		const createSandbox = vi.fn(async () => instance);
 		const value = boundary({ hostExec, createSandbox });
 
-		value.bindLegacy("safe-1", "sandbox");
+		bind(value, "safe-1", "sandbox", "pwd");
 		await value.operations.exec("pwd", cwd, options("safe-1"));
-		value.bindLegacy("safe-2", "sandbox");
+		bind(value, "safe-2", "sandbox", "npm test");
 		await value.operations.exec("npm test", cwd, options("safe-2"));
 		expect(createSandbox).toHaveBeenCalledOnce();
 		expect(sandboxExec).toHaveBeenCalledTimes(2);
 		expect(hostExec).not.toHaveBeenCalled();
 
-		value.bindLegacy("host-1", "host");
+		bind(value, "host-1", "host", "git push");
 		await value.operations.exec("git push", cwd, options("host-1"));
 		expect(hostExec).toHaveBeenCalledOnce();
 		expect(createSandbox).toHaveBeenCalledOnce();
@@ -64,9 +108,8 @@ describe("interactive Bash boundary", () => {
 	it("rejects missing, reused, and unbound action IDs without host fallback", async () => {
 		const hostExec = vi.fn(async () => ({ exitCode: 0 }));
 		const value = boundary({ hostExec, createSandbox: vi.fn(async () => sandbox()) });
-		expect(() => value.bindLegacy("", "sandbox")).toThrow("action ID is required");
-		value.bindLegacy("one", "sandbox");
-		expect(() => value.bindLegacy("one", "host")).toThrow("was reused");
+		bind(value, "one", "sandbox", "pwd");
+		expect(() => bind(value, "one", "host", "pwd")).toThrow("was reused");
 		await expect(value.operations.exec("pwd", cwd, options())).rejects.toThrow("requires an action ID");
 		await expect(value.operations.exec("pwd", cwd, options("missing"))).rejects.toThrow("no permission binding");
 		expect(hostExec).not.toHaveBeenCalled();
@@ -81,15 +124,15 @@ describe("interactive Bash boundary", () => {
 			createSandbox,
 			context: () => ({ cwd, workspaceRoots: roots, readOnlyRoots: [], writeRoots: [] }),
 		});
-		value.bindLegacy("one", "sandbox");
+		bind(value, "one", "sandbox", "pwd", { workspaceRoots: roots });
 		await value.operations.exec("pwd", cwd, options("one"));
 		roots = ["/tmp", cwd];
-		value.bindLegacy("two", "sandbox");
+		bind(value, "two", "sandbox", "pwd", { workspaceRoots: roots });
 		await value.operations.exec("pwd", cwd, options("two"));
 		expect(createSandbox).toHaveBeenCalledOnce();
 
 		roots = [cwd];
-		value.bindLegacy("three", "sandbox");
+		bind(value, "three", "sandbox", "pwd", { workspaceRoots: roots });
 		await value.operations.exec("pwd", cwd, options("three"));
 		expect(createSandbox).toHaveBeenCalledTimes(2);
 		expect(first.dispose).toHaveBeenCalledOnce();
@@ -107,7 +150,7 @@ describe("interactive Bash boundary", () => {
 				workspaceReadOnly: true,
 			}),
 		});
-		value.bindLegacy("one", "sandbox");
+		bind(value, "one", "sandbox", "pwd");
 		await value.operations.exec("pwd", cwd, options("one"));
 		expect(createSandbox).toHaveBeenCalledWith(expect.objectContaining({ workspaceReadOnly: true }));
 	});
@@ -127,12 +170,15 @@ describe("interactive Bash boundary", () => {
 				protectedRoots: [memoryRoot],
 			}),
 		});
-		value.bindLegacy("safe", "sandbox");
+		bind(value, "safe", "sandbox", "pwd", {
+			readRoots: [globalRoot, projectRoot],
+			protectedRoots: [memoryRoot],
+		});
 		await value.operations.exec("pwd", cwd, options("safe"));
 		expect(createSandbox).toHaveBeenCalledWith(
 			expect.objectContaining({
 				readOnlyRoots: expect.arrayContaining([globalRoot, projectRoot]),
-				protectedRoots: [memoryRoot],
+				writeProtectedRoots: [memoryRoot],
 			}),
 		);
 	});
@@ -150,8 +196,8 @@ describe("interactive Bash boundary", () => {
 			.mockResolvedValue({ exitCode: 0 });
 		const value = boundary({ createSandbox: vi.fn(async () => sandbox(sandboxExec)) });
 		const controller = new AbortController();
-		value.bindLegacy("one", "sandbox");
-		value.bindLegacy("two", "sandbox");
+		bind(value, "one", "sandbox", "sleep");
+		bind(value, "two", "sandbox", "pwd");
 		const first = value.operations.exec("sleep", cwd, options("one"));
 		const second = value.operations.exec("pwd", cwd, options("two", controller.signal));
 		await vi.waitFor(() => expect(sandboxExec).toHaveBeenCalledOnce());
@@ -168,11 +214,11 @@ describe("interactive Bash boundary", () => {
 			throw new Error("sandbox unavailable");
 		});
 		const value = boundary({ hostExec, createSandbox });
-		value.bindLegacy("safe", "sandbox");
+		bind(value, "safe", "sandbox", "pwd");
 		await expect(value.operations.exec("pwd", cwd, options("safe"))).rejects.toThrow("sandbox unavailable");
 		expect(hostExec).not.toHaveBeenCalled();
 
-		value.bindLegacy("full", "host");
+		bind(value, "full", "host", "pwd");
 		await value.operations.exec("pwd", cwd, options("full"));
 		expect(hostExec).toHaveBeenCalledOnce();
 		expect(createSandbox).toHaveBeenCalledOnce();
@@ -189,8 +235,8 @@ describe("interactive Bash boundary", () => {
 		const instance = sandbox(sandboxExec);
 		vi.mocked(instance.dispose).mockImplementation(async () => rejectRunning(new Error("sandbox disposed")));
 		const value = boundary({ createSandbox: vi.fn(async () => instance) });
-		value.bindLegacy("one", "sandbox");
-		value.bindLegacy("two", "sandbox");
+		bind(value, "one", "sandbox", "sleep");
+		bind(value, "two", "sandbox", "pwd");
 		const running = value.operations.exec("sleep", cwd, options("one"));
 		const queued = value.operations.exec("pwd", cwd, options("two"));
 		await vi.waitFor(() => expect(sandboxExec).toHaveBeenCalledOnce());
@@ -202,7 +248,7 @@ describe("interactive Bash boundary", () => {
 
 		const forceInstance = sandbox();
 		const forced = boundary({ createSandbox: vi.fn(async () => forceInstance) });
-		forced.bindLegacy("three", "sandbox");
+		bind(forced, "three", "sandbox", "pwd");
 		await forced.operations.exec("pwd", cwd, options("three"));
 		forced.forceDispose();
 		expect(forceInstance.forceDispose).toHaveBeenCalledOnce();

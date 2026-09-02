@@ -395,6 +395,12 @@ test("exact remembered allow survives restart and does not match a changed path"
 		await changedPanel.getByRole("button", { name: /Always deny this exact action/u }).click();
 		await app.waitDone("case-remember-changed");
 		expect(existsSync(path.join(app.projectDir, "other.txt"))).toBe(false);
+
+		await app.relaunch();
+		await app.submit("case-remember-changed");
+		await app.waitDone("case-remember-changed");
+		await expect(app.page.locator(APPROVAL)).toHaveCount(0);
+		expect(existsSync(path.join(app.projectDir, "other.txt"))).toBe(false);
 	} finally {
 		await app.close();
 	}

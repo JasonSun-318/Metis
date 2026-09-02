@@ -86,7 +86,6 @@ import {
 	parseSessionControlEntry,
 	type SessionControlEntry,
 	type SessionControlPayload,
-	type SessionPermissionsEntry,
 } from "./session-control.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import {
@@ -1232,44 +1231,13 @@ function migrateV12ToV13(entries: FileEntry[]): void {
 	}
 }
 
-function migratePermissionPresetField(record: {
-	permissionPreset?: unknown;
-	permissionMode?: unknown;
-}): PermissionPreset {
-	if (isPermissionPreset(record.permissionPreset)) return record.permissionPreset;
-	if (isPermissionPreset(record.permissionMode)) return record.permissionMode;
-	return DEFAULT_PERMISSION_PRESET;
-}
-
-/** Migrate v13 → v14: persist permissionPreset only and drop linear permissionMode. */
+/** Introduce the new preset field without interpreting retired permission data. */
 function migrateV13ToV14(entries: FileEntry[]): void {
 	for (const entry of entries) {
 		if (entry.type === "session") {
-			const header = entry as SessionHeader & {
-				permissionPreset?: PermissionPreset;
-				permissionMode?: unknown;
-				reviewerEnabled?: unknown;
-			};
-			(header as { permissionPreset: PermissionPreset }).permissionPreset = migratePermissionPresetField(header);
-			delete header.permissionMode;
-			delete header.reviewerEnabled;
-			if (header.agent) {
-				const agent = header.agent as SessionHeader["agent"] & { permissionMode?: unknown };
-				(agent as { permissionPreset: PermissionPreset }).permissionPreset = migratePermissionPresetField(agent);
-				delete agent.permissionMode;
-			}
+			const header = entry as SessionHeader;
+			header.permissionPreset ??= DEFAULT_PERMISSION_PRESET;
 			header.version = 14;
-			continue;
-		}
-		if (entry.type === "session_permissions") {
-			const control = entry as SessionPermissionsEntry & {
-				permissionPreset?: PermissionPreset;
-				permissionMode?: unknown;
-				reviewerEnabled?: unknown;
-			};
-			(control as { permissionPreset: PermissionPreset }).permissionPreset = migratePermissionPresetField(control);
-			delete control.permissionMode;
-			delete control.reviewerEnabled;
 		}
 	}
 }
@@ -1290,19 +1258,13 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 		throw new TypeError("Runtime control entries require a v5 session header");
 	}
 	if (
-		version < 6 &&
-		entries.some((entry) => entry.type === "session_permissions" || entry.type === "session_permission_decision")
+		version < 14 &&
+		entries.some((entry) => entry.type === "session_permission_preset" || entry.type === "session_permission_audit")
 	) {
-		throw new TypeError("Session control entries require a v6 session header");
+		throw new TypeError("Permission control entries require a v14 session header");
 	}
 	if (version < 8 && entries.some((entry) => isSessionDirectoryControlEntryType(entry.type))) {
 		throw new TypeError("Directory control entries require a v8 session header");
-	}
-	if (
-		version < 9 &&
-		entries.some((entry) => entry.type === "session_permission_decision" && entry.source === "policy")
-	) {
-		throw new TypeError("Policy permission decisions require a v9 session header");
 	}
 	if (version < 10 && header?.scheduled !== undefined) {
 		throw new TypeError("Scheduled session markers require a v10 session header");
@@ -1586,6 +1548,22 @@ function validateRawSessionRecord(record: unknown, index: number, filePath: stri
 
 function validateSessionHeader(record: Record<string, unknown>, filePath: string): SessionHeader {
 	const header = record as unknown as SessionHeader;
+	const headerFields = new Set([
+		"type",
+		"version",
+		"id",
+		"timestamp",
+		"cwd",
+		"mode",
+		"cwdOrigin",
+		"permissionPreset",
+		"parentSession",
+		"agent",
+		"scheduled",
+	]);
+	if (Object.keys(record).some((field) => !headerFields.has(field))) {
+		corruptSession(filePath, 1, "Session header contains an unsupported field");
+	}
 	try {
 		assertValidSessionId(header.id);
 	} catch (error) {
@@ -1609,15 +1587,30 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	if (record.permissionPreset !== undefined && !isPermissionPreset(record.permissionPreset)) {
 		corruptSession(filePath, 1, "Session header has an invalid permissionPreset");
 	}
-	if (record.permissionMode !== undefined && !isPermissionPreset(record.permissionMode)) {
-		corruptSession(filePath, 1, "Session header has an invalid permissionMode");
-	}
-	if (record.reviewerEnabled !== undefined && typeof record.reviewerEnabled !== "boolean") {
-		corruptSession(filePath, 1, "Session header has an invalid reviewerEnabled");
-	}
 	if (header.agent !== undefined) {
 		if (!isJsonObject(header.agent)) corruptSession(filePath, 1, "Session header has an invalid agent marker");
 		const agent = header.agent;
+		const agentFields = new Set([
+			"agentId",
+			"name",
+			"parentSessionId",
+			"rootSessionId",
+			"agentPath",
+			"agentType",
+			"tools",
+			"writePolicy",
+			"permissionPreset",
+			"model",
+			"thinkingLevel",
+			"cwd",
+			"forkTurns",
+			"timeoutSeconds",
+			"mayDelegate",
+			"initialTask",
+		]);
+		if (Object.keys(agent).some((field) => !agentFields.has(field))) {
+			corruptSession(filePath, 1, "Session header agent marker contains an unsupported field");
+		}
 		try {
 			assertValidSessionId(agent.agentId);
 			assertValidSessionId(agent.parentSessionId);
@@ -1646,13 +1639,7 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		if (agent.writePolicy !== "inherit" && agent.writePolicy !== "deny") {
 			corruptSession(filePath, 1, "Session header has an invalid agent write policy");
 		}
-		const agentRecord = agent as unknown as Record<string, unknown>;
-		if (
-			!isPermissionPreset(agentRecord.permissionPreset ?? agentRecord.permissionMode) ||
-			(agentRecord.permissionPreset !== undefined &&
-				agentRecord.permissionMode !== undefined &&
-				agentRecord.permissionPreset !== agentRecord.permissionMode)
-		) {
+		if (!isPermissionPreset(agent.permissionPreset)) {
 			corruptSession(filePath, 1, "Session header has an invalid agent permission preset");
 		}
 		if (
@@ -1712,14 +1699,11 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
 		);
 	}
-	if (
-		version < 6 &&
-		(header.cwdOrigin !== undefined ||
-			record.permissionMode !== undefined ||
-			record.permissionPreset !== undefined ||
-			record.reviewerEnabled !== undefined)
-	) {
+	if (version < 6 && (header.cwdOrigin !== undefined || record.permissionPreset !== undefined)) {
 		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
+	}
+	if (version >= 14 && !isPermissionPreset(header.permissionPreset)) {
+		corruptSession(filePath, 1, "Current session header requires permissionPreset");
 	}
 	if (version < 10 && header.scheduled !== undefined) {
 		corruptSession(filePath, 1, "Scheduled header fields require a v10 session header");
@@ -1750,6 +1734,9 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
+			if ((type === "session_permission_preset" || type === "session_permission_audit") && version < 14) {
+				corruptSession(filePath, index + 1, "Permission control entries require a v14 session header");
+			}
 			if (isSessionDirectoryControlEntryType(type) && version < 8) {
 				corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
 			}
@@ -1762,7 +1749,12 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			if (type === "session_ultra_selection" && version < 13) {
 				corruptSession(filePath, index + 1, "Ultra selection controls require a v13 session header");
 			}
-			if (!isAgentControlEntryType(type) && version < 6) {
+			if (
+				!isAgentControlEntryType(type) &&
+				type !== "session_permission_preset" &&
+				type !== "session_permission_audit" &&
+				version < 6
+			) {
 				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 			}
 			parseSessionControlRecord(records[index], index + 1, filePath);
@@ -2483,7 +2475,7 @@ function reducePermissionPreset(entries: readonly FileEntry[]): PermissionPreset
 	const header = entries[0] as SessionHeader;
 	let preset = isPermissionPreset(header.permissionPreset) ? header.permissionPreset : DEFAULT_PERMISSION_PRESET;
 	for (const entry of entries.slice(1)) {
-		if (entry.type !== "session_permissions") continue;
+		if (entry.type !== "session_permission_preset") continue;
 		if (isPermissionPreset(entry.permissionPreset)) preset = entry.permissionPreset;
 	}
 	return preset;
@@ -3313,10 +3305,10 @@ export class SessionManager {
 		if (!isPermissionPreset(preset)) throw new TypeError("Invalid permission preset");
 		const previous = this.permissionPreset;
 		const entry = this._appendSessionControl({
-			type: "session_permissions",
+			type: "session_permission_preset",
 			permissionPreset: preset,
 		});
-		if (entry.type !== "session_permissions") throw new Error("Unexpected session control entry");
+		if (entry.type !== "session_permission_preset") throw new Error("Unexpected session control entry");
 		this.permissionPreset = entry.permissionPreset;
 		for (const listener of [...this.permissionPresetListeners]) {
 			listener(this.getPermissionPreset(), previous);
@@ -3331,9 +3323,9 @@ export class SessionManager {
 	}
 
 	/** Append one permission decision audit record without granting persistent authority. */
-	appendPermissionDecision(decision: PermissionDecisionPayload): string {
+	appendPermissionAuditRecord(decision: PermissionDecisionPayload): string {
 		return this._appendSessionControl({
-			type: "session_permission_decision",
+			type: "session_permission_audit",
 			...decision,
 			reason: decision.reason ?? "No reason provided",
 		}).id;

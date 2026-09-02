@@ -22,6 +22,7 @@ import { SessionManager } from "../../src/core/session-manager.ts";
 import type { Settings } from "../../src/core/settings-manager.ts";
 import { SettingsManager } from "../../src/core/settings-manager.ts";
 import type { UnattendedExecutionProfile } from "../../src/core/unattended-execution.ts";
+import type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "../../src/core/workspace-sandbox.ts";
 import type { InlineExtension, ResourceLoader } from "../../src/index.ts";
 import { testToolDefinitions } from "../helpers/tool-definition.ts";
 import {
@@ -80,6 +81,8 @@ export interface HarnessOptions {
 	includeAutoMemory?: boolean;
 	unattendedExecution?: UnattendedExecutionProfile;
 	interactiveBashBoundary?: InteractiveBashBoundary;
+	sandboxHealth?: WorkspaceSandboxHealthStatus;
+	sandboxHealthProbe?: () => Promise<WorkspaceSandboxHealthReport>;
 	withAgentDir?: boolean;
 	workspaceWritePolicy?: "inherit" | "deny";
 	/** Optional caller-owned manager; cleanup does not close it. */
@@ -214,6 +217,8 @@ export async function createHarness(options: HarnessOptions = {}): Promise<Harne
 		includeAutoMemory: options.includeAutoMemory,
 		unattendedExecution: options.unattendedExecution,
 		interactiveBashBoundary: options.interactiveBashBoundary,
+		sandboxHealth: options.sandboxHealth,
+		sandboxHealthProbe: options.sandboxHealthProbe,
 		workspaceWritePolicy: options.workspaceWritePolicy,
 	});
 

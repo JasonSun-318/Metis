@@ -55,14 +55,11 @@ describe("parseArgs", () => {
 	});
 
 	describe("new-session workspace and permissions", () => {
-		test("accepts auto and consumes deprecated reviewer flags", () => {
-			const result = parseArgs(["--cwd", "./project", "--permission-preset", "auto", "--no-reviewer"]);
+		test("accepts cwd and Auto together", () => {
+			const result = parseArgs(["--cwd", "./project", "--permission-preset", "auto"]);
 			expect(result.cwd).toBe("./project");
 			expect(result.permissionPreset).toBe("auto");
-			expect(result).not.toHaveProperty("reviewerEnabled");
-			expect(result.diagnostics).toEqual([
-				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
-			]);
+			expect(result.diagnostics).toEqual([]);
 		});
 
 		test.each(["ask", "auto", "full"] as const)("parses permission preset %s", (preset) => {
@@ -80,14 +77,6 @@ describe("parseArgs", () => {
 			]);
 			expect(parseArgs(["--permission-preset", "trusted"]).diagnostics).toEqual([
 				{ type: "error", message: 'Invalid permission preset "trusted". Valid values: ask, auto, full' },
-			]);
-		});
-
-		test("warns for each deprecated reviewer flag", () => {
-			const result = parseArgs(["--reviewer", "--no-reviewer"]);
-			expect(result.diagnostics).toEqual([
-				{ type: "warning", message: "--reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
-				{ type: "warning", message: "--no-reviewer is deprecated and ignored; permissions use Ask, Auto, or Full" },
 			]);
 		});
 	});

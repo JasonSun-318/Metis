@@ -70,6 +70,7 @@ interface RequestOverrides {
 	readonly action?: PermissionExecutionRequest<string>["action"];
 	readonly args?: unknown;
 	readonly settings?: PermissionSettings;
+	readonly sandboxHealth?: PermissionExecutionRequest<string>["sandboxHealth"];
 	readonly trustedUserMessages?: PermissionExecutionRequest<string>["trustedUserMessages"];
 	readonly interactive?: boolean;
 	readonly signal?: AbortSignal;
@@ -84,6 +85,7 @@ function executionRequest(
 		action: overrides.action ?? action,
 		args: overrides.args ?? { path: `${projectDir}/README.md` },
 		settings: overrides.settings ?? { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+		sandboxHealth: overrides.sandboxHealth ?? "healthy",
 		trustedUserMessages: overrides.trustedUserMessages ?? [
 			{ messageId: "user-1", text: "Perform this exact requested action." },
 		],

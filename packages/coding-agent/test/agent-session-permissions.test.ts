@@ -173,7 +173,7 @@ describe("AgentSession permission enforcement", () => {
 		expect(
 			harness.sessionManager
 				.getDurableJournalSnapshot()
-				.filter((entry) => entry.type === "session_permission_decision"),
+				.filter((entry) => entry.type === "session_permission_audit"),
 		).toEqual([expect.objectContaining({ source: "user", decision: "allow", toolName: "custom_action" })]);
 	});
 
@@ -201,7 +201,7 @@ describe("AgentSession permission enforcement", () => {
 		expect(
 			harness.sessionManager
 				.getDurableJournalSnapshot()
-				.filter((entry) => entry.type === "session_permission_decision"),
+				.filter((entry) => entry.type === "session_permission_audit"),
 		).toEqual([expect.objectContaining({ source: "user", decision: "deny" })]);
 	});
 
@@ -221,6 +221,7 @@ describe("AgentSession permission enforcement", () => {
 			},
 			args: { value: "x" },
 			reason: "test",
+			scopeComplete: true,
 		});
 
 		expect(requestApproval.mock.calls[0]?.[0].cwd).toBe(harness.tempDir);
@@ -244,7 +245,7 @@ describe("AgentSession permission enforcement", () => {
 		expect(
 			harness.sessionManager
 				.getDurableJournalSnapshot()
-				.filter((entry) => entry.type === "session_permission_decision"),
+				.filter((entry) => entry.type === "session_permission_audit"),
 		).toEqual([]);
 	});
 
@@ -272,6 +273,81 @@ describe("AgentSession permission enforcement", () => {
 		expect(execute.mock.calls[0]?.[1]).toEqual({ value: "original" });
 	});
 
+	it("cancels a pending approval when the session model changes", async () => {
+		const { tool, execute } = customTool();
+		let releaseApproval!: (decision: { decision: "allow" }) => void;
+		const approval = new Promise<{ decision: "allow" }>((resolve) => {
+			releaseApproval = resolve;
+		});
+		const requestApproval = vi.fn(async () => approval);
+		const harness = await createHarness({
+			models: [
+				{ id: "faux-1", reasoning: false },
+				{ id: "faux-2", reasoning: false },
+			],
+			toolDefinitions: [tool],
+			permissionPreset: "ask",
+			requestPermissionApproval: requestApproval,
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		const prompt = harness.session.prompt("run it");
+		await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce());
+		await harness.session.setModel(harness.getModel("faux-2")!);
+		releaseApproval({ decision: "allow" });
+		await prompt;
+
+		expect(execute).not.toHaveBeenCalled();
+		expect(harness.session.permissionGrantCount).toBe(0);
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "toolResult" && getMessageText(message).includes("Permission denied"),
+			),
+		).toBe(true);
+	});
+
+	it("cancels a pending approval when sandbox health changes", async () => {
+		const { tool, execute } = customTool();
+		let releaseApproval!: (decision: { decision: "allow" }) => void;
+		const approval = new Promise<{ decision: "allow" }>((resolve) => {
+			releaseApproval = resolve;
+		});
+		const requestApproval = vi.fn(async () => approval);
+		const harness = await createHarness({
+			toolDefinitions: [tool],
+			permissionPreset: "ask",
+			requestPermissionApproval: requestApproval,
+			sandboxHealth: "healthy",
+			sandboxHealthProbe: async () => ({
+				status: "unavailable",
+				code: "dependencies-unavailable",
+				details: [],
+			}),
+		});
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("custom_action", { value: "x" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		const prompt = harness.session.prompt("run it");
+		await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce());
+		await harness.session.refreshSandboxHealth(true);
+		releaseApproval({ decision: "allow" });
+		await prompt;
+
+		expect(harness.session.permissionView.sandboxHealth).toBe("unavailable");
+		expect(harness.eventsOfType("sandbox_health_changed")).toEqual([
+			{ type: "sandbox_health_changed", sandboxHealth: "unavailable" },
+		]);
+		expect(execute).not.toHaveBeenCalled();
+		expect(harness.session.permissionGrantCount).toBe(0);
+	});
+
 	it("executes in Full without approval or decision audit", async () => {
 		const { tool, execute } = customTool();
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
@@ -293,7 +369,7 @@ describe("AgentSession permission enforcement", () => {
 		expect(
 			harness.sessionManager
 				.getDurableJournalSnapshot()
-				.filter((entry) => entry.type === "session_permission_decision"),
+				.filter((entry) => entry.type === "session_permission_audit"),
 		).toEqual([]);
 	});
 
@@ -316,6 +392,31 @@ describe("AgentSession permission enforcement", () => {
 		expect(
 			harness.session.messages.some(
 				(message) => message.role === "toolResult" && getMessageText(message).includes("metis"),
+			),
+		).toBe(true);
+	});
+
+	it("reports unhealthy sandbox state and denies sandbox-targeted tools", async () => {
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionPreset: "ask",
+			requestPermissionApproval: requestApproval,
+			sandboxHealth: "unavailable",
+		});
+		harnesses.push(harness);
+		const path = join(harness.sessionManager.getCwd(), "package.json");
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("read", { path })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("read it");
+
+		expect(harness.session.permissionView.sandboxHealth).toBe("unavailable");
+		expect(requestApproval).not.toHaveBeenCalled();
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "toolResult" && getMessageText(message).includes("Sandbox is unavailable"),
 			),
 		).toBe(true);
 	});

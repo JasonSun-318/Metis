@@ -56,9 +56,10 @@ class FakePeer implements InteractionPeer {
 	}
 }
 
-function permissionInteraction(peer: FakePeer): Extract<InteractionView, { kind: "permission_approval" }> {
+function permissionInteraction(peer: FakePeer): Extract<InteractionView, { kind: "session_permission_approval" }> {
 	const interaction = peer.requests[0];
-	if (interaction?.kind !== "permission_approval") throw new TypeError("Expected a permission_approval interaction");
+	if (interaction?.kind !== "session_permission_approval")
+		throw new TypeError("Expected a session_permission_approval interaction");
 	return interaction;
 }
 
@@ -77,6 +78,7 @@ describe("InteractionBroker", () => {
 		reason: "Network destination needs approval",
 		cwd: "/tmp/work",
 		executionTarget: "host",
+		scopeComplete: true,
 		actor: { type: "agent", id: "agent-child-1", name: "researcher", taskId: "task-1" },
 		...overrides,
 	});
@@ -485,13 +487,13 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "allow-once" };
 
 		await expect(broker.requestPermissionApproval(SESSION_ID, childApproval())).resolves.toEqual({
 			decision: "allow",
 		});
 		expect(peer.requests[0]).toMatchObject({
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			toolLabel: "bash",
 			executionTarget: "host",
 			scopeComplete: true,
@@ -507,7 +509,7 @@ describe("InteractionBroker", () => {
 		});
 		const serialized = JSON.stringify(peer.requests[0]);
 		expect(serialized).not.toContain('"command": "curl https://example.test"');
-		expect(serialized).not.toMatch(/"presentation":"permission_approval"/);
+		expect(serialized).not.toMatch(/"presentation":"session_permission_approval"/);
 	});
 
 	it("returns a project-scoped decision only for an eligible primary action", async () => {
@@ -515,7 +517,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "permission_approval", choice: "always-allow-exact" };
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "always-allow-exact" };
 
 		await expect(
 			broker.requestPermissionApproval(
@@ -539,7 +541,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "permission_approval", choice: "always-deny-exact" };
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "always-deny-exact" };
 
 		await expect(
 			broker.requestPermissionApproval(
@@ -558,7 +560,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "allow-once" };
 
 		await broker.requestPermissionApproval(
 			SESSION_ID,
@@ -582,7 +584,7 @@ describe("InteractionBroker", () => {
 		);
 
 		expect(peer.requests[0]).toMatchObject({
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			toolLabel: "edit",
 			details: [
 				{ label: "Agent", value: "researcher (agent-child-1)" },
@@ -601,7 +603,7 @@ describe("InteractionBroker", () => {
 	it("summarizes known network, search, path, and external tool targets", async () => {
 		const cases: Array<{
 			request: PermissionApprovalRequest;
-			details: Extract<InteractionView, { kind: "permission_approval" }>["details"];
+			details: Extract<InteractionView, { kind: "session_permission_approval" }>["details"];
 		}> = [
 			{
 				request: childApproval({
@@ -676,7 +678,7 @@ describe("InteractionBroker", () => {
 			const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 			const peer = new FakePeer();
 			broker.assign(SESSION_ID, peer);
-			peer.response = { interactionId, kind: "permission_approval", choice: "deny-once" };
+			peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
 			await broker.requestPermissionApproval(SESSION_ID, sample.request);
 			const interaction = permissionInteraction(peer);
 			expect(interaction.details).toEqual(sample.details);
@@ -689,7 +691,7 @@ describe("InteractionBroker", () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
 		const peer = new FakePeer();
 		broker.assign(SESSION_ID, peer);
-		peer.response = { interactionId, kind: "permission_approval", choice: "allow-once" };
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "allow-once" };
 		const paths = Array.from({ length: MAX_PERMISSION_OPERATION_ROWS + 3 }, (_, index) => `/tmp/target-${index}`);
 
 		await expect(

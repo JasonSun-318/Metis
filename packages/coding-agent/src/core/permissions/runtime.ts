@@ -27,6 +27,7 @@ export interface PermissionExecutionRequest<T> {
 	readonly action: NormalizedPermissionAction;
 	readonly args: unknown;
 	readonly settings: PermissionSettings;
+	readonly sandboxHealth: "healthy" | "unavailable" | "misconfigured";
 	readonly trustedUserMessages: readonly TrustedUserMessage[];
 	readonly interactive: boolean;
 	readonly signal: AbortSignal;
@@ -85,6 +86,7 @@ type AuthorizationSource = "policy" | "rule" | "review";
 interface RuntimeSnapshot {
 	readonly action: NormalizedPermissionAction;
 	readonly settings: PermissionSettings;
+	readonly sandboxHealth: PermissionExecutionRequest<unknown>["sandboxHealth"];
 	readonly epoch: number;
 }
 
@@ -214,15 +216,24 @@ export class ToolAuthorizationRuntime {
 				effects: Object.freeze([...action.effects]),
 			}),
 			settings: Object.freeze({ ...request.settings }),
+			sandboxHealth: request.sandboxHealth,
 			epoch: this.epoch,
 		});
 	}
 
 	private evaluate(snapshot: RuntimeSnapshot): PermissionPolicyDecision {
-		return this.policy.evaluate({
+		const decision = this.policy.evaluate({
 			action: snapshot.action,
 			settings: snapshot.settings,
 		} satisfies PermissionPolicyInput);
+		if (
+			decision.kind !== "deny" &&
+			decision.grant.executionTarget === "sandbox" &&
+			snapshot.sandboxHealth !== "healthy"
+		) {
+			return Object.freeze({ kind: "deny", riskLevel: decision.riskLevel, reason: "Sandbox is unavailable" });
+		}
+		return decision;
 	}
 
 	private matchRule(action: NormalizedPermissionAction, decision: AllowedDecision): ProjectRuleMatch | undefined {
@@ -279,6 +290,9 @@ export class ToolAuthorizationRuntime {
 		if (changed) throw new PermissionDeniedError(changed);
 		if (digestCanonical(current.settings) !== digestCanonical(initial.settings)) {
 			throw new PermissionDeniedError("Permission settings changed");
+		}
+		if (current.sandboxHealth !== initial.sandboxHealth) {
+			throw new PermissionDeniedError("Sandbox health changed");
 		}
 		if (current.epoch !== initial.epoch) throw new PermissionDeniedError("Permission runtime changed");
 		return current;

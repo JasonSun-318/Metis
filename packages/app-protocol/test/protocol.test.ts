@@ -941,35 +941,22 @@ describe("golden protocol fixtures", () => {
 		expect(validateResponseFor("client", request.envelope, response)).toEqual(response);
 	});
 
-	it.each([
-		["runId", "runId", "33333333-3333-4333-8333-333333333333"],
-		[
-			"configuration",
-			"configuration",
-			{
-				mode: "code",
-				tools: ["read"],
-				permissionMode: "ask",
-				model: { provider: "openai", modelId: "gpt-test" },
-				thinkingLevel: "max",
-				cwd: "/tmp/metis-project",
-				forkTurns: 0,
-				timeoutSeconds: 1800,
-			},
-		],
-	])("rejects legacy %s in current agent notifications", (_label, field, value) => {
-		const envelope = structuredClone(notifications[0]!.envelope) as {
-			params: {
-				events: Array<{
-					type: string;
-					agent?: Record<string, unknown>;
-				}>;
+	it.each([["runId", "runId", "33333333-3333-4333-8333-333333333333"]])(
+		"rejects unsupported %s in current agent notifications",
+		(_label, field, value) => {
+			const envelope = structuredClone(notifications[0]!.envelope) as {
+				params: {
+					events: Array<{
+						type: string;
+						agent?: Record<string, unknown>;
+					}>;
+				};
 			};
-		};
-		const event = envelope.params.events.find((candidate) => candidate.type === "agent/updated")!;
-		event.agent![field] = value;
-		expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
-	});
+			const event = envelope.params.events.find((candidate) => candidate.type === "agent/updated")!;
+			event.agent![field] = value;
+			expect(() => validateServerNotification(envelope)).toThrow(ProtocolValidationError);
+		},
+	);
 
 	it("accepts auto and rejects unknown primary session permissions", () => {
 		const request = structuredClone(requestFor("client", "session/setPermissionPreset").envelope) as {

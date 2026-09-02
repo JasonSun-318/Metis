@@ -184,14 +184,14 @@ describe("agent runtime e2e", () => {
 			if (!("method" in message) || message.method !== "interaction/request") return;
 			const request = message as ServerRpcRequest<"interaction/request">;
 			const interaction = request.params.interaction;
-			if (interaction.kind !== "permission_approval") return;
+			if (interaction.kind !== "session_permission_approval") return;
 			permissionApprovals += 1;
 			connection.handleServerResponse({
 				jsonrpc: "2.0",
 				id: request.id,
 				result: {
 					interactionId: interaction.interactionId,
-					kind: "permission_approval",
+					kind: "session_permission_approval",
 					choice: "allow-once",
 				},
 			});

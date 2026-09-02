@@ -246,6 +246,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		this.calls.push("refresh:apply");
 	}
 
+	notifyPermissionRulesChanged(): void {
+		this.calls.push("permission-rules:changed");
+	}
+
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
 		return {
 			session: this.getSummary(),
@@ -571,6 +575,18 @@ describe("SessionRegistry", () => {
 		expect(secondRan).toBe(true);
 		release();
 		await first;
+	});
+
+	it("invalidates permission authority in every opened runtime after a project-rule mutation", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const first = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const second = (await registry.open(ref("session-b"))) as FakeRuntime;
+
+		await registry.notifyOpenPermissionRulesChanged();
+
+		expect(first.calls).toEqual(["permission-rules:changed"]);
+		expect(second.calls).toEqual(["permission-rules:changed"]);
 	});
 
 	it("gates public session work across two-phase model-service refresh", async () => {

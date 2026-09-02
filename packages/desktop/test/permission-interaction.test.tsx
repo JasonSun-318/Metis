@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InteractionHost } from "../src/renderer/components/InteractionHost.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 
-type Approval = Extract<InteractionView, { kind: "permission_approval" }>;
+type Approval = Extract<InteractionView, { kind: "session_permission_approval" }>;
 
 const SECRET = "sk-live-secret-value";
 const REDACTED = `[REDACTED] ${"x".repeat(240)}`;
@@ -19,7 +19,7 @@ function approval(overrides: Partial<Approval> = {}): Approval {
 		title: "Approve bash?",
 		message: "Review this action.",
 		createdAt: "2026-08-11T00:00:00.000Z",
-		kind: "permission_approval",
+		kind: "session_permission_approval",
 		requestId: "00000000-0000-4000-8000-000000000301",
 		actionId: "action-bash-1",
 		toolLabel: "bash",
@@ -101,7 +101,7 @@ describe("permission approval interaction", () => {
 		expect(choice(container, "Always deny this exact action")).not.toBeNull();
 	});
 
-	it("focuses the deny control, submits once, and restores focus after close", async () => {
+	it("focuses the deny control, traps Tab, submits once, and restores focus after close", async () => {
 		const previous = document.createElement("button");
 		previous.textContent = "composer";
 		document.body.append(previous);
@@ -112,6 +112,14 @@ describe("permission approval interaction", () => {
 		const { container, root } = mount(approval(), onRespond);
 		await act(async () => { await Promise.resolve(); });
 		expect(document.activeElement?.textContent).toContain("Reject");
+		await act(async () => {
+			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab", shiftKey: true }));
+		});
+		expect(document.activeElement?.textContent).toContain("Allow once");
+		await act(async () => {
+			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
+		});
+		expect(document.activeElement?.textContent).toContain("Reject");
 		await act(async () => choice(container, "Allow once").click());
 		expect(choice(container, "Allow once").disabled).toBe(true);
 		expect(container.querySelector("[aria-live='polite']")?.textContent).toContain("Sending your decision…");
@@ -119,14 +127,14 @@ describe("permission approval interaction", () => {
 		expect(onRespond).toHaveBeenCalledTimes(1);
 		expect(onRespond).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000301",
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			choice: "allow-once",
 		});
 		await act(async () => root.render(<InteractionHost interaction={undefined} onRespond={onRespond} />));
 		expect(document.activeElement).toBe(previous);
 	});
 
-	it("denies with Escape and keeps a stale response from authorizing", async () => {
+	it("denies with Escape and closes a stale response without authorizing", async () => {
 		const onRespond = vi.fn()
 			.mockRejectedValueOnce(new Error("Approval was unavailable or cancelled"))
 			.mockResolvedValue(undefined);
@@ -138,9 +146,8 @@ describe("permission approval interaction", () => {
 		);
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
 		expect(container.textContent).toContain("This approval is no longer available.");
-		expect(container.querySelector(".permission-approval-panel")).not.toBeNull();
-		await act(async () => choice(container, "Allow once").click());
-		expect(onRespond).toHaveBeenCalledTimes(2);
+		expect(container.querySelector(".permission-approval-panel")).toBeNull();
+		expect(onRespond).toHaveBeenCalledTimes(1);
 	});
 
 	it("blocks sandbox actions when sandbox health is unhealthy instead of offering a host fallback", async () => {

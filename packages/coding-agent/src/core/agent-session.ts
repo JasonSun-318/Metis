@@ -227,6 +227,7 @@ import { createAllToolDefinitions } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
 import { resolveWebSearchApiKey, type WebSearchProvider } from "./web-search-config.ts";
+import type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "./workspace-sandbox.ts";
 
 export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
 
@@ -267,6 +268,7 @@ export type AgentSessionEvent =
 	| { type: "goal_changed"; goal: ThreadGoal | null }
 	| { type: "plan_changed"; entryIds: readonly string[] }
 	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode }
+	| { type: "sandbox_health_changed"; sandboxHealth: WorkspaceSandboxHealthStatus }
 	| {
 			type: "permission_review_started";
 			actionId: string;
@@ -359,6 +361,10 @@ export interface AgentSessionConfig {
 	workspaceWritePolicy?: "inherit" | "deny";
 	/** Internal execution boundary override used by runtime tests. */
 	interactiveBashBoundary?: InteractiveBashBoundary;
+	/** Host-probed sandbox health shown in permission surfaces. */
+	sandboxHealth?: WorkspaceSandboxHealthStatus;
+	/** Host sandbox health probe. Omit only for tests with an injected execution boundary. */
+	sandboxHealthProbe?: () => Promise<WorkspaceSandboxHealthReport>;
 	/** Host-only fail-closed profile for unattended runs. Never derive from user or model input. */
 	unattendedExecution?: UnattendedExecutionProfile;
 }
@@ -685,6 +691,10 @@ export class AgentSession {
 	private _permissionApprovalHandler?: RequestPermissionApproval;
 	private readonly _trustedUserMessages: TrustedUserMessage[] = [];
 	private readonly _interactiveBashBoundary?: InteractiveBashBoundary;
+	private _sandboxHealth: WorkspaceSandboxHealthStatus;
+	private readonly _sandboxHealthProbe?: () => Promise<WorkspaceSandboxHealthReport>;
+	private _sandboxHealthCheckedAt: number;
+	private _sandboxHealthRefresh?: Promise<WorkspaceSandboxHealthStatus>;
 	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
@@ -769,6 +779,9 @@ export class AgentSession {
 		this._permissionSettingsCeiling = config.permissionSettingsCeiling;
 		this._workspaceWritePolicy = config.workspaceWritePolicy ?? "inherit";
 		this._unattendedExecution = config.unattendedExecution;
+		this._sandboxHealth = config.sandboxHealth ?? "healthy";
+		this._sandboxHealthProbe = config.sandboxHealthProbe;
+		this._sandboxHealthCheckedAt = Date.now();
 		if (this.sessionManager.getUltraSelected() && !this._ultraAvailable) {
 			throw new Error("Ultra sessions require AgentSessionRuntime");
 		}
@@ -827,7 +840,7 @@ export class AgentSession {
 					(event.outcome === "allow" || event.outcome === "deny") &&
 					!(event.reviewer === "user" && this._permissionApprovalHandler === undefined)
 				) {
-					this.sessionManager.appendPermissionDecision({
+					this.sessionManager.appendPermissionAuditRecord({
 						actionId: event.actionId,
 						toolName: event.toolName,
 						source: event.reviewer === "user" ? "user" : "reviewer",
@@ -835,7 +848,7 @@ export class AgentSession {
 						reason: event.reasonCode,
 					});
 				} else if (event.stage === "decision" && event.outcome === "deny") {
-					this.sessionManager.appendPermissionDecision({
+					this.sessionManager.appendPermissionAuditRecord({
 						actionId: event.actionId,
 						toolName: event.toolName,
 						source: "policy",
@@ -959,9 +972,37 @@ export class AgentSession {
 			permissionPreset,
 			effectiveSettings,
 			constrainedByParent,
-			sandboxHealth: "healthy",
+			sandboxHealth: this._sandboxHealth,
 			...(this._permissionRuntime.activeReview ? { activeReview: this._permissionRuntime.activeReview } : {}),
 		};
+	}
+
+	async refreshSandboxHealth(force = false): Promise<WorkspaceSandboxHealthStatus> {
+		if (!this._sandboxHealthProbe) return this._sandboxHealth;
+		if (!force && Date.now() - this._sandboxHealthCheckedAt < 30_000) return this._sandboxHealth;
+		if (this._sandboxHealthRefresh) return await this._sandboxHealthRefresh;
+		const refresh = this._sandboxHealthProbe()
+			.then((report) => report.status)
+			.catch((): WorkspaceSandboxHealthStatus => "misconfigured")
+			.then((status) => {
+				this._sandboxHealthCheckedAt = Date.now();
+				if (status !== this._sandboxHealth) {
+					this._sandboxHealth = status;
+					this._permissionRuntime.invalidate("sandbox-health");
+					this._emit({ type: "sandbox_health_changed", sandboxHealth: status });
+				}
+				return status;
+			});
+		this._sandboxHealthRefresh = refresh;
+		try {
+			return await refresh;
+		} finally {
+			if (this._sandboxHealthRefresh === refresh) this._sandboxHealthRefresh = undefined;
+		}
+	}
+
+	notifyPermissionRulesChanged(): void {
+		this._permissionRuntime.invalidate("project-rules");
 	}
 
 	get permissionGrantCount(): number {
@@ -1079,6 +1120,7 @@ export class AgentSession {
 		return {
 			...tool,
 			execute: async (toolCallId, params, signal, onUpdate) => {
+				await this.refreshSandboxHealth();
 				const managedBash = tool.name === "bash" && entry.provenance === "builtin";
 				if (
 					managedBash &&
@@ -1110,6 +1152,9 @@ export class AgentSession {
 					},
 					get settings() {
 						return session._effectiveNormalizedPermissionSettings();
+					},
+					get sandboxHealth() {
+						return session._sandboxHealth;
 					},
 					trustedUserMessages: Object.freeze([...this._trustedUserMessages]),
 					interactive: this._permissionApprovalHandler !== undefined,
@@ -4042,6 +4087,7 @@ export class AgentSession {
 
 		const previousModel = this.model;
 		const thinkingSelection = this.getThinkingSelection();
+		if (!modelsAreEqual(previousModel, model)) this._permissionRuntime.invalidate("model");
 		this.agent.state.model = model;
 		this.sessionManager.appendModelChange(model.provider, model.id);
 		this.settingsManager.setDefaultModelAndProvider(model.provider, model.id);
@@ -4079,6 +4125,7 @@ export class AgentSession {
 		const thinkingSelection = next.thinkingLevel ?? this.getThinkingSelection();
 
 		// Apply model
+		if (!modelsAreEqual(currentModel, next.model)) this._permissionRuntime.invalidate("model");
 		this.agent.state.model = next.model;
 		this.sessionManager.appendModelChange(next.model.provider, next.model.id);
 		this.settingsManager.setDefaultModelAndProvider(next.model.provider, next.model.id);
@@ -4107,6 +4154,7 @@ export class AgentSession {
 		const nextModel = availableModels[nextIndex];
 
 		const thinkingSelection = this.getThinkingSelection();
+		if (!modelsAreEqual(currentModel, nextModel)) this._permissionRuntime.invalidate("model");
 		this.agent.state.model = nextModel;
 		this.sessionManager.appendModelChange(nextModel.provider, nextModel.id);
 		this.settingsManager.setDefaultModelAndProvider(nextModel.provider, nextModel.id);
@@ -4826,6 +4874,7 @@ export class AgentSession {
 			return;
 		}
 
+		this._permissionRuntime.invalidate("model");
 		this.agent.state.model = refreshedModel;
 	}
 
@@ -6025,6 +6074,7 @@ export class AgentSession {
 			timestamp: new Date().toISOString(),
 			cwd: this.sessionManager.getCwd(),
 			mode: this.sessionManager.getMode(),
+			permissionPreset: this.sessionManager.getPermissionPreset(),
 		};
 
 		const branchEntries = this.sessionManager.getBranch();

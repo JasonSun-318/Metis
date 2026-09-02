@@ -1911,7 +1911,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(questionPanel).toHaveCount(0);
 		await expect.poll(() => providerRequests).toBe(7);
 
-		phase = "approving an inline packaged permission request";
+		phase = "approving a modal packaged permission request";
 		await page.getByRole("button", { name: "Select permissions, current Auto", exact: true }).click();
 		await page.getByRole("menuitemradio", { name: /Ask/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Ask", exact: true })).toBeVisible();
@@ -1920,7 +1920,9 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.getByRole("button", { name: "Send" }).click();
 		const approvalPanel = page.locator(".permission-approval-panel");
 		await expect(approvalPanel).toBeVisible();
-		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
+		await expect(page.locator(".modal-backdrop")).toHaveCount(1);
+		await expect(approvalPanel).toHaveAttribute("role", "alertdialog");
+		await expect(approvalPanel).toHaveAttribute("aria-modal", "true");
 		await expect(approvalPanel).toContainText("Metis wants to use bash");
 		await expect(approvalPanel.locator("dt", { hasText: "Command" })).toBeVisible();
 		await expect(approvalPanel.locator("dd code", { hasText: "pwd" })).toBeVisible();
@@ -1929,29 +1931,15 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await expect(approvalPanel.locator(".permission-approval-complete-details")).toHaveCount(0);
 		await expect(approvalPanel).toContainText("workspace sandbox");
 		await expect(approvalPanel.locator('[aria-expanded]')).toHaveCount(0);
-		const approvalSlot = page.locator(".composer-dock > .permission-approval-slot");
-		const approvalComposer = page.locator(".composer-dock > .composer-chat");
-		await expect(page.locator(".composer-dock > .permission-approval-slot + .composer-chat")).toHaveCount(1);
-		await approvalSlot.evaluate(async (element) => {
-			await Promise.all(element.getAnimations().map((animation) => animation.finished));
-		});
-		const [approvalSlotBox, approvalComposerBox] = await Promise.all([
-			approvalSlot.boundingBox(),
-			approvalComposer.boundingBox(),
-		]);
-		expect(approvalSlotBox).not.toBeNull();
-		expect(approvalComposerBox).not.toBeNull();
-		expect(approvalSlotBox!.x - approvalComposerBox!.x).toBeCloseTo(16, 0);
-		expect(approvalComposerBox!.width - approvalSlotBox!.width).toBeCloseTo(32, 0);
-		expect(approvalComposerBox!.y - approvalSlotBox!.y - approvalSlotBox!.height).toBeCloseTo(0, 0);
-		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBeLessThan(transcriptHeightBeforeApproval);
+		expect(await transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
 		const denyButton = approvalPanel.getByRole("button", { name: /Reject/u });
 		const allowButton = approvalPanel.getByRole("button", { name: "Allow once", exact: true });
 		const [denyBox, allowBox] = await Promise.all([denyButton.boundingBox(), allowButton.boundingBox()]);
 		expect((allowBox?.x ?? 0)).toBeGreaterThan(denyBox?.x ?? 0);
-		await page.screenshot({ path: path.join(permissionQaDir, "inline-approval.png") });
+		await page.screenshot({ path: path.join(permissionQaDir, "modal-approval.png") });
 		await allowButton.click();
 		await expect(approvalPanel).toHaveCount(0);
+		await expect(page.locator(".modal-backdrop")).toHaveCount(0);
 		await expect.poll(() => providerRequests).toBe(9);
 		await expect.poll(() => transcriptScroll.evaluate((element) => element.clientHeight)).toBe(transcriptHeightBeforeApproval);
 
@@ -2020,11 +2008,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		})).toEqual({ backgroundColor: await resolvedColor(page, "--button-primary-bg"), opacity: "1" });
 		await page.screenshot({ path: path.join(scheduleQaDir, "task-detail.png") });
 		await page.locator(".scheduled-task-history").getByRole("button").click();
-		await expect(page.locator(".scheduled-task-quick-list")).toContainText("Morning brief");
+		await expect(page.locator(".transcript-scroll").getByText("Summarize the current project status.", { exact: true })).toBeVisible();
 
 		phase = "retaining and deleting a packaged scheduled session from the sidebar";
 		await page.locator(".session-sidebar").getByRole("button", { name: "Scheduled tasks", exact: true }).click();
+		await expect(page.locator("main").getByRole("heading", { name: "Scheduled tasks", exact: true })).toBeVisible();
 		await page.locator(".scheduled-task-quick-list").getByRole("button", { name: "Morning brief", exact: true }).click();
+		await expect(page.locator("main").getByRole("heading", { name: "Morning brief", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Delete task" }).click();
 		const deleteTaskDialog = page.getByRole("dialog", { name: "Delete “Morning brief”?" });
 		const deleteSessions = deleteTaskDialog.getByRole("checkbox", {

@@ -133,6 +133,7 @@ function exactProjectPath(action: NormalizedPermissionAction, configured: string
 function structuredApprovalRequest(
 	request: PermissionReviewRequest,
 	redactedArguments: unknown,
+	scopeComplete: boolean,
 	rememberProjectEligible: boolean,
 ): PermissionApprovalRequest {
 	const { action, decision } = request;
@@ -155,6 +156,7 @@ function structuredApprovalRequest(
 		reason: decision.reason,
 		cwd: action.cwd,
 		executionTarget: decision.grant.executionTarget,
+		scopeComplete,
 		rememberProjectEligible,
 		signal: request.signal,
 	});
@@ -244,7 +246,7 @@ export class UserPermissionReviewer implements PermissionReviewer {
 			approval = parseApprovalDecision(
 				await approvalUntilAbort(
 					this.options.requestApproval,
-					structuredApprovalRequest(request, redactedArguments, rememberProjectEligible),
+					structuredApprovalRequest(request, redactedArguments, scopeComplete, rememberProjectEligible),
 					request.signal,
 				),
 			);

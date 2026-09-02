@@ -147,19 +147,20 @@ describe("Composer visual states", () => {
 		);
 	});
 
-	it("docks a non-collapsible permission approval above the composer", () => {
-		const slot = rule(".permission-approval-slot");
-		expect(slot.margin).toBe("0px 16px");
-		expect(slot.animation).toBe("task-list-enter 200ms cubic-bezier(.16, 1, .3, 1)");
-
+	it("shows a non-collapsible permission approval as a modal", () => {
+		const backdrop = rule(".modal-backdrop");
+		expect(backdrop.position).toBe("fixed");
+		expect(backdrop.zIndex).toBe("10010");
+		expect(backdrop.display).toBe("grid");
 		const panel = rule(".permission-approval-panel");
-		expect(panel.borderRadius).toBe("12px 12px 0 0");
-		expect(panel.borderBottomWidth).toBe("0px");
-		expect(panel.background).toBe("var(--panel)");
+		expect(css).toContain(".permission-approval-panel { width: min(620px, 100%);");
+		expect(panel.maxHeight).toBe("calc(100vh - 48px)");
+		expect(panel.overflow).toBe("auto");
+		expect(rule(".interaction-dialog").borderRadius).toBe("16px");
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
 		expect(rule(".permission-approval-details dd code").whiteSpace).toBe("pre-wrap");
 		expect(css).not.toContain("permission-approval-toggle");
-		expect(css).toContain(':root[data-motion="reduced"] .permission-approval-slot');
+		expect(css).not.toContain("permission-approval-slot");
 	});
 
 	it("wraps ask-user questions and answer text instead of hiding it", () => {

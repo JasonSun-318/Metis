@@ -53,6 +53,7 @@ function approvalRequest(actionId = "action-1") {
 		reason: "Network destination needs approval",
 		cwd: "/tmp/work",
 		executionTarget: "host" as const,
+		scopeComplete: true,
 	};
 }
 
@@ -100,8 +101,7 @@ describe("permission protocol", () => {
 				sandboxHealth: "healthy",
 			});
 			const serialized = JSON.stringify(snapshot);
-			expect(serialized).not.toContain("permissionMode");
-			expect(serialized).not.toContain("setPermissionMode");
+			expect(serialized).toContain(`"permissionPreset":"${preset}"`);
 		}
 	});
 
@@ -154,13 +154,13 @@ describe("permission protocol", () => {
 	it("resolves an approval once for the matching session/request/action", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
 		const peer = new RecordingPeer();
-		peer.response = { interactionId: REQUEST_A, kind: "permission_approval", choice: "allow-once" };
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-once" };
 		broker.assign(SESSION_ID, peer);
 		await expect(broker.requestPermissionApproval(SESSION_ID, approvalRequest())).resolves.toEqual({
 			decision: "allow",
 		});
 		expect(peer.requests[0]).toMatchObject({
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			requestId: REQUEST_A,
 			actionId: "action-1",
 			toolLabel: "bash",
@@ -170,7 +170,7 @@ describe("permission protocol", () => {
 		const serialized = JSON.stringify(peer.requests[0]);
 		expect(serialized).not.toContain("sk-secret");
 		expect(serialized).not.toContain("permission:allow-once");
-		expect(serialized).not.toMatch(/"presentation":"permission_approval"/);
+		expect(serialized).not.toMatch(/"presentation":"session_permission_approval"/);
 		expect(broker.hasPending(SESSION_ID)).toBe(false);
 	});
 

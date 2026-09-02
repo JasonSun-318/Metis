@@ -262,8 +262,8 @@ export {
 	type SessionDirectoryAddedEntry,
 	type SessionDirectoryControlEntry,
 	type SessionDirectoryRemovedEntry,
-	type SessionPermissionDecisionEntry,
-	type SessionPermissionsEntry,
+	type SessionPermissionAuditEntry,
+	type SessionPermissionPresetEntry,
 } from "./session-control.ts";
 export { createSessionId } from "./session-id.ts";
 export {

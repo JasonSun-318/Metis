@@ -663,9 +663,9 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
-	const permissionApproval = visibleInteraction?.kind === "permission_approval" ? visibleInteraction : undefined;
+	const permissionApproval = visibleInteraction?.kind === "session_permission_approval" ? visibleInteraction : undefined;
 	const askUserInteraction = visibleInteraction?.kind === "ask_user" ? visibleInteraction : undefined;
-	const inlineInteraction = permissionApproval ?? askUserInteraction;
+	const inlineInteraction = askUserInteraction;
 	const latestNotification = [...state.notifications]
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
@@ -776,8 +776,17 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const respond = async (response: InteractionResponseInput) => {
-		await api.respondToInteraction(response);
-		store.removeInteraction(response.interactionId);
+		try {
+			await api.respondToInteraction(response);
+			store.removeInteraction(response.interactionId);
+		} catch (cause) {
+			const message = cause instanceof Error ? cause.message : String(cause);
+			if (/stale|unavailable|cancelled|no longer/iu.test(message)) {
+				store.removeInteraction(response.interactionId);
+				reportError(new Error("This interaction is no longer available."));
+			}
+			throw cause;
+		}
 	};
 
 	const changeThinking = async (sessionId: string, selection: AppStoreSnapshot["thinkingSelection"]) => {

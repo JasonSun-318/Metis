@@ -350,6 +350,7 @@ const planItem = {
 } satisfies ItemView;
 const permissionRule = {
 	id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	decision: "allow",
 	toolName: "bash",
 	command: "npm test",
 	paths: ["/tmp/project"],

@@ -17,7 +17,7 @@ function approvalErrorMessage(cause: unknown): string {
 }
 
 function priorReviewCopy(
-	outcome: Extract<InteractionView, { kind: "permission_approval" }>["priorReviewerOutcome"],
+	outcome: Extract<InteractionView, { kind: "session_permission_approval" }>["priorReviewerOutcome"],
 ): string {
 	if (outcome === "deny") return "Automatic security review denied this action.";
 	if (outcome === "unavailable") return "Automatic security review could not complete.";
@@ -37,6 +37,7 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 	const [input, setInput] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [dismissedInteractionId, setDismissedInteractionId] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!interaction || interaction.kind === "ask_user") return;
@@ -44,8 +45,16 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 		queueMicrotask(() => firstControl.current?.focus());
 		return () => previous?.focus();
 	}, [interaction]);
+	useEffect(() => {
+		setDismissedInteractionId(null);
+		setBusy(false);
+		setError(null);
+	}, [interaction?.interactionId]);
 
 	if (!interaction) return null;
+	if (dismissedInteractionId === interaction.interactionId) {
+		return <p className="toast toast-error" role="status">{t("This approval is no longer available.")}</p>;
+	}
 	if (interaction.kind === "ask_user") {
 		return <AskUserPanel interaction={interaction} onRespond={onRespond} />;
 	}
@@ -55,8 +64,12 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 		try {
 			await onRespond(response);
 		} catch (cause) {
-			setError(approvalErrorMessage(cause));
-			setBusy(false);
+			const message = approvalErrorMessage(cause);
+			if (message === "This approval is no longer available.") setDismissedInteractionId(response.interactionId);
+			else {
+				setError(message);
+				setBusy(false);
+			}
 		}
 	};
 	const submitInput = (event: FormEvent) => {
@@ -64,7 +77,7 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 		if (interaction.kind !== "input") return;
 		void respond({ interactionId: interaction.interactionId, kind: "input", value: input });
 	};
-	if (interaction.kind === "permission_approval") {
+	if (interaction.kind === "session_permission_approval") {
 		const allowOnce = interaction.choices.includes("allow-once");
 		const alwaysAllow = interaction.choices.includes("always-allow-exact");
 		const denyOnce = interaction.choices.includes("deny-once");
@@ -82,17 +95,32 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 			!interaction.scopeComplete ? "permission-approval-incomplete" : undefined,
 		].filter(Boolean).join(" ") || undefined;
 		const choose = (choice: (typeof interaction.choices)[number]) =>
-			void respond({ interactionId: interaction.interactionId, kind: "permission_approval", choice });
+			void respond({ interactionId: interaction.interactionId, kind: "session_permission_approval", choice });
 		return (
-			<div className="permission-approval-slot">
+			<div className="modal-backdrop">
 				<section
 					aria-describedby={descriptionIds}
 					aria-labelledby="permission-approval-title"
-					className="permission-approval-panel"
+					aria-modal="true"
+					className="interaction-dialog permission-approval-panel"
 					onKeyDown={(event) => {
-						if (event.key !== "Escape" || busy || !escapeChoice) return;
-						event.preventDefault();
-						choose(escapeChoice);
+						if (event.key === "Escape" && !busy && escapeChoice) {
+							event.preventDefault();
+							choose(escapeChoice);
+							return;
+						}
+						if (event.key !== "Tab") return;
+						const controls = [...event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled)")];
+						const first = controls[0];
+						const last = controls.at(-1);
+						if (!first || !last) return;
+						if (event.shiftKey && document.activeElement === first) {
+							event.preventDefault();
+							last.focus();
+						} else if (!event.shiftKey && document.activeElement === last) {
+							event.preventDefault();
+							first.focus();
+						}
 					}}
 					role="alertdialog"
 				>

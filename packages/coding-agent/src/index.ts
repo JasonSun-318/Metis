@@ -475,8 +475,8 @@ export {
 	type SessionDirectoryAddedEntry,
 	type SessionDirectoryControlEntry,
 	type SessionDirectoryRemovedEntry,
-	type SessionPermissionDecisionEntry,
-	type SessionPermissionsEntry,
+	type SessionPermissionAuditEntry,
+	type SessionPermissionPresetEntry,
 } from "./core/session-control.ts";
 export {
 	type DeliveredArtifactAvailability,

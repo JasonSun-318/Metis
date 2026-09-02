@@ -184,6 +184,14 @@ export class SessionRegistry {
 		);
 	}
 
+	async notifyOpenPermissionRulesChanged(): Promise<void> {
+		if (this.modelServiceRefreshActive) return;
+		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
+		await Promise.allSettled(
+			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.notifyPermissionRulesChanged?.())),
+		);
+	}
+
 	async beginModelServiceSettingsRefresh(): Promise<() => void> {
 		if (!this.accepting) throw new AppServerError("BUSY");
 		let unlock!: () => void;

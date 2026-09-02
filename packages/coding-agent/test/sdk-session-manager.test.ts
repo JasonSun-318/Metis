@@ -100,8 +100,6 @@ describe("createAgentSession session manager defaults", () => {
 		expect(session.sessionManager.getPermissionPreset()).toBe("auto");
 		expect(session.sessionManager.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
 		expect(session.sessionManager.getHeader()).toMatchObject({ permissionPreset: "auto" });
-		expect(session.sessionManager.getHeader()).not.toHaveProperty("permissionMode");
-		expect(session.sessionManager.getHeader()).not.toHaveProperty("reviewerEnabled");
 		session.dispose();
 	});
 
@@ -131,6 +129,7 @@ describe("createAgentSession session manager defaults", () => {
 			},
 			args: { command: "git push origin main" },
 			reason: "This action affects the host",
+			scopeComplete: true,
 		});
 		expect(request).toMatchObject({
 			kind: "action",

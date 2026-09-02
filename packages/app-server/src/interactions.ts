@@ -36,9 +36,9 @@ const MAX_TIMEOUT_MS = 2_147_483_647;
 const GENERIC_TARGET_KEY =
 	/^(action|address|branch|command|directory|file|folder|host|id|name|owner|path|port|project|query|repo|repository|resource|target|url|uri)$/iu;
 
-type PermissionApprovalChoice = Extract<InteractionView, { kind: "permission_approval" }>["choices"][number];
-type PermissionRiskLevel = Extract<InteractionView, { kind: "permission_approval" }>["riskLevel"];
-type PermissionExecutionTarget = Extract<InteractionView, { kind: "permission_approval" }>["executionTarget"];
+type PermissionApprovalChoice = Extract<InteractionView, { kind: "session_permission_approval" }>["choices"][number];
+type PermissionRiskLevel = Extract<InteractionView, { kind: "session_permission_approval" }>["riskLevel"];
+type PermissionExecutionTarget = Extract<InteractionView, { kind: "session_permission_approval" }>["executionTarget"];
 
 export interface InteractionPeer {
 	request(request: ServerRpcRequest, signal: AbortSignal): Promise<ServerResult<ServerRequestMethod>>;
@@ -143,7 +143,7 @@ function approvalExecutionTarget(request: PermissionApprovalRequest): Permission
 
 function priorReviewFields(
 	request: PermissionApprovalRequest,
-): Pick<Extract<InteractionView, { kind: "permission_approval" }>, "priorReviewer" | "priorReviewerOutcome"> {
+): Pick<Extract<InteractionView, { kind: "session_permission_approval" }>, "priorReviewer" | "priorReviewerOutcome"> {
 	const automaticReview = recordArgs(request.args)?.automaticReview;
 	if (automaticReview === "unavailable-or-insufficient") {
 		return { priorReviewer: "model", priorReviewerOutcome: "unavailable" };
@@ -163,6 +163,7 @@ function permissionOperation(request: PermissionApprovalRequest) {
 		typeof request.args === "object" && request.args !== null && !Array.isArray(request.args)
 			? (request.args as Record<string, unknown>)
 			: undefined;
+	const describedArgs = recordArgs(args?.redactedArguments) ?? args;
 	const push = (label: string, value: string) => {
 		const row = { label: boundedName(label, "Detail"), value: boundedPublicText(value) };
 		if (!rows.some((candidate) => candidate.label === row.label && candidate.value === row.value)) rows.push(row);
@@ -177,20 +178,23 @@ function permissionOperation(request: PermissionApprovalRequest) {
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
 	for (const path of request.action.paths) push(pathLabel, path);
 
-	const url = request.action.toolName === "web_fetch" && typeof args?.url === "string" ? args.url : undefined;
+	const url =
+		request.action.toolName === "web_fetch" && typeof describedArgs?.url === "string" ? describedArgs.url : undefined;
 	if (url) push("Address", url);
-	if (request.action.toolName === "web_search" && typeof args?.query === "string") push("Query", args.query);
-	if (["grep", "find"].includes(request.action.toolName) && typeof args?.pattern === "string") {
-		push("Pattern", args.pattern);
+	if (request.action.toolName === "web_search" && typeof describedArgs?.query === "string") {
+		push("Query", describedArgs.query);
 	}
-	if (request.action.toolName === "edit" && Array.isArray(args?.edits) && args.edits.length > 0) {
-		push("Changes", String(args.edits.length));
+	if (["grep", "find"].includes(request.action.toolName) && typeof describedArgs?.pattern === "string") {
+		push("Pattern", describedArgs.pattern);
+	}
+	if (request.action.toolName === "edit" && Array.isArray(describedArgs?.edits) && describedArgs.edits.length > 0) {
+		push("Changes", String(describedArgs.edits.length));
 	}
 	if (!url) {
 		for (const { host, port } of request.action.networkTargets) push("Network", `${host}:${port}`);
 	}
-	if (request.action.provenance !== "builtin" && args) {
-		for (const [key, value] of Object.entries(args)) {
+	if (request.action.provenance !== "builtin" && describedArgs) {
+		for (const [key, value] of Object.entries(describedArgs)) {
 			if (!GENERIC_TARGET_KEY.test(key) || !["string", "number", "boolean"].includes(typeof value)) continue;
 			const text = String(value).trim();
 			if (!text) continue;
@@ -206,7 +210,7 @@ function permissionOperation(request: PermissionApprovalRequest) {
 		toolName: boundedName(request.action.toolName, "tool"),
 		rows: visibleRows,
 		omittedRows,
-		scopeComplete: true,
+		scopeComplete: request.scopeComplete,
 		irreversible: request.action.risks.some((risk) => risk === "destructive" || risk === "external-side-effect"),
 		executionTarget: request.executionTarget ?? "host",
 		rememberProjectEligible: request.rememberProjectEligible === true,
@@ -419,7 +423,7 @@ export class InteractionBroker {
 					message: boundedPublicText(approval.reason || "This action needs approval."),
 					createdAt: new Date(this.now()).toISOString(),
 					expiresAt: deadline(this.now(), this.defaultTimeoutMs),
-					kind: "permission_approval",
+					kind: "session_permission_approval",
 					requestId: interactionId,
 					actionId,
 					toolLabel: boundedName(approval.action.toolName, "tool"),
@@ -433,7 +437,7 @@ export class InteractionBroker {
 				},
 				{ signal: approval.signal },
 			);
-			if (response?.kind !== "permission_approval") throw new Error("Approval was unavailable or cancelled");
+			if (response?.kind !== "session_permission_approval") throw new Error("Approval was unavailable or cancelled");
 			if (response.choice === "allow-once" || response.choice === "always-allow-exact") {
 				if (!operation.scopeComplete) {
 					return { decision: "deny", reason: "Permission target details were incomplete" };

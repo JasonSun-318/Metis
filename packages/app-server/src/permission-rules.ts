@@ -14,15 +14,26 @@ function projectRuleView(rule: ProjectPermissionRule): ProjectPermissionRuleView
 		label: entry.label,
 		value: entry.value,
 	}));
-	const network = rule.summary.some((entry) => entry.label === "Network");
+	const target = rule.summary.find((entry) => entry.label === "Execution target")?.value;
+	const executionTarget =
+		target === "sandbox" || target === "host" || target === "external"
+			? target
+			: rule.summary.some((entry) => entry.label === "Network")
+				? "external"
+				: "sandbox";
+	const command = rule.summary.find((entry) => entry.label === "Command")?.value;
 	return {
 		id: rule.id,
+		decision: rule.decision,
 		toolName: rule.toolName,
-		paths: rule.summary.filter((entry) => entry.label === "Path").map((entry) => entry.value),
+		...(command ? { command } : {}),
+		paths: rule.summary
+			.filter((entry) => entry.label === "Path" || entry.label === "Read path" || entry.label === "Write path")
+			.map((entry) => entry.value),
 		details,
 		omittedDetails: Math.max(0, rule.summary.length - details.length),
 		risks: [rule.riskLevel],
-		executionTarget: network ? "external" : "sandbox",
+		executionTarget,
 		createdAt: rule.createdAt,
 	};
 }

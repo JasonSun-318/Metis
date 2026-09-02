@@ -41,6 +41,7 @@ import {
 	withFileMutationQueue,
 } from "./tools/index.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
+import { WorkspaceSandbox } from "./workspace-sandbox.ts";
 
 export interface CreateAgentSessionOptions {
 	/** Working directory for project-local discovery. Default: process.cwd() */
@@ -615,6 +616,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		}
 
 		const extensionsResult = resourceLoader.getExtensions();
+		const sandboxHealth = await WorkspaceSandbox.health();
 		const session = new AgentSession({
 			agent,
 			sessionManager,
@@ -639,6 +641,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			permissionSettingsCeiling: options.permissionSettingsCeiling,
 			workspaceWritePolicy: options.workspaceWritePolicy,
 			unattendedExecution: options.unattendedExecution,
+			sandboxHealth: sandboxHealth.status,
+			sandboxHealthProbe: WorkspaceSandbox.health,
 		});
 		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;

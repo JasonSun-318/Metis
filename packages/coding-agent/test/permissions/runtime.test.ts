@@ -39,6 +39,16 @@ describe("ToolAuthorizationRuntime", () => {
 		expect(reviewerFactory).not.toHaveBeenCalled();
 	});
 
+	it("denies a sandbox-targeted action when sandbox health is unavailable", async () => {
+		const execute = vi.fn(async () => "executed");
+		const runtime = new ToolAuthorizationRuntime({ sessionId: "session-1" });
+
+		await expect(runtime.authorizeAndExecute(safeRequest({ sandboxHealth: "unavailable", execute }))).rejects.toThrow(
+			"Sandbox is unavailable",
+		);
+		expect(execute).not.toHaveBeenCalled();
+	});
+
 	it("binds reviewer arguments to the action digest and redacts them before review", async () => {
 		const args = { path: String((actionInput().args as { path: string }).path), token: "secret-value" };
 		const action = normalizePermissionAction(
@@ -117,10 +127,12 @@ describe("ToolAuthorizationRuntime", () => {
 		["cwd", "Working directory changed"],
 		["settings", "Permission settings changed"],
 		["rule", "rule.deny"],
+		["sandbox-health", "Sandbox health changed"],
 	] as const)("rejects a %s change made while review is pending", async (change, expected) => {
 		const base = highRiskRequest();
 		let currentAction = base.action;
 		let currentSettings = base.settings;
+		let sandboxHealth = base.sandboxHealth;
 		let rule: "deny" | undefined;
 		const execute = vi.fn(async () => "executed");
 		const runtime = new ToolAuthorizationRuntime({
@@ -133,8 +145,10 @@ describe("ToolAuthorizationRuntime", () => {
 						currentAction = Object.freeze({ ...currentAction, cwd: `${currentAction.cwd}/changed` });
 					} else if (change === "settings") {
 						currentSettings = Object.freeze({ ...currentSettings, approvalPolicy: "user" });
-					} else {
+					} else if (change === "rule") {
 						rule = "deny";
+					} else {
+						sandboxHealth = "unavailable";
 					}
 					return allow();
 				},
@@ -147,6 +161,9 @@ describe("ToolAuthorizationRuntime", () => {
 			},
 			get settings() {
 				return currentSettings;
+			},
+			get sandboxHealth() {
+				return sandboxHealth;
 			},
 			execute,
 		};

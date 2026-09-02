@@ -215,15 +215,15 @@ interface SessionEntryBase {
 First line of the file. Metadata only, not part of the tree (no `id`/`parentId`).
 
 ```json
-{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"auto"}
+{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionPreset":"auto"}
 ```
 
-`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. New records write `permissionMode` as `"ask"`, `"auto"`, or `"full"`; omitted values default to Auto. Auto remains Auto when reopened.
+`mode` is `"chat"` or `"code"`. `cwdOrigin` is `"managed"` only for a workspace that Metis owns and may copy/delete; otherwise it is `"user-selected"`. Current records require `permissionPreset` as `"ask"`, `"auto"`, or `"full"`. Auto remains Auto when reopened.
 
 For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ parentSession })`):
 
 ```json
-{"type":"session","version":11,"id":"uuid","timestamp":"2026-07-17T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionMode":"ask","parentSession":"/path/to/original/session.jsonl"}
+{"type":"session","version":14,"id":"uuid","timestamp":"2026-09-01T14:00:00.000Z","cwd":"/path/to/project","mode":"chat","cwdOrigin":"user-selected","permissionPreset":"ask","parentSession":"/path/to/original/session.jsonl"}
 ```
 
 `parentSession` records lineage; forks and clones inherit the source session's mode.
@@ -233,11 +233,11 @@ For sessions with a parent (created via `/fork`, `/clone`, or `newSession({ pare
 Permission changes and decisions are append-only journal metadata:
 
 ```json
-{"type":"session_permissions","id":"a1b2c3d4","parentId":"leaf1234","timestamp":"2026-07-17T14:01:00.000Z","permissionMode":"full"}
-{"type":"session_permission_decision","id":"b2c3d4e5","parentId":"leaf1234","timestamp":"2026-07-17T14:01:01.000Z","actionId":"call-1","toolName":"bash","source":"user","decision":"allow","reason":"Approved once"}
+{"type":"session_permission_preset","id":"a1b2c3d4","parentId":"leaf1234","timestamp":"2026-09-01T14:01:00.000Z","permissionPreset":"full"}
+{"type":"session_permission_audit","id":"b2c3d4e5","parentId":"leaf1234","timestamp":"2026-09-01T14:01:01.000Z","actionId":"call-1","toolName":"bash","source":"user","decision":"allow","reason":"Approved once"}
 ```
 
-These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. New decision records contain only user `allow`/`deny` decisions and are audits, not reusable grants. Legacy reviewer sources and `ask` decisions remain readable but cannot be written through the current API.
+These records are reduced in raw journal order. They do not advance the transcript leaf, appear in `getEntries()`/`getTree()`, or become model messages. Audit records do not grant reusable authority; reusable exact project rules live in the separate permission-rule store.
 
 ### Code additional-directory controls (v8)
 
@@ -252,12 +252,12 @@ Each record permits only the base control fields and one normalized canonical ab
 
 Opening or resuming the same journal preserves these controls. `/tree` and compaction stay within that journal and preserve them. Clone, fork, `newSession()`, and import into a new destination exclude these authority-bearing controls.
 
-### Agent headers and controls (v13)
+### Agent headers and controls (v14)
 
 A first-class child adds an immutable ownership marker to its normal session header:
 
 ```json
-{"type":"session","version":13,"id":"child-id","timestamp":"2026-07-18T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionMode":"ask","agent":{"agentId":"child-id","name":"researcher","agentType":"explorer","parentSessionId":"parent-id","rootSessionId":"parent-id","agentPath":["child-id"],"cwd":"/path/to/project","tools":["read","grep"],"writePolicy":"deny","permissionMode":"ask","model":{"provider":"openai","modelId":"gpt-test"},"thinkingLevel":"high","initialTask":"Inspect the boundary","forkTurns":0,"timeoutSeconds":1800,"mayDelegate":false}}
+{"type":"session","version":14,"id":"child-id","timestamp":"2026-09-01T00:00:00.000Z","cwd":"/path/to/project","mode":"code","cwdOrigin":"user-selected","permissionPreset":"ask","agent":{"agentId":"child-id","name":"researcher","agentType":"explorer","parentSessionId":"parent-id","rootSessionId":"parent-id","agentPath":["child-id"],"cwd":"/path/to/project","tools":["read","grep"],"writePolicy":"deny","permissionPreset":"ask","model":{"provider":"openai","modelId":"gpt-test"},"thinkingLevel":"high","initialTask":"Inspect the boundary","forkTurns":0,"timeoutSeconds":1800,"mayDelegate":false}}
 ```
 
 The immutable header records ownership and the runtime-resolved capability snapshot. Each initial or follow-up task has an immutable `taskId`; append-only `agent_task` records move it through queued, running, and terminal states. `agent_message` audits steering, and `agent_archived` records reversible terminal-history visibility.
@@ -445,7 +445,7 @@ for (const line of lines) {
 Key methods for working with sessions programmatically.
 
 ### Static Creation Methods
-- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionMode? })` - Create a session; omitted permission mode defaults to Auto
+- `SessionManager.create(cwd, sessionDir?, { id?, mode?, cwdOrigin?, permissionPreset? })` - Create a session; omitted permission preset defaults to Auto
 - `SessionManager.open(path, sessionDir?)` - Open existing session file
 - `SessionManager.continueRecent(cwd, sessionDir?, { mode? })` - Open the latest session; use the option only when no session exists
 - `SessionManager.inMemory(cwd?, options?)` - No file persistence
@@ -466,8 +466,9 @@ Key methods for working with sessions programmatically.
 - `getWorkspaceRoots()` - Return the immutable primary root followed by current additional roots
 - `addWorkspaceDirectory(path)` - Append one existing canonical Code root without changing cwd
 - `removeWorkspaceDirectory(path)` - Revoke one added Code root, including a temporarily missing root
-- `getPermissionSettings()` - Return the effective Ask/Auto/Full permission mode
-- `setPermissionSettings(settings)` - Append non-tree permission metadata
+- `getPermissionPreset()` - Return the persisted Ask/Auto/Full permission preset
+- `getPermissionSettings()` - Return the sandbox and approval axes derived from the current preset
+- `setPermissionPreset(preset)` - Append a non-tree `session_permission_preset` control
 
 ### Instance Methods - Appending (all return entry ID)
 - `appendMessage(message)` - Add message

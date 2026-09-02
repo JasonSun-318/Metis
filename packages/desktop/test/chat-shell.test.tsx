@@ -1644,7 +1644,7 @@ describe("Chat desktop shell", () => {
 						title: "Approve bash?",
 						message: "Remove the generated cache.",
 						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "permission_approval",
+						kind: "session_permission_approval",
 						requestId: "00000000-0000-4000-8000-000000000204",
 						actionId: "action-bash-cache",
 						toolLabel: "bash",
@@ -1662,11 +1662,10 @@ describe("Chat desktop shell", () => {
 			},
 		}));
 
-		const dock = container.querySelector<HTMLElement>(".composer-dock")!;
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
-		expect(dock.contains(panel)).toBe(true);
-		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(container.querySelector(".modal-backdrop")?.contains(panel)).toBe(true);
+		expect(panel.getAttribute("aria-modal")).toBe("true");
 		expect(panel.textContent).toContain("Metis wants to use bash");
 		expect(panel.textContent).toContain("Command");
 		expect(panel.textContent).toContain("rm cache.tmp");
@@ -1682,7 +1681,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(api.respondToInteraction).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000204",
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			choice: "allow-once",
 		});
 		expect(container.querySelector(".permission-approval-panel")).toBeNull();

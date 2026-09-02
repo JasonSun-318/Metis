@@ -577,6 +577,7 @@
 				"rules": [
 					{
 						"id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+						"decision": "allow",
 						"toolName": "bash",
 						"command": "npm test",
 						"paths": [

@@ -581,6 +581,7 @@ export const PermissionOperationViewSchema = StrictObject({
 
 export const ProjectPermissionRuleViewSchema = StrictObject({
 	id: OpaqueIdSchema,
+	decision: Type.Union([Type.Literal("allow"), Type.Literal("deny")]),
 	toolName: NameSchema,
 	command: Type.Optional(PublicTextSchema),
 	paths: Type.Array(PathSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
@@ -600,7 +601,7 @@ export const PermissionApprovalChoiceSchema = Type.Union([
 
 export const PermissionApprovalInteractionViewSchema = StrictObject({
 	...InteractionBase,
-	kind: Type.Literal("permission_approval"),
+	kind: Type.Literal("session_permission_approval"),
 	requestId: UuidSchema,
 	actionId: OpaqueIdSchema,
 	toolLabel: NameSchema,

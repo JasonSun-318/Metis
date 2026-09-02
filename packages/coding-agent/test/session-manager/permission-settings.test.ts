@@ -31,9 +31,6 @@ describe("SessionManager permission settings", () => {
 		expect(code.getPermissionPreset()).toBe("auto");
 		expect(chat.getPermissionSettings()).toEqual(PERMISSION_PRESETS.auto);
 		expect(chat.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionPreset: "auto" });
-		expect(chat.getHeader()).not.toHaveProperty("permissionMode");
-		expect(chat.getHeader()).not.toHaveProperty("reviewerEnabled");
-		expect(code.getHeader()).not.toHaveProperty("reviewerEnabled");
 		chat.close();
 		code.close();
 	});
@@ -43,70 +40,21 @@ describe("SessionManager permission settings", () => {
 		await session.setPermissionPreset("auto");
 		const persisted = readSessionJson(file);
 		expect(sessionManager.getPermissionPreset()).toBe("auto");
-		expect(persisted).not.toHaveProperty("permissionMode");
-		expect(JSON.stringify(sessionManager.getDurableJournalSnapshot())).not.toContain("permissionMode");
+		expect(persisted).toMatchObject({ permissionPreset: "ask" });
+		expect(sessionManager.getDurableJournalSnapshot().at(-1)).toMatchObject({ permissionPreset: "auto" });
 		expect((await restartSession(file)).permissionView.effectiveSettings).toEqual(PERMISSION_PRESETS.auto);
 	});
 
-	it("loads Auto from a pre-v14 journal and rewrites the header to permissionPreset", () => {
-		const path = join(directory, "legacy-auto.jsonl");
-		writeRecords(path, [
-			{
-				type: "session",
-				version: 7,
-				id: "legacy-auto",
-				timestamp,
-				cwd: directory,
-				mode: "code",
-				cwdOrigin: "user-selected",
-				permissionMode: "auto",
-				reviewerEnabled: true,
-			},
-			{
-				type: "session_permissions",
-				id: "permission-1",
-				parentId: null,
-				timestamp,
-				permissionMode: "auto",
-				reviewerEnabled: false,
-			},
-			{
-				type: "session_permission_decision",
-				id: "decision-1",
-				parentId: null,
-				timestamp,
-				actionId: "legacy-action",
-				toolName: "bash",
-				source: "reviewer",
-				decision: "ask",
-				reason: "legacy audit",
-			},
-		]);
-
-		const session = SessionManager.open(path, directory);
-		expect(session.getPermissionPreset()).toBe("auto");
-		expect(session.getHeader()).toMatchObject({ version: CURRENT_SESSION_VERSION, permissionPreset: "auto" });
-		expect(session.getHeader()).not.toHaveProperty("permissionMode");
-		expect(session.getDurableJournalSnapshot()).toHaveLength(3);
-		expect(session.getDurableJournalSnapshot()[1]).toEqual(
-			expect.objectContaining({ type: "session_permissions", permissionPreset: "auto" }),
-		);
-		session.close();
-	});
-
-	it("writes no legacy permission fields and preserves Auto creation input", () => {
+	it("writes only the preset contract and preserves Auto creation input", () => {
 		const session = SessionManager.create(directory, directory, { mode: "code", permissionPreset: "auto" });
 		session.setPermissionPreset("full");
 		const records = session.getDurableJournalSnapshot();
 
 		expect(session.getPermissionPreset()).toBe("full");
 		expect(records[0]).toMatchObject({ permissionPreset: "auto" });
-		expect(records[0]).not.toHaveProperty("permissionMode");
-		expect(records[0]).not.toHaveProperty("reviewerEnabled");
 		expect(records.at(-1)).toEqual(
-			expect.objectContaining({ type: "session_permissions", permissionPreset: "full" }),
+			expect.objectContaining({ type: "session_permission_preset", permissionPreset: "full" }),
 		);
-		expect(records.at(-1)).not.toHaveProperty("permissionMode");
 		session.close();
 	});
 
@@ -114,7 +62,7 @@ describe("SessionManager permission settings", () => {
 		const session = SessionManager.inMemory(directory, { mode: "code" });
 		const leafId = session.appendMessage({ role: "user", content: "hello", timestamp: 1 });
 		const controlId = session.setPermissionPreset("full");
-		const decisionId = session.appendPermissionDecision({
+		const decisionId = session.appendPermissionAuditRecord({
 			actionId: "action-1",
 			toolName: "bash",
 			source: "user",
@@ -129,8 +77,8 @@ describe("SessionManager permission settings", () => {
 		expect(session.getEntry(decisionId)).toBeUndefined();
 		expect(session.getTree()).toHaveLength(1);
 		expect(session.getDurableJournalSnapshot().slice(2)).toMatchObject([
-			{ type: "session_permissions", id: controlId, parentId: leafId },
-			{ type: "session_permission_decision", id: decisionId, parentId: leafId },
+			{ type: "session_permission_preset", id: controlId, parentId: leafId },
+			{ type: "session_permission_audit", id: decisionId, parentId: leafId },
 		]);
 		session.close();
 	});
@@ -148,10 +96,10 @@ describe("SessionManager permission settings", () => {
 		session.close();
 	});
 
-	it("derives Auto for legacy Chat and Code headers", () => {
+	it("derives Auto when older session formats have no permission field", () => {
 		for (const [id, mode] of [
-			["legacy-chat", "chat"],
-			["legacy-code", undefined],
+			["older-chat", "chat"],
+			["older-code", undefined],
 		] as const) {
 			const path = join(directory, `${id}.jsonl`);
 			writeRecords(path, [
@@ -174,27 +122,26 @@ describe("SessionManager permission settings", () => {
 	it("rejects malformed or version-mismatched control records", () => {
 		const baseHeader = { type: "session", id: "invalid", timestamp, cwd: directory };
 		const control = {
-			type: "session_permissions",
+			type: "session_permission_preset",
 			id: "control-1",
 			parentId: null,
 			timestamp,
-			permissionMode: "auto",
-			reviewerEnabled: true,
+			permissionPreset: "auto",
 		};
 
 		const oldPath = join(directory, "old-control.jsonl");
 		writeRecords(oldPath, [{ ...baseHeader, version: 5 }, control]);
-		expect(() => SessionManager.open(oldPath, directory)).toThrow("require a v6 session header");
+		expect(() => SessionManager.open(oldPath, directory)).toThrow("require a v14 session header");
 
 		const malformedPath = join(directory, "malformed-control.jsonl");
 		writeRecords(malformedPath, [
-			{ ...baseHeader, version: 6 },
-			{ ...control, reviewerEnabled: "yes" },
+			{ ...baseHeader, version: CURRENT_SESSION_VERSION, permissionPreset: "auto" },
+			{ ...control, extra: "unsupported" },
 		]);
 		expect(() => SessionManager.open(malformedPath, directory)).toThrow("Invalid session control entry");
 
 		const policyDecision = {
-			type: "session_permission_decision",
+			type: "session_permission_audit",
 			id: "policy-1",
 			parentId: null,
 			timestamp,
@@ -206,10 +153,13 @@ describe("SessionManager permission settings", () => {
 		};
 		const oldPolicyPath = join(directory, "old-policy.jsonl");
 		writeRecords(oldPolicyPath, [{ ...baseHeader, version: 8 }, policyDecision]);
-		expect(() => SessionManager.open(oldPolicyPath, directory)).toThrow("require a v9 session header");
+		expect(() => SessionManager.open(oldPolicyPath, directory)).toThrow("require a v14 session header");
 
 		const currentPolicyPath = join(directory, "current-policy.jsonl");
-		writeRecords(currentPolicyPath, [{ ...baseHeader, version: CURRENT_SESSION_VERSION }, policyDecision]);
+		writeRecords(currentPolicyPath, [
+			{ ...baseHeader, version: CURRENT_SESSION_VERSION, permissionPreset: "auto" },
+			policyDecision,
+		]);
 		const current = SessionManager.open(currentPolicyPath, directory);
 		expect(current.getDurableJournalSnapshot().at(-1)).toMatchObject({ source: "policy", decision: "deny" });
 		current.close();
@@ -223,20 +173,22 @@ describe("SessionManager permission settings", () => {
 
 		const branch = source.createBranchedSessionManager(leafId);
 		expect(branch.getPermissionPreset()).toBe("full");
-		expect(branch.getDurableJournalSnapshot().some((entry) => entry.type === "session_permissions")).toBe(false);
+		expect(branch.getDurableJournalSnapshot().some((entry) => entry.type === "session_permission_preset")).toBe(
+			false,
+		);
 		branch.close();
 		source.close();
 
 		const fork = SessionManager.forkFrom(sourcePath, directory, directory);
 		expect(fork.getPermissionPreset()).toBe("full");
-		expect(fork.getDurableJournalSnapshot().some((entry) => entry.type === "session_permissions")).toBe(false);
+		expect(fork.getDurableJournalSnapshot().some((entry) => entry.type === "session_permission_preset")).toBe(false);
 		fork.close();
 	});
 
 	it("imports the complete settings and decision journal", () => {
 		const source = SessionManager.create(directory, directory);
 		source.setPermissionPreset("full");
-		source.appendPermissionDecision({
+		source.appendPermissionAuditRecord({
 			actionId: "write-1",
 			toolName: "write",
 			source: "user",

@@ -662,6 +662,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			});
 			return;
 		}
+		if (event.type === "sandbox_health_changed") {
+			this.publishPermissionPresetChanged();
+			return;
+		}
 		if (event.type === "permission_review_started") {
 			this.publish({
 				type: "session/permissionReviewStarted",
@@ -1607,6 +1611,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		await this.session.applyModelServiceSettingsRefresh();
 	}
 
+	notifyPermissionRulesChanged(): void {
+		this.session.notifyPermissionRulesChanged();
+	}
+
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
 		this.session.modelRegistry.refresh();
 		const model = this.session.modelRegistry.find(input.provider, input.modelId);
@@ -1646,6 +1654,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot> {
+		await this.session.refreshSandboxHealth(true);
 		this.refreshLifecycleProjection();
 		const agentSummaries = this.runtime.subagentManager?.listSummaries(this.sessionId, false) ?? [];
 		const agents = boundedAgentSummaryViews(agentSummaries, 100);

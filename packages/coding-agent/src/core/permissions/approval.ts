@@ -44,6 +44,7 @@ export interface PermissionApprovalRequest {
 	readonly reason: string;
 	readonly cwd?: string;
 	readonly executionTarget?: PermissionExecutionTarget;
+	readonly scopeComplete: boolean;
 	readonly rememberProjectEligible?: boolean;
 	readonly actor?: PermissionActor;
 	readonly signal?: AbortSignal;

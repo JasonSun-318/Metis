@@ -9,16 +9,16 @@ interface SessionControlEntryBase {
 	readonly timestamp: string;
 }
 
-export interface SessionPermissionsEntry extends SessionControlEntryBase {
-	readonly type: "session_permissions";
+export interface SessionPermissionPresetEntry extends SessionControlEntryBase {
+	readonly type: "session_permission_preset";
 	readonly permissionPreset: PermissionPreset;
 }
 
 export type PermissionDecision = "allow" | "ask" | "deny";
 export type PermissionDecisionSource = "user" | "reviewer" | "policy";
 
-export interface SessionPermissionDecisionEntry extends SessionControlEntryBase {
-	readonly type: "session_permission_decision";
+export interface SessionPermissionAuditEntry extends SessionControlEntryBase {
+	readonly type: "session_permission_audit";
 	readonly actionId: string;
 	readonly toolName: string;
 	readonly source: PermissionDecisionSource;
@@ -113,8 +113,8 @@ export interface SessionPlanStatusEntry extends SessionControlEntryBase {
 }
 
 export type SessionControlEntry =
-	| SessionPermissionsEntry
-	| SessionPermissionDecisionEntry
+	| SessionPermissionPresetEntry
+	| SessionPermissionAuditEntry
 	| SessionUltraSelectionEntry
 	| SessionDirectoryControlEntry
 	| SessionCollaborationModeEntry
@@ -316,8 +316,8 @@ export function isPlanControlEntryType(
 
 export function isSessionControlEntryType(type: unknown): type is SessionControlEntry["type"] {
 	return (
-		type === "session_permissions" ||
-		type === "session_permission_decision" ||
+		type === "session_permission_preset" ||
+		type === "session_permission_audit" ||
 		type === "session_ultra_selection" ||
 		isSessionDirectoryControlEntryType(type) ||
 		isPlanControlEntryType(type) ||
@@ -329,28 +329,17 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 	const fields = dataFields(value);
 	const type = requiredString(fields, "type");
 	const baseFields = ["type", "id", "parentId", "timestamp"] as const;
-	if (type === "session_permissions") {
-		assertOnlyFields(fields, [...baseFields, "permissionPreset", "permissionMode", "reviewerEnabled"]);
-		const reviewerEnabled = fields.get("reviewerEnabled");
-		if (reviewerEnabled !== undefined && typeof reviewerEnabled !== "boolean") {
-			invalid("Session control entry.reviewerEnabled must be a boolean");
-		}
-		const permissionPreset = fields.get("permissionPreset") ?? fields.get("permissionMode");
+	if (type === "session_permission_preset") {
+		assertOnlyFields(fields, [...baseFields, "permissionPreset"]);
+		const permissionPreset = fields.get("permissionPreset");
 		if (!isPermissionPreset(permissionPreset)) invalid("Session control entry.permissionPreset is invalid");
-		if (
-			fields.has("permissionPreset") &&
-			fields.has("permissionMode") &&
-			fields.get("permissionPreset") !== fields.get("permissionMode")
-		) {
-			invalid("Session control entry cannot persist both permissionPreset and permissionMode");
-		}
 		return {
 			type,
 			...parseBase(fields),
 			permissionPreset,
 		};
 	}
-	if (type === "session_permission_decision") {
+	if (type === "session_permission_audit") {
 		assertOnlyFields(fields, [...baseFields, "actionId", "toolName", "source", "decision", "reason"]);
 		const source = fields.get("source");
 		const decision = fields.get("decision");

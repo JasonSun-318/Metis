@@ -199,7 +199,7 @@ describe("renderer reconnect behavior", () => {
 						title: "Approve bash?",
 						message: "Delete the generated cache file.",
 						createdAt: "2026-07-16T00:00:00.000Z",
-						kind: "permission_approval",
+						kind: "session_permission_approval",
 						requestId: "00000000-0000-4000-8000-000000000203",
 						actionId: "action-bash-1",
 						toolLabel: "bash",
@@ -220,7 +220,8 @@ describe("renderer reconnect behavior", () => {
 
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
-		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(container.querySelector(".modal-backdrop")?.contains(panel)).toBe(true);
+		expect(panel.getAttribute("aria-modal")).toBe("true");
 		expect(panel.textContent).toContain("Metis wants to use bash");
 		expect(panel.textContent).toContain("Command");
 		expect(panel.textContent).toContain("rm cache.tmp");
@@ -233,7 +234,7 @@ describe("renderer reconnect behavior", () => {
 		await act(async () => panel.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
 		expect(onRespond).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000203",
-			kind: "permission_approval",
+			kind: "session_permission_approval",
 			choice: "deny-once",
 		});
 		await act(async () => root.unmount());
@@ -268,7 +269,7 @@ describe("renderer reconnect behavior", () => {
 						title: "Approve operation?",
 						message: "Review the requested operation.",
 						createdAt: "2026-07-16T00:00:00.000Z",
-						kind: "permission_approval",
+						kind: "session_permission_approval",
 						requestId: "00000000-0000-4000-8000-000000000209",
 						actionId: "action-op-1",
 						reason: "Review the requested operation.",
@@ -300,7 +301,7 @@ describe("renderer reconnect behavior", () => {
 					title: "Approve publish?",
 					message: "Publish content",
 					createdAt: "2026-07-16T00:00:00.000Z",
-					kind: "permission_approval",
+					kind: "session_permission_approval",
 					requestId: "00000000-0000-4000-8000-000000000210",
 					actionId: "action-publish-1",
 					toolLabel: "mcp__service__publish",

@@ -38,6 +38,8 @@ describe("PermissionRulesService", () => {
 			summary: [
 				{ label: "Command", value: "pwd" },
 				{ label: "Working directory", value: projectA },
+				{ label: "Write path", value: join(projectA, "output.txt") },
+				{ label: "Execution target", value: "host" },
 			],
 		});
 		const service = new PermissionRulesService(agentDir, catalog);
@@ -47,11 +49,16 @@ describe("PermissionRulesService", () => {
 			rules: [
 				{
 					id: rule.id,
+					decision: "allow",
 					toolName: "bash",
-					executionTarget: "sandbox",
+					command: "pwd",
+					paths: [join(projectA, "output.txt")],
+					executionTarget: "host",
 					details: [
 						{ label: "Command", value: "pwd" },
 						{ label: "Working directory", value: projectA },
+						{ label: "Write path", value: join(projectA, "output.txt") },
+						{ label: "Execution target", value: "host" },
 					],
 					omittedDetails: 0,
 				},

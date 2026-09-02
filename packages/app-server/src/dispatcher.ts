@@ -568,9 +568,17 @@ export class Dispatcher {
 			case "permission/rules/list":
 				return this.permissionRules.list(request.params);
 			case "permission/rules/delete":
-				return await this.replayMutation(request, async () => this.permissionRules.delete(request.params));
+				return await this.replayMutation(request, async () => {
+					const result = this.permissionRules.delete(request.params);
+					await this.registry.notifyOpenPermissionRulesChanged();
+					return result;
+				});
 			case "permission/rules/clear":
-				return await this.replayMutation(request, async () => this.permissionRules.clear(request.params));
+				return await this.replayMutation(request, async () => {
+					const result = this.permissionRules.clear(request.params);
+					await this.registry.notifyOpenPermissionRulesChanged();
+					return result;
+				});
 			case "project/deletePreview": {
 				const cwd = await this.catalog.refreshModeProjectStorage(request.params.cwd);
 				const snapshot = this.catalog.modeProjectSnapshot(request.params.mode, cwd);

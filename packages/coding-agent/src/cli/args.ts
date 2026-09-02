@@ -131,11 +131,6 @@ export function parseArgs(args: string[]): Args {
 					});
 				}
 			}
-		} else if (arg === "--reviewer" || arg === "--no-reviewer") {
-			result.diagnostics.push({
-				type: "warning",
-				message: `${arg} is deprecated and ignored; permissions use Ask, Auto, or Full`,
-			});
 		} else if (arg === "--continue" || arg === "-c") {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {

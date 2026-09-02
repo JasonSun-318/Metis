@@ -195,8 +195,8 @@ function parseFile(current: string | undefined): PermissionRuleFile {
 	} catch {
 		throw new TypeError("Permission rule file is malformed");
 	}
+	// FileAuthStorageBackend initializes an empty locked store as `{}`.
 	if (isRecord(parsed) && Object.keys(parsed).length === 0) return { version: FILE_VERSION, rules: [] };
-	if (isRecord(parsed) && parsed.version === 1) return { version: FILE_VERSION, rules: [] };
 	if (!isRecord(parsed) || !hasExactKeys(parsed, ["version", "rules"]) || parsed.version !== FILE_VERSION) {
 		throw new TypeError("Permission rule file has an unsupported schema");
 	}
