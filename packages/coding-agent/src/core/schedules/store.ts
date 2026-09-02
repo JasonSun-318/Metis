@@ -134,10 +134,18 @@ function parseRunReason(value: unknown): ScheduleRun["reason"] {
 	return value as ScheduleRun["reason"];
 }
 
-function parseTarget(value: unknown): ScheduleTask["target"] {
-	const input = record(value, "schedule target", ["kind", "workspace", "cwd", "additionalWorkspaceCwd"]);
+function parseTarget(value: unknown, legacy = false): ScheduleTask["target"] {
+	const input = record(
+		value,
+		"schedule target",
+		legacy ? ["kind", "workspace", "cwd"] : ["kind", "workspace", "cwd", "additionalWorkspaceCwd"],
+	);
 	const cwd = string(input.cwd, "schedule target cwd", 32 * 1024);
 	if (!isAbsolute(cwd) || cwd.includes("\0")) throw new Error("Invalid schedule target cwd");
+	if (legacy && input.kind === "project") {
+		record(value, "project schedule target", ["kind", "cwd"]);
+		return { kind: "general", workspace: "fixed", cwd };
+	}
 	if (input.kind === "general" && (input.workspace === "task" || input.workspace === "fixed")) {
 		if (input.workspace === "fixed") {
 			if (input.additionalWorkspaceCwd !== undefined)
@@ -258,7 +266,11 @@ function parseTask(value: unknown, legacy = false): ScheduleTask {
 		"deletionDeleteSessions",
 		"deletionPreviousState",
 		"nextRunSequence",
+		...(legacy ? (["createdFromSessionId"] as const) : []),
 	]);
+	if (legacy && input.createdFromSessionId !== undefined) {
+		id(input.createdFromSessionId, "schedule source session id");
+	}
 	if (typeof input.status !== "string" || !TASK_STATUSES.has(input.status))
 		throw new Error("Invalid schedule task status");
 	if (typeof input.title !== "string" || input.title.length === 0 || input.title.length > 120) {
@@ -284,7 +296,7 @@ function parseTask(value: unknown, legacy = false): ScheduleTask {
 			input.model === undefined && legacy ? { provider: "legacy", modelId: "unassigned" } : parseModel(input.model),
 		schedule: validateScheduleSpec(input.schedule),
 		timezone: validateScheduleTimezone(input.timezone),
-		target: parseTarget(input.target),
+		target: parseTarget(input.target, legacy),
 		status: legacy ? "paused" : (input.status as ScheduleTask["status"]),
 		createdAt: timestamp(input.createdAt, "schedule task creation time"),
 		updatedAt: timestamp(input.updatedAt, "schedule task update time"),

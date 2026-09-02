@@ -80,6 +80,8 @@ describe("schedule store", () => {
 		const currentTask = task("legacy-task");
 		const legacyTask = { ...currentTask } as unknown as Record<string, unknown>;
 		delete legacyTask.model;
+		legacyTask.createdFromSessionId = "source-session";
+		legacyTask.target = { kind: "project", cwd: currentTask.target.cwd };
 		writeFileSync(
 			join(agentDir, "schedules.json"),
 			JSON.stringify({ version: 1, revision: 0, tasks: [legacyTask], events: [] }),
@@ -88,11 +90,13 @@ describe("schedule store", () => {
 		const migrated = store.readIndex().tasks[0];
 		expect(migrated).toMatchObject({
 			title: currentTask.title,
+			target: { kind: "general", workspace: "fixed", cwd: currentTask.target.cwd },
 			model: { provider: "legacy", modelId: "unassigned" },
 			status: "paused",
 			pauseReason: "model_unavailable",
 			nextRunAt: null,
 		});
+		expect(migrated).not.toHaveProperty("createdFromSessionId");
 		expect(JSON.parse(readFileSync(join(agentDir, "schedules.json"), "utf8")).version).toBe(1);
 
 		const legacyRun = run(currentTask, 0) as unknown as Record<string, unknown>;
