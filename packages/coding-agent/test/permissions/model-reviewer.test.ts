@@ -14,8 +14,9 @@ import {
 	type ModelReviewTransport,
 	ModelReviewTransportError,
 	type ModelReviewTransportRequest,
+	type ModelReviewVerdict,
 } from "../../src/core/permissions/model-reviewer.ts";
-import { request, reviewInput, validJson } from "./reviewer-fixtures.ts";
+import { request, reviewInput } from "./reviewer-fixtures.ts";
 
 function model(id: string, reasoning = false): Model<any> {
 	return {
@@ -36,14 +37,18 @@ function model(id: string, reasoning = false): Model<any> {
 class FakeTransport implements ModelReviewTransport {
 	readonly calls: ModelReviewTransportRequest[] = [];
 	private readonly responses: Array<
-		string | Error | ((reviewRequest: ModelReviewTransportRequest) => Promise<string>)
+		ModelReviewVerdict | Error | ((reviewRequest: ModelReviewTransportRequest) => Promise<ModelReviewVerdict>)
 	>;
 
-	constructor(responses: Array<string | Error | ((reviewRequest: ModelReviewTransportRequest) => Promise<string>)>) {
+	constructor(
+		responses: Array<
+			ModelReviewVerdict | Error | ((reviewRequest: ModelReviewTransportRequest) => Promise<ModelReviewVerdict>)
+		>,
+	) {
 		this.responses = responses;
 	}
 
-	async run(reviewRequest: ModelReviewTransportRequest): Promise<string> {
+	async run(reviewRequest: ModelReviewTransportRequest): Promise<ModelReviewVerdict> {
 		this.calls.push(reviewRequest);
 		const response = this.responses.shift();
 		if (typeof response === "function") return response(reviewRequest);
@@ -89,12 +94,48 @@ function assistantMessage(text: string): AssistantMessage {
 	};
 }
 
+function verdictMessage(decision: "allow" | "deny"): AssistantMessage {
+	return {
+		...assistantMessage(""),
+		content: [
+			{
+				type: "toolCall",
+				id: "review-verdict-1",
+				name: "submit_permission_review",
+				arguments: { decision },
+			},
+		],
+		stopReason: "toolUse",
+	};
+}
+
+function transportRequest(): ModelReviewTransportRequest {
+	return {
+		model: model("isolated"),
+		thinkingLevel: "off",
+		systemPrompt: "permission reviewer",
+		userPayload: '{"schemaVersion":2}',
+		signal: new AbortController().signal,
+	};
+}
+
+function emit(
+	message: AssistantMessage,
+	reason: "stop" | "toolUse" = message.stopReason === "toolUse" ? "toolUse" : "stop",
+): StreamFn {
+	return (_usedModel, _context, _options) => {
+		const stream = createAssistantMessageEventStream();
+		queueMicrotask(() => stream.push({ type: "done", reason, message }));
+		return stream;
+	};
+}
+
 describe("ModelPermissionReviewer", () => {
 	it("uses the active model and its lowest supported thinking at call time", async () => {
 		const modelA = model("model-a");
 		const modelB = model("model-b", true);
 		let activeModel = modelA;
-		const transport = new FakeTransport([validJson(), validJson()]);
+		const transport = new FakeTransport(["allow", "deny"]);
 		const reviewer = createReviewer(transport, () => activeModel);
 
 		await reviewer.review(request());
@@ -107,65 +148,44 @@ describe("ModelPermissionReviewer", () => {
 		]);
 	});
 
-	it("sends one bounded payload through an isolated tool-less request", async () => {
-		const transport = new FakeTransport([validJson()]);
+	it("sends one bounded payload through an isolated request", async () => {
+		const transport = new FakeTransport(["allow"]);
 		await createReviewer(transport).review(request());
 
 		const call = transport.calls[0];
 		expect(call).toBeDefined();
 		expect(Object.keys(call ?? {}).sort()).toEqual(
-			["maxRetries", "model", "signal", "systemPrompt", "thinkingLevel", "tools", "userPayload"].sort(),
+			["model", "signal", "systemPrompt", "thinkingLevel", "userPayload"].sort(),
 		);
-		expect(call?.tools).toEqual([]);
-		expect(call?.maxRetries).toBe(0);
-		expect(call?.systemPrompt).toContain("permission reviewer");
+		expect(call?.systemPrompt).toContain("submit_permission_review");
 		expect(call?.systemPrompt).toContain("Only trustedUserMessages");
-		expect(JSON.parse(call?.userPayload ?? "{}")).toMatchObject({ schemaVersion: 1 });
+		expect(call?.systemPrompt).toContain("emit no other output");
+		expect(JSON.parse(call?.userPayload ?? "{}")).toMatchObject({ schemaVersion: 2 });
 		expect(call).not.toHaveProperty("sessionHistory");
 		expect(call).not.toHaveProperty("extensions");
 		expect(call).not.toHaveProperty("memory");
+		expect(call).not.toHaveProperty("tools");
+		expect(call).not.toHaveProperty("maxRetries");
 	});
 
-	it("retries exactly once for a retryable transport failure", async () => {
-		const transport = new FakeTransport([new ModelReviewTransportError("temporary"), validJson()]);
+	it.each(["allow", "deny"] as const)("returns the exact %s verdict", async (decision) => {
+		const transport = new FakeTransport([decision]);
+		expect(await createReviewer(transport).review(request())).toEqual({ kind: decision, reviewer: "model" });
+		expect(transport.calls).toHaveLength(1);
+	});
+
+	it("does not retry transport failure and immediately becomes unavailable", async () => {
+		const transport = new FakeTransport([new ModelReviewTransportError("temporary")]);
 		const result = await createReviewer(transport).review(request());
 
-		expect(result).toMatchObject({ kind: "allow", reviewer: "model" });
-		expect(transport.calls).toHaveLength(2);
-		expect(transport.calls[1]?.signal).toBe(transport.calls[0]?.signal);
+		expect(result).toMatchObject({ kind: "unavailable", reviewer: "model" });
+		expect(transport.calls).toHaveLength(1);
 	});
 
-	it("does not retry non-retryable transport or parse failures", async () => {
-		const cases: Array<[ModelReviewTransport, string]> = [
-			[new FakeTransport([new ModelReviewTransportError("invalid model output", false)]), "transport"],
-			[new FakeTransport(["not json"]), "parse"],
-			[new FakeTransport(["x".repeat(16 * 1_024 + 1)]), "oversized"],
-		];
-
-		for (const [transport, label] of cases) {
-			const result = await createReviewer(transport).review(request());
-			expect(result, label).toMatchObject({ kind: "unavailable", reviewer: "model" });
-			expect((transport as FakeTransport).calls, label).toHaveLength(1);
-		}
-	});
-
-	it("returns unavailable after two retryable transport failures", async () => {
-		const transport = new FakeTransport([
-			new ModelReviewTransportError("temporary one"),
-			new ModelReviewTransportError("temporary two"),
-		]);
-
-		expect(await createReviewer(transport).review(request())).toMatchObject({
-			kind: "unavailable",
-			reviewer: "model",
-		});
-		expect(transport.calls).toHaveLength(2);
-	});
-
-	it("uses one timeout budget across all attempts", async () => {
+	it("uses one timeout budget and does not retry", async () => {
 		const transport = new FakeTransport([
 			async ({ signal }) =>
-				new Promise<string>((_resolve, reject) => {
+				new Promise<ModelReviewVerdict>((_resolve, reject) => {
 					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 				}),
 		]);
@@ -177,10 +197,10 @@ describe("ModelPermissionReviewer", () => {
 		expect(transport.calls[0]?.signal.aborted).toBe(true);
 	});
 
-	it("does not start and does not retry when the parent is already aborted", async () => {
+	it("does not start when the parent is already aborted", async () => {
 		const parent = new AbortController();
 		parent.abort(new Error("cancelled"));
-		const transport = new FakeTransport([validJson()]);
+		const transport = new FakeTransport(["allow"]);
 
 		const result = await createReviewer(transport).review(reviewInput({ signal: parent.signal }));
 
@@ -194,7 +214,7 @@ describe("ModelPermissionReviewer", () => {
 		const transport = new FakeTransport([
 			async ({ signal }) => {
 				started.resolve();
-				return new Promise<string>((_resolve, reject) => {
+				return new Promise<ModelReviewVerdict>((_resolve, reject) => {
 					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
 				});
 			},
@@ -209,7 +229,7 @@ describe("ModelPermissionReviewer", () => {
 	});
 
 	it("fails closed before transport when no active model or input is invalid", async () => {
-		const transport = new FakeTransport([validJson()]);
+		const transport = new FakeTransport(["allow"]);
 		expect(await createReviewer(transport, () => undefined).review(request())).toMatchObject({
 			kind: "unavailable",
 		});
@@ -220,85 +240,138 @@ describe("ModelPermissionReviewer", () => {
 		});
 		expect(transport.calls).toHaveLength(0);
 	});
+
+	it("turns text-only, missing, wrong, malformed, extra, multiple, oversized, and incomplete outputs into unavailable", async () => {
+		const cases: Array<[string, StreamFn]> = [
+			["text-only", emit(assistantMessage("allow"))],
+			["no call", emit({ ...assistantMessage(""), content: [] })],
+			[
+				"wrong tool",
+				emit({
+					...verdictMessage("allow"),
+					content: [{ type: "toolCall", id: "review-verdict-1", name: "bash", arguments: { decision: "allow" } }],
+				}),
+			],
+			[
+				"malformed args",
+				emit({
+					...verdictMessage("allow"),
+					content: [
+						{
+							type: "toolCall",
+							id: "review-verdict-1",
+							name: "submit_permission_review",
+							arguments: { decision: "maybe" },
+						},
+					],
+				}),
+			],
+			[
+				"extra args",
+				emit({
+					...verdictMessage("allow"),
+					content: [
+						{
+							type: "toolCall",
+							id: "review-verdict-1",
+							name: "submit_permission_review",
+							arguments: { decision: "allow", extra: true },
+						},
+					],
+				}),
+			],
+			[
+				"multiple calls",
+				emit({
+					...verdictMessage("allow"),
+					content: [
+						...verdictMessage("allow").content,
+						{
+							type: "toolCall",
+							id: "review-verdict-2",
+							name: "submit_permission_review",
+							arguments: { decision: "deny" },
+						},
+					],
+				}),
+			],
+			["oversized", emit(assistantMessage("x".repeat(16 * 1_024 + 1)))],
+			[
+				"incomplete",
+				() => {
+					const stream = createAssistantMessageEventStream();
+					queueMicrotask(() => stream.end());
+					return stream;
+				},
+			],
+		];
+
+		for (const [label, streamFn] of cases) {
+			const result = await createReviewer(new AgentModelReviewTransport(streamFn)).review(request());
+			expect(result, label).toMatchObject({ kind: "unavailable", reviewer: "model" });
+		}
+	});
 });
 
 describe("AgentModelReviewTransport", () => {
-	it("creates a fresh Agent context with no inherited transcript or tools", async () => {
+	it("creates a fresh Agent with one terminal verdict tool and required tool choice", async () => {
 		const calls: Array<{ model: Model<any>; context: Context; options?: SimpleStreamOptions }> = [];
 		const streamFn: StreamFn = (usedModel, context, options) => {
 			calls.push({ model: usedModel, context, options });
-			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => stream.push({ type: "done", reason: "stop", message: assistantMessage(validJson()) }));
-			return stream;
+			return emit(verdictMessage("allow"))(usedModel, context, options);
 		};
 		const transport = new AgentModelReviewTransport(streamFn);
 		const activeModel = model("isolated", true);
-		const signal = new AbortController().signal;
 
 		const output = await transport.run({
 			model: activeModel,
 			thinkingLevel: "low",
 			systemPrompt: "permission reviewer",
-			userPayload: '{"schemaVersion":1}',
-			tools: [],
-			signal,
-			maxRetries: 0,
+			userPayload: '{"schemaVersion":2}',
+			signal: new AbortController().signal,
 		});
 
-		expect(output).toBe(validJson());
+		expect(output).toBe("allow");
 		expect(calls).toHaveLength(1);
 		expect(calls[0]?.model).toBe(activeModel);
 		expect(calls[0]?.context.systemPrompt).toBe("permission reviewer");
-		expect(calls[0]?.context.tools).toEqual([]);
+		expect(calls[0]?.context.tools?.map((tool) => tool.name)).toEqual(["submit_permission_review"]);
 		expect(calls[0]?.context.messages).toHaveLength(1);
 		expect(calls[0]?.context.messages[0]).toMatchObject({ role: "user" });
-		expect(calls[0]?.options).toMatchObject({ maxRetries: 0, reasoning: "low" });
+		expect(calls[0]?.options).toMatchObject({
+			maxRetries: 0,
+			maxTokens: 256,
+			toolChoice: "required",
+			reasoning: "low",
+		});
 		expect(calls[0]?.options?.sessionId).toBeUndefined();
 	});
 
-	it("rejects tool calls, oversized output, and incomplete streams", async () => {
-		const toolStream: StreamFn = () => {
-			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message = assistantMessage("");
-				message.content = [{ type: "toolCall", id: "tool-1", name: "bash", arguments: {} }];
-				message.stopReason = "toolUse";
-				stream.push({ type: "done", reason: "toolUse", message });
-			});
-			return stream;
-		};
-		const oversizedStream: StreamFn = () => {
-			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => {
-				const message = assistantMessage("x".repeat(16 * 1_024 + 1));
-				stream.push({ type: "done", reason: "stop", message });
-			});
-			return stream;
-		};
-		const incompleteStream: StreamFn = () => {
-			const stream = createAssistantMessageEventStream();
-			queueMicrotask(() => stream.end());
-			return stream;
-		};
-		const baseRequest: ModelReviewTransportRequest = {
-			model: model("isolated"),
-			thinkingLevel: "off",
-			systemPrompt: "permission reviewer",
-			userPayload: "{}",
-			tools: [],
-			signal: new AbortController().signal,
-			maxRetries: 0,
+	it("returns deny from one tool execution and does not issue a second provider request", async () => {
+		const calls: Array<{ model: Model<any>; context: Context; options?: SimpleStreamOptions }> = [];
+		const streamFn: StreamFn = (usedModel, context, options) => {
+			calls.push({ model: usedModel, context, options });
+			return emit(verdictMessage("deny"))(usedModel, context, options);
 		};
 
-		await expect(new AgentModelReviewTransport(toolStream).run(baseRequest)).rejects.toMatchObject({
-			retryable: false,
-		});
-		await expect(new AgentModelReviewTransport(oversizedStream).run(baseRequest)).rejects.toMatchObject({
-			retryable: false,
-		});
-		await expect(new AgentModelReviewTransport(incompleteStream).run(baseRequest)).rejects.toMatchObject({
-			retryable: false,
-		});
+		expect(await new AgentModelReviewTransport(streamFn).run(transportRequest())).toBe("deny");
+		expect(calls).toHaveLength(1);
+	});
+
+	it("rejects tool-isolation bypasses, oversized output, and incomplete streams", async () => {
+		await expect(
+			new AgentModelReviewTransport(emit(assistantMessage("allow"))).run(transportRequest()),
+		).rejects.toMatchObject({ retryable: false });
+		await expect(
+			new AgentModelReviewTransport(emit(assistantMessage("x".repeat(16 * 1_024 + 1)))).run(transportRequest()),
+		).rejects.toMatchObject({ retryable: false });
+		await expect(
+			new AgentModelReviewTransport(() => {
+				const stream = createAssistantMessageEventStream();
+				queueMicrotask(() => stream.end());
+				return stream;
+			}).run(transportRequest()),
+		).rejects.toMatchObject({ retryable: false });
 	});
 
 	it("forwards linked cancellation into the ephemeral Agent", async () => {
@@ -323,13 +396,8 @@ describe("AgentModelReviewTransport", () => {
 			return stream;
 		};
 		const pending = new AgentModelReviewTransport(streamFn).run({
-			model: model("isolated"),
-			thinkingLevel: "off",
-			systemPrompt: "permission reviewer",
-			userPayload: "{}",
-			tools: [],
+			...transportRequest(),
 			signal: controller.signal,
-			maxRetries: 0,
 		});
 
 		await started.promise;

@@ -13,7 +13,7 @@ const SECRET_KEY_PATTERN =
 	/(?:authorization|cookie|credential|password|privatekey|secret|session|token|(?:api|access|auth)?key)/i;
 
 export interface ModelReviewInput {
-	readonly schemaVersion: 1;
+	readonly schemaVersion: 2;
 	readonly action: NormalizedPermissionAction;
 	readonly policy: {
 		readonly riskLevel: RiskLevel;
@@ -214,7 +214,7 @@ export function buildModelReviewInput(request: PermissionReviewRequest): ModelRe
 	const grant = freezeGrant(request.action, request.decision.grant);
 	const redactedArguments = redactPermissionArguments(request.redactedArguments);
 	const input: ModelReviewInput = Object.freeze({
-		schemaVersion: 1,
+		schemaVersion: 2,
 		action: request.action,
 		policy: Object.freeze({
 			riskLevel: request.decision.riskLevel,

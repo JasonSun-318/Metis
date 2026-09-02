@@ -33,7 +33,9 @@ describe("model permission review input", () => {
 	);
 
 	it("includes no signal, interaction state, or untrusted context channel", () => {
-		const serialized = JSON.stringify(buildModelReviewInput(reviewInput()));
+		const input = buildModelReviewInput(reviewInput());
+		expect(input.schemaVersion).toBe(2);
+		const serialized = JSON.stringify(input);
 		expect(serialized).not.toContain("signal");
 		expect(serialized).not.toContain("interactive");
 		expect(serialized).not.toContain("repository");

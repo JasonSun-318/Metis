@@ -31,22 +31,3 @@ export function reviewInput(overrides: Partial<PermissionReviewRequest> = {}): P
 }
 
 export const request = () => reviewInput();
-
-export function validJson(
-	overrides: Partial<{
-		decision: "allow" | "deny";
-		assessedRisk: "low" | "medium" | "high" | "critical";
-		userAuthorization: "unknown" | "low" | "medium" | "high";
-		scopeComplete: boolean;
-		rationale: string;
-	}> = {},
-): string {
-	return JSON.stringify({
-		decision: "allow",
-		assessedRisk: "medium",
-		userAuthorization: "medium",
-		scopeComplete: true,
-		rationale: "The direct user message authorizes this exact action.",
-		...overrides,
-	});
-}
