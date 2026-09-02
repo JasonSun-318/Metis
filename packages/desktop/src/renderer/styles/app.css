@@ -177,7 +177,7 @@ textarea { resize: none; }
 .tool-tabs-scroll { display: flex; min-width: 0; max-width: calc(100% - 25px); flex: 0 1 auto; gap: 1px; overflow-x: auto; scrollbar-width: none; }
 .tool-tabs-scroll::-webkit-scrollbar { display: none; }
 .tool-tab { display: flex; min-width: 0; max-width: 148px; height: 26px; flex: 0 1 auto; align-items: center; border-radius: 6px; color: var(--text-08); }
-.tool-tab.is-active { color: var(--text-22); }
+.tool-tab.is-active { background: var(--surface-05); box-shadow: var(--shadow); color: var(--text-22); }
 .tool-tab.is-preview .tool-tab-select span { font-style: italic; }
 .tool-tab:hover, .tool-tab:focus-within { background: var(--surface-05); }
 .tool-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 5px; padding: 0 3px 0 6px; text-align: left; }
@@ -394,7 +394,8 @@ textarea { resize: none; }
 .browser-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 .browser-downloads, .browser-history { position: relative; flex: none; }
 .browser-downloads-button { position: relative; }
-.browser-download-badge { position: absolute; top: 3px; right: 3px; width: 5px; height: 5px; border-radius: 999px; background: var(--focus); }
+.browser-download-badge { position: absolute; top: 2px; right: 2px; width: 6px; height: 6px; border-radius: 999px; background: var(--link); outline: 2px solid var(--link-ring); animation: session-running-pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .browser-download-badge { animation: none; } }
 .browser-downloads-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; width: 324px; max-height: 380px; overflow-y: auto; display: grid; gap: 1px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
 .browser-downloads-header { display: flex; align-items: center; justify-content: space-between; color: var(--text-20); font-size: 11px; font-weight: 560; padding: 6px 9px 4px; }
 .browser-downloads-empty { margin: 0; color: var(--text-07); font-size: 12px; padding: 14px 9px 16px; text-align: center; }

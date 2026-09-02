@@ -53,6 +53,12 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".browser-view-anchor").top).toBe("42px");
 	});
 
+	it("visually raises the active tool tab above the sidebar header", () => {
+		const activeTab = rule(".tool-tab.is-active");
+		expect(activeTab.background).toBe("var(--surface-05)");
+		expect(activeTab.boxShadow).toBe("var(--shadow)");
+	});
+
 	it("keeps the file tree beside the preview until the sidebar reaches its minimum width", () => {
 		expect(css).toContain("@container (max-width: 300px)");
 		expect(css).not.toContain("@container (max-width: 620px)");

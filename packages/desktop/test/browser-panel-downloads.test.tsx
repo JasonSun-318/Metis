@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { StrictMode, act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -101,6 +103,13 @@ afterEach(async () => {
 });
 
 describe("BrowserPanel downloads", () => {
+	it("uses a blue reduced-motion-aware active indicator", () => {
+		const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
+		expect(css).toMatch(/\.browser-download-badge\s*\{[^}]*background:\s*var\(--link\)/u);
+		expect(css).toMatch(/\.browser-download-badge\s*\{[^}]*animation:\s*session-running-pulse/u);
+		expect(css).toMatch(/prefers-reduced-motion:\s*reduce[^]*\.browser-download-badge\s*\{[^}]*animation:\s*none/u);
+	});
+
 	it("lists downloads with per-state actions and forwards controls", async () => {
 		const controlBrowserDownload = vi.fn().mockResolvedValue(undefined);
 		const { api, emitBrowserEvent } = browserPanelApi({
