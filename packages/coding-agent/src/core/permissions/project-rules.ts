@@ -54,6 +54,16 @@ interface PermissionRuleFile {
 	readonly rules: readonly ProjectPermissionRule[];
 }
 
+interface ParsedPermissionRuleFile {
+	readonly file: PermissionRuleFile;
+	readonly rewrite: boolean;
+}
+
+interface PermissionRuleTransaction<T> {
+	readonly result: T;
+	readonly nextRules?: readonly ProjectPermissionRule[];
+}
+
 interface NormalizedRuleInput extends ProjectPermissionRuleInput {
 	readonly id: string;
 }
@@ -186,9 +196,13 @@ function parseRule(value: unknown): ProjectPermissionRule {
 	});
 }
 
-function parseFile(current: string | undefined): PermissionRuleFile {
-	if (current === undefined || current.trim() === "") return { version: FILE_VERSION, rules: [] };
-	if (Buffer.byteLength(current, "utf8") > MAX_FILE_BYTES) throw new TypeError("Permission rule file is too large");
+function parseFile(current: string | undefined): ParsedPermissionRuleFile {
+	if (current === undefined || current.trim() === "") {
+		return { file: { version: FILE_VERSION, rules: [] }, rewrite: false };
+	}
+	if (Buffer.byteLength(current, "utf8") > MAX_FILE_BYTES) {
+		throw new TypeError("Permission rule file is too large");
+	}
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(current);
@@ -196,7 +210,18 @@ function parseFile(current: string | undefined): PermissionRuleFile {
 		throw new TypeError("Permission rule file is malformed");
 	}
 	// FileAuthStorageBackend initializes an empty locked store as `{}`.
-	if (isRecord(parsed) && Object.keys(parsed).length === 0) return { version: FILE_VERSION, rules: [] };
+	if (isRecord(parsed) && Object.keys(parsed).length === 0) {
+		return { file: { version: FILE_VERSION, rules: [] }, rewrite: false };
+	}
+	if (
+		isRecord(parsed) &&
+		hasExactKeys(parsed, ["version", "rules"]) &&
+		parsed.version === 1 &&
+		Array.isArray(parsed.rules) &&
+		parsed.rules.length <= MAX_RULES_TOTAL
+	) {
+		return { file: { version: FILE_VERSION, rules: [] }, rewrite: true };
+	}
 	if (!isRecord(parsed) || !hasExactKeys(parsed, ["version", "rules"]) || parsed.version !== FILE_VERSION) {
 		throw new TypeError("Permission rule file has an unsupported schema");
 	}
@@ -212,7 +237,7 @@ function parseFile(current: string | undefined): PermissionRuleFile {
 	if ([...perProject.values()].some((count) => count > MAX_RULES_PER_PROJECT)) {
 		throw new TypeError("Permission rule project exceeds its limit");
 	}
-	return { version: FILE_VERSION, rules };
+	return { file: { version: FILE_VERSION, rules }, rewrite: false };
 }
 
 function serializeFile(rules: readonly ProjectPermissionRule[]): string {
@@ -232,10 +257,22 @@ export class ProjectPermissionRuleStore {
 		this.storage = new FileAuthStorageBackend(join(agentDir, "permission-rules.json"));
 	}
 
+	private transact<T>(operation: (rules: readonly ProjectPermissionRule[]) => PermissionRuleTransaction<T>): T {
+		return this.storage.withLock((current) => {
+			const parsed = parseFile(current);
+			const outcome = operation(parsed.file.rules);
+			const shouldWrite = parsed.rewrite || outcome.nextRules !== undefined;
+			return {
+				result: outcome.result,
+				...(shouldWrite ? { next: serializeFile(outcome.nextRules ?? parsed.file.rules) } : {}),
+			};
+		});
+	}
+
 	match(input: ProjectPermissionRuleInput): ProjectPermissionRule | undefined {
 		const normalized = normalizeInput(input, true);
-		return this.storage.withLock((current) => {
-			const rule = parseFile(current).rules.find(
+		return this.transact((rules) => {
+			const rule = rules.find(
 				(candidate) => candidate.projectPath === normalized.projectPath && candidate.id === normalized.id,
 			);
 			return { result: rule ? freezeRule(rule) : undefined };
@@ -252,10 +289,9 @@ export class ProjectPermissionRuleStore {
 
 	private remember(input: ProjectPermissionRuleInput, decision: "allow" | "deny"): ProjectPermissionRule {
 		const normalized = normalizeInput(input, true);
-		return this.storage.withLock((current) => {
-			const file = parseFile(current);
-			const existingIndex = file.rules.findIndex((rule) => rule.id === normalized.id);
-			const existing = file.rules[existingIndex];
+		return this.transact((rules) => {
+			const existingIndex = rules.findIndex((rule) => rule.id === normalized.id);
+			const existing = rules[existingIndex];
 			if (existing?.decision === "deny" || existing?.decision === decision) {
 				return { result: freezeRule(existing) };
 			}
@@ -266,52 +302,46 @@ export class ProjectPermissionRuleStore {
 				createdAt: new Date().toISOString(),
 			});
 			if (existing) {
-				const rules = [...file.rules];
-				rules[existingIndex] = rule;
-				return { result: freezeRule(rule), next: serializeFile(rules) };
+				const nextRules = [...rules];
+				nextRules[existingIndex] = rule;
+				return { result: freezeRule(rule), nextRules };
 			}
-			if (file.rules.length >= MAX_RULES_TOTAL) throw new TypeError("Permission rule store is full");
+			if (rules.length >= MAX_RULES_TOTAL) throw new TypeError("Permission rule store is full");
 			if (
-				file.rules.filter((candidate) => candidate.projectPath === normalized.projectPath).length >=
+				rules.filter((candidate) => candidate.projectPath === normalized.projectPath).length >=
 				MAX_RULES_PER_PROJECT
 			) {
 				throw new TypeError("Permission rule project is full");
 			}
-			return { result: freezeRule(rule), next: serializeFile([...file.rules, rule]) };
+			return { result: freezeRule(rule), nextRules: [...rules, rule] };
 		});
 	}
 
 	list(projectPath: string): readonly ProjectPermissionRule[] {
 		const canonicalProject = canonicalProjectPath(projectPath);
-		return this.storage.withLock((current) => ({
-			result: Object.freeze(
-				parseFile(current)
-					.rules.filter((rule) => rule.projectPath === canonicalProject)
-					.map(freezeRule),
-			),
+		return this.transact((rules) => ({
+			result: Object.freeze(rules.filter((rule) => rule.projectPath === canonicalProject).map(freezeRule)),
 		}));
 	}
 
 	delete(projectPath: string, id: string): boolean {
 		const canonicalProject = canonicalProjectPath(projectPath);
 		const ruleId = requiredDigest(id, "id");
-		return this.storage.withLock((current) => {
-			const file = parseFile(current);
-			const rules = file.rules.filter((rule) => rule.projectPath !== canonicalProject || rule.id !== ruleId);
+		return this.transact((rules) => {
+			const nextRules = rules.filter((rule) => rule.projectPath !== canonicalProject || rule.id !== ruleId);
 			return {
-				result: rules.length !== file.rules.length,
-				...(rules.length === file.rules.length ? {} : { next: serializeFile(rules) }),
+				result: nextRules.length !== rules.length,
+				...(nextRules.length === rules.length ? {} : { nextRules }),
 			};
 		});
 	}
 
 	clear(projectPath: string): number {
 		const canonicalProject = canonicalProjectPath(projectPath);
-		return this.storage.withLock((current) => {
-			const file = parseFile(current);
-			const rules = file.rules.filter((rule) => rule.projectPath !== canonicalProject);
-			const removed = file.rules.length - rules.length;
-			return { result: removed, ...(removed === 0 ? {} : { next: serializeFile(rules) }) };
+		return this.transact((rules) => {
+			const nextRules = rules.filter((rule) => rule.projectPath !== canonicalProject);
+			const removed = rules.length - nextRules.length;
+			return { result: removed, ...(removed === 0 ? {} : { nextRules }) };
 		});
 	}
 }

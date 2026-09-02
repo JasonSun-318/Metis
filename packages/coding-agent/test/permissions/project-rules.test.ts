@@ -120,15 +120,54 @@ describe("ProjectPermissionRuleStore", () => {
 		expect(readFileSync(rulesPath, "utf8")).not.toContain("must-not-be-accepted");
 	});
 
-	it("rejects retired version 1 storage without replacing it", () => {
+	it("retires version 1 rules and rewrites an empty version 2 store", () => {
 		const rulesPath = join(agentDir, "permission-rules.json");
-		const retired = JSON.stringify({ version: 1, rules: [{ decision: "allow", toolName: "write_file" }] });
-		writeFileSync(rulesPath, retired);
+		writeFileSync(
+			rulesPath,
+			JSON.stringify({
+				version: 1,
+				rules: [
+					{
+						id: "legacy-write",
+						projectPath: project,
+						toolName: "write",
+						paths: [join(project, "README.md")],
+						details: [{ label: "File", value: join(project, "README.md") }],
+						omittedDetails: 0,
+						risks: ["workspace-write"],
+						executionTarget: "sandbox",
+						createdAt: "2026-08-20T00:00:00.000Z",
+					},
+				],
+			}),
+		);
+
 		const store = new ProjectPermissionRuleStore(agentDir);
+		expect(store.match(ruleInput({ projectPath: project }))).toBeUndefined();
+		expect(JSON.parse(readFileSync(rulesPath, "utf8"))).toEqual({ version: 2, rules: [] });
+	});
+
+	it("stores a new exact rule while retiring version 1 storage", () => {
+		const rulesPath = join(agentDir, "permission-rules.json");
+		writeFileSync(rulesPath, JSON.stringify({ version: 1, rules: [] }));
 		const input = ruleInput({ projectPath: project });
-		expect(() => store.match(input)).toThrow("unsupported schema");
-		expect(() => store.rememberAllow(input)).toThrow("unsupported schema");
-		expect(readFileSync(rulesPath, "utf8")).toBe(retired);
+
+		const stored = new ProjectPermissionRuleStore(agentDir).rememberAllow(input);
+		const persisted = JSON.parse(readFileSync(rulesPath, "utf8"));
+		expect(stored).toMatchObject({ decision: "allow", actionDigest: input.actionDigest });
+		expect(persisted).toMatchObject({ version: 2, rules: [{ id: stored.id, decision: "allow" }] });
+	});
+
+	it.each([
+		{ version: 1, rules: "not-an-array" },
+		{ version: 1, rules: [], extra: true },
+		{ version: 3, rules: [] },
+	])("rejects malformed or future rule storage without rewriting it", (value) => {
+		const rulesPath = join(agentDir, "permission-rules.json");
+		const original = JSON.stringify(value);
+		writeFileSync(rulesPath, original);
+		expect(() => new ProjectPermissionRuleStore(agentDir).list(project)).toThrow("unsupported schema");
+		expect(readFileSync(rulesPath, "utf8")).toBe(original);
 	});
 
 	it("fails closed for malformed or oversized version 2 storage", () => {
