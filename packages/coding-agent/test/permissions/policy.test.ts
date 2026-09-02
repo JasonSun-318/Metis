@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { parse } from "node:path";
+import { join, parse } from "node:path";
 import { performance } from "node:perf_hooks";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -191,6 +191,34 @@ describe("PermissionPolicy", () => {
 		console.info(`permission domain: 10k=${(performance.now() - startedAt).toFixed(1)}ms p95=${p95.toFixed(3)}ms`);
 		expect(policy).not.toHaveProperty("review");
 		expect(p95).toBeLessThan(5);
+	});
+
+	it("allows ordinary in-workspace file delivery under auto and still reviews sensitive sources", () => {
+		const policy = new PermissionPolicy();
+		const ordinary = normalizePermissionAction(
+			actionInput({
+				toolName: "deliver_file",
+				toolIdentity: "builtin:deliver_file:v1",
+				args: { path: join(projectDir, "report.md") },
+				readPaths: [join(projectDir, "report.md")],
+				effects: [],
+			}),
+		);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: ordinary }).kind).toBe("allow");
+
+		const sensitive = normalizePermissionAction(
+			actionInput({
+				toolName: "deliver_file",
+				toolIdentity: "builtin:deliver_file:v1",
+				args: { path: join(projectDir, ".env") },
+				readPaths: [join(projectDir, ".env")],
+				effects: ["sensitive-read"],
+			}),
+		);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: sensitive })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
 	});
 
 	it("imports without loading model, interaction, or execution adapters", async () => {

@@ -16,7 +16,7 @@ import {
 	stageDeliveredFile,
 } from "./session-attachments.ts";
 import type { SessionManager } from "./session-manager.ts";
-import { fileReadPermissionClaim, permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
+import { fileReadPermissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 
 type DeliveredArtifactsSession = Pick<
 	SessionManager,
@@ -75,13 +75,7 @@ export class SessionDeliveredArtifacts {
 				"Push a finished file to the user in the Desktop app so they can open or locate it. Use after creating or updating a deliverable the user should receive. The file must already exist on disk and stay within the current workspace, Metis attachment directory, or session work directory.",
 			promptSnippet: "Send a finished file to the user in the Desktop app",
 			parameters: DeliverFileParams,
-			permission: permissionDescriptor(({ path }, context) => {
-				const read = fileReadPermissionClaim(path, context);
-				return permissionClaim({
-					readPaths: read.readPaths,
-					effects: [...read.effects, "external-side-effect"],
-				});
-			}),
+			permission: permissionDescriptor(({ path }, context) => fileReadPermissionClaim(path, context)),
 			executionMode: "sequential",
 			execute: async (toolCallId, input, signal) => {
 				if (signal?.aborted) throw new Error("Deliver file was aborted");

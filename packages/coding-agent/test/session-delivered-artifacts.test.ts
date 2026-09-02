@@ -57,7 +57,19 @@ afterEach(() => {
 });
 
 describe("SessionDeliveredArtifacts", () => {
-	it("marks credential-shaped delivery sources as sensitive external effects", () => {
+	it("describes ordinary delivery as a bounded file read", () => {
+		const value = fixture("session-delivered-ordinary");
+		const claim = value.artifacts
+			.createToolDefinition()
+			.permission.describe(
+				{ path: "report.md" },
+				{ actionId: "deliver-ordinary", cwd: value.cwd, workspaceRoots: [value.cwd] },
+			);
+		expect(claim.readPaths).toEqual(["report.md"]);
+		expect(claim.effects).toEqual([]);
+	});
+
+	it("keeps credential-shaped delivery sources sensitive", () => {
 		const value = fixture("session-delivered-sensitive");
 		const claim = value.artifacts
 			.createToolDefinition()
@@ -65,7 +77,7 @@ describe("SessionDeliveredArtifacts", () => {
 				{ path: ".env" },
 				{ actionId: "deliver-sensitive", cwd: value.cwd, workspaceRoots: [value.cwd] },
 			);
-		expect(claim.effects).toEqual(["sensitive-read", "external-side-effect"]);
+		expect(claim.effects).toEqual(["sensitive-read"]);
 	});
 
 	it("keeps staged files private until the successful tool result is journaled", async () => {
