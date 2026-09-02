@@ -255,6 +255,15 @@ describe("Coding Agent Tools", () => {
 			expect(result.details).toBeUndefined();
 		});
 
+		it("should report the UTF-8 byte count for multibyte content", async () => {
+			const testFile = join(testDir, "write-unicode.txt");
+			const content = "中文";
+
+			const result = await writeTool.execute("test-call-write-unicode", { path: testFile, content });
+
+			expect(getTextOutput(result)).toContain("Successfully wrote 6 bytes");
+		});
+
 		it("should create parent directories", async () => {
 			const testFile = join(testDir, "nested", "dir", "test.txt");
 			const content = "Nested content";
