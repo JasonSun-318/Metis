@@ -146,6 +146,31 @@ describe("session catalog", () => {
 		expect(journalOpens).toEqual({ readOnly: 0, writable: 0 });
 	});
 
+	it("skips a v13 journal containing current permission controls", async () => {
+		const path = join(directory, "mixed-permissions.jsonl");
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 13,
+				id: "mixed-permissions",
+				timestamp,
+				cwd: "/tmp",
+				mode: "code",
+				permissionMode: "ask",
+				reviewerEnabled: false,
+			},
+			{
+				type: "session_permission_preset",
+				id: "permission-1",
+				parentId: null,
+				timestamp,
+				permissionPreset: "full",
+			},
+		]);
+
+		expect(await SessionManager.list("/tmp", directory)).toEqual([]);
+	});
+
 	it("accepts only an incomplete final tail and rejects malformed complete records", async () => {
 		const partial = join(directory, "partial.jsonl");
 		const malformed = join(directory, "malformed.jsonl");

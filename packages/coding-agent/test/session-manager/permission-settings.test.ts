@@ -229,6 +229,40 @@ describe("SessionManager permission settings", () => {
 		expect(readFileSync(path, "utf8")).toBe(original);
 	});
 
+	it.each([
+		{
+			name: "v1 permission fields",
+			header: { version: 1, permissionMode: "full" },
+			message: "Workspace and permission header fields require a v6 session header",
+		},
+		{
+			name: "a non-numeric version",
+			header: { version: "13", permissionMode: "ask" },
+			message: "Session header has an invalid version",
+		},
+		{
+			name: "a v12 agent marker",
+			header: { version: 12, agent: {} },
+			message: "Agent header fields require a v13 session header",
+		},
+	])("rejects $name before migration without rewriting the source", ({ header, message }) => {
+		const path = join(directory, `source-boundary-${header.version}.jsonl`);
+		writeRecords(path, [
+			{
+				type: "session",
+				id: "source-boundary",
+				timestamp,
+				cwd: directory,
+				mode: "code",
+				...header,
+			},
+		]);
+		const original = readFileSync(path, "utf8");
+		expect(() => SessionManager.open(path, directory)).toThrow(CorruptSessionError);
+		expect(() => SessionManager.open(path, directory)).toThrow(message);
+		expect(readFileSync(path, "utf8")).toBe(original);
+	});
+
 	it("rejects malformed or version-mismatched control records", () => {
 		const baseHeader = { type: "session", id: "invalid", timestamp, cwd: directory };
 		const control = {

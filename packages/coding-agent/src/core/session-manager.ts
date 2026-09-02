@@ -1310,36 +1310,89 @@ function migrateV13ToV14(entries: FileEntry[], filePath: string): void {
 	}
 }
 
+function readSessionVersion(record: Record<string, unknown>, filePath: string): number {
+	const version = record.version === undefined ? 1 : record.version;
+	if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
+		corruptSession(filePath, 1, "Session header has an invalid version");
+	}
+	if (version > CURRENT_SESSION_VERSION) {
+		corruptSession(
+			filePath,
+			1,
+			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
+		);
+	}
+	return version;
+}
+
+function validateSourceSessionHeaderVersion(record: Record<string, unknown>, filePath: string): number {
+	const version = readSessionVersion(record, filePath);
+	if (
+		version < 6 &&
+		(record.cwdOrigin !== undefined ||
+			record.permissionMode !== undefined ||
+			record.reviewerEnabled !== undefined ||
+			record.permissionPreset !== undefined)
+	) {
+		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
+	}
+	if (version < 10 && record.scheduled !== undefined) {
+		corruptSession(filePath, 1, "Scheduled header fields require a v10 session header");
+	}
+	if (version < 13 && record.agent !== undefined) {
+		corruptSession(filePath, 1, "Agent header fields require a v13 session header");
+	}
+	return version;
+}
+
+function validateSessionRecordVersion(type: string, version: number, filePath: string, lineNumber: number): void {
+	if (type.startsWith("runtime_") && version < 5) {
+		corruptSession(filePath, lineNumber, "Runtime control entries require a v5 session header");
+	}
+	if ((type === "session_permission_preset" || type === "session_permission_audit") && version < 14) {
+		corruptSession(filePath, lineNumber, "Permission control entries require a v14 session header");
+	}
+	if (isSessionDirectoryControlEntryType(type) && version < 8) {
+		corruptSession(filePath, lineNumber, "Directory control entries require a v8 session header");
+	}
+	if (isAgentControlEntryType(type) && version < 13) {
+		corruptSession(filePath, lineNumber, "Agent control entries require a v13 session header");
+	}
+	if (type === "session_ultra_selection" && version < 13) {
+		corruptSession(filePath, lineNumber, "Ultra selection controls require a v13 session header");
+	}
+	if (isPlanControlEntryType(type) && version < 12) {
+		corruptSession(filePath, lineNumber, "Plan control entries require a v12 session header");
+	}
+	if (
+		version < 6 &&
+		(type === "session_permissions" ||
+			type === "session_permission_decision" ||
+			(isSessionControlEntryType(type) &&
+				!isAgentControlEntryType(type) &&
+				type !== "session_permission_preset" &&
+				type !== "session_permission_audit"))
+	) {
+		corruptSession(filePath, lineNumber, "Session control entries require a v6 session header");
+	}
+}
+
+function validateSourceSessionVersionBoundaries(entries: readonly FileEntry[], filePath: string): number {
+	const header = entries.find((entry) => entry.type === "session") as unknown as Record<string, unknown> | undefined;
+	const version = validateSourceSessionHeaderVersion(header ?? {}, filePath);
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (entry.type !== "session") validateSessionRecordVersion(entry.type, version, filePath, index + 1);
+	}
+	return version;
+}
+
 /**
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
  */
 function migrateToCurrentVersion(entries: FileEntry[], filePath: string): boolean {
-	const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
-	const version = header?.version ?? 1;
-	if (
-		version < 5 &&
-		entries.some(
-			(entry) => entry.type !== "session" && typeof entry.type === "string" && entry.type.startsWith("runtime_"),
-		)
-	) {
-		throw new TypeError("Runtime control entries require a v5 session header");
-	}
-	if (
-		version < 14 &&
-		entries.some((entry) => entry.type === "session_permission_preset" || entry.type === "session_permission_audit")
-	) {
-		throw new TypeError("Permission control entries require a v14 session header");
-	}
-	if (version < 8 && entries.some((entry) => isSessionDirectoryControlEntryType(entry.type))) {
-		throw new TypeError("Directory control entries require a v8 session header");
-	}
-	if (version < 10 && header?.scheduled !== undefined) {
-		throw new TypeError("Scheduled session markers require a v10 session header");
-	}
-	if (version < 12 && entries.some((entry) => isPlanControlEntryType(entry.type))) {
-		throw new TypeError("Plan control entries require a v12 session header");
-	}
+	const version = validateSourceSessionVersionBoundaries(entries, filePath);
 
 	if (version >= CURRENT_SESSION_VERSION) return false;
 
@@ -1756,17 +1809,7 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			corruptSession(filePath, 1, "Session header cannot be both scheduled and an agent");
 		}
 	}
-	const version = header.version ?? 1;
-	if (!Number.isInteger(version) || version < 1) {
-		corruptSession(filePath, 1, "Session header has an invalid version");
-	}
-	if (version > CURRENT_SESSION_VERSION) {
-		corruptSession(
-			filePath,
-			1,
-			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
-		);
-	}
+	const version = readSessionVersion(record, filePath);
 	if (version < 6 && (header.cwdOrigin !== undefined || record.permissionPreset !== undefined)) {
 		corruptSession(filePath, 1, "Workspace and permission header fields require a v6 session header");
 	}
@@ -1795,10 +1838,8 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 	const version = header.version ?? 1;
 	for (let index = 1; index < records.length; index++) {
 		const type = (records[index] as { type: string }).type;
+		validateSessionRecordVersion(type, version, filePath, index + 1);
 		if (type.startsWith("runtime_")) {
-			if (version < 5) {
-				corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
-			}
 			if (!isRuntimeControlEntryType(type)) {
 				corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
 			}
@@ -1806,28 +1847,8 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 			continue;
 		}
 		if (isSessionControlEntryType(type)) {
-			if ((type === "session_permission_preset" || type === "session_permission_audit") && version < 14) {
-				corruptSession(filePath, index + 1, "Permission control entries require a v14 session header");
-			}
-			if (isSessionDirectoryControlEntryType(type) && version < 8) {
-				corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
-			}
 			if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
 				corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
-			}
-			if (isAgentControlEntryType(type) && version < 13) {
-				corruptSession(filePath, index + 1, "Agent control entries require a v13 session header");
-			}
-			if (type === "session_ultra_selection" && version < 13) {
-				corruptSession(filePath, index + 1, "Ultra selection controls require a v13 session header");
-			}
-			if (
-				!isAgentControlEntryType(type) &&
-				type !== "session_permission_preset" &&
-				type !== "session_permission_audit" &&
-				version < 6
-			) {
-				corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 			}
 			parseSessionControlRecord(records[index], index + 1, filePath);
 			continue;
@@ -2225,7 +2246,7 @@ function parseCatalogRecord(bytes: Buffer, filePath: string, lineNumber: number)
 function addCatalogRecord(state: SessionCatalogState, record: unknown, index: number, filePath: string): void {
 	const raw = validateRawSessionRecord(record, index, filePath);
 	if (index === 0) {
-		const version = typeof raw.version === "number" ? raw.version : 1;
+		const version = validateSourceSessionHeaderVersion(raw, filePath);
 		if (version >= 6 && version < CURRENT_SESSION_VERSION) {
 			migrateLegacyPermissionFields(raw, filePath, 1, DEFAULT_PERMISSION_PRESET);
 			if (isJsonObject(raw.agent)) {
@@ -2238,14 +2259,12 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 
 	const header = state.header;
 	if (!header) corruptSession(filePath, 1, "Session journal is empty");
+	validateSessionRecordVersion(raw.type as string, header.version ?? 1, filePath, index + 1);
 	if ((header.version ?? 1) < CURRENT_SESSION_VERSION) {
 		migrateLegacyPermissionJournalRecord(raw, filePath, index + 1);
 	}
 	const type = raw.type as string;
 	if (type.startsWith("runtime_")) {
-		if ((header.version ?? 1) < 5) {
-			corruptSession(filePath, index + 1, "Runtime control entries require a v5 session header");
-		}
 		if (!isRuntimeControlEntryType(type)) {
 			corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
 		}
@@ -2259,14 +2278,8 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 		return;
 	}
 	if (isSessionControlEntryType(type)) {
-		if (isSessionDirectoryControlEntryType(type) && (header.version ?? 1) < 8) {
-			corruptSession(filePath, index + 1, "Directory control entries require a v8 session header");
-		}
 		if (isSessionDirectoryControlEntryType(type) && (header.mode ?? DEFAULT_AGENT_MODE) !== "code") {
 			corruptSession(filePath, index + 1, "Directory controls are only valid for Code sessions");
-		}
-		if (!isSessionDirectoryControlEntryType(type) && (header.version ?? 1) < 6) {
-			corruptSession(filePath, index + 1, "Session control entries require a v6 session header");
 		}
 		validateControlGraphEntry(
 			parseSessionControlRecord(raw, index + 1, filePath),
