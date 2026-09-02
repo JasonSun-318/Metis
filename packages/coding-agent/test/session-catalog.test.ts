@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { linkSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { linkSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -95,6 +95,54 @@ describe("session catalog", () => {
 			},
 		]);
 		expect(sessions[0].modified.getTime()).toBe(20);
+		expect(journalOpens).toEqual({ readOnly: 0, writable: 0 });
+	});
+
+	it("lists a v13 permission journal in memory without rewriting it", async () => {
+		const path = join(directory, "legacy-permissions.jsonl");
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 13,
+				id: "legacy-permissions",
+				timestamp,
+				cwd: "/tmp",
+				mode: "code",
+				permissionMode: "ask",
+				reviewerEnabled: true,
+			},
+			{
+				type: "session_permissions",
+				id: "permission-1",
+				parentId: null,
+				timestamp,
+				permissionMode: "full",
+				reviewerEnabled: false,
+			},
+			{
+				type: "session_permission_decision",
+				id: "decision-1",
+				parentId: null,
+				timestamp,
+				actionId: "action-1",
+				toolName: "bash",
+				source: "user",
+				decision: "allow",
+				reason: "approved once",
+			},
+			{
+				type: "message",
+				id: "user",
+				parentId: null,
+				timestamp,
+				message: { role: "user", content: "hello", timestamp: 10 },
+			},
+		]);
+		const original = readFileSync(path, "utf8");
+
+		const sessions = await SessionManager.list("/tmp", directory);
+		expect(sessions).toMatchObject([{ path, id: "legacy-permissions", messageCount: 1, firstMessage: "hello" }]);
+		expect(readFileSync(path, "utf8")).toBe(original);
 		expect(journalOpens).toEqual({ readOnly: 0, writable: 0 });
 	});
 

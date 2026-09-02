@@ -1261,6 +1261,39 @@ function migrateLegacyPermissionFields(
 	delete value.reviewerEnabled;
 }
 
+function migrateLegacySessionPermissionsRecord(
+	value: Record<string, unknown>,
+	filePath: string,
+	lineNumber: number,
+): void {
+	const keys = Object.keys(value);
+	const allowed = new Set(["type", "id", "parentId", "timestamp", "permissionMode", "reviewerEnabled"]);
+	if (keys.some((key) => !allowed.has(key))) {
+		corruptSession(filePath, lineNumber, "Legacy permission control has an unsupported field");
+	}
+	for (const key of ["type", "id", "parentId", "timestamp", "permissionMode"]) {
+		if (!Object.hasOwn(value, key)) {
+			corruptSession(filePath, lineNumber, "Legacy permission control is missing a required field");
+		}
+	}
+	migrateLegacyPermissionFields(value, filePath, lineNumber);
+	value.type = "session_permission_preset";
+}
+
+function migrateLegacyPermissionJournalRecord(
+	value: Record<string, unknown>,
+	filePath: string,
+	lineNumber: number,
+): void {
+	if (value.type === "session_permissions") {
+		migrateLegacySessionPermissionsRecord(value, filePath, lineNumber);
+		return;
+	}
+	if (value.type === "session_permission_decision") {
+		value.type = "session_permission_audit";
+	}
+}
+
 function migrateV13ToV14(entries: FileEntry[], filePath: string): void {
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index] as unknown as Record<string, unknown>;
@@ -1273,24 +1306,7 @@ function migrateV13ToV14(entries: FileEntry[], filePath: string): void {
 			entry.version = 14;
 			continue;
 		}
-		if (entry.type === "session_permissions") {
-			const keys = Object.keys(entry);
-			const allowed = new Set(["type", "id", "parentId", "timestamp", "permissionMode", "reviewerEnabled"]);
-			if (keys.some((key) => !allowed.has(key))) {
-				corruptSession(filePath, lineNumber, "Legacy permission control has an unsupported field");
-			}
-			for (const key of ["type", "id", "parentId", "timestamp", "permissionMode"]) {
-				if (!Object.hasOwn(entry, key)) {
-					corruptSession(filePath, lineNumber, "Legacy permission control is missing a required field");
-				}
-			}
-			migrateLegacyPermissionFields(entry, filePath, lineNumber);
-			entry.type = "session_permission_preset";
-			continue;
-		}
-		if (entry.type === "session_permission_decision") {
-			entry.type = "session_permission_audit";
-		}
+		migrateLegacyPermissionJournalRecord(entry, filePath, lineNumber);
 	}
 }
 
@@ -2209,12 +2225,22 @@ function parseCatalogRecord(bytes: Buffer, filePath: string, lineNumber: number)
 function addCatalogRecord(state: SessionCatalogState, record: unknown, index: number, filePath: string): void {
 	const raw = validateRawSessionRecord(record, index, filePath);
 	if (index === 0) {
+		const version = typeof raw.version === "number" ? raw.version : 1;
+		if (version >= 6 && version < CURRENT_SESSION_VERSION) {
+			migrateLegacyPermissionFields(raw, filePath, 1, DEFAULT_PERMISSION_PRESET);
+			if (isJsonObject(raw.agent)) {
+				migrateLegacyPermissionFields(raw.agent, filePath, 1);
+			}
+		}
 		state.header = validateSessionHeader(raw, filePath);
 		return;
 	}
 
 	const header = state.header;
 	if (!header) corruptSession(filePath, 1, "Session journal is empty");
+	if ((header.version ?? 1) < CURRENT_SESSION_VERSION) {
+		migrateLegacyPermissionJournalRecord(raw, filePath, index + 1);
+	}
 	const type = raw.type as string;
 	if (type.startsWith("runtime_")) {
 		if ((header.version ?? 1) < 5) {
