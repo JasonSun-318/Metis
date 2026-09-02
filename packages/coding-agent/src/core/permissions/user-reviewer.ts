@@ -272,17 +272,6 @@ export class UserPermissionReviewer implements PermissionReviewer {
 			}
 		}
 
-		return validateReviewResult(
-			request,
-			Object.freeze({
-				kind: approval.decision,
-				reviewer: "user",
-				assessedRisk: request.decision.riskLevel,
-				userAuthorization: "high",
-				scopeComplete,
-				rationale:
-					approval.decision === "allow" ? "Explicitly allowed by the user" : "Explicitly denied by the user",
-			}),
-		);
+		return validateReviewResult(request, Object.freeze({ kind: approval.decision, reviewer: "user" as const }));
 	}
 }

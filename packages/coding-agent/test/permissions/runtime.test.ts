@@ -12,17 +12,10 @@ import {
 import { actionInput, rootRecursiveDelete, sensitiveRead } from "./fixtures.ts";
 import { highRiskRequest, reviewRequest, safeRequest } from "./runtime-fixtures.ts";
 
-function allow(
-	reviewer: "model" | "user" = "model",
-	assessedRisk: "high" | "critical" = "high",
-): PermissionReviewResult {
+function allow(reviewer: "model" | "user" = "model"): PermissionReviewResult {
 	return Object.freeze({
 		kind: "allow",
 		reviewer,
-		assessedRisk,
-		userAuthorization: "high",
-		scopeComplete: true,
-		rationale: "The direct user request authorizes this exact action.",
 	});
 }
 
@@ -247,7 +240,7 @@ describe("ToolAuthorizationRuntime", () => {
 	it("never lets a remembered rule bypass a fresh critical-risk user decision", async () => {
 		const action = sensitiveRead();
 		const model = reviewer(allow());
-		const user = reviewer(allow("user", "critical"));
+		const user = reviewer(allow("user"));
 		const runtime = new ToolAuthorizationRuntime({
 			sessionId: "session-1",
 			projectPath: action.workspaceRoots[0],

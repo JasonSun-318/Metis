@@ -3,7 +3,6 @@ export type SandboxPolicy = "read-only" | "workspace-write" | "danger-full-acces
 export type ApprovalPolicy = "user" | "auto-review" | "deny";
 export type MinimumReviewer = "model" | "user";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
-export type UserAuthorization = "unknown" | "low" | "medium" | "high";
 export type ToolProvenance = "builtin" | "host" | "extension" | "sdk" | "mcp";
 export type PermissionEffect =
 	| "sensitive-read"

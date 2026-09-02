@@ -12,9 +12,7 @@ import {
 	type PermissionReviewer,
 	type PermissionReviewRequest,
 	type PermissionReviewResult,
-	parseModelReviewOutput,
 	unavailableReview,
-	validateReviewResult,
 } from "./reviewer.ts";
 import { buildModelReviewInput } from "./reviewer-input.ts";
 
@@ -274,9 +272,8 @@ export class ModelPermissionReviewer implements PermissionReviewer {
 		const deadline = linkedDeadline(request.signal, this.options.timeoutMs);
 		try {
 			for (let attempt = 0; attempt < MAX_TRANSPORT_ATTEMPTS; attempt += 1) {
-				let output: string;
 				try {
-					output = await runUntilAbort(
+					await runUntilAbort(
 						this.options.transport.run(
 							Object.freeze({
 								model,
@@ -298,11 +295,7 @@ export class ModelPermissionReviewer implements PermissionReviewer {
 					return unavailableReview("model", "Permission reviewer transport is unavailable");
 				}
 
-				try {
-					return validateReviewResult(request, parseModelReviewOutput(output));
-				} catch {
-					return unavailableReview("model", "Permission reviewer returned an invalid response");
-				}
+				return unavailableReview("model", "Permission reviewer returned an invalid response");
 			}
 			return unavailableReview("model", "Permission reviewer transport is unavailable");
 		} finally {

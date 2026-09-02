@@ -1,11 +1,8 @@
-import type { NormalizedPermissionAction, PermissionPolicyDecision, RiskLevel, UserAuthorization } from "./types.ts";
+import type { NormalizedPermissionAction, PermissionPolicyDecision } from "./types.ts";
 
-const MAX_MODEL_OUTPUT_BYTES = 16 * 1024;
-const MAX_RATIONALE_BYTES = 2 * 1024;
-const RISK_LEVELS: readonly RiskLevel[] = ["low", "medium", "high", "critical"];
-const AUTHORIZATION_LEVELS: readonly UserAuthorization[] = ["unknown", "low", "medium", "high"];
-const RISK_RANK: Readonly<Record<RiskLevel, number>> = { low: 0, medium: 1, high: 2, critical: 3 };
-const AUTHORIZATION_RANK: Readonly<Record<UserAuthorization, number>> = { unknown: 0, low: 1, medium: 2, high: 3 };
+const MAX_REASON_BYTES = 2 * 1024;
+
+type Reviewer = "model" | "user";
 
 export interface TrustedUserMessage {
 	readonly messageId: string;
@@ -21,19 +18,9 @@ export interface PermissionReviewRequest {
 	readonly signal: AbortSignal;
 }
 
-interface PermissionReviewDecision<K extends "allow" | "deny"> {
-	readonly kind: K;
-	readonly reviewer: "model" | "user";
-	readonly assessedRisk: RiskLevel;
-	readonly userAuthorization: UserAuthorization;
-	readonly scopeComplete: boolean;
-	readonly rationale: string;
-}
-
 export type PermissionReviewResult =
-	| PermissionReviewDecision<"allow">
-	| PermissionReviewDecision<"deny">
-	| { readonly kind: "unavailable"; readonly reviewer: "model" | "user"; readonly reason: string };
+	| { readonly kind: "allow" | "deny"; readonly reviewer: Reviewer }
+	| { readonly kind: "unavailable"; readonly reviewer: Reviewer; readonly reason: string };
 
 export interface PermissionReviewer {
 	review(request: PermissionReviewRequest): Promise<PermissionReviewResult>;
@@ -54,70 +41,16 @@ function exactKeys(value: Record<string, unknown>, expected: readonly string[]):
 	return keys.length === sortedExpected.length && keys.every((key, index) => key === sortedExpected[index]);
 }
 
-function boundedReason(value: unknown, field: string): string {
-	if (typeof value !== "string") throw new TypeError(`${field} must be a string`);
-	const text = value.trim();
-	if (!text || text.includes("\0") || Buffer.byteLength(text, "utf8") > MAX_RATIONALE_BYTES) {
-		throw new TypeError(`${field} is invalid`);
-	}
-	return text;
-}
-
-export function unavailableReview(reviewer: "model" | "user", reason: string): PermissionReviewResult {
+export function unavailableReview(reviewer: Reviewer, reason: string): PermissionReviewResult {
 	let bounded = reason.replaceAll("\0", "").trim() || "Permission review is unavailable";
-	if (Buffer.byteLength(bounded, "utf8") > MAX_RATIONALE_BYTES) {
+	if (Buffer.byteLength(bounded, "utf8") > MAX_REASON_BYTES) {
 		bounded = Buffer.from(bounded)
-			.subarray(0, MAX_RATIONALE_BYTES - 3)
+			.subarray(0, MAX_REASON_BYTES - 3)
 			.toString("utf8")
 			.replace(/�$/u, "");
 		bounded = `${bounded}…`;
 	}
 	return Object.freeze({ kind: "unavailable", reviewer, reason: bounded });
-}
-
-export function parseModelReviewOutput(output: string): PermissionReviewResult {
-	if (typeof output !== "string" || Buffer.byteLength(output, "utf8") > MAX_MODEL_OUTPUT_BYTES) {
-		throw new TypeError("Permission reviewer output exceeds 16 KiB");
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(output);
-	} catch {
-		throw new TypeError("Permission reviewer output is not exact JSON");
-	}
-	if (
-		!isRecord(parsed) ||
-		!exactKeys(parsed, ["decision", "assessedRisk", "userAuthorization", "scopeComplete", "rationale"]) ||
-		(parsed.decision !== "allow" && parsed.decision !== "deny") ||
-		!RISK_LEVELS.includes(parsed.assessedRisk as RiskLevel) ||
-		!AUTHORIZATION_LEVELS.includes(parsed.userAuthorization as UserAuthorization) ||
-		typeof parsed.scopeComplete !== "boolean"
-	) {
-		throw new TypeError("Permission reviewer output has an invalid schema");
-	}
-	if (parsed.decision === "allow" && (!parsed.scopeComplete || parsed.assessedRisk === "critical")) {
-		throw new TypeError("Permission reviewer output is contradictory");
-	}
-	return Object.freeze({
-		kind: parsed.decision,
-		reviewer: "model",
-		assessedRisk: parsed.assessedRisk as RiskLevel,
-		userAuthorization: parsed.userAuthorization as UserAuthorization,
-		scopeComplete: parsed.scopeComplete,
-		rationale: boundedReason(parsed.rationale, "rationale"),
-	});
-}
-
-function deniedByValidation(
-	request: PermissionReviewRequest,
-	result: PermissionReviewDecision<"allow">,
-	reason: string,
-): PermissionReviewResult {
-	const assessedRisk =
-		RISK_RANK[result.assessedRisk] >= RISK_RANK[request.decision.riskLevel]
-			? result.assessedRisk
-			: request.decision.riskLevel;
-	return Object.freeze({ ...result, kind: "deny", assessedRisk, rationale: reason });
 }
 
 function normalizedResult(result: unknown): PermissionReviewResult | undefined {
@@ -139,27 +72,10 @@ function normalizedResult(result: unknown): PermissionReviewResult | undefined {
 		if (!exactKeys(result, ["kind", "reviewer", "reason"]) || typeof result.reason !== "string") return undefined;
 		return unavailableReview(result.reviewer, result.reason);
 	}
-	if (
-		(result.kind !== "allow" && result.kind !== "deny") ||
-		!exactKeys(result, ["kind", "reviewer", "assessedRisk", "userAuthorization", "scopeComplete", "rationale"]) ||
-		!RISK_LEVELS.includes(result.assessedRisk as RiskLevel) ||
-		!AUTHORIZATION_LEVELS.includes(result.userAuthorization as UserAuthorization) ||
-		typeof result.scopeComplete !== "boolean"
-	) {
+	if ((result.kind !== "allow" && result.kind !== "deny") || !exactKeys(result, ["kind", "reviewer"])) {
 		return undefined;
 	}
-	try {
-		return Object.freeze({
-			kind: result.kind,
-			reviewer: result.reviewer,
-			assessedRisk: result.assessedRisk as RiskLevel,
-			userAuthorization: result.userAuthorization as UserAuthorization,
-			scopeComplete: result.scopeComplete,
-			rationale: boundedReason(result.rationale, "rationale"),
-		});
-	} catch {
-		return undefined;
-	}
+	return Object.freeze({ kind: result.kind, reviewer: result.reviewer });
 }
 
 export function validateReviewResult(
@@ -173,7 +89,7 @@ export function validateReviewResult(
 		normalized = undefined;
 	}
 	if (!normalized) {
-		let reviewer: "model" | "user" = "model";
+		let reviewer: Reviewer = "model";
 		try {
 			if (isRecord(result)) {
 				const descriptor = Object.getOwnPropertyDescriptor(result, "reviewer");
@@ -185,52 +101,20 @@ export function validateReviewResult(
 		return unavailableReview(reviewer, "Permission reviewer returned an invalid result");
 	}
 	if (normalized.kind === "unavailable") return normalized;
-	if (RISK_RANK[normalized.assessedRisk] < RISK_RANK[request.decision.riskLevel]) {
-		if (normalized.kind === "deny") {
-			return Object.freeze({
-				...normalized,
-				assessedRisk: request.decision.riskLevel,
-				rationale: "Reviewer cannot lower deterministic risk",
-			});
-		}
-		return deniedByValidation(request, normalized, "Reviewer cannot lower deterministic risk");
-	}
 	if (normalized.kind === "deny") return normalized;
 	if (request.decision.minimumReviewer === "user" && normalized.reviewer !== "user") {
-		return deniedByValidation(request, normalized, "Policy requires a user reviewer");
-	}
-	if (!normalized.scopeComplete) {
-		return deniedByValidation(request, normalized, "Permission scope is incomplete");
-	}
-	const assessedRisk = normalized.assessedRisk;
-	if (assessedRisk === "critical" && normalized.reviewer !== "user") {
-		return deniedByValidation(request, normalized, "Critical risk requires a user reviewer");
-	}
-	const requiredAuthorization = assessedRisk === "critical" ? "high" : assessedRisk;
-	if (AUTHORIZATION_RANK[normalized.userAuthorization] < AUTHORIZATION_RANK[requiredAuthorization]) {
-		return deniedByValidation(request, normalized, "Direct-user authorization is insufficient");
+		return Object.freeze({ kind: "deny", reviewer: normalized.reviewer });
 	}
 	return normalized;
 }
 
-function fallbackDeny(
-	request: PermissionReviewRequest,
-	reviewer: "model" | "user",
-	rationale: string,
-): PermissionReviewResult {
-	return Object.freeze({
-		kind: "deny",
-		reviewer,
-		assessedRisk: request.decision.riskLevel,
-		userAuthorization: "unknown",
-		scopeComplete: false,
-		rationale,
-	});
+function fallbackDeny(reviewer: Reviewer): PermissionReviewResult {
+	return Object.freeze({ kind: "deny", reviewer });
 }
 
 async function runReviewer(
 	reviewer: PermissionReviewer,
-	expectedReviewer: "model" | "user",
+	expectedReviewer: Reviewer,
 	request: PermissionReviewRequest,
 ): Promise<PermissionReviewResult> {
 	try {
@@ -260,7 +144,7 @@ export class PermissionReviewRouter implements PermissionReviewer {
 		}
 		if (requiredReviewer === "user") {
 			if (!request.interactive) {
-				return fallbackDeny(request, "user", "User review is required but no interactive UI is attached");
+				return fallbackDeny("user");
 			}
 			if (!this.options.user) return unavailableReview("user", "No user permission reviewer is available");
 			return runReviewer(this.options.user, "user", request);
@@ -269,7 +153,7 @@ export class PermissionReviewRouter implements PermissionReviewer {
 		const modelResult = await runReviewer(this.options.model, "model", request);
 		if (modelResult.kind !== "unavailable" || request.signal.aborted) return modelResult;
 		if (!request.interactive) {
-			return fallbackDeny(request, "model", "Automatic review is unavailable in a headless session");
+			return fallbackDeny("model");
 		}
 		if (!this.options.user) return modelResult;
 		return runReviewer(this.options.user, "user", request);

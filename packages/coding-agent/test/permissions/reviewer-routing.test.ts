@@ -20,10 +20,6 @@ function modelResult(
 	return {
 		kind: "allow",
 		reviewer: "model",
-		assessedRisk: "medium",
-		userAuthorization: "medium",
-		scopeComplete: true,
-		rationale: "Exact direct-user authorization",
 		...overrides,
 	};
 }
@@ -34,10 +30,6 @@ function userResult(
 	return {
 		kind: "allow",
 		reviewer: "user",
-		assessedRisk: "medium",
-		userAuthorization: "high",
-		scopeComplete: true,
-		rationale: "Explicit user approval",
 		...overrides,
 	};
 }
@@ -89,7 +81,6 @@ describe("PermissionReviewRouter", () => {
 		expect(await router.review(reviewInput({ interactive: false }))).toMatchObject({
 			kind: "deny",
 			reviewer: "model",
-			userAuthorization: "unknown",
 		});
 		expect(user.review).not.toHaveBeenCalled();
 	});
@@ -138,7 +129,6 @@ describe("PermissionReviewRouter", () => {
 	it("revalidates authority-broadening model output before escalating", async () => {
 		const model = reviewer({
 			...modelResult(),
-			assessedRisk: "low",
 			grant: { writeRoots: ["/"] },
 		} as never);
 		const user = reviewer(userResult());

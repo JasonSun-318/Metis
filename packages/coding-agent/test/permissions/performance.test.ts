@@ -62,10 +62,6 @@ describe("permission performance gates", () => {
 				return {
 					kind: "allow" as const,
 					reviewer: "model" as const,
-					assessedRisk: "high" as const,
-					userAuthorization: "high" as const,
-					scopeComplete: true,
-					rationale: "Released after safe work finished.",
 				};
 			}),
 		};
@@ -107,10 +103,6 @@ describe("permission performance gates", () => {
 				return {
 					kind: "deny" as const,
 					reviewer: "model" as const,
-					assessedRisk: "high" as const,
-					userAuthorization: "unknown" as const,
-					scopeComplete: true,
-					rationale: "unreachable",
 				};
 			}),
 		};
