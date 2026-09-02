@@ -76,7 +76,7 @@ describe("permission approval interaction", () => {
 	it("renders exact risk, target, path, and domain details without secrets or hidden reasoning", async () => {
 		const { container } = mount(approval({
 			priorReviewer: "model",
-			priorReviewerOutcome: "insufficient-authorization",
+			priorReviewerOutcome: "unavailable",
 			riskLevel: "critical",
 			executionTarget: "external",
 		}));

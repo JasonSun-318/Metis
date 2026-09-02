@@ -611,9 +611,7 @@ export const PermissionApprovalInteractionViewSchema = StrictObject({
 	scopeComplete: Type.Boolean(),
 	details: Type.Array(PermissionOperationRowViewSchema, { maxItems: MAX_PERMISSION_OPERATION_ROWS }),
 	priorReviewer: Type.Optional(Type.Literal("model")),
-	priorReviewerOutcome: Type.Optional(
-		Type.Union([Type.Literal("deny"), Type.Literal("unavailable"), Type.Literal("insufficient-authorization")]),
-	),
+	priorReviewerOutcome: Type.Optional(Type.Union([Type.Literal("deny"), Type.Literal("unavailable")])),
 	choices: Type.Array(PermissionApprovalChoiceSchema, { minItems: 1, maxItems: 4, uniqueItems: true }),
 });
 

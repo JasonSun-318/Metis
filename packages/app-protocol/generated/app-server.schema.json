@@ -7722,10 +7722,6 @@
                                 {
                                   "type": "string",
                                   "const": "unavailable"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "insufficient-authorization"
                                 }
                               ]
                             },
@@ -22479,10 +22475,6 @@
                                       {
                                         "type": "string",
                                         "const": "unavailable"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "insufficient-authorization"
                                       }
                                     ]
                                   },
@@ -52588,10 +52580,6 @@
                                   {
                                     "type": "string",
                                     "const": "unavailable"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "insufficient-authorization"
                                   }
                                 ]
                               },
@@ -76707,10 +76695,6 @@
                 {
                   "type": "string",
                   "const": "unavailable"
-                },
-                {
-                  "type": "string",
-                  "const": "insufficient-authorization"
                 }
               ]
             },
@@ -85364,10 +85348,6 @@
                             {
                               "type": "string",
                               "const": "unavailable"
-                            },
-                            {
-                              "type": "string",
-                              "const": "insufficient-authorization"
                             }
                           ]
                         },
@@ -88846,10 +88826,6 @@
                       {
                         "type": "string",
                         "const": "unavailable"
-                      },
-                      {
-                        "type": "string",
-                        "const": "insufficient-authorization"
                       }
                     ]
                   },

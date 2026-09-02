@@ -16,6 +16,7 @@ export interface PermissionReviewRequest {
 	readonly redactedArguments: unknown;
 	readonly interactive: boolean;
 	readonly signal: AbortSignal;
+	readonly priorModelOutcome?: "deny" | "unavailable";
 }
 
 export type PermissionReviewResult =
@@ -151,11 +152,11 @@ export class PermissionReviewRouter implements PermissionReviewer {
 		}
 
 		const modelResult = await runReviewer(this.options.model, "model", request);
-		if (modelResult.kind !== "unavailable" || request.signal.aborted) return modelResult;
+		if (modelResult.kind === "allow" || request.signal.aborted) return modelResult;
 		if (!request.interactive) {
-			return fallbackDeny("model");
+			return modelResult.kind === "deny" ? modelResult : fallbackDeny("model");
 		}
 		if (!this.options.user) return modelResult;
-		return runReviewer(this.options.user, "user", request);
+		return runReviewer(this.options.user, "user", Object.freeze({ ...request, priorModelOutcome: modelResult.kind }));
 	}
 }

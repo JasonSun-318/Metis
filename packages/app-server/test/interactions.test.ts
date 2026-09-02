@@ -512,6 +512,23 @@ describe("InteractionBroker", () => {
 		expect(serialized).not.toMatch(/"presentation":"session_permission_approval"/);
 	});
 
+	it.each(["deny", "unavailable"] as const)("projects a prior model %s without rationale", async (outcome) => {
+		const interactionId = "00000000-0000-4000-8000-000000000321";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "deny-once" };
+
+		await broker.requestPermissionApproval(SESSION_ID, childApproval({ args: { automaticReview: outcome } }));
+
+		expect(permissionInteraction(peer)).toMatchObject({
+			priorReviewer: "model",
+			priorReviewerOutcome: outcome,
+		});
+		expect(JSON.stringify(permissionInteraction(peer))).not.toContain("rationale");
+		expect(JSON.stringify(permissionInteraction(peer))).not.toContain("insufficient-authorization");
+	});
+
 	it("returns a project-scoped decision only for an eligible primary action", async () => {
 		const interactionId = "00000000-0000-4000-8000-000000000322";
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });

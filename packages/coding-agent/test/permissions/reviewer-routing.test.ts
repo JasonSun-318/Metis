@@ -48,6 +48,7 @@ describe("PermissionReviewRouter", () => {
 		});
 		expect(model.review).not.toHaveBeenCalled();
 		expect(user.review).toHaveBeenCalledOnce();
+		expect(user.review.mock.calls[0]?.[0]).not.toHaveProperty("priorModelOutcome");
 	});
 
 	it("returns a valid model decision without opening user approval", async () => {
@@ -60,6 +61,18 @@ describe("PermissionReviewRouter", () => {
 		expect(user.review).not.toHaveBeenCalled();
 	});
 
+	it("escalates a model deny to the attached interactive user", async () => {
+		const model = reviewer({ kind: "deny", reviewer: "model" });
+		const user = reviewer({ kind: "allow", reviewer: "user" });
+		const router = new PermissionReviewRouter({ model, user });
+
+		expect(await router.review(reviewInput({ interactive: true }))).toEqual({
+			kind: "allow",
+			reviewer: "user",
+		});
+		expect(user.review).toHaveBeenCalledWith(expect.objectContaining({ priorModelOutcome: "deny" }));
+	});
+
 	it("escalates an unavailable model to the attached interactive user", async () => {
 		const model = reviewer({ kind: "unavailable", reviewer: "model", reason: "provider unavailable" });
 		const user = reviewer(userResult());
@@ -69,16 +82,23 @@ describe("PermissionReviewRouter", () => {
 			kind: "allow",
 			reviewer: "user",
 		});
-		expect(model.review).toHaveBeenCalledOnce();
-		expect(user.review).toHaveBeenCalledOnce();
+		expect(user.review).toHaveBeenCalledWith(expect.objectContaining({ priorModelOutcome: "unavailable" }));
 	});
 
 	it("denies instead of escalating in a headless session", async () => {
-		const model = reviewer({ kind: "unavailable", reviewer: "model", reason: "provider unavailable" });
+		const unavailable = reviewer({ kind: "unavailable", reviewer: "model", reason: "provider unavailable" });
+		const denied = reviewer({ kind: "deny", reviewer: "model" });
 		const user = reviewer(userResult());
-		const router = new PermissionReviewRouter({ model, user });
 
-		expect(await router.review(reviewInput({ interactive: false }))).toMatchObject({
+		expect(
+			await new PermissionReviewRouter({ model: unavailable, user }).review(reviewInput({ interactive: false })),
+		).toMatchObject({
+			kind: "deny",
+			reviewer: "model",
+		});
+		expect(
+			await new PermissionReviewRouter({ model: denied, user }).review(reviewInput({ interactive: false })),
+		).toEqual({
 			kind: "deny",
 			reviewer: "model",
 		});
@@ -99,13 +119,17 @@ describe("PermissionReviewRouter", () => {
 		expect(user.review).not.toHaveBeenCalled();
 	});
 
-	it("does not turn an explicit model deny into a user prompt", async () => {
-		const model = reviewer(modelResult({ kind: "deny" }));
-		const user = reviewer(userResult());
+	it("treats an explicit user deny as final", async () => {
+		const model = reviewer({ kind: "deny", reviewer: "model" });
+		const user = reviewer({ kind: "deny", reviewer: "user" });
 		const router = new PermissionReviewRouter({ model, user });
 
-		expect(await router.review(reviewInput())).toMatchObject({ kind: "deny", reviewer: "model" });
-		expect(user.review).not.toHaveBeenCalled();
+		expect(await router.review(reviewInput({ interactive: true }))).toEqual({
+			kind: "deny",
+			reviewer: "user",
+		});
+		expect(model.review).toHaveBeenCalledOnce();
+		expect(user.review).toHaveBeenCalledOnce();
 	});
 
 	it("lets cancellation override an adapter allow", async () => {

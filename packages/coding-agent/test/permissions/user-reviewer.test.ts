@@ -193,6 +193,20 @@ describe("UserPermissionReviewer", () => {
 		expect(serialized).toContain("<redacted>");
 	});
 
+	it.each(["deny", "unavailable"] as const)("projects the prior model %s without rationale", async (outcome) => {
+		const ui = interaction({ decision: "deny" });
+		const reviewer = new UserPermissionReviewer({ requestApproval: ui.requestApproval, projectPath });
+		const request = reviewerRequest(projectPath, {
+			decision: { ...reviewerRequest(projectPath).decision, minimumReviewer: "model" },
+			priorModelOutcome: outcome,
+		});
+
+		await reviewer.review(request);
+
+		expect(ui.calls[0]?.args).toMatchObject({ automaticReview: outcome });
+		expect(JSON.stringify(ui.calls[0])).not.toContain("rationale");
+	});
+
 	it.each([
 		["closed", () => Promise.reject(new Error("closed"))],
 		["disconnected", () => Promise.reject(new Error("disconnected"))],

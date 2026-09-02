@@ -145,14 +145,8 @@ function priorReviewFields(
 	request: PermissionApprovalRequest,
 ): Pick<Extract<InteractionView, { kind: "session_permission_approval" }>, "priorReviewer" | "priorReviewerOutcome"> {
 	const automaticReview = recordArgs(request.args)?.automaticReview;
-	if (automaticReview === "unavailable-or-insufficient") {
-		return { priorReviewer: "model", priorReviewerOutcome: "unavailable" };
-	}
-	if (automaticReview === "deny") {
-		return { priorReviewer: "model", priorReviewerOutcome: "deny" };
-	}
-	if (automaticReview === "insufficient-authorization") {
-		return { priorReviewer: "model", priorReviewerOutcome: "insufficient-authorization" };
+	if (automaticReview === "deny" || automaticReview === "unavailable") {
+		return { priorReviewer: "model", priorReviewerOutcome: automaticReview };
 	}
 	return {};
 }

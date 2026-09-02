@@ -150,7 +150,9 @@ function structuredApprovalRequest(
 			writePaths: action.writePaths,
 			networkEndpoints: action.networkEndpoints,
 			automaticReview:
-				decision.minimumReviewer === "user" ? "deterministic-policy-requires-user" : "unavailable-or-insufficient",
+				request.priorModelOutcome === "deny" || request.priorModelOutcome === "unavailable"
+					? request.priorModelOutcome
+					: "deterministic-policy-requires-user",
 			redactedArguments,
 		}),
 		reason: decision.reason,
