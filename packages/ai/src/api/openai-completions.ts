@@ -40,7 +40,7 @@ import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
 /**
@@ -491,12 +491,11 @@ export const streamSimple: StreamFunction<"openai-completions", SimpleStreamOpti
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
-	const toolChoice = (options as OpenAICompletionsOptions | undefined)?.toolChoice;
 
 	return stream(model, context, {
 		...base,
 		reasoningEffort,
-		toolChoice,
+		toolChoice: mapSimpleToolChoice(options?.toolChoice, "required"),
 	} satisfies OpenAICompletionsOptions);
 };
 

@@ -37,7 +37,12 @@ import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
-import { adjustMaxTokensForThinking, buildBaseOptions, clampMaxTokensToContext } from "./simple-options.ts";
+import {
+	adjustMaxTokensForThinking,
+	buildBaseOptions,
+	clampMaxTokensToContext,
+	mapSimpleToolChoice,
+} from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
 /**
@@ -789,8 +794,9 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	assertRequestAuth(model.provider, options?.apiKey, options?.headers);
 
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
+	const toolChoice = mapSimpleToolChoice(options?.toolChoice, "any");
 	if (!options?.reasoning) {
-		return stream(model, context, { ...base, thinkingEnabled: false } satisfies AnthropicOptions);
+		return stream(model, context, { ...base, thinkingEnabled: false, toolChoice } satisfies AnthropicOptions);
 	}
 
 	// For models with adaptive thinking: use an effort level.
@@ -801,6 +807,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 			...base,
 			thinkingEnabled: true,
 			effort,
+			toolChoice,
 		} satisfies AnthropicOptions);
 	}
 
@@ -820,6 +827,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 		maxTokens,
 		thinkingEnabled: true,
 		thinkingBudgetTokens: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),
+		toolChoice,
 	} satisfies AnthropicOptions);
 };
 

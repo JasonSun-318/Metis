@@ -33,7 +33,7 @@ import {
 	mapToolChoice,
 	retainThoughtSignature,
 } from "./google-shared.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 export interface GoogleOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "any";
@@ -292,8 +292,9 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
 	}
 
 	const base = buildBaseOptions(model, context, options, apiKey);
+	const toolChoice = mapSimpleToolChoice(options?.toolChoice, "any");
 	if (!options?.reasoning) {
-		return stream(model, context, { ...base, thinking: { enabled: false } } satisfies GoogleOptions);
+		return stream(model, context, { ...base, thinking: { enabled: false }, toolChoice } satisfies GoogleOptions);
 	}
 
 	const clampedReasoning = clampThinkingLevel(model, options.reasoning);
@@ -307,6 +308,7 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
 				enabled: true,
 				level: getThinkingLevel(effort, googleModel),
 			},
+			toolChoice,
 		} satisfies GoogleOptions);
 	}
 
@@ -316,6 +318,7 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
 			enabled: true,
 			budgetTokens: getGoogleBudget(googleModel, effort, options.thinkingBudgets),
 		},
+		toolChoice,
 	} satisfies GoogleOptions);
 };
 

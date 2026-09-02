@@ -23,7 +23,7 @@ import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 // OpenAI Responses rejects max_output_tokens below 16: https://gitee.com/sun124578963_0/metis/issues/6265
@@ -185,6 +185,7 @@ export const streamSimple: StreamFunction<"openai-responses", SimpleStreamOption
 	return stream(model, context, {
 		...base,
 		reasoningEffort,
+		toolChoice: mapSimpleToolChoice(options?.toolChoice, "required"),
 	} satisfies OpenAIResponsesOptions);
 };
 

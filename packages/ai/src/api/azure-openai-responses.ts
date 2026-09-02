@@ -16,7 +16,7 @@ import { headersToRecord } from "../utils/headers.ts";
 import { getProviderEnvValue } from "../utils/provider-env.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 const DEFAULT_AZURE_API_VERSION = "v1";
 const AZURE_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode", "azure-openai-responses"]);
@@ -58,6 +58,7 @@ export interface AzureOpenAIResponsesOptions extends StreamOptions {
 	azureResourceName?: string;
 	azureBaseUrl?: string;
 	azureDeploymentName?: string;
+	toolChoice?: ResponseCreateParamsStreaming["tool_choice"];
 }
 
 /**
@@ -158,6 +159,7 @@ export const streamSimple: StreamFunction<"azure-openai-responses", SimpleStream
 	return stream(model, context, {
 		...base,
 		reasoningEffort,
+		toolChoice: mapSimpleToolChoice(options?.toolChoice, "required"),
 	} satisfies AzureOpenAIResponsesOptions);
 };
 
@@ -275,6 +277,10 @@ function buildParams(
 
 	if (context.tools && context.tools.length > 0) {
 		params.tools = convertResponsesTools(context.tools);
+	}
+
+	if (options?.toolChoice !== undefined) {
+		params.tool_choice = options.toolChoice;
 	}
 
 	if (model.reasoning) {

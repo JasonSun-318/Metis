@@ -48,7 +48,7 @@ import { headersToRecord } from "../utils/headers.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 // ============================================================================
 // Configuration
@@ -471,6 +471,7 @@ export const streamSimple: StreamFunction<"openai-codex-responses", SimpleStream
 	return stream(model, context, {
 		...base,
 		reasoningEffort,
+		toolChoice: mapSimpleToolChoice(options?.toolChoice, "required"),
 	} satisfies OpenAICodexResponsesOptions);
 };
 

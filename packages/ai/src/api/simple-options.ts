@@ -44,6 +44,13 @@ export function buildBaseOptions(
 	};
 }
 
+export function mapSimpleToolChoice<TRequired extends string>(
+	choice: SimpleStreamOptions["toolChoice"],
+	requiredToken: TRequired,
+): "auto" | "none" | TRequired | undefined {
+	return choice === "required" ? requiredToken : choice;
+}
+
 export function clampReasoning(effort: ThinkingLevel | undefined): Exclude<ThinkingLevel, "xhigh" | "max"> | undefined {
 	return effort === "xhigh" || effort === "max" ? "high" : effort;
 }

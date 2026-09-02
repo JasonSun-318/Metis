@@ -26,7 +26,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
-import { buildBaseOptions } from "./simple-options.ts";
+import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
 const MISTRAL_TOOL_CALL_ID_LENGTH = 9;
@@ -126,6 +126,7 @@ export const streamSimple: StreamFunction<"mistral-conversations", SimpleStreamO
 		promptMode: shouldUseReasoning && usesPromptModeReasoning(model) ? "reasoning" : undefined,
 		reasoningEffort:
 			shouldUseReasoning && usesReasoningEffort(model) ? mapReasoningEffort(model, reasoning) : undefined,
+		toolChoice: mapSimpleToolChoice(options?.toolChoice, "required"),
 	} satisfies MistralOptions);
 };
 

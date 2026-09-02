@@ -59,6 +59,7 @@ import {
 	buildBaseOptions,
 	clampMaxTokensToContext,
 	clampReasoning,
+	mapSimpleToolChoice,
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
@@ -395,8 +396,9 @@ export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStrea
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
 	const base = buildBaseOptions(model, context, options, undefined);
+	const toolChoice = mapSimpleToolChoice(options?.toolChoice, "any");
 	if (!options?.reasoning) {
-		return stream(model, context, { ...base, reasoning: undefined } satisfies BedrockOptions);
+		return stream(model, context, { ...base, reasoning: undefined, toolChoice } satisfies BedrockOptions);
 	}
 
 	if (isAnthropicClaudeModel(model)) {
@@ -405,6 +407,7 @@ export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStrea
 				...base,
 				reasoning: options.reasoning,
 				thinkingBudgets: options.thinkingBudgets,
+				toolChoice,
 			} satisfies BedrockOptions);
 		}
 
@@ -427,6 +430,7 @@ export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStrea
 				...(options.thinkingBudgets || {}),
 				[clampReasoning(options.reasoning)!]: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),
 			},
+			toolChoice,
 		} satisfies BedrockOptions);
 	}
 
@@ -434,6 +438,7 @@ export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStrea
 		...base,
 		reasoning: options.reasoning,
 		thinkingBudgets: options.thinkingBudgets,
+		toolChoice,
 	} satisfies BedrockOptions);
 };
 
