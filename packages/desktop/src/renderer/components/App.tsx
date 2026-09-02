@@ -663,9 +663,10 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
-	const permissionApproval = visibleInteraction?.kind === "session_permission_approval" ? visibleInteraction : undefined;
-	const askUserInteraction = visibleInteraction?.kind === "ask_user" ? visibleInteraction : undefined;
-	const inlineInteraction = askUserInteraction;
+	const inlineInteraction =
+		visibleInteraction?.kind === "ask_user" || visibleInteraction?.kind === "session_permission_approval"
+			? visibleInteraction
+			: undefined;
 	const latestNotification = [...state.notifications]
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);

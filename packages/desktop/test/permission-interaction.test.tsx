@@ -81,6 +81,9 @@ describe("permission approval interaction", () => {
 			executionTarget: "external",
 		}));
 		const panel = container.querySelector(".permission-approval-panel")!;
+		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(container.querySelector("[aria-modal='true']")).toBeNull();
 		expect(panel.textContent).toContain("Metis wants to use bash");
 		expect(panel.textContent).toContain("Command");
 		expect(panel.textContent).toContain("curl https://example.test");
@@ -90,7 +93,7 @@ describe("permission approval interaction", () => {
 		expect(panel.textContent).toContain("example.test");
 		expect(panel.textContent).toContain(REDACTED);
 		expect(panel.textContent).toContain("This action reaches a network or external service.");
-		expect(panel.textContent).toContain("Automatic security review could not approve this action.");
+		expect(panel.textContent).toContain("Automatic security review could not complete.");
 		expect(panel.textContent).toContain("This operation may not be reversible.");
 		expect(panel.textContent).not.toContain(SECRET);
 		expect(panel.textContent).not.toContain("base64");
@@ -101,7 +104,7 @@ describe("permission approval interaction", () => {
 		expect(choice(container, "Always deny this exact action")).not.toBeNull();
 	});
 
-	it("focuses the deny control, traps Tab, submits once, and restores focus after close", async () => {
+	it("focuses the deny control, submits once, and restores focus after close", async () => {
 		const previous = document.createElement("button");
 		previous.textContent = "composer";
 		document.body.append(previous);
@@ -111,14 +114,6 @@ describe("permission approval interaction", () => {
 		});
 		const { container, root } = mount(approval(), onRespond);
 		await act(async () => { await Promise.resolve(); });
-		expect(document.activeElement?.textContent).toContain("Reject");
-		await act(async () => {
-			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab", shiftKey: true }));
-		});
-		expect(document.activeElement?.textContent).toContain("Allow once");
-		await act(async () => {
-			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
-		});
 		expect(document.activeElement?.textContent).toContain("Reject");
 		await act(async () => choice(container, "Allow once").click());
 		expect(choice(container, "Allow once").disabled).toBe(true);
@@ -158,6 +153,13 @@ describe("permission approval interaction", () => {
 		expect(choice(container, "Reject").disabled).toBe(false);
 		await act(async () => choice(container, "Reject").click());
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
+	});
+
+	it("disables allow controls when the action scope is incomplete", () => {
+		const { container } = mount(approval({ scopeComplete: false }));
+		expect(choice(container, "Allow once").disabled).toBe(true);
+		expect(choice(container, "Always allow this exact action").disabled).toBe(true);
+		expect(choice(container, "Reject").disabled).toBe(false);
 	});
 
 	it("translates the live review and approval surface", async () => {

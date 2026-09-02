@@ -220,8 +220,9 @@ describe("renderer reconnect behavior", () => {
 
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
-		expect(container.querySelector(".modal-backdrop")?.contains(panel)).toBe(true);
-		expect(panel.getAttribute("aria-modal")).toBe("true");
+		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		expect(panel.getAttribute("aria-modal")).toBeNull();
 		expect(panel.textContent).toContain("Metis wants to use bash");
 		expect(panel.textContent).toContain("Command");
 		expect(panel.textContent).toContain("rm cache.tmp");

@@ -620,6 +620,7 @@ const zhCN = {
 	"Automatic security review could not approve this action.": "自动安全审查无法批准此操作。",
 	"Automatic security review denied this action.": "自动安全审查拒绝了此操作。",
 	"Automatic security review could not complete.": "自动安全审查未能完成。",
+	"The action requires permission review": "此操作需要权限审批",
 	External: "外部",
 	"The last turn was interrupted. Your saved work is intact; send a new message to continue.":
 		"上一次对话被中断。已保存的工作不受影响，请发送新消息继续。",
