@@ -134,7 +134,7 @@ interface BrowserManagerDependencies {
 	readonly saveScreenshot: (image: NativeImage, defaultFilename: string) => Promise<void>;
 	readonly resolveDownloadDirectory: () => string;
 	readonly pathExists: (path: string) => boolean;
-	readonly openPath: (path: string) => Promise<void>;
+	readonly openPath: (path: string) => Promise<string>;
 	readonly showItemInFolder: (path: string) => void;
 	readonly createController?: (input: {
 		readonly browserId: string;
@@ -276,10 +276,7 @@ export class BrowserManager {
 			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
 			resolveDownloadDirectory: () => app.getPath("downloads"),
 			pathExists: (path) => existsSync(path),
-			openPath: async (path) => {
-				const error = await shell.openPath(path);
-				if (error) throw new Error("Path could not be opened");
-			},
+			openPath: (path) => shell.openPath(path),
 			showItemInFolder: (path) => shell.showItemInFolder(path),
 		},
 	) {
@@ -481,7 +478,8 @@ export class BrowserManager {
 	}
 
 	async openDownloadDirectory(): Promise<void> {
-		await this.dependencies.openPath(this.getDownloadDirectory());
+		const error = await this.dependencies.openPath(this.getDownloadDirectory());
+		if (error) throw new Error(error);
 	}
 
 	async controlDownload(input: DesktopDownloadControlInput): Promise<void> {
@@ -509,19 +507,32 @@ export class BrowserManager {
 			case "remove": {
 				this.downloads.delete(input.downloadId);
 				item?.cancel();
-				if (record.state !== "completed") await rm(record.savePath, { force: true }).catch(() => undefined);
 				this.emitDownloads();
 				return;
 			}
 			case "open":
 				if (record.state !== "completed") throw new Error("Download is not complete");
-				await this.dependencies.openPath(record.savePath);
+				{
+					const error = await this.dependencies.openPath(record.savePath);
+					if (error) throw new Error(error);
+				}
 				return;
 			case "reveal":
 				this.dependencies.showItemInFolder(record.savePath);
 				return;
 			case "retry":
-				if (item) return;
+				if (record.state !== "cancelled" && record.state !== "interrupted") {
+					throw new Error("Download cannot be retried");
+				}
+				if (item) {
+					if (!item.canResume()) throw new Error("Download cannot be retried");
+					item.resume();
+					record.state = "progressing";
+					this.emitDownloads();
+					return;
+				}
+				this.downloads.delete(input.downloadId);
+				this.emitDownloads();
 				this.sessionForProfile(record.profileId).downloadURL(record.url);
 				return;
 		}
@@ -1161,7 +1172,13 @@ export class BrowserManager {
 	private readonly onWillDownload = (profileId: string, _event: Event, item: DownloadItem): void => {
 		const downloadId = randomUUID();
 		const directory = this.dependencies.resolveDownloadDirectory();
-		const filename = uniqueFilename(directory, sanitizeFilename(item.getFilename()), this.dependencies.pathExists);
+		const filename = uniqueFilename(
+			directory,
+			sanitizeFilename(item.getFilename()),
+			(path) =>
+				this.dependencies.pathExists(path) ||
+				[...this.downloads.values()].some((download) => download.item !== undefined && download.savePath === path),
+		);
 		const savePath = join(directory, filename);
 		item.setSavePath(savePath);
 		const record: DownloadRecord = {

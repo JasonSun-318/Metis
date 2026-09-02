@@ -1,4 +1,5 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserObservation } from "@metis/app-protocol";
@@ -14,7 +15,7 @@ import {
 const SESSION_ID = "20000000-0000-4000-8000-000000000001";
 const OTHER_SESSION_ID = "20000000-0000-4000-8000-000000000002";
 
-function downloadItemHarness(overrides: { filename?: string; url?: string } = {}) {
+function downloadItemHarness(overrides: { canResume?: boolean; filename?: string; url?: string } = {}) {
 	const listeners = new Map<string, Set<(...args: any[]) => void>>();
 	const item: Record<string, any> = {
 		getURL: vi.fn(() => overrides.url ?? "https://example.com/files/report.pdf"),
@@ -23,6 +24,7 @@ function downloadItemHarness(overrides: { filename?: string; url?: string } = {}
 		getTotalBytes: vi.fn(() => 1_000),
 		getReceivedBytes: vi.fn(() => 0),
 		isPaused: vi.fn(() => false),
+		canResume: vi.fn(() => overrides.canResume ?? false),
 		pause: vi.fn(),
 		resume: vi.fn(),
 		cancel: vi.fn(),
@@ -60,6 +62,7 @@ function latestHistory(events: unknown[]): readonly DesktopHistoryEntry[] {
 
 function browserHarness(
 	options: {
+		downloadDirectory?: string;
 		initialHistory?: unknown[];
 		handoffTimeoutMs?: number;
 		navigationTimeoutMs?: number;
@@ -162,9 +165,9 @@ function browserHarness(
 	const openExternal = vi.fn(async () => undefined);
 	const savePdf = vi.fn(async () => undefined);
 	const saveScreenshot = vi.fn(async () => undefined);
-	const resolveDownloadDirectory = vi.fn(() => "/tmp/metis-downloads");
+	const resolveDownloadDirectory = vi.fn(() => options.downloadDirectory ?? "/tmp/metis-downloads");
 	const pathExists = vi.fn((_path: string) => false);
-	const openPath = vi.fn(async () => undefined);
+	const openPath = vi.fn(async (): Promise<string> => "");
 	const showItemInFolder = vi.fn();
 	const profileStore = new BrowserProfileStore(mkdtempSync(join(tmpdir(), "metis-browser-manager-")));
 	if (options.initialHistory)
@@ -1259,8 +1262,10 @@ describe("BrowserManager", () => {
 			await harness.manager.controlDownload({ type: "reveal", downloadId: secondId });
 			expect(harness.showItemInFolder).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
 
-			await harness.manager.controlDownload({ type: "retry", downloadId: secondId });
-			expect(harness.browserSession.downloadURL).toHaveBeenCalledWith("https://example.com/files/report.pdf");
+			await expect(harness.manager.controlDownload({ type: "retry", downloadId: secondId })).rejects.toThrow(
+				"Download cannot be retried",
+			);
+			expect(harness.browserSession.downloadURL).not.toHaveBeenCalled();
 
 			await harness.manager.controlDownload({ type: "remove", downloadId: secondId });
 			expect(latestDownloads(events)).toHaveLength(1);
@@ -1269,6 +1274,93 @@ describe("BrowserManager", () => {
 			);
 		} finally {
 			vi.useRealTimers();
+		}
+	});
+
+	it("reserves paths across simultaneous same-name downloads", () => {
+		const harness = browserHarness();
+		harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId: "10000000-0000-4000-8000-000000000084",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		const first = downloadItemHarness();
+		const second = downloadItemHarness();
+
+		harness.willDownload(first.item);
+		harness.willDownload(second.item);
+
+		expect(first.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report.pdf");
+		expect(second.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+	});
+
+	it("propagates file-open failures", async () => {
+		const harness = browserHarness();
+		harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId: "10000000-0000-4000-8000-000000000085",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		const download = downloadItemHarness();
+		harness.willDownload(download.item);
+		const downloadId = harness.manager.listDownloads()[0]!.downloadId;
+		download.emit("done", "completed");
+		harness.openPath.mockResolvedValueOnce("No default application");
+
+		await expect(harness.manager.controlDownload({ type: "open", downloadId })).rejects.toThrow(
+			"No default application",
+		);
+	});
+
+	it("resumes recoverable interruptions and replaces terminal retries", async () => {
+		const harness = browserHarness();
+		harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId: "10000000-0000-4000-8000-000000000086",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		const recoverable = downloadItemHarness({ canResume: true });
+		harness.willDownload(recoverable.item);
+		const recoverableId = harness.manager.listDownloads()[0]!.downloadId;
+		recoverable.emit("updated", "interrupted");
+
+		await harness.manager.controlDownload({ type: "retry", downloadId: recoverableId });
+		expect(recoverable.item.resume).toHaveBeenCalledOnce();
+		expect(harness.manager.listDownloads()[0]!.state).toBe("progressing");
+
+		const terminal = downloadItemHarness({ filename: "failed.pdf" });
+		harness.willDownload(terminal.item);
+		const terminalId = harness.manager.listDownloads().find((entry) => entry.filename === "failed.pdf")!.downloadId;
+		terminal.emit("done", "interrupted");
+		await harness.manager.controlDownload({ type: "retry", downloadId: terminalId });
+
+		expect(harness.browserSession.downloadURL).toHaveBeenCalledWith("https://example.com/files/report.pdf");
+		expect(harness.manager.listDownloads().some((entry) => entry.downloadId === terminalId)).toBe(false);
+	});
+
+	it("removes a terminal record without deleting a file that later reused its path", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "metis-browser-download-"));
+		try {
+			const harness = browserHarness({ downloadDirectory: directory });
+			harness.manager.create({
+				sessionId: SESSION_ID,
+				browserId: "10000000-0000-4000-8000-000000000087",
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			});
+			const download = downloadItemHarness();
+			harness.willDownload(download.item);
+			const record = harness.manager.listDownloads()[0]!;
+			await writeFile(record.savePath, "partial");
+			download.emit("done", "interrupted");
+			// The done handler removes the partial file asynchronously; wait for the unlink to land before simulating path reuse.
+			await vi.waitFor(() => expect(existsSync(record.savePath)).toBe(false));
+			await writeFile(record.savePath, "replacement");
+
+			await harness.manager.controlDownload({ type: "remove", downloadId: record.downloadId });
+
+			expect(existsSync(record.savePath)).toBe(true);
+		} finally {
+			await rm(directory, { recursive: true, force: true });
 		}
 	});
 
