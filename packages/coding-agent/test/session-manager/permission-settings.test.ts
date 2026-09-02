@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PERMISSION_PRESETS } from "../../src/core/permissions/index.ts";
+import { CorruptSessionError } from "../../src/core/session-journal.ts";
 import { CURRENT_SESSION_VERSION, SessionManager } from "../../src/core/session-manager.ts";
 import { createPermissionSession, readSessionJson, restartSession } from "../permissions/session-fixtures.ts";
 
@@ -117,6 +118,115 @@ describe("SessionManager permission settings", () => {
 			expect(session.getHeader()).toMatchObject({ permissionPreset: "auto" });
 			session.close();
 		}
+	});
+
+	it("opens and atomically rewrites a v13 permission journal as v14", () => {
+		const path = join(directory, "legacy-permissions.jsonl");
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 13,
+				id: "legacy-permissions",
+				timestamp,
+				cwd: directory,
+				mode: "code",
+				permissionMode: "ask",
+				reviewerEnabled: true,
+			},
+			{
+				type: "session_permissions",
+				id: "permission-1",
+				parentId: null,
+				timestamp,
+				permissionMode: "full",
+				reviewerEnabled: false,
+			},
+			{
+				type: "session_permission_decision",
+				id: "decision-1",
+				parentId: null,
+				timestamp,
+				actionId: "action-1",
+				toolName: "bash",
+				source: "user",
+				decision: "allow",
+				reason: "approved once",
+			},
+		]);
+
+		const session = SessionManager.open(path, directory);
+		expect(session.getPermissionPreset()).toBe("full");
+		expect(session.getDurableJournalSnapshot()).toMatchObject([
+			{ type: "session", version: CURRENT_SESSION_VERSION, permissionPreset: "ask" },
+			{ type: "session_permission_preset", permissionPreset: "full" },
+			{ type: "session_permission_audit", decision: "allow" },
+		]);
+		session.close();
+
+		const persisted = readFileSync(path, "utf8");
+		expect(persisted).not.toContain("permissionMode");
+		expect(persisted).not.toContain("reviewerEnabled");
+		expect(persisted).not.toContain("session_permission_decision");
+	});
+
+	it("exposes a migrated v13 preset from openReadOnly without rewriting the source", () => {
+		const path = join(directory, "legacy-readonly.jsonl");
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 13,
+				id: "legacy-readonly",
+				timestamp,
+				cwd: directory,
+				mode: "code",
+				permissionMode: "ask",
+				reviewerEnabled: false,
+			},
+		]);
+		const original = readFileSync(path, "utf8");
+
+		const session = SessionManager.openReadOnly(path);
+		expect(session.getPermissionPreset()).toBe("ask");
+		expect(session.getHeader()).toMatchObject({
+			version: CURRENT_SESSION_VERSION,
+			permissionPreset: "ask",
+		});
+		expect(readFileSync(path, "utf8")).toBe(original);
+	});
+
+	it.each([
+		{
+			name: "invalid permissionMode",
+			header: { permissionMode: "everything" },
+			message: "Legacy permission mode is invalid",
+		},
+		{
+			name: "non-boolean reviewerEnabled",
+			header: { permissionMode: "ask", reviewerEnabled: "yes" },
+			message: "Legacy reviewer setting is invalid",
+		},
+		{
+			name: "conflicting permissionMode and permissionPreset",
+			header: { permissionMode: "ask", permissionPreset: "full" },
+			message: "Legacy and current permission settings conflict",
+		},
+	])("rejects $name without rewriting the source", ({ header, message }) => {
+		const path = join(directory, "legacy-invalid.jsonl");
+		writeRecords(path, [
+			{
+				type: "session",
+				version: 13,
+				id: "legacy-invalid",
+				timestamp,
+				cwd: directory,
+				mode: "code",
+				...header,
+			},
+		]);
+		const original = readFileSync(path, "utf8");
+		expect(() => SessionManager.open(path, directory)).toThrow(CorruptSessionError);
+		expect(() => SessionManager.open(path, directory)).toThrow(message);
+		expect(readFileSync(path, "utf8")).toBe(original);
 	});
 
 	it("rejects malformed or version-mismatched control records", () => {

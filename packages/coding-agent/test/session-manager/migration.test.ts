@@ -126,4 +126,49 @@ describe("migrateSessionEntries", () => {
 		] as FileEntry[];
 		expect(() => migrateSessionEntries(entries)).toThrow(/v12 session header/iu);
 	});
+
+	it("converts v13 permissionMode journals to current preset records", () => {
+		const entries: FileEntry[] = [
+			{
+				type: "session",
+				version: 13,
+				id: "sess-v13",
+				timestamp: "2025-01-01T00:00:00Z",
+				cwd: "/tmp",
+				permissionMode: "ask",
+				reviewerEnabled: true,
+			} as FileEntry,
+			{
+				type: "session_permissions",
+				id: "permission-1",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:01Z",
+				permissionMode: "full",
+				reviewerEnabled: false,
+			} as unknown as FileEntry,
+			{
+				type: "session_permission_decision",
+				id: "decision-1",
+				parentId: null,
+				timestamp: "2025-01-01T00:00:02Z",
+				actionId: "action-1",
+				toolName: "bash",
+				source: "user",
+				decision: "allow",
+				reason: "approved once",
+			} as unknown as FileEntry,
+		];
+
+		migrateSessionEntries(entries);
+
+		expect(entries).toMatchObject([
+			{ type: "session", version: CURRENT_SESSION_VERSION, permissionPreset: "ask" },
+			{ type: "session_permission_preset", permissionPreset: "full" },
+			{ type: "session_permission_audit", decision: "allow" },
+		]);
+		expect(entries[0]).not.toHaveProperty("permissionMode");
+		expect(entries[0]).not.toHaveProperty("reviewerEnabled");
+		expect(entries[1]).not.toHaveProperty("permissionMode");
+		expect(entries[1]).not.toHaveProperty("reviewerEnabled");
+	});
 });

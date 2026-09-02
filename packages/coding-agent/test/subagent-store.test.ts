@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -83,6 +83,33 @@ describe("AgentStore", () => {
 		writeFileSync(join(agentDir, "subagents", ROOT_ID, "old-child.jsonl"), "legacy sentinel");
 		expect(store.listTree().agents).toEqual([]);
 		expect(getSessionAgentDir(agentDir, ROOT_ID)).toBe(join(agentDir, "agents", ROOT_ID));
+	});
+
+	it("reads a v13 child session in memory without rewriting permissionMode", () => {
+		const { root, store } = setup();
+		const { config: agentConfig } = config(root);
+		mkdirSync(store.directory, { recursive: true });
+		const legacyAgentPath = join(store.directory, `${agentConfig.agentId}.jsonl`);
+		const { permissionPreset: _permissionPreset, ...legacyAgent } = agentConfig;
+		writeFileSync(
+			legacyAgentPath,
+			`${JSON.stringify({
+				type: "session",
+				version: 13,
+				id: agentConfig.agentId,
+				timestamp: "2026-08-20T00:00:00.000Z",
+				cwd: agentConfig.cwd,
+				mode: "code",
+				permissionMode: "ask",
+				agent: { ...legacyAgent, permissionMode: "ask" },
+			})}\n`,
+		);
+
+		const tree = store.listTree();
+		expect(tree.diagnostics).toEqual([]);
+		expect(tree.agents).toHaveLength(1);
+		expect(tree.agents[0]?.config.permissionPreset).toBe("ask");
+		expect(readFileSync(legacyAgentPath, "utf8")).toContain('"permissionMode":"ask"');
 	});
 
 	it("writes v13 agent headers and agent_task records", () => {

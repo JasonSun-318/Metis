@@ -1231,13 +1231,65 @@ function migrateV12ToV13(entries: FileEntry[]): void {
 	}
 }
 
-/** Introduce the new preset field without interpreting retired permission data. */
-function migrateV13ToV14(entries: FileEntry[]): void {
-	for (const entry of entries) {
+/** Convert known v13 permission fields, then stamp the current session version. */
+function migrateLegacyPermissionFields(
+	value: Record<string, unknown>,
+	filePath: string,
+	lineNumber: number,
+	fallback?: PermissionPreset,
+): void {
+	const legacy = value.permissionMode;
+	const current = value.permissionPreset;
+	if (legacy !== undefined && !isPermissionPreset(legacy)) {
+		corruptSession(filePath, lineNumber, "Legacy permission mode is invalid");
+	}
+	if (current !== undefined && !isPermissionPreset(current)) {
+		corruptSession(filePath, lineNumber, "Permission preset is invalid");
+	}
+	if (legacy !== undefined && current !== undefined && legacy !== current) {
+		corruptSession(filePath, lineNumber, "Legacy and current permission settings conflict");
+	}
+	if (value.reviewerEnabled !== undefined && typeof value.reviewerEnabled !== "boolean") {
+		corruptSession(filePath, lineNumber, "Legacy reviewer setting is invalid");
+	}
+	const permissionPreset = current ?? legacy ?? fallback;
+	if (!isPermissionPreset(permissionPreset)) {
+		corruptSession(filePath, lineNumber, "Legacy permission setting is missing");
+	}
+	value.permissionPreset = permissionPreset;
+	delete value.permissionMode;
+	delete value.reviewerEnabled;
+}
+
+function migrateV13ToV14(entries: FileEntry[], filePath: string): void {
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index] as unknown as Record<string, unknown>;
+		const lineNumber = index + 1;
 		if (entry.type === "session") {
-			const header = entry as SessionHeader;
-			header.permissionPreset ??= DEFAULT_PERMISSION_PRESET;
-			header.version = 14;
+			migrateLegacyPermissionFields(entry, filePath, lineNumber, DEFAULT_PERMISSION_PRESET);
+			if (isJsonObject(entry.agent)) {
+				migrateLegacyPermissionFields(entry.agent, filePath, lineNumber);
+			}
+			entry.version = 14;
+			continue;
+		}
+		if (entry.type === "session_permissions") {
+			const keys = Object.keys(entry);
+			const allowed = new Set(["type", "id", "parentId", "timestamp", "permissionMode", "reviewerEnabled"]);
+			if (keys.some((key) => !allowed.has(key))) {
+				corruptSession(filePath, lineNumber, "Legacy permission control has an unsupported field");
+			}
+			for (const key of ["type", "id", "parentId", "timestamp", "permissionMode"]) {
+				if (!Object.hasOwn(entry, key)) {
+					corruptSession(filePath, lineNumber, "Legacy permission control is missing a required field");
+				}
+			}
+			migrateLegacyPermissionFields(entry, filePath, lineNumber);
+			entry.type = "session_permission_preset";
+			continue;
+		}
+		if (entry.type === "session_permission_decision") {
+			entry.type = "session_permission_audit";
 		}
 	}
 }
@@ -1246,7 +1298,7 @@ function migrateV13ToV14(entries: FileEntry[]): void {
  * Run all necessary migrations to bring entries to current version.
  * Mutates entries in place. Returns true if any migration was applied.
  */
-function migrateToCurrentVersion(entries: FileEntry[]): boolean {
+function migrateToCurrentVersion(entries: FileEntry[], filePath: string): boolean {
 	const header = entries.find((e) => e.type === "session") as SessionHeader | undefined;
 	const version = header?.version ?? 1;
 	if (
@@ -1287,14 +1339,14 @@ function migrateToCurrentVersion(entries: FileEntry[]): boolean {
 	if (version < 11) migrateV10ToV11(entries);
 	if (version < 12) migrateV11ToV12(entries);
 	if (version < 13) migrateV12ToV13(entries);
-	if (version < 14) migrateV13ToV14(entries);
+	if (version < 14) migrateV13ToV14(entries, filePath);
 
 	return true;
 }
 
 /** Exported for testing */
 export function migrateSessionEntries(entries: FileEntry[]): void {
-	migrateToCurrentVersion(entries);
+	migrateToCurrentVersion(entries, "<memory>");
 }
 
 /** Exported for compaction.test.ts */
@@ -1714,11 +1766,15 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 	return header;
 }
 
-function validateRawSessionRecords(records: readonly unknown[], filePath: string): SessionHeader {
+function validateSessionRecordEnvelopes(records: readonly unknown[], filePath: string): void {
 	if (records.length === 0) corruptSession(filePath, 1, "Session journal is empty");
-	for (let index = 0; index < records.length; index++) {
+	for (let index = 0; index < records.length; index += 1) {
 		validateRawSessionRecord(records[index], index, filePath);
 	}
+}
+
+function validateRawSessionRecords(records: readonly unknown[], filePath: string): SessionHeader {
+	validateSessionRecordEnvelopes(records, filePath);
 	const header = validateSessionHeader(records[0] as Record<string, unknown>, filePath);
 	const version = header.version ?? 1;
 	for (let index = 1; index < records.length; index++) {
@@ -1886,9 +1942,9 @@ function validateSessionGraph(records: readonly FileEntry[], filePath: string): 
 }
 
 function prepareRawSessionRecords(records: readonly unknown[], filePath: string): PreparedRecords {
-	validateRawSessionRecords(records, filePath);
+	validateSessionRecordEnvelopes(records, filePath);
 	const copy = structuredClone(records) as FileEntry[];
-	const migrated = migrateToCurrentVersion(copy);
+	const migrated = migrateToCurrentVersion(copy, filePath);
 	validateSessionGraph(copy, filePath);
 	return { records: copy, migrated };
 }
