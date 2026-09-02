@@ -103,11 +103,13 @@ describe("schedule store", () => {
 		const legacySnapshot = legacyRun.snapshot as Record<string, unknown>;
 		delete legacySnapshot.name;
 		delete legacySnapshot.model;
+		legacySnapshot.target = { kind: "project", cwd: currentTask.target.cwd };
 		ensureScheduleRunDirectory(agentDir, currentTask.id);
 		writeFileSync(getScheduleRunPath(agentDir, currentTask.id, 1, "run-000"), JSON.stringify(legacyRun));
 		expect(store.getRun(currentTask.id, "run-000").snapshot).toMatchObject({
 			name: currentTask.title,
 			model: { provider: "legacy", modelId: "unassigned" },
+			target: { kind: "general", workspace: "fixed", cwd: currentTask.target.cwd },
 		});
 
 		await store.mutate((draft) => {
@@ -126,6 +128,20 @@ describe("schedule store", () => {
 				store.mutate((draft) => draft.tasks.push(legacy as unknown as ScheduleTask)),
 			).rejects.toMatchObject({ code: "STORE_CORRUPT" });
 		}
+	});
+
+	it("does not treat a current run snapshot with a removed Code target as legacy", async () => {
+		const agentDir = tempDir();
+		const store = ScheduleStore.open(agentDir);
+		const currentTask = task("current-task");
+		await store.mutate((draft) => draft.tasks.push(currentTask));
+
+		const currentRun = run(currentTask, 0) as unknown as Record<string, unknown>;
+		(currentRun.snapshot as Record<string, unknown>).target = { kind: "project", cwd: currentTask.target.cwd };
+		ensureScheduleRunDirectory(agentDir, currentTask.id);
+		writeFileSync(getScheduleRunPath(agentDir, currentTask.id, 1, "run-000"), JSON.stringify(currentRun));
+
+		expect(() => store.getRun(currentTask.id, "run-000")).toThrow("Schedule run file is invalid");
 	});
 
 	it("keeps unbounded run history out of the bounded task index", async () => {

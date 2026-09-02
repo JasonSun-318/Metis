@@ -190,6 +190,7 @@ function parseSnapshot(value: unknown, legacyTask?: ScheduleTask): ScheduleRun["
 		"timezone",
 		"target",
 	]);
+	const legacySnapshot = legacyTask !== undefined && input.name === undefined && input.model === undefined;
 	return {
 		name:
 			input.name === undefined
@@ -205,7 +206,7 @@ function parseSnapshot(value: unknown, legacyTask?: ScheduleTask): ScheduleRun["
 				: parseModel(input.model),
 		schedule: validateScheduleSpec(input.schedule),
 		timezone: validateScheduleTimezone(input.timezone),
-		target: parseTarget(input.target),
+		target: parseTarget(input.target, legacySnapshot),
 	};
 }
 
