@@ -1298,7 +1298,7 @@ textarea { resize: none; }
 .composer textarea::placeholder { color: var(--text-10); }
 .composer textarea:focus-visible, .composer .composer-editable-input:focus-visible { outline: none; }
 .composer .composer-editable-input { position: relative; overflow-y: auto; white-space: pre-wrap; word-break: break-word; scrollbar-color: var(--scrollbar-thumb) transparent; scrollbar-width: thin; }
-.composer .composer-editable-input:empty::before, .composer .composer-editable-input[data-empty="true"]::before { content: attr(data-placeholder); color: var(--text-10); pointer-events: none; position: absolute; top: 7px; left: 5px; right: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.composer .composer-editable-input[data-empty="true"]::before { content: attr(data-placeholder); color: var(--text-10); pointer-events: none; position: absolute; top: 7px; left: 5px; right: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .composer-actions { display: flex; min-height: 32px; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
 .composer-leading, .composer-trailing { display: flex; align-items: center; gap: 7px; }
 .composer-plain-button { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 50%; color: var(--text); transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
@@ -1459,7 +1459,6 @@ textarea { resize: none; }
 	font-size: var(--code-body-size);
 	line-height: 1.45;
 }
-.composer-code .composer-editable-input:empty::before,
 .composer-code .composer-editable-input[data-empty="true"]::before {
 	top: 5px;
 	left: 0;

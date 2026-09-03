@@ -186,4 +186,12 @@ describe("Composer visual states", () => {
 		expect(rule(".composer-code-submit, .composer-code-stop").borderRadius).toBe("5px");
 		expect(rule(".composer-code .composer-actions").display).toBe("flex");
 	});
+
+	it("shows the composer placeholder only via the data-empty attribute, not the :empty selector", () => {
+		expect(css).not.toMatch(/\.composer-editable-input:empty::before/);
+		expect(css).toMatch(
+			/\.composer\s+\.composer-editable-input\[data-empty="true"\]::before\s*\{[^}]*content:\s*attr\(data-placeholder\)/,
+		);
+		expect(css).toMatch(/\.composer-code\s+\.composer-editable-input\[data-empty="true"\]::before/);
+	});
 });
