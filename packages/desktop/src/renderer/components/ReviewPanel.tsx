@@ -84,15 +84,19 @@ function ReviewDetails({ open, snapshot, onSelectFile, onSelectRevision }: {
 	readonly onSelectRevision: (revision: DesktopWorkspaceReviewRevision) => void;
 }) {
 	const { t } = useTranslation();
+	const [commitsCollapsed, setCommitsCollapsed] = useState(false);
 	const tree = useMemo(() => buildReviewTree(snapshot.files), [snapshot.files]);
 	return <aside aria-hidden={!open} aria-label={t("Review details")} className={`review-details${open ? "" : " is-hidden"}`}>
 		<div className="review-details-scroll">
 			{snapshot.files.length > 0 && <ReviewTree key={snapshot.revision} nodes={tree} onSelect={onSelectFile} />}
 		</div>
-		<div className="review-history">
+		<div className={`review-history${commitsCollapsed ? " is-collapsed" : ""}`}>
 			<button aria-pressed={snapshot.revision === "working-tree"} className={`review-revision${snapshot.revision === "working-tree" ? " is-active" : ""}`} onClick={() => onSelectRevision("working-tree")} type="button"><FolderOpen aria-hidden="true" size={14} /><span>{t("All Changes")}</span></button>
-			<h3><ClockCounterClockwise aria-hidden="true" size={13} />{t("Recent commits")}</h3>
-			<ul className="review-commits">{snapshot.commits.map((commit) => <CommitItem commit={commit} key={commit.hash} onSelect={onSelectRevision} selected={snapshot.revision === commit.hash} />)}</ul>
+			<button aria-expanded={!commitsCollapsed} className="review-history-toggle" onClick={() => setCommitsCollapsed((val) => !val)} type="button">
+				<h3><ClockCounterClockwise aria-hidden="true" size={13} /><span>{t("Recent commits")}</span><span className="review-count-badge">{snapshot.commits.length}</span></h3>
+				{commitsCollapsed ? <CaretRight aria-hidden="true" size={12} /> : <CaretDown aria-hidden="true" size={12} />}
+			</button>
+			{!commitsCollapsed && <ul className="review-commits">{snapshot.commits.map((commit) => <CommitItem commit={commit} key={commit.hash} onSelect={onSelectRevision} selected={snapshot.revision === commit.hash} />)}</ul>}
 		</div>
 	</aside>;
 }

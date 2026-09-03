@@ -14,6 +14,7 @@ import {
 	FolderPlus,
 	MagnifyingGlass,
 	PencilSimple,
+	SidebarSimple,
 	SpinnerGap,
 	Trash,
 } from "@phosphor-icons/react";
@@ -158,6 +159,7 @@ export function FilePanel({
 	const [mutationDialog, setMutationDialog] = useState<MutationDialog | null>(null);
 	const [mutationPending, setMutationPending] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
+	const [treeOpen, setTreeOpen] = useState(true);
 	const expanded = useMemo(() => new Set(expandedPaths), [expandedPaths]);
 	const draftMatchesActivePath = draft?.file.relativePath === activePath;
 	const displayedFile = draftMatchesActivePath ? draft.file : file;
@@ -315,7 +317,7 @@ export function FilePanel({
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement: () => treeScrollRef.current,
-		estimateSize: () => 27,
+		estimateSize: () => 28,
 		getItemKey: (index) => rows[index]?.entry.relativePath ?? index,
 		overscan: 10,
 		initialRect: { width: 320, height: 600 },
@@ -323,7 +325,7 @@ export function FilePanel({
 	const measuredRows = virtualizer.getVirtualItems();
 	const visibleRows = measuredRows.length > 0
 		? measuredRows
-		: Array.from({ length: Math.min(rows.length, 30) }, (_, index) => ({ index, start: index * 27 }));
+		: Array.from({ length: Math.min(rows.length, 30) }, (_, index) => ({ index, start: index * 28 }));
 
 	const toggleDirectory = (relativePath: string) => {
 		const next = new Set(expanded);
@@ -470,7 +472,7 @@ export function FilePanel({
 	return (
 		<section
 			aria-hidden={!visible}
-			className={`file-panel${visible ? " is-visible" : ""}`}
+			className={`file-panel${visible ? " is-visible" : ""}${treeOpen ? "" : " is-tree-hidden"}`}
 			id={`file-panel-${sessionId}`}
 			role="tabpanel"
 		>
@@ -480,29 +482,32 @@ export function FilePanel({
 						<span>{rootName(cwd)}</span>
 						{activePath?.split("/").map((part, index) => <span key={`${index}:${part}`}>{part}</span>)}
 					</div>
-					{displayedFile && activePath && (
-						<div className="file-preview-actions">
-							{displayedFile.kind === "text" && draftMatchesActivePath && (
-								<button aria-label={t("Save file")} disabled={draft.text === draft.savedText || saving} onClick={() => void save().catch(onError)} title={t(saving ? "Saving…" : "Save")} type="button">
-									<FloppyDisk aria-hidden="true" size={14} />
-								</button>
-							)}
-							{displayedFile.kind === "text" && isMarkdown(activePath) && (
-								<button aria-label={t(previewMode ? "View source" : "Show preview")} onClick={() => setPreviewMode((value) => !value)} title={t(previewMode ? "Source" : "Preview")} type="button">
-									{previewMode ? <Code aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
-								</button>
-							)}
-							<button aria-label={t("Copy path")} onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))} title={t("Copy path")} type="button"><Copy aria-hidden="true" size={14} /></button>
-							{displayedFile.kind === "text" && <button aria-label={t("Copy contents")} onClick={() => void copy(draftMatchesActivePath ? draft.text : displayedFile.text, t("Contents copied"))} title={t("Copy contents")} type="button"><FileText aria-hidden="true" size={14} /></button>}
-							<div className="file-open-menu" ref={actionMenuRef}>
-								<button aria-expanded={actionMenuOpen} aria-haspopup="menu" aria-label={t("Open file actions")} onClick={() => setActionMenuOpen((value) => !value)} title={t("Open file actions")} type="button"><DotsThree aria-hidden="true" size={16} /></button>
-								{actionMenuOpen && <div aria-label={t("Open file actions")} className="file-open-popover" role="menu">
-									<button onClick={() => open("default")} role="menuitem" type="button">{t("Open in default app")}</button>
-									<button onClick={() => open("reveal")} role="menuitem" type="button">{t("Reveal in file manager")}</button>
-								</div>}
-							</div>
-						</div>
-					)}
+					<div className="file-preview-actions">
+						{displayedFile && activePath && (
+							<>
+								{displayedFile.kind === "text" && draftMatchesActivePath && (
+									<button aria-label={t("Save file")} disabled={draft.text === draft.savedText || saving} onClick={() => void save().catch(onError)} title={t(saving ? "Saving…" : "Save")} type="button">
+										<FloppyDisk aria-hidden="true" size={14} />
+									</button>
+								)}
+								{displayedFile.kind === "text" && isMarkdown(activePath) && (
+									<button aria-label={t(previewMode ? "View source" : "Show preview")} onClick={() => setPreviewMode((value) => !value)} title={t(previewMode ? "Source" : "Preview")} type="button">
+										{previewMode ? <Code aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
+									</button>
+								)}
+								<button aria-label={t("Copy path")} onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))} title={t("Copy path")} type="button"><Copy aria-hidden="true" size={14} /></button>
+								{displayedFile.kind === "text" && <button aria-label={t("Copy contents")} onClick={() => void copy(draftMatchesActivePath ? draft.text : displayedFile.text, t("Contents copied"))} title={t("Copy contents")} type="button"><FileText aria-hidden="true" size={14} /></button>}
+								<div className="file-open-menu" ref={actionMenuRef}>
+									<button aria-expanded={actionMenuOpen} aria-haspopup="menu" aria-label={t("Open file actions")} onClick={() => setActionMenuOpen((value) => !value)} title={t("Open file actions")} type="button"><DotsThree aria-hidden="true" size={16} /></button>
+									{actionMenuOpen && <div aria-label={t("Open file actions")} className="file-open-popover" role="menu">
+										<button onClick={() => open("default")} role="menuitem" type="button">{t("Open in default app")}</button>
+										<button onClick={() => open("reveal")} role="menuitem" type="button">{t("Reveal in file manager")}</button>
+									</div>}
+								</div>
+							</>
+						)}
+						<button aria-expanded={treeOpen} aria-label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")} className={`file-tree-toggle${treeOpen ? " is-active" : ""}`} onClick={() => setTreeOpen((val) => !val)} title={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")} type="button"><SidebarSimple aria-hidden="true" size={14} /></button>
+					</div>
 				</header>
 				{notice && <div className="file-preview-notice" role="status">{notice}</div>}
 				<div className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}${hostedPreview ? " has-hosted-preview" : ""}`}>
