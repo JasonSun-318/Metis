@@ -1,6 +1,7 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
+import { ArrowDown, Trash } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -139,6 +140,10 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			id={`terminal-panel-${terminalId}`}
 			role="tabpanel"
 		>
+			<div className="terminal-actions">
+				<button aria-label={t("Scroll to bottom")} className="terminal-action-btn" onClick={() => terminalRef.current?.scrollToBottom()} title={t("Scroll to bottom")} type="button"><ArrowDown aria-hidden="true" size={13} /></button>
+				<button aria-label={t("Clear terminal")} className="terminal-action-btn" onClick={() => terminalRef.current?.clear()} title={t("Clear terminal")} type="button"><Trash aria-hidden="true" size={13} /></button>
+			</div>
 			<div className="terminal-host" ref={hostRef} />
 			{status && <div className="terminal-status" role="status">{status}</div>}
 		</section>
