@@ -96,6 +96,25 @@ describe("AutoCommandAllowlistPanel", () => {
 			requestId: expect.any(String),
 			rules: [{ command: "curl", allowNetwork: true }],
 		});
+		expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe("");
+		expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(false);
+		await act(async () => root.unmount());
+	});
+
+	it("does not clear the pending next rule when removing an existing rule", async () => {
+		const client = clientStub({
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({
+				rules: [{ command: "ls", allowNetwork: false }],
+				suggestions: [],
+			}),
+		});
+		const { container, root } = await renderPanel(client);
+		setInput(container, "curl");
+		clickCheckbox(container, "Allow network access");
+		await act(async () => clickButton(container, "Remove ls"));
+		await flush();
+		expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe("curl");
+		expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
 		await act(async () => root.unmount());
 	});
 

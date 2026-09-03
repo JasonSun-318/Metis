@@ -159,6 +159,17 @@ export class Dispatcher {
 		}
 	}
 
+	private async mutatePermissionAutoSettings<T>(mutate: () => Promise<T>): Promise<T> {
+		const release = await this.registry.beginModelServiceSettingsRefresh();
+		try {
+			const result = await mutate();
+			this.dropRuntimeSubscriptions(await this.registry.refreshOpenPermissionAutoSettings());
+			return result;
+		} finally {
+			release();
+		}
+	}
+
 	private startTitleJob(sessionId: string, input: ClientParams<"turn/start">): void {
 		if (this.titleJobs.has(sessionId)) return;
 		const source = [
@@ -572,11 +583,9 @@ export class Dispatcher {
 			case "permission/auto/get":
 				return this.permissionAutoSettings.view();
 			case "permission/auto/update":
-				return await this.replayMutation(request, async () => {
-					const result = await this.permissionAutoSettings.update(request.params);
-					await this.registry.refreshOpenPermissionAutoSettings();
-					return result;
-				});
+				return await this.replayMutation(request, () =>
+					this.mutatePermissionAutoSettings(() => this.permissionAutoSettings.update(request.params)),
+				);
 			case "permission/rules/list":
 				return this.permissionRules.list(request.params);
 			case "permission/rules/delete":

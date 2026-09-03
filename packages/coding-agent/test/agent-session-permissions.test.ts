@@ -144,6 +144,24 @@ describe("AgentSession permission enforcement", () => {
 		expect(requestApproval).toHaveBeenCalledOnce();
 	});
 
+	it("invalidates permission authority around an Auto settings reload failure", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		const runtime = (
+			harness.session as unknown as {
+				_permissionRuntime: { invalidate(reason: "settings"): void };
+			}
+		)._permissionRuntime;
+		const invalidate = vi.spyOn(runtime, "invalidate");
+		vi.spyOn(harness.settingsManager, "reload").mockImplementationOnce(async () => {
+			expect(invalidate).toHaveBeenCalledOnce();
+			throw new Error("reload failed");
+		});
+
+		await expect(harness.session.refreshPermissionAutoSettings()).rejects.toThrow("reload failed");
+		expect(invalidate).toHaveBeenCalledTimes(2);
+	});
+
 	it("rejects a Bash network command whose destination cannot be bound exactly", async () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));

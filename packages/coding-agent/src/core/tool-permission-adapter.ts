@@ -134,20 +134,21 @@ function shellNetworkEndpoints(command: string): {
 	return { detected: true, endpoints: [...unique.values()], complete: complete && unique.size > 0 };
 }
 
-function firstNonFlag(words: readonly string[], start = 1): string | undefined {
-	return words.slice(start).find((word) => !word.startsWith("-"));
-}
-
 function requestMethod(words: readonly string[], flags: readonly string[]): string | undefined {
+	let method: string | undefined;
 	for (let index = 0; index < words.length; index += 1) {
 		const word = words[index]!;
 		for (const flag of flags) {
-			if (word === flag) return words[index + 1];
-			if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
-			if (flag.length === 2 && word.startsWith(flag) && word.length > 2) return word.slice(2);
+			if (word === flag) {
+				method = words[index + 1];
+				index += 1;
+				break;
+			}
+			if (word.startsWith(`${flag}=`)) method = word.slice(flag.length + 1);
+			else if (flag.length === 2 && word.startsWith(flag) && word.length > 2) method = word.slice(2);
 		}
 	}
-	return undefined;
+	return method;
 }
 
 function isSafeHttpMethod(method: string | undefined): boolean {
@@ -161,7 +162,14 @@ function curlMutates(words: readonly string[]): boolean {
 		(word) =>
 			word === "-d" ||
 			word === "-F" ||
+			word === "-K" ||
 			word === "-T" ||
+			(/^-[^-]/u.test(word) && /[dFT]/u.test(word.slice(1))) ||
+			word.startsWith("-K") ||
+			word === "--config" ||
+			word.startsWith("--config=") ||
+			word === "--json" ||
+			word.startsWith("--json=") ||
 			word.startsWith("--data") ||
 			word.startsWith("--form") ||
 			word.startsWith("--upload-file"),
@@ -173,6 +181,8 @@ function wgetMutates(words: readonly string[]): boolean {
 	if (!isSafeHttpMethod(method)) return true;
 	return words.some(
 		(word) =>
+			word === "--config" ||
+			word.startsWith("--config=") ||
 			word.startsWith("--post-data") ||
 			word.startsWith("--post-file") ||
 			word.startsWith("--body-data") ||
@@ -186,13 +196,16 @@ function shellHasKnownExternalMutation(command: string): boolean {
 	const publishers = new Set(["npm", "pnpm", "yarn", "bun", "cargo"]);
 	for (const segment of shellSegments(command)) {
 		const words = tokenizeShellWords(segment).words;
-		const executable = words[0]?.replace(/^.*\//u, "")?.toLowerCase();
-		if (!executable) continue;
-		if (remote.has(executable)) return true;
-		if (executable === "git" && firstNonFlag(words) === "push") return true;
-		if (publishers.has(executable) && words.slice(1).some((word) => word === "publish")) return true;
-		if (executable === "curl" && curlMutates(words.slice(1))) return true;
-		if (executable === "wget" && wgetMutates(words.slice(1))) return true;
+		for (let index = 0; index < words.length; index += 1) {
+			const executable = words[index]?.replace(/^.*\//u, "")?.toLowerCase();
+			if (!executable) continue;
+			const args = words.slice(index + 1);
+			if (remote.has(executable)) return true;
+			if (executable === "git" && args.includes("push")) return true;
+			if (publishers.has(executable) && args.includes("publish")) return true;
+			if (executable === "curl" && curlMutates(args)) return true;
+			if (executable === "wget" && wgetMutates(args)) return true;
+		}
 	}
 	return false;
 }

@@ -246,6 +246,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 		this.calls.push("refresh:apply");
 	}
 
+	async refreshPermissionAutoSettings(): Promise<void> {
+		this.calls.push("permission-auto:refresh");
+	}
+
 	notifyPermissionRulesChanged(): void {
 		this.calls.push("permission-rules:changed");
 	}
@@ -634,6 +638,21 @@ describe("SessionRegistry", () => {
 		expect(registry.has("session-a")).toBe(false);
 		expect(runtime.closed).toBe(true);
 		secondRelease();
+	});
+
+	it("removes a runtime that fails an Auto permission settings refresh", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const runtime = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const release = await registry.beginModelServiceSettingsRefresh();
+		runtime.refreshPermissionAutoSettings = vi.fn(async () => {
+			throw new Error("refresh failed");
+		});
+
+		expect(await registry.refreshOpenPermissionAutoSettings()).toEqual(["session-a"]);
+		expect(registry.has("session-a")).toBe(false);
+		expect(runtime.closed).toBe(true);
+		release();
 	});
 
 	it("rejects queue overflow without disturbing admitted work", async () => {

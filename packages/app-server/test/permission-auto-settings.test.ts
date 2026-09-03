@@ -1,5 +1,5 @@
 import { SettingsManager } from "@metis/coding-agent";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
 
 describe("PermissionAutoSettingsService", () => {
@@ -25,6 +25,21 @@ describe("PermissionAutoSettingsService", () => {
 				rules: [{ command: "ls && pwd", allowNetwork: false }],
 			}),
 		).rejects.toThrow();
+		expect(service.view().rules).toEqual([{ command: "ls", allowNetwork: false }]);
+	});
+
+	it("restores the previous rules when persistence fails", async () => {
+		const manager = SettingsManager.inMemory();
+		manager.setAutoCommandRules([{ command: "ls", allowNetwork: false }]);
+		vi.spyOn(manager, "flushOrThrow").mockRejectedValueOnce(new Error("disk unavailable"));
+		const service = new PermissionAutoSettingsService(manager);
+
+		await expect(
+			service.update({
+				requestId: crypto.randomUUID(),
+				rules: [{ command: "curl", allowNetwork: true }],
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
 		expect(service.view().rules).toEqual([{ command: "ls", allowNetwork: false }]);
 	});
 });

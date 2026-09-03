@@ -17,12 +17,23 @@ export class PermissionAutoSettingsService {
 	}
 
 	async update(params: ClientParams<"permission/auto/update">): Promise<ClientResult<"permission/auto/get">> {
+		const previous = this.settingsManager.getAutoCommandRules();
 		try {
 			this.settingsManager.setAutoCommandRules(params.rules);
 		} catch {
 			throw new AppServerError("INVALID_REQUEST");
 		}
-		await this.settingsManager.flush();
+		try {
+			await this.settingsManager.flushOrThrow();
+		} catch {
+			this.settingsManager.setAutoCommandRules(previous);
+			try {
+				await this.settingsManager.flushOrThrow();
+			} catch {
+				// The original failure is authoritative; the settings writer remains fail-closed in memory.
+			}
+			throw new AppServerError("OPERATION_FAILED");
+		}
 		return this.view();
 	}
 }

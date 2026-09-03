@@ -184,12 +184,8 @@ export class SessionRegistry {
 		);
 	}
 
-	async refreshOpenPermissionAutoSettings(): Promise<void> {
-		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
-		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
-		await Promise.all(
-			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.refreshPermissionAutoSettings?.())),
-		);
+	async refreshOpenPermissionAutoSettings(): Promise<string[]> {
+		return await this.refreshOpenRuntimeSettings("refreshPermissionAutoSettings");
 	}
 
 	async notifyOpenPermissionRulesChanged(): Promise<void> {
@@ -233,6 +229,15 @@ export class SessionRegistry {
 
 	private async refreshOpenModelServices(
 		method: "prepareModelServiceSettingsRefresh" | "applyModelServiceSettingsRefresh",
+	): Promise<string[]> {
+		return await this.refreshOpenRuntimeSettings(method);
+	}
+
+	private async refreshOpenRuntimeSettings(
+		method:
+			| "prepareModelServiceSettingsRefresh"
+			| "applyModelServiceSettingsRefresh"
+			| "refreshPermissionAutoSettings",
 	): Promise<string[]> {
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
 		const results = await Promise.allSettled(

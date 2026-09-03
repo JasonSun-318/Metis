@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { PermissionPolicy } from "../src/core/permissions/policy.ts";
 import {
 	assertToolPermissionDescriptor,
 	createToolIdentity,
@@ -105,7 +106,15 @@ describe("tool permission adapter", () => {
 	it.each([
 		"curl -X DELETE https://example.com/item",
 		"curl --data value https://example.com/item",
+		"curl -dvalue https://example.com/item",
+		"curl -Ffile=@payload.txt https://example.com/item",
+		"curl -Tpayload.txt https://example.com/item",
+		`curl --json '{"enabled":true}' https://example.com/item`,
+		"curl -Krequest.cfg https://example.com/item",
+		"curl --config=request.cfg https://example.com/item",
+		"curl -X GET -X DELETE https://example.com/item",
 		"wget --post-data=value https://example.com/item",
+		"wget --config=request.cfg https://example.com/item",
 		"git push origin main",
 		"npm publish",
 	])("keeps known network mutations high risk: %s", (command) => {
@@ -115,6 +124,42 @@ describe("tool permission adapter", () => {
 				{ actionId: `bash-${command}`, cwd: permissionProject, workspaceRoots: [permissionProject] },
 			).effects,
 		).toContain("external-side-effect");
+	});
+
+	it.each([
+		"curl -dvalue https://example.com/item",
+		"curl -Ffile=@payload.txt https://example.com/item",
+		"curl -Tpayload.txt https://example.com/item",
+		`curl --json '{"enabled":true}' https://example.com/item`,
+		"curl -Krequest.cfg https://example.com/item",
+		"curl --config=request.cfg https://example.com/item",
+	])("does not let an Auto curl rule bypass a known mutation: %s", (command) => {
+		const decision = new PermissionPolicy().evaluate({
+			settings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+			action: describeBash(command),
+			autoCommandRules: [{ command: "curl", allowNetwork: true }],
+		});
+		expect(decision.kind).not.toBe("allow");
+	});
+
+	it("keeps an env-wrapped network mutation out of the Auto fast path", () => {
+		const command = "env curl -dvalue https://example.com/item";
+		const action = describeBash(command);
+		expect(action.effects).toContain("external-side-effect");
+		expect(
+			new PermissionPolicy().evaluate({
+				settings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
+				action,
+				autoCommandRules: [{ command: "env", allowNetwork: true }],
+			}).kind,
+		).not.toBe("allow");
+	});
+
+	it.each([
+		`bash -c 'curl --json "{}" https://example.com/item'`,
+		"find /tmp -exec curl -Tpayload.txt https://example.com/item \\;",
+	])("fails closed when a wrapper makes network mutation scope incomplete: %s", (command) => {
+		expect(() => describeBash(command)).toThrow("scope is incomplete");
 	});
 
 	it("fails closed for an unresolved network endpoint", () => {

@@ -38,20 +38,21 @@ export function AutoCommandAllowlistPanel({
 		};
 	}, [api, serverReady, t]);
 
-	const save = async (rules: ClientParams<"permission/auto/update">["rules"]) => {
+	const save = async (rules: ClientParams<"permission/auto/update">["rules"]): Promise<boolean> => {
 		setSaving(true);
 		setError(null);
 		try {
 			setView(await api.updatePermissionAutoSettings({ requestId: crypto.randomUUID(), rules }));
-			setCommand("");
+			return true;
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Auto command rules could not be saved."));
+			return false;
 		} finally {
 			setSaving(false);
 		}
 	};
 
-	const add = (rawCommand: string, network: boolean) => {
+	const add = async (rawCommand: string, network: boolean) => {
 		if (!view || saving) return;
 		const nextCommand = normalizeCommand(rawCommand);
 		if (!nextCommand) return;
@@ -59,7 +60,10 @@ export function AutoCommandAllowlistPanel({
 			setError(t("This command is already on the allowlist."));
 			return;
 		}
-		void save([...view.rules, { command: nextCommand, allowNetwork: network }]);
+		if (await save([...view.rules, { command: nextCommand, allowNetwork: network }])) {
+			setCommand("");
+			setAllowNetwork(false);
+		}
 	};
 
 	if (!view && !error) {
@@ -89,7 +93,7 @@ export function AutoCommandAllowlistPanel({
 						className="auto-command-allowlist-form"
 						onSubmit={(event) => {
 							event.preventDefault();
-							add(command, allowNetwork);
+							void add(command, allowNetwork);
 						}}
 					>
 						<label>
@@ -100,7 +104,7 @@ export function AutoCommandAllowlistPanel({
 								onKeyDown={(event) => {
 									if (event.key !== "Enter") return;
 									event.preventDefault();
-									add(command, allowNetwork);
+									void add(command, allowNetwork);
 								}}
 								placeholder={t("Add a command…")}
 								type="text"
@@ -148,7 +152,7 @@ export function AutoCommandAllowlistPanel({
 									className="auto-command-allowlist-suggestion"
 									disabled={busy}
 									key={suggestion}
-									onClick={() => add(suggestion, false)}
+									onClick={() => void add(suggestion, false)}
 									type="button"
 								>
 									{t("Add {{command}}", { command: suggestion })}

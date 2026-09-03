@@ -1555,6 +1555,42 @@ describe("AppServer", () => {
 		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
 	});
 
+	it("waits for a runtime settings refresh gate before persisting Auto command rules", async () => {
+		const server = await createTestServer({ agentDir, sessionsRoot });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		const release = await server.registry.beginModelServiceSettingsRefresh();
+		let settled = false;
+		const update = connection
+			.handle({
+				jsonrpc: "2.0",
+				id: "auto-rules-gated-update",
+				method: "permission/auto/update",
+				params: {
+					requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+					rules: [{ command: "ls", allowNetwork: false }],
+				},
+			})
+			.finally(() => {
+				settled = true;
+			});
+		try {
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect(settled).toBe(false);
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "auto-rules-before-gate",
+					method: "permission/auto/get",
+					params: {},
+				}),
+			).toMatchObject({ result: { rules: [] } });
+		} finally {
+			release();
+		}
+		expect(await update).toMatchObject({ result: { rules: [{ command: "ls", allowNetwork: false }] } });
+	});
+
 	it("lists draft skills without creating a session or trusting project resources", async () => {
 		const writeSkill = (root: string, name: string, description: string) => {
 			const directory = join(root, name);

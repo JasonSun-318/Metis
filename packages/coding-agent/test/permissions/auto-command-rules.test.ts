@@ -63,6 +63,13 @@ describe("Auto command rules", () => {
 		expect(matchAutoCommandRule("/tmp/git status", rules)).toBeUndefined();
 	});
 
+	it("preserves empty quoted argv entries when matching prefixes", () => {
+		const rules = normalizeAutoCommandRules([{ command: "git status", allowNetwork: false }]);
+		expect(parseSimpleShellCommand("git '' status")).toEqual(["git", "", "status"]);
+		expect(matchAutoCommandRule("git '' status", rules)).toBeUndefined();
+		expect(parseSimpleShellCommand('git "st\\atus"')).toEqual(["git", "st\\atus"]);
+	});
+
 	it("ships only valid unique suggestions", () => {
 		expect(DEFAULT_AUTO_COMMAND_SUGGESTIONS).toContain("ls");
 		expect(DEFAULT_AUTO_COMMAND_SUGGESTIONS).toContain("git status");

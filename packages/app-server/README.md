@@ -4,6 +4,7 @@ Recoverable, multi-session application server shared by Metis desktop and automa
 
 The package owns agent runtimes and durable session mutations. It does not spawn one child process per session.
 
-Request idempotency is journal-scoped: `session/create` IDs are global because they become session IDs; all other
-request IDs are scoped to their `sessionId`. Reusing an ID with different parameters inside one session is rejected
-across process restarts. The same UUID in two different sessions represents two independent operations.
+Durable session-mutation idempotency is journal-scoped: `session/create` IDs are global because they become session
+IDs, while mutations carrying a `sessionId` are scoped to that session and reject conflicting reuse across process
+restarts. Global mutations without a `sessionId` are deduplicated for the lifetime of the App Server process; their
+own services remain responsible for durable retry semantics.

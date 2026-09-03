@@ -2657,8 +2657,12 @@ export class AgentSession {
 	}
 
 	async refreshPermissionAutoSettings(): Promise<void> {
-		await this.settingsManager.reload();
 		this._permissionRuntime.invalidate("settings");
+		try {
+			await this.settingsManager.reload();
+		} finally {
+			this._permissionRuntime.invalidate("settings");
+		}
 	}
 
 	async refreshImageToolSettings(): Promise<void> {

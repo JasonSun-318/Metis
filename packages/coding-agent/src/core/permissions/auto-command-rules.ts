@@ -29,22 +29,28 @@ export const DEFAULT_AUTO_COMMAND_SUGGESTIONS = Object.freeze([
 export function tokenizeShellWords(source: string): { readonly words: readonly string[]; readonly complete: boolean } {
 	const words: string[] = [];
 	let word = "";
+	let wordStarted = false;
 	let quote: "'" | '"' | undefined;
 	let complete = true;
 	const flush = () => {
-		if (word) words.push(word);
+		if (wordStarted) words.push(word);
 		word = "";
+		wordStarted = false;
 	};
 	for (let index = 0; index < source.length; index += 1) {
 		const character = source[index]!;
 		if (quote) {
 			if (character === quote) quote = undefined;
-			else if (character === "\\" && quote === '"' && index + 1 < source.length) word += source[++index]!;
-			else word += character;
+			else if (character === "\\" && quote === '"' && index + 1 < source.length) {
+				const escaped = source[++index]!;
+				if (escaped === "\n") continue;
+				word += ['"', "\\", "$", "`"].includes(escaped) ? escaped : `\\${escaped}`;
+			} else word += character;
 			continue;
 		}
 		if (character === "'" || character === '"') {
 			quote = character;
+			wordStarted = true;
 			continue;
 		}
 		if (character === "\\") {
@@ -52,11 +58,17 @@ export function tokenizeShellWords(source: string): { readonly words: readonly s
 				complete = false;
 				continue;
 			}
-			word += source[++index]!;
+			const escaped = source[++index]!;
+			if (escaped === "\n") continue;
+			wordStarted = true;
+			word += escaped;
 			continue;
 		}
 		if (/\s/u.test(character)) flush();
-		else word += character;
+		else {
+			wordStarted = true;
+			word += character;
+		}
 	}
 	if (quote) complete = false;
 	flush();
