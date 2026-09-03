@@ -1906,6 +1906,24 @@ textarea { resize: none; }
 .permission-rules-confirm h2, .permission-rules-confirm p { margin: 0; }
 .permission-rules-confirm p, .permission-rules-confirm footer { grid-column: 2; }
 .permission-rules-confirm footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.auto-command-allowlist-page { display: grid; align-content: start; gap: 16px; }
+.auto-command-allowlist-page .auto-command-allowlist-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px; }
+.auto-command-allowlist-page .auto-command-allowlist-form > label:first-child { flex: 1 1 220px; min-width: 0; }
+.auto-command-allowlist-page .auto-command-allowlist-network-toggle { display: flex; flex: none; flex-direction: row; align-items: center; gap: 8px; min-height: 36px; color: var(--text-20); }
+.auto-command-allowlist-page .auto-command-allowlist-network-toggle input { width: 15px; height: 15px; accent-color: var(--accent); padding: 0; }
+.auto-command-allowlist-page .auto-command-allowlist-form > button { flex: none; }
+.auto-command-allowlist-page .auto-command-allowlist-chips, .auto-command-allowlist-page .auto-command-allowlist-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.auto-command-allowlist-page .auto-command-allowlist-chip { display: inline-flex; max-width: 100%; align-items: center; gap: 6px; border: 1px solid var(--border-weak); border-radius: 999px; background: var(--surface-03); color: var(--text-22); padding: 4px 6px 4px 10px; }
+.auto-command-allowlist-page .auto-command-allowlist-chip code { overflow: hidden; color: var(--text-26); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+.auto-command-allowlist-page .auto-command-allowlist-network { flex: none; border-radius: 999px; background: var(--provider-badge-bg); color: var(--provider-badge-text); padding: 2px 7px; font-size: 10px; font-weight: 520; }
+.auto-command-allowlist-page .auto-command-allowlist-chip > button { display: grid; width: 24px; height: 24px; flex: none; overflow: hidden; place-items: center; border-radius: 999px; color: transparent; font-size: 0; }
+.auto-command-allowlist-page .auto-command-allowlist-chip > button::before { color: var(--text-08); content: "×"; font-size: 14px; line-height: 1; }
+.auto-command-allowlist-page .auto-command-allowlist-chip > button:hover:not(:disabled) { background: var(--danger-hover-bg); }
+.auto-command-allowlist-page .auto-command-allowlist-chip > button:hover:not(:disabled)::before { color: var(--danger-inline-ink); }
+.auto-command-allowlist-page .auto-command-allowlist-suggestion { border: 1px solid var(--border-weak); border-radius: 999px; background: var(--surface-03); color: var(--text-20); padding: 5px 11px; font-size: 12px; font-weight: 500; }
+.auto-command-allowlist-page .auto-command-allowlist-suggestion:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-05); color: var(--text-28); }
+.auto-command-allowlist-page .auto-command-allowlist-form input:focus-visible, .auto-command-allowlist-page .auto-command-allowlist-network-toggle input:focus-visible, .auto-command-allowlist-page button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.auto-command-allowlist-page :disabled { cursor: not-allowed; opacity: .55; }
 .model-settings-page { display: grid; align-content: start; gap: 8px; }
 .model-provider-grid { display: grid; min-height: 0; align-content: start; gap: 10px; margin-top: 4px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .model-provider-card { display: grid; min-width: 0; min-height: 82px; align-content: space-between; gap: 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-02); color: var(--text-26); padding: 13px 15px; text-align: left; transition: all 120ms ease; overflow: hidden; }
@@ -2317,6 +2335,8 @@ classes so their inline layout wins the cascade. */
 	.settings-main-header { width: 100%; align-items: center; padding: 12px 20px; }
 	.settings-main-heading p { margin-top: 4px; font-size: 11px; }
 	.settings-page { padding: 25px 20px 42px; }
+	.auto-command-allowlist-page .auto-command-allowlist-form { flex-direction: column; align-items: stretch; }
+	.auto-command-allowlist-page .auto-command-allowlist-form > button { width: 100%; }
 	.browser-settings-toolbar { grid-template-columns: minmax(0, 1fr); }
 	.browser-settings-toolbar .settings-danger-button { justify-self: end; }
 	.browser-settings-history-group li { grid-template-columns: 22px minmax(0, 1fr); }

@@ -167,6 +167,38 @@ describe("SettingsDialog", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("opens the global Permissions page without a session or project", async () => {
+		const getPermissionAutoSettings = vi.fn().mockResolvedValue({ rules: [], suggestions: ["ls"] });
+		const api = {
+			getPermissionAutoSettings,
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<SettingsDialog
+				api={api}
+				generalPreferences={generalPreferences}
+				onClose={vi.fn()}
+				onGeneralPreferencesChange={vi.fn()}
+				onThemeChange={vi.fn()}
+				serverReady
+				theme="dark"
+			/>,
+		));
+		await flush();
+		expect(getPermissionAutoSettings).not.toHaveBeenCalled();
+		await act(async () => button(container, "Permissions").click());
+		await flush();
+		expect(getPermissionAutoSettings).toHaveBeenCalledTimes(1);
+		expect(getPermissionAutoSettings.mock.calls[0]).toEqual([]);
+		expect(container.querySelector(".auto-command-allowlist-page")).not.toBeNull();
+		expect(container.textContent).toContain("Command allowlist");
+		expect(container.textContent).not.toContain("sessionId");
+		await act(async () => root.unmount());
+	});
+
 	it("changes language, appearance, motion, content size, and independent prose fonts from General", async () => {
 		const api = {
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),

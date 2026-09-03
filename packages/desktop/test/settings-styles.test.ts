@@ -65,4 +65,19 @@ describe("Settings visual states", () => {
 		);
 		expect(getComputedStyle(reveal).backgroundColor).not.toBe("transparent");
 	});
+
+	it("scopes Auto command allowlist styles and avoids global form selectors", () => {
+		const style = document.createElement("style");
+		style.textContent = css;
+		document.head.replaceChildren(style);
+		const selectors = Array.from(style.sheet?.cssRules ?? [])
+			.filter((candidate): candidate is CSSStyleRule => candidate instanceof CSSStyleRule)
+			.map((candidate) => candidate.selectorText);
+		expect(selectors.some((selector) => selector.startsWith(".auto-command-allowlist-page"))).toBe(true);
+		expect(
+			selectors
+				.filter((selector) => selector.includes("auto-command-allowlist"))
+				.every((selector) => selector.includes(".auto-command-allowlist-page")),
+		).toBe(true);
+	});
 });

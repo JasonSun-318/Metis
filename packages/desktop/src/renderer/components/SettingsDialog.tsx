@@ -1,10 +1,11 @@
-import { ArrowLeft, Brain, Browser, ChartBar, Cpu, GearSix, Robot, Sparkle, UserCircle } from "@phosphor-icons/react";
+import { ArrowLeft, Brain, Browser, ChartBar, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
+import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
 import { GeneralPanel } from "./GeneralPanel.tsx";
 import { MemorySettingsPanel } from "./MemorySettingsPanel.tsx";
@@ -13,7 +14,7 @@ import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "general" | "browser" | "personalization" | "agentTypes" | "profile" | "model" | "memory" | "usage";
+type SettingsPage = "general" | "permissions" | "browser" | "personalization" | "agentTypes" | "profile" | "model" | "memory" | "usage";
 
 export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
@@ -64,6 +65,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 
 	const pages = [
 		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
+		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
 		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
 		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
 		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
@@ -116,6 +118,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 								theme={theme}
 							/>
 						) : null}
+						{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
 						{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
 						{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
