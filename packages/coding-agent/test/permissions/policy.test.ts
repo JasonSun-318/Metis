@@ -4,6 +4,7 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it, vi } from "vitest";
 import {
 	digestPermissionAction,
+	type NormalizePermissionActionInput,
 	normalizePermissionAction,
 	PermissionPolicy,
 	riskLevelFor,
@@ -219,6 +220,73 @@ describe("PermissionPolicy", () => {
 			kind: "review",
 			minimumReviewer: "user",
 		});
+	});
+
+	const auto = { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const;
+	const ask = { sandboxPolicy: "workspace-write", approvalPolicy: "user" } as const;
+	const lsRule = [{ command: "ls", allowNetwork: false }] as const;
+	const policy = new PermissionPolicy();
+	const bashAction = (overrides: Partial<NormalizePermissionActionInput>) =>
+		normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: overrides.command },
+				...overrides,
+			}),
+		);
+
+	it("allows an allowlisted simple command outside the workspace in Auto", () => {
+		const decision = policy.evaluate({
+			settings: auto,
+			action: bashAction({ command: "ls /tmp", readPaths: ["/tmp"] }),
+			autoCommandRules: lsRule,
+		});
+		expect(decision.kind).toBe("allow");
+	});
+
+	it("does not apply an Auto rule in Ask mode", () => {
+		const decision = policy.evaluate({
+			settings: ask,
+			action: bashAction({ command: "ls /tmp", readPaths: ["/tmp"] }),
+			autoCommandRules: lsRule,
+		});
+		expect(decision).toMatchObject({ kind: "review", minimumReviewer: "user" });
+	});
+
+	it.each([
+		{ command: "ls > /tmp/list", effects: [] },
+		{ command: "find /tmp -delete", effects: ["destructive"] },
+		{ command: "cat ~/.ssh/id_rsa", effects: ["sensitive-read"] },
+		{ command: "ls $TARGET", effects: ["unknown"] },
+	] as const)("does not fast-path $command", ({ command, effects }) => {
+		const decision = policy.evaluate({
+			settings: auto,
+			action: bashAction({ command, readPaths: ["/tmp"], effects }),
+			autoCommandRules: [{ command: command.split(" ")[0]!, allowNetwork: false }],
+		});
+		expect(decision.kind).not.toBe("allow");
+	});
+
+	it("requires the per-rule network flag", () => {
+		const networkAction = bashAction({
+			command: "curl https://example.com",
+			networkEndpoints: [{ hostname: "example.com", port: 443 }],
+		});
+		expect(
+			policy.evaluate({
+				settings: auto,
+				action: networkAction,
+				autoCommandRules: [{ command: "curl", allowNetwork: false }],
+			}).kind,
+		).toBe("review");
+		expect(
+			policy.evaluate({
+				settings: auto,
+				action: networkAction,
+				autoCommandRules: [{ command: "curl", allowNetwork: true }],
+			}).kind,
+		).toBe("allow");
 	});
 
 	it("imports without loading model, interaction, or execution adapters", async () => {

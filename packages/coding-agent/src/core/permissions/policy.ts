@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { type AutoCommandRule, matchAutoCommandRule } from "./auto-command-rules.ts";
 import { assertCompleteAction } from "./normalize.ts";
 import { assertPermissionSettings } from "./settings.ts";
 import type {
@@ -14,6 +15,7 @@ import type {
 export interface PermissionPolicyInput {
 	readonly settings: PermissionSettings;
 	readonly action: NormalizedPermissionAction;
+	readonly autoCommandRules?: readonly AutoCommandRule[];
 }
 
 const CRITICAL_EFFECTS = new Set([
@@ -117,8 +119,12 @@ function protectedWriteReason(action: NormalizedPermissionAction): string | unde
 function ceilingDenyReason(settings: PermissionSettings, action: NormalizedPermissionAction): string | undefined {
 	if (settings.sandboxPolicy !== "read-only") return undefined;
 	const forbiddenEffects = action.effects.filter((effect) => effect !== "sensitive-read");
-	if (action.writePaths.length > 0 || forbiddenEffects.length > 0) {
-		const reasons = [...(action.writePaths.length > 0 ? ["write scope"] : []), ...forbiddenEffects];
+	if (action.writePaths.length > 0 || action.networkEndpoints.length > 0 || forbiddenEffects.length > 0) {
+		const reasons = [
+			...(action.writePaths.length > 0 ? ["write scope"] : []),
+			...(action.networkEndpoints.length > 0 ? ["network"] : []),
+			...forbiddenEffects,
+		];
 		return `The read-only sandbox ceiling forbids ${reasons.join(", ")}`;
 	}
 	return undefined;
@@ -162,6 +168,21 @@ function minimumReviewerFor(settings: PermissionSettings, riskLevel: RiskLevel):
 	return undefined;
 }
 
+function isAllowedByAutoCommandRule(input: PermissionPolicyInput): boolean {
+	if (
+		input.settings.sandboxPolicy !== "workspace-write" ||
+		input.settings.approvalPolicy !== "auto-review" ||
+		input.action.toolName !== "bash" ||
+		input.action.command === undefined ||
+		input.action.effects.length > 0
+	) {
+		return false;
+	}
+	const rule = matchAutoCommandRule(input.action.command, input.autoCommandRules ?? []);
+	if (!rule) return false;
+	return input.action.networkEndpoints.length === 0 || rule.allowNetwork;
+}
+
 function deny(riskLevel: RiskLevel, reason: string): PermissionPolicyDecision {
 	return Object.freeze({ kind: "deny", riskLevel, reason });
 }
@@ -188,6 +209,15 @@ export class PermissionPolicy {
 				kind: "allow",
 				riskLevel,
 				reason: "Allowed by deterministic read policy",
+				grant,
+			});
+		}
+
+		if (isAllowedByAutoCommandRule(input)) {
+			return Object.freeze({
+				kind: "allow",
+				riskLevel,
+				reason: "Allowed by Auto command rule",
 				grant,
 			});
 		}

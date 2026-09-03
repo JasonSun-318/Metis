@@ -75,6 +75,7 @@ interface RequestOverrides {
 	readonly interactive?: boolean;
 	readonly signal?: AbortSignal;
 	readonly execute?: PermissionExecutionRequest<string>["execute"];
+	readonly autoCommandRules?: PermissionExecutionRequest<string>["autoCommandRules"];
 }
 
 function executionRequest(
@@ -92,6 +93,7 @@ function executionRequest(
 		interactive: overrides.interactive ?? true,
 		signal: overrides.signal ?? new AbortController().signal,
 		execute: overrides.execute ?? (async () => "executed"),
+		autoCommandRules: overrides.autoCommandRules ?? [],
 	};
 }
 

@@ -1159,6 +1159,9 @@ export class AgentSession {
 					trustedUserMessages: Object.freeze([...this._trustedUserMessages]),
 					interactive: this._permissionApprovalHandler !== undefined,
 					signal: executionSignal,
+					get autoCommandRules() {
+						return session.settingsManager.getAutoCommandRules();
+					},
 					execute: async (grant: ExecutionGrant) => {
 						const bindBash = tool.name === "bash" && this._interactiveBashBoundary;
 						if (bindBash) this._interactiveBashBoundary!.bind(grant);
@@ -2651,6 +2654,11 @@ export class AgentSession {
 	async refreshWebSearchSettings(): Promise<void> {
 		await this.settingsManager.reload();
 		this._applyWebSearchEnabled(this.settingsManager.getWebSearchSettings().enabled);
+	}
+
+	async refreshPermissionAutoSettings(): Promise<void> {
+		await this.settingsManager.reload();
+		this._permissionRuntime.invalidate("settings");
 	}
 
 	async refreshImageToolSettings(): Promise<void> {

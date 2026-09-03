@@ -303,4 +303,89 @@ describe("ToolAuthorizationRuntime", () => {
 			"Permission denied",
 		);
 	});
+
+	function bashOutside(command: string) {
+		return normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command },
+				command,
+				readPaths: ["/tmp"],
+				writePaths: [],
+			}),
+		);
+	}
+
+	it.each(["ls /tmp", "git status --short"] as const)(
+		"executes allowlisted %s without constructing a reviewer",
+		async (command) => {
+			const reviewerFactory = vi.fn(() => reviewer(allow()));
+			const grants = new ExecutionGrantStore();
+			const consumeExact = vi.spyOn(grants, "consumeExact");
+			const execute = vi.fn(async () => "executed");
+			const runtime = new ToolAuthorizationRuntime({ sessionId: "session-allowlist", reviewerFactory, grants });
+			const prefix = command.startsWith("git") ? "git status" : "ls";
+
+			await expect(
+				runtime.authorizeAndExecute(
+					safeRequest({
+						action: bashOutside(command),
+						args: { command },
+						autoCommandRules: [{ command: prefix, allowNetwork: false }],
+						execute,
+					}),
+				),
+			).resolves.toBe("executed");
+			expect(reviewerFactory).not.toHaveBeenCalled();
+			expect(execute).toHaveBeenCalledOnce();
+			expect(consumeExact).toHaveBeenCalledOnce();
+		},
+	);
+
+	it("denies a stale Auto command rule before consuming the grant", async () => {
+		let rules = [{ command: "ls", allowNetwork: false }];
+		const grants = new ExecutionGrantStore();
+		const issue = grants.issue.bind(grants);
+		vi.spyOn(grants, "issue").mockImplementation((input) => {
+			const grant = issue(input);
+			rules = [];
+			return grant;
+		});
+		const execute = vi.fn(async () => "executed");
+		const runtime = new ToolAuthorizationRuntime({ sessionId: "session-stale-rules", grants });
+
+		await expect(
+			runtime.authorizeAndExecute({
+				...safeRequest({
+					action: bashOutside("ls /tmp"),
+					args: { command: "ls /tmp" },
+					execute,
+				}),
+				get autoCommandRules() {
+					return rules;
+				},
+			}),
+		).rejects.toThrow("Auto command rules changed");
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it("does not allowlist a complex outside-workspace command", async () => {
+		const model = reviewer(allow());
+		const runtime = new ToolAuthorizationRuntime({
+			sessionId: "session-complex",
+			reviewerFactory: () => model,
+		});
+
+		await expect(
+			runtime.authorizeAndExecute(
+				safeRequest({
+					action: bashOutside("ls /tmp | cat"),
+					args: { command: "ls /tmp | cat" },
+					autoCommandRules: [{ command: "ls", allowNetwork: false }],
+				}),
+			),
+		).resolves.toBe("executed");
+		expect(model.review).toHaveBeenCalledOnce();
+	});
 });

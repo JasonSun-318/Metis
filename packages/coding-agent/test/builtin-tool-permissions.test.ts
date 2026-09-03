@@ -91,7 +91,7 @@ describe("built-in tool permission descriptors", () => {
 		const context = { actionId: "network", cwd, workspaceRoots: [cwd] };
 		const curl = definitions.bash.permission.describe({ command: "curl https://api.example.test/v1" }, context);
 		expect(curl.networkEndpoints).toEqual([{ hostname: "api.example.test", port: 443 }]);
-		expect(curl.effects).toContain("external-side-effect");
+		expect(curl.effects).not.toContain("external-side-effect");
 
 		expect(() =>
 			describeToolAction(

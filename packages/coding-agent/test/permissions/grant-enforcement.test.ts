@@ -77,6 +77,7 @@ function request(
 		interactive: true,
 		signal: new AbortController().signal,
 		execute,
+		autoCommandRules: [],
 	};
 }
 

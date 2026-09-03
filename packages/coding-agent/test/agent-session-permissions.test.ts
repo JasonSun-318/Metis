@@ -101,6 +101,49 @@ describe("AgentSession permission enforcement", () => {
 		expect(fake.createSandbox).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
 	});
 
+	it("runs an allowlisted outside-workspace ls in Auto without approval", async () => {
+		const fake = fakeBashBoundary();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionPreset: "auto",
+			settings: { autoCommandRules: [{ command: "ls", allowNetwork: false }] },
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+		});
+		fake.setCwd(harness.tempDir);
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "ls /tmp" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run it");
+
+		expect(requestApproval).not.toHaveBeenCalled();
+		expect(fake.sandboxExec).toHaveBeenCalledOnce();
+	});
+
+	it("still asks in Ask mode even with an Auto command rule", async () => {
+		const fake = fakeBashBoundary();
+		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const harness = await createHarness({
+			permissionPreset: "ask",
+			settings: { autoCommandRules: [{ command: "ls", allowNetwork: false }] },
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+		});
+		fake.setCwd(harness.tempDir);
+		harnesses.push(harness);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "ls /tmp" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+
+		await harness.session.prompt("run it");
+
+		expect(requestApproval).toHaveBeenCalledOnce();
+	});
+
 	it("rejects a Bash network command whose destination cannot be bound exactly", async () => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
@@ -673,7 +716,7 @@ describe("AgentSession permission enforcement", () => {
 			expect(fake.hostExec).not.toHaveBeenCalled();
 
 			for (const [command, pattern] of [
-				["curl https://example.com", /read-only sandbox.*external-side-effect/iu],
+				["curl https://example.com", /read-only sandbox.*(?:write scope|network)/iu],
 				["sudo true", /read-only sandbox.*elevation/iu],
 				["cat .env", /approval ceiling.*sensitive-read/iu],
 				["bash -c 'cat package.json'", /read-only sandbox.*write scope/iu],

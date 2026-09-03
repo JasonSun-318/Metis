@@ -7,6 +7,7 @@ import {
 	permissionClaim,
 	permissionDescriptor,
 } from "../src/core/tool-permission-adapter.ts";
+import { createBashToolDefinition } from "../src/core/tools/bash.ts";
 import {
 	definitionWithoutPermission,
 	identityInput,
@@ -16,6 +17,22 @@ import {
 	toolWithUnknownDynamicTarget,
 	toolWithWildcardNetwork,
 } from "./tool-permission-fixtures.ts";
+
+const bashDefinition = createBashToolDefinition(permissionProject);
+
+function describeBash(command: string) {
+	return describeToolAction(
+		bashDefinition,
+		{ command },
+		{
+			actionId: `bash-${command}`,
+			cwd: permissionProject,
+			workspaceRoots: [permissionProject],
+			provenance: "builtin",
+			toolIdentity: createToolIdentity(identityInput({ toolName: "bash" })),
+		},
+	);
+}
 
 describe("tool permission adapter", () => {
 	it("rejects an executable tool without a permission descriptor", () => {
@@ -76,5 +93,31 @@ describe("tool permission adapter", () => {
 
 	it("redacts descriptor exceptions", async () => {
 		await expect(invoke(toolWithThrowingDescriptor())).rejects.not.toThrow("secret descriptor detail");
+	});
+
+	it("classifies exact read-only HTTP fetch as network scope without an external mutation", () => {
+		const action = describeBash("curl https://example.com/data");
+		expect(action.networkEndpoints).toEqual([{ hostname: "example.com", port: 443 }]);
+		expect(action.effects).not.toContain("external-side-effect");
+		expect(action.effects).not.toContain("unknown");
+	});
+
+	it.each([
+		"curl -X DELETE https://example.com/item",
+		"curl --data value https://example.com/item",
+		"wget --post-data=value https://example.com/item",
+		"git push origin main",
+		"npm publish",
+	])("keeps known network mutations high risk: %s", (command) => {
+		expect(
+			bashDefinition.permission.describe(
+				{ command },
+				{ actionId: `bash-${command}`, cwd: permissionProject, workspaceRoots: [permissionProject] },
+			).effects,
+		).toContain("external-side-effect");
+	});
+
+	it("fails closed for an unresolved network endpoint", () => {
+		expect(() => describeBash('curl "$URL"')).toThrow("scope is incomplete");
 	});
 });

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalizeActionPath } from "../../utils/paths.ts";
 import { createPermissionAuditEvent, type PermissionAuditEvent, type PermissionAuditWriter } from "./audit.ts";
+import type { AutoCommandRule } from "./auto-command-rules.ts";
 import { ExecutionGrantStore } from "./grant-store.ts";
 import { digestCanonical, digestPermissionAction } from "./normalize.ts";
 import { PermissionPolicy, type PermissionPolicyInput } from "./policy.ts";
@@ -32,6 +33,7 @@ export interface PermissionExecutionRequest<T> {
 	readonly interactive: boolean;
 	readonly signal: AbortSignal;
 	readonly execute: (grant: ExecutionGrant) => Promise<T>;
+	readonly autoCommandRules: readonly AutoCommandRule[];
 }
 
 export type PermissionRuntimeInvalidation =
@@ -88,6 +90,7 @@ interface RuntimeSnapshot {
 	readonly settings: PermissionSettings;
 	readonly sandboxHealth: PermissionExecutionRequest<unknown>["sandboxHealth"];
 	readonly epoch: number;
+	readonly autoCommandRules: readonly AutoCommandRule[];
 }
 
 export class PermissionDeniedError extends Error {
@@ -218,6 +221,7 @@ export class ToolAuthorizationRuntime {
 			settings: Object.freeze({ ...request.settings }),
 			sandboxHealth: request.sandboxHealth,
 			epoch: this.epoch,
+			autoCommandRules: Object.freeze((request.autoCommandRules ?? []).map((rule) => Object.freeze({ ...rule }))),
 		});
 	}
 
@@ -225,6 +229,7 @@ export class ToolAuthorizationRuntime {
 		const decision = this.policy.evaluate({
 			action: snapshot.action,
 			settings: snapshot.settings,
+			autoCommandRules: snapshot.autoCommandRules,
 		} satisfies PermissionPolicyInput);
 		if (
 			decision.kind !== "deny" &&
@@ -290,6 +295,9 @@ export class ToolAuthorizationRuntime {
 		if (changed) throw new PermissionDeniedError(changed);
 		if (digestCanonical(current.settings) !== digestCanonical(initial.settings)) {
 			throw new PermissionDeniedError("Permission settings changed");
+		}
+		if (digestCanonical(current.autoCommandRules) !== digestCanonical(initial.autoCommandRules)) {
+			throw new PermissionDeniedError("Auto command rules changed");
 		}
 		if (current.sandboxHealth !== initial.sandboxHealth) {
 			throw new PermissionDeniedError("Sandbox health changed");

@@ -5,6 +5,7 @@ import type {
 	ToolPermissionContext,
 	ToolPermissionDescriptor,
 } from "./extensions/types.ts";
+import { tokenizeShellWords } from "./permissions/auto-command-rules.ts";
 import { assertCompleteAction, digestCanonical, normalizePermissionAction } from "./permissions/normalize.ts";
 import { bashReferencesSensitivePath, isSensitivePath } from "./permissions/sensitive-paths.ts";
 import type { NormalizedPermissionAction, ToolProvenance } from "./permissions/types.ts";
@@ -133,6 +134,69 @@ function shellNetworkEndpoints(command: string): {
 	return { detected: true, endpoints: [...unique.values()], complete: complete && unique.size > 0 };
 }
 
+function firstNonFlag(words: readonly string[], start = 1): string | undefined {
+	return words.slice(start).find((word) => !word.startsWith("-"));
+}
+
+function requestMethod(words: readonly string[], flags: readonly string[]): string | undefined {
+	for (let index = 0; index < words.length; index += 1) {
+		const word = words[index]!;
+		for (const flag of flags) {
+			if (word === flag) return words[index + 1];
+			if (word.startsWith(`${flag}=`)) return word.slice(flag.length + 1);
+			if (flag.length === 2 && word.startsWith(flag) && word.length > 2) return word.slice(2);
+		}
+	}
+	return undefined;
+}
+
+function isSafeHttpMethod(method: string | undefined): boolean {
+	return method === undefined || method === "GET" || method === "HEAD";
+}
+
+function curlMutates(words: readonly string[]): boolean {
+	const method = requestMethod(words, ["-X", "--request"])?.toUpperCase();
+	if (!isSafeHttpMethod(method)) return true;
+	return words.some(
+		(word) =>
+			word === "-d" ||
+			word === "-F" ||
+			word === "-T" ||
+			word.startsWith("--data") ||
+			word.startsWith("--form") ||
+			word.startsWith("--upload-file"),
+	);
+}
+
+function wgetMutates(words: readonly string[]): boolean {
+	const method = requestMethod(words, ["--method"])?.toUpperCase();
+	if (!isSafeHttpMethod(method)) return true;
+	return words.some(
+		(word) =>
+			word.startsWith("--post-data") ||
+			word.startsWith("--post-file") ||
+			word.startsWith("--body-data") ||
+			word.startsWith("--body-file"),
+	);
+}
+
+function shellHasKnownExternalMutation(command: string): boolean {
+	if (/\bdeploy\b/iu.test(command)) return true;
+	const remote = new Set(["ssh", "scp", "sftp", "rsync", "nc", "ncat", "telnet"]);
+	const publishers = new Set(["npm", "pnpm", "yarn", "bun", "cargo"]);
+	for (const segment of shellSegments(command)) {
+		const words = tokenizeShellWords(segment).words;
+		const executable = words[0]?.replace(/^.*\//u, "")?.toLowerCase();
+		if (!executable) continue;
+		if (remote.has(executable)) return true;
+		if (executable === "git" && firstNonFlag(words) === "push") return true;
+		if (publishers.has(executable) && words.slice(1).some((word) => word === "publish")) return true;
+		if (executable === "curl" && curlMutates(words.slice(1))) return true;
+		if (executable === "wget" && wgetMutates(words.slice(1))) return true;
+	}
+	return false;
+}
+
 function shellSegments(command: string): string[] {
 	return command
 		.split(/(?:&&|\|\||[;|\n])/u)
@@ -187,43 +251,6 @@ function shellRedirectionScope(command: string): {
 	return { readPaths, writePaths, complete };
 }
 
-function shellWords(segment: string): { readonly words: string[]; readonly complete: boolean } {
-	const words: string[] = [];
-	let word = "";
-	let quote: "'" | '"' | undefined;
-	let complete = true;
-	const flush = () => {
-		if (word) words.push(word);
-		word = "";
-	};
-	for (let index = 0; index < segment.length; index += 1) {
-		const character = segment[index]!;
-		if (quote) {
-			if (character === quote) quote = undefined;
-			else if (character === "\\" && quote === '"' && index + 1 < segment.length) word += segment[++index]!;
-			else word += character;
-			continue;
-		}
-		if (character === "'" || character === '"') {
-			quote = character;
-			continue;
-		}
-		if (character === "\\") {
-			if (index + 1 >= segment.length) {
-				complete = false;
-				continue;
-			}
-			word += segment[++index]!;
-			continue;
-		}
-		if (/\s/u.test(character)) flush();
-		else word += character;
-	}
-	if (quote) complete = false;
-	flush();
-	return { words, complete };
-}
-
 function filesystemOperand(word: string): string | undefined {
 	let value = word;
 	const equals = value.indexOf("=");
@@ -267,7 +294,7 @@ function shellOperandScope(
 		"truncate",
 	]);
 	for (const segment of shellSegments(withoutRedirections)) {
-		const parsed = shellWords(segment);
+		const parsed = tokenizeShellWords(segment);
 		if (!parsed.complete) complete = false;
 		const executable = parsed.words[0]?.replace(/^.*\//u, "");
 		if (!executable) continue;
@@ -371,10 +398,8 @@ export function bashPermissionClaim(command: string, context: ToolPermissionCont
 	if (/\bdeploy\b[^\n]*(?:prod|production)\b|\b(?:prod|production)\b[^\n]*\bdeploy\b/iu.test(command)) {
 		effects.add("production-mutation");
 	}
-	if (network.detected) {
-		effects.add("external-side-effect");
-		if (!network.complete) effects.add("unknown");
-	}
+	if (network.detected && !network.complete) effects.add("unknown");
+	if (shellHasKnownExternalMutation(command)) effects.add("external-side-effect");
 	if (!redirections.complete || !operands.complete) effects.add("unknown");
 	const deleteTargets = recursiveDeleteTargets(command);
 	if (deleteTargets) effects.add("destructive");
