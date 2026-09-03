@@ -254,8 +254,19 @@ describe("PermissionPolicy", () => {
 		expect(decision).toMatchObject({ kind: "review", minimumReviewer: "user" });
 	});
 
+	it("does not match a different executable path", () => {
+		const decision = policy.evaluate({
+			settings: auto,
+			action: bashAction({ command: "/tmp/ls", readPaths: ["/tmp"] }),
+			autoCommandRules: lsRule,
+		});
+		expect(decision.kind).not.toBe("allow");
+	});
+
 	it.each([
 		{ command: "ls > /tmp/list", effects: [] },
+		{ command: "ls | cat", effects: [] },
+		{ command: "echo $(cat file)", effects: ["unknown"] },
 		{ command: "find /tmp -delete", effects: ["destructive"] },
 		{ command: "cat ~/.ssh/id_rsa", effects: ["sensitive-read"] },
 		{ command: "ls $TARGET", effects: ["unknown"] },
@@ -287,6 +298,35 @@ describe("PermissionPolicy", () => {
 				autoCommandRules: [{ command: "curl", allowNetwork: true }],
 			}).kind,
 		).toBe("allow");
+	});
+
+	it("does not fast-path a known external mutation even with network enabled", () => {
+		const decision = policy.evaluate({
+			settings: auto,
+			action: bashAction({
+				command: "curl -X DELETE https://example.com/item",
+				networkEndpoints: [{ hostname: "example.com", port: 443 }],
+				effects: ["external-side-effect"],
+			}),
+			autoCommandRules: [{ command: "curl", allowNetwork: true }],
+		});
+		expect(decision.kind).not.toBe("allow");
+	});
+
+	it("hard-denies recursive deletion even with a matching Auto rule", () => {
+		const action = bashAction({
+			command: "rm -rf /",
+			readPaths: [],
+			writePaths: [parse(projectDir).root],
+			effects: ["destructive"],
+		});
+		expect(
+			policy.evaluate({
+				settings: auto,
+				action,
+				autoCommandRules: [{ command: "rm", allowNetwork: false }],
+			}),
+		).toMatchObject({ kind: "deny", riskLevel: "critical" });
 	});
 
 	it("imports without loading model, interaction, or execution adapters", async () => {
