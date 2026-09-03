@@ -77,6 +77,18 @@ export function AutoCommandAllowlistPanel({
 		}
 	};
 
+	const addSuggestions = async () => {
+		if (!view || saving || !suggestions.length) return;
+		if (view.rules.length + suggestions.length > MAX_AUTO_COMMAND_RULES) {
+			setError(t("The allowlist can hold at most {{max}} commands.", { max: MAX_AUTO_COMMAND_RULES }));
+			return;
+		}
+		await save([
+			...view.rules,
+			...suggestions.map((suggestion) => ({ command: suggestion, allowNetwork: false })),
+		]);
+	};
+
 	if (!view && !error) {
 		return <div aria-label={t("Loading Auto command rules")} className="settings-loading" role="status" />;
 	}
@@ -147,9 +159,9 @@ export function AutoCommandAllowlistPanel({
 							<span>{t("Add a simple command above, or pick one of the suggestions below.")}</span>
 						</div>
 					) : (
-						<ul className="auto-command-allowlist-list">
+						<div className="auto-command-allowlist-rules">
 							{view.rules.map((rule) => (
-								<li className="auto-command-allowlist-row" key={rule.command}>
+								<span className="auto-command-allowlist-chip" key={rule.command}>
 									<code>{rule.command}</code>
 									{rule.allowNetwork ? (
 										<span className="auto-command-allowlist-network">{t("Network")}</span>
@@ -162,27 +174,37 @@ export function AutoCommandAllowlistPanel({
 									>
 										{t("Remove {{command}}", { command: rule.command })}
 									</button>
-								</li>
+								</span>
 							))}
-						</ul>
+						</div>
 					)}
 					{suggestions.length ? (
 						<div className="auto-command-allowlist-footer">
-							<span className="auto-command-allowlist-footer-label">{t("Suggestions")}</span>
-							<div className="auto-command-allowlist-suggestions">
-								{suggestions.map((suggestion) => (
-									<button
-										aria-label={t("Add {{command}}", { command: suggestion })}
-										className="auto-command-allowlist-suggestion"
-										disabled={busy}
-										key={suggestion}
-										onClick={() => void add(suggestion, false)}
-										type="button"
-									>
-										{t("Add {{command}}", { command: suggestion })}
-									</button>
-								))}
+							<div className="auto-command-allowlist-footer-header">
+								<span className="auto-command-allowlist-footer-label">{t("Suggestions")}</span>
+								<div className="auto-command-allowlist-suggestions">
+									{suggestions.map((suggestion) => (
+										<button
+											aria-label={t("Add {{command}}", { command: suggestion })}
+											className="auto-command-allowlist-suggestion"
+											disabled={busy}
+											key={suggestion}
+											onClick={() => void add(suggestion, false)}
+											type="button"
+										>
+											{`+ ${suggestion}`}
+										</button>
+									))}
+								</div>
 							</div>
+							<button
+								className="settings-secondary-button auto-command-allowlist-add-all"
+								disabled={busy || view.rules.length + suggestions.length > MAX_AUTO_COMMAND_RULES}
+								onClick={() => void addSuggestions()}
+								type="button"
+							>
+								{t("Add Suggestions")}
+							</button>
 						</div>
 					) : null}
 					<div className="auto-command-allowlist-info">

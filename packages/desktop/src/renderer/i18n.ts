@@ -20,6 +20,8 @@ const zhCN = {
 		"此处列出的简单命令可在 Auto 模式下自动在工作区外运行。",
 	"Add a command…": "添加命令…",
 	Suggestions: "建议命令",
+	"Add Suggestions": "添加全部建议",
+	"The allowlist can hold at most {{max}} commands.": "允许列表最多容纳 {{max}} 条命令。",
 	"Allow network access": "允许网络访问",
 	"Add command": "添加命令",
 	"Add {{command}}": "添加 {{command}}",
