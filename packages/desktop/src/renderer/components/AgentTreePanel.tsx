@@ -1,5 +1,6 @@
 import { type AgentSummaryView, RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
+	Archive,
 	ArrowLeft,
 	CaretDown,
 	CaretRight,
@@ -8,6 +9,7 @@ import {
 	Robot,
 	SpinnerGap,
 	StopCircle,
+	Trash,
 	WarningCircle,
 } from "@phosphor-icons/react";
 import {
@@ -647,14 +649,14 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							<StatusIcon status={agent.status} />
 							{t(statusLabel(agent.status))}
 						</span>
-						<span>{agent.agentType}</span>
-						{taskSummary && <span>{taskSummary}</span>}
-						{elapsed && <span>{t("{{time}} elapsed", { time: elapsed })}</span>}
-						{usage.tokens > 0 && <span>{t("{{count}} tokens", { count: usage.tokens })}</span>}
+						<span className="subagent-type-tag">{agent.agentType}</span>
+						{elapsed && <span className="subagent-meta-item">{t("{{time}} elapsed", { time: elapsed })}</span>}
+						{usage.tokens > 0 && <span className="subagent-meta-item">{t("{{count}} tokens", { count: usage.tokens })}</span>}
 						{usage.toolUses > 0 && (
-							<span>{usage.toolUses === 1 ? t("1 tool use") : t("{{count}} tool uses", { count: usage.toolUses })}</span>
+							<span className="subagent-meta-item">{usage.toolUses === 1 ? t("1 tool use") : t("{{count}} tool uses", { count: usage.toolUses })}</span>
 						)}
-						{agent.archived && <span>{t("Archived")}</span>}
+						{agent.archived && <span className="subagent-meta-item">{t("Archived")}</span>}
+						{taskSummary && <span className="subagent-card-summary">{taskSummary}</span>}
 					</span>
 				</button>
 				{isActive(agent) && (
@@ -675,14 +677,17 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 				{!isActive(agent) && (
 					<div className="subagent-card-actions">
 						<button
+							className="subagent-action-button"
 							disabled={mutatingAgent || (!agent.archived && activeDescendant)}
 							onClick={() => void archive(agent, !agent.archived)}
 							type="button"
 						>
-							{t(agent.archived ? "Unarchive agent" : "Archive agent")}
+							<Archive aria-hidden="true" size={12} />
+							<span>{t(agent.archived ? "Unarchive agent" : "Archive agent")}</span>
 						</button>
-						<button disabled={mutatingAgent} onClick={() => remove(agent)} type="button">
-							{t("Delete")}
+						<button className="subagent-action-button subagent-action-delete" disabled={mutatingAgent} onClick={() => remove(agent)} type="button">
+							<Trash aria-hidden="true" size={12} />
+							<span>{t("Delete")}</span>
 						</button>
 					</div>
 				)}
@@ -765,6 +770,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						{selectedAgent && !isActive(selectedAgent) && (
 							<div className="subagent-detail-actions">
 								<button
+									className="subagent-action-button"
 									disabled={
 										mutating.has(selectedAgent.agentId) ||
 										(!selectedAgent.archived && hasActiveDescendant(selectedAgent, agents))
@@ -772,14 +778,17 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 									onClick={() => void archive(selectedAgent, !selectedAgent.archived)}
 									type="button"
 								>
-									{t(selectedAgent.archived ? "Unarchive agent" : "Archive agent")}
+									<Archive aria-hidden="true" size={12} />
+									<span>{t(selectedAgent.archived ? "Unarchive agent" : "Archive agent")}</span>
 								</button>
 								<button
+									className="subagent-action-button subagent-action-delete"
 									disabled={mutating.has(selectedAgent.agentId)}
 									onClick={() => remove(selectedAgent)}
 									type="button"
 								>
-									{t("Delete")}
+									<Trash aria-hidden="true" size={12} />
+									<span>{t("Delete")}</span>
 								</button>
 							</div>
 						)}
@@ -825,10 +834,13 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			) : (
 				<div className="subagent-panel-list">
 					<header className="subagent-panel-heading">
-						<Robot aria-hidden="true" size={15} />
-						<strong>{t("Agents")}</strong>
-						<button onClick={toggleArchived} type="button">
-							{t(showArchived ? "Hide archived" : "Show archived")}
+						<span className="subagent-panel-heading-title">
+							<Robot aria-hidden="true" size={15} />
+							<strong>{t("Agents")}</strong>
+						</span>
+						<button className="subagent-heading-toggle" onClick={toggleArchived} type="button">
+							<Archive aria-hidden="true" size={12} />
+							<span>{t(showArchived ? "Hide archived" : "Show archived")}</span>
 						</button>
 					</header>
 					<section aria-label={t("Agent tree")} className="subagent-section" role="tree">
@@ -839,12 +851,12 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						)}
 					</section>
 					{nextAgentCursor && (
-						<button disabled={loadingAgents} onClick={() => void loadAgentPage(false)} type="button">
+						<button className="subagent-load-more" disabled={loadingAgents} onClick={() => void loadAgentPage(false)} type="button">
 							{t(loadingAgents ? "Loading…" : "Load older agents")}
 						</button>
 					)}
 					{showArchived && nextArchivedCursor && (
-						<button disabled={loadingAgents} onClick={() => void loadAgentPage(true)} type="button">
+						<button className="subagent-load-more" disabled={loadingAgents} onClick={() => void loadAgentPage(true)} type="button">
 							{t(loadingAgents ? "Loading…" : "Load more archived")}
 						</button>
 					)}

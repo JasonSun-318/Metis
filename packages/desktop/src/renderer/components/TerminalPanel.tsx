@@ -15,7 +15,7 @@ interface TerminalPanelProps {
 
 export const TERMINAL_THEMES = {
 	dark: {
-		background: "#252525", foreground: "#e8e7e2", cursor: "#9a9a9a", selectionBackground: "#585858",
+		background: "#141414", foreground: "#e8e7e2", cursor: "#9a9a9a", selectionBackground: "#585858",
 		black: "#202020", red: "#ff8585", green: "#8fc17b", yellow: "#e4b56a", blue: "#75a9d6",
 		magenta: "#c69bd6", cyan: "#78c2bd", white: "#e8e7e2", brightBlack: "#7d7c77", brightWhite: "#ffffff",
 	},

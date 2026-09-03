@@ -186,10 +186,10 @@ textarea { resize: none; }
 .tool-tab-dirty { width: 6px; height: 6px; flex: none; overflow: visible !important; border-radius: 50%; background: var(--text-14); }
 .tool-tab-close { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border-radius: 5px; color: var(--text-05); }
 .tool-tab-close:hover { background: var(--surface-08); color: var(--text); }
-.tool-add { position: static; flex: none; }
+.tool-add { position: relative; flex: none; }
 .tool-add-trigger { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; color: var(--text-14); }
 .tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"] { background: var(--surface-04); color: var(--text); }
-.tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 5px); right: 4px; display: grid; width: 244px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
+.tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 5px); left: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
 .tool-add-menu button { height: 30px; background: transparent; font-size: 12px; }
 .tool-sidebar-collapse { position: absolute; top: 3px; right: 13px; display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
 .tool-sidebar-collapse:hover { color: var(--text); }
@@ -198,34 +198,45 @@ textarea { resize: none; }
 .subagent-panel { position: absolute; display: block; height: 100%; overflow: hidden; background: var(--sidebar); color: var(--text); font-size: 12px; inset: 0; }
 .subagent-panel[hidden] { display: none; }
 .subagent-panel-list { height: 100%; overflow-y: auto; padding: 10px; }
-.subagent-panel-heading { display: flex; min-height: 25px; align-items: center; gap: 7px; color: var(--text-22); }
-.subagent-panel-heading strong { flex: 1; }
-.subagent-panel-heading button, .subagent-card-actions button, .subagent-detail-actions button, .subagent-panel-list > button { border-radius: 5px; background: transparent; color: var(--muted); padding: 3px 6px; font-size: 10px; }
-.subagent-panel-heading button:hover:not(:disabled), .subagent-card-actions button:hover:not(:disabled), .subagent-detail-actions button:hover:not(:disabled), .subagent-panel-list > button:hover:not(:disabled) { background: var(--surface-04); color: var(--text); }
+.subagent-panel-heading { display: flex; min-height: 28px; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-22); margin-bottom: 8px; }
+.subagent-panel-heading-title { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.subagent-panel-heading strong { font-size: 13px; font-weight: 600; color: var(--text); }
+.subagent-panel-heading button, .subagent-heading-toggle { display: inline-flex; height: 25px; align-items: center; gap: 5px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-04); color: var(--text-24); padding: 0 8px; font-size: 11px; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
+.subagent-panel-heading button:hover:not(:disabled), .subagent-heading-toggle:hover:not(:disabled) { background: var(--surface-07); color: var(--text); border-color: var(--border-strong); }
 .subagent-section + .subagent-section { margin-top: 15px; }
 .subagent-section-title { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; }
 .subagent-section-empty { margin: 0; color: var(--text-03); padding: 7px 2px; font-size: 11px; }
-.subagent-card { display: grid; min-width: 0; align-items: start; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 9px; transition: background-color 140ms ease; }
-.subagent-card + .subagent-card { margin-top: 5px; }
-.subagent-tree-node + .subagent-tree-node { margin-top: 5px; }
+.subagent-card { display: grid; min-width: 0; align-items: start; grid-template-columns: auto minmax(0, 1fr) auto; border: 1px solid var(--border); border-radius: 9px; background: var(--panel); padding: 10px 11px; transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease; }
+.subagent-card + .subagent-card { margin-top: 6px; }
+.subagent-tree-node + .subagent-tree-node { margin-top: 6px; }
 .subagent-tree-children { margin-top: 5px; border-left: 1px solid var(--border); }
-.subagent-card:hover, .subagent-card:focus-within { background: var(--panel-hover); }
-.subagent-card-open { display: grid; min-width: 0; gap: 6px; background: transparent; padding: 0; text-align: left; }
+.subagent-card:hover, .subagent-card:focus-within { background: var(--panel-hover); border-color: var(--border-strong); }
+.subagent-card-open { display: grid; min-width: 0; gap: 4px; background: transparent; padding: 0; text-align: left; }
 .subagent-card-open:hover:not(:disabled) { background: transparent; }
 .subagent-fold { display: grid; width: 20px; height: 20px; align-items: center; justify-content: center; border-radius: 4px; background: transparent; color: var(--muted); margin: -2px 4px 0 -3px; }
 .subagent-fold:hover, .subagent-fold:focus-visible { background: var(--surface-08); color: var(--text); }
 .subagent-fold-spacer { width: 20px; margin-right: 4px; }
-.subagent-card-title { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.subagent-card-meta { display: flex; flex-wrap: wrap; gap: 4px 7px; color: var(--muted); font-size: 11px; }
+.subagent-card-title { overflow: hidden; color: var(--text); font-size: 13px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.subagent-card-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .subagent-card-meta > span { min-width: 0; }
-.subagent-status { display: inline-flex; align-items: center; gap: 3px; }
-.subagent-card[data-status="failed"] .subagent-status { color: var(--danger); }
-.subagent-card[data-status="queued"] .subagent-status, .subagent-card[data-status="running"] .subagent-status { color: var(--warning); }
-.subagent-stop, .subagent-detail-stop, .subagent-back { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 6px; color: var(--muted); }
-.subagent-stop { margin: -4px -4px 0 4px; }
-.subagent-card-actions, .subagent-detail-actions { display: flex; align-items: center; gap: 3px; }
-.subagent-card-actions { grid-column: 1 / -1; justify-content: flex-end; padding-top: 5px; }
+.subagent-status { display: inline-flex; align-items: center; gap: 3.5px; padding: 1px 6px; border-radius: 4px; background: var(--surface-05); font-size: 11px; font-weight: 500; }
+.subagent-card[data-status="done"] .subagent-status { background: var(--success-soft-bg); color: var(--success-soft-text); }
+.subagent-card[data-status="failed"] .subagent-status { background: var(--danger-soft-bg); color: var(--danger-soft-text); }
+.subagent-card[data-status="queued"] .subagent-status, .subagent-card[data-status="running"] .subagent-status { background: var(--warning-banner-bg); color: var(--warning-soft); }
+.subagent-type-tag { display: inline-flex; align-items: center; padding: 1px 5px; border-radius: 4px; background: var(--surface-05); color: var(--text-24); font-size: 11px; font-family: inherit; }
+.subagent-meta-item { display: inline-flex; align-items: center; color: var(--text-muted); font-size: 11px; }
+.subagent-card-summary { width: 100%; margin-top: 2px; color: var(--text-22); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.subagent-stop, .subagent-detail-stop, .subagent-back { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-04); color: var(--muted); transition: all 140ms ease; }
+.subagent-stop { margin: -2px -2px 0 6px; color: var(--warning); }
+.subagent-stop:hover:not(:disabled) { background: var(--danger-soft-bg); color: var(--danger); border-color: var(--danger-soft-border); }
+.subagent-card-actions, .subagent-detail-actions { display: flex; align-items: center; gap: 5px; }
+.subagent-card-actions { grid-column: 1 / -1; justify-content: flex-end; padding-top: 7px; margin-top: 6px; border-top: 1px solid var(--border); }
+.subagent-card-actions button, .subagent-detail-actions button, .subagent-panel-list > button.subagent-load-more { display: inline-flex; height: 24px; align-items: center; gap: 4px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-04); color: var(--text-22); padding: 0 8px; font-size: 11px; transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
+.subagent-card-actions button:hover:not(:disabled), .subagent-detail-actions button:hover:not(:disabled), .subagent-panel-list > button.subagent-load-more:hover:not(:disabled) { background: var(--surface-07); color: var(--text); border-color: var(--border-strong); }
+.subagent-card-actions button:disabled, .subagent-detail-actions button:disabled, .subagent-panel-list > button.subagent-load-more:disabled { opacity: 0.45; cursor: default; }
+.subagent-card-actions .subagent-action-delete:hover:not(:disabled), .subagent-detail-actions .subagent-action-delete:hover:not(:disabled) { background: var(--danger-soft-bg); color: var(--danger-soft-text); border-color: var(--danger-soft-border); }
 .subagent-stop:hover:not(:disabled), .subagent-detail-stop:hover:not(:disabled), .subagent-back:hover:not(:disabled) { color: var(--text); }
+.subagent-panel-list > button.subagent-load-more { width: 100%; height: 28px; margin-top: 8px; justify-content: center; }
 .subagent-panel .is-spinning { animation: browser-spin 900ms linear infinite; }
 .subagent-detail { --code-body-size: 12px; --code-meta-size: 11px; --code-mono-size: 11px; display: flex; height: 100%; min-width: 0; flex-direction: column; }
 .subagent-detail-header { display: flex; min-height: 42px; align-items: center; gap: 9px; border-bottom: 1px solid var(--border); padding: 0 11px; }

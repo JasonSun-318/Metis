@@ -1,6 +1,7 @@
 import type { AgentMode, PlanView, SessionSummary } from "@metis/app-protocol";
 import { ClipboardText, FileText, FolderSimple, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
@@ -181,6 +182,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 	const [savingFileTabIds, setSavingFileTabIds] = useState<ReadonlySet<string>>(new Set());
 	const [pendingFileClose, setPendingFileClose] = useState<PendingFileClose | null>(null);
 	const [menuOpen, setMenuOpen] = useState(false);
+	const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
 	const [browserProfiles, setBrowserProfiles] = useState<readonly DesktopBrowserProfile[]>([{
 		profileId: DEFAULT_BROWSER_PROFILE_ID,
 		name: "Default",
@@ -335,6 +337,32 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 		resize();
 		return () => window.removeEventListener("resize", resize);
 	}, [onWidthChange, preferredWidth]);
+	const updateMenuPosition = useCallback(() => {
+		if (!menuRef.current) return;
+		const trigger = menuRef.current;
+		const sidebar = trigger.closest<HTMLElement>(".tool-sidebar");
+		if (!sidebar) return;
+		const triggerRect = trigger.getBoundingClientRect();
+		const sidebarRect = sidebar.getBoundingClientRect();
+		if (triggerRect.width === 0 || sidebarRect.width === 0) return;
+		const menuWidth = 200;
+		const spaceRight = sidebarRect.right - triggerRect.left - 8;
+		const offset = Math.min(0, spaceRight - menuWidth);
+		const minLeft = sidebarRect.left + 8 - triggerRect.left;
+		const left = Math.max(minLeft, offset);
+		setMenuStyle({ left: `${Math.round(left)}px` });
+	}, []);
+
+	useLayoutEffect(() => {
+		if (!menuOpen) {
+			setMenuStyle({});
+			return;
+		}
+		updateMenuPosition();
+		window.addEventListener("resize", updateMenuPosition);
+		return () => window.removeEventListener("resize", updateMenuPosition);
+	}, [menuOpen, updateMenuPosition]);
+
 	useEffect(() => {
 		if (!menuOpen) return;
 		const close = (event: PointerEvent) => {
@@ -863,7 +891,12 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 	};
 
 	const toolMenu = (compact: boolean) => (
-		<nav aria-label={t("Available tools")} className={compact ? "tool-add-menu" : "tool-sidebar-menu"} role={compact ? "menu" : undefined}>
+		<nav
+			aria-label={t("Available tools")}
+			className={compact ? "tool-add-menu" : "tool-sidebar-menu"}
+			role={compact ? "menu" : undefined}
+			style={compact ? menuStyle : undefined}
+		>
 			{mode === "code" && <button disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button"><ClipboardText aria-hidden="true" size={14} /><span>{t("Review")}</span></button>}
 			<button disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button"><TerminalWindow aria-hidden="true" size={14} /><span>{t("Terminal")}</span></button>
 			<button disabled={!activeSession} onClick={() => addBrowser()} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button"><Globe aria-hidden="true" size={14} /><span>{t("Browser")}</span></button>

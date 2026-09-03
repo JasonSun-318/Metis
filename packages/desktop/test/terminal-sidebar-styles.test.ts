@@ -21,7 +21,7 @@ function rule(selector: string): CSSStyleDeclaration {
 
 describe("Terminal sidebar shell", () => {
 	it("uses distinct terminal and editor palettes for light and dark themes", () => {
-		expect(TERMINAL_THEMES.dark.background).toBe("#252525");
+		expect(TERMINAL_THEMES.dark.background).toBe("#141414");
 		expect(TERMINAL_THEMES.light.background).toBe("#fcfcfb");
 		expect(TERMINAL_THEMES.light.foreground).toBe("#2e2b27");
 		expect(tokens).toContain("--editor-color-scheme: light;");
@@ -41,7 +41,9 @@ describe("Terminal sidebar shell", () => {
 		expect(sidebar.borderRadius).toBe("9px");
 		expect(rule(".tool-tabbar").height).toBe("36px");
 		expect(rule(".tool-tabs-scroll").flex).toBe("0 1 auto");
-		expect(rule(".tool-add-menu").right).toBe("4px");
+		expect(rule(".tool-add").position).toBe("relative");
+		expect(rule(".tool-add-menu").left).toBe("0px");
+		expect(rule(".tool-add-menu").width).toBe("200px");
 		expect(rule(".tool-stage").top).toBe("36px");
 		expect(rule(".browser-toolbar").height).toBe("42px");
 		expect(rule(".browser-address-field").borderRadius).toBe("8px");
@@ -57,6 +59,13 @@ describe("Terminal sidebar shell", () => {
 		const activeTab = rule(".tool-tab.is-active");
 		expect(activeTab.background).toBe("var(--surface-05)");
 		expect(activeTab.boxShadow).toBe("var(--shadow)");
+	});
+
+	it("anchors the tool-add menu to the plus trigger button rather than the sidebar right edge", () => {
+		expect(rule(".tool-add").position).toBe("relative");
+		expect(rule(".tool-add-menu").position).toBe("absolute");
+		expect(rule(".tool-add-menu").left).toBe("0px");
+		expect(rule(".tool-add-menu").right).toBe("");
 	});
 
 	it("keeps the file tree beside the preview until the sidebar reaches its minimum width", () => {
