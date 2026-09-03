@@ -673,4 +673,26 @@ describe("SettingsManager", () => {
 			expect(manager.getWebSearchSettings()).toEqual({ enabled: false, provider: "brave" });
 		});
 	});
+
+	describe("Auto command rules", () => {
+		it("persists normalized global Auto command rules", async () => {
+			const manager = SettingsManager.inMemory();
+			manager.setAutoCommandRules([
+				{ command: " git   status ", allowNetwork: false },
+				{ command: "curl", allowNetwork: true },
+			]);
+			expect(manager.getAutoCommandRules()).toEqual([
+				{ command: "git status", allowNetwork: false },
+				{ command: "curl", allowNetwork: true },
+			]);
+			await manager.flush();
+		});
+
+		it("fails closed when persisted Auto command rules are invalid", () => {
+			const manager = SettingsManager.inMemory({
+				autoCommandRules: [{ command: "ls && rm -rf /", allowNetwork: false }],
+			});
+			expect(manager.getAutoCommandRules()).toEqual([]);
+		});
+	});
 });

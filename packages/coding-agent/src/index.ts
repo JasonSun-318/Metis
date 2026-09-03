@@ -325,6 +325,16 @@ export {
 	PermissionAuditWriter,
 } from "./core/permissions/audit.ts";
 export {
+	type AutoCommandRule,
+	DEFAULT_AUTO_COMMAND_SUGGESTIONS,
+	MAX_AUTO_COMMAND_LENGTH,
+	MAX_AUTO_COMMAND_RULES,
+	matchAutoCommandRule,
+	normalizeAutoCommandRules,
+	parseSimpleShellCommand,
+	tokenizeShellWords,
+} from "./core/permissions/auto-command-rules.ts";
+export {
 	type ActionRisk,
 	type ClassifyActionInput,
 	classifyAction,

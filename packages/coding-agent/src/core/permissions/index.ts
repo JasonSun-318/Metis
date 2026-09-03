@@ -13,6 +13,7 @@ export {
 	type RequestPermissionApproval,
 } from "./approval.ts";
 export * from "./audit.ts";
+export * from "./auto-command-rules.ts";
 export {
 	type ClassifyActionInput,
 	classifyAction,

@@ -14,6 +14,7 @@ import {
 	validateEmbeddingSettings,
 	validateRerankSettings,
 } from "./memory/memory-service-settings.ts";
+import { type AutoCommandRule, normalizeAutoCommandRules } from "./permissions/auto-command-rules.ts";
 import type { ThinkingSelection } from "./thinking-selection.ts";
 import { isWebSearchProvider, type WebSearchProvider } from "./web-search-config.ts";
 
@@ -187,6 +188,7 @@ export interface Settings {
 	websocketConnectTimeoutMs?: number; // WebSocket connect/open handshake timeout in milliseconds; 0 disables it
 	mcpServers?: Record<string, McpServerSettings>;
 	webSearch?: WebSearchSettings; // global-only opt-in external search
+	autoCommandRules?: AutoCommandRule[]; // global-only Auto-mode command allowlist
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -587,6 +589,20 @@ export class SettingsManager {
 	setWebSearchProvider(provider: WebSearchProvider): void {
 		this.globalSettings.webSearch = { ...this.globalSettings.webSearch, provider };
 		this.markModified("webSearch", "provider");
+		this.save();
+	}
+
+	getAutoCommandRules(): readonly AutoCommandRule[] {
+		try {
+			return normalizeAutoCommandRules(this.globalSettings.autoCommandRules ?? []);
+		} catch {
+			return Object.freeze([]);
+		}
+	}
+
+	setAutoCommandRules(rules: readonly AutoCommandRule[]): void {
+		this.globalSettings.autoCommandRules = normalizeAutoCommandRules(rules).map((rule) => ({ ...rule }));
+		this.markModified("autoCommandRules");
 		this.save();
 	}
 
