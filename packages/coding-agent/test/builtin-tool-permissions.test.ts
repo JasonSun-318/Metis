@@ -165,9 +165,9 @@ describe("built-in tool permission descriptors", () => {
 		const read = describe(`cat ${outside}`, "builtin-bash-cat");
 		expect(read.readPaths).toContain(outside);
 		expect(read.writePaths).toEqual([]);
-		expect(() => describe(`python ./script.py ${outside}`, "builtin-bash-unknown-paths")).toThrow(
-			"scope is incomplete",
-		);
+		const python = describe(`python ./script.py ${outside}`, "builtin-bash-unknown-paths");
+		expect(python.writePaths).toEqual(expect.arrayContaining([join(cwd, "script.py"), outside]));
+		expect(python.effects).not.toContain("unknown");
 		expect(() => describe("touch $OUTPUT_PATH", "builtin-bash-dynamic-operand")).toThrow("scope is incomplete");
 		expect(() => describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory")).toThrow(
 			"scope is incomplete",

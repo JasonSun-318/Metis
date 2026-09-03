@@ -306,6 +306,7 @@ function shellOperandScope(
 		"touch",
 		"truncate",
 	]);
+	const barePathWriters = new Set(["mkdir", "rm", "rmdir", "shred", "tee", "touch", "truncate"]);
 	for (const segment of shellSegments(withoutRedirections)) {
 		const parsed = tokenizeShellWords(segment);
 		if (!parsed.complete) complete = false;
@@ -330,7 +331,17 @@ function shellOperandScope(
 			continue;
 		}
 		if (pathWriters.has(executable)) {
-			writePaths.push(...operands);
+			let endFlags = false;
+			for (const word of argumentWords) {
+				if (!endFlags && word === "--") {
+					endFlags = true;
+					continue;
+				}
+				if (!endFlags && word.startsWith("-") && word !== "-") continue;
+				const path = filesystemOperand(word);
+				if (path) writePaths.push(path);
+				else if (barePathWriters.has(executable)) writePaths.push(word);
+			}
 			continue;
 		}
 		if (executable === "cp" || executable === "install") {
@@ -378,7 +389,10 @@ function shellOperandScope(
 			writePaths.push(...operands);
 			continue;
 		}
-		if (operands.length > 0) complete = false;
+		if (operands.length > 0) {
+			if (argumentWords.some((value) => /[`$*?[\]{}()]/u.test(value))) complete = false;
+			else writePaths.push(...operands);
+		}
 	}
 	return { readPaths, writePaths, complete };
 }

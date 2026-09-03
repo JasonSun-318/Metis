@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { canonicalizeActionPath } from "../../utils/paths.ts";
 import { type AutoCommandRule, matchAutoCommandRule } from "./auto-command-rules.ts";
 import { assertCompleteAction } from "./normalize.ts";
 import { assertPermissionSettings } from "./settings.ts";
@@ -88,6 +89,18 @@ function isRecursiveDeletionCommand(command: string | undefined): boolean {
 	return /\bremove-item\b[^;\n]*(?:-recurse|-r\b)/iu.test(command) || /\brmdir\b[^;\n]*\/s\b/iu.test(command);
 }
 
+function explicitRecursiveDeleteTargets(command: string): readonly string[] {
+	const targets: string[] = [];
+	for (const segment of command.split(/(?:&&|\|\||[;|\n])/u)) {
+		const match = segment.match(/^\s*rm\s+((?:-[^\s]+\s+)+)([^;&|\n]+)\s*$/iu);
+		if (!match || !/(?:^|\s)-[^\s]*r/iu.test(match[1] ?? "")) continue;
+		const parts = (match[2] ?? "").trim().split(/\s+/u);
+		if (parts.length === 0 || parts.some((target) => /[*?$`'"\\]/u.test(target))) continue;
+		targets.push(...parts);
+	}
+	return targets;
+}
+
 function hardDenyReason(action: NormalizedPermissionAction): string | undefined {
 	try {
 		assertCompleteAction(action);
@@ -101,8 +114,26 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 	for (const target of action.writePaths) {
 		if (target === parse(target).root) return "Recursive deletion of a filesystem root is forbidden";
 		if (target === home) return "Recursive deletion of the user home is forbidden";
-		if (action.workspaceRoots.includes(target)) return "Recursive deletion of a workspace root is forbidden";
 	}
+	if (!isRecursiveDeletionCommand(action.command)) return undefined;
+
+	const explicitTargets = action.command ? explicitRecursiveDeleteTargets(action.command) : [];
+	if (explicitTargets.length > 0) {
+		for (const raw of explicitTargets) {
+			try {
+				if (action.workspaceRoots.includes(canonicalizeActionPath(raw, action.cwd))) {
+					return "Recursive deletion of a workspace root is forbidden";
+				}
+			} catch {}
+		}
+		return undefined;
+	}
+
+	const hitsWorkspaceRoot = action.writePaths.some((target) => action.workspaceRoots.includes(target));
+	const hasInteriorWrite = action.writePaths.some((target) =>
+		action.workspaceRoots.some((root) => target !== root && isPathInsideNormalized(root, target)),
+	);
+	if (hitsWorkspaceRoot && !hasInteriorWrite) return "Recursive deletion of a workspace root is forbidden";
 	return undefined;
 }
 

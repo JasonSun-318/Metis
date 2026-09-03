@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionPolicy } from "../src/core/permissions/policy.ts";
+import { settingsForPreset } from "../src/core/permissions/settings.ts";
 import {
 	assertToolPermissionDescriptor,
 	createToolIdentity,
@@ -164,5 +165,30 @@ describe("tool permission adapter", () => {
 
 	it("fails closed for an unresolved network endpoint", () => {
 		expect(() => describeBash('curl "$URL"')).toThrow("scope is incomplete");
+	});
+
+	it("reviews workspace rm and allows python scripts instead of hard-denying both", () => {
+		const policy = new PermissionPolicy();
+		const rm = describeBash("rm file.txt");
+		expect(rm.effects).toContain("destructive");
+		expect(rm.writePaths).toContain(join(permissionProject, "file.txt"));
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: rm })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: rm })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
+
+		const python = describeBash("python ./script.py");
+		expect(python.effects).not.toContain("unknown");
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: python })).toMatchObject({ kind: "allow" });
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: python })).toMatchObject({ kind: "allow" });
+
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: describeBash("rm -rf .") })).toMatchObject({
+			kind: "deny",
+		});
+		expect(() => describeBash("python ./script.py $OUTPUT")).toThrow("scope is incomplete");
 	});
 });

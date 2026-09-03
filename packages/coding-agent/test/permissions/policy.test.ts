@@ -83,6 +83,49 @@ describe("PermissionPolicy", () => {
 		});
 	});
 
+	it("reviews a workspace file delete instead of treating the write grant as recursive workspace deletion", () => {
+		const action = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "rm file.txt" },
+				command: "rm file.txt",
+				readPaths: [],
+				writePaths: [projectDir, join(projectDir, "file.txt")],
+				effects: ["destructive"],
+			}),
+		);
+		const policy = new PermissionPolicy();
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "review",
+			riskLevel: "high",
+			minimumReviewer: "model",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+			kind: "review",
+			riskLevel: "high",
+			minimumReviewer: "user",
+		});
+	});
+
+	it("still hard-denies recursive deletion of the workspace when an extra write grant is present", () => {
+		const action = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "rm -rf . && python script.py" },
+				command: "rm -rf . && python script.py",
+				readPaths: [],
+				writePaths: [projectDir],
+				effects: ["destructive"],
+			}),
+		);
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+			kind: "deny",
+			riskLevel: "critical",
+		});
+	});
+
 	it("fails closed for incomplete actions and wildcard network grants", () => {
 		const policy = new PermissionPolicy();
 		const complete = ordinaryRead();
