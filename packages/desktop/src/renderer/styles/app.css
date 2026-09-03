@@ -261,9 +261,10 @@ textarea { resize: none; }
 .terminal-action-btn { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 5px; background: var(--surface-04); border: 1px solid var(--border); color: var(--text-14); transition: background-color 140ms ease, color 140ms ease; }
 .terminal-action-btn:hover { background: var(--surface-06); color: var(--text); }
 .terminal-status { position: absolute; right: 12px; bottom: 10px; max-width: calc(100% - 24px); border: 1px solid var(--border); border-radius: 7px; background: var(--surface-04); color: var(--muted); padding: 5px 8px; font-size: 11px; }
-.file-panel { position: absolute; display: none; overflow: hidden; background: var(--sidebar); inset: 0; }
-.file-panel.is-visible { display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 36%); transition: grid-template-columns 150ms ease; }
+.file-panel { position: absolute; display: none; overflow: hidden; background: var(--sidebar); inset: 0; --file-tree-width: 220px; }
+.file-panel.is-visible { display: grid; grid-template-columns: minmax(0, 1fr) var(--file-tree-width); transition: grid-template-columns 150ms ease; }
 .file-panel.is-visible.is-tree-hidden { grid-template-columns: minmax(0, 1fr) 0px; }
+.file-panel.is-visible.is-resizing { transition: none; }
 .file-panel.is-tree-hidden .file-tree { display: none; }
 .file-preview, .file-tree { min-width: 0; min-height: 0; }
 .file-preview { display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--app-bg); }
@@ -293,7 +294,10 @@ textarea { resize: none; }
 .file-code-editor { width: 100%; height: 100%; min-width: 0; overflow: hidden; background: var(--app-bg); }
 .file-code-editor .cm-editor { height: 100%; }
 .file-markdown { max-width: 920px; margin: 0 auto; padding: 13px 16px 30px; font-size: 13px; }
-.file-tree { display: flex; flex-direction: column; background: var(--sidebar); }
+.file-tree { position: relative; display: flex; flex-direction: column; background: var(--sidebar); }
+.file-tree-resizer { position: absolute; z-index: 10; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: 0; }
+.file-tree-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background-color 140ms ease; }
+.file-tree-resizer:hover::after, .file-tree-resizer:focus-visible::after, .file-tree-resizer.is-resizing::after { background: var(--border-strong); }
 .file-tree-toolbar { display: flex; height: 40px; flex: none; align-items: center; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .file-tree-toolbar > button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border-radius: 6px; color: var(--text-14); }
 .file-tree-toolbar > button:hover, .file-tree-toolbar > button:focus-visible { background: var(--surface-05); color: var(--text); outline: 0; }
@@ -328,6 +332,7 @@ textarea { resize: none; }
 	.file-panel.is-visible { grid-template-columns: 1fr; grid-template-rows: minmax(0, 58%) minmax(190px, 42%); }
 	.file-preview { border-right: 0; border-bottom: 1px solid var(--border); }
 	.file-preview-notice { max-width: calc(100% - 28px); }
+	.file-tree-resizer { display: none; }
 }
 .review-panel { position: absolute; display: none; overflow: hidden; background: var(--app-bg); color: var(--text); inset: 0; }
 .review-panel.is-visible { display: block; }

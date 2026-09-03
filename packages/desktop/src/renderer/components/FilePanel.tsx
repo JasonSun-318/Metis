@@ -34,6 +34,14 @@ import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const DIRECTORY_CACHE_MS = 5_000;
+const DEFAULT_TREE_WIDTH = 220;
+const MIN_TREE_WIDTH = 140;
+const MAX_TREE_WIDTH = 520;
+
+function clampTreeWidth(value: number): number {
+	if (!Number.isFinite(value)) return DEFAULT_TREE_WIDTH;
+	return Math.max(MIN_TREE_WIDTH, Math.min(MAX_TREE_WIDTH, Math.round(value)));
+}
 
 interface CachedDirectory {
 	readonly entries: readonly DesktopWorkspaceEntry[];
@@ -160,6 +168,24 @@ export function FilePanel({
 	const [mutationPending, setMutationPending] = useState(false);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [treeOpen, setTreeOpen] = useState(true);
+	const [treeWidth, setTreeWidth] = useState(() => {
+		try {
+			const stored = Number(localStorage.getItem("metis.fileTreeWidth"));
+			return clampTreeWidth(stored || DEFAULT_TREE_WIDTH);
+		} catch {
+			return DEFAULT_TREE_WIDTH;
+		}
+	});
+	const [isResizing, setIsResizing] = useState(false);
+	const resizeRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
+
+	const updateTreeWidth = useCallback((nextWidth: number) => {
+		const clamped = clampTreeWidth(nextWidth);
+		setTreeWidth(clamped);
+		try {
+			localStorage.setItem("metis.fileTreeWidth", String(clamped));
+		} catch {}
+	}, []);
 	const expanded = useMemo(() => new Set(expandedPaths), [expandedPaths]);
 	const draftMatchesActivePath = draft?.file.relativePath === activePath;
 	const displayedFile = draftMatchesActivePath ? draft.file : file;
@@ -472,9 +498,10 @@ export function FilePanel({
 	return (
 		<section
 			aria-hidden={!visible}
-			className={`file-panel${visible ? " is-visible" : ""}${treeOpen ? "" : " is-tree-hidden"}`}
+			className={`file-panel${visible ? " is-visible" : ""}${treeOpen ? "" : " is-tree-hidden"}${isResizing ? " is-resizing" : ""}`}
 			id={`file-panel-${sessionId}`}
 			role="tabpanel"
+			style={{ "--file-tree-width": `${treeWidth}px` } as React.CSSProperties}
 		>
 			<div className="file-preview">
 				<header className="file-preview-toolbar">
@@ -558,6 +585,45 @@ export function FilePanel({
 			</div>
 
 			<aside className="file-tree">
+				{treeOpen && (
+					<div
+						aria-label={t("Resize file tree")}
+						aria-orientation="vertical"
+						aria-valuemax={MAX_TREE_WIDTH}
+						aria-valuemin={MIN_TREE_WIDTH}
+						aria-valuenow={treeWidth}
+						className={`file-tree-resizer${isResizing ? " is-resizing" : ""}`}
+						onDoubleClick={() => updateTreeWidth(DEFAULT_TREE_WIDTH)}
+						onKeyDown={(event) => {
+							if (event.key === "ArrowLeft") {
+								event.preventDefault();
+								updateTreeWidth(treeWidth + 16);
+							} else if (event.key === "ArrowRight") {
+								event.preventDefault();
+								updateTreeWidth(treeWidth - 16);
+							}
+						}}
+						onPointerDown={(event) => {
+							resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: treeWidth };
+							setIsResizing(true);
+							event.currentTarget.setPointerCapture(event.pointerId);
+						}}
+						onPointerMove={(event) => {
+							const start = resizeRef.current;
+							if (!start || start.pointerId !== event.pointerId) return;
+							updateTreeWidth(start.startWidth + (start.startX - event.clientX));
+						}}
+						onPointerUp={(event) => {
+							if (resizeRef.current?.pointerId === event.pointerId) {
+								resizeRef.current = null;
+								setIsResizing(false);
+							}
+							event.currentTarget.releasePointerCapture(event.pointerId);
+						}}
+						role="separator"
+						tabIndex={0}
+					/>
+				)}
 				<div className="file-tree-toolbar">
 					<div className="file-search-field">
 						<MagnifyingGlass aria-hidden="true" size={14} />
