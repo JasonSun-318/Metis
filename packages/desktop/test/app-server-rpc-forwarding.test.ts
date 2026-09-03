@@ -34,6 +34,19 @@ describe("desktop App Server RPC forwarding", () => {
 		]);
 	});
 
+	it("declares Auto command allowlist forwarding", () => {
+		expect(DESKTOP_RPC_FORWARDING.getPermissionAutoSettings).toEqual({
+			channel: "metis:get-permission-auto-settings",
+			method: "permission/auto/get",
+			input: "none",
+		});
+		expect(DESKTOP_RPC_FORWARDING.updatePermissionAutoSettings).toEqual({
+			channel: "metis:update-permission-auto-settings",
+			method: "permission/auto/update",
+			input: "required",
+		});
+	});
+
 	it("reconstructs a coded RPC error after the structured-clone boundary", async () => {
 		const api = createDesktopRpcForwarders(
 			vi.fn().mockResolvedValue(desktopRpcIpcFailure(-32011, "Operation failed")),

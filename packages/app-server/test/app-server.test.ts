@@ -73,6 +73,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	compactCalls = 0;
 	agentInterruptCalls = 0;
 	webSearchRefreshCalls = 0;
+	permissionAutoRefreshCalls = 0;
 	sessionName: string | undefined;
 
 	constructor(ref: SessionRef) {
@@ -419,6 +420,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async refreshWebSearchSettings(): Promise<void> {
 		this.webSearchRefreshCalls += 1;
+	}
+
+	async refreshPermissionAutoSettings(): Promise<void> {
+		this.permissionAutoRefreshCalls += 1;
 	}
 
 	async prepareMutation(_input: DurableSessionMutation): Promise<PreparedSessionMutation> {
@@ -1501,6 +1506,53 @@ describe("AppServer", () => {
 			}),
 		).toMatchObject({ result: { enabled: true, provider: "tavily" } });
 		expect(host.runtimes.get("web-search-session")?.webSearchRefreshCalls).toBe(1);
+	});
+
+	it("refreshes already-open runtimes after Auto command rules change", async () => {
+		writeSession(sessionsRoot, "auto-rules-session", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "auto-rules-subscribe",
+			method: "session/subscribe",
+			params: { sessionId: "auto-rules-session" },
+		});
+		const requestId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(0);
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "auto-rules-update",
+				method: "permission/auto/update",
+				params: { requestId, rules: [{ command: "ls", allowNetwork: false }] },
+			}),
+		).toMatchObject({ result: { rules: [{ command: "ls", allowNetwork: false }] } });
+		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "auto-rules-replay",
+				method: "permission/auto/update",
+				params: { requestId, rules: [{ command: "ls", allowNetwork: false }] },
+			}),
+		).toMatchObject({ result: { rules: [{ command: "ls", allowNetwork: false }] } });
+		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "auto-rules-invalid",
+				method: "permission/auto/update",
+				params: {
+					requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+					rules: [{ command: "ls && pwd", allowNetwork: false }],
+				},
+			}),
+			RPC_ERROR_CODES.INVALID_REQUEST,
+		);
+		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
 	});
 
 	it("lists draft skills without creating a session or trusting project resources", async () => {

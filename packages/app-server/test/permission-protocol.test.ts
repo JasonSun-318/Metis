@@ -6,6 +6,7 @@ import type {
 	ServerResult,
 	ServerRpcRequest,
 } from "@metis/app-protocol";
+import { ProtocolValidationError, validateClientRequest, validateResponseFor } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
 import { SessionProjection } from "../src/projection/session-projection.ts";
@@ -200,5 +201,40 @@ describe("permission protocol", () => {
 		broker.releasePeer(peer);
 		await expect(pending).rejects.toThrow("Approval was unavailable or cancelled");
 		expect(broker.hasPending(SESSION_ID)).toBe(false);
+	});
+
+	it("validates global Auto command allowlist envelopes", () => {
+		const get = {
+			jsonrpc: "2.0",
+			id: "auto-get",
+			method: "permission/auto/get",
+			params: {},
+		};
+		expect(validateClientRequest(get)).toEqual(get);
+		const update = {
+			jsonrpc: "2.0",
+			id: "auto-update",
+			method: "permission/auto/update",
+			params: {
+				requestId: REQUEST_A,
+				rules: [{ command: "git status", allowNetwork: false }],
+			},
+		};
+		expect(validateClientRequest(update)).toEqual(update);
+		const view = {
+			jsonrpc: "2.0",
+			id: "auto-update",
+			result: {
+				rules: [{ command: "git status", allowNetwork: false }],
+				suggestions: ["ls", "git status"],
+			},
+		};
+		expect(validateResponseFor("client", update, view)).toEqual(view);
+		expect(() =>
+			validateClientRequest({
+				...update,
+				params: { ...update.params, extra: true },
+			}),
+		).toThrow(ProtocolValidationError);
 	});
 });

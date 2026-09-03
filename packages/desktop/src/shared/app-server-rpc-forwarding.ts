@@ -196,6 +196,16 @@ export const DESKTOP_RPC_FORWARDING = {
 		method: "permission/rules/clear",
 		input: "required",
 	},
+	getPermissionAutoSettings: {
+		channel: "metis:get-permission-auto-settings",
+		method: "permission/auto/get",
+		input: "none",
+	},
+	updatePermissionAutoSettings: {
+		channel: "metis:update-permission-auto-settings",
+		method: "permission/auto/update",
+		input: "required",
+	},
 	setModel: { channel: "metis:set-model", method: "session/setModel", input: "required" },
 	startTurn: { channel: "metis:start-turn", method: "turn/start", input: "required" },
 	steerTurn: { channel: "metis:steer-turn", method: "turn/steer", input: "required" },

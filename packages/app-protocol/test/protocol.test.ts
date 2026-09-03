@@ -422,6 +422,25 @@ const scheduleCases = [
 	["schedule/subscribe", {}, { snapshot: { serverEpoch: EPOCH, tasks: [scheduleTask], unreadCount: 0, cursor: 53 } }],
 	["schedule/unsubscribe", {}, { unsubscribed: true }],
 	[
+		"permission/auto/get",
+		{},
+		{
+			rules: [{ command: "ls", allowNetwork: false }],
+			suggestions: ["ls", "git status"],
+		},
+	],
+	[
+		"permission/auto/update",
+		{
+			requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+			rules: [{ command: "git status", allowNetwork: false }],
+		},
+		{
+			rules: [{ command: "git status", allowNetwork: false }],
+			suggestions: ["ls", "git status"],
+		},
+	],
+	[
 		"session/readImage",
 		{
 			sessionId: SESSION_ID,
@@ -966,6 +985,41 @@ describe("golden protocol fixtures", () => {
 		expect(() => validateClientRequest(request)).not.toThrow();
 		request.params.permissionPreset = "automatic";
 		expect(() => validateClientRequest(request)).toThrow(ProtocolValidationError);
+	});
+
+	it("rejects invalid Auto command allowlist payloads", () => {
+		const valid = makeClientRequest("permission/auto/update", {
+			requestId: RUN_ID,
+			rules: [{ command: "ls", allowNetwork: false }],
+		});
+		expect(() => validateClientRequest(valid)).not.toThrow();
+		(valid.params as Record<string, unknown>).extra = true;
+		expect(() => validateClientRequest(valid)).toThrow(ProtocolValidationError);
+		delete (valid.params as Record<string, unknown>).extra;
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("permission/auto/update", {
+					requestId: RUN_ID,
+					rules: Array.from({ length: 65 }, (_, index) => ({ command: `cmd${index}`, allowNetwork: false })),
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("permission/auto/update", {
+					requestId: RUN_ID,
+					rules: [{ command: "", allowNetwork: false }],
+				}),
+			),
+		).toThrow(ProtocolValidationError);
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest("permission/auto/update", {
+					requestId: RUN_ID,
+					rules: [{ command: "ls", allowNetwork: "yes" }],
+				}),
+			),
+		).toThrow(ProtocolValidationError);
 	});
 
 	it("rejects invalid session action parameters", () => {

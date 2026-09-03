@@ -13,6 +13,7 @@ import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
 import type { MemorySettingsService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
+import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
@@ -97,6 +98,7 @@ export class Dispatcher {
 	private readonly modelSettings: ModelSettingsService;
 	private readonly personalization: PersonalizationService;
 	private readonly permissionRules: PermissionRulesService;
+	private readonly permissionAutoSettings: PermissionAutoSettingsService;
 	private readonly webSearch: WebSearchService;
 	private readonly memorySettings: MemorySettingsService;
 	private readonly hooks: HooksService;
@@ -114,6 +116,7 @@ export class Dispatcher {
 		modelSettings: ModelSettingsService,
 		personalization: PersonalizationService,
 		permissionRules: PermissionRulesService,
+		permissionAutoSettings: PermissionAutoSettingsService,
 		webSearch: WebSearchService,
 		memorySettings: MemorySettingsService,
 		hooks: HooksService,
@@ -128,6 +131,7 @@ export class Dispatcher {
 		this.modelSettings = modelSettings;
 		this.personalization = personalization;
 		this.permissionRules = permissionRules;
+		this.permissionAutoSettings = permissionAutoSettings;
 		this.webSearch = webSearch;
 		this.memorySettings = memorySettings;
 		this.hooks = hooks;
@@ -565,6 +569,14 @@ export class Dispatcher {
 				);
 			case "model/testConnection":
 				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
+			case "permission/auto/get":
+				return this.permissionAutoSettings.view();
+			case "permission/auto/update":
+				return await this.replayMutation(request, async () => {
+					const result = await this.permissionAutoSettings.update(request.params);
+					await this.registry.refreshOpenPermissionAutoSettings();
+					return result;
+				});
 			case "permission/rules/list":
 				return this.permissionRules.list(request.params);
 			case "permission/rules/delete":

@@ -558,6 +558,19 @@ export const PermissionRulesResultSchema = StrictObject({
 	projectPath: PathSchema,
 	rules: Type.Array(ProjectPermissionRuleViewSchema, { maxItems: 256 }),
 });
+export const AutoCommandRuleSchema = StrictObject({
+	command: Utf8String(256, { minLength: 1 }),
+	allowNetwork: Type.Boolean(),
+});
+export const PermissionAutoGetParamsSchema = StrictObject({});
+export const PermissionAutoUpdateParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	rules: Type.Array(AutoCommandRuleSchema, { maxItems: 64 }),
+});
+export const PermissionAutoSettingsViewSchema = StrictObject({
+	rules: Type.Array(AutoCommandRuleSchema, { maxItems: 64 }),
+	suggestions: Type.Array(Utf8String(256, { minLength: 1 }), { maxItems: 64, uniqueItems: true }),
+});
 
 export const SessionSetModelParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
@@ -1289,6 +1302,8 @@ export const ClientRequestMethods = {
 	"permission/rules/list": method(PermissionRulesListParamsSchema, PermissionRulesResultSchema),
 	"permission/rules/delete": method(PermissionRulesDeleteParamsSchema, PermissionRulesResultSchema),
 	"permission/rules/clear": method(PermissionRulesClearParamsSchema, PermissionRulesResultSchema),
+	"permission/auto/get": method(PermissionAutoGetParamsSchema, PermissionAutoSettingsViewSchema),
+	"permission/auto/update": method(PermissionAutoUpdateParamsSchema, PermissionAutoSettingsViewSchema),
 	"session/setModel": method(SessionSetModelParamsSchema, SessionModelResultSchema),
 	"model/list": method(ModelListParamsSchema, ModelListResultSchema),
 	"model/settings/get": method(ModelSettingsGetParamsSchema, ModelSettingsViewSchema),

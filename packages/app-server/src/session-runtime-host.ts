@@ -71,6 +71,7 @@ export interface OpenedSessionRuntime {
 	cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	refreshWebSearchSettings?(): Promise<void>;
+	refreshPermissionAutoSettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;
 	applyModelServiceSettingsRefresh?(): Promise<void>;
 	notifyPermissionRulesChanged?(): Promise<void> | void;

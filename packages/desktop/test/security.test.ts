@@ -527,6 +527,8 @@ describe("desktop trust boundaries", () => {
 			"mcp/restart",
 			"mcp/credential/set",
 			"mcp/credential/clear",
+			"permission/auto/get",
+			"permission/auto/update",
 		]) {
 			expect(Object.values(DESKTOP_RPC_FORWARDING).some((definition) => definition.method === method)).toBe(true);
 		}
@@ -1304,6 +1306,12 @@ describe("desktop trust boundaries", () => {
 			if (request.method.startsWith("permission/rules/")) {
 				result = { projectPath: "/work/project", rules: [] };
 			}
+			if (request.method === "permission/auto/get" || request.method === "permission/auto/update") {
+				result = {
+					rules: request.method === "permission/auto/update" ? request.params.rules : [],
+					suggestions: ["ls"],
+				};
+			}
 			if (request.method === "agent/interrupt") {
 				result = {
 					agent: {
@@ -1365,6 +1373,8 @@ describe("desktop trust boundaries", () => {
 		const listPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listPermissionRules)!;
 		const deletePermissionRule = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deletePermissionRule)!;
 		const clearPermissionRules = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.clearPermissionRules)!;
+		const getPermissionAutoSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getPermissionAutoSettings)!;
+		const updatePermissionAutoSettings = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.updatePermissionAutoSettings)!;
 		const interruptAgent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptAgent)!;
 		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
 		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
@@ -1690,6 +1700,27 @@ describe("desktop trust boundaries", () => {
 			projectPath: "/work/project",
 		});
 		await expect(clearPermissionRules(event, ruleMutation)).resolves.toMatchObject({ projectPath: "/work/project" });
+		await expect(getPermissionAutoSettings(event, { extra: true })).rejects.toThrow(
+			"Invalid permission/auto/get params",
+		);
+		await expect(getPermissionAutoSettings(event, {})).resolves.toEqual({ rules: [], suggestions: ["ls"] });
+		const autoUpdate = {
+			requestId: "11111111-1111-4111-8111-111111111406",
+			rules: [{ command: "ls", allowNetwork: false }],
+		};
+		await expect(
+			updatePermissionAutoSettings(event, { ...autoUpdate, rules: [{ command: "", allowNetwork: false }] }),
+		).rejects.toThrow("Invalid permission/auto/update params");
+		await expect(updatePermissionAutoSettings(event, { ...autoUpdate, extra: true })).rejects.toThrow(
+			"Invalid permission/auto/update params",
+		);
+		await expect(updatePermissionAutoSettings(event, autoUpdate)).resolves.toEqual({
+			rules: [{ command: "ls", allowNetwork: false }],
+			suggestions: ["ls"],
+		});
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "permission/auto/update", params: autoUpdate }),
+		);
 		const agentInput = {
 			sessionId: "session-a",
 			agentId: "child-a",

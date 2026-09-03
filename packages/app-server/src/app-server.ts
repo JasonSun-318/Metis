@@ -29,6 +29,7 @@ import { InteractionBroker } from "./interactions.ts";
 import { MemorySettingsService } from "./memory-settings.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
+import { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import { PermissionRulesService } from "./permission-rules.ts";
 import { PersonalizationService } from "./personalization.ts";
 import { scheduleEventView } from "./schedule-projection.ts";
@@ -103,6 +104,7 @@ export class AppServer {
 		});
 		const personalization = new PersonalizationService(options.agentDir);
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
+		const permissionAutoSettings = new PermissionAutoSettingsService(settingsManager);
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
 		const memorySettings = new MemorySettingsService({ agentDir: options.agentDir, authStorage, settingsManager });
 		const hooks = new HooksService(options.agentDir);
@@ -128,6 +130,7 @@ export class AppServer {
 			modelSettings,
 			personalization,
 			permissionRules,
+			permissionAutoSettings,
 			webSearch,
 			memorySettings,
 			hooks,

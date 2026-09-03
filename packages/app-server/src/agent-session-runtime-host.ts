@@ -1603,6 +1603,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		await this.session.refreshWebSearchSettings();
 	}
 
+	async refreshPermissionAutoSettings(): Promise<void> {
+		await this.session.refreshPermissionAutoSettings();
+	}
+
 	async prepareModelServiceSettingsRefresh(): Promise<void> {
 		await this.session.prepareModelServiceSettingsRefresh();
 	}

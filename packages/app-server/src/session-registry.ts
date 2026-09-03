@@ -184,6 +184,14 @@ export class SessionRegistry {
 		);
 	}
 
+	async refreshOpenPermissionAutoSettings(): Promise<void> {
+		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
+		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
+		await Promise.all(
+			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.refreshPermissionAutoSettings?.())),
+		);
+	}
+
 	async notifyOpenPermissionRulesChanged(): Promise<void> {
 		if (this.modelServiceRefreshActive) return;
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
