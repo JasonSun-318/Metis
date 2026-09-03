@@ -1,7 +1,10 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
+import { CheckCircle, Info, Terminal } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+
+const MAX_AUTO_COMMAND_RULES = 64;
 
 function normalizeCommand(value: string): string {
 	return value.trim().replace(/\s+/g, " ");
@@ -20,6 +23,7 @@ export function AutoCommandAllowlistPanel({
 	const [allowNetwork, setAllowNetwork] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [notice, setNotice] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!serverReady) return;
@@ -38,11 +42,18 @@ export function AutoCommandAllowlistPanel({
 		};
 	}, [api, serverReady, t]);
 
+	useEffect(() => {
+		if (notice === null) return;
+		const timer = setTimeout(() => setNotice(null), 2_500);
+		return () => clearTimeout(timer);
+	}, [notice]);
+
 	const save = async (rules: ClientParams<"permission/auto/update">["rules"]): Promise<boolean> => {
 		setSaving(true);
 		setError(null);
 		try {
 			setView(await api.updatePermissionAutoSettings({ requestId: crypto.randomUUID(), rules }));
+			setNotice(t("Auto command rules updated."));
 			return true;
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Auto command rules could not be saved."));
@@ -81,6 +92,11 @@ export function AutoCommandAllowlistPanel({
 					<h2>{t("Command allowlist")}</h2>
 					<p>{t("Simple commands listed here may run automatically outside the workspace in Auto mode.")}</p>
 				</div>
+				{view ? (
+					<span className="auto-command-allowlist-count">
+						{view.rules.length} / {MAX_AUTO_COMMAND_RULES}
+					</span>
+				) : null}
 			</div>
 			{error ? (
 				<p className="settings-inline-error" role="alert">
@@ -88,7 +104,7 @@ export function AutoCommandAllowlistPanel({
 				</p>
 			) : null}
 			{view ? (
-				<>
+				<div className="settings-card auto-command-allowlist-card">
 					<form
 						className="auto-command-allowlist-form"
 						onSubmit={(event) => {
@@ -96,22 +112,20 @@ export function AutoCommandAllowlistPanel({
 							void add(command, allowNetwork);
 						}}
 					>
-						<label>
-							{t("Command")}
-							<input
-								disabled={busy}
-								onChange={(event) => setCommand(event.target.value)}
-								onKeyDown={(event) => {
-									if (event.key !== "Enter") return;
-									event.preventDefault();
-									void add(command, allowNetwork);
-								}}
-								placeholder={t("Add a command…")}
-								type="text"
-								value={command}
-							/>
-						</label>
-						<label className="auto-command-allowlist-network-toggle">
+						<input
+							aria-label={t("Command")}
+							disabled={busy}
+							onChange={(event) => setCommand(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key !== "Enter") return;
+								event.preventDefault();
+								void add(command, allowNetwork);
+							}}
+							placeholder={t("Add a command…")}
+							type="text"
+							value={command}
+						/>
+						<label className="auto-command-allowlist-toggle">
 							<input
 								aria-label={t("Allow network access")}
 								checked={allowNetwork}
@@ -119,19 +133,27 @@ export function AutoCommandAllowlistPanel({
 								onChange={(event) => setAllowNetwork(event.target.checked)}
 								type="checkbox"
 							/>
-							{t("Allow network access")}
+							<span aria-hidden="true" className="auto-command-allowlist-toggle-track" />
+							<span className="auto-command-allowlist-toggle-text">{t("Allow network access")}</span>
 						</label>
 						<button className="settings-primary-button" disabled={busy || !normalizeCommand(command)} type="submit">
 							{t("Add command")}
 						</button>
 					</form>
-					{view.rules.length === 0 ? <p>{t("No commands on the allowlist yet.")}</p> : null}
-					{view.rules.length ? (
-						<ul className="auto-command-allowlist-chips">
+					{view.rules.length === 0 ? (
+						<div className="auto-command-allowlist-empty">
+							<Terminal aria-hidden="true" size={20} />
+							<p>{t("No commands on the allowlist yet.")}</p>
+							<span>{t("Add a simple command above, or pick one of the suggestions below.")}</span>
+						</div>
+					) : (
+						<ul className="auto-command-allowlist-list">
 							{view.rules.map((rule) => (
-								<li className="auto-command-allowlist-chip" key={rule.command}>
+								<li className="auto-command-allowlist-row" key={rule.command}>
 									<code>{rule.command}</code>
-									{rule.allowNetwork ? <span className="auto-command-allowlist-network">{t("Network")}</span> : null}
+									{rule.allowNetwork ? (
+										<span className="auto-command-allowlist-network">{t("Network")}</span>
+									) : null}
 									<button
 										aria-label={t("Remove {{command}}", { command: rule.command })}
 										disabled={busy}
@@ -143,30 +165,42 @@ export function AutoCommandAllowlistPanel({
 								</li>
 							))}
 						</ul>
-					) : null}
+					)}
 					{suggestions.length ? (
-						<div className="auto-command-allowlist-suggestions">
-							{suggestions.map((suggestion) => (
-								<button
-									aria-label={t("Add {{command}}", { command: suggestion })}
-									className="auto-command-allowlist-suggestion"
-									disabled={busy}
-									key={suggestion}
-									onClick={() => void add(suggestion, false)}
-									type="button"
-								>
-									{t("Add {{command}}", { command: suggestion })}
-								</button>
-							))}
+						<div className="auto-command-allowlist-footer">
+							<span className="auto-command-allowlist-footer-label">{t("Suggestions")}</span>
+							<div className="auto-command-allowlist-suggestions">
+								{suggestions.map((suggestion) => (
+									<button
+										aria-label={t("Add {{command}}", { command: suggestion })}
+										className="auto-command-allowlist-suggestion"
+										disabled={busy}
+										key={suggestion}
+										onClick={() => void add(suggestion, false)}
+										type="button"
+									>
+										{t("Add {{command}}", { command: suggestion })}
+									</button>
+								))}
+							</div>
 						</div>
 					) : null}
-				</>
+					<div className="auto-command-allowlist-info">
+						<Info aria-hidden="true" size={15} />
+						<span>
+							{t(
+								"Complex shell syntax, sensitive files, destructive operations, and hard-denied commands still require review or remain blocked.",
+							)}
+						</span>
+					</div>
+				</div>
 			) : null}
-			<p>
-				{t(
-					"Complex shell syntax, sensitive files, destructive operations, and hard-denied commands still require review or remain blocked.",
-				)}
-			</p>
+			{notice ? (
+				<div className="toast settings-toast" role="status">
+					<CheckCircle aria-hidden="true" size={15} />
+					{notice}
+				</div>
+			) : null}
 		</section>
 	);
 }

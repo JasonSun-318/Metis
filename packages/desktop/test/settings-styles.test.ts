@@ -80,4 +80,26 @@ describe("Settings visual states", () => {
 				.every((selector) => selector.includes(".auto-command-allowlist-page")),
 		).toBe(true);
 	});
+
+	it("renders the Auto command allowlist as one card with switch, rows, and banners", () => {
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-form").padding).toBe("12px 16px");
+		expect(rule('.auto-command-allowlist-page .auto-command-allowlist-form input[type="text"]').flex).toBe("1 1 0%");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle").display).toBe("inline-flex");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").width).toBe("36px");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").height).toBe("22px");
+		expect(
+			rule(
+				".auto-command-allowlist-page .auto-command-allowlist-toggle input:checked + .auto-command-allowlist-toggle-track",
+			).background,
+		).toBe("var(--accent)");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-row").borderTop).toBe(
+			"1px solid var(--border-weak)",
+		);
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-row > button").borderRadius).toBe("999px");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-empty").justifyItems).toBe("center");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-footer").borderTop).toBe(
+			"1px solid var(--border-weak)",
+		);
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-info svg").color).toBe("var(--text-14)");
+	});
 });
