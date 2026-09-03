@@ -960,7 +960,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-								>{tab.kind === "browser" ? <Globe aria-hidden="true" size={12} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={12} /> : <FileText aria-hidden="true" size={12} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={12} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={12} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={12} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={12} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+									>{tab.kind === "terminal" ? <TerminalWindow aria-hidden="true" size={13} /> : tab.kind === "browser" ? <Globe aria-hidden="true" size={13} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={13} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={13} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
