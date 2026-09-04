@@ -170,7 +170,10 @@ function permissionOperation(request: PermissionApprovalRequest) {
 	if (request.action.command) push("Command", request.action.command);
 	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
-	for (const path of request.action.paths) push(pathLabel, path);
+	for (const path of request.action.paths) {
+		if (request.cwd && path === request.cwd) continue;
+		push(pathLabel, path);
+	}
 
 	const url =
 		request.action.toolName === "web_fetch" && typeof describedArgs?.url === "string" ? describedArgs.url : undefined;
@@ -400,11 +403,8 @@ export class InteractionBroker {
 		if (this.pendingByAction.has(actionKey)) throw new Error("Approval was unavailable or cancelled");
 		const interactionId = this.createId();
 		this.pendingByAction.set(actionKey, interactionId);
-		const choices: PermissionApprovalChoice[] = [];
-		if (operation.scopeComplete) {
-			choices.push("allow-once");
-			if (operation.rememberProjectEligible) choices.push("always-allow-exact");
-		}
+		const choices: PermissionApprovalChoice[] = ["allow-once"];
+		if (operation.scopeComplete && operation.rememberProjectEligible) choices.push("always-allow-exact");
 		choices.push("deny-once");
 		if (operation.rememberProjectEligible) choices.push("always-deny-exact");
 		try {
@@ -432,16 +432,12 @@ export class InteractionBroker {
 				{ signal: approval.signal },
 			);
 			if (response?.kind !== "session_permission_approval") throw new Error("Approval was unavailable or cancelled");
-			if (response.choice === "allow-once" || response.choice === "always-allow-exact") {
-				if (!operation.scopeComplete) {
-					return { decision: "deny", reason: "Permission target details were incomplete" };
+			if (response.choice === "allow-once") return { decision: "allow" };
+			if (response.choice === "always-allow-exact") {
+				if (!operation.scopeComplete || !operation.rememberProjectEligible) {
+					throw new Error("Approval returned an ineligible project choice");
 				}
-				if (response.choice === "always-allow-exact") {
-					if (!operation.rememberProjectEligible)
-						throw new Error("Approval returned an ineligible project choice");
-					return { decision: "allow", remember: "project" };
-				}
-				return { decision: "allow" };
+				return { decision: "allow", remember: "project" };
 			}
 			if (response.choice === "deny-once" || response.choice === "always-deny-exact") {
 				if (response.choice === "always-deny-exact") {

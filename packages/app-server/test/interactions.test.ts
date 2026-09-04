@@ -553,6 +553,22 @@ describe("InteractionBroker", () => {
 		expect(JSON.stringify(peer.requests[0])).not.toContain("does not sandbox");
 	});
 
+	it("lets Allow once succeed when the action scope is incomplete", async () => {
+		const interactionId = "00000000-0000-4000-8000-000000000324";
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
+		const peer = new FakePeer();
+		broker.assign(SESSION_ID, peer);
+		peer.response = { interactionId, kind: "session_permission_approval", choice: "allow-once" };
+
+		await expect(
+			broker.requestPermissionApproval(SESSION_ID, childApproval({ actor: undefined, scopeComplete: false })),
+		).resolves.toEqual({ decision: "allow" });
+		expect(permissionInteraction(peer)).toMatchObject({
+			scopeComplete: false,
+			choices: ["allow-once", "deny-once"],
+		});
+	});
+
 	it("returns a project-scoped deny for Always deny", async () => {
 		const interactionId = "00000000-0000-4000-8000-000000000323";
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => interactionId });
@@ -671,6 +687,26 @@ describe("InteractionBroker", () => {
 				details: [
 					{ label: "Path", value: "/tmp/outside" },
 					{ label: "Pattern", value: "TOKEN" },
+				],
+			},
+			{
+				request: childApproval({
+					actor: undefined,
+					action: {
+						actionId: "bash-rm-1",
+						toolName: "bash",
+						provenance: "builtin",
+						risks: ["destructive"],
+						paths: ["/tmp/work", "/tmp/desktop-note.md"],
+						networkTargets: [],
+						command: 'rm -f "/tmp/desktop-note.md"',
+					},
+					args: { command: 'rm -f "/tmp/desktop-note.md"' },
+				}),
+				details: [
+					{ label: "Command", value: 'rm -f "/tmp/desktop-note.md"' },
+					{ label: "Working directory", value: "/tmp/work" },
+					{ label: "Path", value: "/tmp/desktop-note.md" },
 				],
 			},
 			{

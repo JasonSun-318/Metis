@@ -155,9 +155,9 @@ describe("permission approval interaction", () => {
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
 	});
 
-	it("disables allow controls when the action scope is incomplete", () => {
+	it("keeps Allow once enabled when the action scope is incomplete", () => {
 		const { container } = mount(approval({ scopeComplete: false }));
-		expect(choice(container, "Allow once").disabled).toBe(true);
+		expect(choice(container, "Allow once").disabled).toBe(false);
 		expect(choice(container, "Always allow this exact action").disabled).toBe(true);
 		expect(choice(container, "Reject").disabled).toBe(false);
 	});

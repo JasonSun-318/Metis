@@ -241,9 +241,9 @@ describe("renderer reconnect behavior", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("allows complete approvals with omitted summary rows but blocks genuinely incomplete approvals", async () => {
+	it("allows complete approvals with omitted summary rows and still offers Allow once when incomplete", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		for (const [fixture, blocked] of [
+		for (const [fixture] of [
 			[{
 				toolLabel: "read",
 				details: [{ label: "Path", value: "/tmp/target-0" }],
@@ -257,7 +257,7 @@ describe("renderer reconnect behavior", () => {
 				scopeComplete: false,
 				riskLevel: "critical" as const,
 				executionTarget: "host" as const,
-			}, true],
+			}, false],
 		] as const) {
 			const container = document.createElement("div");
 			document.body.append(container);
@@ -282,8 +282,8 @@ describe("renderer reconnect behavior", () => {
 			));
 
 			expect([...container.querySelectorAll<HTMLButtonElement>("button")]
-				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(blocked);
-			expect(container.querySelector('[role="alert"]') === null).toBe(!blocked);
+				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(false);
+			expect(container.querySelector('[role="alert"]') === null).toBe(fixture.scopeComplete);
 			await act(async () => root.unmount());
 			container.remove();
 		}

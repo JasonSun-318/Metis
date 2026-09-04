@@ -49,7 +49,8 @@ export function PermissionApprovalPanel({
 	const alwaysDeny = interaction.choices.includes("always-deny-exact");
 	const escapeChoice = denyOnce ? "deny-once" : alwaysDeny ? "always-deny-exact" : undefined;
 	const sandboxBlocked = sandboxHealth !== "healthy" && interaction.executionTarget === "sandbox";
-	const approvalBlocked = !interaction.scopeComplete || sandboxBlocked;
+	const allowOnceBlocked = sandboxBlocked;
+	const alwaysAllowBlocked = !interaction.scopeComplete || sandboxBlocked;
 	const hostOrExternal = interaction.executionTarget !== "sandbox";
 	const descriptionIds = [
 		"permission-approval-execution-target",
@@ -184,7 +185,7 @@ export function PermissionApprovalPanel({
 					{alwaysAllow && (
 						<button
 							className="button-secondary"
-							disabled={busy || approvalBlocked}
+							disabled={busy || alwaysAllowBlocked}
 							onClick={() => choose("always-allow-exact")}
 							type="button"
 						>
@@ -192,7 +193,7 @@ export function PermissionApprovalPanel({
 						</button>
 					)}
 					{allowOnce && (
-						<button disabled={busy || approvalBlocked} onClick={() => choose("allow-once")} type="button">
+						<button disabled={busy || allowOnceBlocked} onClick={() => choose("allow-once")} type="button">
 							{t(CHOICE_LABELS["allow-once"])}
 						</button>
 					)}

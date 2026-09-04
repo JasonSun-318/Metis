@@ -930,15 +930,17 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 					index: 0,
 					delta: {
 						role: "assistant",
-						content: JSON.stringify({
-							decision: "deny",
-							assessedRisk: "medium",
-							userAuthorization: "unknown",
-							scopeComplete: true,
-							rationale: "Fixture denied the reviewed action.",
-						}),
+						tool_calls: [{
+							index: 0,
+							id: "permission-review-call",
+							type: "function",
+							function: {
+								name: "submit_permission_review",
+								arguments: JSON.stringify({ decision: "deny" }),
+							},
+						}],
 					},
-					finish_reason: "stop",
+					finish_reason: "tool_calls",
 				}],
 			})}\n\ndata: [DONE]\n\n`);
 			return;

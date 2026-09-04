@@ -140,7 +140,11 @@ export class PermissionProvider {
 				respondWithText(response, `${reviewJson(decision)}\nnote`);
 				return;
 			}
-			respondWithText(response, reviewJson(decision));
+			respondWithToolCall(response, {
+				callId: `review-${this.calls.length}`,
+				name: "submit_permission_review",
+				arguments: { decision: decision.decision },
+			});
 			return;
 		}
 

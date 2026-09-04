@@ -157,6 +157,12 @@ describe("Composer visual states", () => {
 		expect(css).not.toContain(".permission-approval-panel { width: min(620px, 100%);");
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
 		expect(rule(".permission-approval-details dd code").whiteSpace).toBe("pre-wrap");
+		expect(rule(".permission-approval-panel > footer button:hover:not(:disabled)").background).toBe(
+			"var(--button-primary-bg-hover)",
+		);
+		expect(rule(".permission-approval-panel > footer .button-secondary:hover:not(:disabled)").background).toBe(
+			"var(--surface-10)",
+		);
 		expect(css).not.toContain("permission-approval-toggle");
 		expect(css).toContain(".permission-approval-slot");
 	});

@@ -28,7 +28,7 @@ function toolFor(marker: string, projectDir: string, outsideDir: string, homeDir
 	const gitHead = path.join(projectDir, ".git", "HEAD");
 	const secretFile = path.join(homeDir, ".ssh", "id_rsa");
 	const cases: Array<readonly [string, PermissionToolCall]> = [
-		["case-auto-high-incomplete", { name: "read", arguments: { path: outsideFile } }],
+		["case-auto-high-incomplete", { name: "bash", arguments: { command: "touch $OUTPUT" } }],
 		["case-remember-changed", { name: "write", arguments: { path: path.join(projectDir, "other.txt"), content: "changed" } }],
 		["case-ask-write", { name: "write", arguments: { path: workspaceFile, content: "ask-once" } }],
 		["case-auto-write", { name: "write", arguments: { path: autoFile, content: "auto-ok" } }],
@@ -283,13 +283,13 @@ test("Auto high external action is model-approved only with exact high authoriza
 	const app = await launchPermissionApp({
 		preset: "auto",
 		decide: (payload) => {
-			if (payload.includes("case-auto-high-incomplete") || payload.includes("outside.txt")) {
+			if (payload.includes("case-auto-high-incomplete") || payload.includes("$OUTPUT")) {
 				return {
-					decision: "allow",
-					assessedRisk: "medium",
-					userAuthorization: "high",
+					decision: "deny",
+					assessedRisk: "high",
+					userAuthorization: "unknown",
 					scopeComplete: false,
-					rationale: "Destination payload is incomplete.",
+					rationale: "Incomplete write scope is denied until the user decides.",
 				};
 			}
 			const authorized = payload.includes("I authorize this exact git push");
@@ -311,7 +311,9 @@ test("Auto high external action is model-approved only with exact high authoriza
 		await app.submit("case-auto-high-incomplete");
 		const panel = app.page.locator(APPROVAL);
 		await expect(panel).toBeVisible();
-		await expect(panel).toContainText(/network|external|sandbox|target/iu);
+		await expect(panel).toContainText(/network|external|sandbox|target|enough target details/iu);
+		await expect(panel.getByRole("button", { name: "Allow once", exact: true })).toBeEnabled();
+		await expect(panel.getByRole("button", { name: "Always allow this exact action", exact: true })).toHaveCount(0);
 		await panel.getByRole("button", { name: /Reject/u }).click();
 		await app.waitDone("case-auto-high-incomplete");
 	} finally {
