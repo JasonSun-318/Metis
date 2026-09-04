@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
 	chmodSync,
 	cpSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -111,6 +112,7 @@ function option(name, fallback) {
 
 const target = process.env.METIS_NATIVE_TOOLS_TARGET ?? option("--target", "all");
 const outputDir = resolve(packageDir, option("--output", "dist/vendor/tools"));
+const cacheRoot = resolve(process.env.METIS_NATIVE_TOOLS_CACHE ?? join(packageDir, ".native-tools-cache"));
 const sandboxOnly = process.argv.includes("--sandbox-only");
 let dispatcher;
 // Optional GitHub mirror base (e.g. https://ghproxy.net/) for networks where
@@ -192,6 +194,46 @@ function sha256(data) {
 
 function mirrorUrl(url) {
 	return mirror ? `${mirror.replace(/\/+$/u, "")}/${url}` : url;
+}
+
+function restoreCachedPair(pair, destination) {
+	const cached = join(cacheRoot, pair);
+	const manifestPath = join(cached, "manifest.json");
+	if (!existsSync(manifestPath)) return false;
+	let manifest;
+	try {
+		manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+	} catch {
+		return false;
+	}
+	if (manifest?.schemaVersion !== 1 || manifest.pair !== pair || !manifest.tools) return false;
+	if (pairs[pair]) {
+		for (const tool of ["rg", "fd"]) {
+			const [archiveName, archiveSha256] = pairs[pair][tool];
+			const entry = manifest.tools[tool];
+			if (!entry || entry.archive !== archiveName || entry.archiveSha256 !== archiveSha256) return false;
+			const binary = join(cached, entry.binary);
+			if (!existsSync(binary) || sha256(readFileSync(binary)) !== entry.binarySha256) return false;
+		}
+	}
+	if (officeCliPairs[pair]) {
+		const [assetName, archiveSha256] = officeCliPairs[pair];
+		const entry = manifest.tools.officecli;
+		if (!entry || entry.archive !== assetName || entry.archiveSha256 !== archiveSha256) return false;
+		const binary = join(cached, entry.binary);
+		if (!existsSync(binary) || sha256(readFileSync(binary)) !== entry.binarySha256) return false;
+	}
+	mkdirSync(dirname(destination), { recursive: true });
+	rmSync(destination, { recursive: true, force: true });
+	cpSync(cached, destination, { recursive: true });
+	return true;
+}
+
+function saveCachedPair(pair, source) {
+	const cached = join(cacheRoot, pair);
+	mkdirSync(cacheRoot, { recursive: true });
+	rmSync(cached, { recursive: true, force: true });
+	cpSync(source, cached, { recursive: true });
 }
 
 async function download(url) {
@@ -361,6 +403,7 @@ async function stageTools() {
 					const pair = queue.shift();
 					if (!pair) return;
 					const destination = join(staged, pair);
+					if (restoreCachedPair(pair, destination)) continue;
 					mkdirSync(destination, { recursive: true });
 					const manifest = { schemaVersion: 1, pair, tools: {} };
 					if (pairs[pair]) {
@@ -368,6 +411,7 @@ async function stageTools() {
 					}
 					if (officeCliPairs[pair]) manifest.tools.officecli = await stageOfficeCli(pair, destination);
 					writeFileSync(join(destination, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+					saveCachedPair(pair, destination);
 				}
 			}),
 		);
