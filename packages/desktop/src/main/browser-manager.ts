@@ -267,10 +267,12 @@ export class BrowserManager {
 			createView: (options) => new WebContentsView(options),
 			createBackgroundWindow: () =>
 				new BaseWindow({
-					show: false,
+					show: true,
 					frame: false,
-					focusable: false,
+					focusable: true,
 					skipTaskbar: true,
+					x: -20_000,
+					y: -20_000,
 					width: DEFAULT_BROWSER_BOUNDS.width,
 					height: DEFAULT_BROWSER_BOUNDS.height,
 				}),
