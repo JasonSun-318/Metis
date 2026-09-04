@@ -70,7 +70,7 @@ export class BrowserTabRuntime {
 
 	syncPresentation(visible: boolean): void {
 		this.presented = visible;
-		this.options.placeSurface(this.controlState !== "agent" && visible);
+		this.options.placeSurface(visible);
 	}
 
 	async runMutation(
@@ -264,7 +264,7 @@ export class BrowserTabRuntime {
 		if (state === "agent") {
 			if (this.activityIdleTimer) clearTimeout(this.activityIdleTimer);
 			this.activityIdleTimer = undefined;
-			this.options.placeSurface(false);
+			this.options.placeSurface(this.presented);
 			if (!this.activityActive) {
 				this.activityActive = true;
 				this.options.emitActivity(true);

@@ -93,7 +93,7 @@ describe("BrowserTabRuntime", () => {
 
 		harness.runtime.resolveHandoff("complete");
 		await vi.waitFor(() => expect(harness.runtime.view()).toEqual({ controlState: "agent" }));
-		expect(harness.surfaces.at(-1)).toBe(false);
+		expect(harness.surfaces.at(-1)).toBe(true);
 		await expect(harness.runtime.runUserMutation(async () => undefined)).rejects.toThrow("controlled by the agent");
 		releaseObservation();
 		await expect(pending).resolves.toEqual({ status: "completed", observation });
@@ -118,7 +118,7 @@ describe("BrowserTabRuntime", () => {
 				}),
 		);
 		await vi.waitFor(() => expect(harness.activity).toEqual([true]));
-		expect(harness.surfaces.at(-1)).toBe(false);
+		expect(harness.surfaces.at(-1)).toBe(true);
 
 		harness.runtime.takeControl();
 		await vi.waitFor(() => expect(harness.handoffs).toContainEqual({ status: "requested", reason: "other" }));
@@ -258,12 +258,49 @@ describe("BrowserTabRuntime", () => {
 		await vi.waitFor(() => expect(releaseObservation).toBeTypeOf("function"));
 
 		expect(harness.runtime.view()).toEqual({ controlState: "agent" });
-		expect(harness.surfaces.at(-1)).toBe(false);
+		expect(harness.surfaces.at(-1)).toBe(true);
 		await expect(harness.runtime.runUserMutation(async () => undefined)).rejects.toThrow("controlled by the agent");
 		releaseObservation();
 		await expect(observing).resolves.toEqual(observation);
 		expect(harness.runtime.view()).toEqual({ controlState: "idle" });
 		expect(harness.surfaces.at(-1)).toBe(true);
+	});
+
+	it("keeps a presented native surface in the foreground while the agent acts", async () => {
+		const harness = runtimeHarness();
+		harness.runtime.syncPresentation(true);
+		let release!: () => void;
+		const pending = harness.runtime.runMutation(
+			new AbortController().signal,
+			() =>
+				new Promise<BrowserOperationDetails>((resolve) => {
+					release = () => resolve(completed());
+				}),
+		);
+		await vi.waitFor(() => expect(harness.runtime.view().controlState).toBe("agent"));
+		expect(harness.surfaces.at(-1)).toBe(true);
+		expect(harness.activity).toEqual([true]);
+		release();
+		await expect(pending).resolves.toEqual(completed());
+		expect(harness.runtime.view()).toEqual({ controlState: "idle" });
+		expect(harness.surfaces.at(-1)).toBe(true);
+	});
+
+	it("still hides an unpresented tab while the agent acts so it does not cover chat UI", async () => {
+		const harness = runtimeHarness();
+		harness.runtime.syncPresentation(false);
+		let release!: () => void;
+		const pending = harness.runtime.runMutation(
+			new AbortController().signal,
+			() =>
+				new Promise<BrowserOperationDetails>((resolve) => {
+					release = () => resolve(completed());
+				}),
+		);
+		await vi.waitFor(() => expect(harness.runtime.view().controlState).toBe("agent"));
+		expect(harness.surfaces.at(-1)).toBe(false);
+		release();
+		await expect(pending).resolves.toEqual(completed());
 	});
 
 	it("turns observation takeover into handoff and resumes with its final snapshot", async () => {
@@ -309,7 +346,7 @@ describe("BrowserTabRuntime", () => {
 		harness.runtime.resolveHandoff("cancel");
 		await vi.waitFor(() => expect(observationCalls).toBe(2));
 		expect(harness.runtime.view()).toEqual({ controlState: "agent" });
-		expect(harness.surfaces.at(-1)).toBe(false);
+		expect(harness.surfaces.at(-1)).toBe(true);
 		await expect(harness.runtime.runUserMutation(async () => undefined)).rejects.toThrow("controlled by the agent");
 
 		harness.runtime.takeControl();
