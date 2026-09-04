@@ -163,14 +163,122 @@ textarea { resize: none; }
 .tool-sidebar { position: absolute; z-index: 6; top: 7px; right: 7px; bottom: 7px; min-width: 280px; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--sidebar); container-type: inline-size; animation: tool-sidebar-slide-in 200ms cubic-bezier(.16, 1, .3, 1); }
 @keyframes tool-sidebar-slide-in { from { transform: translateX(calc(100% + 14px)); } to { transform: translateX(0); } }
 .tool-sidebar-resizer { position: absolute; z-index: 9; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: 0; }
-.tool-sidebar-menu { position: absolute; top: 37.5%; right: 14px; left: 14px; display: grid; gap: 3px; }
-.tool-sidebar-menu button, .tool-add-menu button { display: flex; width: 100%; height: 34px; align-items: center; gap: 8px; border-radius: 7px; background: var(--surface-04); color: var(--text-26); padding: 0 9px; text-align: left; font-size: 12px; transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
-.tool-sidebar-menu button:hover:not(:disabled), .tool-add-menu button:hover:not(:disabled) { background: var(--surface-04); }
-.tool-sidebar-menu button:disabled, .tool-add-menu button:disabled { color: var(--text-06); cursor: default; }
-.tool-sidebar-menu button > svg, .tool-add-menu button > svg { flex: none; color: var(--text-16); }
-.tool-sidebar-menu button:disabled > svg, .tool-add-menu button:disabled > svg { color: var(--text-02); }
-.tool-sidebar-menu kbd, .tool-add-menu kbd { margin-left: auto; border: 0; border-radius: 9px; background: var(--surface-09); color: var(--text-21); padding: 2px 5px; font-family: inherit; font-size: 11px; font-weight: 400; line-height: 1.2; }
-.tool-sidebar-menu button:disabled kbd, .tool-add-menu button:disabled kbd { background: var(--surface-05); color: var(--text-03); }
+.tool-sidebar-menu {
+	position: absolute;
+	inset: 40px 0 0 0;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	padding: 20px 14px;
+	max-width: 440px;
+	margin: 0 auto;
+	gap: 7px;
+	overflow-y: auto;
+}
+.tool-sidebar-menu button {
+	display: flex;
+	width: 100%;
+	min-height: 50px;
+	align-items: center;
+	gap: 12px;
+	border: 1px solid var(--border);
+	border-radius: 9px;
+	background: var(--surface-03);
+	color: var(--text);
+	padding: 8px 12px;
+	text-align: left;
+	transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.tool-sidebar-menu button:hover:not(:disabled),
+.tool-sidebar-menu button:focus-visible {
+	background: var(--surface-06);
+	border-color: var(--border-strong);
+	box-shadow: var(--shadow);
+	transform: translateY(-1px);
+	outline: 0;
+}
+.tool-sidebar-menu button:disabled {
+	opacity: 0.42;
+	cursor: default;
+	background: var(--surface-02);
+	border-color: var(--border);
+	transform: none;
+	box-shadow: none;
+}
+.tool-sidebar-menu .tool-menu-icon {
+	display: grid;
+	width: 32px;
+	height: 32px;
+	flex: none;
+	place-items: center;
+	border-radius: 7px;
+	background: var(--surface-05);
+	border: 1px solid var(--border);
+	color: var(--text-22);
+	transition: color 140ms ease, background-color 140ms ease;
+}
+.tool-sidebar-menu button:hover:not(:disabled) .tool-menu-icon {
+	background: var(--surface-08);
+	color: var(--text);
+}
+.tool-sidebar-menu button:disabled .tool-menu-icon {
+	color: var(--text-04);
+}
+.tool-sidebar-menu .tool-menu-text {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	gap: 2px;
+}
+.tool-sidebar-menu .tool-menu-title {
+	font-size: 12.5px;
+	font-weight: 550;
+	color: var(--text);
+	line-height: 1.3;
+}
+.tool-sidebar-menu .tool-menu-desc {
+	font-size: 11px;
+	color: var(--muted);
+	line-height: 1.35;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.tool-add-menu button {
+	display: flex;
+	width: 100%;
+	height: 30px;
+	align-items: center;
+	gap: 8px;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-24);
+	padding: 0 8px;
+	text-align: left;
+	font-size: 12px;
+	transition: background-color 140ms ease, color 140ms ease;
+}
+.tool-add-menu button:hover:not(:disabled),
+.tool-add-menu button:focus-visible {
+	background: var(--surface-08);
+	color: var(--text);
+	outline: 0;
+}
+.tool-add-menu button:disabled {
+	color: var(--text-03);
+	cursor: default;
+}
+.tool-add-menu .tool-menu-icon {
+	display: flex;
+	align-items: center;
+	color: var(--text-14);
+}
+.tool-add-menu button:disabled .tool-menu-icon {
+	color: var(--text-03);
+}
+.tool-add-menu .tool-menu-title {
+	font-size: 12px;
+}
 .tool-sidebar-header { position: relative; z-index: 50; display: flex; height: 40px; align-items: center; border-bottom: 1px solid var(--border); -webkit-app-region: no-drag; }
 .tool-sidebar-header.is-empty { border-bottom-color: transparent; }
 .tool-tabbar { display: flex; height: 40px; min-width: 0; max-width: calc(100% - 48px); flex: 1; align-items: center; gap: 3px; padding: 4px 0 4px 8px; font-size: 12px; -webkit-app-region: no-drag; }
