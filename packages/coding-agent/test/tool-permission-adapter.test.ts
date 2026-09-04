@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionPolicy } from "../src/core/permissions/policy.ts";
@@ -41,17 +42,17 @@ describe("tool permission adapter", () => {
 		expect(() => assertToolPermissionDescriptor(definitionWithoutPermission())).toThrow("permission descriptor");
 	});
 
-	it("fails closed before execution for throwing, wildcard, and incomplete descriptors", async () => {
+	it("fails closed before execution for throwing and wildcard descriptors", async () => {
 		const execution = vi.fn();
 		for (const [tool, error] of [
 			[toolWithThrowingDescriptor(), "Permission action could not be described"],
 			[toolWithWildcardNetwork(), "exact"],
-			[toolWithUnknownDynamicTarget(), "scope is incomplete"],
 		] as const) {
 			tool.execute = execution;
 			await expect(invoke(tool)).rejects.toThrow(error);
 		}
 		expect(execution).not.toHaveBeenCalled();
+		await expect(invoke(toolWithUnknownDynamicTarget())).resolves.toMatchObject({ effects: ["unknown"] });
 	});
 
 	it("binds identity to source, implementation, and descriptor versions", () => {
@@ -159,12 +160,65 @@ describe("tool permission adapter", () => {
 	it.each([
 		`bash -c 'curl --json "{}" https://example.com/item'`,
 		"find /tmp -exec curl -Tpayload.txt https://example.com/item \\;",
-	])("fails closed when a wrapper makes network mutation scope incomplete: %s", (command) => {
-		expect(() => describeBash(command)).toThrow("scope is incomplete");
+	])("reviews a wrapper instead of hard-denying network mutation scope: %s", (command) => {
+		const action = describeBash(command);
+		expect(action.effects).toContain("unknown");
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
 	});
 
-	it("fails closed for an unresolved network endpoint", () => {
-		expect(() => describeBash('curl "$URL"')).toThrow("scope is incomplete");
+	it("reviews an unresolved network endpoint in Auto instead of hard-denying it", () => {
+		const action = describeBash('curl "$URL"');
+		expect(action.effects).toContain("unknown");
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
+	});
+
+	it("keeps an exact Desktop rm complete and expands ~ reads", () => {
+		const file = join(homedir(), "Desktop", "note.md");
+		const rm = describeBash(`rm -f "${file}"`);
+		expect(rm.effects).toContain("destructive");
+		expect(rm.effects).not.toContain("unknown");
+		expect(rm.writePaths).toEqual(expect.arrayContaining([permissionProject, file]));
+
+		const listed = describeBash("ls ~/Desktop");
+		expect(listed.effects).not.toContain("unknown");
+		expect(listed.readPaths).toContain(join(homedir(), "Desktop"));
+		const globList = describeBash("ls ~/Desktop/*.md");
+		expect(globList.effects).not.toContain("unknown");
+		expect(globList.readPaths).toContain(join(homedir(), "Desktop"));
+		const rmGlob = describeBash(`rm -f ${join(homedir(), "Desktop")}/*.md`);
+		expect(rmGlob.effects).toContain("unknown");
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: rmGlob })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
+	});
+
+	it("lets Auto classify stderr-suppressed reads instead of hard-denying them", () => {
+		const policy = new PermissionPolicy();
+		const listed = describeBash(`ls -la ${join(homedir(), ".metis", "agent")} 2>&1 | head -30`);
+		expect(listed.effects).not.toContain("unknown");
+		expect(listed.writePaths).toEqual([]);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: listed }).kind).not.toBe("deny");
+
+		const cat = describeBash('cat ~/.metis/agent/settings.json 2>/dev/null | head -50; echo "---project---"');
+		expect(cat.effects).not.toContain("unknown");
+		expect(cat.writePaths).toEqual([]);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: cat }).kind).not.toBe("deny");
+
+		const glob = describeBash(
+			'ls ~/.metis/ 2>/dev/null && echo "---" && cat ~/.metis/mcp*.json 2>/dev/null; cat .mcp.json',
+		);
+		expect(glob.effects).not.toContain("unknown");
+		expect(glob.readPaths).toContain(join(homedir(), ".metis"));
+		expect(glob.writePaths).toEqual([]);
+		expect(() => describeBash("rm ~/.metis/mcp*.json")).not.toThrow();
+		expect(describeBash("rm ~/.metis/mcp*.json").effects).toContain("unknown");
 	});
 
 	it("reviews workspace rm and allows python scripts instead of hard-denying both", () => {
@@ -187,8 +241,43 @@ describe("tool permission adapter", () => {
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: python })).toMatchObject({ kind: "allow" });
 
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: describeBash("rm -rf .") })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: describeBash("rm -rf .") })).toMatchObject({
 			kind: "deny",
 		});
-		expect(() => describeBash("python ./script.py $OUTPUT")).toThrow("scope is incomplete");
+		const dynamic = describeBash("python ./script.py $OUTPUT");
+		expect(dynamic.effects).toContain("unknown");
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: dynamic })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+		});
+		expect(
+			new PermissionPolicy().evaluate({
+				settings: settingsForPreset("auto"),
+				action: describeBash('echo "rm -rf ./build"'),
+			}).kind,
+		).not.toBe("deny");
+		expect(
+			policy.evaluate({ settings: settingsForPreset("auto"), action: describeBash("ls && rm -rf ./build") }),
+		).toMatchObject({ kind: "deny", riskLevel: "high" });
+		expect(
+			policy.evaluate({ settings: settingsForPreset("auto"), action: describeBash("Remove-Item -Recurse ./build") }),
+		).toMatchObject({ kind: "deny", riskLevel: "high" });
+		expect(
+			policy.evaluate({ settings: settingsForPreset("auto"), action: describeBash("rmdir /s ./build") }),
+		).toMatchObject({
+			kind: "deny",
+			riskLevel: "high",
+		});
+		const homeDelete = describeBash("rm -rf ~");
+		expect(homeDelete.writePaths).toContain(homedir());
+		for (const preset of ["ask", "auto", "full"] as const) {
+			expect(policy.evaluate({ settings: settingsForPreset(preset), action: homeDelete })).toMatchObject({
+				kind: "deny",
+				riskLevel: "critical",
+			});
+		}
 	});
 });

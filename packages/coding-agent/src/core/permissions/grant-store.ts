@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { canonicalizeActionPath } from "../../utils/paths.ts";
-import { assertCompleteAction, digestCanonical, digestPermissionAction } from "./normalize.ts";
+import { assertWellFormedAction, digestCanonical, digestPermissionAction } from "./normalize.ts";
 import type { ExecutionGrant, GrantRequest, NetworkEndpoint, NormalizedPermissionAction } from "./types.ts";
 
 export const EXECUTION_GRANT_TTL_MS = 30_000;
@@ -150,7 +150,7 @@ export class ExecutionGrantStore {
 	}
 
 	issue(input: ExecutionGrantIssueInput): ExecutionGrant {
-		assertCompleteAction(input.action);
+		assertWellFormedAction(input.action);
 		const epoch = settingsEpoch(input.settingsEpoch);
 		if (epoch < this.highestSettingsEpoch) throw new Error("Cannot issue a grant for an older settings epoch");
 		const id = grantId(this.createId());
@@ -197,7 +197,7 @@ export class ExecutionGrantStore {
 		if (!exactArray(current.action.networkEndpoints, grant.networkEndpoints)) mismatch("network endpoints");
 		if (current.settingsEpoch !== grant.settingsEpoch) mismatch("settingsEpoch");
 		if (current.executionTarget !== grant.executionTarget) mismatch("executionTarget");
-		assertCompleteAction(current.action);
+		assertWellFormedAction(current.action);
 		if (digestPermissionAction(current.action) !== grant.actionDigest) mismatch("action");
 		if (digestExecutionGrantProfile(executionGrantProfile(grant)) !== stored.profileDigest) mismatch("profile");
 		grantStates.set(grant, "consumed");

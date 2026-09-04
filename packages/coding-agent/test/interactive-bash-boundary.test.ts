@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,
+	type InteractiveBashContext,
 } from "../src/core/interactive-bash-boundary.ts";
 import type { PermissionExecutionTarget } from "../src/core/permissions/approval.ts";
 import { ExecutionGrantStore } from "../src/core/permissions/grant-store.ts";
@@ -136,6 +137,37 @@ describe("interactive Bash boundary", () => {
 		await value.operations.exec("pwd", cwd, options("three"));
 		expect(createSandbox).toHaveBeenCalledTimes(2);
 		expect(first.dispose).toHaveBeenCalledOnce();
+	});
+
+	it("does not pass the workspace as a write root when it would overlap .git", async () => {
+		const outside = join(cwd, "..", "desktop-note.md");
+		const git = join(cwd, ".git");
+		const createSandbox = vi.fn(async (_context: unknown) => sandbox());
+		const value = boundary({ createSandbox });
+		bind(value, "rm-outside", "sandbox", "rm file", {
+			writeRoots: [cwd, outside],
+			protectedRoots: [git],
+		});
+		await value.operations.exec("rm file", cwd, options("rm-outside"));
+		const context = createSandbox.mock.lastCall![0] as InteractiveBashContext;
+		expect(context.workspaceReadOnly).toBe(false);
+		expect(context.writeRoots).not.toContain(cwd);
+		expect(context.writeRoots.some((path) => path.endsWith("desktop-note.md"))).toBe(true);
+		expect(context.writeProtectedRoots?.some((path) => path.endsWith(".git"))).toBe(true);
+	});
+
+	it("keeps the workspace read-only when the grant only writes outside it", async () => {
+		const outside = join(cwd, "..", "desktop-note.md");
+		const createSandbox = vi.fn(async () => sandbox());
+		const value = boundary({ createSandbox });
+		bind(value, "rm-outside-only", "sandbox", "rm file", { writeRoots: [outside] });
+		await value.operations.exec("rm file", cwd, options("rm-outside-only"));
+		expect(createSandbox).toHaveBeenCalledWith(
+			expect.objectContaining({
+				workspaceReadOnly: true,
+				writeRoots: expect.arrayContaining([expect.stringMatching(/desktop-note\.md$/u)]),
+			}),
+		);
 	});
 
 	it("passes workspaceReadOnly to sandbox creation", async () => {

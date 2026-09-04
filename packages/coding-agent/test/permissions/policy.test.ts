@@ -26,8 +26,8 @@ describe("PermissionPolicy", () => {
 			if (decision.kind !== "deny") expect(decision.grant.executionTarget).toBe("host");
 		},
 	);
-	it("hard-denies destructive writes to the filesystem, home, and workspace roots", () => {
-		const protectedTargets = [parse(projectDir).root, homedir(), projectDir];
+	it("hard-denies recursive deletion of the filesystem root and home in every preset", () => {
+		const protectedTargets = [parse(projectDir).root, homedir()];
 		for (const target of protectedTargets) {
 			const action = normalizePermissionAction(
 				actionInput({
@@ -40,11 +40,61 @@ describe("PermissionPolicy", () => {
 					effects: ["destructive"],
 				}),
 			);
-			expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
-				kind: "deny",
-				riskLevel: "critical",
-			});
+			for (const preset of ["ask", "auto", "full"] as const) {
+				expect(new PermissionPolicy().evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
+					kind: "deny",
+					riskLevel: "critical",
+				});
+			}
 		}
+	});
+
+	it("denies recursive deletion in Auto and reviews it in Full", () => {
+		const policy = new PermissionPolicy();
+		const build = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: "rm -rf ./build" },
+				command: "rm -rf ./build",
+				readPaths: [],
+				writePaths: [join(projectDir, "build")],
+				effects: ["destructive"],
+			}),
+		);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: build })).toMatchObject({
+			kind: "deny",
+			riskLevel: "high",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: build })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+			riskLevel: "high",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("ask"), action: build })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
+
+		const workspace = normalizePermissionAction(
+			actionInput({
+				toolName: "bash",
+				toolIdentity: "builtin:bash:v1",
+				args: { command: `rm -rf ${projectDir}` },
+				command: `rm -rf ${projectDir}`,
+				readPaths: [],
+				writePaths: [projectDir],
+				effects: ["destructive"],
+			}),
+		);
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: workspace })).toMatchObject({
+			kind: "deny",
+			riskLevel: "high",
+		});
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: workspace })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
 	});
 
 	it("hard-denies protected-root shell scope even when an adapter omits the destructive effect", () => {
@@ -108,7 +158,7 @@ describe("PermissionPolicy", () => {
 		});
 	});
 
-	it("still hard-denies recursive deletion of the workspace when an extra write grant is present", () => {
+	it("denies concatenated workspace recursive deletion in Auto and reviews it in Full", () => {
 		const action = normalizePermissionAction(
 			actionInput({
 				toolName: "bash",
@@ -120,23 +170,28 @@ describe("PermissionPolicy", () => {
 				effects: ["destructive"],
 			}),
 		);
-		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "deny",
-			riskLevel: "critical",
+			riskLevel: "high",
+		});
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+			riskLevel: "high",
 		});
 	});
 
-	it("fails closed for incomplete actions and wildcard network grants", () => {
+	it("reviews unknown scope in Auto and still fails closed for wildcard network grants", () => {
 		const policy = new PermissionPolicy();
-		const complete = ordinaryRead();
-		const incomplete = { ...complete, effects: ["unknown"] as const };
+		const unknown = normalizePermissionAction(actionInput({ effects: ["unknown"] }));
 		const wildcard = {
-			...complete,
+			...ordinaryRead(),
 			networkEndpoints: [{ hostname: "*.example.com", port: 443 }],
 		};
-		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: incomplete })).toMatchObject({
-			kind: "deny",
-			riskLevel: "critical",
+		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: unknown })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "model",
+			riskLevel: "high",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: wildcard })).toMatchObject({
 			kind: "deny",

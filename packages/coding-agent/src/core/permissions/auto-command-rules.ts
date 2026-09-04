@@ -98,6 +98,54 @@ export function tokenizeShellWords(source: string): { readonly words: readonly s
 	return { words, complete };
 }
 
+/** Split on `&&`, `||`, `;`, `|`, and newlines without cutting inside quotes. */
+export function splitShellSegments(command: string): string[] {
+	const segments: string[] = [];
+	let current = "";
+	let quote: "'" | '"' | undefined;
+	const flush = () => {
+		const trimmed = current.trim();
+		if (trimmed) segments.push(trimmed);
+		current = "";
+	};
+	for (let index = 0; index < command.length; index += 1) {
+		const character = command[index]!;
+		if (quote) {
+			current += character;
+			if (character === quote) quote = undefined;
+			else if (character === "\\" && quote === '"' && index + 1 < command.length) current += command[++index]!;
+			continue;
+		}
+		if (character === "'" || character === '"') {
+			quote = character;
+			current += character;
+			continue;
+		}
+		if (character === "\\") {
+			current += character;
+			if (index + 1 < command.length) current += command[++index]!;
+			continue;
+		}
+		if (character === "\n" || character === ";") {
+			flush();
+			continue;
+		}
+		if (character === "&" && command[index + 1] === "&") {
+			flush();
+			index += 1;
+			continue;
+		}
+		if (character === "|") {
+			if (command[index + 1] === "|") index += 1;
+			flush();
+			continue;
+		}
+		current += character;
+	}
+	flush();
+	return segments;
+}
+
 function isSimpleShellSource(source: string): boolean {
 	let quote: "'" | '"' | undefined;
 	for (let index = 0; index < source.length; index += 1) {

@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { Static, TSchema } from "typebox";
 import type {
 	ToolDefinition,
@@ -5,8 +7,8 @@ import type {
 	ToolPermissionContext,
 	ToolPermissionDescriptor,
 } from "./extensions/types.ts";
-import { tokenizeShellWords } from "./permissions/auto-command-rules.ts";
-import { assertCompleteAction, digestCanonical, normalizePermissionAction } from "./permissions/normalize.ts";
+import { splitShellSegments, tokenizeShellWords } from "./permissions/auto-command-rules.ts";
+import { assertWellFormedAction, digestCanonical, normalizePermissionAction } from "./permissions/normalize.ts";
 import { bashReferencesSensitivePath, isSensitivePath } from "./permissions/sensitive-paths.ts";
 import type { NormalizedPermissionAction, ToolProvenance } from "./permissions/types.ts";
 
@@ -80,11 +82,13 @@ const READ_ONLY_SHELL_COMMANDS = new Set([
 	"[",
 	"cat",
 	"cd",
+	"echo",
 	"file",
 	"find",
 	"grep",
 	"head",
 	"ls",
+	"printf",
 	"pwd",
 	"rg",
 	"readonly",
@@ -94,6 +98,7 @@ const READ_ONLY_SHELL_COMMANDS = new Set([
 	"tree",
 	"wc",
 ]);
+const FD_OR_NULL_REDIRECT = /\d*(?:>>?|<)&\d+|\d*(?:>>?|<)\s*\/dev\/(?:null|stdin|stdout|stderr)\b/gu;
 
 const NETWORK_SHELL_COMMAND =
 	/\b(?:curl|wget|ssh|scp|sftp|rsync|nc|ncat|telnet)\b|\bgit\s+(?:push|pull|fetch|clone)\b|\b(?:npm|pnpm|yarn|bun|pip|pip3|cargo|brew)\s+(?:install|add|update|publish)\b/iu;
@@ -211,15 +216,13 @@ function shellHasKnownExternalMutation(command: string): boolean {
 }
 
 function shellSegments(command: string): string[] {
-	return command
-		.split(/(?:&&|\|\||[;|\n])/u)
-		.map((part) => part.trim())
-		.filter(Boolean);
+	return splitShellSegments(command);
 }
 
 function isReadOnlyShellCommand(command: string): boolean {
-	if (/[<>`]|\$\(/u.test(command)) return false;
-	return shellSegments(command).every((segment) => {
+	const stripped = command.replace(FD_OR_NULL_REDIRECT, " ");
+	if (/[<>`]|\$\(/u.test(stripped)) return false;
+	return shellSegments(stripped).every((segment) => {
 		const words = segment.split(/\s+/u);
 		const executable = words[0]?.replace(/^.*\//u, "");
 		if (!executable) return false;
@@ -229,12 +232,45 @@ function isReadOnlyShellCommand(command: string): boolean {
 	});
 }
 
+function commandHasDestructiveExecutable(command: string): boolean {
+	return splitShellSegments(command).some((segment) => {
+		const words = tokenizeShellWords(segment).words;
+		const executable = words[0]?.replace(/^.*\//u, "").toLowerCase();
+		if (!executable) return false;
+		if (
+			["rm", "rmdir", "remove-item", "shred", "truncate", "dd", "mkfs", "del", "erase", "format"].includes(
+				executable,
+			)
+		) {
+			return true;
+		}
+		if (executable === "find") return words.includes("-delete");
+		if (executable === "git") {
+			return words[1] === "clean" || (words[1] === "reset" && words.includes("--hard"));
+		}
+		return ["kill", "pkill", "killall", "reboot", "shutdown", "chmod", "chown", "chgrp"].includes(executable);
+	});
+}
+
 function recursiveDeleteTargets(command: string): string[] | undefined {
 	const match = command.match(/^\s*rm\s+((?:-[^\s]+\s+)+)([^;&|\n]+)\s*$/u);
 	if (!match || !/(?:^|\s)-[^\s]*r/iu.test(match[1] ?? "")) return undefined;
 	const targets = (match[2] ?? "").trim().split(/\s+/u);
 	if (targets.length === 0 || targets.some((target) => /[*?$`'"\\]/u.test(target))) return undefined;
-	return targets;
+	return targets.map((target) => filesystemOperand(target) ?? target);
+}
+
+function isDiscardRedirectionTarget(target: string): boolean {
+	return /^&\d+$/u.test(target) || ["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"].includes(target);
+}
+
+function globDirectory(path: string): string | undefined {
+	const index = path.search(/[*?[]/u);
+	if (index < 0) return undefined;
+	const prefix = path.slice(0, index);
+	const separator = Math.max(prefix.lastIndexOf("/"), prefix.lastIndexOf("\\"));
+	if (separator <= 0) return prefix.startsWith("/") || prefix.startsWith("\\") ? prefix.slice(0, 1) : undefined;
+	return prefix.slice(0, separator);
 }
 
 function shellRedirectionScope(command: string): {
@@ -245,22 +281,23 @@ function shellRedirectionScope(command: string): {
 	const readPaths: string[] = [];
 	const writePaths: string[] = [];
 	let complete = true;
-	const redirection = /\d*(>>(?!>)|>(?!>)|<(?!<))\s*(?:"([^"\n]*)"|'([^'\n]*)'|([^\s;&|]+))/gu;
+	let resolved = 0;
+	const redirection = /\d*(>>(?!>)|>(?!>)|<(?!<))\s*(?:"([^"\n]*)"|'([^'\n]*)'|(&\d+)|([^\s;&|]+))/gu;
 	for (const match of command.matchAll(redirection)) {
 		const operator = match[1];
-		const target = match[2] ?? match[3] ?? match[4] ?? "";
+		const target = match[2] ?? match[3] ?? match[4] ?? match[5] ?? "";
+		if (isDiscardRedirectionTarget(target)) {
+			resolved += 1;
+			continue;
+		}
 		if (!target || /["'`$*?[\]{}()\\]/u.test(target)) {
 			complete = false;
 			continue;
 		}
-		if (["/dev/null", "/dev/stdin", "/dev/stdout", "/dev/stderr"].includes(target)) continue;
 		(operator === "<" ? readPaths : writePaths).push(target);
+		resolved += 1;
 	}
-	const redirectionCount = [...command.matchAll(/\d*(?:>>?|<+)/gu)].filter((match) => {
-		const suffix = command.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 1);
-		return suffix !== "&";
-	}).length;
-	if (redirectionCount > readPaths.length + writePaths.length) complete = false;
+	if ([...command.matchAll(/\d*(?:>>?|<+)/gu)].length > resolved) complete = false;
 	return { readPaths, writePaths, complete };
 }
 
@@ -269,7 +306,9 @@ function filesystemOperand(word: string): string | undefined {
 	const equals = value.indexOf("=");
 	if (equals >= 0) value = value.slice(equals + 1);
 	if (!value || /^(?:https?|ssh|git):\/\//iu.test(value)) return undefined;
-	return /^(?:\/|\.\.?[/\\]|~[/\\])/u.test(value) || /[/\\]/u.test(value) ? value : undefined;
+	if (value === "~") return homedir();
+	if (/^~[/\\]/u.test(value)) value = join(homedir(), value.slice(2));
+	return /^(?:\/|\.\.?[/\\])/u.test(value) || /[/\\]/u.test(value) ? value : undefined;
 }
 
 function bindManagedWorkOperand(word: string, managedWorkDir: string | undefined): string {
@@ -319,15 +358,24 @@ function shellOperandScope(
 			pathWriters.has(executable) ||
 			["cp", "dd", "install", "mv", "sed"].includes(executable) ||
 			executable === "git";
-		const dynamicPath = fileCommand && argumentWords.some((value) => /[`$*?[\]{}()]/u.test(value));
-		if (dynamicPath) {
-			complete = false;
-		}
-		if (
+		const readCommand =
 			READ_ONLY_SHELL_COMMANDS.has(executable) ||
-			(executable === "git" && ["diff", "log", "show", "status"].includes(parsed.words[1] ?? ""))
-		) {
-			readPaths.push(...operands);
+			(executable === "git" && ["diff", "log", "show", "status"].includes(parsed.words[1] ?? ""));
+		const hasShellExpansion = argumentWords.some((value) => /[`$(){}]/u.test(value));
+		const hasGlob = argumentWords.some((value) => /[*?[]/u.test(value));
+		if (fileCommand && (hasShellExpansion || (hasGlob && !readCommand))) complete = false;
+		if (readCommand) {
+			if (
+				executable === "find" &&
+				argumentWords.some((word) => word === "-exec" || word === "-execdir" || word === "-ok" || word === "-okdir")
+			) {
+				complete = false;
+			}
+			for (const word of argumentWords) {
+				const path = filesystemOperand(word);
+				if (!path) continue;
+				readPaths.push(globDirectory(path) ?? path);
+			}
 			continue;
 		}
 		if (pathWriters.has(executable)) {
@@ -406,17 +454,13 @@ export function bashPermissionClaim(command: string, context: ToolPermissionCont
 	if (bashReferencesSensitivePath(command)) {
 		effects.add("sensitive-read");
 	}
-	if (/\b(?:sudo|doas|pkexec)\b/u.test(lower)) effects.add("elevation");
+	if (splitShellSegments(command).some((segment) => /^\s*(?:sudo|doas|pkexec)\b/iu.test(segment))) {
+		effects.add("elevation");
+	}
 	if (/\b(?:chmod\s+(?:-r\s+)?(?:777|a\+rwx)|spctl\s+--master-disable)\b/u.test(lower)) {
 		effects.add("security-weakening");
 	}
-	if (
-		/\b(?:rm|rmdir|shred|truncate|dd|mkfs|del|erase|format)\b/iu.test(command) ||
-		/\bfind\b[^\n]*\s-delete\b/iu.test(command) ||
-		/\bgit\s+(?:reset\s+--hard|clean\b)/iu.test(command) ||
-		/\b(?:kill|pkill|killall|reboot|shutdown)\b/iu.test(command) ||
-		/\b(?:chmod|chown|chgrp)\b/iu.test(command)
-	) {
+	if (commandHasDestructiveExecutable(command)) {
 		effects.add("destructive");
 	}
 	if (/\b(?:npm|pnpm|yarn|bun|cargo)\s+publish\b|\bdeploy\b/iu.test(command)) {
@@ -525,7 +569,7 @@ export function describeToolAction<TParams extends TSchema>(
 			workspaceRoots: context.workspaceRoots,
 			...claim,
 		});
-		assertCompleteAction(action);
+		assertWellFormedAction(action);
 		return action;
 	} catch (error) {
 		if (error instanceof ToolPermissionDescriptionError) throw error;

@@ -1,5 +1,5 @@
 import { isAbsolute } from "node:path";
-import { assertCompleteAction, canonicalJson } from "./normalize.ts";
+import { assertWellFormedAction, canonicalJson } from "./normalize.ts";
 import type { PermissionReviewRequest, TrustedUserMessage } from "./reviewer.ts";
 import type { GrantRequest, NetworkEndpoint, NormalizedPermissionAction, RiskLevel } from "./types.ts";
 
@@ -210,7 +210,7 @@ function trustedMessages(messages: readonly TrustedUserMessage[]): readonly Trus
 }
 
 export function buildModelReviewInput(request: PermissionReviewRequest): ModelReviewInput {
-	assertCompleteAction(request.action);
+	assertWellFormedAction(request.action);
 	const grant = freezeGrant(request.action, request.decision.grant);
 	const redactedArguments = redactPermissionArguments(request.redactedArguments);
 	const input: ModelReviewInput = Object.freeze({

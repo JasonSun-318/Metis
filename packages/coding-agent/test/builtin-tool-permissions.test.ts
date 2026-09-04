@@ -93,17 +93,16 @@ describe("built-in tool permission descriptors", () => {
 		expect(curl.networkEndpoints).toEqual([{ hostname: "api.example.test", port: 443 }]);
 		expect(curl.effects).not.toContain("external-side-effect");
 
-		expect(() =>
-			describeToolAction(
-				definitions.bash,
-				{ command: "git push origin main" },
-				{
-					...context,
-					provenance: "builtin",
-					toolIdentity: "builtin-bash-test",
-				},
-			),
-		).toThrow("scope is incomplete");
+		const incompletePush = describeToolAction(
+			definitions.bash,
+			{ command: "git push origin main" },
+			{
+				...context,
+				provenance: "builtin",
+				toolIdentity: "builtin-bash-test",
+			},
+		);
+		expect(incompletePush.effects).toContain("unknown");
 		const exactPush = describeToolAction(
 			definitions.bash,
 			{ command: "git push https://github.com/example/repo.git" },
@@ -126,13 +125,13 @@ describe("built-in tool permission descriptors", () => {
 			{ ...context, provenance: "builtin", toolIdentity: "builtin-bash-redirection" },
 		);
 		expect(exact.writePaths).toEqual([cwd, target]);
-		expect(() =>
+		expect(
 			describeToolAction(
 				definitions.bash,
 				{ command: 'echo result > "$OUTPUT_PATH"' },
 				{ ...context, provenance: "builtin", toolIdentity: "builtin-bash-dynamic-redirection" },
-			),
-		).toThrow("scope is incomplete");
+			).effects,
+		).toContain("unknown");
 	});
 
 	it("binds shell filesystem operands and rejects unclassified path-bearing commands", () => {
@@ -168,10 +167,8 @@ describe("built-in tool permission descriptors", () => {
 		const python = describe(`python ./script.py ${outside}`, "builtin-bash-unknown-paths");
 		expect(python.writePaths).toEqual(expect.arrayContaining([join(cwd, "script.py"), outside]));
 		expect(python.effects).not.toContain("unknown");
-		expect(() => describe("touch $OUTPUT_PATH", "builtin-bash-dynamic-operand")).toThrow("scope is incomplete");
-		expect(() => describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory")).toThrow(
-			"scope is incomplete",
-		);
+		expect(describe("touch $OUTPUT_PATH", "builtin-bash-dynamic-operand").effects).toContain("unknown");
+		expect(describe(`cp -t ${outside} ./source.txt`, "builtin-bash-target-directory").effects).toContain("unknown");
 	});
 
 	it("marks structured and shell reads of credential-shaped paths as sensitive", () => {

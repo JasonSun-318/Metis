@@ -202,7 +202,7 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 	return Object.freeze(action);
 }
 
-export function assertCompleteAction(action: NormalizedPermissionAction): void {
+export function assertWellFormedAction(action: NormalizedPermissionAction): void {
 	const expectedKeys = [
 		"actionId",
 		"toolName",
@@ -290,7 +290,6 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 		}) &&
 		action.effects.length === normalizedEffects.length &&
 		action.effects.every((effect, index) => effect === normalizedEffects[index]) &&
-		!action.effects.includes("unknown") &&
 		(!action.effects.includes("sensitive-read") || action.readPaths.length > 0) &&
 		(!action.effects.includes("destructive") ||
 			action.writePaths.length > 0 ||
@@ -300,8 +299,13 @@ export function assertCompleteAction(action: NormalizedPermissionAction): void {
 	if (!complete) throw new TypeError("Permission action scope is incomplete");
 }
 
+export function assertCompleteAction(action: NormalizedPermissionAction): void {
+	assertWellFormedAction(action);
+	if (action.effects.includes("unknown")) throw new TypeError("Permission action scope is incomplete");
+}
+
 export function digestPermissionAction(action: NormalizedPermissionAction): string {
-	assertCompleteAction(action);
+	assertWellFormedAction(action);
 	const { actionId: _actionId, ...stableAction } = action;
 	return digestCanonical(stableAction);
 }

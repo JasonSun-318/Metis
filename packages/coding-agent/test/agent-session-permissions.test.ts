@@ -75,7 +75,7 @@ describe("AgentSession permission enforcement", () => {
 		{ mode: "ask", command: "pwd", asks: true, target: "sandbox" },
 		{ mode: "ask", command: "rm -rf ./build", asks: true, target: "sandbox" },
 		{ mode: "auto", command: "pwd", asks: false, target: "sandbox" },
-		{ mode: "auto", command: "rm -rf ./build", asks: true, target: "sandbox" },
+		{ mode: "auto", command: "rm -rf ./build", asks: false, target: "none" },
 		{ mode: "auto", command: "curl https://example.test", asks: true, target: "sandbox" },
 		{ mode: "full", command: "rm -rf ./build", asks: true, target: "host" },
 	] as const)("routes $mode Bash '$command' to $target", async ({ mode, command, asks, target }) => {
@@ -162,9 +162,9 @@ describe("AgentSession permission enforcement", () => {
 		expect(invalidate).toHaveBeenCalledTimes(2);
 	});
 
-	it("rejects a Bash network command whose destination cannot be bound exactly", async () => {
+	it("asks after model review when a Bash network destination cannot be bound exactly", async () => {
 		const fake = fakeBashBoundary();
-		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
+		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
 		const harness = await createHarness({
 			permissionPreset: "auto",
 			requestPermissionApproval: requestApproval,
@@ -179,12 +179,10 @@ describe("AgentSession permission enforcement", () => {
 
 		await harness.session.prompt("push it");
 
-		expect(requestApproval).not.toHaveBeenCalled();
 		expect(fake.sandboxExec).not.toHaveBeenCalled();
 		expect(fake.hostExec).not.toHaveBeenCalled();
 		const toolResult = [...harness.session.messages].reverse().find((message) => message.role === "toolResult");
 		expect(toolResult?.isError).toBe(true);
-		expect(getMessageText(toolResult)).toMatch(/scope is incomplete/iu);
 	});
 
 	it("reuses an exact remembered Bash approval but asks again when command text changes", async () => {
@@ -199,7 +197,7 @@ describe("AgentSession permission enforcement", () => {
 		fake.setCwd(harness.tempDir);
 		harnesses.push(harness);
 
-		for (const command of ["rm -rf ./build", "rm -rf ./build", "rm -rf ./cache"]) {
+		for (const command of ["rm ./build", "rm ./build", "rm ./cache"]) {
 			harness.setResponses([
 				fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
 				fauxAssistantMessage("done"),

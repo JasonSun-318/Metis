@@ -89,9 +89,9 @@ describe("permission action normalization", () => {
 	});
 
 	it("marks unknown effects and empty identities as incomplete", () => {
-		expect(() => assertCompleteAction(normalizePermissionAction(actionInput({ effects: ["unknown"] })))).toThrow(
-			"Permission action scope is incomplete",
-		);
+		const unknown = normalizePermissionAction(actionInput({ effects: ["unknown"] }));
+		expect(digestPermissionAction(unknown)).toMatch(/^[a-f0-9]{64}$/);
+		expect(() => assertCompleteAction(unknown)).toThrow("Permission action scope is incomplete");
 		expect(() => normalizePermissionAction(actionInput({ toolIdentity: " " }))).toThrow("toolIdentity");
 	});
 

@@ -158,11 +158,9 @@ describe("ModelPermissionReviewer", () => {
 			["model", "signal", "systemPrompt", "thinkingLevel", "userPayload"].sort(),
 		);
 		expect(call?.systemPrompt).toContain("submit_permission_review");
-		expect(call?.systemPrompt).toContain("Only trustedUserMessages");
-		expect(call?.systemPrompt).toContain(
-			"Return allow only when trustedUserMessages directly authorize the exact normalized action and complete requested scope; otherwise return deny.",
-		);
-		expect(call?.systemPrompt).toContain("emit no other output");
+		expect(call?.systemPrompt).toContain("trustedUserMessages may confirm user intent");
+		expect(call?.systemPrompt).toContain("Allow clear non-destructive reads");
+		expect(call?.systemPrompt).toContain("Emit no other output");
 		expect(JSON.parse(call?.userPayload ?? "{}")).toMatchObject({ schemaVersion: 2 });
 		expect(call).not.toHaveProperty("sessionHistory");
 		expect(call).not.toHaveProperty("extensions");

@@ -4,9 +4,15 @@ import {
 	matchAutoCommandRule,
 	normalizeAutoCommandRules,
 	parseSimpleShellCommand,
+	splitShellSegments,
 } from "../../src/core/permissions/auto-command-rules.ts";
 
 describe("Auto command rules", () => {
+	it("splits concatenations without cutting quoted operators", () => {
+		expect(splitShellSegments('echo "a|b" && ls')).toEqual(['echo "a|b"', "ls"]);
+		expect(splitShellSegments("echo 'rm -rf /' | cat")).toEqual(["echo 'rm -rf /'", "cat"]);
+	});
+
 	it("parses one quote-aware simple command", () => {
 		expect(parseSimpleShellCommand('git status --format="short value"')).toEqual([
 			"git",

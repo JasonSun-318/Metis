@@ -1,8 +1,12 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
-import { canonicalizeActionPath } from "../../utils/paths.ts";
-import { type AutoCommandRule, matchAutoCommandRule } from "./auto-command-rules.ts";
-import { assertCompleteAction } from "./normalize.ts";
+import {
+	type AutoCommandRule,
+	matchAutoCommandRule,
+	splitShellSegments,
+	tokenizeShellWords,
+} from "./auto-command-rules.ts";
+import { assertWellFormedAction } from "./normalize.ts";
 import { assertPermissionSettings } from "./settings.ts";
 import type {
 	GrantRequest,
@@ -26,7 +30,7 @@ const CRITICAL_EFFECTS = new Set([
 	"payment",
 	"production-mutation",
 ]);
-const HIGH_EFFECTS = new Set(["external-side-effect", "destructive"]);
+const HIGH_EFFECTS = new Set(["external-side-effect", "destructive", "unknown"]);
 
 function isPathInsideNormalized(parent: string, target: string): boolean {
 	const child = relative(parent, target);
@@ -82,28 +86,26 @@ function isExactEndpoint(endpoint: { readonly hostname: string; readonly port: n
 
 function isRecursiveDeletionCommand(command: string | undefined): boolean {
 	if (!command) return false;
-	for (const match of command.matchAll(/\brm\b((?:\s+--?[^\s;&|]+)+)/giu)) {
-		const options = (match[1] ?? "").trim().split(/\s+/u);
-		if (options.some((option) => option.startsWith("--recursive") || /^-[^-]*r/iu.test(option))) return true;
-	}
-	return /\bremove-item\b[^;\n]*(?:-recurse|-r\b)/iu.test(command) || /\brmdir\b[^;\n]*\/s\b/iu.test(command);
-}
-
-function explicitRecursiveDeleteTargets(command: string): readonly string[] {
-	const targets: string[] = [];
-	for (const segment of command.split(/(?:&&|\|\||[;|\n])/u)) {
-		const match = segment.match(/^\s*rm\s+((?:-[^\s]+\s+)+)([^;&|\n]+)\s*$/iu);
-		if (!match || !/(?:^|\s)-[^\s]*r/iu.test(match[1] ?? "")) continue;
-		const parts = (match[2] ?? "").trim().split(/\s+/u);
-		if (parts.length === 0 || parts.some((target) => /[*?$`'"\\]/u.test(target))) continue;
-		targets.push(...parts);
-	}
-	return targets;
+	return splitShellSegments(command).some((segment) => {
+		const words = tokenizeShellWords(segment).words;
+		const executable = words[0]?.replace(/^.*\//u, "").toLowerCase();
+		if (executable === "rm") {
+			return words
+				.slice(1)
+				.some(
+					(option) => option === "--recursive" || option.startsWith("--recursive=") || /^-[^-]*r/iu.test(option),
+				);
+		}
+		if (executable === "remove-item") {
+			return words.some((option) => /^-recurse$/iu.test(option) || /^-(?:r|recurse)\b/iu.test(option));
+		}
+		return executable === "rmdir" && words.some((option) => option.toLowerCase() === "/s");
+	});
 }
 
 function hardDenyReason(action: NormalizedPermissionAction): string | undefined {
 	try {
-		assertCompleteAction(action);
+		assertWellFormedAction(action);
 	} catch {
 		return "Permission action scope is incomplete";
 	}
@@ -115,25 +117,6 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 		if (target === parse(target).root) return "Recursive deletion of a filesystem root is forbidden";
 		if (target === home) return "Recursive deletion of the user home is forbidden";
 	}
-	if (!isRecursiveDeletionCommand(action.command)) return undefined;
-
-	const explicitTargets = action.command ? explicitRecursiveDeleteTargets(action.command) : [];
-	if (explicitTargets.length > 0) {
-		for (const raw of explicitTargets) {
-			try {
-				if (action.workspaceRoots.includes(canonicalizeActionPath(raw, action.cwd))) {
-					return "Recursive deletion of a workspace root is forbidden";
-				}
-			} catch {}
-		}
-		return undefined;
-	}
-
-	const hitsWorkspaceRoot = action.writePaths.some((target) => action.workspaceRoots.includes(target));
-	const hasInteriorWrite = action.writePaths.some((target) =>
-		action.workspaceRoots.some((root) => target !== root && isPathInsideNormalized(root, target)),
-	);
-	if (hitsWorkspaceRoot && !hasInteriorWrite) return "Recursive deletion of a workspace root is forbidden";
 	return undefined;
 }
 
@@ -229,6 +212,9 @@ export class PermissionPolicy {
 		if (invariant) return deny("critical", invariant);
 		const protectedWrite = protectedWriteReason(input.action);
 		if (protectedWrite) return deny("critical", protectedWrite);
+		if (input.settings.approvalPolicy === "auto-review" && isRecursiveDeletionCommand(input.action.command)) {
+			return deny("high", "Recursive deletion is not allowed in Auto mode");
+		}
 
 		const ceiling = ceilingDenyReason(input.settings, input.action);
 		if (ceiling) return deny(riskLevelFor(input.action, grantRequestFor(input.settings, input.action)), ceiling);

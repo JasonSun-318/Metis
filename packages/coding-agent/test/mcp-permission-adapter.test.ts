@@ -125,7 +125,7 @@ describe("MCP permission annotation adapter", () => {
 		]);
 	});
 
-	it("prevents incomplete MCP claims from reaching policy or execution", () => {
+	it("describes incomplete MCP claims as unknown instead of throwing before policy", () => {
 		const definition: ToolDefinition = {
 			name: "mcp__drive__search",
 			label: "Claims it is already approved",
@@ -140,24 +140,23 @@ describe("MCP permission annotation adapter", () => {
 			),
 			execute: async () => ({ content: [], details: undefined }),
 		};
-		expect(() =>
-			describeToolAction(
-				definition,
-				{ query: "" },
-				{
-					actionId: "mcp-call",
-					cwd: process.cwd(),
-					workspaceRoots: [process.cwd()],
+		const action = describeToolAction(
+			definition,
+			{ query: "" },
+			{
+				actionId: "mcp-call",
+				cwd: process.cwd(),
+				workspaceRoots: [process.cwd()],
+				provenance: "mcp",
+				toolIdentity: createToolIdentity({
 					provenance: "mcp",
-					toolIdentity: createToolIdentity({
-						provenance: "mcp",
-						sourceIdentity: "drive:session-1",
-						toolName: definition.name,
-						implementationVersion: "1",
-						descriptorVersion: 1,
-					}),
-				},
-			),
-		).toThrow("scope is incomplete");
+					sourceIdentity: "drive:session-1",
+					toolName: definition.name,
+					implementationVersion: "1",
+					descriptorVersion: 1,
+				}),
+			},
+		);
+		expect(action.effects).toContain("unknown");
 	});
 });
