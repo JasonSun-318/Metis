@@ -899,43 +899,28 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 		>
 			{mode === "code" && (
 				<button aria-label={t("Review")} disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button">
-					<div className="tool-menu-icon"><ClipboardText aria-hidden="true" size={compact ? 14 : 16} /></div>
-					<div className="tool-menu-text">
-						<span className="tool-menu-title">{t("Review")}</span>
-						{!compact && <span className="tool-menu-desc">{t("Inspect working tree changes and Git diff")}</span>}
-					</div>
+					<div className="tool-menu-icon"><ClipboardText aria-hidden="true" size={compact ? 14 : 20} /></div>
+					<span>{t("Review")}</span>
 				</button>
 			)}
 			<button aria-label={t("Terminal")} disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button">
-				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 16} /></div>
-				<div className="tool-menu-text">
-					<span className="tool-menu-title">{t("Terminal")}</span>
-					{!compact && <span className="tool-menu-desc">{t("Interactive shell and command execution")}</span>}
-				</div>
+				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 20} /></div>
+				<span>{t("Terminal")}</span>
 			</button>
 			<button aria-label={t("Browser")} disabled={!activeSession} onClick={() => addBrowser()} role={compact ? "menuitem" : undefined} title={activeSession ? undefined : t("Open a task before starting a browser")} type="button">
-				<div className="tool-menu-icon"><Globe aria-hidden="true" size={compact ? 14 : 16} /></div>
-				<div className="tool-menu-text">
-					<span className="tool-menu-title">{t("Browser")}</span>
-					{!compact && <span className="tool-menu-desc">{t("Live web preview and page interaction")}</span>}
-				</div>
+				<div className="tool-menu-icon"><Globe aria-hidden="true" size={compact ? 14 : 20} /></div>
+				<span>{t("Browser")}</span>
 			</button>
 			{mode === "code" && (
 				<button aria-label={t("Files")} disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button">
-					<div className="tool-menu-icon"><FolderSimple aria-hidden="true" size={compact ? 14 : 16} /></div>
-					<div className="tool-menu-text">
-						<span className="tool-menu-title">{t("Files")}</span>
-						{!compact && <span className="tool-menu-desc">{t("Browse project tree and view code")}</span>}
-					</div>
+					<div className="tool-menu-icon"><FolderSimple aria-hidden="true" size={compact ? 14 : 20} /></div>
+					<span>{t("Files")}</span>
 				</button>
 			)}
 			{mode === "code" && (
 				<button aria-label={t("Agents")} disabled={!activeSession} onClick={addAgent} role={compact ? "menuitem" : undefined} type="button">
-					<div className="tool-menu-icon"><Robot aria-hidden="true" size={compact ? 14 : 16} /></div>
-					<div className="tool-menu-text">
-						<span className="tool-menu-title">{t("Agents")}</span>
-						{!compact && <span className="tool-menu-desc">{t("Track background subagents and execution")}</span>}
-					</div>
+					<div className="tool-menu-icon"><Robot aria-hidden="true" size={compact ? 14 : 20} /></div>
+					<span>{t("Agents")}</span>
 				</button>
 			)}
 		</nav>
