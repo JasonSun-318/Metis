@@ -130,6 +130,36 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
+	it.each(["chat", "code"] as const)("places a same-turn steer after earlier %s assistant content", async (appearance) => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const items = [
+			item("steer-user", "user", [{ type: "text", text: "写一篇介绍" }]),
+			item("steer-first", "assistant", [{ type: "text", text: "这是第一段。" }]),
+			item("steer-guide", "user", [{ type: "text", text: "改成更短" }]),
+			item("steer-final", "assistant", [{ type: "text", text: "更短的介绍。" }]),
+		];
+		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+		await act(async () => root.render(<Turn items={items} running />));
+
+		const users = [...container.querySelectorAll<HTMLElement>(appearance === "chat" ? ".turn-user" : ".code-turn-user")];
+		const first = container.querySelector<HTMLElement>(appearance === "chat" ? ".turn-intermediate" : ".code-turn-status");
+		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
+		expect(users).toHaveLength(2);
+		expect(users[0]!.textContent).toContain("写一篇介绍");
+		expect(users[1]!.textContent).toContain("改成更短");
+		expect(users[1]!.classList.contains("is-entering")).toBe(true);
+		expect(first?.textContent).toContain("这是第一段。");
+		expect(final?.textContent).toContain("更短的介绍。");
+		expect(users[0]!.compareDocumentPosition(first!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(first!.compareDocumentPosition(users[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(users[1]!.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+
+		await act(async () => root.unmount());
+	});
+
 	it("matches the collapsed, capped, show-more, and nested-command states", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");

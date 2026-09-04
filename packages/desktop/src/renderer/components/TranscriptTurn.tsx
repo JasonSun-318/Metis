@@ -231,54 +231,59 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
 
-	return (
-		<>
-			{users.map((item) => {
-				const copyText = messageText(item);
-				return (
-					<div className={`turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
-						<div className="message message-user">
-							{item.content.map((block, index) => <StaticBlock block={block} key={`${block.type}-${index}`} />)}
-						</div>
-						{onCopy && copyText.trim() !== "" && (
-							<div className="turn-actions">
-								<TurnCopyButton onCopy={onCopy} text={copyText} />
+		return (
+			<>
+				{segments.map((segment, index) => {
+					if (segment.type === "user") {
+						const copyText = messageText(segment.item);
+						return (
+							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId}>
+								<div className="message message-user">
+									{segment.item.content.map((block, blockIndex) => <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />)}
+								</div>
+								{onCopy && copyText.trim() !== "" && (
+									<div className="turn-actions">
+										<TurnCopyButton onCopy={onCopy} text={copyText} />
+									</div>
+								)}
 							</div>
-						)}
-					</div>
-				);
-			})}
-			{segments.map((segment, index) =>
-				segment.type === "intermediate" ? (
-					<div className="turn-intermediate" key={`intermediate-${index}`}>
-						{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} />)}
-					</div>
-				) : (
-					<div key={`activity-${index}`}>
-						<ExecutionChain
-							activity={segment.blocks}
-							calls={segment.calls}
-							results={results}
-							running={segment.running}
-						/>
-						{sessionId ? (
-							<ToolResultImages
-								images={toolResultImagesFromBlocks(segment.blocks, results)}
-								sessionId={sessionId}
+						);
+					}
+					if (segment.type === "answer") {
+						return (
+							<div className="turn-answer" data-transcript-answer key={`answer-${segment.item.itemId}`}>
+								{segment.item.content.map((block, blockIndex) =>
+									block.type === "text"
+										? <Markdown key={`${block.type}-${blockIndex}`} text={block.text} />
+										: <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />,
+								)}
+							</div>
+						);
+					}
+					if (segment.type === "intermediate") {
+						return (
+							<div className="turn-intermediate" key={`intermediate-${index}`}>
+								{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} />)}
+							</div>
+						);
+					}
+					return (
+						<div key={`activity-${index}`}>
+							<ExecutionChain
+								activity={segment.blocks}
+								calls={segment.calls}
+								results={results}
+								running={segment.running}
 							/>
-						) : null}
-					</div>
-				),
-			)}
-			{final && (
-				<div className="turn-answer" data-transcript-answer>
-					{final.content.map((block, index) =>
-						block.type === "text"
-							? <Markdown key={`${block.type}-${index}`} text={block.text} />
-							: <StaticBlock block={block} key={`${block.type}-${index}`} />,
-					)}
-				</div>
-			)}
+							{sessionId ? (
+								<ToolResultImages
+									images={toolResultImagesFromBlocks(segment.blocks, results)}
+									sessionId={sessionId}
+								/>
+							) : null}
+						</div>
+					);
+				})}
 			{deliveredFiles.length > 0 && !runtimeRunning && onOpenDeliveredFile ? (
 				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} onPreview={onPreviewDeliveredFile} />
 			) : null}

@@ -47,6 +47,10 @@ const PREVIEW_CHARS = 2_000;
 
 export type CodeTranscriptSegment =
 	| {
+			readonly type: "user";
+			readonly item: ItemView;
+	  }
+	| {
 			readonly type: "content";
 			readonly blocks: readonly VisibleCodeBlock[];
 			readonly answer: boolean;
@@ -72,6 +76,10 @@ export interface CodeTurnPresentation {
 
 export type ChatTranscriptSegment =
 	| {
+			readonly type: "user";
+			readonly item: ItemView;
+	  }
+	| {
 			readonly type: "activity";
 			readonly blocks: readonly (ThinkingBlock | ToolCallBlock | ToolResultBlock)[];
 			readonly calls: readonly ToolCallBlock[];
@@ -80,6 +88,10 @@ export type ChatTranscriptSegment =
 	| {
 			readonly type: "intermediate";
 			readonly blocks: readonly TextBlock[];
+	  }
+	| {
+			readonly type: "answer";
+			readonly item: ItemView;
 	  };
 
 export interface TurnPresentation {
@@ -649,7 +661,12 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 
 	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 		const item = items[itemIndex]!;
-		if (item.role === "user") continue;
+		if (item.role === "user") {
+			flushActivity();
+			flushIntermediateText();
+			segments.push({ type: "user", item });
+			continue;
+		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		for (const block of item.content) {
 			if (block.type === "text") {
@@ -676,6 +693,11 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 			flushIntermediateText();
 			activity.push(block);
 			if (block.type === "tool_call") activityCalls.push(block);
+		}
+		if (itemIndex === finalIndex) {
+			flushActivity();
+			flushIntermediateText();
+			segments.push({ type: "answer", item });
 		}
 	}
 	flushActivity();
@@ -732,7 +754,12 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 
 	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 		const item = items[itemIndex]!;
-		if (item.role === "user") continue;
+		if (item.role === "user") {
+			flushContent();
+			flushTools();
+			segments.push({ type: "user", item });
+			continue;
+		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		const answer = itemIndex === finalIndex;
 		const markdown = item.role === "assistant";

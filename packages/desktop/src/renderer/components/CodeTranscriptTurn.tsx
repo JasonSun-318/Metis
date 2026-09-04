@@ -198,48 +198,51 @@ export function CodeTranscriptTurn({
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
 
-	return (
-		<>
-			{users.map((item) => {
-				const copyText = messageText(item);
-				return (
-					<div className={`code-turn-user${item.itemId === enteringUserId ? " is-entering" : ""}`} key={item.itemId}>
-						<div className="code-turn-user-bubble">{item.content.map((block, index) => <VisibleBlock block={block} key={`${block.type}-${index}`} />)}</div>
-						{onCopy && copyText.trim() !== "" && (
-							<div className="turn-actions">
-								<TurnCopyButton onCopy={onCopy} text={copyText} />
+		return (
+			<>
+				{segments.map((segment, segmentIndex) => {
+					if (segment.type === "user") {
+						const copyText = messageText(segment.item);
+						return (
+							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId}>
+								<div className="code-turn-user-bubble">{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>
+								{onCopy && copyText.trim() !== "" && (
+									<div className="turn-actions">
+										<TurnCopyButton onCopy={onCopy} text={copyText} />
+									</div>
+								)}
 							</div>
-						)}
-					</div>
-				);
-			})}
-			{segments.map((segment, segmentIndex) =>
-				segment.type === "tools" ? (
-					<div key={`tools-${segmentIndex}`}>
-						<CodeExecution
-							calls={segment.calls}
-							orphanResults={segment.orphanResults}
-							results={results}
-						/>
-						{sessionId ? (
-							<ToolResultImages
-								images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
-								sessionId={sessionId}
-							/>
-						) : null}
-					</div>
-				) : (
-					<div
-						className={segment.answer ? "code-turn-answer" : "code-turn-status"}
-						data-transcript-answer={segment.answer ? true : undefined}
-						key={`content-${segmentIndex}`}
-					>
-						{segment.blocks.map((block, blockIndex) => (
-							<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} markdown={segment.markdown} />
-						))}
-					</div>
-				),
-			)}
+						);
+					}
+					if (segment.type === "tools") {
+						return (
+							<div key={`tools-${segmentIndex}`}>
+								<CodeExecution
+									calls={segment.calls}
+									orphanResults={segment.orphanResults}
+									results={results}
+								/>
+								{sessionId ? (
+									<ToolResultImages
+										images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
+										sessionId={sessionId}
+									/>
+								) : null}
+							</div>
+						);
+					}
+					return (
+						<div
+							className={segment.answer ? "code-turn-answer" : "code-turn-status"}
+							data-transcript-answer={segment.answer ? true : undefined}
+							key={`content-${segmentIndex}`}
+						>
+							{segment.blocks.map((block, blockIndex) => (
+								<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} markdown={segment.markdown} />
+							))}
+						</div>
+					);
+				})}
 			{deliveredFiles.length > 0 && !running && onOpenDeliveredFile ? (
 				<DeliveredFileCards
 					files={deliveredFiles}

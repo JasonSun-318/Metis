@@ -64,14 +64,20 @@ describe("transcript turn presentation", () => {
 	it("separates public answer text from thinking and pairs tool results", () => {
 		const view = buildTurnPresentation(turnItems);
 		expect(view.users.map((entry) => entry.itemId)).toEqual(["user-1"]);
-		expect(view.segments.map((segment) => segment.type)).toEqual(["activity", "intermediate", "activity"]);
-		expect(view.segments[0]?.type === "activity" && view.segments[0].blocks[0]?.type).toBe("thinking");
-		expect(view.segments[1]?.type === "intermediate" && view.segments[1].blocks.map((block) => block.text)).toEqual([
+		expect(view.segments.map((segment) => segment.type)).toEqual([
+			"user",
+			"activity",
+			"intermediate",
+			"activity",
+			"answer",
+		]);
+		expect(view.segments[1]?.type === "activity" && view.segments[1].blocks[0]?.type).toBe("thinking");
+		expect(view.segments[2]?.type === "intermediate" && view.segments[2].blocks.map((block) => block.text)).toEqual([
 			"我需要先请求访问你的桌面文件夹才能查看里面的内容。",
 		]);
 		expect(view.final?.itemId).toBe("assistant-final");
 		expect(view.results.get("tool-command")?.output).toBe("file.txt");
-		expect(view.segments[2]?.type === "activity" && actionSummary(view.segments[2].calls)).toBe("Ran a command");
+		expect(view.segments[3]?.type === "activity" && actionSummary(view.segments[3].calls)).toBe("Ran a command");
 	});
 
 	it("extracts display-safe command previews", () => {
@@ -332,6 +338,47 @@ describe("transcript turn presentation", () => {
 				(segment) => segment.type !== "activity" || segment.calls.every((call) => call.name !== "deliver_file"),
 			),
 		).toBe(true);
+	});
+
+	it("places a same-turn steer after earlier assistant content", () => {
+		const items: ItemView[] = [
+			item("user-1", "user", [{ type: "text", text: "写一篇介绍" }]),
+			item("assistant-1", "assistant", [{ type: "text", text: "这是第一段。" }]),
+			item("user-steer", "user", [{ type: "text", text: "改成更短" }]),
+		];
+		const chat = buildTurnPresentation(items);
+		expect(chat.segments.map((segment) => segment.type)).toEqual(["user", "answer", "user"]);
+		expect(
+			chat.segments.map((segment) =>
+				segment.type === "user" || segment.type === "answer" ? segment.item.itemId : segment.type,
+			),
+		).toEqual(["user-1", "assistant-1", "user-steer"]);
+		expect(chat.final?.itemId).toBe("assistant-1");
+
+		const code = buildCodeTurnPresentation(items);
+		expect(code.segments.map((segment) => segment.type)).toEqual(["user", "content", "user"]);
+		expect(code.segments[1]?.type === "content" && code.segments[1].answer).toBe(true);
+		expect(code.segments[2]?.type === "user" && code.segments[2].item.itemId).toBe("user-steer");
+	});
+
+	it("keeps a later assistant reply after the steer", () => {
+		const items: ItemView[] = [
+			item("user-1", "user", [{ type: "text", text: "写一篇介绍" }]),
+			item("assistant-1", "assistant", [{ type: "text", text: "这是第一段。" }]),
+			item("user-steer", "user", [{ type: "text", text: "改成更短" }]),
+			item("assistant-2", "assistant", [{ type: "text", text: "更短的介绍。" }]),
+		];
+		const chat = buildTurnPresentation(items);
+		expect(chat.segments.map((segment) => segment.type)).toEqual(["user", "intermediate", "user", "answer"]);
+		expect(chat.final?.itemId).toBe("assistant-2");
+		expect(chat.segments[1]?.type === "intermediate" && chat.segments[1].blocks.map((block) => block.text)).toEqual([
+			"这是第一段。",
+		]);
+
+		const code = buildCodeTurnPresentation(items);
+		expect(code.segments.map((segment) => segment.type)).toEqual(["user", "content", "user", "content"]);
+		expect(code.segments[1]?.type === "content" && code.segments[1].answer).toBe(false);
+		expect(code.segments[3]?.type === "content" && code.segments[3].answer).toBe(true);
 	});
 
 	it("keeps plan blocks out of ordinary assistant text presentation", () => {
