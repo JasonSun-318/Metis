@@ -541,17 +541,6 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	}, [controlState]);
 
 	useEffect(() => {
-		if (controlState !== "agent" || !visible || state.url === "") return;
-		const request = ++previewRequestRef.current;
-		void capturePreview(request).then(
-			(preview) => {
-				if (preview) setPagePreview(preview);
-			},
-			() => undefined,
-		);
-	}, [controlState, state.url, visible]);
-
-	useEffect(() => {
 		if (!moreOpen && !downloadsOpen && !historyOpen) return;
 		const close = (event: PointerEvent) => {
 			const target = event.target as Node;
@@ -609,6 +598,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			};
 			boundsRef.current = bounds;
 			const presented = shouldPresentRef.current;
+			if (!presented && !presentationRef.current) return;
 			const key = `${presented}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`;
 			if (key === presentationRef.current) return;
 			presentationRef.current = key;
@@ -665,7 +655,6 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			visible
 			&& !modalPresent
 			&& state.url !== ""
-			&& controlState !== "agent"
 			&& !moreOpen
 			&& !downloadsOpen
 			&& !historyOpen
@@ -673,7 +662,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			&& !importOpen
 			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, controlState, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
 
 	const takeControl = () => {
 		if (takeoverBusyRef.current) return;

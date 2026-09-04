@@ -131,7 +131,7 @@ describe("BrowserPanel agent control", () => {
 		);
 	});
 
-	it("shows a safe activity bar, hides native presentation, and requests takeover once", async () => {
+	it("shows a safe activity bar, keeps native presentation, and requests takeover once", async () => {
 		let resolveTakeover!: () => void;
 		const takeBrowserControl = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
 			resolveTakeover = resolve;
@@ -143,17 +143,22 @@ describe("BrowserPanel agent control", () => {
 		expect(container.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe("Browser automation active");
 		expect(container.querySelector('[role="status"]')?.textContent).toContain("Metis is controlling this page");
 		expect(container.querySelector(".browser-toolbar")?.hasAttribute("inert")).toBe(true);
-		await vi.waitFor(() =>
-			expect(api.captureBrowserPreview).toHaveBeenCalledWith({ sessionId: SESSION_ID, browserId: BROWSER_ID }),
-		);
+		await act(async () => {
+			await Promise.resolve();
+		});
+		expect(api.captureBrowserPreview).not.toHaveBeenCalled();
 		await vi.waitFor(() =>
 			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
 				type: "present",
 				sessionId: SESSION_ID,
 				browserId: BROWSER_ID,
-				visible: false,
+				visible: true,
 			})),
 		);
+		expect(api.controlBrowser).not.toHaveBeenCalledWith(expect.objectContaining({
+			type: "present",
+			visible: false,
+		}));
 
 		const takeover = button(container, "Take control");
 		await act(async () => {
