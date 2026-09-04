@@ -354,7 +354,12 @@ describe("BrowserController", () => {
 		const created = fixture();
 		const first = await observe(created.controller);
 		created.debug.handler = async (method, params, sessionId) => {
-			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown" && params.key === "a") {
+			if (
+				method === "Input.dispatchKeyEvent" &&
+				params.type === "rawKeyDown" &&
+				Array.isArray(params.commands) &&
+				params.commands.includes("selectAll")
+			) {
 				created.page.url = "https://other.test/after-select-all";
 				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
 			}
@@ -474,6 +479,15 @@ describe("BrowserController", () => {
 		expect(typed.status).toBe("completed");
 		expect(debug.commands).toContainEqual({ method: "DOM.focus", params: { backendNodeId: 7 } });
 		expect(debug.commands).toContainEqual({ method: "Input.insertText", params: { text: "hello" } });
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchKeyEvent",
+			params: { type: "rawKeyDown", commands: ["selectAll"] },
+		});
+		expect(
+			debug.commands.some(
+				({ method, params }) => method === "Input.dispatchKeyEvent" && params.key === "a" && params.modifiers === 4,
+			),
+		).toBe(false);
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
 	});
 

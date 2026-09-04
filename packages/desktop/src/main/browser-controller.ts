@@ -778,11 +778,10 @@ export class BrowserController {
 		signal: AbortSignal,
 		leaseSignal: AbortSignal,
 	): Promise<void> {
-		const modifiers = this.dependencies.acceleratorModifier ?? (process.platform === "darwin" ? 4 : 2);
 		await this.pressAndRelease(
 			"Input.dispatchKeyEvent",
-			{ type: "rawKeyDown", key: "a", code: "KeyA", modifiers },
-			{ type: "keyUp", key: "a", code: "KeyA", modifiers },
+			{ type: "rawKeyDown", commands: ["selectAll"] },
+			{ type: "keyUp", commands: ["selectAll"] },
 			sessionId,
 			signal,
 			leaseSignal,
