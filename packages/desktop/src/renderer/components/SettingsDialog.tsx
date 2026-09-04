@@ -1,9 +1,8 @@
-import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, X } from "@phosphor-icons/react";
+import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
-import { useProfileIdentity } from "../profile-identity.ts";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
@@ -27,7 +26,6 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 }) {
 	const { t } = useTranslation();
 	const [page, setPage] = useState<SettingsPage>("general");
-	const identity = useProfileIdentity();
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const firstNavRef = useRef<HTMLButtonElement>(null);
 	const pageScrollRef = useRef<HTMLDivElement>(null);
@@ -65,6 +63,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 	}, [onClose]);
 
 	const pages = [
+		{ id: "profile" as const, label: "Profile", description: "Review your profile and token usage.", icon: UserCircle },
 		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
 		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
 		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
@@ -73,72 +72,51 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
 		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
 	];
-	const profileMeta = {
-		id: "profile" as const,
-		label: "Profile & Usage",
-		description: "Review your profile, activity, and token usage.",
-	};
-	const activePage = (page === "profile" || page === "usage")
-		? profileMeta
-		: (pages.find((item) => item.id === page) ?? profileMeta);
+	const activePageId = page === "usage" ? "profile" : page;
+	const activePage = pages.find((item) => item.id === activePageId) ?? pages[0]!;
 
 	return (
 		<div className="settings-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
 			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" data-platform={api.platform} ref={dialogRef} role="dialog">
 				<aside className="settings-navigation" data-platform={api.platform}>
-					<div className="settings-navigation-top">
+					<div className="settings-navigation-top" />
+					<div className="settings-navigation-actions">
 						<button aria-label={t("Back to app")} className="settings-back-button" onClick={onClose} type="button">
 							<ArrowLeft aria-hidden="true" size={16} />
 							<span>{t("Back to app")}</span>
 						</button>
 					</div>
-					<div className="settings-navigation-profile-wrap">
-						<button
-							aria-current={page === "profile" || page === "usage" ? "page" : undefined}
-							aria-label={t("Profile")}
-							className={`settings-nav-profile-card ${page === "profile" || page === "usage" ? "active" : ""}`}
-							onClick={() => setPage("profile")}
-							type="button"
-						>
-							<div className="settings-nav-profile-avatar">
-								{identity.avatarDataUrl ? (
-									<img alt="" src={identity.avatarDataUrl} />
-								) : (
-									<span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>
-								)}
-							</div>
-							<div className="settings-nav-profile-meta">
-								<strong className="settings-nav-profile-name">{identity.displayName}</strong>
-								<span className="settings-nav-profile-sub">{t("Profile & Usage")}</span>
-							</div>
-						</button>
-					</div>
 					<div className="settings-nav-divider" />
 					<nav aria-label={t("Settings pages")}>
-						{pages.map(({ id, label, icon: Icon }, index) => (
-							<button
-								aria-current={page === id ? "page" : undefined}
-								className={`settings-nav-item ${page === id ? "active" : ""}`}
-								key={id}
-								onClick={() => setPage(id)}
-								ref={index === 0 ? firstNavRef : undefined}
-								type="button"
-							>
-								<Icon aria-hidden="true" size={18} />
-								<span>{t(label)}</span>
-							</button>
-						))}
+						{pages.map(({ id, label, icon: Icon }, index) => {
+							const isActive = page === id || (id === "profile" && page === "usage");
+							return (
+								<button
+									aria-current={isActive ? "page" : undefined}
+									className={`settings-nav-item ${isActive ? "active" : ""}`}
+									key={id}
+									onClick={() => setPage(id)}
+									ref={id === "general" ? firstNavRef : undefined}
+									type="button"
+								>
+									<Icon aria-hidden="true" size={18} />
+									<span>{t(label)}</span>
+								</button>
+							);
+						})}
 					</nav>
 				</aside>
 				<div className="settings-main">
 					<header className="settings-main-header">
-						<div className="settings-main-heading">
-							<h1>{t(activePage.label)}</h1>
-							<p>{t(activePage.description)}</p>
+						<div className="settings-main-header-content">
+							<div className="settings-main-heading">
+								<h1>{t(activePage.label)}</h1>
+								<p>{t(activePage.description)}</p>
+							</div>
+							<button aria-label={t("Back to app")} className="settings-close-button" onClick={onClose} title={`${t("Back to app")} (Esc)`} type="button">
+								<X aria-hidden="true" size={16} />
+							</button>
 						</div>
-						<button aria-label={t("Back to app")} className="settings-close-button" onClick={onClose} title={`${t("Back to app")} (Esc)`} type="button">
-							<X aria-hidden="true" size={16} />
-						</button>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
 						{page === "general" ? (

@@ -32,6 +32,12 @@ export type DesktopThemePreference = "dark" | "light" | "system";
 /** Standalone IPC channel for theme preference (kept out of DESKTOP_IPC_CHANNELS). */
 export const DESKTOP_THEME_CHANNEL = "metis:theme";
 
+/** Standalone IPC channel for window fullscreen state events. */
+export const DESKTOP_FULLSCREEN_CHANNEL = "metis:window-fullscreen";
+
+/** Standalone IPC channel for querying window fullscreen state. */
+export const DESKTOP_IS_FULLSCREEN_CHANNEL = "metis:is-fullscreen";
+
 export type DesktopUpdateState =
 	| { readonly status: "unavailable" | "checking" }
 	| { readonly status: "available" | "ready"; readonly version: string }
@@ -579,6 +585,8 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	retryServer(): Promise<void>;
 	getThemePreference(): Promise<DesktopThemePreference>;
 	setThemePreference(theme: DesktopThemePreference): Promise<void>;
+	readonly isFullScreen?: () => Promise<boolean>;
+	readonly subscribeFullScreen?: (listener: (fullScreen: boolean) => void) => () => void;
 }
 
 const interactionResponseValidator = compileSchema(InteractionResultSchema);

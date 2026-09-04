@@ -4,7 +4,9 @@ import { createDesktopRpcForwarders, unwrapDesktopRpcIpcResult } from "./shared/
 import {
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_EVENT_CHANNEL,
+	DESKTOP_FULLSCREEN_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
+	DESKTOP_IS_FULLSCREEN_CHANNEL,
 	DESKTOP_TERMINAL_EVENT_CHANNEL,
 	DESKTOP_THEME_CHANNEL,
 	DESKTOP_UPDATE_EVENT_CHANNEL,
@@ -255,6 +257,18 @@ const api = {
 	setThemePreference: async (theme: DesktopThemePreference): Promise<void> => {
 		if (theme !== "dark" && theme !== "light" && theme !== "system") throw new TypeError("Invalid theme preference");
 		await ipcRenderer.invoke(DESKTOP_THEME_CHANNEL, theme);
+	},
+	isFullScreen: async (): Promise<boolean> => {
+		const value = await ipcRenderer.invoke(DESKTOP_IS_FULLSCREEN_CHANNEL);
+		return Boolean(value);
+	},
+	subscribeFullScreen: (listener: (fullScreen: boolean) => void) => {
+		if (typeof listener !== "function") throw new TypeError("Metis fullscreen listener must be a function");
+		const onEvent = (_event: IpcRendererEvent, value: unknown) => {
+			listener(Boolean(value));
+		};
+		ipcRenderer.on(DESKTOP_FULLSCREEN_CHANNEL, onEvent);
+		return () => ipcRenderer.off(DESKTOP_FULLSCREEN_CHANNEL, onEvent);
 	},
 } satisfies MetisDesktopApi;
 

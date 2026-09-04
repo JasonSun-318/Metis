@@ -15,6 +15,8 @@ import {
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
 import {
+	DESKTOP_FULLSCREEN_CHANNEL,
+	DESKTOP_IS_FULLSCREEN_CHANNEL,
 	DESKTOP_UPDATE_EVENT_CHANNEL,
 	type DesktopAttachmentSelection,
 	type DesktopWorkspaceEditState,
@@ -224,10 +226,19 @@ async function launch(): Promise<void> {
 		},
 	});
 	registerThemeHandlers(ipcMain, () => mainWindow);
+	ipcMain.handle(DESKTOP_IS_FULLSCREEN_CHANNEL, () => {
+		return mainWindow && !mainWindow.isDestroyed() ? mainWindow.isFullScreen() : false;
+	});
 	async function openMainWindow(): Promise<void> {
 		const window = createMainWindow();
 		broker.attach(window);
 		mainWindow = window;
+		window.on("enter-full-screen", () => {
+			if (!window.isDestroyed()) window.webContents.send(DESKTOP_FULLSCREEN_CHANNEL, true);
+		});
+		window.on("leave-full-screen", () => {
+			if (!window.isDestroyed()) window.webContents.send(DESKTOP_FULLSCREEN_CHANNEL, false);
+		});
 		window.on("focus", () => {
 			if (suppressNextFocusAcknowledgement) {
 				suppressNextFocusAcknowledgement = false;

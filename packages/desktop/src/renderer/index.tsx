@@ -12,6 +12,19 @@ import "./styles/app.css";
 applyThemeToDocument(loadTheme(localStorage));
 document.documentElement.dataset.platform = window.metis.platform;
 
+if (window.metis.isFullScreen) {
+	void window.metis.isFullScreen().then((isFull) => {
+		if (isFull) document.documentElement.dataset.fullscreen = "true";
+		else delete document.documentElement.dataset.fullscreen;
+	});
+}
+if (window.metis.subscribeFullScreen) {
+	window.metis.subscribeFullScreen((isFull) => {
+		if (isFull) document.documentElement.dataset.fullscreen = "true";
+		else delete document.documentElement.dataset.fullscreen;
+	});
+}
+
 const root = document.getElementById("root");
 if (!root) throw new Error("Metis renderer root is missing");
 
