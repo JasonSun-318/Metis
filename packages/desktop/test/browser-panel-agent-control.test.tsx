@@ -205,4 +205,50 @@ describe("BrowserPanel agent control", () => {
 			decision: "cancel",
 		});
 	});
+
+	it("resyncs native bounds after a sidebar animation when only position changed", async () => {
+		const api = browserApi();
+		const { container, render } = mount(api);
+		await render("idle");
+		const anchor = container.querySelector(".browser-view-anchor");
+		if (!(anchor instanceof HTMLElement)) throw new Error("missing browser-view-anchor");
+		let x = 900;
+		vi.spyOn(anchor, "getBoundingClientRect").mockImplementation(() => ({
+			x,
+			y: 86,
+			width: 393,
+			height: 747,
+			top: 86,
+			left: x,
+			right: x + 393,
+			bottom: 833,
+			toJSON: () => ({}),
+		}));
+		await act(async () => {
+			window.dispatchEvent(new Event("animationend"));
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		});
+		await vi.waitFor(() =>
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					bounds: { x: 900, y: 86, width: 393, height: 747 },
+				}),
+			),
+		);
+		vi.mocked(api.controlBrowser).mockClear();
+		x = 507;
+		await act(async () => {
+			window.dispatchEvent(new Event("animationend"));
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		});
+		await vi.waitFor(() =>
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					bounds: { x: 507, y: 86, width: 393, height: 747 },
+				}),
+			),
+		);
+	});
 });

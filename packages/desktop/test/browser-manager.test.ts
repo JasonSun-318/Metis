@@ -169,6 +169,7 @@ function browserHarness(
 	const pathExists = vi.fn((_path: string) => false);
 	const openPath = vi.fn(async (): Promise<string> => "");
 	const showItemInFolder = vi.fn();
+	const displayMetricsListeners = new Set<() => void>();
 	const profileStore = new BrowserProfileStore(mkdtempSync(join(tmpdir(), "metis-browser-manager-")));
 	if (options.initialHistory)
 		profileStore.saveHistory(DEFAULT_BROWSER_PROFILE_ID, options.initialHistory as DesktopHistoryEntry[]);
@@ -252,6 +253,10 @@ function browserHarness(
 		},
 		handoffTimeoutMs: options.handoffTimeoutMs ?? 1_000,
 		navigationTimeoutMs: options.navigationTimeoutMs ?? 1_000,
+		watchDisplayMetrics: (listener) => {
+			displayMetricsListeners.add(listener);
+			return () => displayMetricsListeners.delete(listener);
+		},
 	});
 	return {
 		backgroundContentView,
@@ -261,6 +266,9 @@ function browserHarness(
 		controllers,
 		createdPreferences: () => createdPreferences,
 		createdViewOptions: () => createdViewOptions,
+		emitDisplayMetricsChanged: () => {
+			for (const listener of displayMetricsListeners) listener();
+		},
 		emit: (name: string, ...args: any[]) => {
 			for (const listener of [...(listeners.get(name) ?? [])]) listener(...args);
 		},
@@ -450,6 +458,32 @@ describe("BrowserManager", () => {
 		expect(harness.webContents.close).toHaveBeenCalledTimes(2);
 		expect(harness.backgroundWindow.destroy).toHaveBeenCalledOnce();
 		expect(() => harness.manager.close(SESSION_ID, secondId)).toThrow("Browser is not running");
+	});
+
+	it("reapplies the same foreground bounds when display metrics change", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000088";
+		harness.manager.attach({ contentView: harness.contentView } as never);
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		await harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "present",
+			browserId,
+			visible: true,
+			bounds: { x: 800, y: 86, width: 393, height: 747 },
+		});
+		const before = harness.view.setBounds.mock.calls.length;
+		harness.emitDisplayMetricsChanged();
+		expect(harness.view.setBounds).toHaveBeenCalledTimes(before + 1);
+		expect(harness.view.setBounds).toHaveBeenLastCalledWith({ x: 800, y: 86, width: 393, height: 747 });
+		await harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "present",
+			browserId,
+			visible: true,
+			bounds: { x: 800, y: 86, width: 393, height: 747 },
+		});
+		expect(harness.view.setBounds).toHaveBeenCalledTimes(before + 1);
 	});
 
 	it("keeps non-presented browser tabs out of the renderer view tree", () => {

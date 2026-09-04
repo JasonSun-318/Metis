@@ -595,6 +595,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 
 	useEffect(() => {
 		let frame = 0;
+		let followup = 0;
 		let active = true;
 		const send = () => {
 			const anchor = anchorRef.current;
@@ -627,14 +628,30 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		};
 		presentRef.current = send;
 		const observer = new ResizeObserver(schedule);
-		if (anchorRef.current) observer.observe(anchorRef.current);
+		const anchor = anchorRef.current;
+		if (anchor) {
+			observer.observe(anchor);
+			const sidebar = anchor.closest(".tool-sidebar");
+			if (sidebar) observer.observe(sidebar);
+		}
+		const viewport = window.visualViewport;
 		window.addEventListener("resize", schedule);
+		window.addEventListener("animationend", schedule);
+		window.addEventListener("transitionend", schedule);
+		viewport?.addEventListener("resize", schedule);
 		schedule();
+		followup = requestAnimationFrame(() => {
+			if (active) schedule();
+		});
 		return () => {
 			active = false;
 			cancelAnimationFrame(frame);
+			cancelAnimationFrame(followup);
 			observer.disconnect();
 			window.removeEventListener("resize", schedule);
+			window.removeEventListener("animationend", schedule);
+			window.removeEventListener("transitionend", schedule);
+			viewport?.removeEventListener("resize", schedule);
 			presentRef.current = null;
 			const bounds = boundsRef.current;
 			if (bounds && shouldPresentRef.current) {

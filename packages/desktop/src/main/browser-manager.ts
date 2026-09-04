@@ -21,6 +21,7 @@ import {
 	type Input,
 	type NativeImage,
 	type Session,
+	screen,
 	session,
 	shell,
 	type View,
@@ -143,6 +144,7 @@ interface BrowserManagerDependencies {
 	}) => BrowserControllerLike;
 	readonly handoffTimeoutMs?: number;
 	readonly navigationTimeoutMs?: number;
+	readonly watchDisplayMetrics?: (listener: () => void) => () => void;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -255,6 +257,7 @@ export class BrowserManager {
 	private readonly historySaveTimers = new Map<string, NodeJS.Timeout>();
 	private owner?: Pick<BrowserWindow, "contentView">;
 	private automationWindow?: BrowserBackgroundWindow;
+	private stopDisplayMetrics?: () => void;
 
 	constructor(
 		dependencies: BrowserManagerDependencies = {
@@ -278,9 +281,14 @@ export class BrowserManager {
 			pathExists: (path) => existsSync(path),
 			openPath: (path) => shell.openPath(path),
 			showItemInFolder: (path) => shell.showItemInFolder(path),
+			watchDisplayMetrics: (listener) => {
+				screen.on("display-metrics-changed", listener);
+				return () => screen.off("display-metrics-changed", listener);
+			},
 		},
 	) {
 		this.dependencies = dependencies;
+		this.stopDisplayMetrics = dependencies.watchDisplayMetrics?.(() => this.relayoutPresentedSurfaces());
 	}
 
 	attach(window: Pick<BrowserWindow, "contentView">): void {
@@ -811,6 +819,8 @@ export class BrowserManager {
 		} finally {
 			this.automationWindow = undefined;
 		}
+		this.stopDisplayMetrics?.();
+		this.stopDisplayMetrics = undefined;
 		if (failures.length > 0) throw new AggregateError(failures, "Browser shutdown failed");
 	}
 
@@ -969,6 +979,17 @@ export class BrowserManager {
 			this.automationWindow = this.dependencies.createBackgroundWindow();
 		}
 		return this.automationWindow.contentView;
+	}
+
+	private relayoutPresentedSurfaces(): void {
+		for (const record of this.records.values()) {
+			const presentation = record.presentation;
+			record.presentationKey = "";
+			record.runtime.syncPresentation(Boolean(presentation?.visible));
+			if (presentation) {
+				record.presentationKey = `${presentation.visible}:${presentation.bounds.x}:${presentation.bounds.y}:${presentation.bounds.width}:${presentation.bounds.height}`;
+			}
+		}
 	}
 
 	private placeSurface(record: BrowserRecord, foreground: boolean): void {
