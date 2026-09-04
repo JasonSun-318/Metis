@@ -141,10 +141,11 @@ describe("SettingsDialog", () => {
 		await flush();
 		expect(pageScroll.scrollTop).toBe(0);
 		expect(api.getUsage).toHaveBeenCalledWith({ rangeDays: 30 });
-		expect(container.querySelector(".profile-panel")).toBeNull();
+		expect(container.querySelector(".usage-page")).not.toBeNull();
 		await act(async () => button(container, "Memory").click());
 		await flush();
 		expect(api.getMemorySettings).toHaveBeenCalledTimes(1);
+		expect(container.querySelector(".profile-panel")).toBeNull();
 		expect(container.querySelector(".memory-settings-section")).not.toBeNull();
 		await act(async () => button(container, "Browser").click());
 		await flush();

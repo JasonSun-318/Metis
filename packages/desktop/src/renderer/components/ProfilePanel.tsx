@@ -4,12 +4,8 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
-import {
-	DEFAULT_PROFILE_IDENTITY,
-	saveProfileIdentity,
-	type ProfileIdentity,
-	useProfileIdentity,
-} from "../profile-identity.ts";
+import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity, type ProfileIdentity, useProfileIdentity } from "../profile-identity.ts";
+import { UsagePanel } from "./UsagePanel.tsx";
 
 const DAY_MS = 86_400_000;
 const VISIBLE_WEEKS = 53;
@@ -102,8 +98,15 @@ function ProfileLoading() {
 	);
 }
 
-export function ProfilePanel({ api, serverReady }: {
-	readonly api: Pick<MetisDesktopApi, "getProfile">;
+export function ProfilePanel({
+	api,
+	initialTab = "activity",
+	onTabChange,
+	serverReady,
+}: {
+	readonly api: Pick<MetisDesktopApi, "getProfile"> & Partial<Pick<MetisDesktopApi, "getUsage">>;
+	readonly initialTab?: "activity" | "usage";
+	readonly onTabChange?: (tab: "activity" | "usage") => void;
 	readonly serverReady: boolean;
 }) {
 	const { t, i18n } = useTranslation();
@@ -111,6 +114,7 @@ export function ProfilePanel({ api, serverReady }: {
 	const compactNumber = useMemo(() => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }), [locale]);
 	const fullNumber = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 	const fullDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }), [locale]);
+	const [activeTab, setActiveTab] = useState<"activity" | "usage">(initialTab);
 	const [profile, setProfile] = useState<ProfileUsageSummaryView | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [request, setRequest] = useState(0);
@@ -119,6 +123,11 @@ export function ProfilePanel({ api, serverReady }: {
 	const [nameDraft, setNameDraft] = useState(identity.displayName);
 	const [identityError, setIdentityError] = useState<string | null>(null);
 	const avatarInputRef = useRef<HTMLInputElement>(null);
+
+	const handleTabChange = (nextTab: "activity" | "usage") => {
+		setActiveTab(nextTab);
+		onTabChange?.(nextTab);
+	};
 
 	const load = useCallback(() => setRequest((current) => current + 1), []);
 	useEffect(() => {
@@ -216,85 +225,111 @@ export function ProfilePanel({ api, serverReady }: {
 				<div className="profile-content">
 					<header className="profile-identity">
 						<span className="profile-eyebrow">{t("Personal profile")}</span>
-						<div className="profile-identity-copy">
-							<div className="profile-name-row">
-								{editingName ? <input
-									aria-label={t("Display name")}
-									autoFocus
-									maxLength={80}
-									onBlur={saveDisplayName}
-									onChange={(event) => setNameDraft(event.target.value)}
-									onKeyDown={(event) => {
-										if (event.key === "Enter") event.currentTarget.blur();
-										if (event.key === "Escape") { setNameDraft(identity.displayName); setEditingName(false); }
-									}}
-									value={nameDraft}
-								/> : <h1>{identity.displayName}</h1>}
-								<button aria-label={t("Edit display name")} onClick={() => setEditingName(true)} type="button"><PencilSimple aria-hidden="true" size={15} /></button>
+						<div className="profile-identity-main">
+							<div className="profile-avatar-actions">
+								<button aria-label={t("Change avatar")} className="profile-avatar" onClick={() => avatarInputRef.current?.click()} type="button">
+									{identity.avatarDataUrl ? <img alt="" src={identity.avatarDataUrl} /> : <span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>}
+									<i aria-hidden="true"><Camera size={14} /></i>
+								</button>
+								{identity.avatarDataUrl ? <button aria-label={t("Remove avatar")} className="profile-avatar-remove" onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })} type="button"><Trash aria-hidden="true" size={14} /></button> : null}
+								<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { void selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
 							</div>
-							<p>{t("Local profile")}</p>
+							<div className="profile-identity-copy">
+								<div className="profile-name-row">
+									{editingName ? <input
+										aria-label={t("Display name")}
+										autoFocus
+										maxLength={80}
+										onBlur={saveDisplayName}
+										onChange={(event) => setNameDraft(event.target.value)}
+										onKeyDown={(event) => {
+											if (event.key === "Enter") event.currentTarget.blur();
+											if (event.key === "Escape") { setNameDraft(identity.displayName); setEditingName(false); }
+										}}
+										value={nameDraft}
+									/> : <h1>{identity.displayName}</h1>}
+									<button aria-label={t("Edit display name")} onClick={() => setEditingName(true)} type="button"><PencilSimple aria-hidden="true" size={15} /></button>
+								</div>
+								<p>{t("Local profile")}</p>
+								{identityError ? <p className="profile-identity-error" role="alert">{identityError}</p> : null}
+							</div>
+							<div aria-label={t("Profile view")} className="settings-segmented profile-tab-switch" role="group">
+								<button
+									aria-pressed={activeTab === "activity"}
+									onClick={() => handleTabChange("activity")}
+									type="button"
+								>
+									{t("Activity")}
+								</button>
+								<button
+									aria-pressed={activeTab === "usage"}
+									onClick={() => handleTabChange("usage")}
+									type="button"
+								>
+									{t("Usage")}
+								</button>
+							</div>
 						</div>
-						<div className="profile-avatar-actions">
-							<button aria-label={t("Change avatar")} className="profile-avatar" onClick={() => avatarInputRef.current?.click()} type="button">
-								{identity.avatarDataUrl ? <img alt="" src={identity.avatarDataUrl} /> : <span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>}
-								<i aria-hidden="true"><Camera size={14} /></i>
-							</button>
-							{identity.avatarDataUrl ? <button aria-label={t("Remove avatar")} className="profile-avatar-remove" onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })} type="button"><Trash aria-hidden="true" size={14} /></button> : null}
-				<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { void selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
-						</div>
-						{identityError ? <p className="profile-identity-error" role="alert">{identityError}</p> : null}
 					</header>
 					<div aria-label={t("Usage summary")} className="profile-stats">
 						{stats.map(([value, label]) => <div key={label}><strong>{value}</strong><span>{t(label)}</span></div>)}
 					</div>
-					<section className="profile-activity">
-						<div className="profile-section-heading">
-							<div><span>{t("Token activity")}</span><small>{t("Last 53 weeks")}</small></div>
-							<span>{t("Daily")}</span>
-						</div>
-						<div aria-label={t("Daily Token activity")} className="profile-heatmap-scroll">
-							<div className="profile-heatmap">
-								{weeks.map((week, index) => (
-									<div className="profile-heatmap-week" key={week.days[0]?.date ?? index}>
-									{week.days.map((day) => {
-										if (day.future) return <span className="profile-heatmap-future" key={day.date} />;
-										const tokens = formatActivityTokens(day.tokens, compactNumber);
-										const date = fullDate.format(dateFromDayNumber(dayNumber(day.date)));
-										return <span
-											aria-label={t("{{date}}: {{tokens}} Tokens", { date, tokens })}
-											className="profile-heatmap-cell"
-											data-level={intensity(day.tokens, profile.peakDailyTokens)}
-											data-tooltip={t("{{date}} · {{tokens}} Tokens", { date, tokens })}
-											key={day.date}
-											style={{ "--profile-cell-index": index } as CSSProperties}
-										/>;
-									})}
-										{week.month && <small>{week.month}</small>}
+					{activeTab === "activity" ? (
+						<div className="profile-activity-view">
+							<section className="profile-activity">
+								<div className="profile-section-heading">
+									<div><span>{t("Token activity")}</span><small>{t("Last 53 weeks")}</small></div>
+									<span>{t("Daily")}</span>
+								</div>
+								<div aria-label={t("Daily Token activity")} className="profile-heatmap-scroll">
+									<div className="profile-heatmap">
+										{weeks.map((week, index) => (
+											<div className="profile-heatmap-week" key={week.days[0]?.date ?? index}>
+											{week.days.map((day) => {
+												if (day.future) return <span className="profile-heatmap-future" key={day.date} />;
+												const tokens = formatActivityTokens(day.tokens, compactNumber);
+												const date = fullDate.format(dateFromDayNumber(dayNumber(day.date)));
+												return <span
+													aria-label={t("{{date}}: {{tokens}} Tokens", { date, tokens })}
+													className="profile-heatmap-cell"
+													data-level={intensity(day.tokens, profile.peakDailyTokens)}
+													data-tooltip={t("{{date}} · {{tokens}} Tokens", { date, tokens })}
+													key={day.date}
+													style={{ "--profile-cell-index": index } as CSSProperties}
+												/>;
+											})}
+												{week.month && <small>{week.month}</small>}
+											</div>
+										))}
 									</div>
-								))}
+								</div>
+							</section>
+							<div className="profile-details">
+								<section>
+									<h2>{t("Activity insights")}</h2>
+									<dl>
+										<div><dt>{t("Most used mode")}</dt><dd>{mode}</dd></div>
+										<div><dt>{t("Most used reasoning effort")}</dt><dd>{thinking}</dd></div>
+										<div><dt>{t("Skills explored")}</dt><dd>{fullNumber.format(profile.usedSkillCount)}</dd></div>
+										<div><dt>{t("Skill uses")}</dt><dd>{fullNumber.format(profile.skillUseCount)}</dd></div>
+										<div><dt>{t("Chats")}</dt><dd>{fullNumber.format(profile.sessionCount)}</dd></div>
+									</dl>
+								</section>
+								<section>
+									<h2>{t("Most used Skills")}</h2>
+									{profile.topSkills.length === 0 ? <p className="profile-skills-empty">{t("Skill activity will appear after you use a Skill.")}</p> : (
+										<ol className="profile-skill-list">
+											{profile.topSkills.map((skill) => <li key={skill.name}><Sparkle aria-hidden="true" size={15} /><strong>{skill.name}</strong><span>{t(skill.count === 1 ? "{{count}} use" : "{{count}} uses", { count: fullNumber.format(skill.count) })}</span></li>)}
+										</ol>
+									)}
+								</section>
 							</div>
 						</div>
-					</section>
-					<div className="profile-details">
-						<section>
-							<h2>{t("Activity insights")}</h2>
-							<dl>
-								<div><dt>{t("Most used mode")}</dt><dd>{mode}</dd></div>
-								<div><dt>{t("Most used reasoning effort")}</dt><dd>{thinking}</dd></div>
-								<div><dt>{t("Skills explored")}</dt><dd>{fullNumber.format(profile.usedSkillCount)}</dd></div>
-								<div><dt>{t("Skill uses")}</dt><dd>{fullNumber.format(profile.skillUseCount)}</dd></div>
-								<div><dt>{t("Chats")}</dt><dd>{fullNumber.format(profile.sessionCount)}</dd></div>
-							</dl>
-						</section>
-						<section>
-							<h2>{t("Most used Skills")}</h2>
-							{profile.topSkills.length === 0 ? <p className="profile-skills-empty">{t("Skill activity will appear after you use a Skill.")}</p> : (
-								<ol className="profile-skill-list">
-									{profile.topSkills.map((skill) => <li key={skill.name}><Sparkle aria-hidden="true" size={15} /><strong>{skill.name}</strong><span>{t(skill.count === 1 ? "{{count}} use" : "{{count}} uses", { count: fullNumber.format(skill.count) })}</span></li>)}
-								</ol>
-							)}
-						</section>
-					</div>
+					) : (
+						<div className="profile-usage-view">
+							{api.getUsage ? <UsagePanel api={api as Pick<MetisDesktopApi, "getUsage">} serverReady={serverReady} /> : null}
+						</div>
+					)}
 				</div>
 			</div>
 		</section>

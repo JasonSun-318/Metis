@@ -94,7 +94,11 @@ const zhCN = {
 	"Anthropic Serif falls back to the system serif for unsupported characters.":
 		"Anthropic Serif 不支持的字符会回退到系统衬线字体。",
 	Profile: "个人资料",
+	"Profile & Usage": "个人资料与用量",
 	"Review your profile and activity at a glance.": "查看你的个人资料和活动概览。",
+	"Review your profile, activity, and token usage.": "查看个人资料、活跃概览与 Token 用量明细。",
+	"Local profile · Stored on device": "本地个人资料 · 离线存储",
+	Activity: "活跃概览",
 	Usage: "用量",
 	"Review token usage across Chat and Code tasks.": "查看 Chat 和 Code 任务的 Token 用量。",
 	"Search engine": "搜索引擎",

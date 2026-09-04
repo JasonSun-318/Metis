@@ -1,8 +1,9 @@
-import { ArrowLeft, Brain, Browser, ChartBar, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle, X } from "@phosphor-icons/react";
+import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
+import { useProfileIdentity } from "../profile-identity.ts";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
@@ -12,9 +13,8 @@ import { MemorySettingsPanel } from "./MemorySettingsPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
 import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
-import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "general" | "model" | "personalization" | "memory" | "agentTypes" | "permissions" | "browser" | "usage" | "profile";
+type SettingsPage = "profile" | "general" | "model" | "personalization" | "memory" | "agentTypes" | "permissions" | "browser" | "usage";
 
 export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
@@ -27,6 +27,7 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 }) {
 	const { t } = useTranslation();
 	const [page, setPage] = useState<SettingsPage>("general");
+	const identity = useProfileIdentity();
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const firstNavRef = useRef<HTMLButtonElement>(null);
 	const pageScrollRef = useRef<HTMLDivElement>(null);
@@ -71,10 +72,16 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
 		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
 		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
-		{ id: "usage" as const, label: "Usage", description: "Review token usage across Chat and Code tasks.", icon: ChartBar },
-		{ id: "profile" as const, label: "Profile", description: "Review your profile and activity at a glance.", icon: UserCircle },
 	];
-	const activePage = pages.find((item) => item.id === page)!;
+	const profileMeta = {
+		id: "profile" as const,
+		label: "Profile & Usage",
+		description: "Review your profile, activity, and token usage.",
+	};
+	const activePage = (page === "profile" || page === "usage")
+		? profileMeta
+		: (pages.find((item) => item.id === page) ?? profileMeta);
+
 	return (
 		<div className="settings-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
 			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" data-platform={api.platform} ref={dialogRef} role="dialog">
@@ -85,6 +92,28 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 							<span>{t("Back to app")}</span>
 						</button>
 					</div>
+					<div className="settings-navigation-profile-wrap">
+						<button
+							aria-current={page === "profile" || page === "usage" ? "page" : undefined}
+							aria-label={t("Profile")}
+							className={`settings-nav-profile-card ${page === "profile" || page === "usage" ? "active" : ""}`}
+							onClick={() => setPage("profile")}
+							type="button"
+						>
+							<div className="settings-nav-profile-avatar">
+								{identity.avatarDataUrl ? (
+									<img alt="" src={identity.avatarDataUrl} />
+								) : (
+									<span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>
+								)}
+							</div>
+							<div className="settings-nav-profile-meta">
+								<strong className="settings-nav-profile-name">{identity.displayName}</strong>
+								<span className="settings-nav-profile-sub">{t("Profile & Usage")}</span>
+							</div>
+						</button>
+					</div>
+					<div className="settings-nav-divider" />
 					<nav aria-label={t("Settings pages")}>
 						{pages.map(({ id, label, icon: Icon }, index) => (
 							<button
@@ -128,8 +157,16 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 						{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
 						{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
-						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
-						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
+						{page === "profile" || page === "usage" ? (
+							<ProfilePanel
+								api={api}
+								initialTab={page === "usage" ? "usage" : "activity"}
+								onTabChange={() => {
+									if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
+								}}
+								serverReady={serverReady}
+							/>
+						) : null}
 					</div>
 				</div>
 			</div>
