@@ -239,7 +239,7 @@ describe("SettingsDialog", () => {
 		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
 		const contentFontSize = button(container, "内容字号");
-		expect(contentFontSize.closest(".settings-section")?.querySelector("h3")?.textContent).toBe("Typography");
+		expect(contentFontSize.closest(".settings-section")?.querySelector("h3")?.textContent).toBe("排版与字体");
 		await act(async () => contentFontSize.click());
 		const twentyPixels = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
 			.find((option) => option.textContent?.trim() === "20 px")!;

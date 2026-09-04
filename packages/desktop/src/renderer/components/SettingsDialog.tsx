@@ -1,4 +1,4 @@
-import { ArrowLeft, Brain, Browser, ChartBar, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle } from "@phosphor-icons/react";
+import { ArrowLeft, Brain, Browser, ChartBar, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle, X } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -14,7 +14,7 @@ import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 import { UsagePanel } from "./UsagePanel.tsx";
 
-type SettingsPage = "general" | "permissions" | "browser" | "personalization" | "agentTypes" | "profile" | "model" | "memory" | "usage";
+type SettingsPage = "general" | "model" | "personalization" | "memory" | "agentTypes" | "permissions" | "browser" | "usage" | "profile";
 
 export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
 	readonly api: MetisDesktopApi;
@@ -65,25 +65,26 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 
 	const pages = [
 		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
+		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
+		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
+		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and the index or extract engine.", icon: Brain },
+		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
 		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
 		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
-		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
-		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
-		{ id: "profile" as const, label: "Profile", description: "Review your profile and activity at a glance.", icon: UserCircle },
-		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
-		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and the index or extract engine.", icon: Brain },
 		{ id: "usage" as const, label: "Usage", description: "Review token usage across Chat and Code tasks.", icon: ChartBar },
+		{ id: "profile" as const, label: "Profile", description: "Review your profile and activity at a glance.", icon: UserCircle },
 	];
 	const activePage = pages.find((item) => item.id === page)!;
 	return (
 		<div className="settings-backdrop" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" ref={dialogRef} role="dialog">
-				<aside className="settings-navigation">
-					<button aria-label={t("Back to app")} className="settings-back-button" onClick={onClose} type="button">
-						<ArrowLeft aria-hidden="true" size={16} />
-						<span>{t("Back to app")}</span>
-					</button>
-					<p className="settings-navigation-label">{t("Preferences")}</p>
+			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" data-platform={api.platform} ref={dialogRef} role="dialog">
+				<aside className="settings-navigation" data-platform={api.platform}>
+					<div className="settings-navigation-top">
+						<button aria-label={t("Back to app")} className="settings-back-button" onClick={onClose} type="button">
+							<ArrowLeft aria-hidden="true" size={16} />
+							<span>{t("Back to app")}</span>
+						</button>
+					</div>
 					<nav aria-label={t("Settings pages")}>
 						{pages.map(({ id, label, icon: Icon }, index) => (
 							<button
@@ -106,6 +107,9 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 							<h1>{t(activePage.label)}</h1>
 							<p>{t(activePage.description)}</p>
 						</div>
+						<button aria-label={t("Back to app")} className="settings-close-button" onClick={onClose} title={`${t("Back to app")} (Esc)`} type="button">
+							<X aria-hidden="true" size={16} />
+						</button>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
 						{page === "general" ? (
@@ -118,14 +122,14 @@ export function SettingsDialog({ api, generalPreferences, onClose, onGeneralPref
 								theme={theme}
 							/>
 						) : null}
+						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
+						{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
+						{page === "memory" ? <MemorySettingsPanel api={api} onConfigureModels={() => setPage("model")} serverReady={serverReady} /> : null}
+						{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
 						{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
 						{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
-						{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
-						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
-						{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
-						{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
-						{page === "memory" ? <MemorySettingsPanel api={api} onConfigureModels={() => setPage("model")} serverReady={serverReady} /> : null}
 						{page === "usage" ? <UsagePanel api={api} serverReady={serverReady} /> : null}
+						{page === "profile" ? <ProfilePanel api={api} serverReady={serverReady} /> : null}
 					</div>
 				</div>
 			</div>

@@ -21,8 +21,8 @@ function rule(selector: string): CSSStyleDeclaration {
 
 describe("Settings visual states", () => {
 	it("uses restrained overlays and a flatter content hierarchy", () => {
-		expect(rule(".settings-backdrop").background).toBe("rgba(0, 0, 0, 0.46)");
-		expect(rule(".settings-backdrop").backdropFilter).toBe("blur(4px)");
+		expect(rule(".settings-backdrop").background).toBe("var(--app-bg)");
+		expect(rule(".settings-backdrop").padding).toBe("0px");
 		expect(rule(".model-provider-grid").gridTemplateColumns).toBe("repeat(2, minmax(0, 1fr))");
 		expect(rule(".usage-detail-card").borderWidth).toBe("0px");
 		expect(rule(".usage-detail-card").borderRadius).toBe("0px");
