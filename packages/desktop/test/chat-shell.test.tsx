@@ -188,9 +188,24 @@ function changeCodeEditor(view: EditorView, value: string): void {
 async function openTreeMenu(container: HTMLElement, title: string): Promise<void> {
 	const label = [...container.querySelectorAll<HTMLElement>(".file-tree-row [title]")]
 		.find((element) => element.title === title);
-	const trigger = label?.closest(".file-tree-row")?.querySelector<HTMLButtonElement>(".file-tree-row-actions");
-	if (!trigger) throw new Error(`Missing tree actions for ${title}`);
-	await act(async () => trigger.click());
+	const row = label?.closest(".file-tree-row");
+	if (!row) throw new Error(`Missing tree row for ${title}`);
+	await act(async () => row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 80 })));
+}
+
+async function openRootTreeMenu(container: HTMLElement): Promise<void> {
+	const tree = container.querySelector<HTMLElement>(".file-tree-scroll");
+	if (!tree) throw new Error("Missing file tree");
+	await act(async () => tree.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })));
+}
+
+async function submitTreeName(container: HTMLElement, name: string): Promise<void> {
+	const input = container.querySelector<HTMLInputElement>(".file-tree-name-input");
+	if (!input) throw new Error("Missing inline name input");
+	await act(async () => {
+		changeInput(input, name);
+		input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+	});
 }
 
 function createHarness(options: {
@@ -4246,10 +4261,19 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Files").click());
 		await flush();
 
-		await act(async () => button(container, "New file").click());
-		let dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="New file"]')!;
-		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "scratch.ts"));
-		await act(async () => button(dialog, "Create").click());
+		await openRootTreeMenu(container);
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		expect(container.querySelector(".file-tree-name-input")).not.toBeNull();
+		expect(api.mutateWorkspaceEntry).not.toHaveBeenCalled();
+		await act(async () => {
+			container.querySelector(".file-tree-name-input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+		});
+		expect(container.querySelector(".file-tree-name-input")).toBeNull();
+		expect(api.mutateWorkspaceEntry).not.toHaveBeenCalled();
+
+		await openRootTreeMenu(container);
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		await submitTreeName(container, "scratch.ts");
 		await flush();
 		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
 			action: "create", sessionId: "code-existing", parentRelativePath: "", name: "scratch.ts", kind: "file",
@@ -4261,40 +4285,28 @@ describe("Chat desktop shell", () => {
 
 		await openTreeMenu(container, "scratch.ts");
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Rename"]')!;
-		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "renamed.ts"));
-		await act(async () => button(dialog, "Rename").click());
+		await submitTreeName(container, "renamed.ts");
 		await flush();
 		expect(container.querySelector('[role="tab"]')?.textContent).toContain("renamed.ts");
 		editor = codeEditor(container, "Edit renamed.ts");
 		expect(editor.state.doc.toString()).toBe("export const draft = true;");
 
-		await openTreeMenu(container, "renamed.ts");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to…").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to…"]')!;
-		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Destination folder"]')!, "docs"));
-		await act(async () => button(dialog, "Move").click());
-		await flush();
-		editor = codeEditor(container, "Edit renamed.ts");
-		expect(editor.state.doc.toString()).toBe("export const draft = true;");
 		await act(async () => button(container, "Save file").click());
 		await flush();
 		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith(expect.objectContaining({
-			relativePath: "docs/renamed.ts", text: "export const draft = true;",
+			relativePath: "renamed.ts", text: "export const draft = true;",
 		}));
 
 		await act(async () => changeCodeEditor(editor, "discard this draft"));
-		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="docs"]')!.click());
-		await flush();
-		await openTreeMenu(container, "docs/renamed.ts");
+		await openTreeMenu(container, "renamed.ts");
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		let dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		expect(dialog.textContent).toContain("Unsaved changes in 1 open file will be discarded.");
 		await act(async () => button(dialog, "Cancel").click());
 		expect(codeEditor(container, "Edit renamed.ts").state.doc.toString()).toBe("discard this draft");
-		await openTreeMenu(container, "docs/renamed.ts");
+		await openTreeMenu(container, "renamed.ts");
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		await act(async () => button(dialog, "Move to Trash").click());
 		await flush();
 		expect(container.querySelector('[role="tab"]')?.textContent).toContain("Open file");
@@ -4317,9 +4329,7 @@ describe("Chat desktop shell", () => {
 
 		await openTreeMenu(container, "src");
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Rename"]')!;
-		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Name"]')!, "source"));
-		await act(async () => button(dialog, "Rename").click());
+		await submitTreeName(container, "source");
 		await flush();
 		let stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
 			fixedPaths: string[]; expandedPaths: string[];
@@ -4328,29 +4338,25 @@ describe("Chat desktop shell", () => {
 		expect(stored.expandedPaths).toContain("source/nested");
 
 		await openTreeMenu(container, "source");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to…").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to…"]')!;
-		await act(async () => changeInput(dialog.querySelector<HTMLInputElement>('[aria-label="Destination folder"]')!, "docs"));
-		await act(async () => button(dialog, "Move").click());
-		await flush();
-		stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
-			fixedPaths: string[]; expandedPaths: string[];
-		};
-		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["docs/source/a.ts", "docs/source/nested/b.ts"]));
-		expect(stored.expandedPaths).toContain("docs/source/nested");
-
-		await flush();
-		await flush();
-		await openTreeMenu(container, "docs/source");
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
-		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Move to Trash"]')!;
+		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		await act(async () => button(dialog, "Move to Trash").click());
 		await flush();
 		expect([...container.querySelectorAll('[role="tab"]')].some((tab) => /a\.ts|b\.ts/u.test(tab.textContent ?? ""))).toBe(false);
 		stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
 			fixedPaths: string[]; expandedPaths: string[];
 		};
-		expect(stored.expandedPaths.some((path) => path.startsWith("docs/source"))).toBe(false);
+		expect(stored.expandedPaths.some((path) => path.startsWith("source"))).toBe(false);
+
+		await openTreeMenu(container, "docs");
+		const mutationCalls = vi.mocked(api.mutateWorkspaceEntry).mock.calls.length;
+		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		expect(vi.mocked(api.mutateWorkspaceEntry).mock.calls.length).toBe(mutationCalls);
+		await submitTreeName(container, "inside-docs.ts");
+		await flush();
+		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
+			action: "create", sessionId: "code-existing", parentRelativePath: "docs", name: "inside-docs.ts", kind: "file",
+		});
 		await act(async () => root.unmount());
 	});
 

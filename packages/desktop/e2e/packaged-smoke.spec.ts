@@ -3248,54 +3248,47 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(page.locator(".file-preview-notice")).toHaveText("Contents copied");
 
 		phase = "creating and managing a workspace file";
-		await page.getByRole("button", { name: "New file", exact: true }).click();
-		let mutationDialog = page.getByRole("dialog", { name: "New file", exact: true });
-		await mutationDialog.getByRole("textbox", { name: "Name", exact: true }).fill("scratch.ts");
-		await mutationDialog.getByRole("button", { name: "Create", exact: true }).click();
+		const treeScroll = page.locator(".file-tree-scroll");
+		const treeScrollBox = await treeScroll.boundingBox();
+		if (!treeScrollBox) throw new Error("Missing file tree");
+		await treeScroll.click({ button: "right", position: { x: 16, y: Math.max(24, treeScrollBox.height - 18) } });
+		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "New file", exact: true }).click();
+		await page.getByRole("textbox", { name: "Name", exact: true }).fill("scratch.ts");
+		await page.getByRole("textbox", { name: "Name", exact: true }).press("Enter");
 		let scratchEditor = page.getByRole("textbox", { name: "Edit scratch.ts", exact: true });
 		await expect(scratchEditor).toBeVisible();
 		await expect(page.locator(".cm-gutters")).toBeVisible();
 		await expect(page.getByRole("tab", { name: "scratch.ts", exact: true }).locator(".file-kind-icon.is-typescript")).toBeVisible();
 		await scratchEditor.fill("export const managed = true;\n");
 		await expect(scratchEditor.locator("span", { hasText: /^export$/u })).toHaveCSS("color", "rgb(255, 123, 114)");
-		await expect(page.getByRole("button", { name: "Actions for scratch.ts", exact: true }).locator("xpath=..")
-			.locator(".file-kind-icon.is-typescript")).toBeVisible();
+		await expect(page.locator('.file-tree-row [title="scratch.ts"] .file-kind-icon.is-typescript')).toBeVisible();
 		await scratchEditor.press("Meta+f");
 		await expect(page.locator(".cm-search")).toBeVisible();
 		await sidebar.screenshot({ path: path.join(qaDir, "code-editor-find.png") });
 		await scratchEditor.press("Escape");
 
-		await page.getByRole("button", { name: "Actions for scratch.ts", exact: true }).click();
+		await page.locator('.file-tree-row [title="scratch.ts"]').click({ button: "right" });
 		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Rename", exact: true }).click();
-		mutationDialog = page.getByRole("dialog", { name: "Rename", exact: true });
-		await mutationDialog.getByRole("textbox", { name: "Name", exact: true }).fill("managed.ts");
+		await page.getByRole("textbox", { name: "Name", exact: true }).fill("managed.ts");
 		await sidebar.screenshot({ path: path.join(qaDir, "rename-file-dialog.png") });
-		await mutationDialog.getByRole("button", { name: "Rename", exact: true }).click();
+		await page.getByRole("textbox", { name: "Name", exact: true }).press("Enter");
 		scratchEditor = page.getByRole("textbox", { name: "Edit managed.ts", exact: true });
 		await expect.poll(() => codeEditorText(scratchEditor)).toBe("export const managed = true;\n");
 		expect(existsSync(path.join(projectDir, "scratch.ts"))).toBe(false);
 		expect(existsSync(path.join(projectDir, "managed.ts"))).toBe(true);
 
-		await page.getByRole("button", { name: "Actions for managed.ts", exact: true }).click();
-		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Move to…", exact: true }).click();
-		mutationDialog = page.getByRole("dialog", { name: "Move to…", exact: true });
-		await mutationDialog.getByRole("textbox", { name: "Destination folder", exact: true }).fill("archive");
-		await mutationDialog.getByRole("button", { name: "Move", exact: true }).click();
-		await expect(mutationDialog).toBeHidden();
 		await scratchEditor.press("Meta+s");
 		await expect(page.locator(".file-preview-notice")).toHaveText("File saved");
-		await expect.poll(() => readFile(path.join(projectDir, "archive", "managed.ts"), "utf8"))
+		await expect.poll(() => readFile(path.join(projectDir, "managed.ts"), "utf8"))
 			.toBe("export const managed = true;\n");
-		expect(existsSync(path.join(projectDir, "managed.ts"))).toBe(false);
 
-		await page.locator('.file-tree-row [title="archive"]').click();
-		await page.getByRole("button", { name: "Actions for managed.ts", exact: true }).click();
+		await page.locator('.file-tree-row [title="managed.ts"]').click({ button: "right" });
 		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Move to Trash", exact: true }).click();
-		mutationDialog = page.getByRole("dialog", { name: "Move to Trash", exact: true });
+		const mutationDialog = page.getByRole("dialog", { name: "Move managed.ts to Trash?" });
 		await expect(mutationDialog).toContainText("The saved version can be recovered from Trash.");
 		await sidebar.screenshot({ path: path.join(qaDir, "move-file-to-trash-dialog.png") });
 		await mutationDialog.getByRole("button", { name: "Cancel", exact: true }).click();
-		expect(existsSync(path.join(projectDir, "archive", "managed.ts"))).toBe(true);
+		expect(existsSync(path.join(projectDir, "managed.ts"))).toBe(true);
 		await page.getByRole("button", { name: "Close managed.ts", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "Edit managed.ts", exact: true })).toHaveCount(0);
 

@@ -299,8 +299,6 @@ textarea { resize: none; }
 .file-tree-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background-color 140ms ease; }
 .file-tree-resizer:hover::after, .file-tree-resizer:focus-visible::after, .file-tree-resizer.is-resizing::after { background: var(--border-strong); }
 .file-tree-toolbar { display: flex; height: 40px; flex: none; align-items: center; gap: 4px; padding: 5px 8px; border-bottom: 1px solid var(--border); }
-.file-tree-toolbar > button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border-radius: 6px; color: var(--text-14); }
-.file-tree-toolbar > button:hover, .file-tree-toolbar > button:focus-visible { background: var(--surface-05); color: var(--text); outline: 0; }
 .file-search-field { display: flex; height: 28px; min-width: 0; flex: 1; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface-03); color: var(--text-08); padding: 0 8px; }
 .file-search-field:focus-within { border-color: var(--border-strong); color: var(--text-16); }
 .file-search-field input { min-width: 0; height: 100%; flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 11.5px; }
@@ -315,9 +313,7 @@ textarea { resize: none; }
 .file-tree-row-select > svg, .file-kind-icon { flex: none; }
 .file-kind-icon { display: block; object-fit: contain; }
 .file-tree-row-select > span:not(.file-tree-caret) { min-width: 0; overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
-.file-tree-row-actions { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: 5px; color: var(--text-08); opacity: 0; }
-.file-tree-row:hover .file-tree-row-actions, .file-tree-row:focus-within .file-tree-row-actions, .file-tree-row.is-selected .file-tree-row-actions { opacity: 1; }
-.file-tree-row-actions:hover, .file-tree-row-actions:focus-visible { background: var(--surface-08); color: var(--text); outline: 0; }
+.file-tree-name-input { min-width: 0; height: 20px; flex: 1; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--app-bg); color: var(--text); padding: 0 5px; font: inherit; font-size: 11.5px; outline: 0; }
 .file-tree-caret { width: 12px; flex: none !important; }
 .file-tree-menu { position: fixed; z-index: 24; display: grid; width: 176px; gap: 1px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
 .file-tree-menu button { display: flex; height: 29px; align-items: center; gap: 7px; border-radius: 6px; color: var(--text-24); padding: 0 8px; text-align: left; font-size: 11.5px; }
@@ -1808,12 +1804,6 @@ textarea { resize: none; }
 .unsaved-file-dialog .button-secondary { border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
 .interaction-dialog form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 18px; }
 .interaction-dialog input { min-width: 0; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--surface-00); padding: 9px 11px; }
-.file-mutation-dialog { width: min(430px, 100%); }
-.file-mutation-dialog h2 { color: var(--text); font-size: 17px; font-weight: 560; }
-.file-mutation-dialog form { display: grid; grid-template-columns: 1fr; }
-.file-mutation-dialog form label { display: grid; gap: 7px; color: var(--text-17); font-size: 12px; }
-.file-mutation-dialog form .interaction-actions { margin-top: 10px; }
-.file-mutation-dialog .file-trash-confirm { background: var(--danger-bg); color: #fff; }
 .project-dialog { width: min(540px, 100%); max-height: calc(100vh - 48px); overflow-y: auto; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--panel-raised); box-shadow: var(--overlay-shadow); padding: 22px; }
 .project-dialog h2 { margin: 0 0 8px; color: var(--text); font-size: 18px; font-weight: 560; }
 .project-dialog p, .project-dialog li { color: var(--muted); font-size: 13px; line-height: 1.55; }
@@ -1827,6 +1817,7 @@ textarea { resize: none; }
 .project-dialog-actions .button-secondary { border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
 .project-dialog-actions .project-delete-confirm { background: var(--danger-bg); color: #fff; }
 .project-dialog-actions button:disabled { opacity: .45; }
+.file-trash-dialog.project-dialog { width: min(420px, 100%); }
 .project-delete-path { overflow: hidden; border-radius: 6px; background: var(--surface-02); padding: 7px 9px; text-overflow: ellipsis; white-space: nowrap; }
 .project-delete-blocker { border: 1px solid var(--warning-banner-border); border-radius: 8px; background: var(--warning-banner-bg); color: var(--warning-banner-text) !important; padding: 9px 11px; }
 
