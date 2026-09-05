@@ -76,4 +76,15 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 		const page = rule(".settings-page-mount");
 		expect(page.animation).toContain("settings-page-in");
 	});
+
+	it("defines spring zoom entrance for modal dialogs and smooth toast float", () => {
+		const backdrop = rule(".modal-backdrop");
+		expect(backdrop.animation).toContain("modal-fade-in");
+
+		const dialog = rule(".interaction-dialog");
+		expect(dialog.animation).toContain("modal-card-in");
+
+		const toast = rule(".toast");
+		expect(toast.animation).toContain("toast-slide-in");
+	});
 });
