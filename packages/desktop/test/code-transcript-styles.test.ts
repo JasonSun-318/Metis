@@ -52,6 +52,17 @@ describe("Code transcript visual contract", () => {
 		expect(rule(".transcript-code :is(.code-turn-answer, .code-turn-status) h2").fontSize).toBe("1.16em");
 	});
 
+	it("slides transcript disclosures from the caret with a height drawer", () => {
+		expect(css).toContain("details:has(> .transcript-drawer)::details-content");
+		expect(css).toContain("content-visibility: visible");
+		expect(rule(".transcript-drawer").display).toBe("grid");
+		expect(rule(".transcript-drawer").gridTemplateRows).toBe("0fr");
+		expect(rule(".transcript-drawer").transition).toContain("grid-template-rows 280ms");
+		expect(rule('.transcript-drawer[data-open="true"]').gridTemplateRows).toBe("1fr");
+		expect(rule(".transcript-drawer > *").transform).toBe("translateY(-12px)");
+		expect(rule('.transcript-drawer[data-open="true"] > *').transform).toBe("none");
+	});
+
 	it("slides the latest user bubble in from the right and respects reduced motion", () => {
 		expect(
 			rule(".turn-user.is-entering .message-user, .transcript-code .code-turn-user.is-entering > div").animation,

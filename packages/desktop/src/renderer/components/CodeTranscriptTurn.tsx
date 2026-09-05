@@ -83,13 +83,15 @@ function CodeToolStep({ call, result }: {
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
-			{open && <CodeToolDetails
-				call={call}
-				lines={presentation.detailLines}
-				rawInput={presentation.rawInput}
-				rawOutput={presentation.rawOutput}
-				rawOutputIsError={presentation.rawOutputIsError}
-			/>}
+			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
+				<CodeToolDetails
+					call={call}
+					lines={presentation.detailLines}
+					rawInput={presentation.rawInput}
+					rawOutput={presentation.rawOutput}
+					rawOutputIsError={presentation.rawOutputIsError}
+				/>
+			</div>
 		</details>
 	);
 }
@@ -108,11 +110,13 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 				<span>{presentation.label}</span>
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
-			{open && <CodeToolDetails
-				lines={presentation.detailLines}
-				rawOutput={presentation.rawOutput}
-				rawOutputIsError={presentation.rawOutputIsError}
-			/>}
+			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
+				<CodeToolDetails
+					lines={presentation.detailLines}
+					rawOutput={presentation.rawOutput}
+					rawOutputIsError={presentation.rawOutputIsError}
+				/>
+			</div>
 		</details>
 	);
 }
@@ -157,7 +161,7 @@ function CodeExecution({ calls, results, orphanResults }: {
 				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
-			{open && (
+			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div className="code-execution-card">
 					{calls.map((call) => (
 						<CodeToolStep
@@ -170,7 +174,7 @@ function CodeExecution({ calls, results, orphanResults }: {
 						<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
 					))}
 				</div>
-			)}
+			</div>
 		</details>
 	);
 }

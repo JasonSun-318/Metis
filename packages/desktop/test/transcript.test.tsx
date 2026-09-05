@@ -172,6 +172,7 @@ describe("TranscriptTurn", () => {
 		const [thoughtChain, chain] = chains as [HTMLDetailsElement, HTMLDetailsElement];
 		expect(thoughtChain.open).toBe(false);
 		expect(thoughtChain.querySelector(":scope > summary")?.textContent).toContain("Thought process");
+		expect(thoughtChain.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
 		expect(chain.open).toBe(false);
 		expect(chain!.querySelector(":scope > summary")?.textContent).toContain("Ran a command, used a tool");
 		expect(chain!.querySelector(".execution-chain-caret")).not.toBeNull();
@@ -709,12 +710,15 @@ describe("Transcript", () => {
 
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
 		expect(execution.open).toBe(false);
-		expect(execution.querySelector(".code-execution-card")).toBeNull();
+		expect(execution.querySelector(".code-execution-card")).not.toBeNull();
+		expect(execution.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
 		await act(async () => execution.querySelector(":scope > summary")!.click());
 		expect(execution.open).toBe(true);
+		expect(execution.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(false);
 		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
 		expect(command.open).toBe(false);
-		expect(command.querySelector(".code-command-details")).toBeNull();
+		expect(command.querySelector(".code-command-details")).not.toBeNull();
+		expect(command.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
 		await act(async () => command.querySelector("summary")!.click());
 		expect(command.open).toBe(true);
 		expect(command.textContent).toContain("ls -la /Users/ent/Desktop");
