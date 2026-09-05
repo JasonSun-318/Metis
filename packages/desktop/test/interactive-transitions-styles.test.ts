@@ -100,4 +100,12 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 		const slashMenu = rule(".slash-command-menu");
 		expect(slashMenu.animation).toContain("slash-drawer-in");
 	});
+
+	it("defines smooth transitions for file tree carets and session button hovers", () => {
+		const caret = rule(".file-tree-caret");
+		expect(caret.transition).toContain("transform");
+
+		const sessionBtn = rule(".session-button");
+		expect(sessionBtn.transition).toContain("background-color");
+	});
 });

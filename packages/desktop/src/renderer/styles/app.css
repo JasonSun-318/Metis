@@ -102,7 +102,7 @@ textarea { resize: none; }
 .project-group[data-open="false"] > .project-drawer { grid-template-rows: 0fr; }
 .project-group[data-open="false"] > .project-drawer > .project-sessions { opacity: 0; transform: translateY(-9px); }
 .session-row { position: relative; }
-.session-button { display: flex; width: 100%; height: 28px; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; color: var(--text-18); padding: 0 32px 0 8px; text-align: left; font-size: var(--sidebar-item-size); font-weight: 400; letter-spacing: -0.01em; line-height: 1.3; transition: none; }
+.session-button { display: flex; width: 100%; height: 28px; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; border-radius: 6px; color: var(--text-18); padding: 0 32px 0 8px; text-align: left; font-size: var(--sidebar-item-size); font-weight: 400; letter-spacing: -0.01em; line-height: 1.3; transition: background-color 120ms ease, color 120ms ease; }
 .session-row:hover > .session-button:not(:disabled), .session-row:focus-within > .session-button:not(:disabled) { background: var(--surface-09); color: var(--text-strong); }
 .session-button[aria-current="page"] { background: var(--panel-selected); box-shadow: none; color: var(--text-strong); }
 .session-row:hover > .session-button[aria-current="page"], .session-row:focus-within > .session-button[aria-current="page"] { background: var(--panel-selected); box-shadow: none; }
@@ -305,6 +305,11 @@ textarea { resize: none; }
 .tool-sidebar-collapse:hover { background: var(--surface-04); color: var(--text); }
 .tool-sidebar-collapse svg { transform: scaleX(-1); }
 .tool-stage { position: absolute; top: 40px; right: 0; bottom: 0; left: 0; }
+.tool-stage > [aria-hidden="false"] { animation: tool-panel-in 140ms ease both; }
+@keyframes tool-panel-in {
+	from { opacity: 0.7; }
+	to { opacity: 1; }
+}
 .subagent-panel { position: absolute; display: block; height: 100%; overflow: hidden; background: var(--sidebar); color: var(--text); font-size: 12px; inset: 0; }
 .subagent-panel[hidden] { display: none; }
 .subagent-panel-list { height: 100%; overflow-y: auto; padding: 10px; }
@@ -424,7 +429,9 @@ textarea { resize: none; }
 .file-kind-icon { display: block; object-fit: contain; }
 .file-tree-row-select > span:not(.file-tree-caret) { min-width: 0; overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
 .file-tree-name-input { min-width: 0; height: 20px; flex: 1; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--app-bg); color: var(--text); padding: 0 5px; font: inherit; font-size: 11.5px; outline: 0; }
-.file-tree-caret { width: 12px; flex: none !important; }
+.file-tree-caret { width: 12px; flex: none !important; transition: transform 140ms ease; }
+.file-tree-caret.is-expanded,
+.file-tree-row.is-open .file-tree-caret { transform: rotate(90deg); }
 .file-tree-menu { position: fixed; z-index: 24; display: grid; width: 176px; gap: 1px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-05); box-shadow: var(--overlay-shadow); padding: 4px; }
 .file-tree-menu button { display: flex; height: 29px; align-items: center; gap: 7px; border-radius: 6px; color: var(--text-24); padding: 0 8px; text-align: left; font-size: 11.5px; }
 .file-tree-menu button:hover:not(:disabled), .file-tree-menu button:focus-visible:not(:disabled) { background: var(--surface-08); outline: 0; }
@@ -2745,6 +2752,7 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] .settings-backdrop, :root[data-motion="reduced"] .settings-backdrop.is-closing, :root[data-motion="reduced"] .settings-page-mount { animation: none; transition: none; }
 :root[data-motion="reduced"] .modal-backdrop, :root[data-motion="reduced"] .interaction-dialog, :root[data-motion="reduced"] .project-dialog, :root[data-motion="reduced"] .code-project-dialog, :root[data-motion="reduced"] .mcp-dialog, :root[data-motion="reduced"] .toast { animation: none; transition: none; }
 :root[data-motion="reduced"] .context-usage-ring-meter, :root[data-motion="reduced"] .composer-code .composer-file-card, :root[data-motion="reduced"] .composer-image-preview, :root[data-motion="reduced"] .composer-file-card, :root[data-motion="reduced"] .slash-command-menu { animation: none; transition: none; }
+:root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .tool-stage > [aria-hidden="false"] { animation: none; transition: none; }
 :root[data-motion="reduced"] .plugins-section-indicator { transition: none; }
 :root[data-motion="reduced"] .code-execution-title-leave { display: none; }
 

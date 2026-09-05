@@ -1,6 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
-	CaretDown,
 	CaretRight,
 	Code,
 	Copy,
@@ -696,7 +695,7 @@ export function FilePanel({
 							const isExpanded = entry.kind === "directory" && expanded.has(entry.relativePath);
 							const loading = loadingDirectories.has(entry.relativePath);
 							const rowBody = <>
-								{entry.kind === "directory" ? (isExpanded ? <CaretDown aria-hidden="true" size={12} /> : <CaretRight aria-hidden="true" size={12} />) : <span className="file-tree-caret" />}
+								{entry.kind === "directory" ? <CaretRight aria-hidden="true" className={`file-tree-caret ${isExpanded ? "is-expanded" : ""}`} size={12} /> : <span className="file-tree-caret" />}
 								<WorkspaceFileIcon expanded={isExpanded} kind={entry.kind} path={isCreateRow ? editName : entry.relativePath} />
 								{isEditing ? (
 									<input
