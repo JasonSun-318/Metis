@@ -88,9 +88,13 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 				{call.state === "running" && <CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />}
 			</summary>
 			{(command || presentation.rawOutput !== undefined) && (
-				<div className="tool-step-details">
-					{command && <pre className="tool-step-input">{command}</pre>}
-					{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
+				<div className="tool-step-drawer">
+					<div className="tool-step-drawer-inner">
+						<div className="tool-step-details">
+							{command && <pre className="tool-step-input">{command}</pre>}
+							{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
+						</div>
+					</div>
 				</div>
 			)}
 		</details>
@@ -139,53 +143,57 @@ function ExecutionChain({
 				<span>{actionSummary(calls, t)}</span>
 				<CaretRight aria-hidden="true" className="execution-chain-caret" size={16} />
 			</summary>
-			<div className={`execution-chain-content${canExpand && !showAll ? " is-capped" : ""}`}>
-				<div className="execution-chain-viewport">
-					<div className="execution-chain-timeline">
-						{activity.map((block, index) => {
-							if (block.type === "thinking") {
-								return (
-									<div className="activity-step" key={`thinking-${index}`}>
-										<span className="activity-step-icon"><ClockCounterClockwise aria-hidden="true" size={17} /></span>
-										<p>{block.text}</p>
-									</div>
-								);
-							}
-							if (block.type === "tool_call") {
-								return <ToolStep call={block} key={`tool-${block.toolCallId}`} result={results.get(block.toolCallId)} />;
-							}
-							if (block.type === "tool_result") {
-								const presentation = toolTranscriptPresentation(undefined, block, t);
-								return (
-									<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
-										<span className="activity-step-icon"><CheckCircle aria-hidden="true" size={17} /></span>
-										<p>{presentation.label}</p>
-										<SafeToolDetails lines={presentation.detailLines} />
-										{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
-									</div>
-								);
-							}
-							return null;
-						})}
+			<div className="execution-chain-drawer">
+				<div className="execution-chain-drawer-inner">
+					<div className={`execution-chain-content${canExpand && !showAll ? " is-capped" : ""}`}>
+						<div className="execution-chain-viewport">
+							<div className="execution-chain-timeline">
+								{activity.map((block, index) => {
+									if (block.type === "thinking") {
+										return (
+											<div className="activity-step" key={`thinking-${index}`}>
+												<span className="activity-step-icon"><ClockCounterClockwise aria-hidden="true" size={17} /></span>
+												<p>{block.text}</p>
+											</div>
+										);
+									}
+									if (block.type === "tool_call") {
+										return <ToolStep call={block} key={`tool-${block.toolCallId}`} result={results.get(block.toolCallId)} />;
+									}
+									if (block.type === "tool_result") {
+										const presentation = toolTranscriptPresentation(undefined, block, t);
+										return (
+											<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
+												<span className="activity-step-icon"><CheckCircle aria-hidden="true" size={17} /></span>
+												<p>{presentation.label}</p>
+												<SafeToolDetails lines={presentation.detailLines} />
+												{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
+											</div>
+										);
+									}
+									return null;
+								})}
+							</div>
+						</div>
+						{canExpand && !showAll && (
+							<button className="execution-chain-show-more" onClick={() => setShowAll(true)} type="button">
+								{t("Show more")}
+							</button>
+						)}
 					</div>
+					{(!canExpand || showAll) && (
+						<div className="execution-chain-done">
+							{running ? <CircleNotch aria-hidden="true" className="tool-step-spinner" size={17} /> : <CheckCircle aria-hidden="true" size={17} />}
+							<span>{t(running ? "Working" : "Done")}</span>
+						</div>
+					)}
+					{canExpand && showAll && (
+						<button className="execution-chain-show-more is-show-less" onClick={() => setShowAll(false)} type="button">
+							{t("Show less")}
+						</button>
+					)}
 				</div>
-				{canExpand && !showAll && (
-					<button className="execution-chain-show-more" onClick={() => setShowAll(true)} type="button">
-						{t("Show more")}
-					</button>
-				)}
 			</div>
-			{(!canExpand || showAll) && (
-				<div className="execution-chain-done">
-					{running ? <CircleNotch aria-hidden="true" className="tool-step-spinner" size={17} /> : <CheckCircle aria-hidden="true" size={17} />}
-					<span>{t(running ? "Working" : "Done")}</span>
-				</div>
-			)}
-			{canExpand && showAll && (
-				<button className="execution-chain-show-more is-show-less" onClick={() => setShowAll(false)} type="button">
-					{t("Show less")}
-				</button>
-			)}
 		</details>
 	);
 }
