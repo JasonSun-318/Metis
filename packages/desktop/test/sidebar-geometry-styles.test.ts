@@ -24,4 +24,19 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(rule(".workspace").gridColumn).toBe("2");
 		expect(rule(".session-sidebar").gridColumn).toBe("1");
 	});
+
+	it("positions left sidebar toggle buttons at top 7px to align with traffic lights centerline (y=22px)", () => {
+		const fixedButton = rule(
+			':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar-actions .sessions-sidebar-toggle-fixed',
+		);
+		expect(fixedButton.top).toBe("7px");
+		expect(fixedButton.left).toBe("76px");
+
+		const actionButton = rule(".workspace-titlebar-actions button");
+		expect(actionButton.width).toBe("30px");
+		expect(actionButton.height).toBe("30px");
+
+		const controls = rule(".sidebar-titlebar-controls");
+		expect(controls.top).toBe("0px");
+	});
 });
