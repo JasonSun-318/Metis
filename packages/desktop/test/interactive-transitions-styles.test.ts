@@ -6,26 +6,28 @@ import { describe, expect, it } from "vitest";
 
 const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 
-let parsedRules: CSSStyleRule[] | null = null;
 function rule(selector: string): CSSStyleDeclaration {
-	if (!parsedRules) {
-		const style = document.createElement("style");
-		style.textContent = css;
-		document.head.replaceChildren(style);
-		parsedRules = Array.from(style.sheet?.cssRules ?? []).filter(
-			(candidate): candidate is CSSStyleRule => candidate instanceof CSSStyleRule,
-		);
-	}
-	const match = parsedRules.find(
-		(candidate) =>
-			candidate.selectorText === selector ||
-			candidate.selectorText
-				.split(",")
-				.map((s) => s.trim())
-				.includes(selector),
+	const style = document.createElement("style");
+	style.textContent = css;
+	document.head.replaceChildren(style);
+	const matchingRules = Array.from(style.sheet?.cssRules ?? []).filter(
+		(candidate): candidate is CSSStyleRule =>
+			candidate instanceof CSSStyleRule &&
+			(candidate.selectorText === selector ||
+				candidate.selectorText
+					.split(",")
+					.map((s) => s.trim())
+					.includes(selector)),
 	);
-	if (!match) throw new Error(`Missing CSS rule: ${selector}`);
-	return match.style;
+	if (matchingRules.length === 0) throw new Error(`Missing CSS rule: ${selector}`);
+	const target = document.createElement("div");
+	for (const candidate of matchingRules) {
+		for (let i = 0; i < candidate.style.length; i++) {
+			const prop = candidate.style[i]!;
+			target.style.setProperty(prop, candidate.style.getPropertyValue(prop));
+		}
+	}
+	return target.style;
 }
 
 describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () => {
@@ -86,5 +88,16 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 
 		const toast = rule(".toast");
 		expect(toast.animation).toContain("toast-slide-in");
+	});
+
+	it("defines smooth meter transitions for context ring and pop-in for attachments", () => {
+		const ringMeter = rule(".context-usage-ring-meter");
+		expect(ringMeter.transition).toContain("stroke-dashoffset");
+
+		const pill = rule(".composer-code .composer-file-card");
+		expect(pill.animation).toContain("pill-pop-in");
+
+		const slashMenu = rule(".slash-command-menu");
+		expect(slashMenu.animation).toContain("slash-drawer-in");
 	});
 });
