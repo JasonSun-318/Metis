@@ -40,10 +40,10 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(controls.top).toBe("0px");
 	});
 
-	it("unifies titlebar actions and right sidebar toggle to top 7px and right 17px", () => {
+	it("unifies titlebar actions and right sidebar toggle to top 7px and right 20px", () => {
 		const actions = rule(".workspace-titlebar-actions");
 		expect(actions.top).toBe("7px");
-		expect(actions.right).toBe("17px");
+		expect(actions.right).toBe("20px");
 
 		const actionButtons = rule(".workspace-titlebar-actions button");
 		expect(actionButtons.width).toBe("30px");
