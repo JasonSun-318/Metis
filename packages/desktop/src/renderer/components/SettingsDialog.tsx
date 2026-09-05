@@ -118,7 +118,10 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 									aria-current={isActive ? "page" : undefined}
 									className={`settings-nav-item ${isActive ? "active" : ""}`}
 									key={id}
-									onClick={() => setPage(id)}
+									onClick={() => {
+										setPage(id);
+										if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
+									}}
 									ref={id === "general" ? firstNavRef : undefined}
 									type="button"
 								>

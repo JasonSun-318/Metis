@@ -69,50 +69,27 @@ function CodeToolStep({ call, result }: {
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
-	const [closing, setClosing] = useState(false);
-	const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const presentation = toolTranscriptPresentation(call, result, t);
 	const running = call.state === "running" || call.state === "pending";
 	const Icon = isCommandTool(call.name) ? TerminalWindow : Wrench;
-
-	const toggleOpen = () => {
-		if (open) {
-			setOpen(false);
-			setClosing(true);
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			closeTimer.current = setTimeout(() => setClosing(false), 200);
-		} else {
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			setClosing(false);
-			setOpen(true);
-		}
-	};
-
-	const commandClass = isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool";
 	return (
-		<details className={`${commandClass}${closing ? " is-closing" : ""}`} open={open || closing}>
+		<details className={isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool"} open={open}>
 			<summary onClick={(event) => {
 				event.preventDefault();
-				toggleOpen();
+				setOpen((current) => !current);
 			}}>
 				<Icon aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
-			{(open || closing) && (
-				<div className="code-command-drawer">
-					<div className="code-command-drawer-inner">
-						<CodeToolDetails
-							call={call}
-							lines={presentation.detailLines}
-							rawInput={presentation.rawInput}
-							rawOutput={presentation.rawOutput}
-							rawOutputIsError={presentation.rawOutputIsError}
-						/>
-					</div>
-				</div>
-			)}
+			{open && <CodeToolDetails
+				call={call}
+				lines={presentation.detailLines}
+				rawInput={presentation.rawInput}
+				rawOutput={presentation.rawOutput}
+				rawOutputIsError={presentation.rawOutputIsError}
+			/>}
 		</details>
 	);
 }
@@ -120,44 +97,22 @@ function CodeToolStep({ call, result }: {
 function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
-	const [closing, setClosing] = useState(false);
-	const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 	const presentation = toolTranscriptPresentation(undefined, result, t);
-
-	const toggleOpen = () => {
-		if (open) {
-			setOpen(false);
-			setClosing(true);
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			closeTimer.current = setTimeout(() => setClosing(false), 200);
-		} else {
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			setClosing(false);
-			setOpen(true);
-		}
-	};
-
 	return (
-		<details className={`code-command code-command-tool${closing ? " is-closing" : ""}`} open={open || closing}>
+		<details className="code-command code-command-tool" open={open}>
 			<summary onClick={(event) => {
 				event.preventDefault();
-				toggleOpen();
+				setOpen((current) => !current);
 			}}>
 				<Wrench aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
-			{(open || closing) && (
-				<div className="code-command-drawer">
-					<div className="code-command-drawer-inner">
-						<CodeToolDetails
-							lines={presentation.detailLines}
-							rawOutput={presentation.rawOutput}
-							rawOutputIsError={presentation.rawOutputIsError}
-						/>
-					</div>
-				</div>
-			)}
+			{open && <CodeToolDetails
+				lines={presentation.detailLines}
+				rawOutput={presentation.rawOutput}
+				rawOutputIsError={presentation.rawOutputIsError}
+			/>}
 		</details>
 	);
 }
@@ -193,47 +148,27 @@ function CodeExecution({ calls, results, orphanResults }: {
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
-	const [closing, setClosing] = useState(false);
-	const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-	const toggleOpen = () => {
-		if (open) {
-			setOpen(false);
-			setClosing(true);
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			closeTimer.current = setTimeout(() => setClosing(false), 200);
-		} else {
-			if (closeTimer.current) clearTimeout(closeTimer.current);
-			setClosing(false);
-			setOpen(true);
-		}
-	};
-
 	return (
-		<details className={`code-execution${closing ? " is-closing" : ""}`} open={open || closing}>
+		<details className="code-execution" open={open}>
 			<summary onClick={(event) => {
 				event.preventDefault();
-				toggleOpen();
+				setOpen((current) => !current);
 			}}>
 				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
-			{(open || closing) && (
-				<div className="code-execution-drawer">
-					<div className="code-execution-drawer-inner">
-						<div className="code-execution-card">
-							{calls.map((call) => (
-								<CodeToolStep
-									call={call}
-									key={call.toolCallId}
-									result={results.get(call.toolCallId)}
-								/>
-							))}
-							{orphanResults.map((result) => (
-								<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
-							))}
-						</div>
-					</div>
+			{open && (
+				<div className="code-execution-card">
+					{calls.map((call) => (
+						<CodeToolStep
+							call={call}
+							key={call.toolCallId}
+							result={results.get(call.toolCallId)}
+						/>
+					))}
+					{orphanResults.map((result) => (
+						<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
+					))}
 				</div>
 			)}
 		</details>

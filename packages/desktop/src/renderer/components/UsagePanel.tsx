@@ -1,6 +1,6 @@
 import type { UsageDailyView, UsageRangeDays, UsageSummaryView } from "@metis/app-protocol";
 import { ChartBar, Rows } from "@phosphor-icons/react";
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
@@ -22,6 +22,8 @@ export function UsagePanel({ api, serverReady }: {
 	const [usage, setUsage] = useState<UsageSummaryView | null>(null);
 	const [hovered, setHovered] = useState<number | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const activeSelectedRef = useRef<UsageDailyView | null>(null);
+	const activeLeftRef = useRef<number>(50);
 	const compact = useMemo(() => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }), [locale]);
 	const full = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 	const date = useMemo(() => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }), [locale]);
@@ -41,10 +43,15 @@ export function UsagePanel({ api, serverReady }: {
 	if (!usage) return <p className="settings-inline-error" role="alert">{error}</p>;
 	const peak = Math.max(1, ...usage.daily.map(dayTotal));
 	const selected = hovered === null ? null : usage.daily[hovered] ?? null;
+	if (selected && usage.daily.length > 0) {
+		activeSelectedRef.current = selected;
+		activeLeftRef.current = Math.min(88, Math.max(12, ((hovered! + 0.5) / usage.daily.length) * 100));
+	}
+	const displaySelected = selected ?? activeSelectedRef.current;
+	const displayLeft = selected && usage.daily.length > 0
+		? Math.min(88, Math.max(12, ((hovered! + 0.5) / usage.daily.length) * 100))
+		: activeLeftRef.current;
 	const modeShare = usage.totalTokens === 0 ? 0 : Math.round((usage.codeTokens / usage.totalTokens) * 100);
-	const tooltipLeftPercent = hovered !== null && usage.daily.length > 0
-		? Math.min(88, Math.max(12, ((hovered + 0.5) / usage.daily.length) * 100))
-		: 50;
 
 	return (
 		<section className="settings-page usage-page">
@@ -99,7 +106,14 @@ export function UsagePanel({ api, serverReady }: {
 				</div>
 				{display === "chart" ? (
 					<div className="usage-chart-wrap">
-						<div aria-label={t("Daily token chart")} className="usage-chart" role="img">
+						<div
+							aria-label={t("Daily token chart")}
+							className="usage-chart"
+							key={rangeDays}
+							onMouseLeave={() => setHovered(null)}
+							onPointerLeave={() => setHovered(null)}
+							role="img"
+						>
 							{usage.daily.map((day, index) => {
 								const chatHeight = (day.chatTokens / peak) * 100;
 								const codeHeight = (day.codeTokens / peak) * 100;
@@ -108,7 +122,7 @@ export function UsagePanel({ api, serverReady }: {
 										className={`usage-bar ${hovered === index ? "active" : ""}`}
 										key={day.date}
 										onMouseEnter={() => setHovered(index)}
-										onMouseLeave={() => setHovered(null)}
+										onPointerEnter={() => setHovered(index)}
 										style={{ "--bar-index": index } as CSSProperties}
 									>
 										<i className="code" style={{ height: `${codeHeight}%` }} />
@@ -122,11 +136,15 @@ export function UsagePanel({ api, serverReady }: {
 							<span>{date.format(new Date(`${usage.daily[Math.floor(usage.daily.length / 2)]!.date}T12:00:00`))}</span>
 							<span>{date.format(new Date(`${usage.daily.at(-1)!.date}T12:00:00`))}</span>
 						</div>
-						{selected ? (
-							<div className="usage-tooltip" role="status" style={{ left: `${tooltipLeftPercent}%` }}>
-								<strong>{date.format(new Date(`${selected.date}T12:00:00`))}</strong>
-								<span><i className="chat" />{full.format(selected.chatTokens)} {t("Chat")}</span>
-								<span><i className="code" />{full.format(selected.codeTokens)} {t("Code")}</span>
+						{displaySelected ? (
+							<div
+								className={`usage-tooltip ${hovered !== null && selected !== null ? "is-visible" : ""}`}
+								role="status"
+								style={{ left: `${displayLeft}%` }}
+							>
+								<strong>{date.format(new Date(`${displaySelected.date}T12:00:00`))}</strong>
+								<span><i className="chat" />{full.format(displaySelected.chatTokens)} {t("Chat")}</span>
+								<span><i className="code" />{full.format(displaySelected.codeTokens)} {t("Code")}</span>
 							</div>
 						) : null}
 					</div>

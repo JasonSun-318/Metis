@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
+const cssPath = existsSync(path.join(process.cwd(), "src/renderer/styles/app.css"))
+	? path.join(process.cwd(), "src/renderer/styles/app.css")
+	: path.join(process.cwd(), "packages/desktop/src/renderer/styles/app.css");
+const css = readFileSync(cssPath, "utf8");
 
 function rule(selector: string): CSSStyleDeclaration {
 	const style = document.createElement("style");
@@ -30,32 +33,7 @@ function rule(selector: string): CSSStyleDeclaration {
 	return target.style;
 }
 
-describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () => {
-	it("defines smooth transitions on tool-step container and carets", () => {
-		const toolStep = rule(".tool-step");
-		expect(toolStep.transition).toContain("margin-left");
-		expect(toolStep.transition).toContain("background-color");
-
-		const caret = rule(".tool-step > summary > svg:first-child");
-		expect(caret.transition).toContain("top");
-		expect(caret.transition).toContain("left");
-	});
-
-	it("defines smooth drawer transitions for tool-step-drawer", () => {
-		const drawer = rule(".tool-step-drawer");
-		expect(drawer.transition).toContain("grid-template-rows");
-		expect(drawer.display).toBe("grid");
-		expect(drawer.gridTemplateRows).toBe("0fr");
-
-		const openDrawer = rule(".tool-step[open] .tool-step-drawer");
-		expect(openDrawer.gridTemplateRows).toBe("1fr");
-	});
-
-	it("supports reduced-motion mode by disabling transitions", () => {
-		const reduced = rule(':root[data-motion="reduced"] .tool-step, :root[data-motion="reduced"] .tool-step-drawer');
-		expect(reduced.transition).toBe("none");
-	});
-
+describe("Interactive Transitions", () => {
 	it("defines upward growth animation and smooth height transitions on usage bars", () => {
 		const usageBar = rule(".usage-bar");
 		expect(usageBar.animation).toContain("usage-bar-rise");
@@ -77,6 +55,12 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 
 		const page = rule(".settings-page-mount");
 		expect(page.animation).toContain("settings-page-in");
+	});
+
+	it("hides vertical scrollbar while preserving scrollability in settings", () => {
+		const scroll = rule(".settings-page-scroll");
+		expect(scroll.overflowY).toBe("auto");
+		expect(scroll.scrollbarWidth).toBe("none");
 	});
 
 	it("defines spring zoom entrance for modal dialogs and smooth toast float", () => {
