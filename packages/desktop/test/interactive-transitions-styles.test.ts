@@ -65,4 +65,15 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 		expect(tooltip.transition).toContain("left");
 		expect(tooltip.transition).toContain("opacity");
 	});
+
+	it("defines smooth entrance and exit animations for settings dialog", () => {
+		const backdrop = rule(".settings-backdrop");
+		expect(backdrop.animation).toContain("settings-fade-in");
+
+		const closingBackdrop = rule(".settings-backdrop.is-closing");
+		expect(closingBackdrop.animation).toContain("settings-fade-out");
+
+		const page = rule(".settings-page-mount");
+		expect(page.animation).toContain("settings-page-in");
+	});
 });

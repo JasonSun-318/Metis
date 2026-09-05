@@ -941,6 +941,37 @@ describe("WebSearchSettingsPanel", () => {
 		});
 		await act(async () => root.unmount());
 	});
+
+	it("applies is-closing class and calls onClose after delay when closeDelayMs is configured", async () => {
+		const onClose = vi.fn();
+		const api = {
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(
+			<SettingsDialog
+				api={api}
+				closeDelayMs={160}
+				generalPreferences={generalPreferences}
+				onClose={onClose}
+				onGeneralPreferencesChange={vi.fn()}
+				onThemeChange={vi.fn()}
+				serverReady
+				theme="dark"
+			/>,
+		));
+		await flush();
+		const backdrop = container.querySelector(".settings-backdrop")!;
+		expect(backdrop.classList.contains("is-closing")).toBe(false);
+		await act(async () => button(container, "Back to app").click());
+		expect(backdrop.classList.contains("is-closing")).toBe(true);
+		expect(onClose).not.toHaveBeenCalled();
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 180)));
+		expect(onClose).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+	});
 });
 
 describe("UsagePanel", () => {
