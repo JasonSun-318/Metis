@@ -1,6 +1,6 @@
 import type { UsageDailyView, UsageRangeDays, UsageSummaryView } from "@metis/app-protocol";
 import { ChartBar, Rows } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
@@ -109,6 +109,7 @@ export function UsagePanel({ api, serverReady }: {
 										key={day.date}
 										onMouseEnter={() => setHovered(index)}
 										onMouseLeave={() => setHovered(null)}
+										style={{ "--bar-index": index } as CSSProperties}
 									>
 										<i className="code" style={{ height: `${codeHeight}%` }} />
 										<i className="chat" style={{ height: `${chatHeight}%` }} />

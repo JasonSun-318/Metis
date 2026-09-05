@@ -2246,14 +2246,24 @@ textarea { resize: none; }
 .usage-chart-wrap, .usage-table-wrap { height: 180px; margin-top: 12px; }
 .usage-chart-wrap { position: relative; display: grid; min-height: 0; grid-template-rows: minmax(0, 1fr) auto; }
 .usage-chart { display: flex; min-height: 0; align-items: flex-end; gap: clamp(2px, .45vw, 7px); border-bottom: 1px solid var(--surface-11); background: repeating-linear-gradient(to bottom, transparent 0, transparent calc(25% - 1px), var(--border-weak) 25%); padding: 0 4px; }
-.usage-bar { display: flex; height: 100%; min-width: 3px; flex: 1; align-items: stretch; justify-content: flex-end; flex-direction: column; border-radius: 3px 3px 0 0; cursor: pointer; transition: background-color 100ms ease; }
+@keyframes usage-bar-rise {
+	from { transform: scaleY(0); }
+	to { transform: scaleY(1); }
+}
+@keyframes usage-tooltip-pop {
+	from { opacity: 0; transform: translate(-50%, 4px); }
+	to { opacity: 1; transform: translate(-50%, 0); }
+}
+.usage-bar { display: flex; height: 100%; min-width: 3px; flex: 1; align-items: stretch; justify-content: flex-end; flex-direction: column; border-radius: 3px 3px 0 0; cursor: pointer; transform-origin: bottom; animation: usage-bar-rise 360ms cubic-bezier(.16, 1, .3, 1) both; animation-delay: calc(var(--bar-index, 0) * 8ms); transition: background-color 100ms ease; }
 .usage-bar:hover, .usage-bar.active { background: var(--surface-07); }
-.usage-bar > i { display: block; width: 100%; min-height: 0; }
+.usage-bar > i { display: block; width: 100%; min-height: 0; transition: height 280ms cubic-bezier(.16, 1, .3, 1); }
 .usage-bar > i.code { border-radius: 3px 3px 0 0; background: var(--usage-code); }
 .usage-bar > i.chat { background: var(--accent); }
 .usage-chart-axis { display: flex; justify-content: space-between; color: var(--text-10); margin-top: 6px; font-size: 11px; font-weight: 500; }
-.usage-tooltip { position: absolute; z-index: 2; top: 12px; display: grid; min-width: 165px; gap: 6px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-08); box-shadow: var(--overlay-shadow); color: var(--text-22); padding: 10px 12px; font-size: 11px; transform: translateX(-50%); pointer-events: none; }
+.usage-tooltip { position: absolute; z-index: 2; top: 12px; display: grid; min-width: 165px; gap: 6px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface-08); box-shadow: var(--overlay-shadow); color: var(--text-22); padding: 10px 12px; font-size: 11px; transform: translateX(-50%); pointer-events: none; animation: usage-tooltip-pop 140ms cubic-bezier(.16, 1, .3, 1) both; transition: left 120ms cubic-bezier(.16, 1, .3, 1), opacity 140ms ease; }
 .usage-tooltip strong { color: var(--text-28); font-weight: 560; }
+.profile-activity-view, .profile-usage-view { animation: profile-tab-enter 180ms cubic-bezier(.16, 1, .3, 1) both; }
+@keyframes profile-tab-enter { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 .usage-table-wrap { overflow: auto; }
 .usage-table-wrap table { width: 100%; border-collapse: collapse; color: var(--text-14); font-size: 11px; }
 .usage-table-wrap th, .usage-table-wrap td { border-bottom: 1px solid var(--border-weak); padding: 9px 8px; text-align: right; }
@@ -2674,6 +2684,8 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(6) { transform: rotate(300deg); }
 :root[data-motion="reduced"] .session-sidebar, :root[data-motion="reduced"] .session-sidebar.is-closing, :root[data-motion="reduced"] .tool-sidebar, :root[data-motion="reduced"] .model-selector-popover, :root[data-motion="reduced"] .model-selector-submenu, :root[data-motion="reduced"] .permission-selector-popover, :root[data-motion="reduced"] .effort-popover, :root[data-motion="reduced"] .account-menu-popover, :root[data-motion="reduced"] .effort-label, :root[data-motion="reduced"] .effort-ultra-field, :root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div, :root[data-motion="reduced"] .task-list-spinner, :root[data-motion="reduced"] .task-list-slot, :root[data-motion="reduced"] .ask-user-slot, :root[data-motion="reduced"] .permission-approval-slot, :root[data-motion="reduced"] .code-execution-title-enter, :root[data-motion="reduced"] .code-execution-title-leave { animation: none; }
 :root[data-motion="reduced"] .tool-step, :root[data-motion="reduced"] .tool-step-drawer { transition: none; }
+:root[data-motion="reduced"] .usage-bar, :root[data-motion="reduced"] .usage-tooltip, :root[data-motion="reduced"] .profile-activity-view, :root[data-motion="reduced"] .profile-usage-view { animation: none; transition: none; }
+:root[data-motion="reduced"] .usage-bar > i { transition: none; }
 :root[data-motion="reduced"] .plugins-section-indicator { transition: none; }
 :root[data-motion="reduced"] .code-execution-title-leave { display: none; }
 

@@ -53,4 +53,16 @@ describe("Interactive Transitions - Phase 1: Thinking Chain & Tool Steps", () =>
 		const reduced = rule(':root[data-motion="reduced"] .tool-step, :root[data-motion="reduced"] .tool-step-drawer');
 		expect(reduced.transition).toBe("none");
 	});
+
+	it("defines upward growth animation and smooth height transitions on usage bars", () => {
+		const usageBar = rule(".usage-bar");
+		expect(usageBar.animation).toContain("usage-bar-rise");
+
+		const usageBarItem = rule(".usage-bar > i");
+		expect(usageBarItem.transition).toContain("height");
+
+		const tooltip = rule(".usage-tooltip");
+		expect(tooltip.transition).toContain("left");
+		expect(tooltip.transition).toContain("opacity");
+	});
 });
