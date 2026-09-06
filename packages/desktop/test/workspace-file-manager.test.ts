@@ -36,6 +36,7 @@ async function createHarness() {
 	if (process.platform !== "win32") {
 		await symlink(path.join(tempRoot, "outside.txt"), path.join(project, "outside-link"));
 		await symlink(tempRoot, path.join(project, "outside-directory-link"), "dir");
+		await symlink(path.join(project, "src"), path.join(project, "src-link"), "dir");
 	}
 	const fakeRipgrep = path.join(tempRoot, "fake-rg.mjs");
 	const scanCounter = path.join(tempRoot, "rg-scans.txt");
@@ -314,6 +315,22 @@ describe("WorkspaceFileManager", () => {
 		expect(root).toContainEqual({ name: ".hidden", relativePath: ".hidden", kind: "file" });
 		if (process.platform !== "win32") {
 			expect(root).toContainEqual({ name: "outside-link", relativePath: "outside-link", kind: "symlink" });
+			expect(root).toContainEqual({
+				name: "outside-directory-link",
+				relativePath: "outside-directory-link",
+				kind: "symlink",
+			});
+			expect(root).toContainEqual({ name: "src-link", relativePath: "src-link", kind: "directory" });
+			await expect(
+				manager.listDirectory({ sessionId: SESSION_ID, relativePath: "src-link" }),
+			).resolves.toContainEqual({
+				name: "App.tsx",
+				relativePath: "src-link/App.tsx",
+				kind: "file",
+			});
+			await expect(manager.readFile({ sessionId: SESSION_ID, relativePath: "src-link" })).rejects.toThrow(
+				"Workspace target is not a file",
+			);
 			await expect(manager.readFile({ sessionId: SESSION_ID, relativePath: "outside-link" })).rejects.toThrow(
 				"Workspace path escapes the authorized root",
 			);

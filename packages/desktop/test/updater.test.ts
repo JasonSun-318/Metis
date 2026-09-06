@@ -8,8 +8,10 @@ import { DesktopUpdater } from "../src/main/updater.ts";
 const BASE_URL = "https://updates.example.test/metis";
 const VERSION = "0.80.6";
 const temporaryDirectories: string[] = [];
+const updaters: DesktopUpdater[] = [];
 
 afterEach(async () => {
+	for (const updater of updaters.splice(0)) updater.stop();
 	await Promise.all(
 		temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })),
 	);
@@ -46,24 +48,28 @@ async function harness(
 		readonly platform?: NodeJS.Platform;
 		readonly arch?: string;
 		readonly baseUrl?: string;
+		readonly checkIntervalMs?: number;
+		readonly fetch?: ReturnType<typeof vi.fn<(input: string, init?: RequestInit) => Promise<Response>>>;
 	} = {},
 ) {
 	const dmg = options.dmg ?? new TextEncoder().encode("verified Metis disk image");
 	const release = options.manifest ?? manifest("0.81.0", dmg);
-	const fetch = vi
-		.fn()
-		.mockResolvedValueOnce(
-			new Response(JSON.stringify(release), {
-				headers: { "content-type": "application/json" },
-				status: 200,
-			}),
-		)
-		.mockResolvedValueOnce(
-			new Response(dmg.buffer as ArrayBuffer, {
-				headers: { "content-length": String(dmg.byteLength) },
-				status: 200,
-			}),
-		);
+	const fetch =
+		options.fetch ??
+		vi
+			.fn<(input: string, init?: RequestInit) => Promise<Response>>()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(release), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response(dmg.buffer as ArrayBuffer, {
+					headers: { "content-length": String(dmg.byteLength) },
+					status: 200,
+				}),
+			);
 	const openPath = vi.fn(async (_path: string) => "");
 	const onDiagnostic = vi.fn();
 	const states: unknown[] = [];
@@ -73,13 +79,15 @@ async function harness(
 		baseUrl: options.baseUrl ?? BASE_URL,
 		currentVersion: VERSION,
 		downloadsDirectory,
-		fetch,
+		fetch: (input, init) => fetch(input, init),
 		isPackaged: options.isPackaged ?? true,
 		onDiagnostic,
 		onState: (state) => states.push(state),
 		openPath,
 		platform: options.platform ?? "darwin",
+		checkIntervalMs: options.checkIntervalMs ?? 0,
 	});
+	updaters.push(updater);
 	return { dmg, downloadsDirectory, fetch, onDiagnostic, openPath, states, updater };
 }
 
@@ -185,5 +193,32 @@ describe("DesktopUpdater", () => {
 		expect(onDiagnostic).toHaveBeenCalledWith("Update download failed");
 		const files = await readdir(downloadsDirectory);
 		expect(files).toEqual([]);
+	});
+
+	it("rechecks on an interval without requiring a restart", async () => {
+		const dmg = new TextEncoder().encode("later release");
+		let checks = 0;
+		const fetch = vi.fn(async () => {
+			checks += 1;
+			return new Response(JSON.stringify(manifest(checks === 1 ? "0.80.6" : "0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			});
+		});
+		const { updater } = await harness({ checkIntervalMs: 20, dmg, fetch });
+		expect(updater.start()).toBe(true);
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		updater.stop();
+		expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+	});
+
+	it("keeps an available update if a later check fails", async () => {
+		const { fetch, updater } = await harness({ checkIntervalMs: 20 });
+		updater.start();
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		fetch.mockRejectedValue(new Error("offline"));
+		await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2));
+		updater.stop();
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
 	});
 });

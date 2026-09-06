@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import type { Stats } from "node:fs";
+import type { Dirent, Stats } from "node:fs";
 import {
 	lstat,
 	mkdir,
@@ -289,26 +289,20 @@ export class WorkspaceFileManager {
 	}
 
 	async listDirectory(input: DesktopWorkspaceTarget): Promise<readonly DesktopWorkspaceEntry[]> {
-		const { path } = await this.target(input);
-		const entries = await readdir(path, { withFileTypes: true });
+		const { root, path } = await this.target(input);
+		const entries = await Promise.all(
+			(await readdir(path, { withFileTypes: true })).map(async (entry): Promise<DesktopWorkspaceEntry | null> => {
+				const kind = await this.listEntryKind(root, path, entry);
+				if (!kind) return null;
+				return {
+					name: entry.name,
+					relativePath: input.relativePath ? `${input.relativePath}/${entry.name}` : entry.name,
+					kind,
+				};
+			}),
+		);
 		return entries
-			.flatMap((entry): DesktopWorkspaceEntry[] => {
-				const kind = entry.isDirectory()
-					? "directory"
-					: entry.isFile()
-						? "file"
-						: entry.isSymbolicLink()
-							? "symlink"
-							: null;
-				if (!kind) return [];
-				return [
-					{
-						name: entry.name,
-						relativePath: input.relativePath ? `${input.relativePath}/${entry.name}` : entry.name,
-						kind,
-					},
-				];
-			})
+			.filter((entry): entry is DesktopWorkspaceEntry => entry !== null)
 			.sort((left, right) => {
 				const kindOrder = Number(left.kind !== "directory") - Number(right.kind !== "directory");
 				return kindOrder || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
@@ -988,6 +982,23 @@ export class WorkspaceFileManager {
 		const root = await realpath(authorizedRoot);
 		if (!(await stat(root)).isDirectory()) throw new Error("Workspace root is not a directory");
 		return root;
+	}
+
+	private async listEntryKind(
+		root: string,
+		directory: string,
+		entry: Dirent,
+	): Promise<DesktopWorkspaceEntry["kind"] | null> {
+		if (entry.isDirectory()) return "directory";
+		if (entry.isFile()) return "file";
+		if (!entry.isSymbolicLink()) return null;
+		try {
+			const canonical = await realpath(join(directory, entry.name));
+			if ((await stat(canonical)).isDirectory() && isInside(root, canonical)) return "directory";
+		} catch {
+			// dangling, unreadable, or escaping symlink — keep as symlink
+		}
+		return "symlink";
 	}
 
 	private async target(input: DesktopWorkspaceTarget): Promise<{ readonly root: string; readonly path: string }> {

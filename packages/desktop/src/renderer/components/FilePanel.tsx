@@ -116,6 +116,10 @@ function isValidEntryName(name: string): boolean {
 	return name !== "." && name !== ".." && !/[\\/\0]/u.test(name);
 }
 
+function isWorkspaceNotAFileError(cause: unknown): boolean {
+	return (cause instanceof Error ? cause.message : String(cause)).includes("Workspace target is not a file");
+}
+
 function withCreateRow(rows: readonly TreeRow[], edit: Extract<InlineEdit, { type: "create" }>): TreeRow[] {
 	const parentIndex = edit.parentRelativePath
 		? rows.findIndex((row) => row.entry.relativePath === edit.parentRelativePath)
@@ -291,9 +295,15 @@ export function FilePanel({
 			},
 			(cause) => {
 				if (generation !== readGeneration.current) return;
-				setPreviewError(cause instanceof Error ? cause.message : t("File could not be opened"));
+				setPreviewError(
+					isWorkspaceNotAFileError(cause)
+						? t("Choose a file from the workspace tree")
+						: cause instanceof Error
+							? cause.message
+							: t("File could not be opened"),
+				);
 				setPreviewLoading(false);
-				onError(cause);
+				if (!isWorkspaceNotAFileError(cause)) onError(cause);
 			},
 		);
 	}, [activePath, api, draftMatchesActivePath, onError, sessionId, t, visible]);

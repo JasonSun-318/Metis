@@ -24,11 +24,13 @@ export interface DesktopUpdaterOptions {
 	readonly openPath: (path: string) => Promise<string>;
 	readonly onState?: (state: DesktopUpdateState) => void;
 	readonly onDiagnostic?: (message: string) => void;
+	readonly checkIntervalMs?: number;
 }
 
 const MAX_DMG_BYTES = 4 * 1024 * 1024 * 1024;
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const DEFAULT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function trustedBaseUrl(value: string | null | undefined): URL | undefined {
 	if (!value) return undefined;
@@ -121,7 +123,9 @@ export class DesktopUpdater {
 	private manifest?: UpdateManifest;
 	private downloadedPath?: string;
 	private downloadTask?: Promise<void>;
+	private checkTask?: Promise<void>;
 	private started = false;
+	private checkTimer?: ReturnType<typeof setInterval>;
 
 	constructor(options: DesktopUpdaterOptions) {
 		this.options = options;
@@ -142,7 +146,18 @@ export class DesktopUpdater {
 		this.started = true;
 		this.setState({ status: "checking" });
 		void this.checkForUpdates();
+		const interval = this.options.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
+		if (interval > 0) {
+			this.checkTimer = setInterval(() => void this.checkForUpdates(), interval);
+			this.checkTimer.unref?.();
+		}
 		return true;
+	}
+
+	stop(): void {
+		if (!this.checkTimer) return;
+		clearInterval(this.checkTimer);
+		this.checkTimer = undefined;
 	}
 
 	view(): DesktopUpdateState {
@@ -170,21 +185,37 @@ export class DesktopUpdater {
 	}
 
 	private async checkForUpdates(): Promise<void> {
+		if (this.downloadTask || this.state.status === "downloading") return;
+		if (this.checkTask) return await this.checkTask;
+		const task = this.performCheck();
+		this.checkTask = task;
+		try {
+			await task;
+		} finally {
+			if (this.checkTask === task) this.checkTask = undefined;
+		}
+	}
+
+	private async performCheck(): Promise<void> {
 		try {
 			const manifestUrl = new URL(`darwin/${this.options.arch}/latest.json`, this.baseUrl!).href;
 			const response = await this.options.fetch(manifestUrl, { cache: "no-store" });
 			if (!response.ok) throw new Error(`Update manifest request failed with ${response.status}`);
 			const manifest = parseManifest(await response.json(), this.baseUrl!);
 			if (compareStableVersions(manifest.version, this.options.currentVersion) <= 0) {
-				this.setState({ status: "unavailable" });
+				this.manifest = undefined;
+				if (this.state.status !== "ready") this.setState({ status: "unavailable" });
 				return;
 			}
 			this.manifest = manifest;
+			if (this.state.status === "ready") return;
 			this.setState({ status: "available", version: manifest.version });
 		} catch {
-			this.manifest = undefined;
-			this.setState({ status: "unavailable" });
 			this.options.onDiagnostic?.("Update check failed");
+			if (this.state.status === "checking") {
+				this.manifest = undefined;
+				this.setState({ status: "unavailable" });
+			}
 		}
 	}
 
