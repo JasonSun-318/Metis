@@ -37,7 +37,7 @@ import {
 	createWebFetchTool,
 	createWebSearchTool,
 	createWriteTool,
-	type ToolName,
+	getDefaultToolNames,
 	withFileMutationQueue,
 } from "./tools/index.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
@@ -477,21 +477,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 		}
 
-		const defaultActiveToolNames: ToolName[] = [
-			"read",
-			"grep",
-			"bash",
-			"edit",
-			"write",
-			"web_fetch",
-			...(settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID)
-				? (["describe_image"] as const)
-				: []),
-			...(settingsManager.getWebSearchSettings().enabled ? (["web_search"] as const) : []),
-			...(suppliedSessionManager?.getHeader()?.agent
-				? []
-				: (["set_tasks", "get_goal", "create_goal", "update_goal"] as const)),
-		];
+		const defaultActiveToolNames = getDefaultToolNames({
+			visionEnabled: settingsManager.getVisionSettings() !== undefined && authStorage.has(VISION_PROVIDER_ID),
+			webSearchEnabled: settingsManager.getWebSearchSettings().enabled,
+			isSubagent: suppliedSessionManager?.getHeader()?.agent !== undefined,
+		});
 		const allowedToolNames = options.unattendedExecution
 			? [...UNATTENDED_TOOL_NAMES]
 			: (options.tools ?? (options.noTools === "all" ? [] : undefined));

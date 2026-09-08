@@ -223,7 +223,7 @@ import {
 import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
-import { createAllToolDefinitions } from "./tools/index.ts";
+import { createAllToolDefinitions, getDefaultToolNames } from "./tools/index.ts";
 import { resolveReadPathAsync } from "./tools/path-utils.ts";
 import { UNATTENDED_TOOL_NAMES, type UnattendedExecutionProfile } from "./unattended-execution.ts";
 import { resolveWebSearchApiKey, type WebSearchProvider } from "./web-search-config.ts";
@@ -5318,21 +5318,11 @@ export class AgentSession {
 
 		const defaultActiveToolNames = this._baseToolDefinitionsOverride
 			? this._baseToolDefinitionsOverride.map(({ name }) => name)
-			: [
-					"read",
-					"grep",
-					"bash",
-					"edit",
-					"write",
-					"web_fetch",
-					...(this._visionServiceReady() && this._canActivateDescribeImage() ? ["describe_image"] : []),
-					...(this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch()
-						? ["web_search"]
-						: []),
-					...(this.sessionManager.getHeader()?.agent
-						? []
-						: ["set_tasks", "get_goal", "create_goal", "update_goal"]),
-				];
+			: getDefaultToolNames({
+					visionEnabled: this._visionServiceReady() && this._canActivateDescribeImage(),
+					webSearchEnabled: this.settingsManager.getWebSearchSettings().enabled && this._canActivateWebSearch(),
+					isSubagent: this.sessionManager.getHeader()?.agent !== undefined,
+				});
 		const baseActiveToolNames = options.activeToolNames ?? defaultActiveToolNames;
 		const globallyEnabledToolNames = baseActiveToolNames.filter((name) => {
 			if (name === "web_search") {

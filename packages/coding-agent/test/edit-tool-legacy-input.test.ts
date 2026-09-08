@@ -1,9 +1,11 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validateToolArguments } from "@metis/ai";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExtensionContext } from "../src/core/extensions/types.ts";
 import { createEditToolDefinition } from "../src/core/tools/edit.ts";
+import { createAllTools, createCodingTools, createTool } from "../src/core/tools/index.ts";
 
 const tempDirs: string[] = [];
 
@@ -71,19 +73,30 @@ describe("edit tool prepareArguments", () => {
 		expect(definition.prepareArguments!("garbage")).toBe("garbage");
 	});
 
-	it("prepared args execute correctly", async () => {
+	it.each([
+		["definition", createEditToolDefinition],
+		["single tool", (cwd: string) => createTool("edit", cwd)],
+		["coding tools", (cwd: string) => createCodingTools(cwd).find((tool) => tool.name === "edit")!],
+		["all tools", (cwd: string) => createAllTools(cwd).edit],
+	] as const)("prepared args execute correctly through the %s factory", async (_name, factory) => {
 		const dir = await createTempDir();
 		const filePath = join(dir, "legacy.txt");
 		await writeFile(filePath, "before\n", "utf8");
 
-		const definition = createEditToolDefinition(dir);
+		const definition = factory(dir);
 		const prepared = definition.prepareArguments!({
 			path: "legacy.txt",
 			oldText: "before",
 			newText: "after",
 		});
 
-		const result = await definition.execute("tool-1", prepared, undefined, undefined, {} as ExtensionContext);
+		const args = validateToolArguments(definition, {
+			type: "toolCall",
+			id: "tool-1",
+			name: "edit",
+			arguments: prepared as Record<string, unknown>,
+		});
+		const result = await definition.execute("tool-1", args, undefined, undefined, {} as ExtensionContext);
 		expect(result.content).toEqual([{ type: "text", text: "Successfully replaced 1 block(s) in legacy.txt." }]);
 		expect(await readFile(filePath, "utf8")).toBe("after\n");
 	});

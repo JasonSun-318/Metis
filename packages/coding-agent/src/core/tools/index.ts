@@ -105,41 +105,21 @@ import {
 	type GoalToolOptions,
 } from "../goal/tools.ts";
 import { createSetTasksToolDefinition } from "../set-tasks.ts";
-import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.ts";
-import {
-	createDescribeImageTool,
-	createDescribeImageToolDefinition,
-	type DescribeImageToolOptions,
-} from "./describe-image.ts";
-import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.ts";
-import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.ts";
-import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
-import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.ts";
-import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.ts";
+import { type BashToolOptions, createBashToolDefinition } from "./bash.ts";
+import { createDescribeImageToolDefinition, type DescribeImageToolOptions } from "./describe-image.ts";
+import { createEditToolDefinition, type EditToolOptions } from "./edit.ts";
+import { createFindToolDefinition, type FindToolOptions } from "./find.ts";
+import { createGrepToolDefinition, type GrepToolOptions } from "./grep.ts";
+import { createLsToolDefinition, type LsToolOptions } from "./ls.ts";
+import { createReadToolDefinition, type ReadToolOptions } from "./read.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
-import { createWebFetchTool, createWebFetchToolDefinition } from "./web-fetch.ts";
-import { createWebSearchTool, createWebSearchToolDefinition, type WebSearchToolOptions } from "./web-search.ts";
-import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
+import { createWebFetchToolDefinition } from "./web-fetch.ts";
+import { createWebSearchToolDefinition, type WebSearchToolOptions } from "./web-search.ts";
+import { createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
-export type ToolName =
-	| "read"
-	| "bash"
-	| "edit"
-	| "write"
-	| "grep"
-	| "find"
-	| "ls"
-	| "web_fetch"
-	| "web_search"
-	| "set_tasks"
-	| "get_goal"
-	| "create_goal"
-	| "update_goal"
-	| "describe_image";
-export const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
-export const allToolNames: Set<ToolName> = new Set([
+const toolNames = [
 	"read",
 	"bash",
 	"edit",
@@ -154,7 +134,10 @@ export const allToolNames: Set<ToolName> = new Set([
 	"create_goal",
 	"update_goal",
 	"describe_image",
-]);
+] as const;
+export type ToolName = (typeof toolNames)[number];
+export const allToolNames: Set<ToolName> = new Set(toolNames);
+export const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
@@ -205,38 +188,7 @@ export function createToolDefinition(toolName: ToolName, cwd: string, options?: 
 }
 
 export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
-	switch (toolName) {
-		case "read":
-			return createReadTool(cwd, options?.read);
-		case "bash":
-			return createBashTool(cwd, options?.bash);
-		case "edit":
-			return createEditTool(cwd, options?.edit);
-		case "write":
-			return createWriteTool(cwd, options?.write);
-		case "grep":
-			return createGrepTool(cwd, options?.grep);
-		case "find":
-			return createFindTool(cwd, options?.find);
-		case "ls":
-			return createLsTool(cwd, options?.ls);
-		case "web_fetch":
-			return createWebFetchTool();
-		case "web_search":
-			return createWebSearchTool(options?.webSearch);
-		case "set_tasks":
-			return wrapToolDefinition(createSetTasksToolDefinition());
-		case "get_goal":
-			return wrapToolDefinition(createGetGoalToolDefinition(options?.goal));
-		case "create_goal":
-			return wrapToolDefinition(createCreateGoalToolDefinition(options?.goal));
-		case "update_goal":
-			return wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal));
-		case "describe_image":
-			return createDescribeImageTool(cwd, options?.describeImage);
-		default:
-			throw new Error(`Unknown tool name: ${toolName}`);
-	}
+	return wrapToolDefinition(createToolDefinition(toolName, cwd, options));
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
@@ -258,57 +210,38 @@ export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOption
 }
 
 export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): Record<ToolName, ToolDef> {
-	return {
-		read: createReadToolDefinition(cwd, options?.read),
-		bash: createBashToolDefinition(cwd, options?.bash),
-		edit: createEditToolDefinition(cwd, options?.edit),
-		write: createWriteToolDefinition(cwd, options?.write),
-		grep: createGrepToolDefinition(cwd, options?.grep),
-		find: createFindToolDefinition(cwd, options?.find),
-		ls: createLsToolDefinition(cwd, options?.ls),
-		web_fetch: createWebFetchToolDefinition(),
-		web_search: createWebSearchToolDefinition(options?.webSearch),
-		set_tasks: createSetTasksToolDefinition(),
-		get_goal: createGetGoalToolDefinition(options?.goal),
-		create_goal: createCreateGoalToolDefinition(options?.goal),
-		update_goal: createUpdateGoalToolDefinition(options?.goal),
-		describe_image: createDescribeImageToolDefinition(cwd, options?.describeImage),
-	};
+	return Object.fromEntries(toolNames.map((name) => [name, createToolDefinition(name, cwd, options)])) as Record<
+		ToolName,
+		ToolDef
+	>;
 }
 
 export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [
-		createReadTool(cwd, options?.read),
-		createBashTool(cwd, options?.bash),
-		createEditTool(cwd, options?.edit),
-		createWriteTool(cwd, options?.write),
-	];
+	return createCodingToolDefinitions(cwd, options).map((definition) => wrapToolDefinition(definition));
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [
-		createReadTool(cwd, options?.read),
-		createGrepTool(cwd, options?.grep),
-		createFindTool(cwd, options?.find),
-		createLsTool(cwd, options?.ls),
-	];
+	return createReadOnlyToolDefinitions(cwd, options).map((definition) => wrapToolDefinition(definition));
 }
 
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
-	return {
-		read: createReadTool(cwd, options?.read),
-		bash: createBashTool(cwd, options?.bash),
-		edit: createEditTool(cwd, options?.edit),
-		write: createWriteTool(cwd, options?.write),
-		grep: createGrepTool(cwd, options?.grep),
-		find: createFindTool(cwd, options?.find),
-		ls: createLsTool(cwd, options?.ls),
-		web_fetch: createWebFetchTool(),
-		web_search: createWebSearchTool(options?.webSearch),
-		set_tasks: wrapToolDefinition(createSetTasksToolDefinition()),
-		get_goal: wrapToolDefinition(createGetGoalToolDefinition(options?.goal)),
-		create_goal: wrapToolDefinition(createCreateGoalToolDefinition(options?.goal)),
-		update_goal: wrapToolDefinition(createUpdateGoalToolDefinition(options?.goal)),
-		describe_image: createDescribeImageTool(cwd, options?.describeImage),
-	};
+	return Object.fromEntries(toolNames.map((name) => [name, createTool(name, cwd, options)])) as Record<ToolName, Tool>;
+}
+
+export function getDefaultToolNames(options: {
+	visionEnabled: boolean;
+	webSearchEnabled: boolean;
+	isSubagent: boolean;
+}): ToolName[] {
+	return [
+		"read",
+		"grep",
+		"bash",
+		"edit",
+		"write",
+		"web_fetch",
+		...(options.visionEnabled ? (["describe_image"] as const) : []),
+		...(options.webSearchEnabled ? (["web_search"] as const) : []),
+		...(options.isSubagent ? [] : (["set_tasks", ...GOAL_TOOL_NAMES] as const)),
+	];
 }
