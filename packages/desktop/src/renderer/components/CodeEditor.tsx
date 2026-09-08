@@ -2,10 +2,10 @@ import { css } from "@codemirror/lang-css";
 import { html } from "@codemirror/lang-html";
 import { javascript } from "@codemirror/lang-javascript";
 import { json } from "@codemirror/lang-json";
-import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { markdown } from "@codemirror/lang-markdown";
 import { python } from "@codemirror/lang-python";
 import { yaml } from "@codemirror/lang-yaml";
+import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { EditorState, type Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { tags } from "@lezer/highlight";
@@ -13,7 +13,15 @@ import { basicSetup } from "codemirror";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
+export interface CodeTextSelection {
+	readonly from: number;
+	readonly to: number;
+	readonly text: string;
+	readonly range: Range;
+}
+
 interface CodeEditorProps {
+	readonly onSelect?: (selection: CodeTextSelection) => void;
 	readonly label: string;
 	readonly onChange: (value: string) => void;
 	readonly onSave: () => void;
@@ -36,43 +44,78 @@ function languageForPath(path: string): Extension {
 	return [];
 }
 
-const theme = EditorView.theme({
-	"&": { height: "100%", backgroundColor: "var(--editor-bg)", color: "var(--editor-text)", colorScheme: "var(--editor-color-scheme)" },
-	"&.cm-focused": { outline: "none" },
-	".cm-scroller": {
-		overflow: "auto",
-		fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-		fontSize: "var(--code-mono-size)",
-		lineHeight: "1.55",
+const theme = EditorView.theme(
+	{
+		"&": {
+			height: "100%",
+			backgroundColor: "var(--editor-bg)",
+			color: "var(--editor-text)",
+			colorScheme: "var(--editor-color-scheme)",
+		},
+		"&.cm-focused": { outline: "none" },
+		".cm-scroller": {
+			overflow: "auto",
+			fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+			fontSize: "var(--code-mono-size)",
+			lineHeight: "1.55",
+		},
+		".cm-content": { minHeight: "100%", padding: "12px 0 28px", caretColor: "var(--editor-caret)" },
+		".cm-line": { padding: "0 14px 0 7px" },
+		".cm-gutters": {
+			backgroundColor: "var(--editor-bg)",
+			borderRight: "1px solid var(--editor-border)",
+			color: "var(--editor-muted)",
+		},
+		".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--editor-active)" },
+		".cm-selectionBackground, &.cm-focused .cm-selectionBackground": {
+			backgroundColor: "var(--editor-selection) !important",
+		},
+		".cm-panels": { backgroundColor: "var(--editor-panel)", color: "var(--editor-text)" },
+		".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--editor-border)" },
+		".cm-textfield": {
+			border: "1px solid var(--editor-border)",
+			backgroundColor: "var(--editor-field)",
+			color: "var(--editor-text)",
+		},
+		".cm-button": {
+			border: "1px solid var(--editor-border)",
+			backgroundColor: "var(--editor-button)",
+			backgroundImage: "none",
+			color: "var(--editor-text)",
+		},
 	},
-	".cm-content": { minHeight: "100%", padding: "12px 0 28px", caretColor: "var(--editor-caret)" },
-	".cm-line": { padding: "0 14px 0 7px" },
-	".cm-gutters": {
-		backgroundColor: "var(--editor-bg)",
-		borderRight: "1px solid var(--editor-border)",
-		color: "var(--editor-muted)",
-	},
-	".cm-activeLine, .cm-activeLineGutter": { backgroundColor: "var(--editor-active)" },
-	".cm-selectionBackground, &.cm-focused .cm-selectionBackground": { backgroundColor: "var(--editor-selection) !important" },
-	".cm-panels": { backgroundColor: "var(--editor-panel)", color: "var(--editor-text)" },
-	".cm-panels.cm-panels-top": { borderBottom: "1px solid var(--editor-border)" },
-	".cm-textfield": { border: "1px solid var(--editor-border)", backgroundColor: "var(--editor-field)", color: "var(--editor-text)" },
-	".cm-button": {
-		border: "1px solid var(--editor-border)",
-		backgroundColor: "var(--editor-button)",
-		backgroundImage: "none",
-		color: "var(--editor-text)",
-	},
-}, { dark: true });
+	{ dark: true },
+);
 
 const highContrastHighlightStyle = HighlightStyle.define([
-	{ tag: [tags.keyword, tags.modifier, tags.operatorKeyword, tags.controlKeyword, tags.definitionKeyword, tags.moduleKeyword], color: "var(--syntax-keyword)" },
+	{
+		tag: [
+			tags.keyword,
+			tags.modifier,
+			tags.operatorKeyword,
+			tags.controlKeyword,
+			tags.definitionKeyword,
+			tags.moduleKeyword,
+		],
+		color: "var(--syntax-keyword)",
+	},
 	{ tag: [tags.string, tags.docString, tags.character, tags.attributeValue], color: "var(--syntax-string)" },
 	{ tag: [tags.number, tags.bool, tags.null, tags.atom, tags.unit], color: "var(--syntax-constant)" },
-	{ tag: [tags.function(tags.variableName), tags.propertyName, tags.attributeName, tags.labelName], color: "var(--syntax-symbol)" },
+	{
+		tag: [tags.function(tags.variableName), tags.propertyName, tags.attributeName, tags.labelName],
+		color: "var(--syntax-symbol)",
+	},
 	{ tag: [tags.typeName, tags.className, tags.namespace, tags.tagName], color: "var(--syntax-type)" },
-	{ tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment], color: "var(--syntax-comment)", fontStyle: "italic" },
-	{ tag: [tags.heading, tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6], color: "var(--syntax-keyword)", fontWeight: "600" },
+	{
+		tag: [tags.comment, tags.lineComment, tags.blockComment, tags.docComment],
+		color: "var(--syntax-comment)",
+		fontStyle: "italic",
+	},
+	{
+		tag: [tags.heading, tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6],
+		color: "var(--syntax-keyword)",
+		fontWeight: "600",
+	},
 	{ tag: [tags.link, tags.url], color: "var(--syntax-symbol)", textDecoration: "underline" },
 	{ tag: [tags.monospace, tags.inserted], color: "var(--syntax-inserted)" },
 	{ tag: [tags.operator, tags.punctuation, tags.bracket], color: "var(--syntax-punctuation)" },
@@ -100,7 +143,7 @@ const chinesePhrases = EditorState.phrases.of({
 	"replaced $ matches": "已替换 $ 个匹配",
 });
 
-export function CodeEditor({ label, onChange, onSave, path, value }: CodeEditorProps) {
+export function CodeEditor({ label, onChange, onSave, onSelect, path, value }: CodeEditorProps) {
 	const { i18n } = useTranslation();
 	const hostRef = useRef<HTMLDivElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
@@ -119,14 +162,18 @@ export function CodeEditor({ label, onChange, onSave, path, value }: CodeEditorP
 			doc: value,
 			parent,
 			extensions: [
-				Prec.high(keymap.of([{
-					key: "Mod-s",
-					preventDefault: true,
-					run: () => {
-						onSaveRef.current();
-						return true;
-					},
-				}])),
+				Prec.high(
+					keymap.of([
+						{
+							key: "Mod-s",
+							preventDefault: true,
+							run: () => {
+								onSaveRef.current();
+								return true;
+							},
+						},
+					]),
+				),
 				basicSetup,
 				EditorState.tabSize.of(4),
 				EditorView.contentAttributes.of({ "aria-label": label }),
@@ -158,5 +205,31 @@ export function CodeEditor({ label, onChange, onSave, path, value }: CodeEditorP
 		applyingControlledValue.current = false;
 	}, [value]);
 
-	return <div className="file-code-editor" ref={hostRef} />;
+	const captureSelection = () => {
+		const view = viewRef.current;
+		if (!view || !onSelect) return;
+		// Mouseup listeners finish updating CodeMirror before reading its document selection.
+		requestAnimationFrame(() => {
+			if (viewRef.current !== view) return;
+			const selected = view.state.selection.main;
+			const native = window.getSelection();
+			if (selected.empty || !native?.rangeCount) return;
+			const range = native.getRangeAt(0).cloneRange();
+			if (!view.contentDOM.contains(range.startContainer) || !view.contentDOM.contains(range.endContainer)) return;
+			onSelect({ from: selected.from, to: selected.to, text: view.state.doc.toString(), range });
+		});
+	};
+	return (
+		<div
+			className="file-code-editor"
+			role="document"
+			ref={hostRef}
+			onMouseUp={(event) => {
+				if (event.button === 0) captureSelection();
+			}}
+			onKeyUp={(event) => {
+				if (event.key === "Shift" || event.shiftKey) captureSelection();
+			}}
+		/>
+	);
 }

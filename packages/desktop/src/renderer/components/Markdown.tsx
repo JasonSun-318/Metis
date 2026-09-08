@@ -1,6 +1,6 @@
-import { marked, type Token, type Tokens } from "marked";
 import type { TFunction } from "i18next";
-import { createElement, Fragment, useMemo, type ReactNode } from "react";
+import { marked, type Token, type Tokens } from "marked";
+import { createElement, Fragment, type ReactNode, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 
 function safeHref(href: string): string | undefined {
@@ -39,11 +39,19 @@ function inline(tokens: readonly Token[], t: TFunction): ReactNode[] {
 				return null;
 			case "link": {
 				const href = safeHref(token.href);
-				return <a href={href} key={key} {...externalLinkProps(href)}>{inline(token.tokens ?? [], t)}</a>;
+				return (
+					<a href={href} key={key} {...externalLinkProps(href)}>
+						{inline(token.tokens ?? [], t)}
+					</a>
+				);
 			}
 			case "image": {
 				const href = safeHref(token.href);
-				return <a className="markdown-image-link" href={href} key={key} {...externalLinkProps(href)}>{t("[Image: {{name}}]", { name: token.text || t("image") })}</a>;
+				return (
+					<a className="markdown-image-link" href={href} key={key} {...externalLinkProps(href)}>
+						{t("[Image: {{name}}]", { name: token.text || t("image") })}
+					</a>
+				);
 			}
 			case "html":
 				return <Fragment key={key}>{token.raw}</Fragment>;
@@ -56,7 +64,14 @@ function inline(tokens: readonly Token[], t: TFunction): ReactNode[] {
 function listItem(item: Tokens.ListItem, index: number, t: TFunction): ReactNode {
 	return (
 		<li key={`item-${index}`}>
-			{item.task && <input aria-label={t(item.checked ? "Completed" : "Not completed")} checked={item.checked} disabled type="checkbox" />}
+			{item.task && (
+				<input
+					aria-label={t(item.checked ? "Completed" : "Not completed")}
+					checked={item.checked}
+					disabled
+					type="checkbox"
+				/>
+			)}
 			{blocks(item.tokens, t)}
 		</li>
 	);
@@ -64,7 +79,11 @@ function listItem(item: Tokens.ListItem, index: number, t: TFunction): ReactNode
 
 function tableCell(cell: Tokens.TableCell, index: number, t: TFunction): ReactNode {
 	const Tag = cell.header ? "th" : "td";
-	return <Tag key={`cell-${index}`} style={cell.align ? { textAlign: cell.align } : undefined}>{inline(cell.tokens, t)}</Tag>;
+	return (
+		<Tag key={`cell-${index}`} style={cell.align ? { textAlign: cell.align } : undefined}>
+			{inline(cell.tokens, t)}
+		</Tag>
+	);
 }
 
 function block(token: Token, index: number, t: TFunction): ReactNode {
@@ -81,14 +100,22 @@ function block(token: Token, index: number, t: TFunction): ReactNode {
 		case "heading":
 			return createElement(`h${Math.min(6, Math.max(1, token.depth))}`, { key }, inline(token.tokens ?? [], t));
 		case "code":
-			return <pre key={key}><code className={token.lang ? `language-${token.lang}` : undefined}>{token.text}</code></pre>;
+			return (
+				<pre key={key}>
+					<code className={token.lang ? `language-${token.lang}` : undefined}>{token.text}</code>
+				</pre>
+			);
 		case "blockquote":
 			return <blockquote key={key}>{blocks(token.tokens ?? [], t)}</blockquote>;
 		case "list": {
 			const children = token.items.map((item: Tokens.ListItem, itemIndex: number) => listItem(item, itemIndex, t));
-			return token.ordered
-				? <ol key={key} start={typeof token.start === "number" ? token.start : undefined}>{children}</ol>
-				: <ul key={key}>{children}</ul>;
+			return token.ordered ? (
+				<ol key={key} start={typeof token.start === "number" ? token.start : undefined}>
+					{children}
+				</ol>
+			) : (
+				<ul key={key}>{children}</ul>
+			);
 		}
 		case "hr":
 			return <hr key={key} />;
@@ -96,13 +123,25 @@ function block(token: Token, index: number, t: TFunction): ReactNode {
 			return (
 				<div className="markdown-table-scroll" key={key}>
 					<table>
-						<thead><tr>{token.header.map((cell: Tokens.TableCell, cellIndex: number) => tableCell(cell, cellIndex, t))}</tr></thead>
-						<tbody>{token.rows.map((row: Tokens.TableCell[], rowIndex: number) => <tr key={`row-${rowIndex}`}>{row.map((cell, cellIndex) => tableCell(cell, cellIndex, t))}</tr>)}</tbody>
+						<thead>
+							<tr>
+								{token.header.map((cell: Tokens.TableCell, cellIndex: number) => tableCell(cell, cellIndex, t))}
+							</tr>
+						</thead>
+						<tbody>
+							{token.rows.map((row: Tokens.TableCell[], rowIndex: number) => (
+								<tr key={`row-${rowIndex}`}>{row.map((cell, cellIndex) => tableCell(cell, cellIndex, t))}</tr>
+							))}
+						</tbody>
 					</table>
 				</div>
 			);
 		case "html":
-			return <p className="markdown-raw-html" key={key}>{token.raw}</p>;
+			return (
+				<p className="markdown-raw-html" key={key}>
+					{token.raw}
+				</p>
+			);
 		default:
 			return <p key={key}>{token.raw}</p>;
 	}
@@ -112,14 +151,33 @@ function blocks(tokens: readonly Token[], t: TFunction): ReactNode[] {
 	return tokens.map((token, index) => block(token, index, t));
 }
 
-export function Markdown({ text }: { readonly text: string }) {
+export function Markdown({
+	text,
+	sourcePositions = false,
+}: {
+	readonly text: string;
+	readonly sourcePositions?: boolean;
+}) {
 	const { t, i18n } = useTranslation();
 	const content = useMemo(() => {
 		try {
-			return blocks(marked.lexer(text), t);
+			const normalized = sourcePositions ? text.replace(/\r\n?/gu, "\n") : text;
+			const tokens = marked.lexer(normalized);
+			if (!sourcePositions || tokens.map((token) => token.raw).join("") !== normalized) return blocks(tokens, t);
+			let offset = 0;
+			return tokens.map((token, index) => {
+				const start = offset;
+				offset += token.raw.length;
+				const content = block(token, index, t);
+				return content === null ? null : (
+					<div className="markdown-source-block" data-source-start={start} data-source-end={offset} key={index}>
+						{content}
+					</div>
+				);
+			});
 		} catch {
 			return <p>{text}</p>;
 		}
-	}, [i18n.resolvedLanguage, t, text]);
+	}, [i18n.resolvedLanguage, t, text, sourcePositions]);
 	return <>{content}</>;
 }

@@ -1,5 +1,5 @@
 import { File, SpinnerGap } from "@phosphor-icons/react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopPreviewFileInput, MetisDesktopApi } from "../../../shared/desktop-api.ts";
 import { DocxViewer } from "./DocxViewer.tsx";
@@ -9,9 +9,9 @@ import { PdfViewer } from "./PdfViewer.tsx";
 import { PptxViewer } from "./PptxViewer.tsx";
 import { PreviewFrame } from "./PreviewFrame.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
-import { TextViewer } from "./TextViewer.tsx";
 import { previewBytesCache, previewCacheKey } from "./preview-bytes-cache.ts";
 import { classifyPreviewKind } from "./preview-kinds.ts";
+import { TextViewer } from "./TextViewer.tsx";
 
 export interface UniversalPreviewTarget {
 	readonly source: "delivered" | "workspace";
@@ -90,11 +90,30 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const [data, setData] = useState<LoadedPreview | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const input = useMemo(() => previewInput(file), [file]);
+	const input = useMemo(() => previewInput(file), [file.source, file.sessionId, file.fileId, file.relativePath]);
+	const liveText = file.source === "workspace" && (kind === "markdown" || kind === "text");
+	const loadedKey = useRef<string | null>(null);
+	const [revision, setRevision] = useState(0);
+	useEffect(() => {
+		if (!active || !liveText) return;
+		return api.subscribe?.((event) => {
+			if (event.type !== "app-server" || event.envelope.method !== "connection/events") return;
+			if (
+				event.envelope.params.events.some(
+					(event) =>
+						(event.type === "turn/completed" || event.type === "turn/interrupted") &&
+						event.turn.sessionId === file.sessionId,
+				)
+			)
+				setRevision((value) => value + 1);
+		});
+	}, [active, api, file.sessionId, liveText]);
 
 	const handleOpenDefault = () => {
 		if (file.source === "delivered" && file.fileId) {
-			void api.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "default" }).catch(onError);
+			void api
+				.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "default" })
+				.catch(onError);
 		} else if (file.source === "workspace" && file.relativePath) {
 			void api
 				.openWorkspaceFile({ sessionId: file.sessionId, relativePath: file.relativePath, action: "default" })
@@ -104,7 +123,9 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 
 	const handleReveal = () => {
 		if (file.source === "delivered" && file.fileId) {
-			void api.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "reveal" }).catch(onError);
+			void api
+				.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "reveal" })
+				.catch(onError);
 		} else if (file.source === "workspace" && file.relativePath) {
 			void api
 				.openWorkspaceFile({ sessionId: file.sessionId, relativePath: file.relativePath, action: "reveal" })
@@ -116,7 +137,10 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		if (!active || kind === "unsupported") {
 			setLoading(false);
 			setError(null);
-			if (!active) setData(null);
+			if (!active) {
+				setData(null);
+				loadedKey.current = null;
+			}
 			return;
 		}
 		if (!input) {
@@ -125,7 +149,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			return;
 		}
 		const key = previewCacheKey(input);
-		const cached = previewBytesCache.get(key);
+		const cached = liveText ? undefined : previewBytesCache.get(key);
 		if (cached) {
 			setData({
 				name: file.name,
@@ -138,9 +162,10 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			return;
 		}
 		let cancelled = false;
-		setLoading(true);
+		const refreshing = liveText && loadedKey.current === key;
+		setLoading(!refreshing);
 		setError(null);
-		setData(null);
+		if (!refreshing) setData(null);
 		void api.readPreviewFile(input).then(
 			(result) => {
 				if (cancelled) return;
@@ -152,13 +177,20 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 					setLoading(false);
 					return;
 				}
-				previewBytesCache.set(key, result.bytes);
-				setData({
-					name: result.name || file.name,
-					byteLength: result.byteLength,
-					mediaType: result.mediaType,
-					bytes: result.bytes,
-				});
+				if (!liveText) previewBytesCache.set(key, result.bytes);
+				loadedKey.current = key;
+				setData((previous) =>
+					refreshing &&
+					previous?.bytes.length === result.bytes.length &&
+					previous.bytes.every((byte, index) => byte === result.bytes[index])
+						? previous
+						: {
+								name: result.name || file.name,
+								byteLength: result.byteLength,
+								mediaType: result.mediaType,
+								bytes: result.bytes,
+							},
+				);
 				setLoading(false);
 			},
 			(cause) => {
@@ -171,7 +203,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		return () => {
 			cancelled = true;
 		};
-	}, [active, api, file.name, input, kind, onError, t]);
+	}, [active, api, file.name, input, kind, onError, t, liveText, revision]);
 
 	if (!active) {
 		return <div className="universal-previewer preview-inactive" hidden />;
@@ -226,7 +258,8 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	if (kind === "pptx") return <PptxViewer {...viewerProps} />;
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
 	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
-	if (kind === "markdown" || kind === "text") return <TextViewer kind={kind} {...viewerProps} />;
+	if (kind === "markdown" || kind === "text")
+		return <TextViewer key={JSON.stringify(input)} kind={kind} file={file} {...viewerProps} />;
 
 	return (
 		<PreviewShell

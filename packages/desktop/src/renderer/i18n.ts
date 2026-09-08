@@ -10,6 +10,27 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	"Save this file before referencing its contents": "此文件有未保存的修改，请先保存再引用",
+	"Selected text actions": "选中文字操作",
+	"Request changes": "请求更改",
+	"Add to conversation": "添加到会话",
+	"Describe the change": "修改需求",
+	"Describe the change…": "描述希望如何修改…",
+	"Send change request": "发送修改请求",
+	"Failed to send request": "发送失败，请重试",
+	"Failed to add reference": "添加引用失败",
+	"Describe the change first": "请先描述修改需求",
+	"This conversation is not ready to send": "当前会话暂时无法发送，请稍后重试",
+	"A message is already being submitted": "正在提交消息，请稍候",
+	"Request changes to {{name}}: {{instruction}}": "请求更改 {{name}}：{{instruction}}",
+	"{{count}} selected text fragments": "{{count}} 个已选文本片段",
+	"Remove reference {{name}}": "移除引用 {{name}}",
+	"Delivered version": "已交付版本",
+	"Lines {{start}}–{{end}}": "第 {{start}}–{{end}} 行",
+	"Select at most 8 text fragments": "最多添加 8 个文本片段",
+	"Select a smaller text fragment": "选中文字过长，请缩小选区",
+	"Selected text exceeds 32 KiB. Remove or shorten a fragment": "引用内容超过 32 KiB，请移除片段或缩小选区",
+
 	"Metis menu": "Metis 菜单",
 	Settings: "设置",
 	General: "通用",

@@ -12,8 +12,8 @@ import {
 	RPC_ERROR_CODES,
 	type ScheduleTaskView,
 	type SessionDeliveredFileView,
-	type SessionSummary,
 	type SessionStatusView,
+	type SessionSummary,
 	type SkillSummaryView,
 	type ThinkingSelectionView,
 } from "@metis/app-protocol";
@@ -21,53 +21,54 @@ import { Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { contextUsagePercent } from "../context-usage.ts";
 import {
 	applyGeneralPreferencesToDocument,
 	loadGeneralPreferences,
 	resolveReducedMotion,
 	saveGeneralPreferences,
 } from "../general-preferences.ts";
+import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
 import { useConversationPlanFlow } from "../hooks/use-conversation-plan-flow.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
+import { rpcErrorCode } from "../rpc-error.ts";
 import { SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
-import { applyThemeToDocument, loadTheme, resolveTheme, saveTheme, type AppTheme, watchSystemTheme } from "../theme.ts";
-import { contextUsagePercent } from "../context-usage.ts";
-import { Composer, type ComposerSubmission } from "./Composer.tsx";
+import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
+import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
+import { PluginsPanel } from "./PluginsPanel.tsx";
+import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
+import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
+import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import {
 	clampSessionSidebarPreferredWidth,
 	clampSessionSidebarWidth,
-	sessionSidebarDefaultWidth,
 	type ProjectSessionGroup,
-	type SidebarDestination,
 	SessionSidebar,
 	type SessionSidebarState,
+	type SidebarDestination,
+	sessionSidebarDefaultWidth,
 } from "./SessionSidebar.tsx";
-import { PluginsPanel } from "./PluginsPanel.tsx";
-import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
-import { SettingsDialog } from "./SettingsDialog.tsx";
 import { SessionStatusPanel } from "./SessionStatusPanel.tsx";
-import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
-import { ThinkingSelector } from "./ThinkingSelector.tsx";
-import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
-import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
-import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
-import { Transcript } from "./Transcript.tsx";
-import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
-import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
-import { rpcErrorCode } from "../rpc-error.ts";
+import { SettingsDialog } from "./SettingsDialog.tsx";
+import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
+import { ThinkingSelector } from "./ThinkingSelector.tsx";
+import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
+import { Transcript } from "./Transcript.tsx";
+import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
+import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -1343,7 +1344,14 @@ export function App({ api, store }: AppProps) {
 	const isCollapsed = !sessionsSidebarOpen || sidebarClosing;
 
 	return (
-		<>
+		<FileSelectionProvider
+			sessionId={writableSessionId ?? null}
+			enabled={Boolean(
+				writableSessionId && serverReady && state.syncStatus === "ready" &&
+				compactingSession === null && !collaborationModeChanging && !visibleInteraction
+			)}
+			onSubmit={submit}
+		>
 		<div
 			aria-hidden={settingsOpen || undefined}
 			className={`app-shell${isCollapsed ? " sessions-sidebar-collapsed" : ""}`}
@@ -1585,6 +1593,6 @@ export function App({ api, store }: AppProps) {
 				theme={theme}
 			/>
 		) : null}
-		</>
+		</FileSelectionProvider>
 	);
 }

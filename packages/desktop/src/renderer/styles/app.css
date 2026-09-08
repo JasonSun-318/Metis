@@ -400,7 +400,7 @@ textarea { resize: none; }
 .file-open-popover button { display: flex; width: 100%; height: 29px; align-items: center; border-radius: 6px; color: var(--text-24); padding: 0 8px; text-align: left; font-size: 11.5px; }
 .file-open-popover button:hover, .file-open-popover button:focus-visible { background: var(--surface-08); outline: 0; }
 .file-preview-notice { position: absolute; z-index: 5; top: 49px; left: 50%; max-width: calc(62% - 24px); overflow: hidden; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-05); color: var(--text); padding: 5px 9px; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; transform: translateX(-50%); pointer-events: none; }
-.file-preview-body { position: relative; min-height: 0; flex: 1; overflow: auto; color: var(--text); }
+.file-preview-body { user-select: text; position: relative; min-height: 0; flex: 1; overflow: auto; color: var(--text); }
 .file-preview-body.has-editor { overflow: hidden; }
 .file-preview-body.has-hosted-preview { overflow: hidden; display: flex; flex-direction: column; }
 .file-empty-state { position: absolute; display: grid; place-items: center; align-content: center; gap: 7px; color: var(--muted); text-align: center; inset: 0; }
@@ -3356,6 +3356,7 @@ classes so their inline layout wins the cascade. */
 }
 
 .text-viewport {
+ user-select: text;
 	padding: 16px 20px;
 }
 
@@ -3368,3 +3369,35 @@ classes so their inline layout wins the cascade. */
 	word-break: break-all;
 	color: var(--text);
 }
+
+/* File-preview selections reuse the conversation flow. */
+.markdown-source-block { display: contents; }
+::highlight(metis-file-selection) { background: #628cda55; }
+.file-selection-popover { position: fixed; inset: auto; margin: 0; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--panel); color: var(--text); box-shadow: var(--overlay-shadow); padding: 3px; font-size: 12px; }
+.file-selection-popover.is-editing { width: min(380px, calc(100vw - 16px)); padding: 0; border-radius: 12px; }
+.selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.selection-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 9px; border-radius: 7px; white-space: nowrap; }
+.selection-actions button + button { box-shadow: -3px 0 0 -2px var(--border-strong); }
+.selection-actions button svg { flex: none; opacity: .8; }
+.selection-actions button:hover:not(:disabled), .selection-request-heading button:hover { background: var(--surface-08); }
+.file-selection-popover button:focus-visible { outline: 2px solid var(--text); outline-offset: -2px; }
+.selection-request-heading, .composer-selection > div { display: flex; min-width: 0; align-items: center; justify-content: space-between; gap: 8px; }
+.selection-request-heading { padding: 6px 7px 5px 12px; border-bottom: 1px solid var(--border); color: var(--muted); font-size: 11px; }
+.selection-request-context { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; }
+.selection-request-heading strong, .composer-selection strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.selection-request-heading strong { flex: 0 1 auto; max-width: 45%; color: var(--text); }
+.selection-request-heading button, .composer-selection button { flex: none; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 6px; }
+.selection-request-context blockquote { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; padding-left: 8px; border-left: 2px solid var(--border-strong); color: var(--muted); font-size: 11px; }
+.selection-request-input { display: flex; align-items: flex-end; gap: 10px; padding: 10px 10px 10px 12px; }
+.selection-request-input textarea { field-sizing: content; flex: 1; min-width: 0; min-height: 28px; max-height: 144px; resize: none; padding: 4px 0; margin: 0; border: 0; border-radius: 0; outline: none; box-shadow: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 20px; }
+.selection-request-input textarea::placeholder { color: var(--muted); opacity: .8; }
+.selection-send { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--text); color: var(--panel); }
+.selection-send:disabled { opacity: .35; }
+.selection-send svg.is-spinning { animation: browser-spin 1s linear infinite; }
+.selection-error { padding: 7px 10px; color: var(--muted); overflow-wrap: anywhere; font-size: 12px; }
+.composer-selections { width: fit-content; max-width: 100%; margin: 0 0 8px; }
+.composer-selections summary { width: fit-content; max-width: 100%; cursor: pointer; border: 1px solid var(--border-strong); border-radius: 9px; padding: 5px 8px; font-size: 12px; }
+.composer-selection-list { max-height: 220px; overflow: auto; margin-top: 8px; }
+.composer-selection { padding: 6px 8px; border-left: 2px solid var(--border-strong); margin: 6px 0; font-size: 12px; }
+.composer-selection small { display: block; overflow-wrap: anywhere; color: var(--muted); }
+.composer-selection blockquote { margin: 4px 0 0; max-height: 100px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }

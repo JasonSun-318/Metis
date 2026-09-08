@@ -640,7 +640,10 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 	const loadFileDraft = (tabId: string, file: WorkspaceFileDraft["file"]) => {
 		setFileDrafts((current) => {
 			const existing = current.get(tabId);
-			if (existing?.file.relativePath === file.relativePath) return current;
+			if (
+				existing?.file.relativePath === file.relativePath &&
+				(existing.text !== existing.savedText || existing.file.revision === file.revision)
+			) return current;
 			return new Map(current).set(tabId, { file, savedText: file.text, text: file.text });
 		});
 	};

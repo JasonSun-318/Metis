@@ -96,6 +96,10 @@ export function useConversationPlanFlow({
 		readonly requestId: string;
 	} | null>(null);
 	const previousSessionId = useRef(sessionId);
+	const generation = useMemo(() => ({ sessionId }), [sessionId]);
+	const currentGeneration = useRef(generation);
+	currentGeneration.current = generation;
+	const inFlight = useRef<{ generation: object; requestId: string } | null>(null);
 	const [planRevisionTarget, setPlanRevisionTarget] = useState<PlanView | null>(null);
 	const [pendingPlanAction, setPendingPlanAction] = useState<{
 		readonly action: "start" | "cancel";
@@ -135,7 +139,18 @@ export function useConversationPlanFlow({
 
 	const submit = useCallback(
 		async (input: ConversationSubmission) => {
-			if (!sessionId || pendingCollaborationMode !== null) return;
+			if (
+				!sessionId ||
+				generation !== currentGeneration.current ||
+				writableSessionId !== sessionId ||
+				!serverReady ||
+				!syncReady ||
+				compacting ||
+				interactionPending ||
+				pendingCollaborationMode !== null
+			)
+				throw new Error("This conversation is not ready to send");
+			if (inFlight.current?.generation === generation) throw new Error("A message is already being submitted");
 			clearError();
 			const key = JSON.stringify({ sessionId, input: composerRequestKey(input) });
 			const request =
@@ -147,23 +162,42 @@ export function useConversationPlanFlow({
 							requestId: crypto.randomUUID(),
 						};
 			activeTurnRequest.current = request;
+			const flight = { generation, requestId: request.requestId };
+			inFlight.current = flight;
 			try {
 				if (request.method === "queue") {
 					await api.queueTurn({ sessionId, requestId: request.requestId, ...composerPayload(input) });
 				} else {
 					await api.startTurn({ sessionId, requestId: request.requestId, ...composerPayload(input) });
 				}
-				activeTurnRequest.current = null;
+				if (currentGeneration.current !== generation) return;
+				if (activeTurnRequest.current === request) activeTurnRequest.current = null;
 				setPlanRevisionTarget(null);
 			} catch (cause) {
 				if (!shouldReuseMutationRequest(cause) && activeTurnRequest.current === request) {
 					activeTurnRequest.current = null;
 				}
-				reportError(cause);
+				if (currentGeneration.current === generation) reportError(cause);
 				throw cause;
+			} finally {
+				if (inFlight.current === flight) inFlight.current = null;
 			}
 		},
-		[api, clearError, pendingCollaborationMode, queuedTurnCount, reportError, running, sessionId],
+		[
+			api,
+			clearError,
+			pendingCollaborationMode,
+			queuedTurnCount,
+			reportError,
+			running,
+			sessionId,
+			writableSessionId,
+			serverReady,
+			syncReady,
+			compacting,
+			interactionPending,
+			generation,
+		],
 	);
 
 	const changeCollaborationMode = useCallback(

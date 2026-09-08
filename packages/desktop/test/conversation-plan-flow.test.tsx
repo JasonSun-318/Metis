@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 
-import { RPC_ERROR_CODES, type ItemView, type PlanView } from "@metis/app-protocol";
+import { type ItemView, type PlanView, RPC_ERROR_CODES } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type ConversationPlanFlow, useConversationPlanFlow } from "../src/renderer/hooks/use-conversation-plan-flow.ts";
+import {
+	type ConversationPlanFlow,
+	useConversationPlanFlow,
+} from "../src/renderer/hooks/use-conversation-plan-flow.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const proposedPlan: PlanView = {
@@ -31,6 +34,72 @@ function planItem(plan: PlanView): ItemView {
 afterEach(() => document.body.replaceChildren());
 
 describe("useConversationPlanFlow", () => {
+	it("rejects unavailable and concurrent submissions without letting an old task report errors in the new task", async () => {
+		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+		let reject!: (error: Error) => void;
+		const api = {
+			startTurn: vi
+				.fn()
+				.mockImplementationOnce(
+					() =>
+						new Promise((_, fail) => {
+							reject = fail;
+						}),
+				)
+				.mockResolvedValue({}),
+		} as unknown as MetisDesktopApi;
+		const reportError = vi.fn();
+		let sessionId = "one",
+			serverReady = false;
+		let flow!: ConversationPlanFlow;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		function Harness() {
+			flow = useConversationPlanFlow({
+				api,
+				sessionId,
+				writableSessionId: sessionId,
+				running: false,
+				queuedTurnCount: 0,
+				serverReady,
+				syncReady: true,
+				compacting: false,
+				interactionPending: false,
+				collaborationMode: "default",
+				itemOrder: [],
+				itemsById: new Map(),
+				clearError: vi.fn(),
+				reportError,
+			});
+			return null;
+		}
+		const input = { text: "edit", attachments: [] };
+		try {
+			await act(async () => root.render(<Harness />));
+			await expect(flow.submit(input)).rejects.toThrow("not ready");
+			expect(api.startTurn).not.toHaveBeenCalled();
+			serverReady = true;
+			await act(async () => root.render(<Harness />));
+			const stale = flow.submit;
+			const pending = flow.submit(input).catch((error) => error);
+			await expect(flow.submit(input)).rejects.toThrow("already being submitted");
+			sessionId = "two";
+			await act(async () => root.render(<Harness />));
+			await act(async () => flow.submit(input));
+			reject(new Error("old task failed"));
+			await expect(pending).resolves.toEqual(new Error("old task failed"));
+			expect(reportError).not.toHaveBeenCalled();
+			sessionId = "one";
+			await act(async () => root.render(<Harness />));
+			await expect(stale(input)).rejects.toThrow("not ready");
+			await act(async () => flow.submit(input));
+			expect(api.startTurn).toHaveBeenCalledTimes(3);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("reuses a failed submission request and routes later busy turns to the queue", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const api = {
@@ -67,8 +136,9 @@ describe("useConversationPlanFlow", () => {
 		await expect(act(async () => flow.submit(input))).rejects.toThrow("response lost");
 		await act(async () => flow.submit(input));
 		expect(api.startTurn).toHaveBeenCalledTimes(2);
-		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].requestId)
-			.toBe(vi.mocked(api.startTurn).mock.calls[1]?.[0].requestId);
+		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].requestId).toBe(
+			vi.mocked(api.startTurn).mock.calls[1]?.[0].requestId,
+		);
 
 		vi.mocked(api.startTurn)
 			.mockRejectedValueOnce(Object.assign(new Error("turn rejected"), { code: RPC_ERROR_CODES.OPERATION_FAILED }))
@@ -77,8 +147,9 @@ describe("useConversationPlanFlow", () => {
 			"turn rejected",
 		);
 		await act(async () => flow.submit({ text: "known failure", attachments: [] }));
-		expect(vi.mocked(api.startTurn).mock.calls[2]?.[0].requestId)
-			.not.toBe(vi.mocked(api.startTurn).mock.calls[3]?.[0].requestId);
+		expect(vi.mocked(api.startTurn).mock.calls[2]?.[0].requestId).not.toBe(
+			vi.mocked(api.startTurn).mock.calls[3]?.[0].requestId,
+		);
 
 		running = true;
 		await act(async () => root.render(<Harness />));
@@ -121,11 +192,13 @@ describe("useConversationPlanFlow", () => {
 
 		expect(flow.currentProposedPlan).toEqual(proposedPlan);
 		await act(async () => flow.startPlan(proposedPlan));
-		expect(api.startPlanExecution).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "session-1",
-			planId: "plan-1",
-			revision: 2,
-		}));
+		expect(api.startPlanExecution).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "session-1",
+				planId: "plan-1",
+				revision: 2,
+			}),
+		);
 		expect(flow.planActionsBusy).toBe(true);
 
 		plan = { ...plan, status: "accepted" };
@@ -136,11 +209,13 @@ describe("useConversationPlanFlow", () => {
 		plan = { ...proposedPlan, revision: 3 };
 		await act(async () => root.render(<Harness />));
 		await act(async () => flow.cancelPlan(plan));
-		expect(api.cancelPlan).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "session-1",
-			planId: "plan-1",
-			revision: 3,
-		}));
+		expect(api.cancelPlan).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "session-1",
+				planId: "plan-1",
+				revision: 3,
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 });

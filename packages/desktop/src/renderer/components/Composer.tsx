@@ -1,22 +1,23 @@
-import type { McpServerSummaryView, SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
+import type { ClientParams, McpServerSummaryView, SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
 import { ArrowUp, Stop, X } from "@phosphor-icons/react";
 import {
+	type FormEvent,
+	type KeyboardEvent as ReactKeyboardEvent,
+	type ReactNode,
 	useCallback,
 	useEffect,
 	useRef,
 	useState,
-	type FormEvent,
-	type KeyboardEvent as ReactKeyboardEvent,
-	type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
+import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
 import {
-	composerSlashCommands,
 	type ComposerSlashCommand,
+	composerSlashCommands,
 	SlashCommandMenu,
 } from "./SlashCommandMenu.tsx";
 import { TaskList } from "./TaskList.tsx";
@@ -258,6 +259,7 @@ function attachmentTypeLabel(name: string): string {
 }
 
 export interface ComposerSubmission {
+	readonly fileSelections?: ClientParams<"turn/start">["fileSelections"];
 	readonly text: string;
 	readonly attachments: readonly DesktopAttachmentSelection[];
 	readonly skill?: SkillSummaryView;
@@ -338,6 +340,7 @@ export function Composer({
 	thinkingControl,
 }: ComposerProps) {
 	const { t } = useTranslation();
+	const fileSelections = useFileSelections();
 	const [hasInput, setHasInput] = useState(false);
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [submitting, setSubmitting] = useState(false);
@@ -653,6 +656,8 @@ export function Composer({
 		}
 
 		// 4. Standard submission
+		const selected = fileSelections?.selections ?? [];
+		if (selected.length && !prompt.trim()) return;
 		setSubmitting(true);
 		try {
 			const matchedSkills = parsed.tokenSkills
@@ -662,10 +667,12 @@ export function Composer({
 			await onSubmit({
 				text: prompt,
 				attachments,
+				...(selected.length ? { fileSelections: selected.map((item) => item.input) } : {}),
 				...(matchedSkills.length > 0 ? { skill: matchedSkills[0], skills: matchedSkills } : {}),
 			});
 
 			if (editor) editor.replaceChildren();
+			fileSelections?.remove(selected.map((item) => item.id));
 			setAttachments([]);
 			syncEditorState();
 		} finally {
@@ -702,6 +709,7 @@ export function Composer({
 			>
 				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
 				<div className="composer-box">
+					<FileSelectionChips />
 					{attachments.length > 0 && (
 						<div aria-label={t("Message additions")} className="composer-attachments">
 							{attachments.map((attachment) => attachment.previewDataUrl ? (

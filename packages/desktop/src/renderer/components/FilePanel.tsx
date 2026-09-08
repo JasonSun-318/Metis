@@ -26,8 +26,11 @@ import type {
 	DesktopWorkspaceMutationInput,
 	DesktopWorkspaceMutationResult,
 } from "../../shared/desktop-api.ts";
-import { CodeEditor } from "./CodeEditor.tsx";
+import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { useFileSelections } from "./preview/FileSelectionContext.tsx";
+import { FileSelectionPopover } from "./preview/FileSelectionPopover.tsx";
+import { selectionFromRange, selectionFromText, type DraftFileSelection } from "./preview/file-selection.ts";
 import { classifyPreviewKind, isHostedPreviewKind } from "./preview/preview-kinds.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
 import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
@@ -152,6 +155,18 @@ export function FilePanel({
 	visible,
 }: FilePanelProps) {
 	const { t } = useTranslation();
+	const selectionActions = useFileSelections();
+	const previewBodyRef = useRef<HTMLDivElement>(null);
+	const [selection, setSelection] = useState<{ draft: DraftFileSelection; range: Range } | null>(null);
+	const [selectionOpen, setSelectionOpen] = useState(false);
+	const [selectionError, setSelectionError] = useState("");
+	const currentDraft = useRef(draft);
+	currentDraft.current = draft;
+	useEffect(() => {
+		setSelection(null);
+		setSelectionOpen(false);
+		setSelectionError("");
+	}, [activePath, sessionId, visible, draft?.text]);
 	const cacheRef = useRef(new Map<string, CachedDirectory>());
 	const loadingDirectoriesRef = useRef(new Set<string>());
 	const treeScrollRef = useRef<HTMLDivElement>(null);
@@ -205,6 +220,79 @@ export function FilePanel({
 	const expanded = useMemo(() => new Set(expandedPaths), [expandedPaths]);
 	const draftMatchesActivePath = draft?.file.relativePath === activePath;
 	const displayedFile = draftMatchesActivePath ? draft.file : file;
+
+ const captureSelection = (editor?: CodeTextSelection) => {
+		if (!visible || !draftMatchesActivePath || !activePath || !selectionActions?.enabled) return;
+		const root = previewBodyRef.current;
+		const native = window.getSelection();
+		if (!root || (!editor && !native?.rangeCount)) return;
+		const range = editor?.range ?? native!.getRangeAt(0).cloneRange();
+		const target = { source: "workspace" as const, sessionId, relativePath: activePath, name: fileName(activePath) };
+		try {
+			const quote = editor
+				? selectionFromText({
+						file: target,
+						sourceText: editor.text,
+						selectedText: editor.text.slice(editor.from, editor.to),
+						basis: "source",
+						start: editor.from,
+						end: editor.to,
+					})
+				: selectionFromRange({
+						root,
+						range,
+						file: target,
+						sourceText: draft.text,
+						displayText: draft.text,
+						kind: "markdown",
+						selectedText: native!.toString(),
+					});
+			if (quote) {
+				setSelection({ draft: quote, range });
+				setSelectionOpen(true);
+				setSelectionError("");
+			}
+		} catch (cause) {
+			setSelectionOpen(false);
+			setSelectionError(cause instanceof Error ? cause.message : "Failed to add reference");
+		}
+	};
+
+	// Refresh clean editor drafts after agent writes; never overwrite local unsaved edits.
+	useEffect(() => {
+		if (!visible || !activePath) return;
+		let cancelled = false;
+		let read = 0;
+		const refresh = async () => {
+			const before = currentDraft.current;
+			if (before?.file.relativePath !== activePath || before.text !== before.savedText) return;
+			const generation = ++read;
+			try {
+				const result = await api.readWorkspaceFile({ sessionId, relativePath: activePath });
+				if (cancelled || generation !== read || currentDraft.current !== before) return;
+				if (result.kind === "text") onDraftLoadedRef.current(result);
+			} catch (cause) {
+				if (!cancelled && generation === read) onError(cause);
+			}
+		};
+		void refresh();
+		const unsubscribe = api.subscribe?.((event) => {
+			if (
+				event.type === "app-server" &&
+				event.envelope.method === "connection/events" &&
+				event.envelope.params.events.some(
+					(event) =>
+						(event.type === "turn/completed" || event.type === "turn/interrupted") &&
+						event.turn.sessionId === sessionId,
+				)
+			)
+				void refresh();
+		});
+		return () => {
+			cancelled = true;
+			unsubscribe?.();
+		};
+	}, [activePath, api, sessionId, visible, onError]);
 
 	const loadDirectory = useCallback(async (relativePath: string) => {
 		const cached = cacheRef.current.get(relativePath);
@@ -587,7 +675,17 @@ export function FilePanel({
 					</div>
 				</header>
 				{notice && <div className="file-preview-notice" role="status">{notice}</div>}
-				<div className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}${hostedPreview ? " has-hosted-preview" : ""}`}>
+				<div
+					role="document"
+					ref={previewBodyRef}
+					onPointerUp={(event) => {
+						if (previewMode && event.button === 0) captureSelection();
+					}}
+					onKeyUp={(event) => {
+						if (previewMode && (event.key === "Shift" || event.shiftKey)) captureSelection();
+					}}
+					className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}${hostedPreview ? " has-hosted-preview" : ""}`}
+				>
 					{!activePath ? (
 						<div className="file-empty-state"><FolderOpen aria-hidden="true" size={29} /><strong>{t("Open file")}</strong><span>{t("Choose a file from the workspace tree")}</span></div>
 					) : previewLoading ? (
@@ -621,9 +719,10 @@ export function FilePanel({
 					) : displayedFile?.kind === "unsupported" ? (
 						<div className="file-empty-state"><File aria-hidden="true" size={27} /><strong>{t(displayedFile.reason === "too-large" ? "File is too large to preview" : "Binary file cannot be previewed")}</strong><span>{t("Open it in the default app to inspect it")}</span></div>
 					) : visible && draftMatchesActivePath && isMarkdown(draft.file.relativePath) && previewMode ? (
-						<article className="file-markdown code-turn-answer"><Markdown text={draft.text} /></article>
+						<article className="file-markdown code-turn-answer"><Markdown text={draft.text} sourcePositions /></article>
 					) : visible && draftMatchesActivePath ? (
 						<CodeEditor
+							onSelect={captureSelection}
 							label={t("Edit {{name}}", { name: fileName(draft.file.relativePath) })}
 							onChange={(text) => { setNotice(null); onDraftChange(text); }}
 							onSave={() => void save().catch(onError)}
@@ -632,6 +731,27 @@ export function FilePanel({
 						/>
 					) : null}
 				</div>
+				{selectionError && (
+					<div className="selection-error" role="alert">
+						{t(selectionError)}
+					</div>
+				)}
+				{selection && selectionActions && (
+					<FileSelectionPopover
+						key={selection.draft.id}
+						selection={selection.draft}
+						range={selection.range}
+						open={selectionOpen && visible}
+						enabled={selectionActions.enabled && draft?.text === draft?.savedText}
+						disabledReason={
+							draft?.text !== draft?.savedText ? t("Save this file before referencing its contents") : undefined
+						}
+						onAdd={() => selectionActions.add(selection.draft)}
+						onRequestChange={(instruction) => selectionActions.requestChange(selection.draft, instruction)}
+						onDismiss={() => setSelectionOpen(false)}
+						onAccepted={() => requestAnimationFrame(() => document.getElementById("composer-input")?.focus())}
+					/>
+				)}
 			</div>
 
 			<aside className="file-tree">

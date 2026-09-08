@@ -1,5 +1,7 @@
+import type { ClientParams } from "@metis/app-protocol";
 export interface ConversationSubmission {
 	readonly text: string;
+	readonly fileSelections?: ClientParams<"turn/start">["fileSelections"];
 	readonly attachments: readonly { readonly path: string; readonly name: string }[];
 	readonly skill?: { readonly name: string };
 }
@@ -11,6 +13,7 @@ function composerText(input: ConversationSubmission): string {
 export function composerPayload(input: ConversationSubmission) {
 	return {
 		text: composerText(input),
+		...(input.fileSelections?.length ? { fileSelections: input.fileSelections } : {}),
 		...(input.attachments.length > 0
 			? { attachments: input.attachments.map(({ path, name }) => ({ path, name })) }
 			: {}),
@@ -22,5 +25,6 @@ export function composerRequestKey(input: ConversationSubmission): string {
 		text: input.text,
 		attachments: input.attachments.map(({ path, name }) => ({ path, name })),
 		skill: input.skill?.name ?? null,
+		...(input.fileSelections?.length ? { fileSelections: input.fileSelections } : {}),
 	});
 }
