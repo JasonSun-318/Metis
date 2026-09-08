@@ -644,6 +644,23 @@ export const FileAttachmentInputSchema = StrictObject({
 	name: Type.Optional(Type.String({ minLength: 1, maxLength: 255 })),
 });
 
+const FileSelectionFields = {
+	selectedText: Type.String({ minLength: 1, maxLength: 8000 }),
+	basis: Type.Union([Type.Literal("source"), Type.Literal("markdown"), Type.Literal("formatted")]),
+	sourceExcerpt: Type.Optional(Type.String({ maxLength: 4000 })),
+	excerptTruncated: Type.Optional(Type.Boolean()),
+	startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+	endLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+};
+export const FileSelectionInputSchema = Type.Union([
+	StrictObject({ ...FileSelectionFields, source: Type.Literal("workspace"), relativePath: PathSchema }),
+	StrictObject({
+		...FileSelectionFields,
+		source: Type.Literal("delivered"),
+		fileId: Type.String({ pattern: "^[a-f0-9]{16}$" }),
+	}),
+]);
+
 export const TurnInputSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	// Turn request IDs are scoped to sessionId.
@@ -651,6 +668,7 @@ export const TurnInputSchema = StrictObject({
 	text: PromptTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
 	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
+	fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
 });
 
 export const TurnSteerParamsSchema = StrictObject({
@@ -659,6 +677,7 @@ export const TurnSteerParamsSchema = StrictObject({
 	text: PromptTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
 	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
+	fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
 	delivery: Type.Union([Type.Literal("steer"), Type.Literal("follow_up")]),
 });
 

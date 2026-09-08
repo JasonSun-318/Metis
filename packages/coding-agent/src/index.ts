@@ -488,6 +488,13 @@ export {
 	type SessionDeliveredArtifact,
 	SessionDeliveredArtifacts,
 } from "./core/session-delivered-artifacts.ts";
+export {
+	assertSessionFileSelections,
+	formatSessionFileSelectionDisplayText,
+	formatSessionFileSelections,
+	type SessionFileSelection,
+	splitSessionFileSelectionPrompt,
+} from "./core/session-file-selections.ts";
 export { createSessionId } from "./core/session-id.ts";
 export {
 	assertValidSessionId,

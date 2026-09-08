@@ -30,6 +30,7 @@ import {
 	createAskUserToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
+	formatSessionFileSelections,
 	getLatestCacheHitPercent,
 	getProjectTrustOptions,
 	hasTrustRequiringProjectResources,
@@ -74,6 +75,7 @@ import {
 	type PreparedSessionMutation,
 	prepareSessionMutation,
 } from "./durable-mutation.ts";
+import { resolveFileSelections } from "./file-selection-context.ts";
 import type { InteractionBroker } from "./interactions.ts";
 import {
 	opaqueId,
@@ -1689,6 +1691,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
+		const selections = await resolveFileSelections(input.fileSelections ?? [], {
+			cwd: this.runtime.cwd,
+			resolveDelivered: (id) => {
+				const resolved = this.session.deliveredArtifacts?.resolve(id);
+				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
+			},
+		});
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -1700,12 +1709,19 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: formatSessionAttachments(input.text, attachments),
+			text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 		});
 	}
 
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
+		const selections = await resolveFileSelections(input.fileSelections ?? [], {
+			cwd: this.runtime.cwd,
+			resolveDelivered: (id) => {
+				const resolved = this.session.deliveredArtifacts?.resolve(id);
+				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
+			},
+		});
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -1717,13 +1733,20 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: formatSessionAttachments(input.text, attachments),
+			text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 			streamingBehavior: input.delivery === "follow_up" ? "followUp" : "steer",
 		});
 	}
 
 	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
+		const selections = await resolveFileSelections(input.fileSelections ?? [], {
+			cwd: this.runtime.cwd,
+			resolveDelivered: (id) => {
+				const resolved = this.session.deliveredArtifacts?.resolve(id);
+				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
+			},
+		});
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -1736,7 +1759,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		try {
 			const queuedTurn = this.runtime.enqueueQueuedTurn({
 				requestId: input.requestId,
-				text: formatSessionAttachments(input.text, attachments),
+				text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
 				...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 			});
 			return { queuedTurn: queuedTurnView(queuedTurn) };

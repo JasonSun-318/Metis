@@ -1923,3 +1923,32 @@ describe("redacted errors and generated schema", () => {
 		}
 	});
 });
+
+it("accepts bounded selected-file context on each turn entry and rejects ambiguous identities", () => {
+	const selection = { source: "workspace", relativePath: "README.md", basis: "markdown", selectedText: "section" };
+	for (const method of ["turn/start", "turn/queue", "turn/steer"]) {
+		const params = {
+			sessionId: SESSION_ID,
+			requestId: "22222222-2222-4222-8222-222222222222",
+			text: "edit",
+			...(method === "turn/steer" ? { delivery: "steer" } : {}),
+		};
+		expect(() => validateClientRequest(makeClientRequest(method, params))).not.toThrow();
+		expect(() =>
+			validateClientRequest(
+				makeClientRequest(method, {
+					...params,
+					fileSelections: Array.from({ length: 8 }, () => ({ ...selection })),
+				}),
+			),
+		).not.toThrow();
+		for (const bad of [
+			Array.from({ length: 9 }, () => ({ ...selection })),
+			[{ ...selection, path: "/untrusted" }],
+			[{ ...selection, fileId: "1234567890abcdef" }],
+			[{ ...selection, selectedText: "x".repeat(8001) }],
+		]) {
+			expect(() => validateClientRequest(makeClientRequest(method, { ...params, fileSelections: bad }))).toThrow();
+		}
+	}
+});

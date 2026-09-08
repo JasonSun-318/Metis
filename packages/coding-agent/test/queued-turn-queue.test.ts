@@ -9,6 +9,7 @@ import {
 	QueuedTurnQueue,
 } from "../src/core/queued-turn-queue.ts";
 import { formatSessionAttachments } from "../src/core/session-attachments.ts";
+import { formatSessionFileSelections, splitSessionFileSelectionPrompt } from "../src/core/session-file-selections.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
 const requestId = (index: number): string => `00000000-0000-4000-8000-${index.toString().padStart(12, "0")}`;
@@ -114,6 +115,31 @@ describe("QueuedTurnQueue", () => {
 		expect(() =>
 			queue.enqueue({ requestId: requestId(MAX_QUEUED_TURNS + 1), input: { text: "overflow" }, state: "enqueued" }),
 		).toThrow(QueuedTurnLimitError);
+	});
+
+	it("preserves file selections when a queued request is edited and recovered", () => {
+		const files = [
+			{
+				source: "workspace" as const,
+				name: "README.md",
+				path: "/repo/README.md",
+				basis: "markdown" as const,
+				selectedText: "old section",
+				startLine: 5,
+				endLine: 5,
+			},
+		];
+		const first = queue.enqueue({
+			requestId: requestId(1),
+			input: { text: formatSessionFileSelections("edit", files) },
+			state: "paused",
+		});
+		queue.update({ queueItemId: first.queueItemId, expectedRevision: first.revision, text: "make it shorter" });
+		const restored = new QueuedTurnQueue(manager).list()[0]!;
+		expect(splitSessionFileSelectionPrompt(restored.input.text)).toEqual({
+			text: "make it shorter",
+			fileSelections: files,
+		});
 	});
 
 	it("rejects empty edits without attachments", () => {

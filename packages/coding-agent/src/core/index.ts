@@ -269,6 +269,13 @@ export {
 	type SessionPermissionAuditEntry,
 	type SessionPermissionPresetEntry,
 } from "./session-control.ts";
+export {
+	assertSessionFileSelections,
+	formatSessionFileSelectionDisplayText,
+	formatSessionFileSelections,
+	type SessionFileSelection,
+	splitSessionFileSelectionPrompt,
+} from "./session-file-selections.ts";
 export { createSessionId } from "./session-id.ts";
 export {
 	assertValidSessionId,

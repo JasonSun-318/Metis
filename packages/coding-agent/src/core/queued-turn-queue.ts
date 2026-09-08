@@ -6,6 +6,7 @@ import {
 	reduceRuntimeJournal,
 } from "./runtime-recovery.ts";
 import { formatSessionAttachments, splitSessionAttachmentPrompt } from "./session-attachments.ts";
+import { formatSessionFileSelections } from "./session-file-selections.ts";
 import type { SessionManager } from "./session-manager.ts";
 
 export const MAX_QUEUED_TURNS = 32;
@@ -133,9 +134,12 @@ export class QueuedTurnQueue {
 	update(input: { queueItemId: string; expectedRevision: string; text: string }): QueuedTurnDraft {
 		const current = this.requireRevision(input.queueItemId, input.expectedRevision);
 		if (current.state === "sending") throw new QueuedTurnConflictError(input.queueItemId);
-		const { attachments } = splitSessionAttachmentPrompt(current.input.text);
+		const { attachments, fileSelections } = splitSessionAttachmentPrompt(current.input.text);
 		if (!input.text.trim() && attachments.length === 0) throw new TypeError("Queued turn text must not be empty");
-		const nextInput = { ...current.input, text: formatSessionAttachments(input.text, attachments) };
+		const nextInput = {
+			...current.input,
+			text: formatSessionAttachments(formatSessionFileSelections(input.text, fileSelections), attachments),
+		};
 		this.appendState(current, current.state === "queued" ? "enqueued" : "paused", nextInput);
 		return this.requireVisible(input.queueItemId);
 	}

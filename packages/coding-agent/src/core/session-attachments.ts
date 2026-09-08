@@ -13,6 +13,11 @@ import {
 } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { canonicalizePath, canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
+import {
+	formatSessionFileSelectionDisplayText,
+	type SessionFileSelection,
+	splitSessionFileSelectionPrompt,
+} from "./session-file-selections.ts";
 import { assertValidSessionId } from "./session-id.ts";
 
 export const MAX_SESSION_ATTACHMENTS = 16;
@@ -608,18 +613,19 @@ export function replaceSessionAttachmentReferences(
 export function splitSessionAttachmentPrompt(text: string): {
 	readonly text: string;
 	readonly attachments: readonly SessionAttachment[];
+	readonly fileSelections: readonly SessionFileSelection[];
 } {
 	const attachments: SessionAttachment[] = [];
 	const publicText = replaceSessionAttachmentReferences(text, (found) => {
 		attachments.push(...found);
 		return "";
 	}).trim();
-	return { text: publicText, attachments };
+	return { ...splitSessionFileSelectionPrompt(publicText), attachments };
 }
 
 /** Replace private model-facing attachment metadata with compact CLI labels. */
 export function formatSessionAttachmentDisplayText(text: string): string {
-	return replaceSessionAttachmentReferences(text, (attachments) =>
-		attachments.map(({ name }) => `[${name}]`).join(" "),
+	return formatSessionFileSelectionDisplayText(
+		replaceSessionAttachmentReferences(text, (attachments) => attachments.map(({ name }) => `[${name}]`).join(" ")),
 	);
 }

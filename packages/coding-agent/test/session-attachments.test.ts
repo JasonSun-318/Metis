@@ -78,6 +78,7 @@ describe("session attachments", () => {
 		expect(splitSessionAttachmentPrompt(formatted)).toEqual({
 			text: "review this",
 			attachments: [attachment],
+			fileSelections: [],
 		});
 	});
 

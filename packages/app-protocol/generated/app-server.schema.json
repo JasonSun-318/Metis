@@ -5963,6 +5963,131 @@
                         "additionalProperties": false
                       },
                       "maxItems": 16
+                    },
+                    "fileSelections": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "relativePath"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "workspace"
+                              },
+                              "relativePath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 32768
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "fileId"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "delivered"
+                              },
+                              "fileId": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{16}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "maxItems": 8
                     }
                   },
                   "additionalProperties": false
@@ -6081,6 +6206,131 @@
                         "additionalProperties": false
                       },
                       "maxItems": 16
+                    },
+                    "fileSelections": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "relativePath"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "workspace"
+                              },
+                              "relativePath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 32768
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "fileId"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "delivered"
+                              },
+                              "fileId": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{16}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "maxItems": 8
                     },
                     "delivery": {
                       "anyOf": [
@@ -6210,6 +6460,131 @@
                         "additionalProperties": false
                       },
                       "maxItems": 16
+                    },
+                    "fileSelections": {
+                      "type": "array",
+                      "items": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "relativePath"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "workspace"
+                              },
+                              "relativePath": {
+                                "type": "string",
+                                "minLength": 1,
+                                "x-metis-maxUtf8Bytes": 32768
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "selectedText",
+                              "basis",
+                              "source",
+                              "fileId"
+                            ],
+                            "properties": {
+                              "selectedText": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 8000
+                              },
+                              "basis": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "source"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "markdown"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "formatted"
+                                  }
+                                ]
+                              },
+                              "sourceExcerpt": {
+                                "type": "string",
+                                "maxLength": 4000
+                              },
+                              "excerptTruncated": {
+                                "type": "boolean"
+                              },
+                              "startLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "endLine": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "source": {
+                                "type": "string",
+                                "const": "delivered"
+                              },
+                              "fileId": {
+                                "type": "string",
+                                "pattern": "^[a-f0-9]{16}$"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        ]
+                      },
+                      "maxItems": 8
                     }
                   },
                   "additionalProperties": false
@@ -43314,6 +43689,131 @@
                     "additionalProperties": false
                   },
                   "maxItems": 16
+                },
+                "fileSelections": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "relativePath"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "workspace"
+                          },
+                          "relativePath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "fileId"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "delivered"
+                          },
+                          "fileId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{16}$"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "maxItems": 8
                 }
               },
               "additionalProperties": false
@@ -43432,6 +43932,131 @@
                     "additionalProperties": false
                   },
                   "maxItems": 16
+                },
+                "fileSelections": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "relativePath"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "workspace"
+                          },
+                          "relativePath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "fileId"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "delivered"
+                          },
+                          "fileId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{16}$"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "maxItems": 8
                 },
                 "delivery": {
                   "anyOf": [
@@ -43561,6 +44186,131 @@
                     "additionalProperties": false
                   },
                   "maxItems": 16
+                },
+                "fileSelections": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "relativePath"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "workspace"
+                          },
+                          "relativePath": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "required": [
+                          "selectedText",
+                          "basis",
+                          "source",
+                          "fileId"
+                        ],
+                        "properties": {
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000
+                          },
+                          "basis": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "source"
+                              },
+                              {
+                                "type": "string",
+                                "const": "markdown"
+                              },
+                              {
+                                "type": "string",
+                                "const": "formatted"
+                              }
+                            ]
+                          },
+                          "sourceExcerpt": {
+                            "type": "string",
+                            "maxLength": 4000
+                          },
+                          "excerptTruncated": {
+                            "type": "boolean"
+                          },
+                          "startLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "endLine": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "const": "delivered"
+                          },
+                          "fileId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{16}$"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "maxItems": 8
                 }
               },
               "additionalProperties": false
