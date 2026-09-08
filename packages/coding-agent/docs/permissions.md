@@ -4,29 +4,33 @@ Permissions belong to a session. New Chat and Code sessions default to **Auto**.
 
 | Mode | Automatic model actions | Actions that ask | Execution |
 |---|---|---|---|
-| **Ask** | Proven ordinary built-in structured reads inside the workspace, plus fixed internal controls | Bash, writes, web, MCP, Extensions, SDK/custom tools, sensitive or outside access, and unknown actions | Approved ordinary/destructive Bash stays in the workspace sandbox; network, elevation, or external-side-effect Bash is explicitly shown as host execution |
-| **Auto** | Workspace reads/writes, ordinary sandboxed Bash, built-in web, and installed MCP/Extension/SDK tools | Dangerous Bash and sensitive, outside, or unknown built-in actions | Ordinary Bash runs in the workspace sandbox; structured tools remain path-guarded; approved boundary-crossing Bash runs on the host |
-| **Full** | All model tool actions | None | Runs directly as the current OS user |
+| **Ask** | Deterministic ordinary workspace reads, currently classified read-only MCP actions, and fixed internal controls | Other actions require user review, including Bash, writes, built-in web, sensitive access, and outside-workspace access | Built-in Bash uses the granted sandbox scope; integration code runs on the host or externally |
+| **Auto** | Low-risk workspace actions, eligible Auto command rules, deterministic reads, and fixed internal controls | Review-required writes, network, destructive/external effects, and critical risks go directly to the user; remaining uncertain reads may use model review, with user fallback | Built-in Bash uses the granted sandbox scope; structured tools remain path-guarded |
+| **Full** | Low- and medium-risk actions | High- and critical-risk actions still require user review | Local execution runs as the current OS user; MCP remains external |
 
-The approval UI offers **Reject**, **Always allow for this project** when eligible, and **Allow once**. It always states whether the action will run in the sandbox or directly on the host.
+All modes deny invalid scopes, protected workspace metadata writes, and recursive deletion of the filesystem root or user home. Auto also denies recursive deletion commands. Changing to Full does not remove these prohibitions.
+
+The approval UI offers **Reject**, **Always allow for this project** when eligible, and **Allow once**. It states whether the action will run in the sandbox, on the host, or externally. An eligible existing project rule can satisfy review without another prompt.
 
 ## Bash sandbox
 
-Ask and Auto share one lazy sandbox broker per interactive session. No broker is created until the first sandboxed Bash command. The broker is reused while the working directory, workspace roots, app-owned attachment/work roots, and shell stay unchanged; a boundary change rotates it. Switching to Full, replacing or closing the runtime, and application shutdown dispose it and its private temporary directory.
+Ask and Auto use a lazy sandbox broker per interactive session. No broker is created until the first sandboxed Bash command. The broker is reused while the working directory, read/write/protected roots, network endpoints, and shell stay unchanged; a boundary change rotates it. Switching to Full, replacing or closing the runtime, and application shutdown dispose it and its private temporary directory.
 
-The sandbox permits reads and writes in the active workspace roots and its private temporary directory. Session attachments are read-only; an active app-owned work directory is writable. Required runtime binaries and libraries are readable. Network access and local port binding are blocked. A command cannot use sandbox approval as a fallback to host execution: startup, protocol, timeout, or runtime failure denies the command.
+The sandbox is configured from the consumed action grant, including read/write roots, protected metadata, and exact network endpoints. A read-only action keeps the workspace read-only; approved writes or outside reads add their granted scope. Required runtime binaries and libraries remain readable. Network access is limited to granted endpoints; local port binding is blocked. A command cannot use sandbox approval as a fallback to host execution: startup, protocol, timeout, or runtime failure denies the command.
 
-Ask prompts for every model-initiated Bash command, including `pwd`, builds, and tests. Auto runs ordinary shell commands automatically in the sandbox. Known destructive commands such as `rm`, `git reset --hard`, or `git clean`, sensitive-path references, and opaque inline or encoded execution prompt; destruction-only commands remain sandboxed. Commands classified as networked, elevated, or externally side-effecting prompt with a host warning and run on the host only after approval. Full Bash runs on the host without Metis approval.
+Ask requires user review for model-initiated Bash commands, including `pwd`, builds, and tests, unless an eligible project rule already covers the exact action. Auto runs low-risk shell commands and eligible Auto command rules automatically. Review-required writes, network, deletions, and external effects skip model review and go directly to the user. Other uncertain reads may be model-reviewed; a model denial or unavailable reviewer falls back to the interactive user. Recursive deletion is denied in Auto. Approval does not change an Ask/Auto Bash grant into host execution. Full Bash runs on the host, but high- and critical-risk actions still require review.
 
-Bash classification is conservative command-text analysis, not program-behavior verification. A command such as `npm test` can execute project code, and the sandbox intentionally permits that code to mutate the active workspace. The security boundary is that Ask still requires approval, while Auto confines ordinary Bash from outside reads/writes and network access; use Ask when every shell invocation must be confirmed.
+Bash classification is conservative command-text analysis, not program-behavior verification. A command such as `npm test` can execute project code and mutate the granted workspace. Ask requires user review; Auto confines ordinary Bash to its granted paths and network endpoints. Use Ask when shell invocations should require user review rather than automatic policy or model review.
 
 The sandbox depends on the platform sandbox runtime and packaged helpers. If those are unavailable, Ask and Auto fail closed instead of changing the execution target.
 
 ## Structured tools and integrations
 
-Structured file tools are path-guarded rather than shell-sandboxed. Ask automatically permits only proven ordinary built-in reads inside an effective workspace root; writes and other model tools ask. Auto permits ordinary workspace reads and writes automatically. Sensitive paths, outside-root targets, unprovable objects, and unknown built-in actions still ask.
+Structured file tools are path-guarded rather than shell-sandboxed. Ask automatically permits deterministic ordinary reads inside an effective workspace root; writes require review. Auto permits low-risk workspace reads and writes automatically. Sensitive reads require the user; ordinary outside reads may receive model review in Auto. Review-required writes and network actions go directly to the user.
 
-Installing or configuring MCP, Extension, or SDK code means trusting that integration. Its model-facing tools ask in Ask and run automatically in Auto. Integration initialization and in-process hooks already run with Metis's OS authority; the Bash sandbox does not contain them. Built-in `web_fetch` and `web_search` also run automatically in Auto.
+Installing or configuring MCP, Extension, or SDK code means trusting that integration's implementation. Its model-facing calls still follow the action policy; installation alone does not automatically approve every call. The current MCP adapter uses annotations and inferred argument scope to classify read-only calls, which the policy may allow in all three modes. This classification does not prove the remote server's behavior. Other integration calls follow their declared scope and risks. Built-in `web_fetch` and `web_search` declare network access and require user review in Ask and Auto unless an eligible project rule applies.
+
+Integration initialization and in-process hooks already run with Metis's OS authority; the Bash sandbox does not contain them.
 
 Project trust controls whether project-provided configuration and code load. It is separate from action permissions. For hostile installed code or whole-process containment, use a container, VM, micro-VM, remote sandbox, or separate limited OS account. See [Security](security.md) and [Containerization](containerization.md).
 

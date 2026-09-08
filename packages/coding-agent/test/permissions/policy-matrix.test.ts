@@ -82,7 +82,7 @@ describe("permission policy matrix", () => {
 
 	it.each([
 		["ask", "review", "user", "sandbox"],
-		["auto", "review", "model", "sandbox"],
+		["auto", "review", "user", "sandbox"],
 		["full", "allow", undefined, "host"],
 	] as const)("routes exact non-mutating network access in %s", (preset, kind, minimumReviewer, executionTarget) => {
 		const action = normalizePermissionAction(
@@ -98,7 +98,7 @@ describe("permission policy matrix", () => {
 
 	it.each([
 		["ask", "review", "user"],
-		["auto", "review", "model"],
+		["auto", "review", "user"],
 		["full", "review", "user"],
 	] as const)("routes bounded destructive operations in %s", (preset, kind, minimumReviewer) => {
 		const action = normalizePermissionAction(
@@ -109,6 +109,23 @@ describe("permission policy matrix", () => {
 			riskLevel: "high",
 			minimumReviewer,
 		});
+	});
+
+	it.each([
+		["outside write", { writePaths: ["/outside/output.txt"] }],
+		["external side effect", { effects: ["external-side-effect"] as const }],
+	])("sends review-required %s directly to the user in Auto", (_name, scope) => {
+		const action = normalizePermissionAction(actionInput(scope));
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
+			kind: "review",
+			minimumReviewer: "user",
+		});
+	});
+
+	it("keeps model review for ordinary outside reads in Auto", () => {
+		expect(
+			new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: outsideRead() }),
+		).toMatchObject({ kind: "review", minimumReviewer: "model" });
 	});
 
 	it.each(["sensitive-read", "elevation", "security-weakening", "payment", "production-mutation"] as const)(

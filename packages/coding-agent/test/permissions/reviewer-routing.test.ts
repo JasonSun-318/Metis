@@ -7,7 +7,7 @@ import {
 	PermissionReviewRouter,
 	settingsForPreset,
 } from "../../src/core/permissions/index.ts";
-import { ordinaryRead } from "./fixtures.ts";
+import { externalWrite, ordinaryRead } from "./fixtures.ts";
 import { directUserMessage, reviewInput } from "./reviewer-fixtures.ts";
 
 function reviewer(result: PermissionReviewResult): PermissionReviewer & { review: ReturnType<typeof vi.fn> } {
@@ -35,6 +35,19 @@ function userResult(
 }
 
 describe("PermissionReviewRouter", () => {
+	it.each(["allow", "deny"] as const)("routes an Auto external effect directly to user %s", async (kind) => {
+		const action = externalWrite();
+		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
+		if (decision.kind !== "review") throw new Error("expected review");
+		const model = reviewer(modelResult());
+		const user = reviewer(userResult({ kind }));
+		const router = new PermissionReviewRouter({ model, user });
+		expect(await router.review(reviewInput({ action, decision }))).toEqual({ kind, reviewer: "user" });
+		expect(model.review).not.toHaveBeenCalled();
+		expect(user.review).toHaveBeenCalledOnce();
+		expect(user.review.mock.calls[0]?.[0]).not.toHaveProperty("priorModelOutcome");
+	});
+
 	it("uses the user directly when deterministic policy requires a user", async () => {
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult());
@@ -106,12 +119,16 @@ describe("PermissionReviewRouter", () => {
 	});
 
 	it("fails closed when required user review has no interactive UI", async () => {
+		const action = externalWrite();
+		const decision = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action });
+		if (decision.kind !== "review") throw new Error("expected review");
 		const model = reviewer(modelResult());
 		const user = reviewer(userResult());
 		const router = new PermissionReviewRouter({ model, user });
 		const input = reviewInput({
+			action,
 			interactive: false,
-			decision: { ...reviewInput().decision, minimumReviewer: "user" },
+			decision,
 		});
 
 		expect(await router.review(input)).toMatchObject({ kind: "deny", reviewer: "user" });

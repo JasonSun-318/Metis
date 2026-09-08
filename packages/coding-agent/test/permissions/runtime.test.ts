@@ -9,7 +9,7 @@ import {
 	PermissionReviewRouter,
 	ToolAuthorizationRuntime,
 } from "../../src/core/permissions/index.ts";
-import { actionInput, rootRecursiveDelete, sensitiveRead } from "./fixtures.ts";
+import { actionInput, outsideRead, rootRecursiveDelete, sensitiveRead } from "./fixtures.ts";
 import { highRiskRequest, reviewRequest, safeRequest } from "./runtime-fixtures.ts";
 
 function allow(reviewer: "model" | "user" = "model"): PermissionReviewResult {
@@ -55,7 +55,7 @@ describe("ToolAuthorizationRuntime", () => {
 		);
 		const review = vi.fn(async (request: Parameters<PermissionReviewer["review"]>[0]) => {
 			expect(JSON.stringify(request.redactedArguments)).not.toContain("secret-value");
-			return allow();
+			return allow("user");
 		});
 		const runtime = new ToolAuthorizationRuntime({
 			sessionId: "session-args",
@@ -77,16 +77,19 @@ describe("ToolAuthorizationRuntime", () => {
 			reviewerFactory: () => new PermissionReviewRouter({ model, user }),
 		});
 
-		await expect(interactive.authorizeAndExecute(highRiskRequest())).resolves.toBe("executed");
+		await expect(interactive.authorizeAndExecute(safeRequest({ action: outsideRead() }))).resolves.toBe("executed");
+		expect(model.review).toHaveBeenCalledOnce();
 		expect(user.review).toHaveBeenCalledOnce();
 
 		const headless = new ToolAuthorizationRuntime({
 			sessionId: "session-2",
 			reviewerFactory: () => new PermissionReviewRouter({ model, user }),
 		});
-		await expect(headless.authorizeAndExecute(highRiskRequest({ interactive: false }))).rejects.toThrow(
-			"Permission denied",
-		);
+		await expect(
+			headless.authorizeAndExecute(safeRequest({ action: outsideRead(), interactive: false })),
+		).rejects.toThrow("Permission denied");
+		expect(model.review).toHaveBeenCalledTimes(2);
+		expect(user.review).toHaveBeenCalledOnce();
 	});
 
 	it("revalidates tool identity after review and before consuming a grant", async () => {
@@ -107,7 +110,7 @@ describe("ToolAuthorizationRuntime", () => {
 			reviewerFactory: () => ({
 				review: async () => {
 					fixture.onReview();
-					return allow();
+					return allow("user");
 				},
 			}),
 		});
@@ -143,7 +146,7 @@ describe("ToolAuthorizationRuntime", () => {
 					} else {
 						sandboxHealth = "unavailable";
 					}
-					return allow();
+					return allow("user");
 				},
 			}),
 		});
@@ -182,7 +185,7 @@ describe("ToolAuthorizationRuntime", () => {
 			reviewerFactory: () => ({
 				review: async () => {
 					runtime.invalidate(reason);
-					return allow();
+					return allow("user");
 				},
 			}),
 		});

@@ -9,7 +9,7 @@ import { highRiskRequest, safeRequest } from "./runtime-fixtures.ts";
 
 const allowed: PermissionReviewResult = Object.freeze({
 	kind: "allow",
-	reviewer: "model",
+	reviewer: "user",
 });
 
 describe("ToolAuthorizationRuntime concurrency", () => {

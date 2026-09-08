@@ -7,8 +7,8 @@ import {
 	settingsForPreset,
 	ToolAuthorizationRuntime,
 } from "../../src/core/permissions/index.ts";
-import { workspaceWrite } from "./fixtures.ts";
-import { highRiskRequest, safeRequest } from "./runtime-fixtures.ts";
+import { outsideRead, workspaceWrite } from "./fixtures.ts";
+import { safeRequest } from "./runtime-fixtures.ts";
 
 function percentile(samples: readonly number[], p: number): number {
 	const ranked = [...samples].sort((left, right) => left - right);
@@ -66,7 +66,7 @@ describe("permission performance gates", () => {
 			}),
 		};
 		const runtime = new ToolAuthorizationRuntime({ sessionId: "perf-queue", reviewerFactory: () => reviewer });
-		const blocked = runtime.authorizeAndExecute(highRiskRequest());
+		const blocked = runtime.authorizeAndExecute(safeRequest({ action: outsideRead() }));
 		await vi.waitFor(() => expect(reviewer.review).toHaveBeenCalledOnce());
 		const started = performance.now();
 		await expect(
@@ -114,8 +114,8 @@ describe("permission performance gates", () => {
 			grants,
 			audit,
 		});
-		const first = runtime.authorizeAndExecute(highRiskRequest());
-		const second = runtime.authorizeAndExecute(highRiskRequest());
+		const first = runtime.authorizeAndExecute(safeRequest({ action: outsideRead() }));
+		const second = runtime.authorizeAndExecute(safeRequest({ action: outsideRead() }));
 		await vi.waitFor(() => expect(reviewer.review).toHaveBeenCalledOnce());
 		runtime.invalidate("session");
 		await expect(first).rejects.toThrow("Permission denied");

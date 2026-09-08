@@ -174,11 +174,23 @@ function isReadOnlyMcp(action: NormalizedPermissionAction): boolean {
 	);
 }
 
-function minimumReviewerFor(settings: PermissionSettings, riskLevel: RiskLevel): MinimumReviewer | undefined {
+function minimumReviewerFor(
+	settings: PermissionSettings,
+	riskLevel: RiskLevel,
+	action: NormalizedPermissionAction,
+): MinimumReviewer | undefined {
 	if (riskLevel === "critical") return "user";
 	if (settings.sandboxPolicy === "danger-full-access") return riskLevel === "high" ? "user" : undefined;
 	if (settings.approvalPolicy === "user") return "user";
-	if (settings.approvalPolicy === "auto-review") return riskLevel === "low" ? undefined : "model";
+	if (settings.approvalPolicy === "auto-review" && riskLevel !== "low") {
+		// Model review only permits reads; known mutations and network need user review.
+		return action.writePaths.length > 0 ||
+			action.networkEndpoints.length > 0 ||
+			action.effects.includes("destructive") ||
+			action.effects.includes("external-side-effect")
+			? "user"
+			: "model";
+	}
 	return undefined;
 }
 
@@ -252,7 +264,7 @@ export class PermissionPolicy {
 			);
 		}
 
-		const reviewer = minimumReviewerFor(input.settings, riskLevel);
+		const reviewer = minimumReviewerFor(input.settings, riskLevel, input.action);
 		if (reviewer) {
 			return Object.freeze({
 				kind: "review",

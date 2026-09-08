@@ -149,7 +149,7 @@ describe("PermissionPolicy", () => {
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
 			riskLevel: "high",
-			minimumReviewer: "model",
+			minimumReviewer: "user",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
 			kind: "review",
@@ -266,7 +266,7 @@ describe("PermissionPolicy", () => {
 		const grant = new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: network });
 		if (grant.kind === "deny") throw new Error("Expected a grant request");
 		expect(riskLevelFor(network, grant.grant)).toBe("medium");
-		expect(grant).toMatchObject({ kind: "review", minimumReviewer: "model" });
+		expect(grant).toMatchObject({ kind: "review", minimumReviewer: "user" });
 	});
 
 	it("has no reviewer callback and stays below the domain latency budget", () => {
