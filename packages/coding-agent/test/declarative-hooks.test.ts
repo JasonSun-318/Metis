@@ -198,6 +198,16 @@ describe("declarative hooks bridge", () => {
 		expect(createDeclarativeHooksBridge(agentDir)).toBeUndefined();
 	});
 
+	it("does not restore hooks cleared before the factory is installed", async () => {
+		saveDeclarativeHooks(agentDir, [makeHook()]);
+		const bridge = createDeclarativeHooksBridge(agentDir);
+		if (!bridge || typeof bridge === "function") throw new Error("expected a named inline extension");
+		saveDeclarativeHooks(agentDir, []);
+		const { api, handlers } = captureApi();
+		await bridge.factory(api);
+		expect(handlers.size).toBe(0);
+	});
+
 	it("blocks a tool call when a PreToolUse hook exits 2", async () => {
 		const handlers = installBridge([makeHook({ args: ["-e", "console.error('nope'); process.exit(2)"] })]);
 		const handler = handlers.get("tool_call")!;

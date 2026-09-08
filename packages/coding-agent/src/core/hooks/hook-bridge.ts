@@ -222,8 +222,7 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 		name: "hooks",
 		factory: (metis: ExtensionAPI) => {
 			// Reload so config edits land on new sessions without restarting the host.
-			const { hooks: currentHooks } = loadDeclarativeHooks(agentDir);
-			const allHooks = currentHooks.length > 0 ? currentHooks : hooks;
+			const { hooks: allHooks } = loadDeclarativeHooks(agentDir);
 
 			const toolHooks = allHooks.filter((hook) => hook.event === "PreToolUse");
 			const resultHooks = allHooks.filter(
