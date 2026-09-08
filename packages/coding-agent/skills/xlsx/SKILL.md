@@ -3,9 +3,9 @@ name: xlsx
 description: "Create, read, analyze, or modify Microsoft Excel .xlsx workbooks, including formulas, charts, pivots, financial models, dashboards, templates, and CSV/TSV imports. Use when an .xlsx file is input or output, or the user explicitly asks for an Excel workbook."
 ---
 
-## Metis integration (overrides conflicting rules below)
+## Metis integration
 
-This file embeds the official `excel` skill from the bundled OfficeCLI 1.0.140.
+This file adapts the official `excel` skill from the bundled OfficeCLI 1.0.140.
 
 - OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
 - For a financial model, scenarios, or projections, run `officecli load_skill financial-model` once. For a KPI, analytics, or executive dashboard, run `officecli load_skill data-dashboard` once. Treat the selected specialized skill as overriding the generic guidance below; the Metis integration rules in this section still take priority.
@@ -15,13 +15,13 @@ This file embeds the official `excel` skill from the bundled OfficeCLI 1.0.140.
 - Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered sheets, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. Read only the ranges needed for the question; do not validate or render unless needed.
-- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Preserve formulas separately from displayed values; never infer a computed value that OfficeCLI can return.
 - Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every workbook must be rendered. Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
+Render and read images only when the task needs confirmation of charts, dashboard appearance, clipped text, column widths, overlap, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant sheets or ranges and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -134,7 +134,7 @@ Any hardcoded number without a source is an undocumented assumption — a review
 
 Six steps. Every non-trivial build follows this shape.
 
-1. **Metis lifecycle.** Do not open a resident. Every mutating command persists before it returns. For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures.**
+1. For many cells, use `batch`: **≤ 50 ops/block recommended; tested up to 80+ ops per block on pure value-set payloads with zero failures.**
 2. **Create or load.** `officecli create "$FILE"` (new) or `officecli view "$FILE" outline` (existing — get the lay of the land first).
 3. **Build incrementally.** One command, read the output, continue. After any structural op (new sheet, chart, named range, pivot), run `get` on it to confirm shape before stacking more on top.
 4. **Format.** Column widths, number formats, freeze panes, tab colors, header fills. Formatting is not optional polish — per "Requirements for Outputs" it is part of the deliverable.
@@ -206,7 +206,7 @@ Start wide, then narrow. `outline` first tells you what sheets exist and where t
 **Open the rendered workbook to eyeball your own work.**
 - `officecli view $FILE html` — Read the returned HTML to audit the rendered output. Each sheet is addressable, charts render inline. Catches `###`, placeholder leakage, pivot layout, row-height clipping.
 - Do not launch `officecli watch` from Metis. If the user wants a live viewer, ask them to open the workbook in Excel / WPS / Numbers.
-Use `view html` as your **first visual check after a batch of edits** — fix at source. For final visual verification, the user opens the `.xlsx` in their Excel / WPS / Numbers viewer.
+When visual confirmation is needed after edits, use `view html` — fix at source. For final visual verification, the user opens the `.xlsx` in their Excel / WPS / Numbers viewer.
 
 **Orient.** Sheets, dimensions, formula counts.
 
@@ -388,11 +388,7 @@ officecli set "$FILE" "/Sheet1/chart[1]/axis[@role=category]" --prop title="Mont
 
 Safe props: `title`, `min`, `max`, `majorGridlines`, `visible`, `labelRotation`.
 
-## QA (Required)
-
-**Assume there are problems. Your job is to find them.**
-
-Your first workbook is almost never correct. Treat QA as a bug hunt, not a confirmation step. If you found zero issues on first inspection, you were not looking hard enough. The formulas look fine **until** you check two of them against source cells.
+## QA (required for creation/editing)
 
 ### Minimum cycle before "done"
 
@@ -471,7 +467,6 @@ EOF
 CLI constraints and gaps to work around — not defects in the output file.
 
 - **Chart series are immutable after create** — to add/change a series: `remove` + `add` with the full series list. (Position is mutable: `set chart[N] --prop anchor=` / `x/y/width/height`.) `remove chart[N]` shifts subsequent indices down; re-add appends at end.
-- **Cross-sheet formula batches run fine through a resident** — a prior "deadlocks even at 3-5 ops" caution no longer reproduces. Pure value-set batches stay reliable at 50-80+ ops too. If you ever hit a hang, fall back to a non-resident one-big-batch or individual `set`. **Multiple resident processes on the same file/machine can still contend** — expect non-deterministic hangs if another agent/session holds a resident on the same file.
 - **Conditional formatting naming asymmetry** — the element name for `--type` is `conditionalformatting`; the path suffix is `/cf[N]`. Use `officecli help xlsx conditionalformatting` for schema, `/cf[N]` for paths.
 - **Sheet `position` prop on add** — help says Add processes `position`, but the prop is often ignored. Reorder with `officecli move --index` / `--after` / `--before` after creating the sheet.
 - **`remove /sheet[N]` cascade guard** — rejects sheet remove/rename when the sheet is referenced by validation / conditional format / sparkline / hyperlink / named range on another sheet. Remove those dependent elements first, then remove the sheet.
@@ -509,9 +504,3 @@ Before calling a color or chart "broken", open the file in the user's actual tar
 | Modifying a file open in Excel | Close it in Excel first |
 | `swap` not reordering sheets | `swap` is for rows/cells. Use `move --after` / `--before` / `--index` for sheets |
 | Cached values missing after write | New formulas get cached values when a human opens the file; `validate` accepts them either way |
-
----
-
-## Metis final override
-
-Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.

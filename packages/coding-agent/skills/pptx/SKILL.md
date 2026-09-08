@@ -3,9 +3,9 @@ name: pptx
 description: "Create, read, extract, or modify Microsoft PowerPoint .pptx files, including slide decks, templates, layouts, notes, comments, merging, and splitting. Use when a .pptx file is input or output, or the user explicitly asks for PowerPoint slides."
 ---
 
-## Metis integration (overrides conflicting rules below)
+## Metis integration
 
-This file embeds the official `pptx` skill from the bundled OfficeCLI 1.0.140.
+This file adapts the official `pptx` skill from the bundled OfficeCLI 1.0.140.
 
 - OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
 - For a fundraising deck, load both chunks below in two separate shell tool calls (not one combined call), concatenate them in order, and treat the result as overriding the generic guidance below. The Metis integration rules in this section still take priority.
@@ -23,12 +23,12 @@ This file embeds the official `pptx` skill from the bundled OfficeCLI 1.0.140.
 - Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered slides, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every presentation must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render a contact sheet or only the relevant slides and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -224,7 +224,7 @@ Copy-level tells live in "Copy reads human".
 
 ## Common Workflow
 
-1. **Metis lifecycle.** Do not open a resident. Every mutating command persists before it returns. Use `batch` for repetitive shape grids.
+1. Use `batch` for repetitive shape grids.
 2. **Orient.** New deck: `officecli create "$FILE"`. Existing: `officecli view "$FILE" outline` first. Never edit blind.
 3. **Title sequence first (plan, don't build yet).** Before creating any slide or shape, write out the full ordered list of slide titles. If someone reading ONLY the titles can't follow the argument, fix the arc now — cheaper in a list than after 14 slides. Pick ONE title grammar — all topic noun-phrases or all action statements, never a mix — and hold it throughout (see "Copy reads human").
 4. **Build in display order.** Add slides in audience-view order: cover → agenda → section-1 divider → section-1 content → section-2 divider → … → closing. `--index` on slide add works, but linear append keeps the build script readable and avoids index-arithmetic bugs. **Before final delivery, confirm slide count + narrative arc match your build plan.** Use the outline for this structural check; a conditional Gate 3 visual audit can confirm it when visual review is needed.
@@ -531,8 +531,6 @@ Then 4 connectors (`Decide→YesBox`, `Decide→NoBox`, `YesBox→Done`, `NoBox�
 
 ## QA (required for creation/editing)
 
-**Assume there are problems.** First render is almost never correct. If you found zero issues, you were not looking hard enough.
-
 ### Delivery Gate (any failure = REJECT, do NOT deliver)
 
 Gates 1–2b are text/schema-level and required for creation/editing. Gate 3 is conditional: run it only when the task needs visual confirmation. A structural delivery is done when Gates 1–2b pass; a visually verified delivery also requires Gate 3 to converge.
@@ -555,7 +553,7 @@ Run this gate only when visual confirmation is needed. Pick **one** path:
 
 **Optional `--grid N`** — only on user request for layout-rhythm, or when `view outline` shows anomalous layout distribution: `officecli view "<file>" screenshot --grid 3 -o "$METIS_WORK_DIR/grid.png"`.
 
-**Per-slide checklist (assume issues exist):**
+**Per-slide checklist:**
 
 - **overlap** — shapes / charts / giant decorative numbers (01/02/03 100pt+) colliding
 - **text overflow** — clipped at slide or shape boundary (KPI cards, narrow boxes)
@@ -574,8 +572,6 @@ REJECT with `slide N: <issue>` lines, else "Gate 3 PASS" (HTML-text fallback add
 
 **Fix-verify (when Gate 3 is used, max 3 cycles).** Fix → re-run Gate 3 → repeat until zero new issues. After 3 rounds without convergence, **stop** and report `slide N: <issue> — attempted: <fixes> — likely root: <template|design-conflict|ambiguous>`.
 
-**Then deliver.** Mutating commands already persist before returning; no separate flush command is needed.
-
 ## Common Pitfalls
 
 Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
@@ -588,9 +584,3 @@ Sanity-check cheatsheet — what breaks on the first try. Design + shell traps.
 | Paths 1-based vs `--index` 0-based | `/slide[1]` = first slide; `--index 0` = first position |
 | `$` in `--prop text=` | Single-quote: `--prop text='$15M'`. Double-quoted `"$15M"` gets shell-expanded to `M` |
 | `\n` / `\t` in `--prop text=` | Interpreted by the CLI: `\n` = paragraph break, `\t` = tab. Double `\\n` for a literal |
-
----
-
-## Metis final override
-
-Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.

@@ -3,9 +3,9 @@ name: docx
 description: "Create, read, extract, or modify Microsoft Word .docx files, including templates, tracked changes, comments, headers, footers, tables, and tables of contents. Use when a .docx file is input or output, or the user explicitly asks for a Word document."
 ---
 
-## Metis integration (overrides conflicting rules below)
+## Metis integration
 
-This file embeds the official `word` skill from the bundled OfficeCLI 1.0.140.
+This file adapts the official `word` skill from the bundled OfficeCLI 1.0.140.
 
 - OfficeCLI is already bundled. Never download, install, self-update, or run `officecli install`. If `officecli --version` fails, report an incomplete Metis installation.
 - For an academic paper, journal article, conference paper, or thesis, run `officecli load_skill academic-paper` once. For a fillable form, questionnaire, contract with input fields, or mail-merge template, run `officecli load_skill word-form` once. Treat the selected specialized skill as overriding the generic guidance below. The Metis integration rules in this section still take priority.
@@ -15,12 +15,12 @@ This file embeds the official `word` skill from the bundled OfficeCLI 1.0.140.
 - Metis creates a unique `$METIS_WORK_DIR` for the current run. Put previews, rendered pages, extracted media, conversions, and other intermediates only there; never create `.work`, `work`, or `tmp` beside an attachment. Start file-producing operations from `cd "$METIS_WORK_DIR"` and pass `-o "$METIS_WORK_DIR/<name>"` when supported. Metis clears the directory after the run.
 - Preserve the input by default and write modifications to a new deliverable unless the user explicitly requests an in-place change to an Metis-owned attachment.
 - Use the fewest sufficient operations and stop when the request is answered. For reading or summarizing, prefer one targeted `view`, `get`, or `query`; do not validate or render unless needed.
-- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Ignore later resident lifecycle instructions: do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
+- Metis disables OfficeCLI auto-resident mode. Each command is self-contained and file-changing commands persist before returning. Do not use `open`, `save`, `close`, or `watch`. Use `batch` for multiple related changes.
 - Never call a separate remote document, image, OCR, or vision service. When visual confirmation is needed, use only the current Metis model's image input as described below.
 
 ### Conditional visual confirmation
 
-The official visual-delivery guidance below is conditional in Metis, not universal. Ignore later rules that say every document must be rendered. Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
+Render and read images only when the task needs confirmation of image content, layout, overlap, overflow, or final visual appearance. If visual confirmation is unnecessary, do not render.
 
 When visual confirmation is needed and the current model accepts image input, render only the relevant pages and use the `read` tool on the resulting PNG files. A printed image path is not image input.
 
@@ -58,8 +58,6 @@ docx paths contain `[]`; some prop values contain `$`. Both are shell metacharac
 If in doubt, `view text` after writing and compare character-for-character.
 
 **Incremental execution.** `officecli` mutates the file on every call. Run commands one at a time and check each exit code — a 50-command script that fails at command 3 cascades silently. After any structural op (new style, table, TOC, section break) run `get` on it before stacking more.
-
-**Metis lifecycle:** Do not open a resident. Every mutating command persists before it returns. For many paragraphs of one style, use `batch` (one pass for the whole array).
 
 **`$FILE` convention.** All commands use `"$FILE"` — set it once (`FILE="your-doc.docx"`). Never copy a literal `doc.docx` / `review.docx` into output — always substitute your actual target.
 
@@ -444,16 +442,14 @@ Three tiers of precision; use the lowest that does the job.
 
 Borders use the format `style;size;color;space`: `single;4;FF0000;1`. Hex colors never start with `#`: `FF0000`. Scheme color names (`accent1..6`, `dark1`/`dark2`, `light1`/`light2`, `hyperlink`) are accepted anywhere a hex color is — prefer hex for stable colors across themes.
 
-## QA (Required)
-
-**Assume there are problems — QA is a bug hunt, not a confirmation step.** Your first document is almost never correct; zero issues on first inspection means you weren't looking hard enough. Headings look fine until `view outline` shows an H3 directly under an H1; the footer shows "Page 1" until `get --depth 3` reveals a static run, not a field.
+## QA (required for creation/editing)
 
 ### Minimum cycle before "done"
 
 1. `officecli view "$FILE" issues` — empty paras, missing alt text, formatting anomalies.
 2. `officecli view "$FILE" outline` — heading hierarchy (no H1 → H3 skips), TOC presence, section count.
 3. `officecli view "$FILE" text --max-lines 400` — typos, stray `\$`/`\t`/`\n` literals, placeholder tokens.
-4. `officecli validate "$FILE"` — schema check (the Delivery Gate re-runs this on the closed, on-disk file).
+4. `officecli validate "$FILE"` — schema check.
 5. **Conditional visual pass.** Only when the task needs visual confirmation and the current model can inspect images, run `officecli view "$FILE" screenshot --grid auto -o "$METIS_WORK_DIR/sheet.png"` and read it. `--grid auto` tiles every page into one image; use `screenshot --page N` for fine checks on a suspect page. If visual confirmation is needed but unavailable, report the unverified visual aspects. If it is not needed, skip this step without rendering.
 6. If anything failed, fix, then **rerun the full cycle** — one fix commonly creates another problem.
 
@@ -569,13 +565,3 @@ When deleting ALL content of a paragraph/list item, also mark the paragraph mark
 ```
 
 Force field recalc on open with `officecli set "$FILE" /settings --prop updateFields=true` (writes `<w:updateFields w:val="true"/>`; covers the layout-dependent fields PAGE / PAGEREF / NUMPAGES / TOC page numbers — no raw-set needed). For SEQ numbering, prefer `set / --prop recalcFields=seq`, which writes correct cached values now without waiting on Word.
-
-### Help pointer
-
-When in doubt: `officecli help docx`, `officecli help docx <element>`, `officecli help docx <verb> <element>`, `--json` for agents. Help is the authoritative schema; this skill is the decision guide.
-
----
-
-## Metis final override
-
-Metis's integration rules above take priority over conflicting generic requirements: simple reads use stdout without intermediate files; OfficeCLI is non-resident; do not install or update tools; do not use separate remote services; save deliverables under `$METIS_ATTACHMENTS_DIR`; keep intermediates under the runtime-created `$METIS_WORK_DIR`; and do not render when visual confirmation is unnecessary.
