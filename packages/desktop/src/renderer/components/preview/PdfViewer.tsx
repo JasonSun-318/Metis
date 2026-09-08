@@ -1,9 +1,11 @@
-import { CaretLeft, CaretRight, SpinnerGap } from "@phosphor-icons/react";
+import { SpinnerGap } from "@phosphor-icons/react";
 import * as pdfjsLib from "pdfjs-dist";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { usePreviewExpansion } from "./PreviewFrame.tsx";
+import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { pdfCMapUrl, pdfStandardFontDataUrl, pdfWorkerSrc } from "./pdf-assets.ts";
-import { PreviewToolbar } from "./PreviewToolbar.tsx";
+import { type PreviewSize, type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
 
 const workerSrc = pdfWorkerSrc();
 if (workerSrc) pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -17,309 +19,254 @@ export interface PdfViewerProps {
 	readonly onReveal?: () => void;
 }
 
-export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault, onReveal }: PdfViewerProps) {
+function PdfPage({
+	doc,
+	number,
+	mode,
+	viewport,
+	initialSize,
+	scrollRef,
+}: {
+	doc: pdfjsLib.PDFDocumentProxy;
+	number: number;
+	mode: PreviewZoom;
+	viewport: PreviewSize;
+	initialSize: PreviewSize;
+	scrollRef: RefObject<HTMLDivElement | null>;
+}) {
 	const { t } = useTranslation();
-	const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-	const [totalPages, setTotalPages] = useState(0);
-	const [currentPage, setCurrentPage] = useState(1);
-	const [pageSizes, setPageSizes] = useState<readonly { width: number; height: number }[]>([]);
-	const [zoom, setZoom] = useState(100);
-	const [inverted, setInverted] = useState(false);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
-	const canvasMapRef = useRef<Map<number, HTMLCanvasElement>>(new Map());
-	const textLayerMapRef = useRef<Map<number, HTMLDivElement>>(new Map());
-	const renderedPages = useRef<Set<number>>(new Set());
-	const queueRef = useRef<number[]>([]);
-	const isProcessingRef = useRef(false);
-	const scrollContainerRef = useRef<HTMLDivElement>(null);
-	const pdfDocRef = useRef<pdfjsLib.PDFDocumentProxy | null>(null);
-	const zoomRef = useRef(zoom);
-	const renderTasksRef = useRef<Map<number, { cancel: () => void }>>(new Map());
+	const wrapper = useRef<HTMLDivElement>(null);
+	const canvas = useRef<HTMLCanvasElement>(null);
+	const textLayer = useRef<HTMLDivElement>(null);
+	const renderChain = useRef<Promise<void>>(Promise.resolve());
+	const [nearby, setNearby] = useState(number <= 3);
+	const [page, setPage] = useState<pdfjsLib.PDFPageProxy | null>(null);
+	const [error, setError] = useState(false);
+	const size = page?.getViewport({ scale: 1 }) ?? initialSize;
+	const scale = previewScale(mode, size, viewport);
 
 	useEffect(() => {
-		pdfDocRef.current = pdfDoc;
-	}, [pdfDoc]);
-
-	useEffect(() => {
-		zoomRef.current = zoom;
-	}, [zoom]);
-
-	const renderPageDirect = useCallback(async (pageNum: number) => {
-		const doc = pdfDocRef.current;
-		const canvas = canvasMapRef.current.get(pageNum);
-		const textLayerDiv = textLayerMapRef.current.get(pageNum);
-		if (!doc || !canvas) return;
-		try {
-			const page = await doc.getPage(pageNum);
-			const context = canvas.getContext("2d");
-			if (!context) return;
-			const dpr = Math.min(window.devicePixelRatio || 1, 2);
-			const scale = (zoomRef.current / 100) * dpr;
-			const viewport = page.getViewport({ scale });
-			canvas.height = viewport.height;
-			canvas.width = viewport.width;
-			canvas.style.width = `${viewport.width / dpr}px`;
-			canvas.style.height = `${viewport.height / dpr}px`;
-			const unscaled = page.getViewport({ scale: 1 });
-			setPageSizes((current) => {
-				const next = [...current];
-				next[pageNum - 1] = { width: unscaled.width, height: unscaled.height };
-				return next;
-			});
-			renderTasksRef.current.get(pageNum)?.cancel();
-			const renderTask = page.render({ canvasContext: context, viewport });
-			renderTasksRef.current.set(pageNum, renderTask);
-			await renderTask.promise;
-			if (textLayerDiv && pdfjsLib.TextLayer) {
-				textLayerDiv.replaceChildren();
-				textLayerDiv.style.width = `${viewport.width / dpr}px`;
-				textLayerDiv.style.height = `${viewport.height / dpr}px`;
-				const textLayer = new pdfjsLib.TextLayer({
-					container: textLayerDiv,
-					textContentSource: page.streamTextContent(),
-					viewport: page.getViewport({ scale: zoomRef.current / 100 }),
-				});
-				await textLayer.render();
-			}
-			renderedPages.current.add(pageNum);
-		} catch {
-			// cancelled or failed
-		} finally {
-			renderTasksRef.current.delete(pageNum);
-		}
-	}, []);
-
-	const scheduleProcessQueue = useCallback(() => {
-		if (isProcessingRef.current) return;
-		isProcessingRef.current = true;
-		void (async () => {
-			try {
-				while (queueRef.current.length > 0) {
-					const pageNum = queueRef.current.shift()!;
-					if (renderedPages.current.has(pageNum)) continue;
-					await renderPageDirect(pageNum);
-				}
-			} finally {
-				isProcessingRef.current = false;
-			}
-		})();
-	}, [renderPageDirect]);
-
-	const enqueuePage = useCallback(
-		(pageNum: number, highPriority = false) => {
-			if (renderedPages.current.has(pageNum)) return;
-			if (highPriority) {
-				queueRef.current = [pageNum, ...queueRef.current.filter((p) => p !== pageNum)];
-			} else if (!queueRef.current.includes(pageNum)) {
-				queueRef.current.push(pageNum);
-			}
-			scheduleProcessQueue();
-		},
-		[scheduleProcessQueue],
-	);
-
-	useEffect(() => {
-		let cancelled = false;
-		setLoading(true);
-		setError(null);
-		setPdfDoc(null);
-		setTotalPages(0);
-		setCurrentPage(1);
-		renderedPages.current.clear();
-		queueRef.current = [];
-		canvasMapRef.current.clear();
-		if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-			setError(t("Failed to load PDF document"));
-			setLoading(false);
+		if (!wrapper.current || typeof IntersectionObserver === "undefined") {
+			setNearby(true);
 			return;
 		}
-		const loadingTask = pdfjsLib.getDocument({
-			data: bytes,
-			cMapUrl: pdfCMapUrl(),
-			cMapPacked: true,
-			standardFontDataUrl: pdfStandardFontDataUrl(),
+		const observer = new IntersectionObserver((entries) => setNearby(entries.some((entry) => entry.isIntersecting)), {
+			root: scrollRef.current,
+			rootMargin: "600px 0px",
 		});
-		void loadingTask.promise.then(
-			async (doc) => {
-				if (cancelled) {
-					void doc.destroy();
-					return;
-				}
-				pdfDocRef.current = doc;
-				setPdfDoc(doc);
-				setTotalPages(doc.numPages);
-				setPageSizes(Array.from({ length: doc.numPages }, () => ({ width: 800, height: 1130 })));
-				setLoading(false);
-				enqueuePage(1, true);
-				if (doc.numPages >= 2) enqueuePage(2);
-				if (doc.numPages >= 3) enqueuePage(3);
+		observer.observe(wrapper.current);
+		return () => observer.disconnect();
+	}, [scrollRef]);
+
+	useEffect(() => {
+		if (!nearby || page) return;
+		let cancelled = false;
+		void doc.getPage(number).then(
+			(value) => {
+				if (!cancelled) setPage(value);
 			},
-			(err) => {
-				if (cancelled) return;
-				setError(err instanceof Error ? err.message : t("Failed to load PDF document"));
-				setLoading(false);
+			() => {
+				if (!cancelled) setError(true);
 			},
 		);
 		return () => {
 			cancelled = true;
-			for (const task of renderTasksRef.current.values()) task.cancel();
-			renderTasksRef.current.clear();
-			void pdfDocRef.current?.destroy();
-			pdfDocRef.current = null;
-			void loadingTask.destroy?.();
 		};
-	}, [bytes, enqueuePage, t]);
+	}, [doc, number, nearby, page]);
 
 	useEffect(() => {
-		if (!pdfDoc || totalPages <= 0) return;
-		const toRender = Array.from(renderedPages.current);
-		renderedPages.current.clear();
-		for (const pageNum of toRender) enqueuePage(pageNum);
-	}, [zoom, pdfDoc, totalPages, enqueuePage]);
-
-	useEffect(() => {
-		if (!pdfDoc || totalPages <= 0) return;
-		const scrollContainer = scrollContainerRef.current;
-		if (!scrollContainer || typeof IntersectionObserver === "undefined") return;
-		const lazyObserver = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries) {
-					if (!entry.isIntersecting) continue;
-					const pageNumStr = (entry.target as HTMLElement).dataset.page;
-					if (!pageNumStr) continue;
-					const pageNum = Number.parseInt(pageNumStr, 10);
-					enqueuePage(pageNum, true);
-					for (const neighbor of [pageNum - 1, pageNum + 1]) {
-						if (neighbor >= 1 && neighbor <= totalPages) enqueuePage(neighbor, false);
-					}
-				}
-			},
-			{ root: scrollContainer, rootMargin: "300px 0px", threshold: 0.05 },
-		);
-		const visibleRatios = new Map<number, number>();
-		const visibilityObserver = new IntersectionObserver(
-			(entries) => {
-				for (const entry of entries) {
-					const pageNumStr = (entry.target as HTMLElement).dataset.page;
-					if (!pageNumStr) continue;
-					visibleRatios.set(Number.parseInt(pageNumStr, 10), entry.intersectionRatio);
-				}
-				let maxRatio = 0;
-				let maxPage = 1;
-				for (const [page, ratio] of visibleRatios) {
-					if (ratio > maxRatio) {
-						maxRatio = ratio;
-						maxPage = page;
-					}
-				}
-				if (maxRatio > 0) setCurrentPage(maxPage);
-			},
-			{ root: scrollContainer, threshold: [0, 0.2, 0.5, 0.8, 1] },
-		);
-		const wrappers = Array.from(scrollContainer.querySelectorAll<HTMLElement>(".pdf-page-wrapper"));
-		for (const wrapper of wrappers) {
-			lazyObserver.observe(wrapper);
-			visibilityObserver.observe(wrapper);
-		}
+		if (!page || !nearby || !canvas.current || !textLayer.current) return;
+		let cancelled = false;
+		let task: ReturnType<pdfjsLib.PDFPageProxy["render"]> | undefined;
+		let layer: InstanceType<typeof pdfjsLib.TextLayer> | undefined;
+		const target = canvas.current;
+		const textTarget = textLayer.current;
+		// A cancelled render must settle before the same canvas can be reused.
+		renderChain.current = renderChain.current
+			.catch(() => {})
+			.then(async () => {
+				if (cancelled) return;
+				const context = target.getContext("2d");
+				if (!context) return;
+				setError(false);
+				const dpr = window.devicePixelRatio || 1;
+				const displayViewport = page.getViewport({ scale });
+				const renderViewport = page.getViewport({ scale: scale * dpr });
+				target.width = Math.ceil(renderViewport.width);
+				target.height = Math.ceil(renderViewport.height);
+				target.style.width = `${displayViewport.width}px`;
+				target.style.height = `${displayViewport.height}px`;
+				task = page.render({ canvasContext: context, viewport: renderViewport });
+				await task.promise;
+				if (cancelled) return;
+				textTarget.replaceChildren();
+				textTarget.style.setProperty("--scale-factor", String(scale));
+				layer = new pdfjsLib.TextLayer({
+					container: textTarget,
+					textContentSource: page.streamTextContent(),
+					viewport: displayViewport,
+				});
+				await layer.render();
+			})
+			.catch(() => {
+				if (!cancelled) setError(true);
+			});
 		return () => {
-			lazyObserver.disconnect();
-			visibilityObserver.disconnect();
+			cancelled = true;
+			task?.cancel();
+			layer?.cancel();
 		};
-	}, [pdfDoc, totalPages, enqueuePage]);
+	}, [page, nearby, scale]);
 
-	const scrollToPage = (pageNum: number) => {
-		scrollContainerRef.current
-			?.querySelector<HTMLElement>(`.pdf-page-wrapper[data-page="${pageNum}"]`)
-			?.scrollIntoView({ behavior: "smooth", block: "start" });
+	return (
+		<div
+			ref={wrapper}
+			className="pdf-page-wrapper"
+			data-page={number}
+			style={{ width: size.width * scale, height: size.height * scale }}
+		>
+			<canvas ref={canvas} />
+			<div ref={textLayer} className="textLayer" />
+			{error && (
+				<div className="preview-error-state" role="alert">
+					{t("Failed to render page")}
+				</div>
+			)}
+		</div>
+	);
+}
+
+export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault, onReveal }: PdfViewerProps) {
+	const { t } = useTranslation();
+	const [doc, setDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+	const [initialSize, setInitialSize] = useState<PreviewSize>({ width: 800, height: 1130 });
+	const [currentPage, setCurrentPage] = useState(1);
+	const [mode, setMode] = useState<PreviewZoom>("width");
+	const [inverted, setInverted] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const { ref: scrollRef, size } = usePreviewViewport();
+	const resizing = usePreviewExpansion()?.resizing ?? false;
+	const anchor = useRef({ page: 1, fraction: 0 });
+	const zoom = previewScale(mode, initialSize, size) * 100;
+
+	useEffect(() => {
+		let cancelled = false;
+		setDoc(null);
+		setError(null);
+		setMode("width");
+		setCurrentPage(1);
+		anchor.current = { page: 1, fraction: 0 };
+		if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
+			setError(t("Failed to load PDF document"));
+			return;
+		}
+		// PDF.js transfers ownership to its worker. Keep the preview cache's bytes intact.
+		const task = pdfjsLib.getDocument({
+			data: Uint8Array.from(bytes),
+			cMapUrl: pdfCMapUrl(),
+			cMapPacked: true,
+			standardFontDataUrl: pdfStandardFontDataUrl(),
+		});
+		void task.promise
+			.then(async (document) => {
+				const first = await document.getPage(1);
+				if (cancelled) return;
+				const viewport = first.getViewport({ scale: 1 });
+				setInitialSize({ width: viewport.width, height: viewport.height });
+				setDoc(document);
+			})
+			.catch((cause) => {
+				if (!cancelled) setError(cause instanceof Error ? cause.message : t("Failed to load PDF document"));
+			});
+		return () => {
+			cancelled = true;
+			void task.destroy();
+		};
+	}, [bytes, t]);
+
+	useLayoutEffect(() => {
+		const container = scrollRef.current;
+		const page = container?.querySelector<HTMLElement>(`[data-page="${anchor.current.page}"]`);
+		if (!container || !page) return;
+		container.scrollTop +=
+			page.getBoundingClientRect().top -
+			container.getBoundingClientRect().top -
+			16 +
+			anchor.current.fraction * page.offsetHeight;
+	}, [mode, size, scrollRef, resizing]);
+
+	const trackPosition = () => {
+		if (resizing) return;
+		const container = scrollRef.current;
+		if (!container) return;
+		const top = container.getBoundingClientRect().top + 16;
+		const pages = Array.from(container.querySelectorAll<HTMLElement>(".pdf-page-wrapper"));
+		const page =
+			pages.find(
+				(element) =>
+					element.getBoundingClientRect().bottom >
+					top + Math.min(element.offsetHeight / 2, container.clientHeight / 2),
+			) ?? pages.at(-1);
+		if (!page) return;
+		const number = Number(page.dataset.page);
+		anchor.current = {
+			page: number,
+			fraction: (top - page.getBoundingClientRect().top) / Math.max(1, page.offsetHeight),
+		};
+		setCurrentPage(number);
 	};
-
-	const pageControls =
-		totalPages > 0 ? (
-			<div className="preview-page-navigator">
-				<button
-					aria-label={t("Previous page")}
-					className="preview-toolbar-btn"
-					disabled={currentPage <= 1}
-					onClick={() => currentPage > 1 && scrollToPage(currentPage - 1)}
-					type="button"
-				>
-					<CaretLeft aria-hidden="true" size={13} />
-				</button>
-				<span className="preview-page-info">
-					{currentPage} / {totalPages}
-				</span>
-				<button
-					aria-label={t("Next page")}
-					className="preview-toolbar-btn"
-					disabled={currentPage >= totalPages}
-					onClick={() => currentPage < totalPages && scrollToPage(currentPage + 1)}
-					type="button"
-				>
-					<CaretRight aria-hidden="true" size={13} />
-				</button>
-			</div>
-		) : null;
-
+	const goToPage = (number: number) => {
+		const container = scrollRef.current;
+		const page = container?.querySelector<HTMLElement>(`[data-page="${number}"]`);
+		if (!container || !page) return;
+		container.scrollTop += page.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
+		anchor.current = { page: number, fraction: 0 };
+		setCurrentPage(number);
+	};
 	return (
 		<div className="universal-previewer pdf-previewer">
 			<PreviewToolbar
 				byteLength={byteLength}
-				extraActions={pageControls}
 				fileName={fileName}
-				isInverted={inverted}
 				onClose={onClose}
 				onOpenDefault={onOpenDefault}
 				onReveal={onReveal}
-				onToggleInvert={() => setInverted((value) => !value)}
-				onZoomIn={() => setZoom((value) => Math.min(300, value + 20))}
-				onZoomOut={() => setZoom((value) => Math.max(50, value - 20))}
-				onZoomReset={() => setZoom(100)}
-				showInvertToggle
 				zoom={zoom}
+				zoomMode={mode}
+				onZoomModeChange={setMode}
+				onZoomIn={() => setMode(Math.max(10, Math.min(300, Math.round(zoom) + 20)))}
+				onZoomOut={() => setMode(Math.max(10, Math.min(300, Math.round(zoom) - 20)))}
+				isInverted={inverted}
+				onToggleInvert={() => setInverted((value) => !value)}
+				showInvertToggle
+				extraActions={doc && <PreviewPageControls current={currentPage} total={doc.numPages} onChange={goToPage} />}
 			/>
-			<div className={`preview-viewport pdf-viewport${inverted ? " is-inverted" : ""}`}>
-				{loading ? (
+			<div
+				ref={scrollRef}
+				onScroll={trackPosition}
+				className={`preview-viewport pdf-canvas-container${inverted ? " is-inverted" : ""}`}
+			>
+				{error ? (
+					<div className="preview-error-state" role="alert">
+						{error}
+					</div>
+				) : !doc ? (
 					<div className="preview-loading-state">
-						<SpinnerGap aria-hidden="true" className="is-spinning" size={28} />
+						<SpinnerGap className="is-spinning" size={28} />
 						<span>{t("Loading PDF document…")}</span>
 					</div>
-				) : error ? (
-					<div className="preview-error-state">
-						<span>{error}</span>
-					</div>
 				) : (
-					<div className="pdf-canvas-container" ref={scrollContainerRef}>
-						{Array.from({ length: totalPages }, (_, index) => {
-							const pageNum = index + 1;
-							const size = pageSizes[index] ?? { width: 800, height: 1130 };
-							return (
-								<div
-									className="pdf-page-wrapper"
-									data-page={pageNum}
-									key={pageNum}
-									style={{
-										width: `${Math.round(size.width * (zoom / 100))}px`,
-										aspectRatio: `${size.width} / ${size.height}`,
-									}}
-								>
-									<canvas
-										ref={(element) => {
-											if (element) canvasMapRef.current.set(pageNum, element);
-											else canvasMapRef.current.delete(pageNum);
-										}}
-									/>
-									<div
-										className="textLayer"
-										ref={(element) => {
-											if (element) textLayerMapRef.current.set(pageNum, element);
-											else textLayerMapRef.current.delete(pageNum);
-										}}
-									/>
-								</div>
-							);
-						})}
-					</div>
+					Array.from({ length: doc.numPages }, (_, index) => (
+						<PdfPage
+							key={index}
+							doc={doc}
+							number={index + 1}
+							mode={mode}
+							viewport={size}
+							initialSize={initialSize}
+							scrollRef={scrollRef}
+						/>
+					))
 				)}
 			</div>
 		</div>

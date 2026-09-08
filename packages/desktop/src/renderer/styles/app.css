@@ -2784,14 +2784,45 @@ classes so their inline layout wins the cascade. */
 	-webkit-app-region: no-drag;
 }
 
+.preview-frame {
+	position: relative;
+	inset: auto;
+	margin: 0;
+	padding: 0;
+	border: 0;
+	width: 100%;
+	height: 100%;
+	max-width: none;
+	max-height: none;
+	min-width: 0;
+	min-height: 0;
+	flex: 1 1 0%;
+	color: var(--text);
+	background: var(--app-bg);
+	overflow: hidden;
+}
+.preview-frame[open] { display: flex; }
+.preview-frame:modal {
+	position: fixed;
+	inset: 24px;
+	width: calc(100vw - 48px);
+	height: calc(100dvh - 48px);
+	margin: auto;
+	border: 1px solid var(--border-weak);
+	border-radius: 12px;
+	box-shadow: var(--overlay-shadow);
+}
+.preview-frame::backdrop { background: rgb(0 0 0 / 55%); }
+.universal-previewer { min-width: 0; container: preview / inline-size; }
 .preview-toolbar {
-	display: flex;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto auto auto;
+	grid-template-areas: "meta pages zoom actions";
 	align-items: center;
-	justify-content: space-between;
 	gap: 8px;
-	height: 38px;
+	height: auto;
 	min-height: 38px;
-	padding: 0 12px;
+	padding: 5px 8px;
 	background: var(--panel);
 	border-bottom: 1px solid var(--border-weak);
 	font-size: 12px;
@@ -2799,50 +2830,32 @@ classes so their inline layout wins the cascade. */
 	z-index: 5;
 	-webkit-app-region: no-drag;
 }
-
-.preview-toolbar-meta {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-	min-width: 0;
-	flex-shrink: 1;
-}
-
-.preview-toolbar-title {
-	font-weight: 500;
-	font-size: 12px;
+.preview-toolbar-meta { grid-area: meta; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.preview-toolbar-meta > svg { flex: none; }
+.preview-toolbar-title { min-width: 0; font-weight: 500; font-size: 12px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.preview-toolbar-size { font-size: 11px; color: var(--text-09); padding: 4px 8px; }
+.preview-toolbar-center { grid-area: pages; display: flex; align-items: center; min-width: 0; }
+.preview-toolbar-zoom { grid-area: zoom; min-width: 0; }
+.preview-toolbar-actions { grid-area: actions; display: flex; align-items: center; gap: 4px; }
+.preview-actions-menu {
+	position: fixed;
+	inset: auto;
+	margin: 0;
+	width: 200px;
+	box-sizing: border-box;
+	padding: 6px;
+	background: var(--panel);
 	color: var(--text);
-	white-space: nowrap;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	max-width: 180px;
-}
-
-.preview-toolbar-size {
-	font-size: 11px;
-	color: var(--text-09);
-	padding: 1px 5px;
-	background: var(--surface-04);
-	border-radius: 4px;
 	border: 1px solid var(--border-weak);
+	border-radius: 8px;
+	box-shadow: var(--overlay-shadow);
 }
-
-.preview-toolbar-center {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	flex: 1;
-	min-width: 0;
-}
-
-.preview-toolbar-actions {
-	display: flex;
-	align-items: center;
-	gap: 4px;
-	flex-shrink: 0;
-}
+.preview-actions-menu:popover-open { display: flex; flex-direction: column; gap: 2px; }
+.preview-actions-menu button { border: 0; border-radius: 4px; padding: 8px; text-align: left; color: inherit; background: transparent; cursor: pointer; }
+.preview-actions-menu button:hover { background: var(--surface-08); }
 
 .preview-toolbar-btn {
+	flex: none;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -2883,6 +2896,8 @@ classes so their inline layout wins the cascade. */
 }
 
 .preview-zoom-label {
+	width: 96px;
+	height: 26px;
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 	color: var(--text-18);
@@ -2909,12 +2924,26 @@ classes so their inline layout wins the cascade. */
 }
 
 .preview-page-info {
+	white-space: nowrap;
 	font-size: 11px;
 	font-variant-numeric: tabular-nums;
 	color: var(--text-18);
 	padding: 0 4px;
 	min-width: 44px;
 	text-align: center;
+}
+
+@container preview (max-width: 620px) {
+	.preview-toolbar {
+		grid-template-columns: minmax(0, 1fr) auto;
+		grid-template-areas: "meta actions" "pages zoom";
+		gap: 4px 6px;
+	}
+	.preview-toolbar-actions, .preview-toolbar-zoom { justify-self: end; }
+	.preview-toolbar-zoom:empty, .preview-toolbar-center:empty { display: none; }
+	.preview-zoom-label { width: 80px; min-width: 0; }
+	.preview-page-navigator { gap: 0; padding-inline: 0; }
+	.preview-page-info { min-width: 0; max-width: 64px; overflow: hidden; text-overflow: ellipsis; }
 }
 
 .preview-viewport {
@@ -2955,27 +2984,22 @@ classes so their inline layout wins the cascade. */
 }
 
 /* PDF Previewer */
-.pdf-viewport {
-	display: flex;
-	justify-content: center;
-	padding: 16px;
-	background: var(--surface-00);
-}
-
 .pdf-canvas-container {
 	display: flex;
 	flex-direction: column;
-	align-items: center;
-	overflow: auto;
-	width: 100%;
-	height: 100%;
-	padding: 24px 16px;
+	align-items: stretch;
+	padding: 16px;
 	box-sizing: border-box;
+	scrollbar-gutter: stable;
+	overflow-anchor: none;
+	background: var(--surface-00);
 }
+.pptx-viewport { padding: 16px; box-sizing: border-box; scrollbar-gutter: stable; }
+.pptx-render-host { width: 100%; min-width: 0; }
 
 .pdf-page-wrapper {
 	position: relative;
-	margin-bottom: 20px;
+	margin: 0 auto 20px;
 	flex-shrink: 0;
 	background: #ffffff;
 	box-shadow: var(--overlay-shadow);
@@ -3004,16 +3028,13 @@ classes so their inline layout wins the cascade. */
 	color: transparent;
 }
 
-.pdf-viewport.is-inverted .pdf-page-wrapper {
+.pdf-canvas-container.is-inverted .pdf-page-wrapper {
 	background: #1e2029;
 	filter: invert(1) hue-rotate(180deg);
 }
 
-.pdf-canvas-container canvas {
-	display: block;
-	max-width: 100%;
-	height: auto;
-}
+.pdf-page-wrapper .preview-error-state { position: absolute; inset: 0; }
+.pdf-canvas-container.is-inverted { filter: none; }
 
 /* Excel Previewer */
 .excel-search-bar {

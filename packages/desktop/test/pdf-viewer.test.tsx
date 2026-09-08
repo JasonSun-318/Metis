@@ -2,10 +2,13 @@
 
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const getDocument = vi.fn();
 const destroy = vi.fn();
+let resize: () => void = () => {};
+let width = 480;
+const render = vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() }));
 
 vi.mock("pdfjs-dist", () => ({
 	GlobalWorkerOptions: { workerSrc: "" },
@@ -26,54 +29,98 @@ vi.mock("../src/renderer/components/preview/pdf-assets.ts", () => ({
 
 describe("PdfViewer", () => {
 	beforeEach(() => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		width = 480;
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(() => width);
+		vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(600);
+		vi.stubGlobal(
+			"ResizeObserver",
+			class {
+				constructor(callback: () => void) {
+					resize = callback;
+				}
+				observe() {}
+				disconnect() {}
+			},
+		);
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({} as CanvasRenderingContext2D);
+		render.mockClear();
 		getDocument.mockReset();
 		destroy.mockReset();
 		getDocument.mockReturnValue({
 			promise: Promise.resolve({
 				numPages: 2,
 				getPage: async () => ({
-					getViewport: () => ({
-						width: 100,
-						height: 140,
+					getViewport: ({ scale }: { scale: number }) => ({
+						width: 960 * scale,
+						height: 540 * scale,
 						clone() {
 							return this;
 						},
 					}),
 					streamTextContent: () => ({}),
-					render: () => ({ promise: Promise.resolve() }),
+					render,
 				}),
 				destroy,
 			}),
+			destroy,
 		});
 	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
+		document.body.replaceChildren();
+	});
 
-	it(
-		"opens the document from raw bytes and destroys it on unmount",
-		async () => {
-			const { PdfViewer } = await import("../src/renderer/components/preview/PdfViewer.tsx");
-			const container = document.createElement("div");
-			document.body.append(container);
-			const root = createRoot(container);
-			const bytes = new Uint8Array([1, 2, 3, 4]);
-			await act(async () => {
-				root.render(
-					<PdfViewer bytes={bytes} byteLength={4} fileName="a.pdf" onOpenDefault={() => {}} onReveal={() => {}} />,
-				);
-				await Promise.resolve();
-			});
-			expect(getDocument).toHaveBeenCalledWith(
-				expect.objectContaining({
-					data: bytes,
-					cMapPacked: true,
-					cMapUrl: "app://renderer/pdfjs/cmaps/",
-					standardFontDataUrl: "app://renderer/pdfjs/standard_fonts/",
-				}),
+	it("opens the document from raw bytes and destroys it on unmount", async () => {
+		const { PdfViewer } = await import("../src/renderer/components/preview/PdfViewer.tsx");
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const bytes = new Uint8Array([1, 2, 3, 4]);
+		await act(async () => {
+			root.render(
+				<PdfViewer bytes={bytes} byteLength={4} fileName="a.pdf" onOpenDefault={() => {}} onReveal={() => {}} />,
 			);
-			await act(async () => {
-				root.unmount();
-			});
-			expect(destroy).toHaveBeenCalled();
-		},
-		15000,
-	);
+			await Promise.resolve();
+		});
+		expect(getDocument.mock.calls[0]![0].data.buffer).not.toBe(bytes.buffer);
+		expect(container.querySelector('select[aria-label="Zoom"]')?.getAttribute("data-mode")).toBe("width");
+		expect(getDocument).toHaveBeenCalledWith(
+			expect.objectContaining({
+				data: bytes,
+				cMapPacked: true,
+				cMapUrl: "app://renderer/pdfjs/cmaps/",
+				standardFontDataUrl: "app://renderer/pdfjs/standard_fonts/",
+			}),
+		);
+		const page = container.querySelector<HTMLElement>(".pdf-page-wrapper")!;
+		expect(page.style.width).toBe("480px");
+		await act(async () => {
+			width = 280;
+			resize();
+		});
+		expect(page.style.width).toBe("280px");
+		const select = container.querySelector<HTMLSelectElement>('select[aria-label="Zoom"]')!;
+		await act(async () => {
+			select.value = "100";
+			select.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		expect(page.style.width).toBe("960px");
+		await act(async () => {
+			width = 1000;
+			resize();
+		});
+		expect(page.style.width).toBe("960px");
+		await act(async () => {
+			select.value = "page";
+			select.dispatchEvent(new Event("change", { bubbles: true }));
+		});
+		expect(Number.parseFloat(page.style.height)).toBeLessThanOrEqual(600);
+		expect(render).toHaveBeenCalled();
+		await act(async () => {
+			root.unmount();
+		});
+		expect(destroy).toHaveBeenCalled();
+	}, 15000);
 });

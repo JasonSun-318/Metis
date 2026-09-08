@@ -56,3 +56,17 @@ if (typeof Range !== "undefined") {
 	Object.defineProperty(Range.prototype, "getBoundingClientRect", { configurable: true, value: () => emptyRect });
 	Object.defineProperty(Range.prototype, "getClientRects", { configurable: true, value: () => [] });
 }
+
+// jsdom does not implement native dialog/popover transitions; browser coverage exercises the real APIs.
+if (typeof HTMLDialogElement !== "undefined") {
+	HTMLDialogElement.prototype.close ??= function () {
+		this.removeAttribute("open");
+	};
+	HTMLDialogElement.prototype.showModal ??= function () {
+		this.setAttribute("open", "");
+	};
+}
+if (typeof HTMLElement !== "undefined") {
+	HTMLElement.prototype.hidePopover ??= () => {};
+	HTMLElement.prototype.showPopover ??= () => {};
+}

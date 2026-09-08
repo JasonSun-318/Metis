@@ -7,6 +7,7 @@ import { ExcelViewer } from "./ExcelViewer.tsx";
 import { ImageViewer } from "./ImageViewer.tsx";
 import { PdfViewer } from "./PdfViewer.tsx";
 import { PptxViewer } from "./PptxViewer.tsx";
+import { PreviewFrame } from "./PreviewFrame.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import { TextViewer } from "./TextViewer.tsx";
 import { previewBytesCache, previewCacheKey } from "./preview-bytes-cache.ts";
@@ -75,7 +76,15 @@ function PreviewShell({
 	);
 }
 
-export function PreviewHost({ file, api, active, onClose, onError }: PreviewHostProps) {
+export function PreviewHost(props: PreviewHostProps) {
+	return (
+		<PreviewFrame active={props.active}>
+			<PreviewContent {...props} />
+		</PreviewFrame>
+	);
+}
+
+function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProps) {
 	const { t } = useTranslation();
 	const kind = classifyPreviewKind(file.name);
 	const [data, setData] = useState<LoadedPreview | null>(null);
