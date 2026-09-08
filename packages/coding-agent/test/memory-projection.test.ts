@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getAutoMemoryPaths, getAutoMemoryRoot, getMemorySqlitePath, loadAutoMemory } from "../src/core/auto-memory.ts";
 import { memoryProjectIdentity } from "../src/core/memory/memory-project.ts";
-import { renderProjection, writeProjection } from "../src/core/memory/memory-projection.ts";
+import { writeProjection } from "../src/core/memory/memory-projection.ts";
 import { openMemoryStore } from "../src/core/memory/memory-store.ts";
 import type { MemoryFact } from "../src/core/memory/memory-types.ts";
 
@@ -27,79 +27,6 @@ describe("memory projection", () => {
 	const dirs: string[] = [];
 	afterEach(() => {
 		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
-	});
-
-	it("renders one preferences index line and a topic file with both fact texts", () => {
-		const facts = [
-			fact({
-				id: "a",
-				topicFile: "preferences.md",
-				text: "User prefers Chinese replies",
-				createdAt: "2026-08-21T00:00:00.000Z",
-			}),
-			fact({
-				id: "b",
-				topicFile: "preferences.md",
-				text: "User likes concise answers",
-				createdAt: "2026-08-21T01:00:00.000Z",
-			}),
-		];
-
-		const rendered = renderProjection(facts);
-		const lines = rendered.indexMarkdown.split(/\r?\n/).filter((line) => line.trim().length > 0);
-		expect(lines).toHaveLength(1);
-		expect(lines[0]).toMatch(INDEX_ENTRY);
-		expect(lines[0]).toMatch(/^- \[preferences\.md\]\(preferences\.md\) — /);
-		const sentence = lines[0]!.split(" — ", 2)[1]!;
-		expect(sentence.length).toBeLessThanOrEqual(120);
-		expect(sentence).toContain("Chinese");
-		expect(sentence).toContain("concise");
-
-		const topic = rendered.topicFiles.get("preferences.md");
-		expect(topic).toBeDefined();
-		expect(topic).toContain("User prefers Chinese replies");
-		expect(topic).toContain("User likes concise answers");
-		expect(rendered.truncated).toBe(false);
-		expect(rendered.omittedTopicCount).toBe(0);
-	});
-
-	it("truncates the returned index to maxIndexLines by latest createdAt", () => {
-		const facts: MemoryFact[] = [];
-		for (let i = 0; i < 205; i++) {
-			facts.push(
-				fact({
-					id: `t${i}`,
-					topicFile: `topic-${String(i).padStart(3, "0")}.md`,
-					text: `Fact ${i}`,
-					createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, i)).toISOString(),
-				}),
-			);
-		}
-
-		const rendered = renderProjection(facts, { maxIndexLines: 200 });
-		const lines = rendered.indexMarkdown.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
-		expect(lines).toHaveLength(200);
-		expect(rendered.truncated).toBe(true);
-		expect(rendered.omittedTopicCount).toBe(5);
-		expect(lines[0]).toContain("topic-204.md");
-		expect(lines[199]).toContain("topic-005.md");
-		expect(rendered.topicFiles.size).toBe(205);
-	});
-
-	it("keeps a multiline Unicode retrieval sentence on one 120-code-point line", () => {
-		const rendered = renderProjection([
-			fact({
-				id: "multiline",
-				topicFile: "notes.md",
-				text: `line one\nline two ${"界".repeat(200)}`,
-				createdAt: "2026-08-21T00:00:00.000Z",
-			}),
-		]);
-		const lines = rendered.indexMarkdown.split("\n");
-		expect(lines).toHaveLength(1);
-		const summary = lines[0]!.split(" — ")[1]!;
-		expect(summary).toContain("line one line two");
-		expect([...summary]).toHaveLength(120);
 	});
 
 	it("writeProjection writes the bounded catalog on disk", async () => {
@@ -125,7 +52,7 @@ describe("memory projection", () => {
 			fact({
 				id: "g2",
 				topicFile: "preferences.md",
-				text: "User likes concise answers",
+				text: `User likes concise answers\n${"🧠".repeat(120)}`,
 				createdAt: "2026-08-21T01:00:00.000Z",
 			}),
 		);
@@ -152,6 +79,10 @@ describe("memory projection", () => {
 		const globalLines = globalIndex.split(/\r?\n/).filter((line) => INDEX_ENTRY.test(line));
 		expect(globalLines).toHaveLength(1);
 		expect(globalLines[0]).toMatch(/^- \[preferences\.md\]\(preferences\.md\) — /);
+		const summary = globalLines[0]!.split(" — ")[1]!;
+		expect(summary).toContain("User prefers Chinese replies User likes concise answers 🧠");
+		expect([...summary]).toHaveLength(120);
+		expect(summary).not.toContain("\uFFFD");
 		const preferences = readFileSync(join(paths.global.directory, "preferences.md"), "utf8");
 		expect(preferences).toContain("User prefers Chinese replies");
 		expect(preferences).toContain("User likes concise answers");

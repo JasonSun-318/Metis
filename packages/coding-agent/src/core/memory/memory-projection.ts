@@ -12,50 +12,16 @@ import {
 } from "../durable-file.ts";
 import { withMemoryRootLock } from "./memory-lock.ts";
 import type { MemoryProjectionFact, MemoryStore } from "./memory-store.ts";
-import { isManagedProjectionTopicFile, MAX_TOPICS_PER_CONTEXT, type MemoryFact } from "./memory-types.ts";
+import { isManagedProjectionTopicFile, MAX_TOPICS_PER_CONTEXT } from "./memory-types.ts";
 
 const INDEX_SENTENCE_MAX = 120;
 const INDEX_MAX_BYTES = 25 * 1024;
 const STRICT_INDEX_ENTRY = /^- \[([^\]]+\.md)\]\(\1\) — .{1,120}$/u;
 
-export interface RenderProjectionOptions {
-	maxIndexLines?: number;
-}
-export interface ProjectionRenderResult {
-	indexMarkdown: string;
-	topicFiles: Map<string, string>;
-	truncated: boolean;
-	omittedTopicCount: number;
-}
-interface TopicGroup {
-	topicFile: string;
-	facts: MemoryFact[];
-	latestCreatedAt: string;
-}
 interface TopicMetadata {
 	topicFile: string;
 	latestCreatedAt: string;
 	sentence: string;
-}
-
-export function renderProjection(
-	facts: readonly MemoryFact[],
-	options: RenderProjectionOptions = {},
-): ProjectionRenderResult {
-	const groups = groupByTopic(facts);
-	groups.sort((a, b) => b.latestCreatedAt.localeCompare(a.latestCreatedAt) || a.topicFile.localeCompare(b.topicFile));
-	const topicFiles = new Map(
-		groups.map((group) => [group.topicFile, group.facts.map((fact) => fact.text).join("\n")]),
-	);
-	const visible = options.maxIndexLines === undefined ? groups : groups.slice(0, options.maxIndexLines);
-	return {
-		indexMarkdown: visible
-			.map((group) => indexLine(group.topicFile, buildRetrievalSentence(group.facts.map((fact) => fact.text))))
-			.join("\n"),
-		topicFiles,
-		truncated: visible.length < groups.length,
-		omittedTopicCount: groups.length - visible.length,
-	};
 }
 
 export async function withMemoryProjectionLock<T>(agentDir: string, fn: () => Promise<T> | T): Promise<T> {
@@ -213,27 +179,8 @@ function removeStableGeneratedTopic(path: string): void {
 	unlinkSync(path);
 }
 
-function groupByTopic(facts: readonly MemoryFact[]): TopicGroup[] {
-	const byTopic = new Map<string, MemoryFact[]>();
-	for (const fact of facts) {
-		const list = byTopic.get(fact.topicFile);
-		if (list) list.push(fact);
-		else byTopic.set(fact.topicFile, [fact]);
-	}
-	return [...byTopic].map(([topicFile, topicFacts]) => {
-		topicFacts.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-		return { topicFile, facts: topicFacts, latestCreatedAt: topicFacts.at(-1)!.createdAt };
-	});
-}
-
 function indexLine(topicFile: string, sentence: string): string {
 	return `- [${topicFile}](${topicFile}) — ${sentence || "Memory facts"}`;
-}
-
-function buildRetrievalSentence(texts: readonly string[]): string {
-	let result = "";
-	for (const text of texts) result = appendRetrievalText(result, text);
-	return result;
 }
 
 function appendRetrievalText(current: string, text: string): string {
