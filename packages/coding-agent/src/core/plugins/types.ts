@@ -56,6 +56,7 @@ export interface PluginSkillComponent {
 	originalName: string; // original name in SKILL.md
 	filePath: string; // absolute path in controlled packages directory
 	baseDir: string;
+	disableModelInvocation?: boolean;
 }
 
 export interface PluginMcpComponent {

@@ -392,6 +392,24 @@ export {
 	reducePlanState,
 	type StoredPlan,
 } from "./core/plan-state.ts";
+export {
+	createInitialPluginRegistry,
+	getPluginCacheDir,
+	getPluginDataDir,
+	getPluginLockPath,
+	getPluginPackageDir,
+	getPluginPackagesDir,
+	getPluginRegistryPath,
+	getPluginsDir,
+	type NormalizedComponent,
+	type NormalizedPluginPackage,
+	OFFICIAL_MARKET_ID,
+	OFFICIAL_MARKET_NAME,
+	OFFICIAL_MARKET_URL,
+	readPluginRegistry,
+	readPluginSnapshot,
+	withPluginRegistryLock,
+} from "./core/plugins/registry.ts";
 // Plugin system types
 export type {
 	CapabilityKind,

@@ -197,6 +197,24 @@ export {
 	reducePlanState,
 	type StoredPlan,
 } from "./plan-state.ts";
+export {
+	createInitialPluginRegistry,
+	getPluginCacheDir,
+	getPluginDataDir,
+	getPluginLockPath,
+	getPluginPackageDir,
+	getPluginPackagesDir,
+	getPluginRegistryPath,
+	getPluginsDir,
+	type NormalizedComponent,
+	type NormalizedPluginPackage,
+	OFFICIAL_MARKET_ID,
+	OFFICIAL_MARKET_NAME,
+	OFFICIAL_MARKET_URL,
+	readPluginRegistry,
+	readPluginSnapshot,
+	withPluginRegistryLock,
+} from "./plugins/registry.ts";
 export type {
 	CapabilityKind,
 	MarketRecord,
