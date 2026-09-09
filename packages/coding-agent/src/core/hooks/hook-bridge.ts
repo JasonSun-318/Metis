@@ -328,11 +328,16 @@ async function runMatchingHooks(
 			if (effect.blockReason && ctx.ui?.notify) {
 				ctx.ui.notify(`[Hook: ${hook.name}] ${effect.blockReason}`, "warning");
 			}
+			if (effect.continueReason && ctx.ui?.notify) {
+				ctx.ui.notify(`[Hook: ${hook.name}] ${effect.continueReason}`, "info");
+			}
 			results.push({ hook, result, effect });
-			// Short-circuit on explicit block for UserPromptSubmit and command-v1 PreToolUse
+			// Short-circuit on explicit block or continuation
 			if (
-				effect.blockReason &&
-				(hook.event === "UserPromptSubmit" || (hook.event === "PreToolUse" && hook.protocol === "command-v1"))
+				(effect.blockReason &&
+					(hook.event === "UserPromptSubmit" ||
+						(hook.event === "PreToolUse" && hook.protocol === "command-v1"))) ||
+				(effect.continueReason && hook.event === "Stop")
 			) {
 				break;
 			}
@@ -365,7 +370,8 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 			);
 			const startHooks = allHooks.filter((hook) => hook.event === "SessionStart");
 			const inputHooks = allHooks.filter((hook) => hook.event === "UserPromptSubmit");
-			const stopHooks = allHooks.filter((hook) => hook.event === "Stop");
+			const commandStopHooks = allHooks.filter((hook) => hook.event === "Stop" && hook.protocol === "command-v1");
+			const legacyStopHooks = allHooks.filter((hook) => hook.event === "Stop" && hook.protocol !== "command-v1");
 
 			const preToolContexts = new Map<string, string>();
 
@@ -476,11 +482,29 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 				});
 			}
 
-			if (stopHooks.length > 0 || toolHooks.length > 0) {
+			if (commandStopHooks.length > 0) {
+				metis.on("before_agent_stop", async (event, ctx) => {
+					const results = await runMatchingHooks(commandStopHooks, "Stop", ctx, () => ({
+						lastAssistantMessage: event.lastAssistantMessage,
+						stopHookActive: event.stopHookActive,
+					}));
+					for (const { hook, effect } of results) {
+						if (effect?.continueReason) {
+							return {
+								continueReason: effect.continueReason,
+								context: effect.context ? `[Hook: ${hook.name}]\n${effect.context}` : undefined,
+							};
+						}
+					}
+					return undefined;
+				});
+			}
+
+			if (legacyStopHooks.length > 0 || toolHooks.length > 0 || commandStopHooks.length > 0) {
 				metis.on("agent_settled", async (_event, ctx) => {
 					preToolContexts.clear();
-					if (stopHooks.length > 0) {
-						await runMatchingHooks(stopHooks, "Stop", ctx, () => ({}));
+					if (legacyStopHooks.length > 0) {
+						await runMatchingHooks(legacyStopHooks, "Stop", ctx, () => ({}));
 					}
 				});
 			}

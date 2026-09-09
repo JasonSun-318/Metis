@@ -14,6 +14,8 @@ import type { BuildSystemPromptOptions } from "../system-prompt.ts";
 import type {
 	BeforeAgentStartEvent,
 	BeforeAgentStartEventResult,
+	BeforeAgentStopEvent,
+	BeforeAgentStopEventResult,
 	BeforeProviderHeadersEvent,
 	BeforeProviderRequestEvent,
 	CompactOptions,
@@ -136,6 +138,7 @@ type RunnerEmitEvent = Exclude<
 	| ResourcesDiscoverEvent
 	| InputEvent
 	| SessionStartEvent
+	| BeforeAgentStopEvent
 >;
 
 type SessionBeforeEvent = Extract<
@@ -1238,5 +1241,33 @@ export class ExtensionRunner {
 		}
 
 		return accumulatedContext ? { context: accumulatedContext } : undefined;
+	}
+
+	/** Emit before_agent_stop event allowing Stop hooks to request continuation. */
+	async emitBeforeAgentStop(event: BeforeAgentStopEvent): Promise<BeforeAgentStopEventResult | undefined> {
+		const ctx = this.createContext();
+
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("before_agent_stop");
+			if (!handlers || handlers.length === 0) continue;
+
+			for (const handler of handlers) {
+				try {
+					const result = (await handler(event, ctx)) as BeforeAgentStopEventResult | undefined;
+					if (result?.continueReason) {
+						return result;
+					}
+				} catch (err) {
+					this.emitError({
+						extensionPath: ext.path,
+						event: "before_agent_stop" as any,
+						error: err instanceof Error ? err.message : String(err),
+						stack: err instanceof Error ? err.stack : undefined,
+					});
+				}
+			}
+		}
+
+		return undefined;
 	}
 }

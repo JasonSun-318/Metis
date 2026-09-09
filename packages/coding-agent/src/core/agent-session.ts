@@ -658,6 +658,7 @@ export class AgentSession {
 	private _baseToolDefinitionsOverride?: readonly ToolDefinition[];
 	private _sessionStartEvent: SessionStartEvent;
 	private _pendingSessionStartContext?: string;
+	private _stopHookActive = false;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -3360,6 +3361,7 @@ export class AgentSession {
 		const sessionId = this.sessionManager.getSessionId();
 		this._activeWorkDir = undefined;
 		this._isAgentRunActive = true;
+		this._stopHookActive = false;
 		try {
 			if (this._agentDir) clearSessionAttachmentNonFiles(this._agentDir, sessionId);
 			const errors: unknown[] = [];
@@ -3451,9 +3453,42 @@ export class AgentSession {
 
 		// The agent loop drains both queues before emitting agent_end. Any messages
 		// here were queued by agent_end extension handlers and need a continuation.
-		const hasQueuedMessages = this.agent.hasQueuedMessages();
+		let hasQueuedMessages = this.agent.hasQueuedMessages();
+		// Stop continuation insertion point: Sequence is retry -> compaction -> goal -> queue -> stop continuation.
+		// If no higher-priority queued messages remain and the run was not aborted, command-v1 Stop hooks
+		// can request a continuation (up to once per turn, tracked by _stopHookActive).
 		if (!hasQueuedMessages && msg.stopReason !== "aborted") {
-			this._scheduleThrottledMemoryExtract();
+			if (this._extensionRunner.hasHandlers("before_agent_stop")) {
+				const candidateText =
+					typeof msg.content === "string"
+						? msg.content
+						: msg.content
+								.filter((c): c is TextContent => c.type === "text")
+								.map((c) => c.text)
+								.join("\n");
+				const stopResult = await this._extensionRunner.emitBeforeAgentStop({
+					type: "before_agent_stop",
+					lastAssistantMessage: candidateText,
+					stopHookActive: this._stopHookActive,
+				});
+				if (stopResult?.continueReason && !this._stopHookActive) {
+					this._stopHookActive = true;
+					const continuationContent = stopResult.context
+						? `${stopResult.continueReason}\n\n${stopResult.context}`
+						: stopResult.continueReason;
+					this.agent.followUp({
+						role: "custom",
+						customType: "hook_stop_continuation",
+						content: continuationContent,
+						display: false,
+						timestamp: Date.now(),
+					});
+					hasQueuedMessages = true;
+				}
+			}
+			if (!hasQueuedMessages) {
+				this._scheduleThrottledMemoryExtract();
+			}
 		}
 		return hasQueuedMessages;
 	}
