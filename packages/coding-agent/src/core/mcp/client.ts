@@ -337,6 +337,18 @@ export class McpServerClient {
 		this.intentionallyClosing = false;
 		this.setState(this.reconnectAttempt > 0 ? "reconnecting" : "connecting");
 
+		if (this.config.transport === "http") {
+			const missingBearer = Boolean(this.config.bearerTokenEnvVar && !this.config.bearerToken);
+			const missingHeaders = Object.entries(this.config.httpHeaderEnv ?? {}).filter(
+				([header]) => !this.config.httpHeaders?.[header],
+			);
+			if (missingBearer || missingHeaders.length > 0) {
+				const error = new Error("Missing required authentication configuration or environment variables");
+				this.setState("auth_required", error);
+				throw error;
+			}
+		}
+
 		const client = this.createClient();
 		const transport = this.createTransport();
 		this.attachConnection(client, transport);

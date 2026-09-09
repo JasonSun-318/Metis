@@ -247,6 +247,7 @@ export function readPluginSnapshot(agentDir: string): PluginSnapshot {
 					owner,
 					name: comp.name,
 					originalName: comp.originalName || comp.name,
+					packageDir,
 					definition: comp.definition as PluginMcpComponent["definition"],
 				});
 			} else if (comp.kind === "hook") {
@@ -254,6 +255,7 @@ export function readPluginSnapshot(agentDir: string): PluginSnapshot {
 				hooks.push({
 					kind: "hook",
 					owner,
+					packageDir,
 					definition: comp.definition as PluginHookComponent["definition"],
 				});
 			}

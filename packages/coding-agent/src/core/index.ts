@@ -127,7 +127,10 @@ export {
 	type McpToolRecord,
 	mcpConfigurationRevision,
 	mcpServerFingerprint,
+	resolveMcpServerDefinitions,
 	resolveMcpServerSettings,
+	resolveMcpSettings,
+	resolvePluginTemplateVariables,
 } from "./mcp/index.ts";
 export type {
 	ModeProjectSessionTarget,

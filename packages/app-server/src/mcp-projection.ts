@@ -1,4 +1,11 @@
-import type { ClientParams, McpCatalogEntryView, McpServerDetailView, McpServerSummaryView } from "@metis/app-protocol";
+import { createHash } from "node:crypto";
+import type {
+	ClientParams,
+	McpCatalogEntryView,
+	McpServerDetailView,
+	McpServerSummaryView,
+	PluginOwnerView,
+} from "@metis/app-protocol";
 import {
 	type McpServerSettings,
 	type McpServerStatus,
@@ -54,15 +61,17 @@ function publicHttpUrl(value: string): { url?: string; error?: string } {
 }
 
 export function publicMcpServer(input: {
-	scope: "user" | "project";
+	scope: "user" | "project" | "plugin";
 	name: string;
 	server: McpServerSettings;
 	effective: boolean;
 	status?: McpServerStatus;
 	credentialConfigured?: boolean;
 	credentialState?: string;
+	pluginOwner?: PluginOwnerView;
+	originalName?: string;
 }): McpServerSummaryView {
-	const { scope, name, server, effective, status } = input;
+	const { scope, name, server, effective, status, pluginOwner, originalName } = input;
 	const serverInfoName = status?.serverInfo?.name.slice(0, 256);
 	const startupTimeoutSec =
 		typeof server.startupTimeoutSec === "number" && server.startupTimeoutSec > 0 && server.startupTimeoutSec <= 3_600
@@ -75,10 +84,12 @@ export function publicMcpServer(input: {
 	const description = server.description?.trim();
 	const common = {
 		name,
+		...(pluginOwner ? { pluginOwner } : {}),
+		...(originalName ? { originalName } : {}),
 		...(description && Buffer.byteLength(description, "utf8") <= 4096 ? { description } : {}),
 		scope,
 		effective,
-		revision: mcpRevision(scope, name, server, input.credentialState),
+		revision: mcpRevision(scope === "plugin" ? "user" : scope, name, server, input.credentialState),
 		enabled: server.enabled ?? true,
 		required: server.required ?? false,
 		...(startupTimeoutSec === undefined ? {} : { startupTimeoutSec }),
@@ -259,10 +270,48 @@ export function publicMcpServers(
 			}),
 		);
 	}
+	for (const status of options.statuses ?? []) {
+		if (!status.pluginOwner) continue;
+		const originalName = status.originalName ?? status.name;
+		const effective =
+			!(originalName in user) && !(originalName in project) && !(status.name in user) && !(status.name in project);
+		const credentialStatus = options.credentialStatus?.("user", status.name, { command: "plugin" }, effective);
+		const serverInfoName = status.serverInfo?.name.slice(0, 256);
+		rows.push({
+			name: status.name,
+			originalName: status.originalName,
+			pluginOwner: status.pluginOwner,
+			scope: "plugin",
+			effective,
+			revision: createHash("sha256")
+				.update(JSON.stringify(["plugin", status.name, status.pluginOwner]))
+				.digest("hex"),
+			transport: status.transport,
+			enabled: status.state !== "disabled",
+			required: status.required,
+			state: status.state,
+			credentialConfigured: credentialStatus?.configured ?? false,
+			toolCount: status.toolCount,
+			resourceCount: status.resourceCount,
+			resourceTemplateCount: status.resourceTemplateCount,
+			promptCount: status.promptCount,
+			capabilities: status.capabilities,
+			disabledTools: [],
+			...(status.serverInfo && serverInfoName
+				? { serverInfo: { name: serverInfoName, version: status.serverInfo.version.slice(0, 16_000) } }
+				: {}),
+			...(status.lastError ? { lastError: status.lastError.slice(0, 16_000) } : {}),
+		});
+	}
+	const scopePriority = (scope: "user" | "project" | "plugin") => {
+		if (scope === "user") return 0;
+		if (scope === "project") return 1;
+		return 2;
+	};
 	return rows.sort(
 		(left, right) =>
 			Number(right.effective) - Number(left.effective) ||
-			(left.scope === right.scope ? 0 : left.scope === "user" ? -1 : 1) ||
+			scopePriority(left.scope) - scopePriority(right.scope) ||
 			left.name.localeCompare(right.name),
 	);
 }

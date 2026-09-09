@@ -79,6 +79,7 @@ import {
 	UsageSummaryViewSchema,
 	WebSearchProviderSchema,
 	WebSearchSettingsViewSchema,
+	WritableMcpScopeViewSchema,
 	WritableSkillSourceViewSchema,
 } from "./views.ts";
 
@@ -252,12 +253,14 @@ export const McpListResultSchema = StrictObject({
 });
 
 const McpDefinitionFields = { scope: McpScopeViewSchema, name: NameSchema } as const;
+const McpWritableDefinitionFields = { scope: WritableMcpScopeViewSchema, name: NameSchema } as const;
 const McpMutationBaseFields = {
 	requestId: UuidSchema,
 	...McpDefinitionFields,
 } as const;
 const McpUpsertMutationFields = {
-	...McpMutationBaseFields,
+	requestId: UuidSchema,
+	...McpWritableDefinitionFields,
 	expectedRevision: Type.Union([Sha256Schema, Type.Null()]),
 } as const;
 const McpExistingMutationFields = { ...McpMutationBaseFields, expectedRevision: Sha256Schema } as const;
@@ -312,7 +315,7 @@ export const McpCredentialClearParamsSchema = mcpSessionTarget(McpExistingMutati
 export const McpCredentialClearResultSchema = McpGetResultSchema;
 
 const McpImportFields = {
-	scope: McpScopeViewSchema,
+	scope: WritableMcpScopeViewSchema,
 	text: Utf8String(1024 * 1024, { minLength: 1, maxLength: 1024 * 1024 }),
 } as const;
 const McpImportSelectionSchema = StrictObject({

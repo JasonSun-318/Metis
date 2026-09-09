@@ -174,7 +174,8 @@ export const SkillImportCandidateViewSchema = StrictObject({
 	fileCount: Type.Integer({ minimum: 1, maximum: 2048 }),
 });
 
-export const McpScopeViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project")]);
+export const WritableMcpScopeViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project")]);
+export const McpScopeViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project"), Type.Literal("plugin")]);
 export const McpTransportViewSchema = Type.Union([Type.Literal("stdio"), Type.Literal("http")]);
 export const McpStateViewSchema = Type.Union([
 	Type.Literal("inactive"),
@@ -230,6 +231,8 @@ export const McpImportInspectionViewSchema = StrictObject({
 
 const McpServerViewFields = {
 	name: NameSchema,
+	pluginOwner: Type.Optional(PluginOwnerSchema),
+	originalName: Type.Optional(PublicTextSchema),
 	description: Type.Optional(Utf8String(4096, { minLength: 1, maxLength: 4096 })),
 	scope: McpScopeViewSchema,
 	effective: Type.Boolean(),
@@ -1439,6 +1442,7 @@ export type PluginOwnerView = Static<typeof PluginOwnerSchema>;
 export type SkillDetailView = Static<typeof SkillDetailViewSchema>;
 export type SkillImportInputView = Static<typeof SkillImportInputViewSchema>;
 export type SkillImportCandidateView = Static<typeof SkillImportCandidateViewSchema>;
+export type WritableMcpScopeView = Static<typeof WritableMcpScopeViewSchema>;
 export type McpScopeView = Static<typeof McpScopeViewSchema>;
 export type McpTransportView = Static<typeof McpTransportViewSchema>;
 export type McpStateView = Static<typeof McpStateViewSchema>;

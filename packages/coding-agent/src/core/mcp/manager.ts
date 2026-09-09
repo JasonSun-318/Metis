@@ -13,6 +13,7 @@ import {
 	type McpSecretCredential,
 	mcpCredentialKey,
 } from "../auth-storage.ts";
+import type { PluginOwner } from "../plugins/types.ts";
 import type { McpServerSettings, SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
 import {
@@ -49,6 +50,7 @@ export interface McpManagerCreateOptions {
 	settingsManager: SettingsManager;
 	authStorage: AuthStorage;
 	cwd: string;
+	agentDir?: string;
 	environment?: NodeJS.ProcessEnv;
 	backgroundOptionalStartup?: boolean;
 	configurationCoordinator?: McpConfigurationCoordinator;
@@ -69,6 +71,8 @@ interface ClientGeneration {
 
 export interface McpServerStatus {
 	name: string;
+	pluginOwner?: PluginOwner;
+	originalName?: string;
 	transport: "stdio" | "http";
 	state: McpConnectionState;
 	required: boolean;
@@ -268,6 +272,7 @@ export class McpManager {
 	private readonly settingsManager: SettingsManager;
 	private readonly authStorage: AuthStorage;
 	private readonly cwd: string;
+	private readonly agentDir?: string;
 	private readonly environment: NodeJS.ProcessEnv;
 	private readonly configurationCoordinator?: McpConfigurationCoordinator;
 	private activeGeneration: ClientGeneration = {
@@ -297,6 +302,7 @@ export class McpManager {
 		this.settingsManager = options.settingsManager;
 		this.authStorage = options.authStorage;
 		this.cwd = options.cwd;
+		this.agentDir = options.agentDir;
 		this.environment = options.environment ?? process.env;
 		this.configurationCoordinator = options.configurationCoordinator;
 	}
@@ -304,7 +310,7 @@ export class McpManager {
 	static async create(options: McpManagerCreateOptions): Promise<McpManager> {
 		const manager = new McpManager(options);
 		await manager.initialize(
-			resolveMcpSettings(options.settingsManager, options.cwd, options.environment),
+			resolveMcpSettings(options.settingsManager, options.cwd, options.environment, options.agentDir),
 			options.backgroundOptionalStartup ?? false,
 		);
 		manager.unregisterCoordinator = options.configurationCoordinator?.register(manager);
@@ -698,6 +704,8 @@ export class McpManager {
 			const status = client.status();
 			return {
 				name: config.name,
+				pluginOwner: config.pluginOwner,
+				originalName: config.originalName,
 				transport: config.transport,
 				state: status.state,
 				required: config.required,
@@ -798,7 +806,12 @@ export class McpManager {
 	}
 
 	async prepareConfiguration(
-		settings: ResolvedMcpSettings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment),
+		settings: ResolvedMcpSettings = resolveMcpSettings(
+			this.settingsManager,
+			this.cwd,
+			this.environment,
+			this.agentDir,
+		),
 		credentialOverlay?: McpCredentialOverlay,
 	): Promise<McpPreparedConfiguration> {
 		this.authStorage.reload();
@@ -886,7 +899,7 @@ export class McpManager {
 			else delete target[name];
 		}
 		return this.prepareConfiguration(
-			resolveMcpServerDefinitions(globalServers, projectServers, this.cwd, this.environment),
+			resolveMcpServerDefinitions(globalServers, projectServers, this.cwd, this.environment, this.agentDir),
 			credentialOverlay,
 		);
 	}
@@ -895,7 +908,7 @@ export class McpManager {
 		const refresh = this.refreshTail.then(async () => {
 			await this.settingsManager.reload();
 			this.authStorage.reload();
-			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment);
+			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment, this.agentDir);
 			const revision = this.runtimeConfigurationRevision(settings);
 			if (revision === this.activeRevision) {
 				this.failedRefresh = undefined;

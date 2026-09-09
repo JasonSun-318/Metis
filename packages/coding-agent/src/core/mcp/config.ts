@@ -1,6 +1,9 @@
 import { createHash } from "node:crypto";
+import { getAgentDir } from "../../config.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { type McpCredentialIdentity, mcpCredentialKey, mcpVersionedCredentialKey } from "../auth-storage.ts";
+import { readPluginSnapshot } from "../plugins/registry.ts";
+import type { PluginMcpComponent, PluginOwner } from "../plugins/types.ts";
 import type {
 	McpHttpServerSettings,
 	McpServerSettings,
@@ -10,6 +13,8 @@ import type {
 
 export interface ResolvedMcpServerConfig {
 	name: string;
+	pluginOwner?: PluginOwner;
+	originalName?: string;
 	description?: string;
 	credentialIdentity: McpCredentialIdentity;
 	credentialKey: string;
@@ -30,6 +35,26 @@ export interface ResolvedMcpServerConfig {
 	bearerTokenEnvVar?: string;
 	httpHeaders?: Record<string, string>;
 	httpHeaderEnv?: Record<string, string>;
+}
+
+export function resolvePluginTemplateVariables(value: string, context: { pluginRoot: string; cwd: string }): string {
+	return value.replace(
+		/\$\{(CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|workspaceFolder|PROJECT_ROOT|cwd)\}|\$(CLAUDE_PLUGIN_ROOT|PLUGIN_ROOT|workspaceFolder|PROJECT_ROOT|cwd)\b/g,
+		(_match, bracedKey, bareKey) => {
+			const key = bracedKey ?? bareKey;
+			switch (key) {
+				case "CLAUDE_PLUGIN_ROOT":
+				case "PLUGIN_ROOT":
+					return context.pluginRoot;
+				case "workspaceFolder":
+				case "PROJECT_ROOT":
+				case "cwd":
+					return context.cwd;
+				default:
+					return _match;
+			}
+		},
+	);
 }
 
 export interface ResolvedMcpSettings {
@@ -114,6 +139,10 @@ export function resolveMcpServerSettings(
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
 	credentialIdentity: McpCredentialIdentity = { scope: "user", name },
+	options?: {
+		pluginOwner?: PluginOwner;
+		originalName?: string;
+	},
 ): ResolvedMcpServerConfig {
 	if (!name.trim()) throw new Error("MCP server name must not be empty");
 	if (typeof server !== "object" || server === null || Array.isArray(server)) {
@@ -129,6 +158,8 @@ export function resolveMcpServerSettings(
 	const credentialVersion = optionalCredentialVersion(server.credentialVersion);
 	const common = {
 		name,
+		...(options?.pluginOwner ? { pluginOwner: options.pluginOwner } : {}),
+		...(options?.originalName ? { originalName: options.originalName } : {}),
 		description: optionalDescription(server.description),
 		credentialIdentity,
 		...(credentialVersion ? { credentialVersion } : {}),
@@ -203,16 +234,51 @@ export function resolveMcpServerSettings(
 	});
 }
 
+function resolvePluginMcpSettings(comp: PluginMcpComponent, cwd: string): McpServerSettings {
+	const vars = { pluginRoot: comp.packageDir, cwd };
+	const def = comp.definition;
+	if (typeof def.command === "string") {
+		const resolvedCommand = resolvePluginTemplateVariables(def.command, vars);
+		const resolvedArgs = def.args?.map((arg) => resolvePluginTemplateVariables(arg, vars));
+		const resolvedCwd = def.cwd ? resolvePluginTemplateVariables(def.cwd, vars) : undefined;
+		const resolvedEnv: Record<string, string> = {};
+		if (def.env) {
+			for (const [k, v] of Object.entries(def.env)) {
+				resolvedEnv[k] = resolvePluginTemplateVariables(v, vars);
+			}
+		}
+		resolvedEnv.CLAUDE_PLUGIN_ROOT = comp.packageDir;
+
+		return {
+			...def,
+			command: resolvedCommand,
+			args: resolvedArgs,
+			cwd: resolvedCwd,
+			env: resolvedEnv,
+		};
+	}
+	if (typeof def.url === "string") {
+		const resolvedUrl = resolvePluginTemplateVariables(def.url, vars);
+		return {
+			...def,
+			url: resolvedUrl,
+		};
+	}
+	return def;
+}
+
 export function resolveMcpSettings(
 	settings: SettingsManager,
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
+	agentDirOrPlugins?: string | readonly PluginMcpComponent[],
 ): ResolvedMcpSettings {
 	return resolveMcpServerDefinitions(
 		settings.getGlobalSettings().mcpServers ?? {},
 		settings.getProjectSettings().mcpServers ?? {},
 		cwd,
 		environment,
+		agentDirOrPlugins,
 	);
 }
 
@@ -221,10 +287,16 @@ export function resolveMcpServerDefinitions(
 	projectServers: Readonly<Record<string, McpServerSettings>>,
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
+	agentDirOrPlugins?: string | readonly PluginMcpComponent[],
 ): ResolvedMcpSettings {
 	const effective = new Map<
 		string,
-		{ readonly server: McpServerSettings; readonly credentialIdentity: McpCredentialIdentity }
+		{
+			readonly server: McpServerSettings;
+			readonly credentialIdentity: McpCredentialIdentity;
+			readonly pluginOwner?: PluginOwner;
+			readonly originalName?: string;
+		}
 	>();
 	for (const [name, server] of Object.entries(globalServers)) {
 		effective.set(name, { server, credentialIdentity: { scope: "user", name } });
@@ -232,9 +304,38 @@ export function resolveMcpServerDefinitions(
 	for (const [name, server] of Object.entries(projectServers)) {
 		effective.set(name, { server, credentialIdentity: { scope: "project", name, cwd } });
 	}
+
+	let pluginServers: readonly PluginMcpComponent[] = [];
+	if (Array.isArray(agentDirOrPlugins)) {
+		pluginServers = agentDirOrPlugins;
+	} else {
+		const agentDir = typeof agentDirOrPlugins === "string" ? agentDirOrPlugins : getAgentDir();
+		try {
+			pluginServers = readPluginSnapshot(agentDir).mcp;
+		} catch {
+			pluginServers = [];
+		}
+	}
+
+	for (const comp of pluginServers) {
+		if (effective.has(comp.name) || effective.has(comp.originalName)) {
+			continue;
+		}
+		const instantiated = resolvePluginMcpSettings(comp, cwd);
+		effective.set(comp.name, {
+			server: instantiated,
+			credentialIdentity: { scope: "user", name: comp.name },
+			pluginOwner: comp.owner,
+			originalName: comp.originalName,
+		});
+	}
+
 	return {
-		servers: [...effective.entries()].map(([name, { server, credentialIdentity }]) =>
-			resolveMcpServerSettings(name, server, cwd, environment, credentialIdentity),
+		servers: [...effective.entries()].map(([name, { server, credentialIdentity, pluginOwner, originalName }]) =>
+			resolveMcpServerSettings(name, server, cwd, environment, credentialIdentity, {
+				pluginOwner,
+				originalName,
+			}),
 		),
 	};
 }

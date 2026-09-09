@@ -64,12 +64,14 @@ export interface PluginMcpComponent {
 	owner: PluginOwner;
 	name: string;
 	originalName: string;
+	packageDir: string;
 	definition: McpServerSettings; // template, variables resolved at instantiation
 }
 
 export interface PluginHookComponent {
 	kind: "hook";
 	owner: PluginOwner;
+	packageDir: string;
 	definition: DeclarativeHook;
 }
 
