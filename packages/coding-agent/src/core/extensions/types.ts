@@ -873,9 +873,10 @@ export interface InputEvent {
 
 /** Result from input event handler */
 export type InputEventResult =
-	| { action: "continue" }
-	| { action: "transform"; text: string; images?: ImageContent[] }
-	| { action: "handled" };
+	| { action: "continue"; context?: string }
+	| { action: "transform"; text: string; images?: ImageContent[]; context?: string }
+	| { action: "handled" }
+	| { action: "block"; reason: string };
 
 // ============================================================================
 // Tool Events
@@ -1091,6 +1092,10 @@ export type ExtensionEvent =
 // Event Results
 // ============================================================================
 
+export interface SessionStartEventResult {
+	context?: string;
+}
+
 export interface ContextEventResult {
 	messages?: AgentMessage[];
 }
@@ -1214,7 +1219,7 @@ export interface ExtensionAPI {
 
 	on(event: "project_trust", handler: ProjectTrustHandler): void;
 	on(event: "resources_discover", handler: ExtensionHandler<ResourcesDiscoverEvent, ResourcesDiscoverResult>): void;
-	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
+	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent, SessionStartEventResult>): void;
 	on(event: "session_info_changed", handler: ExtensionHandler<SessionInfoChangedEvent>): void;
 	on(
 		event: "session_before_switch",

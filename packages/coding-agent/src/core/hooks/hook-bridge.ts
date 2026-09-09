@@ -357,6 +357,7 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 		factory: (metis: ExtensionAPI) => {
 			// Reload so config edits land on new sessions without restarting the host.
 			const { hooks: allHooks } = loadDeclarativeHooks(agentDir);
+			if (allHooks.length === 0) return;
 
 			const toolHooks = allHooks.filter((hook) => hook.event === "PreToolUse");
 			const resultHooks = allHooks.filter(
@@ -365,6 +366,8 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 			const startHooks = allHooks.filter((hook) => hook.event === "SessionStart");
 			const inputHooks = allHooks.filter((hook) => hook.event === "UserPromptSubmit");
 			const stopHooks = allHooks.filter((hook) => hook.event === "Stop");
+
+			const preToolContexts = new Map<string, string>();
 
 			if (toolHooks.length > 0) {
 				metis.on("tool_call", async (event, ctx) => {
@@ -375,52 +378,110 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 					}));
 					for (const { hook, result, effect } of results) {
 						if (effect?.blockReason) {
-							return { block: true, reason: effect.blockReason };
+							preToolContexts.delete(event.toolCallId);
+							const reason = effect.context
+								? `${effect.blockReason}\n\n[Hook: ${hook.name}]\n${effect.context}`
+								: effect.blockReason;
+							return { block: true, reason };
 						}
 						if (result.code === HOOK_BLOCK_EXIT_CODE) {
+							preToolContexts.delete(event.toolCallId);
 							const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
 							const suffix = output ? `: ${output}` : "";
 							return { block: true, reason: `Blocked by hook ${hook.name}${suffix}` };
 						}
 					}
+					const contexts = results
+						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
+						.filter((c): c is string => Boolean(c));
+					if (contexts.length > 0) {
+						preToolContexts.set(event.toolCallId, contexts.join("\n\n"));
+					}
 					return undefined;
 				});
 			}
 
-			if (resultHooks.length > 0) {
+			if (resultHooks.length > 0 || toolHooks.length > 0) {
 				metis.on("tool_result", async (event, ctx) => {
-					await runMatchingHooks(resultHooks, event.isError ? "PostToolUseFailure" : "PostToolUse", ctx, () => ({
-						toolName: event.toolName,
-						toolCallId: event.toolCallId,
-						input: event.input,
-						content: event.content,
-						details: event.details,
-						isError: event.isError,
-					}));
+					const preContext = preToolContexts.get(event.toolCallId);
+					preToolContexts.delete(event.toolCallId);
+
+					const results =
+						resultHooks.length > 0
+							? await runMatchingHooks(
+									resultHooks,
+									event.isError ? "PostToolUseFailure" : "PostToolUse",
+									ctx,
+									() => ({
+										toolName: event.toolName,
+										toolCallId: event.toolCallId,
+										input: event.input,
+										content: event.content,
+										details: event.details,
+										isError: event.isError,
+									}),
+								)
+							: [];
+
+					const postContexts = results
+						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
+						.filter((c): c is string => Boolean(c));
+
+					const allContexts = [preContext, ...postContexts].filter((c): c is string => Boolean(c));
+					if (allContexts.length > 0) {
+						const combined = allContexts.join("\n\n");
+						return {
+							content: [...event.content, { type: "text" as const, text: combined }],
+						};
+					}
 					return undefined;
 				});
 			}
 
 			if (startHooks.length > 0) {
 				metis.on("session_start", async (event, ctx) => {
-					await runMatchingHooks(startHooks, "SessionStart", ctx, () => ({ reason: event.reason }));
+					const results = await runMatchingHooks(startHooks, "SessionStart", ctx, () => ({
+						reason: event.reason,
+					}));
+					const contexts = results
+						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
+						.filter((c): c is string => Boolean(c));
+					return contexts.length > 0 ? { context: contexts.join("\n\n") } : undefined;
 				});
 			}
 
 			if (inputHooks.length > 0) {
-				// Observer-only: hook exit codes never transform or swallow user input.
 				metis.on("input", async (event, ctx) => {
-					await runMatchingHooks(inputHooks, "UserPromptSubmit", ctx, () => ({
+					const results = await runMatchingHooks(inputHooks, "UserPromptSubmit", ctx, () => ({
 						text: event.text,
 						source: event.source,
 					}));
-					return undefined;
+					for (const { hook, result, effect } of results) {
+						if (effect?.blockReason) {
+							return { action: "block", reason: effect.blockReason };
+						}
+						if (result.code === HOOK_BLOCK_EXIT_CODE) {
+							const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
+							const suffix = output ? `: ${output}` : "";
+							return { action: "block", reason: `Blocked by hook ${hook.name}${suffix}` };
+						}
+					}
+					const contexts = results
+						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
+						.filter((c): c is string => Boolean(c));
+					return {
+						action: "continue",
+						...(contexts.length > 0 ? { context: contexts.join("\n\n") } : {}),
+					};
 				});
 			}
 
-			if (stopHooks.length > 0) {
+			if (stopHooks.length > 0 || toolHooks.length > 0) {
 				metis.on("agent_settled", async (_event, ctx) => {
-					await runMatchingHooks(stopHooks, "Stop", ctx, () => ({}));
+					preToolContexts.clear();
+					if (stopHooks.length > 0) {
+						await runMatchingHooks(stopHooks, "Stop", ctx, () => ({}));
+					}
 				});
 			}
 		},

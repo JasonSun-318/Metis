@@ -657,6 +657,7 @@ export class AgentSession {
 	private _excludedToolNames?: Set<string>;
 	private _baseToolDefinitionsOverride?: readonly ToolDefinition[];
 	private _sessionStartEvent: SessionStartEvent;
+	private _pendingSessionStartContext?: string;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -3472,6 +3473,8 @@ export class AgentSession {
 		const expandPromptTemplates = options?.expandPromptTemplates ?? true;
 		const preflightResult = options?.preflightResult;
 		let messages: AgentMessage[] | undefined;
+		let consumedSessionStart = false;
+		let previousSessionStartContext: string | undefined;
 
 		try {
 			if (expandPromptTemplates && text.startsWith("/") && this.isCompacting) {
@@ -3496,6 +3499,7 @@ export class AgentSession {
 			// Emit input event for extension interception (before skill/template expansion)
 			let currentText = text;
 			let currentImages = options?.images;
+			let userPromptContext: string | undefined;
 			if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
@@ -3503,6 +3507,12 @@ export class AgentSession {
 					options?.source ?? "interactive",
 					this.isStreaming ? options?.streamingBehavior : undefined,
 				);
+				if (inputResult.action === "block") {
+					const reason = inputResult.reason || "Prompt blocked by hook";
+					this._extensionUIContext?.notify?.(reason, "warning");
+					preflightResult?.(false);
+					throw new Error(reason);
+				}
 				if (inputResult.action === "handled") {
 					preflightResult?.(true);
 					return;
@@ -3510,6 +3520,9 @@ export class AgentSession {
 				if (inputResult.action === "transform") {
 					currentText = inputResult.text;
 					currentImages = inputResult.images ?? currentImages;
+				}
+				if (inputResult.context) {
+					userPromptContext = inputResult.context;
 				}
 			}
 
@@ -3535,9 +3548,9 @@ export class AgentSession {
 					);
 				}
 				if (options.streamingBehavior === "followUp") {
-					await this._queueFollowUp(expandedText, currentImages);
+					await this._queueFollowUp(expandedText, currentImages, userPromptContext);
 				} else {
-					await this._queueSteer(expandedText, currentImages);
+					await this._queueSteer(expandedText, currentImages, userPromptContext);
 				}
 				this._recordTrustedUserMessage(text, inputSource);
 				preflightResult?.(true);
@@ -3579,6 +3592,18 @@ export class AgentSession {
 			// Build messages array (custom message if any, then user message)
 			messages = [];
 
+			let hookContext = userPromptContext;
+			consumedSessionStart = false;
+			previousSessionStartContext = undefined;
+			if (this._pendingSessionStartContext) {
+				previousSessionStartContext = this._pendingSessionStartContext;
+				hookContext = hookContext
+					? `${this._pendingSessionStartContext}\n\n${hookContext}`
+					: this._pendingSessionStartContext;
+				consumedSessionStart = true;
+				this._pendingSessionStartContext = undefined;
+			}
+
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
 			if (currentImages) {
@@ -3588,6 +3613,7 @@ export class AgentSession {
 				role: "user",
 				content: userContent,
 				timestamp: Date.now(),
+				...(hookContext ? { hookContext } : {}),
 			});
 
 			// Inject any pending "nextTurn" messages as context alongside the user message
@@ -3627,6 +3653,9 @@ export class AgentSession {
 				this.agent.state.systemPrompt = this._effectiveSystemPrompt();
 			}
 		} catch (error) {
+			if (consumedSessionStart && previousSessionStartContext) {
+				this._pendingSessionStartContext = previousSessionStartContext;
+			}
 			preflightResult?.(false);
 			throw error;
 		}
@@ -3805,35 +3834,51 @@ export class AgentSession {
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
-	private async _queueSteer(text: string, images?: ImageContent[]): Promise<void> {
-		this._enqueueSteer(text, images);
+	private async _queueSteer(text: string, images?: ImageContent[], hookContext?: string): Promise<void> {
+		this._enqueueSteer(text, images, undefined, hookContext);
 	}
 
-	private _enqueueSteer(text: string, images?: ImageContent[], identity?: AgentQueueIdentity): void {
+	private _enqueueSteer(
+		text: string,
+		images?: ImageContent[],
+		identity?: AgentQueueIdentity,
+		hookContext?: string,
+	): void {
 		this._steeringMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.steer({ role: "user", content, timestamp: Date.now() }, identity);
+		this.agent.steer(
+			{ role: "user", content, timestamp: Date.now(), ...(hookContext ? { hookContext } : {}) },
+			identity,
+		);
 	}
 
 	/**
 	 * Internal: Queue a follow-up message (already expanded, no extension command check).
 	 */
-	private async _queueFollowUp(text: string, images?: ImageContent[]): Promise<void> {
-		this._enqueueFollowUp(text, images);
+	private async _queueFollowUp(text: string, images?: ImageContent[], hookContext?: string): Promise<void> {
+		this._enqueueFollowUp(text, images, undefined, hookContext);
 	}
 
-	private _enqueueFollowUp(text: string, images?: ImageContent[], identity?: AgentQueueIdentity): void {
+	private _enqueueFollowUp(
+		text: string,
+		images?: ImageContent[],
+		identity?: AgentQueueIdentity,
+		hookContext?: string,
+	): void {
 		this._followUpMessages.push(text);
 		this._emitQueueUpdate();
 		const content: (TextContent | ImageContent)[] = [{ type: "text", text }];
 		if (images) {
 			content.push(...images);
 		}
-		this.agent.followUp({ role: "user", content, timestamp: Date.now() }, identity);
+		this.agent.followUp(
+			{ role: "user", content, timestamp: Date.now(), ...(hookContext ? { hookContext } : {}) },
+			identity,
+		);
 	}
 
 	/**
@@ -4807,7 +4852,10 @@ export class AgentSession {
 		}
 
 		this._applyExtensionBindings(this._extensionRunner);
-		await this._extensionRunner.emit(this._sessionStartEvent);
+		const sessionStartResult = await this._extensionRunner.emitSessionStart(this._sessionStartEvent);
+		if (sessionStartResult?.context) {
+			this._pendingSessionStartContext = sessionStartResult.context;
+		}
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		this._continueActiveGoalInBackground();
 	}
@@ -5362,7 +5410,13 @@ export class AgentSession {
 			this._extensionErrorListener;
 		if (hasBindings) {
 			await options?.beforeSessionStart?.();
-			await this._extensionRunner.emit({ type: "session_start", reason: "reload" });
+			const sessionStartResult = await this._extensionRunner.emitSessionStart({
+				type: "session_start",
+				reason: "reload",
+			});
+			if (sessionStartResult?.context) {
+				this._pendingSessionStartContext = sessionStartResult.context;
+			}
 			await this.extendResourcesFromExtensions("reload");
 		}
 	}

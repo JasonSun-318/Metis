@@ -72,4 +72,32 @@ describe("declarative hooks end-to-end", () => {
 
 		expect(fs.existsSync(marker)).toBe(false);
 	});
+
+	it("applies command-v1 SessionStart context to a newly bound session", async () => {
+		saveDeclarativeHooks(agentDir, [
+			{
+				id: "e2e-cmd-session-start",
+				name: "e2e cmd start",
+				enabled: true,
+				event: "SessionStart",
+				protocol: "command-v1",
+				runMode: "shell",
+				command: `echo '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"STARTUP_CONTEXT"}}'`,
+			},
+		]);
+
+		const services = await createAgentSessionServices({ cwd: agentDir, agentDir });
+		const sessionManager = SessionManager.create(agentDir, path.join(agentDir, "sessions"), {
+			id: "e2e-session-3",
+			mode: "chat",
+			cwdOrigin: "user-selected",
+			permissionPreset: "ask",
+		});
+		const { session } = await createAgentSessionFromServices({ services, sessionManager });
+		await session.bindExtensions({});
+
+		// The pending session start context should be captured
+		expect((session as any)._pendingSessionStartContext).toBe("[Hook: e2e cmd start]\nSTARTUP_CONTEXT");
+		session.dispose();
+	});
 });

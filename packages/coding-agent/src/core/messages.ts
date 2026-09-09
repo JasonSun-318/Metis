@@ -76,6 +76,12 @@ declare module "@metis/agent-core" {
 	}
 }
 
+declare module "@metis/ai" {
+	interface UserMessage {
+		hookContext?: string;
+	}
+}
+
 /**
  * Convert a BashExecutionMessage to user message text for LLM context.
  */
@@ -181,7 +187,22 @@ export function convertToLlm(messages: AgentMessage[]): Message[] {
 						],
 						timestamp: m.timestamp,
 					};
-				case "user":
+				case "user": {
+					const hookContext = (m as { hookContext?: string }).hookContext;
+					if (!hookContext) {
+						return m;
+					}
+					if (typeof m.content === "string") {
+						return {
+							...m,
+							content: `${m.content}\n\n${hookContext}`,
+						};
+					}
+					return {
+						...m,
+						content: [...m.content, { type: "text" as const, text: hookContext }],
+					};
+				}
 				case "assistant":
 				case "toolResult":
 					return m;

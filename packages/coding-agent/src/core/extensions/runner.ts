@@ -56,6 +56,8 @@ import type {
 	SessionBeforeSwitchResult,
 	SessionBeforeTreeResult,
 	SessionShutdownEvent,
+	SessionStartEvent,
+	SessionStartEventResult,
 	ToolCallEvent,
 	ToolCallEventResult,
 	ToolResultEvent,
@@ -133,6 +135,7 @@ type RunnerEmitEvent = Exclude<
 	| MessageEndEvent
 	| ResourcesDiscoverEvent
 	| InputEvent
+	| SessionStartEvent
 >;
 
 type SessionBeforeEvent = Extract<
@@ -1147,7 +1150,7 @@ export class ExtensionRunner {
 		return { skillPaths, promptPaths, themePaths };
 	}
 
-	/** Emit input event. Transforms chain, "handled" short-circuits. */
+	/** Emit input event. Transforms chain, "handled" or "block" short-circuits. */
 	async emitInput(
 		text: string,
 		images: ImageContent[] | undefined,
@@ -1157,6 +1160,7 @@ export class ExtensionRunner {
 		const ctx = this.createContext();
 		let currentText = text;
 		let currentImages = images;
+		let accumulatedContext: string | undefined;
 
 		for (const ext of this.extensions) {
 			for (const handler of ext.handlers.get("input") ?? []) {
@@ -1169,10 +1173,16 @@ export class ExtensionRunner {
 						streamingBehavior,
 					};
 					const result = (await handler(event, ctx)) as InputEventResult | undefined;
+					if (result?.action === "block") return result;
 					if (result?.action === "handled") return result;
 					if (result?.action === "transform") {
 						currentText = result.text;
 						currentImages = result.images ?? currentImages;
+					}
+					if (result?.context) {
+						accumulatedContext = accumulatedContext
+							? `${accumulatedContext}\n\n${result.context}`
+							: result.context;
 					}
 				} catch (err) {
 					this.emitError({
@@ -1184,8 +1194,49 @@ export class ExtensionRunner {
 				}
 			}
 		}
-		return currentText !== text || currentImages !== images
-			? { action: "transform", text: currentText, images: currentImages }
-			: { action: "continue" };
+		const hasTransform = currentText !== text || currentImages !== images;
+		if (hasTransform) {
+			return {
+				action: "transform",
+				text: currentText,
+				images: currentImages,
+				...(accumulatedContext ? { context: accumulatedContext } : {}),
+			};
+		}
+		return {
+			action: "continue",
+			...(accumulatedContext ? { context: accumulatedContext } : {}),
+		};
+	}
+
+	/** Emit session_start event and accumulate hook context if returned. */
+	async emitSessionStart(event: SessionStartEvent): Promise<SessionStartEventResult | undefined> {
+		const ctx = this.createContext();
+		let accumulatedContext: string | undefined;
+
+		for (const ext of this.extensions) {
+			const handlers = ext.handlers.get("session_start");
+			if (!handlers || handlers.length === 0) continue;
+
+			for (const handler of handlers) {
+				try {
+					const result = (await handler(event, ctx)) as SessionStartEventResult | undefined;
+					if (result?.context) {
+						accumulatedContext = accumulatedContext
+							? `${accumulatedContext}\n\n${result.context}`
+							: result.context;
+					}
+				} catch (err) {
+					this.emitError({
+						extensionPath: ext.path,
+						event: "session_start",
+						error: err instanceof Error ? err.message : String(err),
+						stack: err instanceof Error ? err.stack : undefined,
+					});
+				}
+			}
+		}
+
+		return accumulatedContext ? { context: accumulatedContext } : undefined;
 	}
 }
