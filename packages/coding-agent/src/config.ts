@@ -422,7 +422,7 @@ export function getBundledToolsDir(): string | undefined {
 		return undefined;
 	}
 	const pair = `${process.platform}-${process.arch}`;
-	const packageDir = getPackageDir();
+	const packageDir = getPackageDir().replace(/\.asar([\\/])/u, ".asar.unpacked$1");
 	return [join(packageDir, "vendor", "tools", pair), join(packageDir, "dist", "vendor", "tools", pair)].find(
 		existsSync,
 	);

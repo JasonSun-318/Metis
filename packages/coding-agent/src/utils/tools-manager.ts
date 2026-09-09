@@ -45,7 +45,8 @@ function incompleteInstallation(message: string): Error {
 }
 
 function bundledRoots(packageDir: string): string[] {
-	return [join(packageDir, "vendor", "tools"), join(packageDir, "dist", "vendor", "tools")];
+	const root = packageDir.replace(/\.asar([\\/])/u, ".asar.unpacked$1");
+	return [join(root, "vendor", "tools"), join(root, "dist", "vendor", "tools")];
 }
 
 function isCompiledRuntime(): boolean {

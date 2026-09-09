@@ -51,6 +51,24 @@ describe("bundled native tools", () => {
 		).toThrow("failed its integrity check");
 	});
 
+	it("resolves ASAR assets to real paths before integrity checks and execution", () => {
+		const parent = packageDir;
+		packageDir = join(parent, "app.asar.unpacked", "agent");
+		try {
+			const binary = stage("rg", "verified-rg");
+			expect(
+				getBundledToolPath("rg", {
+					packageDir: join(parent, "app.asar", "agent"),
+					platform: "darwin",
+					arch: "arm64",
+					requireBundle: true,
+				}),
+			).toBe(binary);
+		} finally {
+			packageDir = parent;
+		}
+	});
+
 	it("reports an incomplete install instead of downloading a missing platform pair", () => {
 		expect(() =>
 			getBundledToolPath("rg", { packageDir, platform: "win32", arch: "x64", requireBundle: true }),

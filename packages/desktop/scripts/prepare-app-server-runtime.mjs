@@ -59,7 +59,10 @@ async function copyWorkspacePackage(packageRoot, destination) {
 		) {
 			continue;
 		}
-		await cp(join(packageRoot, entry.name), join(destination, entry.name), { recursive: true });
+		await cp(join(packageRoot, entry.name), join(destination, entry.name), {
+			recursive: true,
+			verbatimSymlinks: true,
+		});
 	}
 }
 

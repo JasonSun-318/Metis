@@ -294,12 +294,27 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 					}
 				}
 				if (!wrapped.argv[0]) throw new Error("Sandbox runtime returned an empty command");
+				if (process.platform === "win32") {
+					// srt-win creates a fresh child environment; spawn's env only reaches the broker.
+					const separator = wrapped.argv.indexOf("--");
+					if (separator < 0) throw new Error("Sandbox runtime returned no child command separator");
+					const toolEnvironment = Object.entries(request.env).filter(([name]) =>
+						/^(?:PATH|METIS_(?:WORK_DIR|ATTACHMENTS_DIR)|OFFICECLI_(?:SKIP_UPDATE|NO_AUTO_INSTALL|NO_AUTO_RESIDENT))$/iu.test(
+							name,
+						),
+					);
+					wrapped.argv.splice(
+						separator,
+						0,
+						...toolEnvironment.flatMap(([name, value]) => ["--env", `${name}=${value}`]),
+					);
+				}
 				const child = spawnProcess(wrapped.argv[0], wrapped.argv.slice(1), {
 					cwd,
 					detached: process.platform !== "win32",
 					env: {
-						...request.env,
 						...wrapped.env,
+						...request.env,
 						...(request.env.METIS_WORK_DIR
 							? {
 									TMPDIR: request.env.METIS_WORK_DIR,

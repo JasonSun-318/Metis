@@ -88,6 +88,10 @@ function minimalEnvironment(temporaryDir: string, preferred?: NodeJS.ProcessEnv)
 		"ProgramFiles(x86)",
 		"ProgramData",
 		"METIS_WORK_DIR",
+		"METIS_ATTACHMENTS_DIR",
+		"OFFICECLI_SKIP_UPDATE",
+		"OFFICECLI_NO_AUTO_INSTALL",
+		"OFFICECLI_NO_AUTO_RESIDENT",
 	]) {
 		if (source[key] !== undefined) environment[key] = source[key];
 	}
@@ -226,7 +230,7 @@ class SandboxBroker {
 			if (!statSync(shellPath).isFile()) throw new TypeError("Workspace sandbox shell path must be a file");
 		}
 
-		const temporaryDir = mkdtempSync(join(tmpdir(), "metis-sandbox-"));
+		const temporaryDir = canonicalizeActionPath(mkdtempSync(join(tmpdir(), "metis-sandbox-")), input.cwd);
 		const environment = minimalEnvironment(temporaryDir);
 		// ponytail: Electron disables RunAsNode, so use a per-run Worker; bundle Node only if native crash containment is required.
 		const child =

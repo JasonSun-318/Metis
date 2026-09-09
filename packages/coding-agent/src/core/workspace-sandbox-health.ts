@@ -87,7 +87,8 @@ function sha256(path: string): string {
 }
 
 function sandboxRuntimeRoots(packageDir: string): readonly string[] {
-	return [join(packageDir, "vendor", "sandbox-runtime"), join(packageDir, "dist", "vendor", "sandbox-runtime")];
+	const root = packageDir.replace(/\.asar([\\/])/u, ".asar.unpacked$1");
+	return [join(root, "vendor", "sandbox-runtime"), join(root, "dist", "vendor", "sandbox-runtime")];
 }
 
 function inspectBundledHelper(input: {

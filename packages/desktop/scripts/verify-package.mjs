@@ -3,6 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { extractFile, listPackage } from "@electron/asar";
 import { FuseState, FuseV1Options, getCurrentFuseWire } from "@electron/fuses";
+import { checkSkillRuntime } from "../../../scripts/check-skill-runtime.mjs";
 
 const desktopRoot = path.resolve(import.meta.dirname, "..");
 const repoRoot = path.resolve(desktopRoot, "../..");
@@ -30,6 +31,7 @@ const resourcesRoot =
 		? path.join(packageRoot, "Metis.app", "Contents", "Resources")
 		: path.join(packageRoot, "resources");
 const appAsar = path.join(resourcesRoot, "app.asar");
+await checkSkillRuntime({ packageDir: path.join(appAsar, ".webpack/app-server/node_modules/@metis/coding-agent") });
 const executable =
 	process.platform === "darwin"
 		? path.join(packageRoot, "Metis.app", "Contents", "MacOS", "Metis")

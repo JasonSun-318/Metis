@@ -4,6 +4,7 @@
 
 import { spawn } from "node:child_process";
 import { waitForChildProcess } from "../utils/child-process.ts";
+import { getShellEnv } from "../utils/shell.ts";
 
 /**
  * Options for executing shell commands.
@@ -40,6 +41,7 @@ export async function execCommand(
 	return new Promise((resolve) => {
 		const proc = spawn(command, args, {
 			cwd,
+			env: getShellEnv(),
 			shell: false,
 			stdio: ["ignore", "pipe", "pipe"],
 		});

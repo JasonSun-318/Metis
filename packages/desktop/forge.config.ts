@@ -152,7 +152,7 @@ async function stageRipgrepRuntime(buildPath: string, platform: string, arch: st
 
 const config: ForgeConfig = {
 	packagerConfig: {
-		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools}" },
+		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools,.webpack/app-server/node_modules/@metis/coding-agent/dist/vendor}" },
 		// Electron Packager otherwise shares one global temp root. Concurrent
 		// packaging jobs can delete each other's staging trees mid-ASAR creation.
 		tmpdir: process.env.METIS_ELECTRON_PACKAGER_TMPDIR,
@@ -185,7 +185,7 @@ const config: ForgeConfig = {
 			const target = path.join(buildPath, ".webpack", arch, "app-server");
 			await rm(target, { recursive: true, force: true });
 			await Promise.all([
-				cp(appServerRuntime, target, { recursive: true }),
+				cp(appServerRuntime, target, { recursive: true, verbatimSymlinks: true }),
 				stageNodePtyRuntime(buildPath, platform, arch),
 				stageRipgrepRuntime(buildPath, platform, arch),
 			]);
