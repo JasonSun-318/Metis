@@ -26,10 +26,9 @@ import {
 	FileVideo,
 	FileXls,
 	FileZip,
-	Folder,
-	FolderOpen,
 } from "@phosphor-icons/react";
 import type { ComponentType } from "react";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 interface WorkspaceFileIconProps {
 	readonly expanded?: boolean;
@@ -170,8 +169,7 @@ function iconForFile(path: string): IconDefinition {
 
 export function WorkspaceFileIcon({ expanded = false, kind = "file", path, size = 14 }: WorkspaceFileIconProps) {
 	if (kind === "directory") {
-		const FolderComponent = expanded ? FolderOpen : Folder;
-		return <FolderComponent aria-hidden="true" className="file-kind-icon workspace-file-icon is-folder file-kind-folder" size={size} />;
+		return <AnimatedNavIcon kind="folder" expanded={expanded} className="file-kind-icon workspace-file-icon is-folder file-kind-folder" size={size} />;
 	}
 	const { Component, type } = iconForFile(path);
 	return <Component aria-hidden="true" className={`file-kind-icon workspace-file-icon is-${type} file-kind-${type}`} size={size} />;

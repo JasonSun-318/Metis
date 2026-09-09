@@ -1,5 +1,5 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, ClockCountdown, Code, FolderSimple, NotePencil, PuzzlePiece, SidebarSimple } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, Code, SidebarSimple } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,6 +21,7 @@ import { AccountMenu } from "./AccountMenu.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
 import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 export type SidebarDestination = "tasks" | "skills" | "schedules";
 
@@ -272,7 +273,7 @@ function ProjectGroup({
 				title={group.cwd}
 				type="button"
 			>
-				<FolderSimple aria-hidden="true" size={17} />
+				<AnimatedNavIcon expanded={open} kind="folder" />
 				<span>{group.name}</span>
 			</button>
 			<ProjectActions
@@ -441,14 +442,14 @@ export const SessionSidebar = memo(function SessionSidebar({
 				</button>
 			</div>
 			<button aria-current={newTaskOpen ? "page" : undefined} className="new-task-button" disabled={busy} onClick={onNewTask} type="button">
-				<NotePencil aria-hidden="true" size={18} />
+				<AnimatedNavIcon kind="task" />
 				{t("New task")}
 			</button>
 			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
-				<PuzzlePiece aria-hidden="true" size={17} />
+				<AnimatedNavIcon kind="customize" />
 				{t("Customize")}
 			</button>
-			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><ClockCountdown aria-hidden="true" size={17} />{t("Scheduled tasks")}</button>}
+			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><AnimatedNavIcon kind="schedule" />{t("Scheduled tasks")}</button>}
 			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>
 				{grouping === "project" && <span className="session-grouping-label">{t("Projects")}</span>}
 				<SessionGroupingMenu

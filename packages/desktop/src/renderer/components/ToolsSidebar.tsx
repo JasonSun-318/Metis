@@ -1,5 +1,5 @@
 import type { AgentMode, PlanView, SessionSummary } from "@metis/app-protocol";
-import { ClipboardText, FileText, FolderSimple, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
+import { ClipboardText, FileText, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -21,6 +21,7 @@ import { ReviewPanel } from "./ReviewPanel.tsx";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 const FILE_BROWSER_STORAGE_PREFIX = "metis.file-browser.v1:";
 const BROWSER_PROFILE_STORAGE_KEY = "metis.browser-profile.v1";
@@ -916,7 +917,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 			</button>
 			{mode === "code" && (
 				<button aria-label={t("Files")} disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button">
-					<div className="tool-menu-icon"><FolderSimple aria-hidden="true" size={compact ? 14 : 20} /></div>
+					<div className="tool-menu-icon"><AnimatedNavIcon kind="folder" size={compact ? 14 : 20} /></div>
 					<span>{t("Files")}</span>
 				</button>
 			)}

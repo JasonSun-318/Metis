@@ -3437,3 +3437,34 @@ classes so their inline layout wins the cascade. */
 .composer-selection { padding: 6px 8px; border-left: 2px solid var(--border-strong); margin: 6px 0; font-size: 12px; }
 .composer-selection small { display: block; overflow-wrap: anywhere; color: var(--muted); }
 .composer-selection blockquote { margin: 4px 0 0; max-height: 100px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Animate just the icon detail; parent hover includes the option's text and padding. */
+.animated-nav-icon { flex-shrink: 0; overflow: visible; }
+.animated-nav-icon .nav-icon-motion { transform-origin: 12px 12px; }
+.animated-nav-icon-schedule .nav-icon-motion { transform-origin: 12px 13px; }
+@media (prefers-reduced-motion: no-preference) {
+ :root:not([data-motion="reduced"]) button:not(:disabled):not([aria-disabled="true"]):is(:hover, :focus-visible) .animated-nav-icon .nav-icon-motion {
+  animation: var(--nav-icon-animation) 650ms cubic-bezier(.22,.7,.3,1) 1;
+ }
+ .animated-nav-icon-task { --nav-icon-animation: nav-icon-write; }
+ .animated-nav-icon-customize { --nav-icon-animation: nav-icon-block; }
+ .animated-nav-icon-folder { --nav-icon-animation: nav-icon-folder; }
+ .animated-nav-icon-schedule { --nav-icon-animation: nav-icon-clock; }
+}
+@keyframes nav-icon-write {
+ 0%, 100% { transform: translate(0, 0) rotate(0); }
+ 25% { transform: translate(-1px, 1.5px) rotate(-7deg); }
+ 55% { transform: translate(1.5px, -1px) rotate(4deg); }
+ 75% { transform: translate(-.5px, .5px) rotate(-3deg); }
+}
+@keyframes nav-icon-block {
+ 0%, 100% { transform: translate(0, 0); }
+ 45%, 65% { transform: translate(-3px, 3px); }
+}
+@keyframes nav-icon-folder {
+ 0%, 100% { transform: rotate(0); }
+ 30% { transform: rotate(-8deg); }
+ 60% { transform: rotate(5deg); }
+ 80% { transform: rotate(-2deg); }
+}
+@keyframes nav-icon-clock { from { transform: rotate(0); } to { transform: rotate(360deg); } }

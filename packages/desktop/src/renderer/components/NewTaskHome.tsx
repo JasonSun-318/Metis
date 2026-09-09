@@ -1,11 +1,12 @@
 import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
-import { CaretDown, FolderSimple } from "@phosphor-icons/react";
+import { CaretDown } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { Composer, type ComposerSubmission } from "./Composer.tsx";
 import { SideRays } from "./SideRays.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 interface NewTaskHomeProps {
 	readonly busy: boolean;
@@ -92,7 +93,7 @@ export function NewTaskHome({
 						title={folder ?? t(folderLocked ? "This task has no project folder" : "Choose a project or folder")}
 						type="button"
 					>
-						<FolderSimple aria-hidden="true" size={17} />
+						<AnimatedNavIcon kind="folder" />
 						<span>{folder ? folderName(folder) : t(folderLocked ? "No project folder" : "Work in a project or folder")}</span>
 						<CaretDown aria-hidden="true" size={13} />
 					</button>

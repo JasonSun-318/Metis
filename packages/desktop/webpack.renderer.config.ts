@@ -34,6 +34,7 @@ const config: Configuration = {
 		new MiniCssExtractPlugin(),
 		new CopyWebpackPlugin({
 			patterns: [
+				{ from: path.join(import.meta.dirname, "assets/licenses/lucide-animated.txt"), to: "licenses/lucide-animated.txt" },
 				{ from: path.join(pdfjsRoot, "build/pdf.worker.min.mjs"), to: "pdf.worker.min.mjs" },
 				{ from: path.join(pdfjsRoot, "cmaps"), to: "pdfjs/cmaps" }, // pdfjs-dist/cmaps
 				{ from: path.join(pdfjsRoot, "standard_fonts"), to: "pdfjs/standard_fonts" }, // pdfjs-dist/standard_fonts
