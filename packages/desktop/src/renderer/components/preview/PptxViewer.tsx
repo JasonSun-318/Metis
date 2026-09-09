@@ -6,8 +6,12 @@ import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { materializePreviewBlobUrls } from "./preview-blob-urls.ts";
 import { type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
+import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
+import { mountPptxSelectionLayer } from "./pptx-selection.ts";
+import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface PptxViewerProps {
+	readonly file?: UniversalPreviewTarget;
 	readonly fileName: string;
 	readonly byteLength?: number;
 	readonly bytes: Uint8Array;
@@ -16,8 +20,11 @@ export interface PptxViewerProps {
 	readonly onReveal?: () => void;
 }
 
-export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault, onReveal }: PptxViewerProps) {
+export function PptxViewer({ fileName, file, byteLength, bytes, onClose, onOpenDefault, onReveal }: PptxViewerProps) {
 	const { t } = useTranslation();
+	const selection = useDocumentSelection(file, bytes);
+	const selectionRef = useRef(selection);
+	selectionRef.current = selection;
 	const hostRef = useRef<HTMLDivElement>(null);
 	const { ref: viewportRef, size } = usePreviewViewport();
 	const [viewer, setViewer] = useState<PptxRendererInstance | null>(null);
@@ -39,6 +46,14 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 		let cancelled = false;
 		let handle: PptxRendererInstance | undefined;
 		let observer: MutationObserver | undefined;
+		const rendered = new Map<number, HTMLElement>();
+		const mountSelection = (index: number, element: HTMLElement) => {
+			const slide = handle?.presentationData?.slides[index];
+			if (!slide || !file) return;
+			mountPptxSelectionLayer(slide, element, index + 1, (value, anchor) =>
+				selectionRef.current.select(value.target, value.text, anchor, value.excerpt),
+			);
+		};
 		setLoading(true);
 		setViewer(null);
 		setMode("page");
@@ -51,6 +66,10 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 				handle = await PptxRenderer.open(Uint8Array.from(bytes).buffer, host, {
 					zipLimits: RECOMMENDED_ZIP_LIMITS,
 					fitMode: "none",
+					onSlideRendered: (index, element) => {
+						rendered.set(index, element);
+						mountSelection(index, element);
+					},
 					onSlideChange: (index) => {
 						if (!cancelled && !resizingRef.current) setCurrentPage(index + 1);
 					},
@@ -63,6 +82,8 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 					return;
 				}
 				await materializePreviewBlobUrls(host);
+				for (const [index, element] of rendered) if (element.isConnected) mountSelection(index, element);
+				rendered.clear();
 				if (cancelled) return;
 				observer = new MutationObserver(() => {
 					void materializePreviewBlobUrls(host);
@@ -83,7 +104,7 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 
 			host.replaceChildren();
 		};
-	}, [bytes, t]);
+	}, [bytes, t, file?.sessionId, file?.relativePath, file?.fileId]);
 
 	useEffect(() => {
 		if (!viewer || size.width <= 0 || size.height <= 0) return;
@@ -127,7 +148,10 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 				onOpenDefault={onOpenDefault}
 				onReveal={onReveal}
 			/>
-			<div ref={viewportRef} className="preview-viewport pptx-viewport">
+			<div
+				ref={viewportRef}
+				className={`preview-viewport pptx-viewport${selection.enabled ? " can-select-objects" : ""}`}
+			>
 				{loading && (
 					<div className="preview-loading-state">
 						<SpinnerGap aria-hidden="true" className="is-spinning" size={28} />
@@ -141,6 +165,7 @@ export function PptxViewer({ fileName, byteLength, bytes, onClose, onOpenDefault
 				)}
 				<div className="pptx-render-host" ref={hostRef} />
 			</div>
+			{selection.popover}
 		</div>
 	);
 }

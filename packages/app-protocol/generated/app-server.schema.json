@@ -5977,6 +5977,110 @@
                               "relativePath"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -6036,6 +6140,110 @@
                               "fileId"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -6220,6 +6428,110 @@
                               "relativePath"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -6279,6 +6591,110 @@
                               "fileId"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -6474,6 +6890,110 @@
                               "relativePath"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -6533,6 +7053,110 @@
                               "fileId"
                             ],
                             "properties": {
+                              "target": {
+                                "anyOf": [
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pdf"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "endPage": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "page",
+                                      "slidePath",
+                                      "objectId",
+                                      "objectType",
+                                      "objectName"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "pptx"
+                                      },
+                                      "page": {
+                                        "type": "integer",
+                                        "minimum": 1,
+                                        "maximum": 1000000
+                                      },
+                                      "slidePath": {
+                                        "type": "string",
+                                        "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                      },
+                                      "objectId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "objectType": {
+                                        "anyOf": [
+                                          {
+                                            "type": "string",
+                                            "const": "shape"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "picture"
+                                          },
+                                          {
+                                            "type": "string",
+                                            "const": "chart"
+                                          }
+                                        ]
+                                      },
+                                      "objectName": {
+                                        "type": "string",
+                                        "maxLength": 255
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  },
+                                  {
+                                    "type": "object",
+                                    "required": [
+                                      "kind",
+                                      "sheet",
+                                      "range"
+                                    ],
+                                    "properties": {
+                                      "kind": {
+                                        "type": "string",
+                                        "const": "spreadsheet"
+                                      },
+                                      "sheet": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "range": {
+                                        "type": "string",
+                                        "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                      }
+                                    },
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "selectedText": {
                                 "type": "string",
                                 "minLength": 1,
@@ -43715,6 +44339,110 @@
                           "relativePath"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,
@@ -43774,6 +44502,110 @@
                           "fileId"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,
@@ -43958,6 +44790,110 @@
                           "relativePath"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,
@@ -44017,6 +44953,110 @@
                           "fileId"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,
@@ -44212,6 +45252,110 @@
                           "relativePath"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,
@@ -44271,6 +45415,110 @@
                           "fileId"
                         ],
                         "properties": {
+                          "target": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pdf"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "endPage": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "page",
+                                  "slidePath",
+                                  "objectId",
+                                  "objectType",
+                                  "objectName"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "pptx"
+                                  },
+                                  "page": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 1000000
+                                  },
+                                  "slidePath": {
+                                    "type": "string",
+                                    "pattern": "^ppt/slides/slide[0-9]+\\.xml$"
+                                  },
+                                  "objectId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "objectType": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "shape"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "picture"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "chart"
+                                      }
+                                    ]
+                                  },
+                                  "objectName": {
+                                    "type": "string",
+                                    "maxLength": 255
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "required": [
+                                  "kind",
+                                  "sheet",
+                                  "range"
+                                ],
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "const": "spreadsheet"
+                                  },
+                                  "sheet": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 255
+                                  },
+                                  "range": {
+                                    "type": "string",
+                                    "pattern": "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            ]
+                          },
                           "selectedText": {
                             "type": "string",
                             "minLength": 1,

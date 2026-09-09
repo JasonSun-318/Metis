@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConversationSubmission } from "../../composer-submission.ts";
-import { type DraftFileSelection, validateSelectionSize } from "./file-selection.ts";
+import { type DraftFileSelection, selectionTargetLabel, validateSelectionSize } from "./file-selection.ts";
 
 interface FileSelectionActions {
 	readonly enabled: boolean;
@@ -82,7 +82,9 @@ export function FileSelectionProvider({
 					validateSelectionSize([selection.input]);
 					await onSubmit({
 						text: t("Request changes to {{name}}: {{instruction}}", {
-							name: selection.name,
+							name: selection.input.target
+								? `${selection.name} · ${selectionTargetLabel(selection.input.target)}`
+								: selection.name,
 							instruction: instruction.trim(),
 						}),
 						attachments: [],

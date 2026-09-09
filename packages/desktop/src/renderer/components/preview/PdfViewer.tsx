@@ -6,11 +6,15 @@ import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { pdfCMapUrl, pdfStandardFontDataUrl, pdfWorkerSrc } from "./pdf-assets.ts";
 import { type PreviewSize, type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
+import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
+import { pdfTextSelection } from "./pdf-selection.ts";
+import { useDocumentSelection } from "./use-document-selection.tsx";
 
 const workerSrc = pdfWorkerSrc();
 if (workerSrc) pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
 
 export interface PdfViewerProps {
+	readonly file?: UniversalPreviewTarget;
 	readonly fileName: string;
 	readonly byteLength?: number;
 	readonly bytes: Uint8Array;
@@ -136,8 +140,9 @@ function PdfPage({
 	);
 }
 
-export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault, onReveal }: PdfViewerProps) {
+export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDefault, onReveal }: PdfViewerProps) {
 	const { t } = useTranslation();
+	const selection = useDocumentSelection(file, bytes);
 	const [doc, setDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
 	const [initialSize, setInitialSize] = useState<PreviewSize>({ width: 800, height: 1130 });
 	const [currentPage, setCurrentPage] = useState(1);
@@ -148,6 +153,13 @@ export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault,
 	const resizing = usePreviewExpansion()?.resizing ?? false;
 	const anchor = useRef({ page: 1, fraction: 0 });
 	const zoom = previewScale(mode, initialSize, size) * 100;
+	const capture = () => {
+		const native = window.getSelection();
+		if (!selection.enabled || !native?.rangeCount || !scrollRef.current) return;
+		const range = native.getRangeAt(0).cloneRange();
+		const value = pdfTextSelection(scrollRef.current, range, native.toString());
+		if (value) selection.select(value.target, value.text, range);
+	};
 
 	useEffect(() => {
 		let cancelled = false;
@@ -243,6 +255,14 @@ export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault,
 			/>
 			<div
 				ref={scrollRef}
+				onPointerUp={(event) => {
+					if (event.button === 0) capture();
+				}}
+				onKeyUp={(event) => {
+					if (event.key === "Shift") capture();
+				}}
+				role="document"
+				aria-label={fileName}
 				onScroll={trackPosition}
 				className={`preview-viewport pdf-canvas-container${inverted ? " is-inverted" : ""}`}
 			>
@@ -269,6 +289,7 @@ export function PdfViewer({ fileName, byteLength, bytes, onClose, onOpenDefault,
 					))
 				)}
 			</div>
+			{selection.popover}
 		</div>
 	);
 }

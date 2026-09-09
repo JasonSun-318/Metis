@@ -645,6 +645,28 @@ export const FileAttachmentInputSchema = StrictObject({
 });
 
 const FileSelectionFields = {
+	target: Type.Optional(
+		Type.Union([
+			StrictObject({
+				kind: Type.Literal("pdf"),
+				page: Type.Integer({ minimum: 1, maximum: 1000000 }),
+				endPage: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000000 })),
+			}),
+			StrictObject({
+				kind: Type.Literal("pptx"),
+				page: Type.Integer({ minimum: 1, maximum: 1000000 }),
+				slidePath: Type.String({ pattern: "^ppt/slides/slide[0-9]+\\.xml$" }),
+				objectId: Type.String({ minLength: 1, maxLength: 255 }),
+				objectType: Type.Union([Type.Literal("shape"), Type.Literal("picture"), Type.Literal("chart")]),
+				objectName: Type.String({ maxLength: 255 }),
+			}),
+			StrictObject({
+				kind: Type.Literal("spreadsheet"),
+				sheet: Type.String({ minLength: 1, maxLength: 255 }),
+				range: Type.String({ pattern: "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$" }),
+			}),
+		]),
+	),
 	selectedText: Type.String({ minLength: 1, maxLength: 8000 }),
 	basis: Type.Union([Type.Literal("source"), Type.Literal("markdown"), Type.Literal("formatted")]),
 	sourceExcerpt: Type.Optional(Type.String({ maxLength: 4000 })),

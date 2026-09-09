@@ -12,6 +12,7 @@ import { AgentSessionRuntimeHost, InteractionBroker } from "@metis/app-server";
 import { SessionDeliveredArtifacts, SessionManager, splitSessionFileSelectionPrompt } from "@metis/coding-agent";
 import { chromium, expect } from "@playwright/test";
 import { build } from "esbuild";
+import { selectionDeck, selectionPdf, selectionWorkbook } from "./document-selection-fixtures.mjs";
 
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repo = resolve(desktop, "../..");
@@ -20,6 +21,9 @@ const cwd = join(directory, "workspace"),
 	agentDir = join(directory, "agent");
 await mkdir(cwd);
 await mkdir(agentDir);
+await writeFile(join(cwd, "objects.pptx"), await selectionDeck());
+await writeFile(join(cwd, "document.pdf"), selectionPdf());
+await writeFile(join(cwd, "cells.xlsx"), selectionWorkbook());
 const source =
 	"# Selection fixture\n\nOriginal target sentence.\n\n## First\n\n**Repeated phrase** with context.\n\n## Second\n\n**Repeated phrase** with context.\n\n```js\nconst answer = 42;\n```\n";
 await writeFile(join(cwd, "notes.md"), source);
@@ -179,11 +183,23 @@ try {
 					res.end(Buffer.from(result.data, "base64"));
 					return;
 				}
-				assert(["notes.md", "code.ts", "data.json"].includes(target.relativePath));
+				assert(
+					["notes.md", "code.ts", "data.json", "objects.pptx", "document.pdf", "cells.xlsx"].includes(
+						target.relativePath,
+					),
+				);
 				res.end(await readFile(join(cwd, target.relativePath)));
 				return;
 			}
+			if (url.pathname.startsWith("/pdfjs/standard_fonts/")) {
+				res.end(await readFile(join(desktop, "node_modules/pdfjs-dist/standard_fonts", basename(url.pathname))));
+				return;
+			}
 			const files = {
+				"/pdf.worker.min.mjs": [
+					join(desktop, "node_modules/pdfjs-dist/build/pdf.worker.min.mjs"),
+					"text/javascript",
+				],
 				"/fixture.js": [join(directory, "fixture.js"), "text/javascript"],
 				"/app.css": [join(desktop, "src/renderer/styles/app.css"), "text/css"],
 			};
@@ -575,6 +591,96 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	console.log("PASS retry idempotency and delivered revision preservation");
 	await expect.poll(() => opened.isActive(), { timeout: 15000 }).toBe(false);
 	await page.screenshot({ path: join(directory, "completed.png") });
+	// Document-specific selections flow through the same real runtime without a vision configuration.
+	const sendDocumentRequest = async (instruction) => {
+		await expect(popup.getByRole("button", { name: "Add to conversation", exact: true })).toHaveCount(0);
+		await popup.getByRole("button", { name: "Request changes", exact: true }).click();
+		await popup.getByRole("textbox").fill(instruction);
+		await geometry();
+		await popup.getByRole("button", { name: "Send change request", exact: true }).click();
+		await expect.poll(() => models.some((m) => m.prompt.includes(instruction)), { timeout: 15000 }).toBe(true);
+		await expect.poll(() => opened.isActive(), { timeout: 15000 }).toBe(false);
+		return models.findLast((m) => m.prompt.includes(instruction)).files[0];
+	};
+	await page.evaluate(() => window.openFixture("objects.pptx"));
+	await page.locator('.pptx-object-target[data-object-id="2"]').waitFor();
+	await expect
+		.poll(() =>
+			page
+				.locator(".pptx-render-host img")
+				.evaluateAll((images) => images.length > 0 && images.every((img) => img.complete && img.naturalWidth > 0)),
+		)
+		.toBe(true);
+	for (const [id, type] of [
+		["2", "shape"],
+		["3", "picture"],
+		["4", "chart"],
+	]) {
+		const object = page.locator('.pptx-object-target[data-object-id="' + id + '"]');
+		await object.hover();
+		await expect(page.locator(".file-selection-popover")).toHaveCount(0);
+		assert.deepEqual(
+			await object.evaluate((element) => {
+				const style = getComputedStyle(element);
+				return { background: style.backgroundColor, shadow: style.boxShadow };
+			}),
+			{ background: "rgba(0, 0, 0, 0)", shadow: "none" },
+		);
+		await object.click();
+		const quote = await sendDocumentRequest("DOC " + type + " change");
+		assert.equal(quote.target.objectId, id);
+		assert.equal(quote.target.objectType, type);
+		assert.equal(quote.target.slidePath, "ppt/slides/slide1.xml");
+		assert.equal(quote.target.page, 1);
+		if (type === "shape") assert.equal(quote.selectedText, "Selected title");
+		if (type === "picture") assert.equal(JSON.parse(quote.sourceExcerpt).resource.target, "../media/image1.png");
+		if (type === "chart") assert.equal(JSON.parse(quote.sourceExcerpt).chartPath, "ppt/charts/chart1.xml");
+	}
+	await page.screenshot({ path: join(directory, "pptx-object-requests.png") });
+	await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+	await page.locator('.pptx-object-target[data-object-id="3"]').click();
+	const zoomQuote = await sendDocumentRequest("DOC zoomed picture change");
+	assert.equal(zoomQuote.target.objectId, "3");
+	await page.evaluate(() => window.openFixture("document.pdf"));
+	await expect(page.locator(".textLayer")).toContainText("PDF selected sentence.");
+	await drag("PDF selected sentence.", 0, false, ".textLayer");
+	const pdfQuote = await sendDocumentRequest("DOC pdf change");
+	assert.deepEqual(pdfQuote.target, { kind: "pdf", page: 1 });
+	assert(pdfQuote.selectedText.includes("PDF selected sentence."));
+	await page.evaluate(() => window.openFixture("cells.xlsx"));
+	await page.locator(".excel-cell").first().waitFor();
+	await expect(page.locator(".excel-col-header").first()).toHaveText("C");
+	await expect(page.locator(".excel-row-header").first()).toHaveText("5");
+	const startCell = await page.locator(".excel-grid-row").first().locator(".excel-cell").first().boundingBox();
+	await page.mouse.move(startCell.x + 10, startCell.y + 10);
+	await page.mouse.down();
+	await page.mouse.move(startCell.x + 100, startCell.y + 40, { steps: 5 });
+	await page.mouse.up();
+	await expect(page.locator(".excel-selection-info")).toContainText("C5:D6");
+	await expect(page.locator(".excel-selection-info")).toContainText("=SUM(C6:C7)");
+	const cellQuote = await sendDocumentRequest("DOC cells change");
+	assert.deepEqual(cellQuote.target, { kind: "spreadsheet", sheet: "Revenue", range: "C5:D6" });
+	assert(JSON.parse(cellQuote.sourceExcerpt).cells.some((c) => c.address === "C5" && c.formula === "SUM(C6:C7)"));
+	await page.screenshot({ path: join(directory, "xlsx-cell-requests.png") });
+	// Selecting a merged cell expands to the real merged range.
+	await page.locator(".excel-merge").click();
+	await expect(page.locator(".excel-selection-info")).toContainText("C8:D8");
+	const mergeQuote = await sendDocumentRequest("DOC merged cells change");
+	assert.equal(mergeQuote.target.range, "C8:D8");
+	// Virtual rows retain absolute addresses after scrolling; blank cells remain selectable.
+	await page.locator(".excel-viewport").evaluate((element) => {
+		element.scrollTop = 2800;
+	});
+	const visibleRow = page
+		.locator(".excel-grid-row")
+		.filter({ has: page.locator(".excel-row-header", { hasText: /^110$/ }) });
+	await visibleRow.locator(".excel-cell").last().click();
+	const blankQuote = await sendDocumentRequest("DOC empty cell change");
+	assert.equal(blankQuote.target.range, "E110");
+	assert.equal(JSON.parse(blankQuote.sourceExcerpt).cells[0].value, null);
+	console.log(
+		"PASS PPTX shapes/pictures/charts, PDF native text, XLSX real ranges -> model context without vision gating",
+	);
 	// The actual file-tree entry point must support source selections and its own Markdown preview.
 	await writeFile(join(cwd, "notes.md"), source);
 	await page.evaluate(() => {
@@ -661,6 +767,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 				"history restore",
 				"workspace file tree: source and Markdown",
 				"workspace clean draft refresh and unsaved edit guard",
+				"PPTX object, PDF text, XLSX cell target context without vision gating",
 			],
 		}),
 	);

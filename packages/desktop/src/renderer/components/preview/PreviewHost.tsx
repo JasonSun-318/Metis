@@ -91,7 +91,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const input = useMemo(() => previewInput(file), [file.source, file.sessionId, file.fileId, file.relativePath]);
-	const liveText = file.source === "workspace" && (kind === "markdown" || kind === "text");
+	const liveText = file.source === "workspace";
 	const loadedKey = useRef<string | null>(null);
 	const [revision, setRevision] = useState(0);
 	useEffect(() => {
@@ -245,6 +245,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	}
 
 	const viewerProps = {
+		file,
 		byteLength: data.byteLength,
 		bytes: data.bytes,
 		fileName: data.name,
@@ -259,7 +260,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
 	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
 	if (kind === "markdown" || kind === "text")
-		return <TextViewer key={JSON.stringify(input)} kind={kind} file={file} {...viewerProps} />;
+		return <TextViewer key={JSON.stringify(input)} kind={kind} {...viewerProps} />;
 
 	return (
 		<PreviewShell

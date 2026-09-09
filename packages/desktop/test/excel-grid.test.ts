@@ -1,12 +1,41 @@
 import { describe, expect, it } from "vitest";
 import * as XLSX from "xlsx";
 import {
+	excelSelectionContext,
+	expandExcelSelection,
 	mergesInRowRange,
 	paintedCellsForRow,
 	parseExcelBytes,
 } from "../src/renderer/components/preview/excel-grid.ts";
 
 describe("parseExcelBytes", () => {
+	it("keeps real cell addresses and formulas when data starts at C5", () => {
+		const wb = XLSX.utils.book_new();
+		XLSX.utils.book_append_sheet(
+			wb,
+			{
+				C5: { t: "n", v: 12, f: "SUM(C6:C7)" },
+				C6: { t: "n", v: 5 },
+				C7: { t: "n", v: 7 },
+				"!ref": "C5:D7",
+				"!merges": [{ s: { r: 4, c: 2 }, e: { r: 4, c: 3 } }],
+			},
+			"收入",
+		);
+		const view = parseExcelBytes(new Uint8Array(XLSX.write(wb, { type: "array", bookType: "xlsx" })), "test.xlsx");
+		const sheet = view.sheets.收入!;
+		expect([sheet.startRow, sheet.startCol]).toEqual([4, 2]);
+		const range = expandExcelSelection(sheet, { row: 0, col: 1 }, { row: 1, col: 1 });
+		expect(range).toEqual({ startRow: 0, startCol: 0, endRow: 1, endCol: 1 });
+		const context = excelSelectionContext(sheet, range);
+		expect(context.target).toEqual({ kind: "spreadsheet", sheet: "收入", range: "C5:D6" });
+		expect(JSON.parse(context.excerpt).cells).toContainEqual(
+			expect.objectContaining({ address: "C5", value: 12, formula: "SUM(C6:C7)" }),
+		);
+		expect(JSON.parse(context.excerpt).cells).toContainEqual(
+			expect.objectContaining({ address: "D5", mergedInto: "C5" }),
+		);
+	});
 	it("stores only populated cells and merge anchors", () => {
 		const sheet = XLSX.utils.aoa_to_sheet([
 			["A", "B"],

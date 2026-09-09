@@ -13,9 +13,11 @@ export function FileSelectionPopover({
 	onRequestChange,
 	onDismiss,
 	onAccepted,
+	requestOnly = false,
+	onEditing,
 }: {
 	selection: DraftFileSelection;
-	range: Range;
+	range: Range | HTMLElement;
 	open: boolean;
 	enabled: boolean;
 	disabledReason?: string;
@@ -23,6 +25,8 @@ export function FileSelectionPopover({
 	onRequestChange: (instruction: string) => Promise<void>;
 	onDismiss: () => void;
 	onAccepted: () => void;
+	requestOnly?: boolean;
+	onEditing?: () => void;
 }) {
 	const { t } = useTranslation();
 	const ref = useRef<HTMLDivElement>(null);
@@ -50,19 +54,25 @@ export function FileSelectionPopover({
 		}
 		popup.showPopover();
 		const position = () => {
-			if (!range.startContainer.isConnected) {
+			const isText = range instanceof Range;
+			if (!(isText ? range.startContainer : range).isConnected) {
 				popup.style.visibility = "hidden";
 				return;
 			}
-			const element =
-				range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
-			const clip = element?.closest(".text-viewport, .cm-scroller, .file-preview-body")?.getBoundingClientRect();
+			const element = !isText
+				? range
+				: range.startContainer instanceof Element
+					? range.startContainer
+					: range.startContainer.parentElement;
+			const clip = element?.closest(".preview-viewport, .cm-scroller, .file-preview-body")?.getBoundingClientRect();
 			const width = document.documentElement.clientWidth,
 				height = window.innerHeight;
 			const rects = Array.from(range.getClientRects());
 			const visibleRects = rects.filter(
 				(rect) =>
 					rect.width > 0 &&
+					rect.right > Math.max(0, clip?.left ?? 0) &&
+					rect.left < Math.min(width, clip?.right ?? width) &&
 					rect.bottom > Math.max(0, clip?.top ?? 0) &&
 					rect.top < Math.min(height, clip?.bottom ?? height),
 			);
@@ -84,7 +94,8 @@ export function FileSelectionPopover({
 		if (editing) inputRef.current?.focus();
 		const highlights = globalThis.CSS?.highlights as unknown as Map<string, Highlight> | undefined;
 		const key = "metis-file-selection";
-		const highlight = typeof Highlight === "undefined" ? undefined : new Highlight(range);
+		const highlight =
+			typeof Highlight === "undefined" || !(range instanceof Range) ? undefined : new Highlight(range);
 		if (highlight && highlights) highlights.set(key, highlight);
 		return () => {
 			observer.disconnect();
@@ -184,27 +195,30 @@ export function FileSelectionPopover({
 						onClick={() => {
 							setError("");
 							setEditing(true);
+							onEditing?.();
 						}}
 					>
 						<NotePencil aria-hidden="true" size={14} />
 						{t("Request changes")}
 					</button>
-					<button
-						type="button"
-						disabled={!enabled}
-						onClick={() => {
-							try {
-								onAdd();
-								onDismiss();
-								onAccepted();
-							} catch (cause) {
-								setError(cause instanceof Error ? cause.message : t("Failed to add reference"));
-							}
-						}}
-					>
-						<ChatText aria-hidden="true" size={14} />
-						{t("Add to conversation")}
-					</button>
+					{!requestOnly && (
+						<button
+							type="button"
+							disabled={!enabled}
+							onClick={() => {
+								try {
+									onAdd();
+									onDismiss();
+									onAccepted();
+								} catch (cause) {
+									setError(cause instanceof Error ? cause.message : t("Failed to add reference"));
+								}
+							}}
+						>
+							<ChatText aria-hidden="true" size={14} />
+							{t("Add to conversation")}
+						</button>
+					)}
 				</div>
 			)}
 			{(error || disabledReason) && (

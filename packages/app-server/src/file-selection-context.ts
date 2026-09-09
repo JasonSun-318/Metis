@@ -38,12 +38,21 @@ export async function resolveFileSelections(
 		}
 		if (!(await stat(target.path)).isFile()) throw new TypeError("Selected target must be a file");
 		const { source: _source, ...quote } = selection;
-		const { selectedText, basis, sourceExcerpt, excerptTruncated, startLine, endLine } = quote;
+		const {
+			selectedText,
+			basis,
+			sourceExcerpt,
+			excerptTruncated,
+			startLine,
+			endLine,
+			target: documentTarget,
+		} = quote;
 		files.push({
 			source: selection.source,
 			...target,
 			selectedText,
 			basis,
+			...(documentTarget === undefined ? {} : { target: documentTarget }),
 			...(sourceExcerpt === undefined ? {} : { sourceExcerpt }),
 			...(excerptTruncated === undefined ? {} : { excerptTruncated }),
 			...(startLine === undefined ? {} : { startLine }),

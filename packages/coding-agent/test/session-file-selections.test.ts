@@ -23,6 +23,32 @@ const files: SessionFileSelection[] = [
 	},
 ];
 describe("file selection context", () => {
+	it.each([
+		{ kind: "pdf", page: 2, endPage: 3 },
+		{
+			kind: "pptx",
+			page: 3,
+			slidePath: "ppt/slides/slide8.xml",
+			objectId: "42",
+			objectType: "picture",
+			objectName: "Logo",
+		},
+		{ kind: "spreadsheet", sheet: "收入", range: "C5:E8" },
+	] as const)("retains document target $kind through durable attachment parsing", (target) => {
+		const selection = { ...files[0]!, target };
+		expect(splitSessionAttachmentPrompt(formatSessionFileSelections("change", [selection])).fileSelections).toEqual([
+			selection,
+		]);
+	});
+	it.each([
+		{ kind: "pdf", page: 3, endPage: 2 },
+		{ kind: "pdf", page: 1, coordinates: [] },
+		{ kind: "pptx", page: 1, slidePath: "../../other.xml", objectId: "1", objectType: "picture", objectName: "" },
+		{ kind: "spreadsheet", sheet: "Data", range: "XFE1" },
+		{ kind: "spreadsheet", sheet: "Data", range: "B3:A1" },
+	])("rejects malformed document target %j", (target) => {
+		expect(() => formatSessionFileSelections("edit", [{ ...files[0]!, target } as SessionFileSelection])).toThrow();
+	});
 	it("round trips quoted data and hides metadata even alongside attachments", () => {
 		const prompt = formatSessionFileSelections("解释这一段", files);
 		expect(splitSessionFileSelectionPrompt(prompt)).toEqual({ text: "解释这一段", fileSelections: files });

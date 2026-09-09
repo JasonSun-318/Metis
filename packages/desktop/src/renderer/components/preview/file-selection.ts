@@ -9,6 +9,26 @@ export interface DraftFileSelection {
 	readonly input: FileSelectionInput;
 }
 
+export function selectionFromDocument(
+	file: UniversalPreviewTarget,
+	target: NonNullable<FileSelectionInput["target"]>,
+	selectedText: string,
+	sourceExcerpt?: string,
+): DraftFileSelection | null {
+	const draft = selectionFromText({ file, sourceText: selectedText, selectedText, basis: "formatted" });
+	if (!draft) return null;
+	const input = { ...draft.input, target, ...(sourceExcerpt === undefined ? {} : { sourceExcerpt }) };
+	validateSelectionSize([input]);
+	return { ...draft, input, id: JSON.stringify([file.sessionId, input]) };
+}
+
+export function selectionTargetLabel(target: FileSelectionInput["target"]): string {
+	if (!target) return "";
+	if (target.kind === "spreadsheet") return `${target.sheet}!${target.range}`;
+	if (target.kind === "pptx") return `${target.page} · ${target.objectName || target.objectId}`;
+	return target.endPage && target.endPage !== target.page ? `${target.page}–${target.endPage}` : String(target.page);
+}
+
 export function validateSelectionSize(selections: readonly FileSelectionInput[]): void {
 	if (selections.length > 8) throw new Error("Select at most 8 text fragments");
 	let bytes = 0;
