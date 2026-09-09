@@ -1,4 +1,5 @@
 import type { PathMetadata } from "./package-manager.ts";
+import type { PluginOwner } from "./plugins/types.ts";
 
 export type SourceScope = "user" | "project" | "temporary";
 export type SourceOrigin = "package" | "top-level";
@@ -13,6 +14,7 @@ export interface SourceInfo {
 	sourceIdentity?: string;
 	/** Digest/version of the executable source, used only for stable permission identity. */
 	implementationVersion?: string;
+	pluginOwner?: PluginOwner;
 }
 
 export function createSourceInfo(path: string, metadata: PathMetadata): SourceInfo {
@@ -34,6 +36,7 @@ export function createSyntheticSourceInfo(
 		baseDir?: string;
 		sourceIdentity?: string;
 		implementationVersion?: string;
+		pluginOwner?: PluginOwner;
 	},
 ): SourceInfo {
 	return {
@@ -44,5 +47,6 @@ export function createSyntheticSourceInfo(
 		baseDir: options.baseDir,
 		sourceIdentity: options.sourceIdentity,
 		implementationVersion: options.implementationVersion,
+		pluginOwner: options.pluginOwner,
 	};
 }

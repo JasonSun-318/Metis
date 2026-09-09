@@ -19,6 +19,7 @@ import {
 	importSkills,
 	inspectSkillImport,
 	isImmutableAsarSkill,
+	publicSkills,
 	readSkillDetail,
 	trashSkill,
 	writeSkill,
@@ -534,5 +535,98 @@ describe("Skill files", () => {
 			),
 		).rejects.toMatchObject({ code: "INVALID_REQUEST" });
 		expect(fetchImpl).not.toHaveBeenCalled();
+	});
+
+	it("serves plugin skills as read-only and prevents manual CRUD mutation", async () => {
+		const pluginSkillDir = join(agentDir, "plugins", "packages", "plugin-1", "c1", "skills", "helper");
+		mkdirSync(pluginSkillDir, { recursive: true });
+		const skillFilePath = join(pluginSkillDir, "SKILL.md");
+		writeFileSync(skillFilePath, content("helper", "Plugin helper description", "# Helper Instructions"), "utf8");
+
+		const pluginSkill: Skill = {
+			name: "p-plugin-1-helper",
+			originalName: "helper",
+			description: "Plugin helper description",
+			filePath: skillFilePath,
+			baseDir: pluginSkillDir,
+			disableModelInvocation: false,
+			pluginOwner: {
+				pluginId: "1".repeat(64),
+				displayName: "Plugin 1",
+				componentId: "skill-helper",
+			},
+			sourceInfo: {
+				path: skillFilePath,
+				source: "plugin",
+				scope: "user",
+				origin: "package",
+				baseDir: pluginSkillDir,
+			},
+		};
+
+		const context = { agentDir, cwd: null, skills: [pluginSkill] };
+
+		// 1. publicSkills should expose source === "plugin", pluginOwner, originalName
+		const listed = publicSkills(context.skills);
+		expect(listed.skills).toHaveLength(1);
+		expect(listed.skills[0]).toEqual({
+			name: "p-plugin-1-helper",
+			originalName: "helper",
+			description: "Plugin helper description",
+			source: "plugin",
+			pluginOwner: {
+				pluginId: "1".repeat(64),
+				displayName: "Plugin 1",
+				componentId: "skill-helper",
+			},
+		});
+
+		// 2. readSkillDetail should be editable: false
+		const detail = await readSkillDetail(context.skills, {
+			cwd: null,
+			source: "plugin",
+			name: "p-plugin-1-helper",
+		});
+		expect(detail.editable).toBe(false);
+		expect(detail.source).toBe("plugin");
+		expect(detail.name).toBe("p-plugin-1-helper");
+		expect(detail.originalName).toBe("helper");
+		expect(detail.pluginOwner?.displayName).toBe("Plugin 1");
+		expect(detail.entryFile).toBe("SKILL.md");
+
+		// 3. writeSkill on plugin source should fail with OPERATION_FAILED
+		await expect(
+			writeSkill(context, {
+				requestId: REQUEST_A,
+				cwd: null,
+				source: "plugin" as any,
+				name: "p-plugin-1-helper",
+				content: "new content",
+				expectedRevision: null,
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+
+		// 4. trashSkill on plugin source should fail with OPERATION_FAILED
+		await expect(
+			trashSkill(context, {
+				requestId: REQUEST_A,
+				cwd: null,
+				source: "plugin" as any,
+				name: "p-plugin-1-helper",
+				expectedRevision: detail.revision,
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
+
+		// 5. importSkills to plugin source should fail with OPERATION_FAILED
+		await expect(
+			importSkills(context, {
+				requestId: REQUEST_A,
+				cwd: null,
+				source: "plugin" as any,
+				sourceRevision: "rev",
+				candidateIds: ["id1"],
+				input: { kind: "archive", path: "/tmp/fake.zip" },
+			}),
+		).rejects.toMatchObject({ code: "OPERATION_FAILED" });
 	});
 });

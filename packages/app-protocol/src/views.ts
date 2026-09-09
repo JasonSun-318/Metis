@@ -109,8 +109,14 @@ export const SkillSourceViewSchema = Type.Union([
 	Type.Literal("system"),
 	Type.Literal("user"),
 	Type.Literal("project"),
+	Type.Literal("plugin"),
 ]);
 export const WritableSkillSourceViewSchema = Type.Union([Type.Literal("user"), Type.Literal("project")]);
+export const PluginOwnerSchema = StrictObject({
+	pluginId: Sha256Schema,
+	displayName: PublicTextSchema,
+	componentId: NameSchema,
+});
 export const SkillNameSchema = Type.String({
 	minLength: 1,
 	maxLength: 64,
@@ -122,6 +128,8 @@ export const SkillSummaryViewSchema = StrictObject({
 	name: NameSchema,
 	description: PublicTextSchema,
 	source: Type.Optional(SkillSourceViewSchema),
+	pluginOwner: Type.Optional(PluginOwnerSchema),
+	originalName: Type.Optional(PublicTextSchema),
 });
 
 export const SkillDetailViewSchema = Type.Refine(
@@ -140,8 +148,10 @@ export const SkillDetailViewSchema = Type.Refine(
 		instructions: SkillContentSchema,
 		updatedAt: TimestampSchema,
 		editable: Type.Boolean(),
+		pluginOwner: Type.Optional(PluginOwnerSchema),
+		originalName: Type.Optional(PublicTextSchema),
 	}),
-	(value) => value.editable === (value.source !== "system"),
+	(value) => value.editable === (value.source !== "system" && value.source !== "plugin"),
 	"Skill editability must match its source",
 );
 
@@ -1425,6 +1435,7 @@ export type SessionSummary = Static<typeof SessionSummarySchema>;
 export type SkillSummaryView = Static<typeof SkillSummaryViewSchema>;
 export type SkillSourceView = Static<typeof SkillSourceViewSchema>;
 export type WritableSkillSourceView = Static<typeof WritableSkillSourceViewSchema>;
+export type PluginOwnerView = Static<typeof PluginOwnerSchema>;
 export type SkillDetailView = Static<typeof SkillDetailViewSchema>;
 export type SkillImportInputView = Static<typeof SkillImportInputViewSchema>;
 export type SkillImportCandidateView = Static<typeof SkillImportCandidateViewSchema>;

@@ -264,8 +264,8 @@ function stateLabel(state: McpStateView): string {
 	} satisfies Record<McpStateView, string>)[state];
 }
 
-function sourceLabel(source: SkillSourceView): "System" | "User" | "Project" {
-	return source === "system" ? "System" : source === "user" ? "User" : "Project";
+function sourceLabel(source: SkillSourceView): "System" | "User" | "Project" | "Plugin" {
+	return source === "system" ? "System" : source === "user" ? "User" : source === "project" ? "Project" : "Plugin";
 }
 
 function mcpProtocolTarget(

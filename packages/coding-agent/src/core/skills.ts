@@ -5,6 +5,7 @@ import { getAgentDir, getProjectConfigDir } from "../config.ts";
 import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
+import type { PluginOwner } from "./plugins/types.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 
 /** Max name length per spec */
@@ -78,6 +79,8 @@ export interface Skill {
 	baseDir: string;
 	sourceInfo: SourceInfo;
 	disableModelInvocation: boolean;
+	pluginOwner?: PluginOwner;
+	originalName?: string;
 }
 
 export interface ParsedSkillBlock {

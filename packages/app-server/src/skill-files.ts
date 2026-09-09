@@ -45,6 +45,7 @@ export function isImmutableAsarSkill(path: string, source: SkillSourceView): boo
 }
 
 function sourceOf(skill: Skill): SkillSourceView | undefined {
+	if (skill.pluginOwner || skill.sourceInfo?.source === "plugin") return "plugin";
 	if (isInside(getSkillsDir(), skill.filePath)) return "system";
 	return skill.sourceInfo.scope === "user" || skill.sourceInfo.scope === "project"
 		? skill.sourceInfo.scope
@@ -59,7 +60,13 @@ export function publicSkills(skills: readonly Skill[]): ClientResult<"skill/list
 	return {
 		skills: skills.slice(0, MAX_SKILL_FILES).map((skill) => {
 			const source = sourceOf(skill);
-			return { name: skill.name, description: skill.description, ...(source ? { source } : {}) };
+			return {
+				name: skill.name,
+				description: skill.description,
+				...(source ? { source } : {}),
+				...(skill.pluginOwner ? { pluginOwner: skill.pluginOwner } : {}),
+				...(skill.originalName ? { originalName: skill.originalName } : {}),
+			};
 		}),
 	};
 }
@@ -190,10 +197,10 @@ export async function readSkillDetail(
 	const { bytes, updatedAt } = await readEntry(
 		skill.filePath,
 		undefined,
-		isImmutableAsarSkill(skill.filePath, input.source),
+		isImmutableAsarSkill(skill.filePath, input.source) || input.source === "plugin",
 	);
 	const content = decode(bytes);
-	const parsed = parseContent(input.name, content);
+	const parsed = parseContent(skill.originalName || input.name, content);
 	return {
 		name: input.name,
 		description: parsed.description,
@@ -205,7 +212,9 @@ export async function readSkillDetail(
 		content,
 		instructions: parsed.instructions,
 		updatedAt,
-		editable: input.source !== "system",
+		editable: input.source !== "system" && input.source !== "plugin",
+		...(skill.pluginOwner ? { pluginOwner: skill.pluginOwner } : {}),
+		...(skill.originalName ? { originalName: skill.originalName } : {}),
 	};
 }
 
@@ -298,6 +307,7 @@ export async function writeSkill(context: SkillFileContext, input: ClientParams<
 
 export async function trashSkill(context: SkillFileContext, input: ClientParams<"skill/remove">): Promise<void> {
 	if (input.cwd !== context.cwd || !SKILL_NAME.test(input.name)) fail("INVALID_REQUEST", input.requestId);
+	if (input.source !== "user" && input.source !== "project") fail("OPERATION_FAILED", input.requestId);
 	const root = writableRoot(context, input.source, input.requestId);
 	const current = findSkill(context.skills, input.source, input.name);
 	if (!current) fail("CONFLICT", input.requestId);
@@ -486,6 +496,7 @@ export async function importSkills(
 	fetchImpl: FetchImplementation = globalThis.fetch,
 ): Promise<void> {
 	if (input.cwd !== context.cwd) fail("INVALID_REQUEST", input.requestId);
+	if (input.source !== "user" && input.source !== "project") fail("OPERATION_FAILED", input.requestId);
 	const inspected = await entriesForImport(input, fetchImpl);
 	if (inspected.revision !== input.sourceRevision) fail("CONFLICT", input.requestId);
 	const byId = new Map(inspected.candidates.map((candidate) => [candidate.id, candidate]));

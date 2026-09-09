@@ -7,6 +7,7 @@ import type { ResourceDiagnostic } from "./diagnostics.ts";
 
 export type { ResourceCollision, ResourceDiagnostic } from "./diagnostics.ts";
 
+import { parseFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, isLocalPath, resolvePath } from "../utils/paths.ts";
 import { createEventBus, type EventBus } from "./event-bus.ts";
 import {
@@ -17,12 +18,14 @@ import {
 } from "./extensions/loader.ts";
 import type { Extension, ExtensionRuntime, InlineExtension, LoadExtensionsResult } from "./extensions/types.ts";
 import { DefaultPackageManager, type PathMetadata, type ResolvedResource } from "./package-manager.ts";
+import { readPluginSnapshot } from "./plugins/registry.ts";
+import type { PluginSnapshot } from "./plugins/types.ts";
 import type { PromptTemplate } from "./prompt-templates.ts";
 import { loadPromptTemplates } from "./prompt-templates.ts";
 import { SettingsManager } from "./settings-manager.ts";
-import type { Skill } from "./skills.ts";
+import type { Skill, SkillFrontmatter } from "./skills.ts";
 import { loadSkills } from "./skills.ts";
-import { createSourceInfo, type SourceInfo } from "./source-info.ts";
+import { createSourceInfo, createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { resetTimings } from "./timings.ts";
 
 export interface ResourceExtensionPaths {
@@ -677,6 +680,48 @@ export class DefaultResourceLoader implements ResourceLoader {
 		});
 	}
 
+	private loadPluginSkills(): Skill[] {
+		if (this.noSkills) return [];
+		let snapshot: PluginSnapshot;
+		try {
+			snapshot = readPluginSnapshot(this.agentDir);
+		} catch {
+			return [];
+		}
+
+		const pluginSkills: Skill[] = [];
+		for (const comp of snapshot.skills) {
+			if (!existsSync(comp.filePath)) continue;
+			try {
+				const rawContent = readFileSync(comp.filePath, "utf-8");
+				const { frontmatter } = parseFrontmatter<SkillFrontmatter>(rawContent);
+				const description = frontmatter.description || "";
+				const disableModelInvocation =
+					comp.disableModelInvocation ?? frontmatter["disable-model-invocation"] === true;
+
+				pluginSkills.push({
+					name: comp.name,
+					originalName: comp.originalName || comp.name,
+					description,
+					filePath: comp.filePath,
+					baseDir: comp.baseDir,
+					disableModelInvocation,
+					pluginOwner: comp.owner,
+					sourceInfo: createSyntheticSourceInfo(comp.filePath, {
+						source: "plugin",
+						scope: "user",
+						origin: "package",
+						baseDir: comp.baseDir,
+						pluginOwner: comp.owner,
+					}),
+				});
+			} catch {
+				// Ignore file read error
+			}
+		}
+		return pluginSkills;
+	}
+
 	private updateSkillsFromPaths(skillPaths: string[], metadataByPath?: Map<string, PathMetadata>): void {
 		let skillsResult: { skills: Skill[]; diagnostics: ResourceDiagnostic[] };
 		if (this.noSkills && skillPaths.length === 0) {
@@ -690,13 +735,14 @@ export class DefaultResourceLoader implements ResourceLoader {
 			});
 		}
 		const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;
-		this.skills = resolvedSkills.skills.map((skill) => ({
+		const baseSkills = resolvedSkills.skills.map((skill) => ({
 			...skill,
 			sourceInfo:
 				this.findSourceInfoForPath(skill.filePath, this.extensionSkillSourceInfos, metadataByPath) ??
 				skill.sourceInfo ??
 				this.getDefaultSourceInfoForPath(skill.filePath),
 		}));
+		this.skills = [...baseSkills, ...this.loadPluginSkills()];
 		this.skillDiagnostics = resolvedSkills.diagnostics;
 	}
 
