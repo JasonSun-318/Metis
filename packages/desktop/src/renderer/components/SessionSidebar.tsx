@@ -55,6 +55,8 @@ interface SessionSidebarProps {
 	readonly destination: SidebarDestination;
 	readonly onSettings: () => void;
 	readonly onUpdate: () => void;
+	readonly onCheckUpdate?: () => void;
+	readonly checkingUpdate?: boolean;
 	readonly onSkills: () => void;
 	readonly onSchedules: () => void;
 	readonly onOpenSchedule: (taskId: string) => void;
@@ -304,6 +306,8 @@ export const SessionSidebar = memo(function SessionSidebar({
 	destination,
 	onSettings,
 	onUpdate,
+	onCheckUpdate,
+	checkingUpdate = false,
 	onSkills,
 	onSchedules,
 	onOpenSchedule,
@@ -535,7 +539,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					</button>
 				</div>
 			)}
-			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} /></div>
+			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} onCheckUpdate={onCheckUpdate} checkingUpdate={checkingUpdate || updateState.status === "checking"} updateDownloading={updateState.status === "downloading"} /></div>
 			<div
 				aria-label={t("Resize sessions sidebar")}
 				aria-orientation="vertical"

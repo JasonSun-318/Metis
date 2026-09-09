@@ -124,7 +124,10 @@ describe("DesktopUpdater", () => {
 		expect(updater.start()).toBe(true);
 		expect(updater.view()).toEqual({ status: "checking" });
 		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
-		expect(fetch).toHaveBeenCalledWith(`${BASE_URL}/darwin/arm64/latest.json`, { cache: "no-store" });
+		expect(fetch).toHaveBeenCalledWith(
+			`${BASE_URL}/darwin/arm64/latest.json`,
+			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
+		);
 		expect(states).toContainEqual({ status: "available", version: "0.81.0" });
 	});
 
@@ -220,5 +223,493 @@ describe("DesktopUpdater", () => {
 		await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2));
 		updater.stop();
 		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+	});
+
+	it("fetches a newer release on manual check after starting with no update", async () => {
+		const dmg = new TextEncoder().encode("manual release");
+		let check = 0;
+		const fetch = vi.fn(async () => {
+			check += 1;
+			const version = check === 1 ? VERSION : "0.81.0";
+			return new Response(JSON.stringify(manifest(version, dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			});
+		});
+		const { updater } = await harness({ dmg, fetch });
+		expect(updater.start()).toBe(true);
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "unavailable" }));
+		expect(fetch).toHaveBeenCalledTimes(1);
+
+		const result = await updater.checkForUpdate();
+		expect(result).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it("deduplicates concurrent checks into a single fetch and allows checking again after completion", async () => {
+		let resolveFetch: ((res: Response) => void) | undefined;
+		const fetch = vi.fn(
+			() =>
+				new Promise<Response>((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+		const { updater } = await harness({ fetch });
+		updater.start();
+		const check1 = updater.checkForUpdate();
+		const check2 = updater.checkForUpdate();
+		expect(fetch).toHaveBeenCalledTimes(1);
+
+		const dmg = new TextEncoder().encode("concurrent release");
+		resolveFetch!(
+			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const [res1, res2] = await Promise.all([check1, check2]);
+		expect(res1).toEqual({ status: "available", version: "0.81.0" });
+		expect(res2).toEqual({ status: "available", version: "0.81.0" });
+		expect(fetch).toHaveBeenCalledTimes(1);
+
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		await updater.checkForUpdate();
+		expect(fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it("returns unavailable when up-to-date, but rejects on network/HTTP/manifest error", async () => {
+		const dmg = new TextEncoder().encode("up-to-date");
+		const fetchUpToDate = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify(manifest(VERSION, dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const { updater: upToDateUpdater } = await harness({ dmg, fetch: fetchUpToDate });
+		await expect(upToDateUpdater.checkForUpdate()).resolves.toEqual({ status: "unavailable" });
+
+		const fetchNetworkError = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+		const { updater: networkUpdater } = await harness({ fetch: fetchNetworkError });
+		await expect(networkUpdater.checkForUpdate()).rejects.toThrow("Failed to fetch");
+
+		const fetchHttpError = vi.fn().mockResolvedValue(new Response("Internal Server Error", { status: 500 }));
+		const { updater: httpUpdater } = await harness({ fetch: fetchHttpError });
+		await expect(httpUpdater.checkForUpdate()).rejects.toThrow("Update manifest request failed with 500");
+
+		const fetchBadManifest = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify({ schemaVersion: 999 }), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const { updater: badManifestUpdater } = await harness({ fetch: fetchBadManifest });
+		await expect(badManifestUpdater.checkForUpdate()).rejects.toThrow("Invalid update manifest");
+	});
+
+	it("preserves existing available and ready states on manual check failure and allows retry", async () => {
+		const dmg = new TextEncoder().encode("state test");
+		const fetch = vi.fn().mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const { updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+
+		fetch.mockRejectedValueOnce(new Error("offline"));
+		await expect(updater.checkForUpdate()).rejects.toThrow("offline");
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		await expect(updater.checkForUpdate()).resolves.toEqual({ status: "available", version: "0.81.0" });
+
+		fetch.mockResolvedValueOnce(
+			new Response(dmg.buffer as ArrayBuffer, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			}),
+		);
+		await updater.downloadAndOpen();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+
+		fetch.mockRejectedValueOnce(new Error("offline"));
+		await expect(updater.checkForUpdate()).rejects.toThrow("offline");
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+	});
+
+	it("ignores checks during download without issuing a fetch or resetting progress", async () => {
+		const dmg = new TextEncoder().encode("downloading progress test");
+		let releaseChunk: (() => void) | undefined;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(dmg.subarray(0, 5));
+				releaseChunk = () => {
+					controller.enqueue(dmg.subarray(5));
+					controller.close();
+				};
+			},
+		});
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response(stream, {
+					headers: { "content-length": String(dmg.byteLength) },
+					status: 200,
+				}),
+			);
+		const { updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		const downloadPromise = updater.downloadAndOpen();
+		await vi.waitFor(() => expect(updater.view().status).toBe("downloading"));
+		const downloadingView = updater.view();
+
+		const checkResult = await updater.checkForUpdate();
+		expect(checkResult).toEqual(downloadingView);
+		expect(fetch).toHaveBeenCalledTimes(2);
+
+		releaseChunk!();
+		await downloadPromise;
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+	});
+
+	it("interleaves check then download: check returning older manifest during download does not overwrite state and allows opening ready installer", async () => {
+		const dmg = new TextEncoder().encode("interleaved older release");
+		let releaseChunk: (() => void) | undefined;
+		let releaseCheck: (() => void) | undefined;
+		let checks = 0;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(dmg.subarray(0, 5));
+				releaseChunk = () => {
+					controller.enqueue(dmg.subarray(5));
+					controller.close();
+				};
+			},
+		});
+		const fetch = vi.fn(async (url: string) => {
+			if (url.endsWith("latest.json")) {
+				checks += 1;
+				if (checks === 1) {
+					return new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+						headers: { "content-type": "application/json" },
+						status: 200,
+					});
+				}
+				await new Promise<void>((resolve) => {
+					releaseCheck = resolve;
+				});
+				// Remote returned older version (0.80.6) while download of 0.81.0 is in flight
+				return new Response(JSON.stringify(manifest(VERSION, dmg)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				});
+			}
+			return new Response(stream, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			});
+		});
+		const { openPath, updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+
+		// 1. Start check first
+		const checkPromise = updater.checkForUpdate();
+		// 2. Start download second while check fetch is pending
+		const downloadPromise = updater.downloadAndOpen();
+		await vi.waitFor(() => expect(updater.view().status).toBe("downloading"));
+
+		// 3. Resolve the pending check with the older manifest
+		releaseCheck!();
+		await checkPromise;
+		// Downloading status and manifest should NOT be overwritten by the check
+		expect(updater.view().status).toBe("downloading");
+
+		// 4. Finish the download
+		releaseChunk!();
+		await downloadPromise;
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(openPath).toHaveBeenCalledTimes(1);
+
+		// 5. Subsequent open must succeed without throwing "No desktop update is available"
+		await updater.downloadAndOpen();
+		expect(openPath).toHaveBeenCalledTimes(2);
+	});
+
+	it("interleaves check then download: check returning same manifest during download preserves download and installer", async () => {
+		const dmg = new TextEncoder().encode("interleaved same release");
+		let releaseChunk: (() => void) | undefined;
+		let releaseCheck: (() => void) | undefined;
+		let checks = 0;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(dmg.subarray(0, 5));
+				releaseChunk = () => {
+					controller.enqueue(dmg.subarray(5));
+					controller.close();
+				};
+			},
+		});
+		const fetch = vi.fn(async (url: string) => {
+			if (url.endsWith("latest.json")) {
+				checks += 1;
+				if (checks === 1) {
+					return new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+						headers: { "content-type": "application/json" },
+						status: 200,
+					});
+				}
+				await new Promise<void>((resolve) => {
+					releaseCheck = resolve;
+				});
+				return new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				});
+			}
+			return new Response(stream, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			});
+		});
+		const { openPath, updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		const checkPromise = updater.checkForUpdate();
+		const downloadPromise = updater.downloadAndOpen();
+		await vi.waitFor(() => expect(updater.view().status).toBe("downloading"));
+
+		releaseCheck!();
+		await checkPromise;
+		expect(updater.view().status).toBe("downloading");
+
+		releaseChunk!();
+		await downloadPromise;
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(openPath).toHaveBeenCalledTimes(1);
+
+		await updater.downloadAndOpen();
+		expect(openPath).toHaveBeenCalledTimes(2);
+	});
+
+	it("interleaves check then download: check returning newer manifest during download does not disrupt active download", async () => {
+		const dmg = new TextEncoder().encode("interleaved newer release");
+		const dmgNew = new TextEncoder().encode("future newer release");
+		let releaseChunk: (() => void) | undefined;
+		let releaseCheck: (() => void) | undefined;
+		let checks = 0;
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(dmg.subarray(0, 5));
+				releaseChunk = () => {
+					controller.enqueue(dmg.subarray(5));
+					controller.close();
+				};
+			},
+		});
+		const fetch = vi.fn(async (url: string) => {
+			if (url.endsWith("latest.json")) {
+				checks += 1;
+				if (checks === 1) {
+					return new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+						headers: { "content-type": "application/json" },
+						status: 200,
+					});
+				}
+				if (checks === 2) {
+					await new Promise<void>((resolve) => {
+						releaseCheck = resolve;
+					});
+					// While 0.81.0 is downloading, remote announced 0.82.0
+					return new Response(JSON.stringify(manifest("0.82.0", dmgNew)), {
+						headers: { "content-type": "application/json" },
+						status: 200,
+					});
+				}
+				return new Response(JSON.stringify(manifest("0.82.0", dmgNew)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				});
+			}
+			return new Response(stream, {
+				headers: { "content-length": String(dmg.byteLength) },
+				status: 200,
+			});
+		});
+		const { openPath, updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		const checkPromise = updater.checkForUpdate();
+		const downloadPromise = updater.downloadAndOpen();
+		await vi.waitFor(() => expect(updater.view().status).toBe("downloading"));
+
+		releaseCheck!();
+		await checkPromise;
+		expect(updater.view().status).toBe("downloading");
+
+		releaseChunk!();
+		await downloadPromise;
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(openPath).toHaveBeenCalledTimes(1);
+
+		// Verified opening the downloaded 0.81.0 installer succeeds
+		await updater.downloadAndOpen();
+		expect(openPath).toHaveBeenCalledTimes(2);
+
+		// Now subsequent check detects the newer 0.82.0
+		const nextCheck = await updater.checkForUpdate();
+		expect(nextCheck).toEqual({ status: "available", version: "0.82.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.82.0" });
+	});
+
+	it("keeps verified DMG on same or lower remote version, and switches to available on higher remote version", async () => {
+		const dmg = new TextEncoder().encode("ready version test");
+		const dmgNew = new TextEncoder().encode("newer ready version test");
+		const fetch = vi
+			.fn()
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response(dmg.buffer as ArrayBuffer, {
+					headers: { "content-length": String(dmg.byteLength) },
+					status: 200,
+				}),
+			);
+		const { openPath, updater } = await harness({ dmg, fetch });
+		await updater.checkForUpdate();
+		await updater.downloadAndOpen();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(openPath).toHaveBeenCalledTimes(1);
+
+		// Remote serves same version 0.81.0 -> stays ready, can open again
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		await updater.downloadAndOpen();
+		expect(openPath).toHaveBeenCalledTimes(2);
+
+		// Remote rolls back to 0.80.7 (higher than current app 0.80.6, but lower than ready 0.81.0)
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.80.7", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		await updater.downloadAndOpen();
+		expect(openPath).toHaveBeenCalledTimes(3);
+
+		// Remote rolls back to 0.80.6 (same as app version) -> stays ready
+		fetch.mockResolvedValueOnce(
+			new Response(JSON.stringify(manifest("0.80.6", dmg)), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+
+		// Remote serves higher version 0.82.0 -> transitions to available
+		fetch
+			.mockResolvedValueOnce(
+				new Response(JSON.stringify(manifest("0.82.0", dmgNew)), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}),
+			)
+			.mockResolvedValueOnce(
+				new Response(dmgNew.buffer as ArrayBuffer, {
+					headers: { "content-length": String(dmgNew.byteLength) },
+					status: 200,
+				}),
+			);
+		await updater.checkForUpdate();
+		expect(updater.view()).toEqual({ status: "available", version: "0.82.0" });
+		await updater.downloadAndOpen();
+		expect(updater.view()).toEqual({ status: "ready", version: "0.82.0" });
+		expect(openPath).toHaveBeenCalledTimes(4);
+	});
+
+	it("rejects manual check when unpackaged, on unsupported platform, or without valid base URL", async () => {
+		for (const options of [
+			{ isPackaged: false },
+			{ platform: "win32" as const },
+			{ arch: "ia32" },
+			{ baseUrl: "http://insecure.example.test" },
+		]) {
+			const { fetch, updater } = await harness(options);
+			await expect(updater.checkForUpdate()).rejects.toThrow("Update checks are unavailable in this build");
+			expect(fetch).not.toHaveBeenCalled();
+			expect(updater.view()).toEqual({ status: "unavailable" });
+		}
+	});
+
+	it("records diagnostic without unhandled rejection when startup check fails", async () => {
+		const fetch = vi.fn().mockRejectedValue(new Error("network down"));
+		const { onDiagnostic, updater } = await harness({ fetch });
+		expect(updater.start()).toBe(true);
+		expect(updater.view()).toEqual({ status: "checking" });
+		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "unavailable" }));
+		expect(onDiagnostic).toHaveBeenCalledWith("Update check failed");
+	});
+
+	it("aborts manifest request when timeout occurs", async () => {
+		const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+			const signal = init?.signal;
+			return new Promise<Response>((_, reject) => {
+				if (signal?.aborted) {
+					reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+					return;
+				}
+				signal?.addEventListener("abort", () => {
+					reject(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+				});
+			});
+		});
+		vi.useFakeTimers();
+		const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockImplementation((ms) => {
+			const controller = new AbortController();
+			setTimeout(() => {
+				controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError"));
+			}, ms);
+			return controller.signal;
+		});
+		try {
+			const { updater } = await harness({ fetch });
+			const checkPromise = updater.checkForUpdate();
+			const assertion = expect(checkPromise).rejects.toThrow(/aborted/u);
+			await vi.advanceTimersByTimeAsync(15_000);
+			await assertion;
+		} finally {
+			timeoutSpy.mockRestore();
+			vi.useRealTimers();
+		}
 	});
 });

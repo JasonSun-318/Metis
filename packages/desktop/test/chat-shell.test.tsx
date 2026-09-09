@@ -442,6 +442,7 @@ function createHarness(options: {
 		getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		updateWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		getUpdateState: vi.fn(async () => updateState),
+		checkForUpdate: vi.fn(async () => updateState),
 		startUpdate: vi.fn().mockResolvedValue(undefined),
 		subscribeUpdate: vi.fn((listener) => {
 			updateSubscribers.add(listener);
@@ -800,9 +801,17 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("shows the update action above Metis only when a newer version is available", async () => {
+	it("shows the update action above Metis only when a newer version is available and handles manual check flow", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api, emitUpdate } = createHarness();
+		let resolveCheck: ((state: { status: "available"; version: string }) => void) | undefined;
+		api.checkForUpdate = vi.fn(
+			() =>
+				new Promise<{ status: "available"; version: string }>((resolve) => {
+					resolveCheck = resolve;
+				}),
+		);
+
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -810,8 +819,29 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.querySelector(".sidebar-update-notice")).toBeNull();
 
+		const refreshBtn = container.querySelector<HTMLButtonElement>(".account-update-check")!;
+		expect(refreshBtn).not.toBeNull();
+		expect(refreshBtn.disabled).toBe(false);
+		expect(refreshBtn.getAttribute("aria-busy")).toBe("false");
+
+		await act(async () => refreshBtn.click());
+		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+		expect(refreshBtn.disabled).toBe(true);
+		expect(refreshBtn.getAttribute("aria-busy")).toBe("true");
+		expect(refreshBtn.querySelector(".is-spinning")).not.toBeNull();
+
+		await act(async () => refreshBtn.click());
+		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+
 		await act(async () => emitUpdate({ status: "available", version: "0.81.0" }));
+		await act(async () => resolveCheck!({ status: "available", version: "0.81.0" }));
+		await flush();
+
+		expect(refreshBtn.disabled).toBe(false);
+		expect(refreshBtn.getAttribute("aria-busy")).toBe("false");
+
 		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
+		expect(notice).not.toBeNull();
 		expect(notice.nextElementSibling?.classList.contains("sidebar-footer")).toBe(true);
 		const update = button(notice, "Update to new version");
 		expect(update.querySelector("svg")).not.toBeNull();
@@ -822,6 +852,64 @@ describe("Chat desktop shell", () => {
 		expect(button(notice, "Downloading update 42%").disabled).toBe(true);
 		await act(async () => emitUpdate({ status: "ready", version: "0.81.0" }));
 		expect(button(notice, "Open installer").disabled).toBe(false);
+
+		await act(async () => root.unmount());
+	});
+
+	it("shows up-to-date and failure notices and protects downloading/ready states against stale check results", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api, emitUpdate } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const refreshBtn = container.querySelector<HTMLButtonElement>(".account-update-check")!;
+
+		// 1. Up-to-date notice
+		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
+		await act(async () => refreshBtn.click());
+		await flush();
+		expect(container.querySelector(".toast")?.textContent).toBe("Metis is up to date");
+
+		// 2. Failure notice and retry
+		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("offline"));
+		await act(async () => refreshBtn.click());
+		await flush();
+		expect(container.querySelector(".toast")?.textContent).toBe(
+			"Could not check for updates. Check your connection and try again.",
+		);
+		expect(refreshBtn.disabled).toBe(false);
+
+		// Retry succeeds
+		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
+		await act(async () => refreshBtn.click());
+		await flush();
+		expect(container.querySelector(".toast")?.textContent).toBe("Metis is up to date");
+
+		// 3. Unsupported build notice
+		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("Update checks are unavailable in this build"));
+		await act(async () => refreshBtn.click());
+		await flush();
+		expect(container.querySelector(".toast")?.textContent).toBe("Update checks are not supported in this build");
+
+		// 4. Stale check does not overwrite downloading/ready state
+		let resolveDelayedCheck: ((val: { status: "unavailable" }) => void) | undefined;
+		api.checkForUpdate = vi.fn(
+			() =>
+				new Promise<{ status: "unavailable" }>((resolve) => {
+					resolveDelayedCheck = resolve;
+				}),
+		);
+		await act(async () => refreshBtn.click());
+		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", progress: 60 }));
+		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
+		expect(button(notice, "Downloading update 60%")).not.toBeNull();
+
+		await act(async () => resolveDelayedCheck!({ status: "unavailable" }));
+		await flush();
+		expect(button(notice, "Downloading update 60%")).not.toBeNull();
 
 		await act(async () => root.unmount());
 	});

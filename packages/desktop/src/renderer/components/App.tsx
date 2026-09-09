@@ -229,6 +229,8 @@ export function App({ api, store }: AppProps) {
 	const [compactingSession, setCompactingSession] = useState<{ readonly sessionId: string; readonly startedAt: string } | null>(null);
 	const dirtyToolSessionIds = [...workspaceState.dirtySessionIds];
 	const toolCleanupSessionIds = workspaceState.cleanupSessionIds;
+	const [checkingUpdate, setCheckingUpdate] = useState(false);
+	const updateCheckTask = useRef<Promise<void> | null>(null);
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const [fullscreen, setFullscreen] = useState(false);
 	useEffect(() => {
@@ -382,6 +384,32 @@ export function App({ api, store }: AppProps) {
 			unsubscribe();
 		};
 	}, [api]);
+	const checkDesktopUpdate = useCallback(() => {
+		if (updateCheckTask.current) return;
+		setCheckingUpdate(true);
+		const task = api
+			.checkForUpdate()
+			.then((next) => {
+				setUpdateState((current) => {
+					if (current.status === "downloading" || current.status === "ready") return current;
+					return next;
+				});
+				if (next.status === "unavailable") setNotice(t("Metis is up to date"));
+			})
+			.catch((error: unknown) => {
+				const message = error instanceof Error ? error.message : String(error);
+				if (message.includes("unavailable in this build") || message.includes("not supported in this build")) {
+					setNotice(t("Update checks are not supported in this build"));
+				} else {
+					setNotice(t("Could not check for updates. Check your connection and try again."));
+				}
+			})
+			.finally(() => {
+				updateCheckTask.current = null;
+				setCheckingUpdate(false);
+			});
+		updateCheckTask.current = task;
+	}, [api, t]);
 	const startDesktopUpdate = useCallback(() => {
 		void api.startUpdate().catch(reportError);
 	}, [api, reportError]);
@@ -1367,6 +1395,8 @@ export function App({ api, store }: AppProps) {
 				onDeleteSchedule={deleteScheduledTask}
 				onSettings={openSettings}
 				onUpdate={startDesktopUpdate}
+				onCheckUpdate={checkDesktopUpdate}
+				checkingUpdate={checkingUpdate}
 				onSkills={openSkillsDestination}
 				onSchedules={openSchedulesDestination}
 				onOpenSchedule={openSchedule}

@@ -132,23 +132,25 @@ export class DesktopUpdater {
 		this.baseUrl = trustedBaseUrl(options.baseUrl);
 	}
 
+	isSupported(): boolean {
+		return Boolean(
+			this.options.isPackaged &&
+				this.options.platform === "darwin" &&
+				["arm64", "x64"].includes(this.options.arch) &&
+				this.baseUrl &&
+				versionParts(this.options.currentVersion),
+		);
+	}
+
 	start(): boolean {
 		if (this.started) return true;
-		if (
-			!this.options.isPackaged ||
-			this.options.platform !== "darwin" ||
-			!["arm64", "x64"].includes(this.options.arch) ||
-			!this.baseUrl ||
-			!versionParts(this.options.currentVersion)
-		) {
-			return false;
-		}
+		if (!this.isSupported()) return false;
 		this.started = true;
 		this.setState({ status: "checking" });
-		void this.checkForUpdates();
+		void this.checkForUpdates().catch(() => undefined);
 		const interval = this.options.checkIntervalMs ?? DEFAULT_CHECK_INTERVAL_MS;
 		if (interval > 0) {
-			this.checkTimer = setInterval(() => void this.checkForUpdates(), interval);
+			this.checkTimer = setInterval(() => void this.checkForUpdates().catch(() => undefined), interval);
 			this.checkTimer.unref?.();
 		}
 		return true;
@@ -184,6 +186,12 @@ export class DesktopUpdater {
 		}
 	}
 
+	async checkForUpdate(): Promise<DesktopUpdateState> {
+		if (!this.isSupported()) throw new Error("Update checks are unavailable in this build");
+		await this.checkForUpdates();
+		return this.view();
+	}
+
 	private async checkForUpdates(): Promise<void> {
 		if (this.downloadTask || this.state.status === "downloading") return;
 		if (this.checkTask) return await this.checkTask;
@@ -199,23 +207,36 @@ export class DesktopUpdater {
 	private async performCheck(): Promise<void> {
 		try {
 			const manifestUrl = new URL(`darwin/${this.options.arch}/latest.json`, this.baseUrl!).href;
-			const response = await this.options.fetch(manifestUrl, { cache: "no-store" });
+			const response = await this.options.fetch(manifestUrl, {
+				cache: "no-store",
+				signal: AbortSignal.timeout(15_000),
+			});
 			if (!response.ok) throw new Error(`Update manifest request failed with ${response.status}`);
 			const manifest = parseManifest(await response.json(), this.baseUrl!);
-			if (compareStableVersions(manifest.version, this.options.currentVersion) <= 0) {
-				this.manifest = undefined;
-				if (this.state.status !== "ready") this.setState({ status: "unavailable" });
+			if (this.downloadTask || this.state.status === "downloading") {
 				return;
 			}
+			if (compareStableVersions(manifest.version, this.options.currentVersion) <= 0) {
+				if (this.state.status !== "ready") {
+					this.manifest = undefined;
+					this.setState({ status: "unavailable" });
+				}
+				return;
+			}
+			if (this.state.status === "ready" && this.manifest) {
+				const comparison = compareStableVersions(manifest.version, this.manifest.version);
+				if (comparison <= 0) return;
+			}
 			this.manifest = manifest;
-			if (this.state.status === "ready") return;
+			this.downloadedPath = undefined;
 			this.setState({ status: "available", version: manifest.version });
-		} catch {
+		} catch (error) {
 			this.options.onDiagnostic?.("Update check failed");
 			if (this.state.status === "checking") {
 				this.manifest = undefined;
 				this.setState({ status: "unavailable" });
 			}
+			throw error;
 		}
 	}
 
@@ -236,12 +257,14 @@ export class DesktopUpdater {
 			if (!(await verifiedFile(destination, manifest))) {
 				throw new Error("Downloaded update failed verification");
 			}
+			this.manifest = manifest;
 			this.downloadedPath = destination;
 			this.setState({ status: "ready", version: manifest.version });
 			await this.openDownloadedPath(destination);
 		} catch (error) {
 			await rm(partial, { force: true }).catch(() => undefined);
 			this.downloadedPath = undefined;
+			this.manifest = manifest;
 			this.setState({ status: "available", version: manifest.version });
 			this.options.onDiagnostic?.("Update download failed");
 			throw error;

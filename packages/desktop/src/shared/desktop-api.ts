@@ -104,6 +104,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	writeClipboardText: "metis:write-clipboard-text",
 	setWorkspaceEditState: "metis:set-workspace-edit-state",
 	getUpdateState: "metis:get-update-state",
+	checkForUpdate: "metis:check-for-update",
 	startUpdate: "metis:start-update",
 } as const;
 
@@ -578,6 +579,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	writeClipboardText(input: DesktopWriteClipboardTextInput): Promise<void>;
 	setWorkspaceEditState(input: DesktopWorkspaceEditState): Promise<void>;
 	getUpdateState(): Promise<DesktopUpdateState>;
+	checkForUpdate(): Promise<DesktopUpdateState>;
 	startUpdate(): Promise<void>;
 	subscribeUpdate(listener: (state: DesktopUpdateState) => void): () => void;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;

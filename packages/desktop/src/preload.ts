@@ -217,6 +217,8 @@ const api = {
 	},
 	getUpdateState: async () =>
 		validateDesktopUpdateState(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getUpdateState)),
+	checkForUpdate: async () =>
+		validateDesktopUpdateState(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.checkForUpdate)),
 	startUpdate: async () => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.startUpdate);
 	},

@@ -204,4 +204,23 @@ describe("AccountMenu", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("clicking refresh triggers update check independently without opening Settings", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const onSettings = vi.fn();
+		const onCheckUpdate = vi.fn();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(<AccountMenu onCheckUpdate={onCheckUpdate} onSettings={onSettings} />),
+		);
+
+		const refresh = button(container, "Check for updates");
+		expect(refresh.classList.contains("account-update-check")).toBe(true);
+		await act(async () => refresh.click());
+		expect(onCheckUpdate).toHaveBeenCalledOnce();
+		expect(onSettings).not.toHaveBeenCalled();
+		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
+		await act(async () => root.unmount());
+	});
 });

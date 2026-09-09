@@ -3,7 +3,7 @@ import webpack, { type Configuration } from "webpack";
 const updateBaseUrl =
 	process.env.METIS_UPDATE_BASE_URL ||
 	process.env.METIS_DOWNLOAD_BASE_URL ||
-	null;
+	"https://metis-release.oss-cn-shenzhen.aliyuncs.com/metis";
 
 const config: Configuration = {
 	entry: "./src/main/main.ts",

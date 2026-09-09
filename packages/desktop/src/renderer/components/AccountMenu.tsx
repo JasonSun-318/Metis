@@ -1,9 +1,14 @@
-import { CaretDown, GearSix } from "@phosphor-icons/react";
+import { ArrowsClockwise, CaretDown, GearSix } from "@phosphor-icons/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useProfileIdentity } from "../profile-identity.ts";
 
-export const AccountMenu = memo(function AccountMenu({ onSettings }: { readonly onSettings: () => void }) {
+export const AccountMenu = memo(function AccountMenu({ onSettings, onCheckUpdate, checkingUpdate = false, updateDownloading = false }: {
+ readonly onSettings: () => void;
+ readonly onCheckUpdate?: () => void;
+ readonly checkingUpdate?: boolean;
+ readonly updateDownloading?: boolean;
+}) {
 	const { t } = useTranslation();
 	const identity = useProfileIdentity();
 	const [open, setOpen] = useState(false);
@@ -44,11 +49,12 @@ export const AccountMenu = memo(function AccountMenu({ onSettings }: { readonly 
 						role="menuitem"
 						type="button"
 					>
-						<GearSix aria-hidden="true" size={17} />
+						<GearSix aria-hidden="true" size={15} />
 						<span className="account-menu-item-label">{t("Settings")}</span>
 					</button>
 				</div>
 			) : null}
+			<div className="account-menu-footer">
 			<button
 				aria-label={identity.displayName}
 				aria-expanded={open}
@@ -66,6 +72,16 @@ export const AccountMenu = memo(function AccountMenu({ onSettings }: { readonly 
 				<span className="account-menu-name">{identity.displayName}</span>
 				<CaretDown aria-hidden="true" size={14} />
 			</button>
+			{onCheckUpdate && <button
+				aria-label={t(checkingUpdate ? "Checking for updates" : "Check for updates")}
+				aria-busy={checkingUpdate}
+				className="account-update-check"
+				disabled={checkingUpdate || updateDownloading}
+				onClick={() => { setOpen(false); onCheckUpdate(); }}
+				title={t(updateDownloading ? "Update download in progress" : checkingUpdate ? "Checking for updates" : "Check for updates")}
+				type="button"
+			><ArrowsClockwise aria-hidden="true" className={checkingUpdate ? "is-spinning" : undefined} size={15} /></button>}
+			</div>
 		</div>
 	);
 });

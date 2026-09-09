@@ -1336,12 +1336,18 @@ describe("desktop trust boundaries", () => {
 		const writeClipboardText = vi.fn();
 		const setWorkspaceEditState = vi.fn();
 		const openPath = vi.fn(async () => "");
+		const updater = {
+			view: vi.fn(() => ({ status: "unavailable" as const })),
+			checkForUpdate: vi.fn(async () => ({ status: "unavailable" as const })),
+			downloadAndOpen: vi.fn(async () => undefined),
+		};
 		const broker = new ClientBroker({
 			ipcMain: ipcMain as never,
 			supervisor,
 			writeClipboardText,
 			setWorkspaceEditState,
 			openPath,
+			updater,
 		});
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
@@ -1393,6 +1399,11 @@ describe("desktop trust boundaries", () => {
 		await expect(reportEditState(event, { dirty: true, language: "zh-CN", visibleSessionId: null })).rejects.toThrow(
 			"Invalid workspace edit state",
 		);
+
+		const checkForUpdate = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.checkForUpdate)!;
+		await expect(checkForUpdate(event, { extra: true })).rejects.toThrow("Invalid desktop IPC arguments");
+		await expect(checkForUpdate(event)).resolves.toEqual({ status: "unavailable" });
+		expect(updater.checkForUpdate).toHaveBeenCalledOnce();
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();

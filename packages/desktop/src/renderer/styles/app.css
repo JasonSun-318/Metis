@@ -146,12 +146,48 @@ textarea { resize: none; }
 .account-mark { display: grid; width: 20px; height: 20px; flex: none; overflow: hidden; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 700; }
 .account-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .account-menu { position: relative; width: 100%; }
-.account-menu-trigger { display: flex; width: 100%; height: 34px; align-items: center; gap: 9px; border-radius: 7px; color: var(--text-21); padding: 0 7px 0 1px; text-align: left; font-size: 13px; letter-spacing: -0.01em; transition: background-color 120ms ease, box-shadow 120ms ease; }
+.account-menu-footer { display: flex; align-items: center; gap: 4px; width: 100%; }
+.account-menu-trigger { display: flex; flex: 1; min-width: 0; width: auto; height: 34px; align-items: center; gap: 9px; border-radius: 7px; color: var(--text-21); padding: 0 7px 0 1px; text-align: left; font-size: 13px; letter-spacing: -0.01em; transition: background-color 120ms ease, box-shadow 120ms ease; }
 .account-menu-name { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-menu-trigger > svg { color: var(--text-08); transition: transform 140ms ease; }
 .account-menu-trigger:hover, .account-menu-trigger:focus-visible { background: var(--surface-07); outline: 1px solid var(--surface-13); outline-offset: -1px; }
 .account-menu-trigger[aria-expanded="true"] { background: var(--surface-08); }
 .account-menu-trigger[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.account-update-check {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 28px;
+	height: 28px;
+	border: 0;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-14);
+	padding: 0;
+	transition: background-color 120ms ease, color 120ms ease;
+}
+.account-update-check:hover:not(:disabled),
+.account-update-check:focus-visible:not(:disabled) {
+	background: var(--surface-07);
+	color: var(--text-21);
+	outline: 1px solid var(--surface-13);
+	outline-offset: -1px;
+}
+.account-update-check:disabled {
+	color: var(--text-03);
+	cursor: not-allowed;
+}
+.account-update-check svg.is-spinning {
+	animation: browser-spin 900ms linear infinite;
+}
+:root[data-motion="reduced"] .account-update-check svg.is-spinning {
+	animation: none;
+}
+@media (prefers-reduced-motion: reduce) {
+	.account-update-check svg.is-spinning {
+		animation: none;
+	}
+}
 .account-menu-popover { position: absolute; z-index: 100; right: 0; bottom: 39px; left: 0; display: grid; gap: 2px; border: 1px solid var(--border-strong); border-radius: 10px; background: var(--surface-04); box-shadow: var(--overlay-shadow); padding: 4px; animation: composer-popover-in 150ms cubic-bezier(.16, 1, .3, 1); transform-origin: right bottom; }
 .account-menu-item { display: grid; width: 100%; min-height: 28px; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 8px; border-radius: 6px; color: var(--text-24); padding: 2px 8px; text-align: left; font-size: 13px; font-weight: 400; line-height: 1.2; letter-spacing: -0.01em; transition: background-color 120ms ease, color 120ms ease; }
 .account-menu-item svg { color: var(--text-27); }

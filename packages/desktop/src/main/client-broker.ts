@@ -79,6 +79,7 @@ interface BrokerSupervisor {
 
 interface BrokerUpdater {
 	view(): DesktopUpdateState;
+	checkForUpdate(): Promise<DesktopUpdateState>;
 	downloadAndOpen(): Promise<void>;
 }
 
@@ -335,6 +336,9 @@ export class ClientBroker {
 		this.openPath = options.openPath ?? (async () => "Skill folder opening is unavailable");
 		this.updater = options.updater ?? {
 			view: () => ({ status: "unavailable" }),
+			checkForUpdate: async () => {
+				throw new Error("Update checks are unavailable in this build");
+			},
 			downloadAndOpen: async () => {
 				throw new Error("Desktop updates are unavailable");
 			},
@@ -656,6 +660,7 @@ export class ClientBroker {
 			await this.supervisor.retry();
 		});
 		this.register(DESKTOP_IPC_CHANNELS.getUpdateState, 0, async () => this.updater.view());
+		this.register(DESKTOP_IPC_CHANNELS.checkForUpdate, 0, async () => this.updater.checkForUpdate());
 		this.register(DESKTOP_IPC_CHANNELS.startUpdate, 0, async () => {
 			await this.updater.downloadAndOpen();
 		});
