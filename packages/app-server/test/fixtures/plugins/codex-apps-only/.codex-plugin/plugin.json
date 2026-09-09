@@ -1,0 +1,15 @@
+{
+	"name": "codex-apps-only-plugin",
+	"version": "1.0.0",
+	"description": "Codex plugin containing only apps connector",
+	"interface": {
+		"displayName": "Codex Apps Only Plugin"
+	},
+	"apps": [
+		{
+			"id": "app-connector-1",
+			"name": "Host App Connector",
+			"description": "Connects to host app"
+		}
+	]
+}

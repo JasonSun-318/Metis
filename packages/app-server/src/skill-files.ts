@@ -4,22 +4,25 @@ import { lstat, mkdir, open, readdir, rename, rm, unlink } from "node:fs/promise
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import type { ClientParams, ClientResult, SkillSourceView } from "@metis/app-protocol";
 import { CONFIG_DIR_NAME, getSkillsDir, parseFrontmatter, type Skill } from "@metis/coding-agent";
-import yauzl, { type Entry, type ZipFile } from "yauzl";
+import {
+	archiveEntries,
+	type FetchImplementation,
+	fetchBytes,
+	fetchJson,
+	fetchOptionalJson,
+	githubSource,
+	type ImportedArchiveEntry as ImportedEntry,
+	MAX_GITHUB_ROUTE_PARTS,
+	validArchivePath,
+} from "./github-archive.ts";
 import { AppServerError } from "./session-runtime-host.ts";
 
 const MAX_SKILL_BYTES = 256 * 1024;
 const MAX_SKILL_FILES = 256;
 const MAX_VISITED_DIRECTORIES = 1024;
 const MAX_IMPORT_SOURCE_BYTES = 32 * 1024 * 1024;
-const MAX_IMPORT_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-const MAX_IMPORT_FILE_BYTES = 16 * 1024 * 1024;
-const MAX_IMPORT_ENTRIES = 2048;
 const MAX_IMPORT_CANDIDATES = 64;
-const MAX_GITHUB_JSON_BYTES = 4 * 1024 * 1024;
-const MAX_GITHUB_ROUTE_PARTS = 16;
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
-const MISSING_GITHUB_COMMIT_STATUS = new Set([404, 422]);
 
 export interface SkillFileContext {
 	readonly agentDir: string;
@@ -318,12 +321,6 @@ export async function trashSkill(context: SkillFileContext, input: ClientParams<
 	}
 }
 
-interface ImportedEntry {
-	readonly path: string;
-	readonly bytes: Buffer;
-	readonly mode: 0o600 | 0o700;
-}
-
 interface ImportedCandidate {
 	readonly id: string;
 	readonly name: string;
@@ -334,107 +331,6 @@ interface ImportedCandidate {
 interface InspectedImport {
 	readonly revision: string;
 	readonly candidates: readonly ImportedCandidate[];
-}
-
-type FetchImplementation = typeof globalThis.fetch;
-
-function validArchivePath(path: string): boolean {
-	if (!path || path.length > 4096 || path.includes("\0") || path.includes("\\") || path.startsWith("/")) return false;
-	const parts = path.replace(/\/$/u, "").split("/");
-	return parts.length > 0 && parts.every((part) => part !== "" && part !== "." && part !== "..");
-}
-
-function regularZipEntry(entry: Entry): boolean {
-	const directory = entry.fileName.endsWith("/");
-	const madeBy = entry.versionMadeBy >>> 8;
-	if (madeBy !== 3) return true;
-	const mode = (entry.externalFileAttributes >>> 16) & 0xffff;
-	const kind = mode & 0o170000;
-	return kind === 0 || kind === (directory ? 0o040000 : 0o100000);
-}
-
-function importedFileMode(entry: Entry): 0o600 | 0o700 {
-	return entry.versionMadeBy >>> 8 === 3 && ((entry.externalFileAttributes >>> 16) & 0o111) !== 0 ? 0o700 : 0o600;
-}
-
-function openZip(bytes: Buffer): Promise<ZipFile> {
-	return new Promise((resolveZip, reject) => {
-		yauzl.fromBuffer(
-			bytes,
-			{ autoClose: false, decodeStrings: true, lazyEntries: true, strictFileNames: true, validateEntrySizes: true },
-			(error, zip) => (error ? reject(error) : resolveZip(zip)),
-		);
-	});
-}
-
-function readZipEntry(zip: ZipFile, entry: Entry): Promise<Buffer> {
-	return new Promise((resolveEntry, reject) => {
-		zip.openReadStream(entry, (error, stream) => {
-			if (error) {
-				reject(error);
-				return;
-			}
-			const chunks: Buffer[] = [];
-			let bytes = 0;
-			stream.on("data", (chunk: Buffer) => {
-				bytes += chunk.length;
-				if (bytes > MAX_IMPORT_FILE_BYTES) stream.destroy(new Error("Skill import entry is too large"));
-				else chunks.push(chunk);
-			});
-			stream.once("error", reject);
-			stream.once("end", () => resolveEntry(Buffer.concat(chunks, bytes)));
-		});
-	});
-}
-
-async function archiveEntries(bytes: Buffer, stripRoot = false, skipNonRegular = false): Promise<ImportedEntry[]> {
-	let zip: ZipFile | undefined;
-	try {
-		zip = await openZip(bytes);
-		if (zip.entryCount < 1 || zip.entryCount > MAX_IMPORT_ENTRIES) fail("INVALID_REQUEST");
-		const entries: ImportedEntry[] = [];
-		let totalBytes = 0;
-		await new Promise<void>((resolveEntries, reject) => {
-			zip!.on("error", reject);
-			zip!.on("end", resolveEntries);
-			zip!.on("entry", (entry: Entry) => {
-				void (async () => {
-					if (!validArchivePath(entry.fileName) || entry.isEncrypted()) {
-						throw new Error("Unsafe Skill archive entry");
-					}
-					if (!regularZipEntry(entry)) {
-						if (!skipNonRegular) throw new Error("Unsafe Skill archive entry");
-						zip!.readEntry();
-						return;
-					}
-					if (entry.uncompressedSize > MAX_IMPORT_FILE_BYTES) throw new Error("Skill archive entry is too large");
-					if (!entry.fileName.endsWith("/")) {
-						totalBytes += entry.uncompressedSize;
-						if (totalBytes > MAX_IMPORT_UNCOMPRESSED_BYTES) throw new Error("Skill archive is too large");
-						entries.push({
-							path: entry.fileName,
-							bytes: await readZipEntry(zip!, entry),
-							mode: importedFileMode(entry),
-						});
-					}
-					zip!.readEntry();
-				})().catch(reject);
-			});
-			zip!.readEntry();
-		});
-		if (!stripRoot) return entries;
-		const roots = new Set(entries.map((entry) => entry.path.split("/")[0]));
-		if (roots.size !== 1) fail("INVALID_REQUEST");
-		return entries
-			.map((entry) => ({ ...entry, path: entry.path.slice(entry.path.indexOf("/") + 1) }))
-			.filter((entry) => entry.path);
-	} catch (error) {
-		if (error instanceof AppServerError) throw error;
-		fail("INVALID_REQUEST");
-	} finally {
-		zip?.close();
-	}
-	throw new AppServerError("INVALID_REQUEST");
 }
 
 function importedCandidates(entries: readonly ImportedEntry[]): ImportedCandidate[] {
@@ -498,123 +394,6 @@ async function inspectArchive(path: string): Promise<InspectedImport> {
 		revision: createHash("sha256").update(bytes).digest("hex"),
 		candidates: importedCandidates(await archiveEntries(bytes)),
 	};
-}
-
-interface GitHubSource {
-	readonly owner: string;
-	readonly repo: string;
-	readonly route?: { readonly kind: "tree" | "blob"; readonly parts: readonly string[] };
-}
-
-function githubSource(value: string): GitHubSource {
-	let url: URL;
-	try {
-		url = new URL(value);
-	} catch {
-		fail("INVALID_REQUEST");
-	}
-	if (
-		url.protocol !== "https:" ||
-		url.hostname !== "github.com" ||
-		url.username ||
-		url.password ||
-		url.search ||
-		url.hash
-	) {
-		fail("INVALID_REQUEST");
-	}
-	const parts = url.pathname.split("/").filter(Boolean);
-	const owner = parts[0];
-	const repo = parts[1]?.replace(/\.git$/u, "");
-	if (!owner || !repo || !/^[A-Za-z0-9_.-]+$/u.test(owner) || !/^[A-Za-z0-9_.-]+$/u.test(repo))
-		fail("INVALID_REQUEST");
-	if (parts.length === 2) return { owner, repo };
-	const kind = parts[2];
-	const route = parts.slice(3);
-	if ((kind !== "tree" && kind !== "blob") || route.length < 1 || !validArchivePath(route.join("/"))) {
-		fail("INVALID_REQUEST");
-	}
-	return { owner, repo, route: { kind, parts: route } };
-}
-
-async function fetchBytes(
-	fetchImpl: FetchImplementation,
-	url: string,
-	maximum: number,
-	accept: string,
-	missingStatuses?: ReadonlySet<number>,
-): Promise<Buffer | undefined> {
-	let response: Response | undefined;
-	for (let attempt = 0; attempt < 2; attempt += 1) {
-		try {
-			response = await fetchImpl(url, {
-				redirect: "error",
-				headers: { Accept: accept, "User-Agent": "Metis-Desktop" },
-				signal: AbortSignal.timeout(60_000),
-			});
-		} catch {
-			if (attempt === 1) fail("OPERATION_FAILED");
-			await new Promise((resolveRetry) => setTimeout(resolveRetry, 250));
-			continue;
-		}
-		if (attempt === 0 && RETRYABLE_HTTP_STATUS.has(response.status)) {
-			await response.body?.cancel().catch(() => undefined);
-			await new Promise((resolveRetry) => setTimeout(resolveRetry, 250));
-			continue;
-		}
-		break;
-	}
-	if (response && missingStatuses?.has(response.status)) {
-		await response.body?.cancel().catch(() => undefined);
-		return undefined;
-	}
-	if (!response?.ok || !response.body) fail("OPERATION_FAILED");
-	const declared = Number(response.headers.get("content-length"));
-	if (Number.isFinite(declared) && declared > maximum) fail("INVALID_REQUEST");
-	const reader = response.body.getReader();
-	const chunks: Buffer[] = [];
-	let length = 0;
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			length += value.byteLength;
-			if (length > maximum) {
-				await reader.cancel();
-				fail("INVALID_REQUEST");
-			}
-			chunks.push(Buffer.from(value));
-		}
-	} finally {
-		reader.releaseLock();
-	}
-	return Buffer.concat(chunks, length);
-}
-
-async function fetchJson(fetchImpl: FetchImplementation, url: string): Promise<unknown> {
-	const bytes = await fetchBytes(fetchImpl, url, MAX_GITHUB_JSON_BYTES, "application/vnd.github+json");
-	if (!bytes) fail("OPERATION_FAILED");
-	try {
-		return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-	} catch {
-		fail("OPERATION_FAILED");
-	}
-}
-
-async function fetchOptionalJson(fetchImpl: FetchImplementation, url: string): Promise<unknown | undefined> {
-	const bytes = await fetchBytes(
-		fetchImpl,
-		url,
-		MAX_GITHUB_JSON_BYTES,
-		"application/vnd.github+json",
-		MISSING_GITHUB_COMMIT_STATUS,
-	);
-	if (!bytes) return undefined;
-	try {
-		return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-	} catch {
-		fail("OPERATION_FAILED");
-	}
 }
 
 async function inspectGithub(value: string, fetchImpl: FetchImplementation): Promise<InspectedImport> {

@@ -1,0 +1,15 @@
+{
+	"hooks": {
+		"OnModelThinking": [
+			{
+				"matcher": "*",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node ./check.js"
+					}
+				]
+			}
+		]
+	}
+}

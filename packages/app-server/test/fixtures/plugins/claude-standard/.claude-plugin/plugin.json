@@ -1,0 +1,8 @@
+{
+	"name": "claude-fixture-plugin",
+	"version": "1.0.0",
+	"description": "A Claude plugin with skill, mcp and hook",
+	"author": {
+		"name": "Anthropic"
+	}
+}

@@ -1,0 +1,456 @@
+import { createHash } from "node:crypto";
+import { posix } from "node:path";
+import type { PluginFormat } from "@metis/coding-agent";
+import {
+	archiveEntries,
+	type FetchImplementation,
+	fetchBytes,
+	fetchJson,
+	fetchOptionalJson,
+	githubSource,
+	MAX_GITHUB_ROUTE_PARTS,
+	MAX_PLUGIN_ARCHIVE_ENTRIES,
+	MAX_PLUGIN_DOWNLOAD_BYTES,
+	MAX_PLUGIN_FILE_BYTES,
+	MAX_PLUGIN_METADATA_BYTES,
+	MAX_PLUGIN_UNCOMPRESSED_BYTES,
+	MISSING_GITHUB_COMMIT_STATUS,
+	validArchivePath,
+} from "./github-archive.ts";
+import { AppServerError } from "./session-runtime-host.ts";
+
+export interface CatalogEntry {
+	readonly id: string;
+	readonly name: string;
+	readonly description: string;
+	readonly formatHint: PluginFormat;
+	readonly sourceSupported: boolean;
+	readonly source: unknown;
+	readonly strict?: boolean;
+	readonly skills?: readonly string[];
+}
+
+export interface InspectedSource {
+	readonly canonicalRepository: string;
+	readonly owner: string;
+	readonly repo: string;
+	readonly commit: string;
+	readonly root: string;
+	readonly catalog: readonly CatalogEntry[];
+	readonly isMarketplace: boolean;
+}
+
+export interface ResolvedPluginFiles {
+	readonly repository: string;
+	readonly owner: string;
+	readonly repo: string;
+	readonly commit: string;
+	readonly subdir: string;
+	readonly files: Map<string, Buffer>;
+}
+
+function normalizeSubdir(p: string): string {
+	const norm = posix.normalize(p.replace(/\\/g, "/"));
+	return norm.replace(/^\.\//, "").replace(/^\//, "").replace(/\/$/, "");
+}
+
+export function canonicalizeRepository(urlOrShorthand: string): {
+	canonicalRepository: string;
+	owner: string;
+	repo: string;
+	route?: { readonly kind: "tree" | "blob"; readonly parts: readonly string[] };
+} {
+	const source = githubSource(urlOrShorthand);
+	const owner = source.owner.toLowerCase();
+	const repo = source.repo.toLowerCase();
+	return {
+		canonicalRepository: `https://github.com/${owner}/${repo}`,
+		owner: source.owner,
+		repo: source.repo,
+		route: source.route,
+	};
+}
+
+export function computePluginId(canonicalRepository: string, canonicalSubdir: string): string {
+	const normRepo = canonicalRepository.toLowerCase().replace(/\/$/, "");
+	const normSubdir = normalizeSubdir(canonicalSubdir).toLowerCase();
+	return createHash("sha256").update(`${normRepo}\0${normSubdir}`).digest("hex");
+}
+
+export function isSourceSupported(source: unknown): boolean {
+	if (typeof source === "string") {
+		// Relative path inside repo
+		return !source.startsWith("http://") && !source.startsWith("https://") && !source.startsWith("git@");
+	}
+	if (typeof source !== "object" || source === null) return false;
+	const obj = source as Record<string, unknown>;
+
+	if (obj.source === "local" && typeof obj.path === "string") return true;
+
+	if (obj.source === "github" && typeof obj.repo === "string") {
+		const parts = obj.repo.split("/").filter(Boolean);
+		return parts.length === 2;
+	}
+
+	if (obj.source === "url" && typeof obj.url === "string") {
+		try {
+			const u = new URL(obj.url);
+			return u.protocol === "https:" && u.hostname === "github.com";
+		} catch {
+			return false;
+		}
+	}
+
+	if (obj.source === "git-subdir" && typeof obj.url === "string" && typeof obj.path === "string") {
+		try {
+			const u = new URL(obj.url);
+			return u.protocol === "https:" && u.hostname === "github.com";
+		} catch {
+			return false;
+		}
+	}
+
+	return false;
+}
+
+async function fetchFileRaw(
+	fetchImpl: FetchImplementation,
+	owner: string,
+	repo: string,
+	path: string,
+	commit: string,
+): Promise<Buffer | undefined> {
+	const url = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${encodeURIComponent(path).replace(/%2F/g, "/")}?ref=${encodeURIComponent(commit)}`;
+	return await fetchBytes(
+		fetchImpl,
+		url,
+		MAX_PLUGIN_METADATA_BYTES,
+		"application/vnd.github.raw+json",
+		MISSING_GITHUB_COMMIT_STATUS,
+	);
+}
+
+export async function resolveCommitSha(
+	fetchImpl: FetchImplementation,
+	owner: string,
+	repo: string,
+	refOrSha?: string,
+): Promise<string> {
+	if (refOrSha && /^[a-f0-9]{40}$/i.test(refOrSha)) {
+		return refOrSha.toLowerCase();
+	}
+	const api = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+	if (!refOrSha) {
+		const repository = (await fetchJson(fetchImpl, api)) as { default_branch?: unknown };
+		if (typeof repository.default_branch !== "string" || !repository.default_branch) {
+			throw new AppServerError("OPERATION_FAILED");
+		}
+		refOrSha = repository.default_branch;
+	}
+	const result = (await fetchJson(fetchImpl, `${api}/commits/${encodeURIComponent(refOrSha)}`)) as {
+		sha?: unknown;
+	};
+	if (typeof result.sha !== "string" || !/^[a-f0-9]{40}$/i.test(result.sha)) {
+		throw new AppServerError("OPERATION_FAILED");
+	}
+	return result.sha.toLowerCase();
+}
+
+export async function inspectRepositorySource(
+	urlOrShorthand: string,
+	fetchImpl: FetchImplementation = globalThis.fetch,
+): Promise<InspectedSource> {
+	const parsed = canonicalizeRepository(urlOrShorthand);
+	const api = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+	let commit: string | undefined;
+	let root = "";
+
+	if (!parsed.route) {
+		commit = await resolveCommitSha(fetchImpl, parsed.owner, parsed.repo);
+	} else {
+		if (parsed.route.parts.length > MAX_GITHUB_ROUTE_PARTS) {
+			throw new AppServerError("INVALID_REQUEST");
+		}
+		for (let length = parsed.route.parts.length; length >= 1; length -= 1) {
+			const candidateRef = parsed.route.parts.slice(0, length).join("/");
+			const result = (await fetchOptionalJson(fetchImpl, `${api}/commits/${encodeURIComponent(candidateRef)}`)) as
+				| { sha?: unknown }
+				| undefined;
+			if (!result) continue;
+			if (typeof result.sha !== "string" || !/^[a-f0-9]{40}$/i.test(result.sha)) {
+				throw new AppServerError("OPERATION_FAILED");
+			}
+			commit = result.sha.toLowerCase();
+			root = parsed.route.parts.slice(length).join("/");
+			if (parsed.route.kind === "blob" && posix.basename(root) === "SKILL.md") {
+				root = posix.dirname(root);
+			}
+			if (root === ".") root = "";
+			if (root && !validArchivePath(root)) {
+				throw new AppServerError("INVALID_REQUEST");
+			}
+			break;
+		}
+	}
+
+	if (!commit) {
+		throw new AppServerError("OPERATION_FAILED");
+	}
+
+	// Probe for marketplace manifest
+	const claudeMarketPath = root ? `${root}/.claude-plugin/marketplace.json` : ".claude-plugin/marketplace.json";
+	const codexMarketPath = root ? `${root}/.agents/plugins/marketplace.json` : ".agents/plugins/marketplace.json";
+
+	const claudeMarketBuf = await fetchFileRaw(fetchImpl, parsed.owner, parsed.repo, claudeMarketPath, commit);
+	let codexMarketBuf: Buffer | undefined;
+	if (!claudeMarketBuf) {
+		codexMarketBuf = await fetchFileRaw(fetchImpl, parsed.owner, parsed.repo, codexMarketPath, commit);
+	}
+
+	const catalog: CatalogEntry[] = [];
+	let isMarketplace = false;
+
+	if (claudeMarketBuf) {
+		isMarketplace = true;
+		try {
+			const json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(claudeMarketBuf));
+			if (typeof json === "object" && json !== null && Array.isArray(json.plugins)) {
+				for (const item of json.plugins) {
+					if (typeof item !== "object" || item === null) continue;
+					const itemObj = item as Record<string, unknown>;
+					const entryName = typeof itemObj.name === "string" ? itemObj.name : "unnamed-plugin";
+					const entryDesc = typeof itemObj.description === "string" ? itemObj.description : "";
+					const supported = isSourceSupported(itemObj.source);
+					const strict = typeof itemObj.strict === "boolean" ? itemObj.strict : undefined;
+					const skills = Array.isArray(itemObj.skills)
+						? (itemObj.skills.filter((s) => typeof s === "string") as string[])
+						: undefined;
+
+					catalog.push({
+						id: `entry-${entryName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+						name: entryName,
+						description: entryDesc,
+						formatHint: "claude",
+						sourceSupported: supported,
+						source: itemObj.source,
+						strict,
+						skills,
+					});
+				}
+			}
+		} catch {
+			throw new AppServerError("OPERATION_FAILED");
+		}
+	} else if (codexMarketBuf) {
+		isMarketplace = true;
+		try {
+			const json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(codexMarketBuf));
+			if (typeof json === "object" && json !== null && Array.isArray(json.plugins)) {
+				for (const item of json.plugins) {
+					if (typeof item !== "object" || item === null) continue;
+					const itemObj = item as Record<string, unknown>;
+					const entryName = typeof itemObj.name === "string" ? itemObj.name : "unnamed-plugin";
+					const entryDesc = typeof itemObj.description === "string" ? itemObj.description : "";
+					const supported = isSourceSupported(itemObj.source);
+
+					catalog.push({
+						id: `entry-${entryName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+						name: entryName,
+						description: entryDesc,
+						formatHint: "codex",
+						sourceSupported: supported,
+						source: itemObj.source,
+					});
+				}
+			}
+		} catch {
+			throw new AppServerError("OPERATION_FAILED");
+		}
+	} else {
+		// Not a marketplace. Check if it is a single Claude or Codex plugin
+		const claudePluginPath = root ? `${root}/.claude-plugin/plugin.json` : ".claude-plugin/plugin.json";
+		const codexPluginPath = root ? `${root}/.codex-plugin/plugin.json` : ".codex-plugin/plugin.json";
+
+		const claudePluginBuf = await fetchFileRaw(fetchImpl, parsed.owner, parsed.repo, claudePluginPath, commit);
+		const codexPluginBuf = !claudePluginBuf
+			? await fetchFileRaw(fetchImpl, parsed.owner, parsed.repo, codexPluginPath, commit)
+			: undefined;
+
+		if (claudePluginBuf) {
+			let name = parsed.repo;
+			let description = "";
+			try {
+				const json = JSON.parse(new TextDecoder("utf-8").decode(claudePluginBuf));
+				if (json.name) name = json.name;
+				if (json.description) description = json.description;
+			} catch {
+				// ignore
+			}
+			catalog.push({
+				id: `entry-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+				name,
+				description,
+				formatHint: "claude",
+				sourceSupported: true,
+				source: root || "./",
+			});
+		} else if (codexPluginBuf) {
+			let name = parsed.repo;
+			let description = "";
+			try {
+				const json = JSON.parse(new TextDecoder("utf-8").decode(codexPluginBuf));
+				if (json.name) name = json.name;
+				if (json.description) description = json.description;
+			} catch {
+				// ignore
+			}
+			catalog.push({
+				id: `entry-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+				name,
+				description,
+				formatHint: "codex",
+				sourceSupported: true,
+				source: root || "./",
+			});
+		} else {
+			// Download repo archive to discover skills
+			const zipBytes = await fetchBytes(
+				fetchImpl,
+				`https://codeload.github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/zip/${commit}`,
+				MAX_PLUGIN_DOWNLOAD_BYTES,
+				"application/zip",
+			);
+			if (!zipBytes) throw new AppServerError("OPERATION_FAILED");
+
+			const entries = await archiveEntries(zipBytes, {
+				stripRoot: true,
+				skipNonRegular: true,
+				maxFileBytes: MAX_PLUGIN_FILE_BYTES,
+				maxUncompressedBytes: MAX_PLUGIN_UNCOMPRESSED_BYTES,
+				maxEntries: MAX_PLUGIN_ARCHIVE_ENTRIES,
+			});
+
+			const prefix = root ? `${normalizeSubdir(root)}/` : "";
+			const relevant = entries.filter((e) => (prefix ? e.path.startsWith(prefix) : true));
+			const skillEntries = relevant.filter((e) => posix.basename(e.path) === "SKILL.md");
+
+			if (skillEntries.length > 0) {
+				for (const se of skillEntries) {
+					const skillDir = posix.dirname(se.path);
+					const skillName = posix.basename(skillDir) || parsed.repo;
+					catalog.push({
+						id: `entry-${skillName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+						name: skillName,
+						description: "",
+						formatHint: "agent-skills",
+						sourceSupported: true,
+						source: skillDir,
+					});
+				}
+			}
+		}
+	}
+
+	return {
+		canonicalRepository: parsed.canonicalRepository,
+		owner: parsed.owner,
+		repo: parsed.repo,
+		commit,
+		root,
+		catalog,
+		isMarketplace,
+	};
+}
+
+export async function fetchPluginFiles(
+	origin: { canonicalRepository: string; owner: string; repo: string; commit: string; root: string },
+	entry: CatalogEntry,
+	fetchImpl: FetchImplementation = globalThis.fetch,
+): Promise<ResolvedPluginFiles> {
+	if (!entry.sourceSupported) {
+		throw new AppServerError("INVALID_REQUEST");
+	}
+
+	let targetOwner = origin.owner;
+	let targetRepo = origin.repo;
+	let targetCommit = origin.commit;
+	let targetSubdir = origin.root;
+
+	const src = entry.source;
+
+	if (typeof src === "string") {
+		// Relative path in origin repository
+		const rel = normalizeSubdir(src);
+		targetSubdir = origin.root ? normalizeSubdir(posix.join(origin.root, rel)) : rel;
+	} else if (typeof src === "object" && src !== null) {
+		const obj = src as Record<string, unknown>;
+		if (obj.source === "local" && typeof obj.path === "string") {
+			const rel = normalizeSubdir(obj.path);
+			targetSubdir = origin.root ? normalizeSubdir(posix.join(origin.root, rel)) : rel;
+		} else if (obj.source === "github" && typeof obj.repo === "string") {
+			const parts = obj.repo.split("/").filter(Boolean);
+			targetOwner = parts[0];
+			targetRepo = parts[1].replace(/\.git$/, "");
+			targetSubdir = "";
+			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
+			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
+			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
+		} else if (obj.source === "url" && typeof obj.url === "string") {
+			const parsed = canonicalizeRepository(obj.url);
+			targetOwner = parsed.owner;
+			targetRepo = parsed.repo;
+			targetSubdir = "";
+			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
+			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
+			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
+		} else if (obj.source === "git-subdir" && typeof obj.url === "string" && typeof obj.path === "string") {
+			const parsed = canonicalizeRepository(obj.url);
+			targetOwner = parsed.owner;
+			targetRepo = parsed.repo;
+			targetSubdir = normalizeSubdir(obj.path);
+			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
+			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
+			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
+		} else {
+			throw new AppServerError("INVALID_REQUEST");
+		}
+	} else {
+		throw new AppServerError("INVALID_REQUEST");
+	}
+
+	// Download ZIP
+	const zipUrl = `https://codeload.github.com/${encodeURIComponent(targetOwner)}/${encodeURIComponent(targetRepo)}/zip/${targetCommit}`;
+	const zipBytes = await fetchBytes(fetchImpl, zipUrl, MAX_PLUGIN_DOWNLOAD_BYTES, "application/zip");
+	if (!zipBytes) throw new AppServerError("OPERATION_FAILED");
+
+	const entries = await archiveEntries(zipBytes, {
+		stripRoot: true,
+		skipNonRegular: true,
+		maxFileBytes: MAX_PLUGIN_FILE_BYTES,
+		maxUncompressedBytes: MAX_PLUGIN_UNCOMPRESSED_BYTES,
+		maxEntries: MAX_PLUGIN_ARCHIVE_ENTRIES,
+	});
+
+	const files = new Map<string, Buffer>();
+	const prefix = targetSubdir ? `${targetSubdir}/` : "";
+
+	for (const e of entries) {
+		if (prefix) {
+			if (e.path.startsWith(prefix)) {
+				const relativePath = e.path.slice(prefix.length);
+				if (relativePath) files.set(relativePath, e.bytes);
+			}
+		} else {
+			files.set(e.path, e.bytes);
+		}
+	}
+
+	return {
+		repository: `https://github.com/${targetOwner.toLowerCase()}/${targetRepo.toLowerCase()}`,
+		owner: targetOwner,
+		repo: targetRepo,
+		commit: targetCommit,
+		subdir: targetSubdir,
+		files,
+	};
+}

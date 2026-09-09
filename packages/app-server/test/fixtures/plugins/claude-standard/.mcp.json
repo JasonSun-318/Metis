@@ -1,0 +1,12 @@
+{
+	"mcpServers": {
+		"fixture-mcp": {
+			"command": "node",
+			"args": ["./server.js"],
+			"env": {
+				"PORT": "3000"
+			},
+			"cwd": "${CLAUDE_PLUGIN_ROOT}"
+		}
+	}
+}

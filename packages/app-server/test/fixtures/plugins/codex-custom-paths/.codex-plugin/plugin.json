@@ -1,0 +1,12 @@
+{
+	"name": "codex-fixture-plugin",
+	"version": "2.0.0",
+	"description": "Codex plugin with custom paths",
+	"interface": {
+		"displayName": "Codex Fixture Plugin",
+		"description": "Codex fixture display description"
+	},
+	"skills": "./custom-skills",
+	"mcpServers": "./config/mcp.json",
+	"hooks": "./config/hooks.json"
+}

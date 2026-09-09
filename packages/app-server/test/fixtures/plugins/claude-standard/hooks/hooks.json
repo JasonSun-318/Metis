@@ -1,0 +1,17 @@
+{
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "bash",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "node ./scripts/check.js",
+						"timeout": 30,
+						"statusMessage": "Checking command..."
+					}
+				]
+			}
+		]
+	}
+}

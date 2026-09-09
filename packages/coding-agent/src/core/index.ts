@@ -197,6 +197,19 @@ export {
 	reducePlanState,
 	type StoredPlan,
 } from "./plan-state.ts";
+export type {
+	CapabilityKind,
+	MarketRecord,
+	PluginFormat,
+	PluginHookComponent,
+	PluginIssue,
+	PluginMcpComponent,
+	PluginOwner,
+	PluginRecord,
+	PluginRegistry,
+	PluginSkillComponent,
+	PluginSnapshot,
+} from "./plugins/types.ts";
 export {
 	MAX_QUEUED_TURNS,
 	QueuedTurnConflictError,

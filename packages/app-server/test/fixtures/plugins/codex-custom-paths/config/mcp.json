@@ -1,0 +1,11 @@
+{
+	"mcpServers": {
+		"codex-mcp": {
+			"command": "python",
+			"args": ["./server.py"],
+			"env": {
+				"DEBUG": "1"
+			}
+		}
+	}
+}
