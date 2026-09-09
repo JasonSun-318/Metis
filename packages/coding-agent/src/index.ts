@@ -265,6 +265,13 @@ export {
 	validateHookMatcher,
 } from "./core/hooks/hook-protocol.ts";
 export {
+	applyHttpProxySettings,
+	configureHttpDispatcher,
+	DEFAULT_HTTP_IDLE_TIMEOUT_MS,
+	formatHttpIdleTimeoutMs,
+	parseHttpIdleTimeoutMs,
+} from "./core/http-dispatcher.ts";
+export {
 	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,

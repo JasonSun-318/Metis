@@ -365,7 +365,7 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 			if (
 				"cwd" in request.params &&
 				request.params.cwd === null &&
-				servers.some((server) => server.scope !== "user")
+				servers.some((server) => server.scope === "project")
 			) {
 				failResponseCorrelation("Global MCP server list contains a project-scoped server");
 			}

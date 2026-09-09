@@ -2546,8 +2546,22 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		readonly cwd: string;
 		readonly settingsManager: SettingsManager;
 	}): ClientResult<"mcp/list"> {
+		const pluginMcpStatuses = readPluginSnapshot(this.agentDir).mcp.map((comp) => ({
+			name: comp.name,
+			originalName: comp.originalName,
+			pluginOwner: comp.owner,
+			state: "connected" as const,
+			transport: ("url" in comp.definition ? "http" : "stdio") as "stdio" | "http",
+			required: false,
+			toolCount: 0,
+			resourceCount: 0,
+			resourceTemplateCount: 0,
+			promptCount: 0,
+			capabilities: ["tools"],
+		}));
 		return {
 			servers: publicMcpServers(context.settingsManager, {
+				statuses: pluginMcpStatuses,
 				credentialStatus: (scope, name, server) =>
 					mcpCredentialStatus(this.authStorage, context.cwd, scope, name, server),
 			}),

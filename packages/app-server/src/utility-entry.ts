@@ -1,4 +1,4 @@
-import { getAgentDir } from "@metis/coding-agent";
+import { configureHttpDispatcher, getAgentDir } from "@metis/coding-agent";
 import { AppServer } from "./app-server.ts";
 import { bindAppServerTransport } from "./transport/transport.ts";
 import {
@@ -10,6 +10,7 @@ import {
 type ElectronUtilityProcess = { readonly parentPort?: UtilityParentPort | null };
 
 async function main(): Promise<void> {
+	configureHttpDispatcher();
 	const parentPort = requireUtilityParentPort(process as unknown as ElectronUtilityProcess);
 
 	const server = await AppServer.create({ agentDir: getAgentDir() });

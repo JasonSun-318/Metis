@@ -1659,6 +1659,10 @@ describe("exact limits", () => {
 		expect(() => validateResponseFor("client", request, projectRow)).toThrow(
 			"Global MCP server list contains a project-scoped server",
 		);
+
+		const pluginRow = structuredClone(fixture) as { result: { servers: Array<{ scope: string }> } };
+		pluginRow.result.servers[0]!.scope = "plugin";
+		expect(() => validateResponseFor("client", request, pluginRow)).not.toThrow();
 	});
 
 	it("keeps profile summaries bounded, sorted, and internally consistent", () => {

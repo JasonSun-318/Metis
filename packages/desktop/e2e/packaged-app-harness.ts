@@ -46,6 +46,7 @@ export interface PackagedDesktopLaunchOptions {
 	readonly homeDir: string;
 	readonly diagnostics: string[];
 	readonly extraArguments?: readonly string[];
+	readonly env?: Record<string, string>;
 }
 
 export function launchPackagedDesktop(options: PackagedDesktopLaunchOptions): ChildProcess {
@@ -64,6 +65,7 @@ export function launchPackagedDesktop(options: PackagedDesktopLaunchOptions): Ch
 			HTTPS_PROXY: "",
 			NO_PROXY: "127.0.0.1,localhost",
 			USERPROFILE: options.homeDir,
+			...(options.env ?? {}),
 		},
 		stdio: ["ignore", "pipe", "pipe"],
 	});

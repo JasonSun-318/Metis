@@ -634,8 +634,15 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 	const switchSection = (next: PluginSection) => {
 		setSection(next);
 		setPage({ kind: "catalog" });
-		if (next === "skills") mcpDetailGeneration.current += 1;
-		else skillDetailGeneration.current += 1;
+		if (next === "skills") {
+			mcpDetailGeneration.current += 1;
+			setSkillRetry((v) => v + 1);
+		} else if (next === "mcp") {
+			skillDetailGeneration.current += 1;
+			setMcpRefresh((v) => v + 1);
+		} else if (next === "hooks") {
+			setHooksRefresh((v) => v + 1);
+		}
 	};
 	const closeDialog = () => {
 		if (pendingAction) return;
