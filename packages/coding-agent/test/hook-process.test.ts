@@ -222,6 +222,36 @@ describe("hook process execution and bounds", () => {
 		expect(result.stdout).toBe("€你好");
 	});
 
+	it("does not emit replacement character or exceed 32768 bytes when truncated on multibyte boundary", async () => {
+		const childScript =
+			"const buf = Buffer.alloc(32766, 0x61); " +
+			"process.stdout.write(buf); " +
+			"process.stdout.write(Buffer.from([0xe4, 0xbd])); " +
+			"process.stdout.write(Buffer.from([0xa0, 0x62])); " +
+			"process.exit(0);";
+
+		const hook = makeHook({
+			args: ["-e", childScript],
+			timeoutSeconds: 3,
+		});
+		const result = await runHookProcess(
+			hook,
+			{
+				event: "SessionStart",
+				hook: { id: hook.id, name: hook.name },
+				sessionId: "s-utf8-bound",
+				cwd,
+				timestamp: "t",
+			},
+			{ cwd },
+		);
+
+		expect(result.code).toBe(0);
+		expect(result.stdoutTruncated).toBe(true);
+		expect(Buffer.byteLength(result.stdout, "utf8")).toBeLessThanOrEqual(MAX_PIPE_BUFFER_BYTES);
+		expect(result.stdout).not.toContain("\uFFFD");
+	});
+
 	it("terminates process tree and does not leave inherited-stdio grandchild alive on timeout", async () => {
 		let grandchildPid: number | undefined;
 		const isAlive = (pid: number) => {

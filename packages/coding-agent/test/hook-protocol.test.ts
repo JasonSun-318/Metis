@@ -466,4 +466,19 @@ describe("hook-protocol result interpreter matrix", () => {
 		expect(Buffer.byteLength(merged!, "utf8")).toBeLessThanOrEqual(MAX_EVENT_TOTAL_CONTEXT_BYTES);
 		expect(merged).toContain(EVENT_CONTEXT_TRUNCATED_MARKER.trim());
 	});
+
+	it("preserves pre-aggregated PreToolUse context up to 32 KiB budget without re-truncating to 8 KiB or duplicate wrapping", () => {
+		const preMergedText = `[Hook: hook-a]\n${"A".repeat(4500)}\n\n[Hook: hook-b]\n${"B".repeat(5500)}`;
+		const entries = [
+			{
+				hookName: "PreToolUse",
+				context: preMergedText,
+			},
+		];
+		const merged = mergeEventContexts(entries);
+		expect(merged).toBeDefined();
+		expect(Buffer.byteLength(merged!, "utf8")).toBe(Buffer.byteLength(preMergedText, "utf8"));
+		expect(merged).toBe(preMergedText);
+		expect(merged).not.toContain("[Hook: PreToolUse]");
+	});
 });

@@ -402,6 +402,10 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/** Pre-evaluated hook context from durable admission. */
+	hookContext?: string;
+	/** Whether extension input handlers (hooks) have already been evaluated. */
+	hookEvaluated?: boolean;
 }
 
 /** Result from cycleModel() */
@@ -3181,7 +3185,12 @@ export class AgentSession {
 	}
 
 	/** Persist an independent queued turn before its provider work is scheduled. */
-	beginDurableQueuedTurn(identity: RuntimeRequestIdentity, input: DurablePromptInput, queueItemId: string): string {
+	beginDurableQueuedTurn(
+		identity: RuntimeRequestIdentity,
+		input: DurablePromptInput,
+		queueItemId: string,
+		kind: "turn" | "steer" | "next_turn" = "steer",
+	): string {
 		if (this._durableTurn) throw new Error("A durable runtime turn is already active");
 		const turnId = deriveBatchedTurnId([queueItemId]);
 		const residentPayloadBytes = durablePromptResidentPayloadBytes(input);
@@ -3194,7 +3203,7 @@ export class AgentSession {
 		});
 		this._durableTurn = {
 			turnId,
-			operations: [{ identity, input, kind: "next_turn", residentPayloadBytes }],
+			operations: [{ identity, input, kind, residentPayloadBytes }],
 			consumedQueueItemIds: [queueItemId],
 		};
 		this._durableResidentPayloadBytes += residentPayloadBytes;
@@ -3209,7 +3218,7 @@ export class AgentSession {
 		identity: RuntimeRequestIdentity,
 		behavior: "steer" | "followUp",
 		queueItemId = identity.queueItemId,
-	): Promise<void> {
+	): Promise<{ enqueuedToActiveTurn: boolean; preparedInput: DurablePromptInput }> {
 		let userPromptContext: string | undefined;
 		let currentText = input.text;
 		if (this._extensionRunner.hasHandlers("input")) {
@@ -3233,6 +3242,19 @@ export class AgentSession {
 		if (textBytes > MAX_DURABLE_PROMPT_TEXT_BYTES) {
 			throw new Error(`Expanded durable prompt cannot exceed ${MAX_DURABLE_PROMPT_TEXT_BYTES} UTF-8 bytes`);
 		}
+
+		const preparedInput: DurablePromptInput = {
+			...input,
+			text: currentText,
+			hookContext: userPromptContext,
+			hookEvaluated: true,
+		};
+
+		const isTurnActive = this._durableTurn !== undefined && this._isAgentRunActive;
+		if (!isTurnActive) {
+			return { enqueuedToActiveTurn: false, preparedInput };
+		}
+
 		const queue = behavior === "followUp" ? "follow_up" : "steer";
 		if (this._durableQueues.has(queueItemId)) {
 			throw new Error(`Durable queue item is already enqueued: ${queueItemId}`);
@@ -3244,7 +3266,7 @@ export class AgentSession {
 			);
 		}
 		this._durableQueues.set(queueItemId, {
-			operation: { identity, input, kind: "steer", residentPayloadBytes },
+			operation: { identity, input: preparedInput, kind: "steer", residentPayloadBytes },
 			queue,
 		});
 		this._durableResidentPayloadBytes += residentPayloadBytes;
@@ -3257,6 +3279,8 @@ export class AgentSession {
 			this._durableResidentPayloadBytes -= residentPayloadBytes;
 			throw error;
 		}
+
+		return { enqueuedToActiveTurn: true, preparedInput };
 	}
 
 	/** Execute accepted work; final durable markers settle before this promise. */
@@ -3287,7 +3311,13 @@ export class AgentSession {
 		try {
 			if (this._runtimeTeardownRequested) throw new Error("The agent session is tearing down");
 			const images = input.images?.length ? this.sessionManager.resolveDurableImageRefs(input.images) : undefined;
-			await durablePromptExecutionContext.run(context, () => this.prompt(input.text, { images }));
+			await durablePromptExecutionContext.run(context, () =>
+				this.prompt(input.text, {
+					images,
+					hookContext: input.hookContext,
+					hookEvaluated: input.hookEvaluated,
+				}),
+			);
 		} catch (error) {
 			runError = error;
 		} finally {
@@ -3578,7 +3608,9 @@ export class AgentSession {
 			let currentText = text;
 			let currentImages = options?.images;
 			let userPromptContext: string | undefined;
-			if (this._extensionRunner.hasHandlers("input")) {
+			if (options?.hookEvaluated) {
+				userPromptContext = options.hookContext;
+			} else if (this._extensionRunner.hasHandlers("input")) {
 				const inputResult = await this._extensionRunner.emitInput(
 					currentText,
 					currentImages,

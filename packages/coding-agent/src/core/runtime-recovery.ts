@@ -31,6 +31,8 @@ export interface DurablePromptInput {
 	readonly images?: readonly DurableImageRef[];
 	readonly streamingBehavior?: "steer" | "followUp";
 	readonly planExecution?: PlanExecutionRef;
+	readonly hookContext?: string;
+	readonly hookEvaluated?: boolean;
 }
 
 export interface DurablePromptSubmission {

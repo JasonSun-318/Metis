@@ -779,13 +779,13 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				enabled: draft.enabled,
 				event: draft.event,
 				protocol: draft.protocol,
-				matcher: draft.matcher.trim() || undefined,
 				runMode: draft.runMode,
 				command: draft.command.trim(),
-				args,
-				timeoutSeconds,
-				statusMessage: draft.statusMessage.trim() || undefined,
-				metadata,
+				...(draft.matcher.trim() ? { matcher: draft.matcher.trim() } : {}),
+				...(args && args.length > 0 ? { args } : {}),
+				...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+				...(draft.statusMessage.trim() ? { statusMessage: draft.statusMessage.trim() } : {}),
+				...(metadata ? { metadata } : {}),
 			};
 			const result = await api.upsertHook({ hook: hookInput });
 			setHooksState({ status: "success", value: result.hooks });

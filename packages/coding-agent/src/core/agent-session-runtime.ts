@@ -448,12 +448,38 @@ export class AgentSessionRuntime {
 			this.requestIndex.set(identity.requestId, indexed);
 			this.operationIndex.set(identity.operationId, indexed);
 			if (input.delivery === "steer") {
-				await this._session.enqueueAcceptedDurablePrompt(draft.input, identity, "steer", draft.queueItemId);
-				return { operationId: identity.operationId, queueItemId: draft.queueItemId, status: "accepted" };
+				const admission = await this._session.enqueueAcceptedDurablePrompt(
+					draft.input,
+					identity,
+					"steer",
+					draft.queueItemId,
+				);
+				if (admission.enqueuedToActiveTurn) {
+					return { operationId: identity.operationId, queueItemId: draft.queueItemId, status: "accepted" };
+				}
+				const session = this._session;
+				const turnId = session.beginDurableQueuedTurn(
+					identity,
+					admission.preparedInput,
+					draft.queueItemId,
+					"steer",
+				);
+				turnStarted = true;
+				indexed.turnId = turnId;
+				this.trackAcceptedTask(turnId, session, async () => {
+					try {
+						const state = await session.runAcceptedDurablePrompt(turnId, admission.preparedInput);
+						this.afterQueuedTurnSettled(session, state);
+					} catch (error) {
+						this.afterQueuedTurnSettled(session, "interrupted");
+						throw error;
+					}
+				});
+				return { operationId: identity.operationId, queueItemId: draft.queueItemId, turnId, status: "accepted" };
 			}
 
 			const session = this._session;
-			const turnId = session.beginDurableQueuedTurn(identity, draft.input, draft.queueItemId);
+			const turnId = session.beginDurableQueuedTurn(identity, draft.input, draft.queueItemId, "next_turn");
 			turnStarted = true;
 			indexed.turnId = turnId;
 			this.trackAcceptedTask(turnId, session, async () => {
@@ -564,9 +590,34 @@ export class AgentSessionRuntime {
 					input: submission.input,
 				});
 				queueDurable = true;
-				indexed.queueItemId = identity.queueItemId;
-				await this._session.enqueueAcceptedDurablePrompt(submission.input, identity, behavior);
-				return { operationId: identity.operationId, queueItemId: identity.queueItemId, status: "accepted" };
+				const admission = await this._session.enqueueAcceptedDurablePrompt(submission.input, identity, behavior);
+				if (admission.enqueuedToActiveTurn) {
+					return { operationId: identity.operationId, queueItemId: identity.queueItemId, status: "accepted" };
+				}
+
+				// The previous turn settled while the input hook was running.
+				// Promote this accepted prompt to a new durable queued turn so provider work runs.
+				const turnId = this._session.beginDurableQueuedTurn(
+					identity,
+					admission.preparedInput,
+					identity.queueItemId,
+					"steer",
+				);
+				turnStarted = true;
+				indexed.turnId = turnId;
+				const session = this._session;
+				const predecessors = [...this.acceptedTasks];
+				this.trackAcceptedTask(turnId, session, async () => {
+					await Promise.all(predecessors);
+					try {
+						const state = await session.runAcceptedDurablePrompt(turnId, admission.preparedInput);
+						this.afterQueuedTurnSettled(session, state);
+					} catch (error) {
+						this.afterQueuedTurnSettled(session, "interrupted");
+						throw error;
+					}
+				});
+				return { operationId: identity.operationId, queueItemId: identity.queueItemId, turnId, status: "accepted" };
 			}
 
 			const session = this._session;

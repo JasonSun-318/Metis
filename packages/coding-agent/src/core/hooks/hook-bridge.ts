@@ -196,8 +196,12 @@ export function runHookProcess(
 				terminateChildTree();
 			}
 			cleanup();
-			stdout += stdoutDecoder.end();
-			stderr += stderrDecoder.end();
+			if (!stdoutTruncated) {
+				stdout += stdoutDecoder.end();
+			}
+			if (!stderrTruncated) {
+				stderr += stderrDecoder.end();
+			}
 			child.stdout?.destroy();
 			child.stderr?.destroy();
 			resolve({
