@@ -53,6 +53,17 @@ describe("HooksService", () => {
 		expect(onDisk).toEqual({ hooks: [updated] });
 		// Empty optional fields are dropped from the persisted form.
 		expect(onDisk.hooks[0].statusMessage).toBeUndefined();
+		// Legacy hook without protocol is NOT upgraded when edited.
+		expect(onDisk.hooks[0].protocol).toBeUndefined();
+	});
+
+	it("roundtrips command-v1 protocol and preserves it on disk", () => {
+		const svc = new HooksService(agentDir);
+		const v1Hook = { ...HOOK_A, id: "22222222-3333-4444-8555-666666666666", protocol: "command-v1" as const };
+		expect(svc.upsert({ hook: v1Hook })).toEqual({ hooks: [v1Hook], loadErrors: [] });
+
+		const onDisk = JSON.parse(readFileSync(join(agentDir, "hooks.json"), "utf8"));
+		expect(onDisk.hooks[0].protocol).toBe("command-v1");
 	});
 
 	it("appends a second hook and deletes by id", () => {

@@ -29,6 +29,9 @@ export type HookEventName = (typeof HOOK_EVENT_NAMES)[number];
 export const HOOK_RUN_MODES = ["process", "shell"] as const;
 export type HookRunMode = (typeof HOOK_RUN_MODES)[number];
 
+export const HOOK_PROTOCOLS = ["legacy", "command-v1"] as const;
+export type HookProtocol = (typeof HOOK_PROTOCOLS)[number];
+
 export const HOOK_DEFAULT_TIMEOUT_SECONDS = 60;
 export const HOOK_MAX_TIMEOUT_SECONDS = 600;
 
@@ -45,6 +48,12 @@ export interface DeclarativeHook {
 	matcher?: string;
 	/** See HOOK_RUN_MODES. */
 	runMode: HookRunMode;
+	/**
+	 * Execution protocol.
+	 * - undefined | "legacy": preserves historical behavior (tool list matcher, stdout logs, exit 2).
+	 * - "command-v1": structured JSON output, regex matcher, context injection and blocking/continuation decisions.
+	 */
+	protocol?: HookProtocol;
 	/** process mode: executable; shell mode: full command line. */
 	command: string;
 	/** process mode only: argv entries. */
@@ -63,6 +72,10 @@ export interface DeclarativeHooksConfig {
 
 export function isHookEventName(value: string): value is HookEventName {
 	return (HOOK_EVENT_NAMES as readonly string[]).includes(value);
+}
+
+export function isHookProtocol(value: string): value is HookProtocol {
+	return (HOOK_PROTOCOLS as readonly string[]).includes(value as HookProtocol);
 }
 
 export function isHookRunMode(value: string): value is HookRunMode {
@@ -119,6 +132,9 @@ export function validateDeclarativeHook(hook: DeclarativeHook): string | null {
 	) {
 		return `Hook timeoutSeconds must be an integer between 1 and ${HOOK_MAX_TIMEOUT_SECONDS}`;
 	}
+	if (hook.protocol !== undefined && (typeof hook.protocol !== "string" || !isHookProtocol(hook.protocol))) {
+		return `Hook protocol must be one of: ${HOOK_PROTOCOLS.join(", ")}`;
+	}
 	if (hook.matcher !== undefined && typeof hook.matcher !== "string") {
 		return "Hook matcher must be a string";
 	}
@@ -150,6 +166,7 @@ function coerceHook(value: unknown): DeclarativeHook | null {
 		event,
 		...(typeof raw.matcher === "string" ? { matcher: raw.matcher } : {}),
 		runMode,
+		...(raw.protocol !== undefined ? { protocol: raw.protocol as HookProtocol } : {}),
 		command: typeof raw.command === "string" ? raw.command : "",
 		...(Array.isArray(raw.args) ? { args: raw.args.filter((arg): arg is string => typeof arg === "string") } : {}),
 		...(typeof raw.timeoutSeconds === "number" ? { timeoutSeconds: raw.timeoutSeconds } : {}),

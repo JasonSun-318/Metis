@@ -774,6 +774,7 @@ export const HookEventNameSchema = Type.Union([
 	Type.Literal("Stop"),
 ]);
 export const HookRunModeSchema = Type.Union([Type.Literal("process"), Type.Literal("shell")]);
+export const HookProtocolSchema = Type.Union([Type.Literal("legacy"), Type.Literal("command-v1")]);
 export const DeclarativeHookViewSchema = StrictObject({
 	id: Type.String({ minLength: 1, maxLength: 128 }),
 	name: Type.String({ minLength: 1, maxLength: 200 }),
@@ -781,6 +782,7 @@ export const DeclarativeHookViewSchema = StrictObject({
 	event: HookEventNameSchema,
 	matcher: Type.Optional(Type.String({ minLength: 0, maxLength: 200 })),
 	runMode: HookRunModeSchema,
+	protocol: Type.Optional(HookProtocolSchema),
 	command: Type.String({ minLength: 1, maxLength: 4096 }),
 	args: Type.Optional(Type.Array(Type.String({ maxLength: 2000 }), { maxItems: 64 })),
 	timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 600 })),

@@ -1952,3 +1952,29 @@ it("accepts bounded selected-file context on each turn entry and rejects ambiguo
 		}
 	}
 });
+
+it("validates protocol field on declarative hooks and rejects unknown protocols", () => {
+	const baseHook = {
+		id: "11111111-2222-4333-8444-555555555555",
+		name: "Test hook",
+		enabled: true,
+		event: "PreToolUse",
+		matcher: "bash",
+		runMode: "shell",
+		command: "exit 0",
+	};
+
+	expect(() =>
+		validateClientRequest(makeClientRequest("hooks/upsert", { hook: { ...baseHook, protocol: "command-v1" } })),
+	).not.toThrow();
+
+	expect(() =>
+		validateClientRequest(makeClientRequest("hooks/upsert", { hook: { ...baseHook, protocol: "legacy" } })),
+	).not.toThrow();
+
+	expect(() => validateClientRequest(makeClientRequest("hooks/upsert", { hook: baseHook }))).not.toThrow();
+
+	expect(() =>
+		validateClientRequest(makeClientRequest("hooks/upsert", { hook: { ...baseHook, protocol: "unknown-proto" } })),
+	).toThrow();
+});

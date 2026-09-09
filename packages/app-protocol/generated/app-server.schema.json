@@ -5313,6 +5313,18 @@
                             }
                           ]
                         },
+                        "protocol": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "legacy"
+                            },
+                            {
+                              "type": "string",
+                              "const": "command-v1"
+                            }
+                          ]
+                        },
                         "command": {
                           "type": "string",
                           "minLength": 1,
@@ -27677,146 +27689,15 @@
                               }
                             ]
                           },
-                          "command": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 4096
-                          },
-                          "args": {
-                            "type": "array",
-                            "items": {
-                              "type": "string",
-                              "maxLength": 2000
-                            },
-                            "maxItems": 64
-                          },
-                          "timeoutSeconds": {
-                            "type": "integer",
-                            "minimum": 1,
-                            "maximum": 600
-                          },
-                          "statusMessage": {
-                            "type": "string",
-                            "maxLength": 500
-                          },
-                          "metadata": {
-                            "type": "object",
-                            "patternProperties": {
-                              "^.*$": {}
-                            }
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "maxItems": 100
-                    },
-                    "loadErrors": {
-                      "type": "array",
-                      "items": {
-                        "type": "string",
-                        "x-metis-maxUtf8Bytes": 65536
-                      },
-                      "maxItems": 100
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": [
-                "jsonrpc",
-                "id",
-                "result"
-              ],
-              "properties": {
-                "jsonrpc": {
-                  "type": "string",
-                  "const": "2.0"
-                },
-                "id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-metis-maxUtf16Units": 128
-                },
-                "result": {
-                  "type": "object",
-                  "required": [
-                    "hooks",
-                    "loadErrors"
-                  ],
-                  "properties": {
-                    "hooks": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "id",
-                          "name",
-                          "enabled",
-                          "event",
-                          "runMode",
-                          "command"
-                        ],
-                        "properties": {
-                          "id": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 128
-                          },
-                          "name": {
-                            "type": "string",
-                            "minLength": 1,
-                            "maxLength": 200
-                          },
-                          "enabled": {
-                            "type": "boolean"
-                          },
-                          "event": {
+                          "protocol": {
                             "anyOf": [
                               {
                                 "type": "string",
-                                "const": "SessionStart"
+                                "const": "legacy"
                               },
                               {
                                 "type": "string",
-                                "const": "UserPromptSubmit"
-                              },
-                              {
-                                "type": "string",
-                                "const": "PreToolUse"
-                              },
-                              {
-                                "type": "string",
-                                "const": "PostToolUse"
-                              },
-                              {
-                                "type": "string",
-                                "const": "PostToolUseFailure"
-                              },
-                              {
-                                "type": "string",
-                                "const": "Stop"
-                              }
-                            ]
-                          },
-                          "matcher": {
-                            "type": "string",
-                            "minLength": 0,
-                            "maxLength": 200
-                          },
-                          "runMode": {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "process"
-                              },
-                              {
-                                "type": "string",
-                                "const": "shell"
+                                "const": "command-v1"
                               }
                             ]
                           },
@@ -27960,6 +27841,173 @@
                               {
                                 "type": "string",
                                 "const": "shell"
+                              }
+                            ]
+                          },
+                          "protocol": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "legacy"
+                              },
+                              {
+                                "type": "string",
+                                "const": "command-v1"
+                              }
+                            ]
+                          },
+                          "command": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          },
+                          "args": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "maxLength": 2000
+                            },
+                            "maxItems": 64
+                          },
+                          "timeoutSeconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 600
+                          },
+                          "statusMessage": {
+                            "type": "string",
+                            "maxLength": 500
+                          },
+                          "metadata": {
+                            "type": "object",
+                            "patternProperties": {
+                              "^.*$": {}
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 100
+                    },
+                    "loadErrors": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "maxItems": 100
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "hooks",
+                    "loadErrors"
+                  ],
+                  "properties": {
+                    "hooks": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "enabled",
+                          "event",
+                          "runMode",
+                          "command"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "enabled": {
+                            "type": "boolean"
+                          },
+                          "event": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "SessionStart"
+                              },
+                              {
+                                "type": "string",
+                                "const": "UserPromptSubmit"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PreToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUse"
+                              },
+                              {
+                                "type": "string",
+                                "const": "PostToolUseFailure"
+                              },
+                              {
+                                "type": "string",
+                                "const": "Stop"
+                              }
+                            ]
+                          },
+                          "matcher": {
+                            "type": "string",
+                            "minLength": 0,
+                            "maxLength": 200
+                          },
+                          "runMode": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "process"
+                              },
+                              {
+                                "type": "string",
+                                "const": "shell"
+                              }
+                            ]
+                          },
+                          "protocol": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "legacy"
+                              },
+                              {
+                                "type": "string",
+                                "const": "command-v1"
                               }
                             ]
                           },
@@ -43675,6 +43723,18 @@
                         }
                       ]
                     },
+                    "protocol": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "legacy"
+                        },
+                        {
+                          "type": "string",
+                          "const": "command-v1"
+                        }
+                      ]
+                    },
                     "command": {
                       "type": "string",
                       "minLength": 1,
@@ -59008,146 +59068,15 @@
                           }
                         ]
                       },
-                      "command": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 4096
-                      },
-                      "args": {
-                        "type": "array",
-                        "items": {
-                          "type": "string",
-                          "maxLength": 2000
-                        },
-                        "maxItems": 64
-                      },
-                      "timeoutSeconds": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "maximum": 600
-                      },
-                      "statusMessage": {
-                        "type": "string",
-                        "maxLength": 500
-                      },
-                      "metadata": {
-                        "type": "object",
-                        "patternProperties": {
-                          "^.*$": {}
-                        }
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  "maxItems": 100
-                },
-                "loadErrors": {
-                  "type": "array",
-                  "items": {
-                    "type": "string",
-                    "x-metis-maxUtf8Bytes": 65536
-                  },
-                  "maxItems": 100
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "jsonrpc",
-            "id",
-            "result"
-          ],
-          "properties": {
-            "jsonrpc": {
-              "type": "string",
-              "const": "2.0"
-            },
-            "id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "x-metis-maxUtf16Units": 128
-            },
-            "result": {
-              "type": "object",
-              "required": [
-                "hooks",
-                "loadErrors"
-              ],
-              "properties": {
-                "hooks": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "id",
-                      "name",
-                      "enabled",
-                      "event",
-                      "runMode",
-                      "command"
-                    ],
-                    "properties": {
-                      "id": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 128
-                      },
-                      "name": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 200
-                      },
-                      "enabled": {
-                        "type": "boolean"
-                      },
-                      "event": {
+                      "protocol": {
                         "anyOf": [
                           {
                             "type": "string",
-                            "const": "SessionStart"
+                            "const": "legacy"
                           },
                           {
                             "type": "string",
-                            "const": "UserPromptSubmit"
-                          },
-                          {
-                            "type": "string",
-                            "const": "PreToolUse"
-                          },
-                          {
-                            "type": "string",
-                            "const": "PostToolUse"
-                          },
-                          {
-                            "type": "string",
-                            "const": "PostToolUseFailure"
-                          },
-                          {
-                            "type": "string",
-                            "const": "Stop"
-                          }
-                        ]
-                      },
-                      "matcher": {
-                        "type": "string",
-                        "minLength": 0,
-                        "maxLength": 200
-                      },
-                      "runMode": {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "process"
-                          },
-                          {
-                            "type": "string",
-                            "const": "shell"
+                            "const": "command-v1"
                           }
                         ]
                       },
@@ -59291,6 +59220,173 @@
                           {
                             "type": "string",
                             "const": "shell"
+                          }
+                        ]
+                      },
+                      "protocol": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "legacy"
+                          },
+                          {
+                            "type": "string",
+                            "const": "command-v1"
+                          }
+                        ]
+                      },
+                      "command": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 4096
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "maxItems": 64
+                      },
+                      "timeoutSeconds": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 600
+                      },
+                      "statusMessage": {
+                        "type": "string",
+                        "maxLength": 500
+                      },
+                      "metadata": {
+                        "type": "object",
+                        "patternProperties": {
+                          "^.*$": {}
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 100
+                },
+                "loadErrors": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  },
+                  "maxItems": 100
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "hooks",
+                "loadErrors"
+              ],
+              "properties": {
+                "hooks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "enabled",
+                      "event",
+                      "runMode",
+                      "command"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "enabled": {
+                        "type": "boolean"
+                      },
+                      "event": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "SessionStart"
+                          },
+                          {
+                            "type": "string",
+                            "const": "UserPromptSubmit"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PreToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUse"
+                          },
+                          {
+                            "type": "string",
+                            "const": "PostToolUseFailure"
+                          },
+                          {
+                            "type": "string",
+                            "const": "Stop"
+                          }
+                        ]
+                      },
+                      "matcher": {
+                        "type": "string",
+                        "minLength": 0,
+                        "maxLength": 200
+                      },
+                      "runMode": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "process"
+                          },
+                          {
+                            "type": "string",
+                            "const": "shell"
+                          }
+                        ]
+                      },
+                      "protocol": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "legacy"
+                          },
+                          {
+                            "type": "string",
+                            "const": "command-v1"
                           }
                         ]
                       },

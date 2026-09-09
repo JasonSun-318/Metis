@@ -59,6 +59,7 @@ function normalizeHook(hook: ClientParams<"hooks/upsert">["hook"]): DeclarativeH
 		...(hook.matcher !== undefined ? { matcher: hook.matcher } : {}),
 		runMode: hook.runMode,
 		command: hook.command,
+		...(hook.protocol !== undefined ? { protocol: hook.protocol } : {}),
 		...(hook.args !== undefined && hook.args.length > 0 ? { args: hook.args } : {}),
 		...(hook.timeoutSeconds !== undefined ? { timeoutSeconds: hook.timeoutSeconds } : {}),
 		...(hook.statusMessage !== undefined ? { statusMessage: hook.statusMessage } : {}),

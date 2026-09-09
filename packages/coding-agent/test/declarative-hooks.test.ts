@@ -108,6 +108,49 @@ describe("declarative hooks config", () => {
 		expect(hookMatchesTool(makeHook({ matcher: "Write, Edit" }), "BASH")).toBe(false);
 		expect(hookMatchesTool(makeHook(), "anything")).toBe(true);
 	});
+
+	it("preserves missing protocol on legacy hooks and roundtrips command-v1", () => {
+		const legacyHook = makeHook({ protocol: undefined });
+		const v1Hook = makeHook({ protocol: "command-v1" });
+		saveDeclarativeHooks(agentDir, [legacyHook, v1Hook]);
+
+		const loaded = loadDeclarativeHooks(agentDir);
+		expect(loaded.errors).toEqual([]);
+		expect(loaded.hooks).toHaveLength(2);
+		expect(loaded.hooks[0].protocol).toBeUndefined();
+		expect(loaded.hooks[1].protocol).toBe("command-v1");
+
+		const raw = JSON.parse(fs.readFileSync(path.join(agentDir, HOOKS_CONFIG_FILENAME), "utf8"));
+		expect(raw.hooks[0].protocol).toBeUndefined();
+		expect(raw.hooks[1].protocol).toBe("command-v1");
+	});
+
+	it("rejects unknown protocol on validateDeclarativeHook", () => {
+		expect(validateDeclarativeHook(makeHook({ protocol: "legacy" }))).toBeNull();
+		expect(validateDeclarativeHook(makeHook({ protocol: "command-v1" }))).toBeNull();
+		expect(validateDeclarativeHook(makeHook({ protocol: "future-v2" as never }))).toContain("protocol");
+		expect(validateDeclarativeHook(makeHook({ protocol: 123 as never }))).toContain("protocol");
+	});
+
+	it("surfaces unknown protocol in hooks.json as loadError without executing or downgrading", () => {
+		const good = makeHook();
+		const bad = { ...makeHook({ id: "bad-proto" }), protocol: "unknown-proto" };
+		fs.writeFileSync(path.join(agentDir, HOOKS_CONFIG_FILENAME), JSON.stringify({ hooks: [good, bad] }));
+
+		const loaded = loadDeclarativeHooks(agentDir);
+		expect(loaded.hooks).toEqual([good]);
+		expect(loaded.errors).toHaveLength(1);
+		expect(loaded.errors[0]).toContain("protocol");
+	});
+
+	it("reloading reflects removal of the last hook", () => {
+		const hook = makeHook();
+		saveDeclarativeHooks(agentDir, [hook]);
+		expect(loadDeclarativeHooks(agentDir).hooks).toHaveLength(1);
+
+		saveDeclarativeHooks(agentDir, []);
+		expect(loadDeclarativeHooks(agentDir).hooks).toEqual([]);
+	});
 });
 
 describe("hook process runner", () => {
