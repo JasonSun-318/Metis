@@ -442,7 +442,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				? this.interactions.requestPermissionApproval(this.sessionId, request)
 				: Promise.resolve({ decision: "deny", reason: "No interactive session owner is available" }),
 		);
-		await session.bindExtensions(uiContext ? { uiContext, mode: "rpc" } : {});
+		await session.bindExtensions({
+			...(uiContext ? { uiContext, mode: "rpc" } : {}),
+			onError: (error) => {
+				if (uiContext) {
+					uiContext.notify(`[${error.event}] ${error.error}`, "error");
+				}
+			},
+		});
 	}
 
 	get sessionId(): string {

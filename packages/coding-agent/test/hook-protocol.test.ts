@@ -34,6 +34,8 @@ function makeRun(overrides: Partial<HookRunResult & { stdoutTruncated?: boolean 
 		stdout: "",
 		stderr: "",
 		stdoutTruncated: false,
+		stderrTruncated: false,
+		durationMs: 0,
 		...overrides,
 	};
 }

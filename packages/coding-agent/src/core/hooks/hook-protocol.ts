@@ -1,6 +1,10 @@
 import { type DeclarativeHook, hookMatchesTool } from "./declarative-hooks.ts";
 import type { HookPayload, HookRunResult } from "./hook-bridge.ts";
 
+export const MAX_PIPE_BUFFER_BYTES = 32768; // 32 KiB
+export const MAX_HOOK_CONTEXT_BYTES = 8192; // 8 KiB
+export const MAX_EVENT_TOTAL_CONTEXT_BYTES = 32768; // 32 KiB
+
 export const COMPATIBLE_TOOL_ALIASES: Readonly<Record<string, string>> = {
 	bash: "Bash",
 	read: "Read",
@@ -9,9 +13,6 @@ export const COMPATIBLE_TOOL_ALIASES: Readonly<Record<string, string>> = {
 	grep: "Grep",
 	find: "Glob",
 };
-
-export const MAX_HOOK_CONTEXT_BYTES = 8192; // 8 KiB
-export const MAX_EVENT_TOTAL_CONTEXT_BYTES = 32768; // 32 KiB
 
 export interface HookEffect {
 	context?: string;

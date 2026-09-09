@@ -13,15 +13,22 @@
  *   (Claude Code-compatible). All other events are observers.
  */
 
-import { spawn } from "node:child_process";
+import { type ChildProcess, spawn } from "node:child_process";
+import { getShellEnv, killProcessTree } from "../../utils/shell.ts";
 import type { ExtensionAPI, ExtensionContext, InlineExtension } from "../extensions/types.ts";
 import {
 	type DeclarativeHook,
 	HOOK_DEFAULT_TIMEOUT_SECONDS,
 	type HookEventName,
-	hookMatchesTool,
 	loadDeclarativeHooks,
 } from "./declarative-hooks.ts";
+import {
+	buildCommandHookPayload,
+	type HookEffect,
+	interpretHookResult,
+	MAX_PIPE_BUFFER_BYTES,
+	matchHook,
+} from "./hook-protocol.ts";
 
 /**
  * Declarative event -> extension event it binds to:
@@ -31,9 +38,11 @@ import {
  */
 
 /** Exit code a PreToolUse hook uses to block the tool call. */
-const HOOK_BLOCK_EXIT_CODE = 2;
-const HOOK_STDOUT_LIMIT = 8192;
-const HOOK_KILL_GRACE_MS = 5000;
+export const HOOK_BLOCK_EXIT_CODE = 2;
+export const HOOK_STDOUT_LIMIT = 8192;
+export const HOOK_KILL_GRACE_MS = 1000;
+export const EXIT_STDIO_GRACE_MS = 500;
+export { MAX_PIPE_BUFFER_BYTES };
 
 export interface HookRunResult {
 	code: number | null;
@@ -43,6 +52,9 @@ export interface HookRunResult {
 	spawnError: string | null;
 	stdout: string;
 	stderr: string;
+	stdoutTruncated: boolean;
+	stderrTruncated: boolean;
+	durationMs: number;
 }
 
 export interface HookPayloadBase {
@@ -73,10 +85,6 @@ export interface HookPayloadBase {
 /** JSON written to the hook process's stdin. */
 export type HookPayload = HookPayloadBase;
 
-function truncate(text: string): string {
-	return text.length > HOOK_STDOUT_LIMIT ? `${text.slice(0, HOOK_STDOUT_LIMIT)}…` : text;
-}
-
 /** Spawn a hook process, write the payload JSON to stdin, enforce the timeout. Never rejects. */
 export function runHookProcess(
 	hook: DeclarativeHook,
@@ -84,61 +92,139 @@ export function runHookProcess(
 	options: { cwd: string; signal?: AbortSignal },
 ): Promise<HookRunResult> {
 	return new Promise((resolve) => {
+		const startTime = Date.now();
+
+		if (options.signal?.aborted) {
+			resolve({
+				code: null,
+				signal: null,
+				timedOut: false,
+				aborted: true,
+				spawnError: null,
+				stdout: "",
+				stderr: "",
+				stdoutTruncated: false,
+				stderrTruncated: false,
+				durationMs: 0,
+			});
+			return;
+		}
+
 		const timeoutMs = (hook.timeoutSeconds ?? HOOK_DEFAULT_TIMEOUT_SECONDS) * 1000;
 		let timedOut = false;
+		let aborted = false;
+		let stdoutBytes = 0;
+		let stderrBytes = 0;
+		let stdoutTruncated = false;
+		let stderrTruncated = false;
 		let stdout = "";
 		let stderr = "";
 		let closeCode: number | null = null;
 		let closeSignal: string | null = null;
 		let spawnError: string | null = null;
+		let exitTimer: NodeJS.Timeout | undefined;
+		let finished = false;
 
-		const child =
-			hook.runMode === "shell"
-				? spawn(hook.command, {
-						cwd: options.cwd,
-						shell: true,
-						stdio: ["pipe", "pipe", "pipe"],
-						windowsHide: true,
-					})
-				: spawn(hook.command, hook.args ?? [], {
-						cwd: options.cwd,
-						shell: false,
-						stdio: ["pipe", "pipe", "pipe"],
-						windowsHide: true,
-					});
+		const env = getShellEnv();
+
+		let child: ChildProcess;
+		try {
+			child =
+				hook.runMode === "shell"
+					? spawn(hook.command, {
+							cwd: options.cwd,
+							env,
+							shell: true,
+							stdio: ["pipe", "pipe", "pipe"],
+							windowsHide: true,
+							detached: process.platform !== "win32",
+						})
+					: spawn(hook.command, hook.args ?? [], {
+							cwd: options.cwd,
+							env,
+							shell: false,
+							stdio: ["pipe", "pipe", "pipe"],
+							windowsHide: true,
+							detached: process.platform !== "win32",
+						});
+		} catch (err) {
+			resolve({
+				code: null,
+				signal: null,
+				timedOut: false,
+				aborted: false,
+				spawnError: err instanceof Error ? err.message : String(err),
+				stdout: "",
+				stderr: "",
+				stdoutTruncated: false,
+				stderrTruncated: false,
+				durationMs: Math.max(0, Date.now() - startTime),
+			});
+			return;
+		}
 
 		let killTimer: NodeJS.Timeout | undefined;
 		let forceKillTimer: NodeJS.Timeout | undefined;
 		let abortListener: (() => void) | undefined;
-		let finished = false;
+
+		const cleanup = () => {
+			clearTimeout(killTimer);
+			clearTimeout(forceKillTimer);
+			clearTimeout(exitTimer);
+			if (abortListener) options.signal?.removeEventListener("abort", abortListener);
+		};
 
 		const finish = (result: Partial<HookRunResult>) => {
 			if (finished) return;
 			finished = true;
-			clearTimeout(killTimer);
-			clearTimeout(forceKillTimer);
-			if (abortListener) options.signal?.removeEventListener("abort", abortListener);
+			cleanup();
+			child.stdout?.destroy();
+			child.stderr?.destroy();
 			resolve({
-				code: result.code ?? closeCode,
+				code: spawnError ? null : (result.code ?? closeCode),
 				signal: result.signal ?? closeSignal,
 				timedOut,
-				aborted: options.signal?.aborted === true,
+				aborted,
 				spawnError,
-				stdout: truncate(stdout),
-				stderr: truncate(stderr),
+				stdout,
+				stderr,
+				stdoutTruncated,
+				stderrTruncated,
+				durationMs: Math.max(0, Date.now() - startTime),
 			});
+		};
+
+		const terminateChildTree = () => {
+			if (child.pid) {
+				killProcessTree(child.pid);
+			} else {
+				try {
+					child.kill("SIGKILL");
+				} catch {}
+			}
 		};
 
 		killTimer = setTimeout(() => {
 			timedOut = true;
-			child.kill("SIGTERM");
-			forceKillTimer = setTimeout(() => child.kill("SIGKILL"), HOOK_KILL_GRACE_MS);
+			try {
+				child.kill("SIGTERM");
+			} catch {}
+			forceKillTimer = setTimeout(() => {
+				terminateChildTree();
+				finish({});
+			}, HOOK_KILL_GRACE_MS);
 		}, timeoutMs);
 
 		if (options.signal) {
 			abortListener = () => {
-				child.kill("SIGTERM");
-				forceKillTimer = setTimeout(() => child.kill("SIGKILL"), HOOK_KILL_GRACE_MS);
+				aborted = true;
+				try {
+					child.kill("SIGTERM");
+				} catch {}
+				forceKillTimer = setTimeout(() => {
+					terminateChildTree();
+					finish({});
+				}, HOOK_KILL_GRACE_MS);
 			};
 			options.signal.addEventListener("abort", abortListener, { once: true });
 		}
@@ -146,33 +232,63 @@ export function runHookProcess(
 		child.on("error", (error) => {
 			spawnError = error instanceof Error ? error.message : String(error);
 		});
+
 		child.stdout?.on("data", (chunk: Buffer) => {
-			if (stdout.length < HOOK_STDOUT_LIMIT * 2) stdout += chunk.toString("utf8");
+			if (stdoutBytes < MAX_PIPE_BUFFER_BYTES) {
+				const remaining = MAX_PIPE_BUFFER_BYTES - stdoutBytes;
+				if (chunk.length <= remaining) {
+					stdout += chunk.toString("utf8");
+					stdoutBytes += chunk.length;
+				} else {
+					stdout += chunk.subarray(0, remaining).toString("utf8");
+					stdoutBytes = MAX_PIPE_BUFFER_BYTES;
+					stdoutTruncated = true;
+				}
+			} else {
+				stdoutTruncated = true;
+			}
 		});
+
 		child.stderr?.on("data", (chunk: Buffer) => {
-			if (stderr.length < HOOK_STDOUT_LIMIT * 2) stderr += chunk.toString("utf8");
+			if (stderrBytes < MAX_PIPE_BUFFER_BYTES) {
+				const remaining = MAX_PIPE_BUFFER_BYTES - stderrBytes;
+				if (chunk.length <= remaining) {
+					stderr += chunk.toString("utf8");
+					stderrBytes += chunk.length;
+				} else {
+					stderr += chunk.subarray(0, remaining).toString("utf8");
+					stderrBytes = MAX_PIPE_BUFFER_BYTES;
+					stderrTruncated = true;
+				}
+			} else {
+				stderrTruncated = true;
+			}
 		});
-		child.on("close", (code, signal) => {
+
+		child.on("exit", (code, signal) => {
 			closeCode = code;
 			closeSignal = signal;
-			// Give buffered stdout/stderr data events a tick to land before resolving.
-			setImmediate(() => finish({}));
+			// Arm grace timer to release if grandchild holds stdio
+			exitTimer = setTimeout(() => {
+				finish({});
+			}, EXIT_STDIO_GRACE_MS);
+		});
+
+		child.on("close", (code, signal) => {
+			if (code !== null) closeCode = code;
+			if (signal !== null) closeSignal = signal;
+			finish({});
 		});
 
 		// EPIPE when the hook exits without reading stdin; never fail the run for it.
 		child.stdin?.on("error", () => undefined);
 		try {
-			child.stdin?.end(`${JSON.stringify(payload)}\n`);
+			const jsonPayload = buildCommandHookPayload(hook, payload);
+			child.stdin?.end(`${JSON.stringify(jsonPayload)}\n`);
 		} catch {
 			// Ignore sync write failures; the close handler still resolves.
 		}
 	});
-}
-
-function blockReason(hook: DeclarativeHook, result: HookRunResult): string {
-	const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
-	const suffix = output ? `: ${output}` : "";
-	return `Blocked by hook ${hook.name}${suffix}`;
 }
 
 function basePayload(hook: DeclarativeHook, ctx: ExtensionContext): HookPayloadBase {
@@ -196,15 +312,30 @@ async function runMatchingHooks(
 	event: HookEventName,
 	ctx: ExtensionContext,
 	extra: () => Partial<HookPayloadBase>,
-): Promise<Array<{ hook: DeclarativeHook; result: HookRunResult }>> {
+): Promise<Array<{ hook: DeclarativeHook; result: HookRunResult; effect: HookEffect }>> {
 	const details = extra();
-	const results: Array<{ hook: DeclarativeHook; result: HookRunResult }> = [];
+	const results: Array<{ hook: DeclarativeHook; result: HookRunResult; effect: HookEffect }> = [];
 	for (const hook of hooks) {
 		if (!hook.enabled || hook.event !== event) continue;
-		if (details.toolName !== undefined && !hookMatchesTool(hook, details.toolName)) continue;
+		if (!matchHook(hook, { toolName: details.toolName, reason: details.reason })) continue;
 		const payload: HookPayload = { ...basePayload(hook, ctx), ...details };
 		try {
-			results.push({ hook, result: await runHookProcess(hook, payload, { cwd: ctx.cwd, signal: ctx.signal }) });
+			const result = await runHookProcess(hook, payload, { cwd: ctx.cwd, signal: ctx.signal });
+			const effect = interpretHookResult(hook, result);
+			if (effect.diagnostic && ctx.ui?.notify) {
+				ctx.ui.notify(`[Hook: ${hook.name}] ${effect.diagnostic}`, "warning");
+			}
+			if (effect.blockReason && ctx.ui?.notify) {
+				ctx.ui.notify(`[Hook: ${hook.name}] ${effect.blockReason}`, "warning");
+			}
+			results.push({ hook, result, effect });
+			// Short-circuit on explicit block for UserPromptSubmit and command-v1 PreToolUse
+			if (
+				effect.blockReason &&
+				(hook.event === "UserPromptSubmit" || (hook.event === "PreToolUse" && hook.protocol === "command-v1"))
+			) {
+				break;
+			}
 		} catch {
 			// runHookProcess never rejects; this is belt-and-braces containment.
 		}
@@ -242,9 +373,14 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 						toolCallId: event.toolCallId,
 						input: event.input,
 					}));
-					for (const { hook, result } of results) {
+					for (const { hook, result, effect } of results) {
+						if (effect?.blockReason) {
+							return { block: true, reason: effect.blockReason };
+						}
 						if (result.code === HOOK_BLOCK_EXIT_CODE) {
-							return { block: true, reason: blockReason(hook, result) };
+							const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
+							const suffix = output ? `: ${output}` : "";
+							return { block: true, reason: `Blocked by hook ${hook.name}${suffix}` };
 						}
 					}
 					return undefined;
