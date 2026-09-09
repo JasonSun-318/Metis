@@ -331,12 +331,20 @@ describe("hook context, blocking, and lifecycle integration", () => {
 		expect(faux.state.callCount).toBe(2);
 	});
 
-	it("attaches PreToolUse context and PostToolUse context to the tool result", async () => {
+	it("preserves source labels and over 8 KiB of PreToolUse contexts in the model's tool result", async () => {
+		const firstContext = `[Hook: embedded-label]\n${"A".repeat(4500)}END_A`;
+		const secondContext = `${"B".repeat(5500)}END_B`;
 		const preHook = makeScriptHook({
 			name: "pre-hook",
 			event: "PreToolUse",
 			matcher: "bash",
-			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: "PRE_TOOL_HINT" } }))`,
+			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: ${JSON.stringify(firstContext)} } }))`,
+		});
+		const secondPreHook = makeScriptHook({
+			name: "PreToolUse",
+			event: "PreToolUse",
+			matcher: "bash",
+			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: ${JSON.stringify(secondContext)} } }))`,
 		});
 		const postHook = makeScriptHook({
 			name: "post-hook",
@@ -345,7 +353,7 @@ describe("hook context, blocking, and lifecycle integration", () => {
 			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: "POST_TOOL_ANALYSIS" } }))`,
 		});
 
-		const { session, faux } = await setupSession([preHook, postHook]);
+		const { session, faux } = await setupSession([preHook, secondPreHook, postHook]);
 
 		let secondTurnContext: any;
 		faux.setResponses([
@@ -365,8 +373,10 @@ describe("hook context, blocking, and lifecycle integration", () => {
 			.filter((c: any) => c.type === "text")
 			.map((c: any) => c.text)
 			.join("\n");
-		expect(resultText).toContain("PRE_TOOL_HINT");
-		expect(resultText).toContain("POST_TOOL_ANALYSIS");
+		expect(resultText).toContain(
+			`[Hook: pre-hook]\n${firstContext}\n\n[Hook: PreToolUse]\n${secondContext}\n\n[Hook: post-hook]\nPOST_TOOL_ANALYSIS`,
+		);
+		expect(resultText).not.toContain("context truncated");
 	});
 
 	it("isolates contexts between two concurrent sessions", async () => {

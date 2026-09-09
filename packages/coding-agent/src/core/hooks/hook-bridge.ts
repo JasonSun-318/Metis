@@ -17,11 +17,13 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { getShellEnv, killProcessTree } from "../../utils/shell.ts";
 import type { ExtensionAPI, ExtensionContext, InlineExtension } from "../extensions/types.ts";
+import { resolvePluginTemplateVariables } from "../mcp/config.ts";
+import type { PluginOwner } from "../plugins/types.ts";
 import {
 	type DeclarativeHook,
 	HOOK_DEFAULT_TIMEOUT_SECONDS,
 	type HookEventName,
-	loadDeclarativeHooks,
+	loadEffectiveHooks,
 } from "./declarative-hooks.ts";
 import {
 	buildCommandHookPayload,
@@ -66,6 +68,8 @@ export interface HookPayloadBase {
 		name: string;
 		statusMessage?: string;
 		metadata?: Record<string, unknown>;
+		pluginOwner?: PluginOwner;
+		packageDir?: string;
 	};
 	sessionId: string;
 	cwd: string;
@@ -127,13 +131,34 @@ export function runHookProcess(
 		let exitTimer: NodeJS.Timeout | undefined;
 		let finished = false;
 
-		const env = getShellEnv();
+		let command = hook.command;
+		let args = hook.args ? [...hook.args] : undefined;
+		const pluginRoot = hook.env?.CLAUDE_PLUGIN_ROOT ?? "";
+		if (pluginRoot || command.includes("$")) {
+			command = resolvePluginTemplateVariables(command, {
+				pluginRoot,
+				cwd: options.cwd,
+			});
+			if (args) {
+				args = args.map((arg) =>
+					resolvePluginTemplateVariables(arg, {
+						pluginRoot,
+						cwd: options.cwd,
+					}),
+				);
+			}
+		}
+
+		const env = {
+			...getShellEnv(),
+			...(hook.env ?? {}),
+		};
 
 		let child: ChildProcess;
 		try {
 			child =
 				hook.runMode === "shell"
-					? spawn(hook.command, {
+					? spawn(command, {
 							cwd: options.cwd,
 							env,
 							shell: true,
@@ -141,7 +166,7 @@ export function runHookProcess(
 							windowsHide: true,
 							detached: process.platform !== "win32",
 						})
-					: spawn(hook.command, hook.args ?? [], {
+					: spawn(command, args ?? [], {
 							cwd: options.cwd,
 							env,
 							shell: false,
@@ -333,6 +358,8 @@ function basePayload(hook: DeclarativeHook, ctx: ExtensionContext): HookPayloadB
 			name: hook.name,
 			...(hook.statusMessage !== undefined ? { statusMessage: hook.statusMessage } : {}),
 			...(hook.metadata !== undefined ? { metadata: hook.metadata } : {}),
+			...(hook.pluginOwner !== undefined ? { pluginOwner: hook.pluginOwner } : {}),
+			...(hook.env?.CLAUDE_PLUGIN_ROOT !== undefined ? { packageDir: hook.env.CLAUDE_PLUGIN_ROOT } : {}),
 		},
 		sessionId: ctx.sessionManager.getSessionId(),
 		cwd: ctx.cwd,
@@ -388,14 +415,14 @@ async function runMatchingHooks(
  * hooks keep a zero-extension runtime (required for unattended execution).
  */
 export function createDeclarativeHooksBridge(agentDir: string): InlineExtension | undefined {
-	const { hooks } = loadDeclarativeHooks(agentDir);
+	const { hooks } = loadEffectiveHooks(agentDir);
 	if (hooks.length === 0) return undefined;
 
 	return {
 		name: "hooks",
 		factory: (metis: ExtensionAPI) => {
 			// Reload so config edits land on new sessions without restarting the host.
-			const { hooks: allHooks } = loadDeclarativeHooks(agentDir);
+			const { hooks: allHooks } = loadEffectiveHooks(agentDir);
 			if (allHooks.length === 0) return;
 
 			const toolHooks = allHooks.filter((hook) => hook.event === "PreToolUse");
@@ -407,7 +434,8 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 			const commandStopHooks = allHooks.filter((hook) => hook.event === "Stop" && hook.protocol === "command-v1");
 			const legacyStopHooks = allHooks.filter((hook) => hook.event === "Stop" && hook.protocol !== "command-v1");
 
-			const preToolContexts = new Map<string, string>();
+			// Keep each source separate until tool_result; format and budget the combined entries once.
+			const preToolContexts = new Map<string, Array<{ hookName: string; context: string }>>();
 
 			if (toolHooks.length > 0) {
 				metis.on("tool_call", async (event, ctx) => {
@@ -428,9 +456,8 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 					const entries = results
 						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
 						.filter((c): c is { hookName: string; context: string } => Boolean(c));
-					const context = mergeEventContexts(entries);
-					if (context) {
-						preToolContexts.set(event.toolCallId, context);
+					if (entries.length > 0) {
+						preToolContexts.set(event.toolCallId, entries);
 					}
 					return undefined;
 				});
@@ -438,7 +465,7 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 
 			if (resultHooks.length > 0 || toolHooks.length > 0) {
 				metis.on("tool_result", async (event, ctx) => {
-					const preContext = preToolContexts.get(event.toolCallId);
+					const preEntries = preToolContexts.get(event.toolCallId) ?? [];
 					preToolContexts.delete(event.toolCallId);
 
 					const results =
@@ -462,12 +489,7 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
 						.filter((c): c is { hookName: string; context: string } => Boolean(c));
 
-					const allEntries: Array<{ hookName: string; context: string }> = [];
-					if (preContext) {
-						allEntries.push({ hookName: "PreToolUse", context: preContext });
-					}
-					allEntries.push(...entries);
-					const combined = mergeEventContexts(allEntries);
+					const combined = mergeEventContexts([...preEntries, ...entries]);
 					if (combined) {
 						return {
 							content: [...event.content, { type: "text" as const, text: combined }],

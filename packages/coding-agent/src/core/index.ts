@@ -100,6 +100,7 @@ export {
 	isHookEventName,
 	isHookRunMode,
 	loadDeclarativeHooks,
+	loadEffectiveHooks,
 	parseHookMatcher,
 	saveDeclarativeHooks,
 	validateDeclarativeHook,

@@ -129,4 +129,98 @@ describe("HooksService", () => {
 			}),
 		).not.toThrow();
 	});
+
+	it("lists plugin hooks alongside user hooks, and prevents editing or deleting plugin hooks", () => {
+		const pkgDir = join(agentDir, "plugins", "packages", "plug-1", "commit1");
+		mkdirSync(pkgDir, { recursive: true });
+		mkdirSync(join(agentDir, "plugins"), { recursive: true });
+
+		writeFileSync(
+			join(agentDir, "plugins", "registry.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				revision: 1,
+				markets: [],
+				installed: [
+					{
+						id: "plug-1",
+						name: "plug-1",
+						displayName: "Plugin One",
+						format: "claude",
+						repository: "user/repo",
+						commit: "commit1",
+						installedAt: new Date().toISOString(),
+						enabled: true,
+					},
+				],
+			}),
+		);
+
+		const pluginHook = {
+			id: "hook-plugin-1",
+			name: "Plugin Lint Hook",
+			enabled: true,
+			event: "PreToolUse" as const,
+			runMode: "shell" as const,
+			protocol: "command-v1" as const,
+			command: "echo test",
+		};
+
+		writeFileSync(
+			join(pkgDir, "normalized.json"),
+			JSON.stringify({
+				pluginId: "plug-1",
+				commit: "commit1",
+				format: "claude",
+				name: "plug-1",
+				displayName: "Plugin One",
+				components: [
+					{
+						kind: "hook",
+						componentId: "lint-hook",
+						name: "Plugin Lint Hook",
+						definition: pluginHook,
+					},
+				],
+			}),
+		);
+
+		const svc = new HooksService(agentDir);
+		svc.upsert({ hook: HOOK_A });
+
+		const view = svc.view();
+		expect(view.hooks).toHaveLength(2);
+		expect(view.hooks[0]).toEqual(HOOK_A);
+		expect(view.hooks[1]).toMatchObject({
+			...pluginHook,
+			pluginOwner: {
+				pluginId: "plug-1",
+				displayName: "Plugin One",
+				componentId: "lint-hook",
+			},
+		});
+
+		// Cannot delete a plugin hook
+		expect(() => svc.delete({ id: "hook-plugin-1" })).toThrow(/OPERATION_FAILED/);
+
+		// Cannot upsert with pluginOwner
+		expect(() =>
+			svc.upsert({
+				hook: {
+					...HOOK_B,
+					pluginOwner: { pluginId: "plug-1", displayName: "Plugin One", componentId: "lint-hook" },
+				},
+			}),
+		).toThrow(/OPERATION_FAILED/);
+
+		// Cannot overwrite a plugin hook ID
+		expect(() =>
+			svc.upsert({
+				hook: {
+					...HOOK_B,
+					id: "hook-plugin-1",
+				},
+			}),
+		).toThrow(/OPERATION_FAILED/);
+	});
 });

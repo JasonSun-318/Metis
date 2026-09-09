@@ -467,18 +467,27 @@ describe("hook-protocol result interpreter matrix", () => {
 		expect(merged).toContain(EVENT_CONTEXT_TRUNCATED_MARKER.trim());
 	});
 
-	it("preserves pre-aggregated PreToolUse context up to 32 KiB budget without re-truncating to 8 KiB or duplicate wrapping", () => {
-		const preMergedText = `[Hook: hook-a]\n${"A".repeat(4500)}\n\n[Hook: hook-b]\n${"B".repeat(5500)}`;
+	it.each(["actual-hook", "PreToolUse"])("preserves source %s when context contains a hook label", (name) => {
+		const hook = makeHook({ name, event: "SessionStart" });
+		const context = "[Hook: another-source]\nProject context";
+		const effect = interpretHookResult(
+			hook,
+			makeRun({
+				stdout: JSON.stringify({ hookSpecificOutput: { hookEventName: hook.event, additionalContext: context } }),
+			}),
+		);
+		expect(effect.context).toBe(context);
+		expect(mergeEventContexts([{ hookName: hook.name, context: effect.context! }])).toBe(
+			`[Hook: ${name}]\n${context}`,
+		);
+	});
+
+	it("preserves separate hook contexts totaling over 8 KiB without duplicate wrapping", () => {
 		const entries = [
-			{
-				hookName: "PreToolUse",
-				context: preMergedText,
-			},
+			{ hookName: "hook-a", context: "A".repeat(4500) },
+			{ hookName: "hook-b", context: "B".repeat(5500) },
 		];
 		const merged = mergeEventContexts(entries);
-		expect(merged).toBeDefined();
-		expect(Buffer.byteLength(merged!, "utf8")).toBe(Buffer.byteLength(preMergedText, "utf8"));
-		expect(merged).toBe(preMergedText);
-		expect(merged).not.toContain("[Hook: PreToolUse]");
+		expect(merged).toBe(`[Hook: hook-a]\n${entries[0].context}\n\n[Hook: hook-b]\n${entries[1].context}`);
 	});
 });

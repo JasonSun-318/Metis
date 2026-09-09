@@ -801,6 +801,7 @@ export const DeclarativeHookViewSchema = StrictObject({
 	timeoutSeconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 600 })),
 	statusMessage: Type.Optional(Type.String({ maxLength: 500 })),
 	metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+	pluginOwner: Type.Optional(PluginOwnerSchema),
 });
 export const HooksListViewSchema = StrictObject({
 	hooks: Type.Array(DeclarativeHookViewSchema, { maxItems: 100 }),

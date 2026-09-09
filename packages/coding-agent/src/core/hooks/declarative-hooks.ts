@@ -11,6 +11,9 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
+import { resolvePluginTemplateVariables } from "../mcp/config.ts";
+import { readPluginSnapshot } from "../plugins/registry.ts";
+import type { PluginHookComponent, PluginOwner } from "../plugins/types.ts";
 import { validateHookMatcher } from "./hook-protocol.ts";
 
 export const HOOKS_CONFIG_FILENAME = "hooks.json";
@@ -65,6 +68,10 @@ export interface DeclarativeHook {
 	statusMessage?: string;
 	/** Free-form JSON passed through to the hook payload. */
 	metadata?: Record<string, unknown>;
+	/** Plugin owner if hook is provided by an installed plugin. */
+	pluginOwner?: PluginOwner;
+	/** Custom environment variables injected into the hook process. */
+	env?: Record<string, string>;
 }
 
 export interface DeclarativeHooksConfig {
@@ -155,6 +162,21 @@ export function validateDeclarativeHook(hook: DeclarativeHook): string | null {
 		}
 		if (JSON.stringify(hook.metadata).length > 8192) return "Hook metadata must stay under 8KB";
 	}
+	if (hook.pluginOwner !== undefined) {
+		if (
+			typeof hook.pluginOwner !== "object" ||
+			hook.pluginOwner === null ||
+			typeof hook.pluginOwner.pluginId !== "string" ||
+			typeof hook.pluginOwner.displayName !== "string"
+		) {
+			return "Hook pluginOwner must be an object with pluginId and displayName";
+		}
+	}
+	if (hook.env !== undefined) {
+		if (typeof hook.env !== "object" || hook.env === null || Array.isArray(hook.env)) {
+			return "Hook env must be an object";
+		}
+	}
 	return null;
 }
 
@@ -226,10 +248,56 @@ export function saveDeclarativeHooks(agentDir: string, hooks: DeclarativeHook[])
 	if (hooks.length > 100) throw new Error("At most 100 hooks can be configured");
 	const seen = new Set<string>();
 	for (const hook of hooks) {
+		if (hook.pluginOwner) {
+			throw new Error("Plugin hooks cannot be persisted into user hooks.json");
+		}
 		const error = validateDeclarativeHook(hook);
 		if (error) throw new Error(error);
 		if (seen.has(hook.id)) throw new Error(`Duplicate hook id: ${hook.id}`);
 		seen.add(hook.id);
 	}
 	replaceFileAtomicallySync(hooksConfigPath(agentDir), `${JSON.stringify({ hooks }, null, "\t")}\n`);
+}
+
+/**
+ * Loads user-level declarative hooks merged with active plugin hooks.
+ * User hooks come first in config order, followed by plugin hooks in snapshot order.
+ */
+export function loadEffectiveHooks(agentDir: string): { hooks: DeclarativeHook[]; errors: string[] } {
+	const { hooks: userHooks, errors } = loadDeclarativeHooks(agentDir);
+	let snapshotHooks: PluginHookComponent[] = [];
+	try {
+		snapshotHooks = readPluginSnapshot(agentDir).hooks;
+	} catch {
+		return { hooks: userHooks, errors };
+	}
+
+	const pluginHooks: DeclarativeHook[] = [];
+	for (const comp of snapshotHooks) {
+		const raw = comp.definition;
+		const command = resolvePluginTemplateVariables(raw.command, {
+			pluginRoot: comp.packageDir,
+			cwd: "",
+		});
+		const args = raw.args?.map((arg) =>
+			resolvePluginTemplateVariables(arg, {
+				pluginRoot: comp.packageDir,
+				cwd: "",
+			}),
+		);
+		pluginHooks.push({
+			...raw,
+			command,
+			...(args ? { args } : {}),
+			pluginOwner: comp.owner,
+			env: {
+				CLAUDE_PLUGIN_ROOT: comp.packageDir,
+			},
+		});
+	}
+
+	return {
+		hooks: [...userHooks, ...pluginHooks],
+		errors,
+	};
 }

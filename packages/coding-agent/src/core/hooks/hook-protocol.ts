@@ -69,12 +69,7 @@ export function mergeEventContexts(
 	const markerBytes = Buffer.byteLength(marker, "utf8");
 
 	for (const entry of entries) {
-		const isPreAggregated = entry.hookName === "PreToolUse" || entry.context.startsWith("[Hook: ");
-		const itemText = isPreAggregated
-			? entry.context.startsWith("[Hook: ")
-				? entry.context
-				: `[Hook: ${entry.hookName}]\n${entry.context}`
-			: `[Hook: ${entry.hookName}]\n${truncateHookContext(entry.context, MAX_HOOK_CONTEXT_BYTES)}`;
+		const itemText = `[Hook: ${entry.hookName}]\n${truncateHookContext(entry.context, MAX_HOOK_CONTEXT_BYTES)}`;
 		const separator = formattedList.length > 0 ? "\n\n" : "";
 		const separatorBytes = Buffer.byteLength(separator, "utf8");
 		const itemBytes = Buffer.byteLength(itemText, "utf8");

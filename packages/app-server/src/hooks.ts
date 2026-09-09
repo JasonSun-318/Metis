@@ -1,5 +1,10 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { type DeclarativeHook, loadDeclarativeHooks, saveDeclarativeHooks } from "@metis/coding-agent";
+import {
+	type DeclarativeHook,
+	loadDeclarativeHooks,
+	readPluginSnapshot,
+	saveDeclarativeHooks,
+} from "@metis/coding-agent";
 import { AppServerError } from "./session-runtime-host.ts";
 
 /**
@@ -17,10 +22,31 @@ export class HooksService {
 
 	view(): ClientResult<"hooks/list"> {
 		const { hooks, errors } = loadDeclarativeHooks(this.agentDir);
-		return { hooks, loadErrors: errors };
+		let pluginHooks: DeclarativeHook[] = [];
+		try {
+			const snapshot = readPluginSnapshot(this.agentDir);
+			pluginHooks = snapshot.hooks.map((h) => ({
+				...h.definition,
+				pluginOwner: h.owner,
+			}));
+		} catch {
+			// ignore missing or corrupt plugin snapshot
+		}
+		return { hooks: [...hooks, ...pluginHooks], loadErrors: errors };
 	}
 
 	upsert(params: ClientParams<"hooks/upsert">): ClientResult<"hooks/list"> {
+		if (params.hook.pluginOwner) {
+			throw new AppServerError("OPERATION_FAILED");
+		}
+		try {
+			const snapshot = readPluginSnapshot(this.agentDir);
+			if (snapshot.hooks.some((h) => h.definition.id === params.hook.id)) {
+				throw new AppServerError("OPERATION_FAILED");
+			}
+		} catch (err) {
+			if (err instanceof AppServerError) throw err;
+		}
 		const { hooks } = loadDeclarativeHooks(this.agentDir);
 		const incoming = normalizeHook(params.hook);
 		const index = hooks.findIndex((hook) => hook.id === incoming.id);
@@ -35,6 +61,14 @@ export class HooksService {
 	}
 
 	delete(params: ClientParams<"hooks/delete">): ClientResult<"hooks/list"> {
+		try {
+			const snapshot = readPluginSnapshot(this.agentDir);
+			if (snapshot.hooks.some((h) => h.definition.id === params.id)) {
+				throw new AppServerError("OPERATION_FAILED");
+			}
+		} catch (err) {
+			if (err instanceof AppServerError) throw err;
+		}
 		const { hooks } = loadDeclarativeHooks(this.agentDir);
 		const remaining = hooks.filter((hook) => hook.id !== params.id);
 		if (remaining.length === hooks.length) {

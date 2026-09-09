@@ -242,6 +242,7 @@ export {
 	isHookProtocol,
 	isHookRunMode,
 	loadDeclarativeHooks,
+	loadEffectiveHooks,
 	parseHookMatcher,
 	saveDeclarativeHooks,
 	validateDeclarativeHook,
