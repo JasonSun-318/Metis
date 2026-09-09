@@ -134,6 +134,20 @@ function api() {
 		listHooks: vi.fn().mockResolvedValue({ hooks, loadErrors: [] }),
 		upsertHook: vi.fn().mockImplementation(({ hook }) => Promise.resolve({ hooks: [hook], loadErrors: [] })),
 		deleteHook: vi.fn().mockResolvedValue({ hooks: [], loadErrors: [] }),
+		listPluginMarkets: vi.fn().mockResolvedValue({ markets: [] }),
+		addPluginMarket: vi.fn().mockResolvedValue({ market: null }),
+		removePluginMarket: vi.fn().mockResolvedValue({ removed: true }),
+		listPluginsCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
+		inspectPlugin: vi.fn().mockResolvedValue({ inspection: null }),
+		installPlugin: vi.fn().mockResolvedValue({ installed: null }),
+		listInstalledPlugins: vi.fn().mockResolvedValue({ plugins: [] }),
+		getInstalledPlugin: vi.fn().mockResolvedValue({ plugin: null }),
+		uninstallPlugin: vi.fn().mockResolvedValue({ removed: true }),
+		setPluginEnabled: vi.fn().mockResolvedValue({ plugin: null }),
+		checkPluginUpdates: vi.fn().mockResolvedValue({ updates: [] }),
+		updatePlugin: vi.fn().mockResolvedValue({ updated: null }),
+		getPluginSettings: vi.fn().mockResolvedValue({ settings: {} }),
+		updatePluginSettings: vi.fn().mockResolvedValue({ settings: {} }),
 	};
 }
 
@@ -811,25 +825,25 @@ describe("PluginsPanel", () => {
 		expect(dialog.querySelector("select")).toBeNull();
 
 		// 高级选项默认折叠
-		expect(dialog.querySelector('input[placeholder="30"]')).toBeNull();
+		expect(dialog.querySelector('input[placeholder="60"]')).toBeNull();
 
 		// 展开高级选项
 		await act(async () => button(dialog, "Advanced options").click());
 		await flush();
-		expect(dialog.querySelector('input[placeholder="30"]')).not.toBeNull();
+		expect(dialog.querySelector('input[placeholder="60"]')).not.toBeNull();
 
 		// 点击 Event 下拉
-		await act(async () => button(dialog, "PreToolUse (Pre tool use)").click());
+		await act(async () => button(dialog, "Event").click());
 		await flush();
-		const stopOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) => el.textContent?.includes("Stop"));
+		const stopOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) => el.textContent?.includes("Before finishing") || el.textContent?.includes("Stop"));
 		expect(stopOption).toBeDefined();
 		await act(async () => stopOption!.click());
 		await flush();
 
 		// 填写表单
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="pre-commit-lint"]')!, "notify-done"));
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="/usr/local/bin/node"]')!, "/usr/bin/say"));
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="30"]')!, "45"));
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]')!, "notify-done"));
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="node"]')!, "/usr/bin/say"));
+		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="60"]')!, "45"));
 		await act(async () => button(dialog, "Create").click());
 		await flush();
 
