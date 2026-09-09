@@ -89,6 +89,11 @@ for (const [fuse, expected] of [
 // listPackage returns OS-native separators on Windows; the expected paths below
 // always use forward slashes, so normalize the listing before matching.
 const packagedPaths = new Set(listPackage(appAsar).map((path) => path.replaceAll("\\", "/")));
+for (const packagedPath of packagedPaths) {
+	if (packagedPath.includes("/@metis/coding-agent/dist/vendor/python/") || packagedPath.includes("/@metis/coding-agent/dist/skills/pdf/")) {
+		throw new Error(`Removed PDF skill/runtime remains in package: ${packagedPath}`);
+	}
+}
 const tuiNativeRoot = "/.webpack/app-server/node_modules/@metis/tui/native/";
 const expectedTuiNativePrefix =
 	process.platform === "darwin" || process.platform === "win32"
