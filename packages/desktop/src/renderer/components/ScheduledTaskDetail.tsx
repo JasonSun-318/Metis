@@ -126,16 +126,52 @@ export function ScheduledTaskDetail({ api, task, onBack, onChanged, onDeleted, o
 	const running = task.activeRunId !== undefined;
 	return (
 		<section className="scheduled-task-detail">
-			<nav aria-label={t("Breadcrumb")} className="scheduled-task-breadcrumb"><button onClick={onBack} type="button"><ArrowLeft aria-hidden="true" size={14} /> {t("Scheduled tasks")}</button><span>/</span><span aria-current="page">{task.name}</span></nav>
+			<nav aria-label={t("Breadcrumb")} className="scheduled-task-breadcrumb"><button onClick={onBack} type="button"><ArrowLeft aria-hidden="true" size={14} /> {t("Scheduled tasks")}</button></nav>
 			<header>
-				<div><h1>{task.name}</h1>{task.description && <p>{task.description}</p>}<div className="scheduled-task-status-line"><label><input checked={task.status === "active"} disabled={busy || running || task.status === "completed" || task.status === "deleting"} onChange={() => void toggleActive()} role="switch" type="checkbox" /> {t("Active")}</label><span className={`scheduled-task-state state-${task.status}`}>{t(running ? "Running" : task.status.replace("_", " "))}</span><span>{t("Next run: {{value}}", { value: dateTime(task.nextRunAt, intlLocale) })}</span></div></div>
-				<div className="scheduled-task-detail-actions"><button aria-label={t("Edit task")} disabled={busy || running} onClick={onEdit} type="button"><NotePencil aria-hidden="true" size={16} /></button><button aria-label={t("Delete task")} disabled={busy || running} onClick={() => setConfirmDelete(true)} type="button"><Trash aria-hidden="true" size={16} /></button><button className="scheduled-task-run-now" disabled={busy || running || task.status === "deleting"} onClick={() => void runNow()} type="button"><Play aria-hidden="true" size={14} /> {t("Run now")}</button></div>
+				<div className="scheduled-task-detail-heading">
+					<h1>{task.name}</h1>
+					{task.description && <p>{task.description}</p>}
+					<div className="scheduled-task-status-line">
+						<label><input aria-label={t("Active")} checked={task.status === "active"} disabled={busy || running || task.status === "completed" || task.status === "deleting"} onChange={() => void toggleActive()} role="switch" type="checkbox" /> {t(running ? "Running" : task.status.replace("_", " "))}</label>
+						<span>{scheduleLabel(task.schedule, t)}</span>
+					</div>
+				</div>
+				<div className="scheduled-task-detail-actions">
+					<button className="scheduled-task-run-now" disabled={busy || running || task.status === "deleting"} onClick={() => void runNow()} type="button"><Play aria-hidden="true" size={14} /> {t("Run now")}</button>
+					<button aria-label={t("Edit task")} title={t("Edit task")} disabled={busy || running} onClick={onEdit} type="button"><NotePencil aria-hidden="true" size={15} /></button>
+					<button aria-label={t("Delete task")} title={t("Delete task")} disabled={busy || running} onClick={() => setConfirmDelete(true)} type="button"><Trash aria-hidden="true" size={15} /></button>
+				</div>
 			</header>
 			{task.pauseReason === "model_unavailable" && <p className="scheduled-task-warning" role="status">{t("The selected model is no longer available. Edit the task and choose a configured model.")}</p>}
 			{error && <p className="scheduled-task-form-error" role="alert">{t(error)}</p>}
 			<div className="scheduled-task-detail-grid">
-				<section aria-labelledby="schedule-history-heading"><h2 id="schedule-history-heading">{t("History")}</h2>{loading ? <div className="scheduled-task-loading" role="status">{t("Loading run history…")}</div> : runs.length === 0 ? <p className="scheduled-task-muted">{t("No runs yet.")}</p> : <ul className="scheduled-task-history">{runs.map((run) => <li key={run.id}><button disabled={busy} onClick={() => void openRun(run)} type="button"><span className={`scheduled-run-dot run-${run.status}`} /><span><strong>{t(run.status)}</strong><small>{dateTime(run.completedAt ?? run.createdAt, intlLocale)}{run.resultPreview ? ` · ${run.resultPreview}` : run.error ? ` · ${run.error.message}` : ""}</small></span>{run.unread && <i aria-label={t("Unread")} />}</button></li>)}</ul>}{nextBeforeRunId && <button className="scheduled-task-load-more" disabled={loading} onClick={() => void loadRuns(nextBeforeRunId)} type="button">{t("Load older runs")}</button>}</section>
-				<aside aria-labelledby="schedule-instructions-heading"><h2 id="schedule-instructions-heading">{t("Instructions")}</h2><p>{task.instruction}</p><h3>{t("Repeat")}</h3><p>{scheduleLabel(task.schedule, t)}</p><h3>{t("Model")}</h3><p>{task.model.provider} / {task.model.modelId}</p><h3>{t("Project")}</h3><p>{task.target.workspace === "fixed" ? task.target.cwd : t("Dedicated task workspace")}</p><h3>{t("Time zone")}</h3><p>{task.timezone}</p><h3>{t("Permissions")}</h3><p>{t("Workspace files, web access, and available Skills. No Connectors, Extensions, or project memory.")}</p></aside>
+				<div className="scheduled-task-detail-main">
+					<section aria-labelledby="schedule-instructions-heading" className="scheduled-task-instructions">
+						<h2 id="schedule-instructions-heading">{t("Instructions")}</h2><p>{task.instruction}</p>
+					</section>
+					<section aria-labelledby="schedule-history-heading">
+						<h2 id="schedule-history-heading">{t("History")}</h2>
+						{loading ? <div className="scheduled-task-loading" role="status">{t("Loading run history…")}</div> : runs.length === 0 ? <p className="scheduled-task-muted">{t("No runs yet.")}</p> : (
+							<ul className="scheduled-task-history">{runs.map((run) => (
+								<li key={run.id}><button disabled={busy} onClick={() => void openRun(run)} type="button">
+									<span className={`scheduled-run-dot run-${run.status}`} />
+									<span className="scheduled-task-history-content"><span className="scheduled-task-history-heading"><strong>{t(run.status)}</strong><time dateTime={run.completedAt ?? run.createdAt}>{dateTime(run.completedAt ?? run.createdAt, intlLocale)}</time></span>{(run.resultPreview || run.error) && <small>{run.resultPreview || run.error?.message}</small>}</span>
+									{run.unread && <i aria-label={t("Unread")} />}
+								</button></li>
+							))}</ul>
+						)}
+						{nextBeforeRunId && <button className="scheduled-task-load-more" disabled={loading} onClick={() => void loadRuns(nextBeforeRunId)} type="button">{t("Load older runs")}</button>}
+					</section>
+				</div>
+				<aside aria-label={t("Settings")}>
+					<dl className="scheduled-task-properties">
+						<div><dt>{t("Next run")}</dt><dd>{dateTime(task.nextRunAt, intlLocale)}</dd></div>
+						<div><dt>{t("Model")}</dt><dd>{task.model.provider} / {task.model.modelId}</dd></div>
+						<div><dt>{t("Project")}</dt><dd>{task.target.workspace === "fixed" ? task.target.cwd : t("Dedicated task workspace")}</dd></div>
+						<div><dt>{t("Time zone")}</dt><dd>{task.timezone}</dd></div>
+					</dl>
+					<details className="scheduled-task-permissions"><summary>{t("Permissions")}</summary><p>{t("Workspace files, web access, and available Skills. No Connectors, Extensions, or project memory.")}</p></details>
+				</aside>
 			</div>
 			{confirmDelete && <ScheduledTaskDeleteDialog deleteSchedule={(input) => api.deleteSchedule(input)} onClose={() => setConfirmDelete(false)} onDeleted={() => { setConfirmDelete(false); onDeleted(task.id); }} task={task} />}
 		</section>
