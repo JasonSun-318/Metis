@@ -421,10 +421,15 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Checkbox for partial install
 			const partialCheckbox = partialDialog.locator(".plugins-partial-checkbox input[type='checkbox']");
 			await expect(partialCheckbox).toBeVisible();
+			await expect(partialCheckbox).toBeChecked();
 			const installBtn = partialDialog.locator("button.button-primary");
+			await expect(installBtn).toBeEnabled();
+
+			// Unchecking the checkbox disables the button
+			await partialCheckbox.click();
 			await expect(installBtn).toBeDisabled();
 
-			// Checking the checkbox enables the button
+			// Checking the checkbox enables the button back
 			await partialCheckbox.click();
 			await expect(installBtn).toBeEnabled();
 

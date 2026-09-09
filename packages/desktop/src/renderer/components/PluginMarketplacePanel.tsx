@@ -728,7 +728,10 @@ export function PluginMarketplacePanel({
 				<InspectPluginDialog
 					entry={inspectingEntry}
 					error={inspectionError}
-					initialAllowPartial={false}
+					initialAllowPartial={Boolean(
+						inspection?.components.some((c) => c.status === "unsupported") ||
+						inspection?.issues.some((i) => i.status === "unsupported"),
+					)}
 					inspection={inspection}
 					installPending={installPending}
 					installResult={installResult}
