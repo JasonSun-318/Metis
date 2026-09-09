@@ -1515,3 +1515,144 @@ export type ScheduleTaskSnapshotView = Static<typeof ScheduleTaskSnapshotViewSch
 export type DomainEvent = Static<typeof DomainEventSchema>;
 export type ConnectionEventsParams = Static<typeof ConnectionEventsParamsSchema>;
 export type CustomAgentTypeView = Static<typeof CustomAgentTypeViewSchema>;
+
+// =========================================================================
+// Plugins
+// =========================================================================
+
+export const PluginFormatSchema = Type.Union([
+	Type.Literal("claude"),
+	Type.Literal("codex"),
+	Type.Literal("agent-skills"),
+]);
+
+export const PluginCapabilityKindSchema = Type.Union([
+	Type.Literal("skill"),
+	Type.Literal("mcp"),
+	Type.Literal("hook"),
+	Type.Literal("unsupported"),
+]);
+
+export const PluginComponentStatusSchema = Type.Union([
+	Type.Literal("ready"),
+	Type.Literal("needs-configuration"),
+	Type.Literal("unsupported"),
+	Type.Literal("failed"),
+]);
+
+export const PluginActivationStatusSchema = Type.Union([
+	Type.Literal("applied"),
+	Type.Literal("next-turn"),
+	Type.Literal("failed"),
+]);
+
+export const PluginComponentPublicViewSchema = StrictObject({
+	componentId: NameSchema,
+	kind: PluginCapabilityKindSchema,
+	displayName: PublicTextSchema,
+	originalName: PublicTextSchema,
+	status: PluginComponentStatusSchema,
+	reason: Type.Optional(PublicTextSchema),
+});
+
+export const PluginIssueSchema = StrictObject({
+	code: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+	componentId: NameSchema,
+	status: Type.Union([Type.Literal("needs-configuration"), Type.Literal("unsupported"), Type.Literal("warning")]),
+	message: PublicTextSchema,
+});
+
+export const PluginRecordSchema = StrictObject({
+	id: Sha256Schema,
+	name: NameSchema,
+	displayName: PublicTextSchema,
+	format: PluginFormatSchema,
+	repository: Utf8String(2048, { minLength: 1 }),
+	subdir: Utf8String(1024),
+	commit: Type.String({ minLength: 1, maxLength: 128 }),
+	version: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+	trackingRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	sourceId: NameSchema,
+	enabled: Type.Boolean(),
+	installedAt: TimestampSchema,
+	issues: Type.Array(PluginIssueSchema),
+});
+
+export const PluginRuntimeErrorViewSchema = StrictObject({
+	componentId: NameSchema,
+	message: PublicTextSchema,
+});
+
+export const PluginInstalledViewSchema = StrictObject({
+	plugin: PluginRecordSchema,
+	components: Type.Array(PluginComponentPublicViewSchema),
+	activation: PluginActivationStatusSchema,
+	runtimeErrors: Type.Array(PluginRuntimeErrorViewSchema),
+});
+
+export const PluginMarketViewSchema = StrictObject({
+	id: NameSchema,
+	url: Utf8String(2048, { minLength: 1 }),
+	displayName: PublicTextSchema,
+	selected: Type.Boolean(),
+	fetchedAt: Type.Optional(TimestampSchema),
+	commit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+});
+
+export const PluginCatalogEntryViewSchema = StrictObject({
+	id: NameSchema,
+	name: NameSchema,
+	description: PublicTextSchema,
+	formatHint: PluginFormatSchema,
+	sourceSupported: Type.Boolean(),
+	installState: Type.Union([
+		Type.Literal("installed"),
+		Type.Literal("not-installed"),
+		Type.Literal("update-available"),
+	]),
+});
+
+export const PluginInspectionInfoSchema = StrictObject({
+	id: Sha256Schema,
+	name: NameSchema,
+	displayName: PublicTextSchema,
+	format: PluginFormatSchema,
+	version: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+	description: PublicTextSchema,
+	repository: Utf8String(2048, { minLength: 1 }),
+	subdir: Utf8String(1024),
+	commit: Type.String({ minLength: 1, maxLength: 128 }),
+	trackingRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	sourceId: NameSchema,
+});
+
+export const PluginInspectionViewSchema = StrictObject({
+	inspectionId: UuidSchema,
+	plugin: PluginInspectionInfoSchema,
+	components: Type.Array(PluginComponentPublicViewSchema),
+	issues: Type.Array(PluginIssueSchema),
+	sourceCommit: Type.String({ minLength: 1, maxLength: 128 }),
+	registryRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginUpdateInspectionViewSchema = StrictObject({
+	pluginId: Sha256Schema,
+	currentCommit: Type.String({ minLength: 1, maxLength: 128 }),
+	upToDate: Type.Boolean(),
+	newCommit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	inspectionId: Type.Optional(UuidSchema),
+	inspection: Type.Optional(PluginInspectionViewSchema),
+});
+
+export type PluginFormat = Static<typeof PluginFormatSchema>;
+export type PluginCapabilityKind = Static<typeof PluginCapabilityKindSchema>;
+export type PluginComponentStatus = Static<typeof PluginComponentStatusSchema>;
+export type PluginActivationStatus = Static<typeof PluginActivationStatusSchema>;
+export type PluginComponentPublicView = Static<typeof PluginComponentPublicViewSchema>;
+export type PluginIssue = Static<typeof PluginIssueSchema>;
+export type PluginRecord = Static<typeof PluginRecordSchema>;
+export type PluginInstalledView = Static<typeof PluginInstalledViewSchema>;
+export type PluginMarketView = Static<typeof PluginMarketViewSchema>;
+export type PluginCatalogEntryView = Static<typeof PluginCatalogEntryViewSchema>;
+export type PluginInspectionView = Static<typeof PluginInspectionViewSchema>;
+export type PluginUpdateInspectionView = Static<typeof PluginUpdateInspectionViewSchema>;

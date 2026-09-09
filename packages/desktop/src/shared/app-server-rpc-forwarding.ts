@@ -213,6 +213,20 @@ export const DESKTOP_RPC_FORWARDING = {
 	updateQueuedTurn: { channel: "metis:update-queued-turn", method: "turn/queue/update", input: "required" },
 	deleteQueuedTurn: { channel: "metis:delete-queued-turn", method: "turn/queue/delete", input: "required" },
 	sendQueuedTurn: { channel: "metis:send-queued-turn", method: "turn/queue/send", input: "required" },
+	listPluginMarkets: { channel: "metis:list-plugin-markets", method: "plugin/market/list", input: "none" },
+	addPluginMarket: { channel: "metis:add-plugin-market", method: "plugin/market/add", input: "required" },
+	selectPluginMarket: { channel: "metis:select-plugin-market", method: "plugin/market/select", input: "required" },
+	removePluginMarket: { channel: "metis:remove-plugin-market", method: "plugin/market/remove", input: "required" },
+	refreshPluginMarket: { channel: "metis:refresh-plugin-market", method: "plugin/market/refresh", input: "required" },
+	getPluginCatalog: { channel: "metis:get-plugin-catalog", method: "plugin/catalog", input: "required" },
+	inspectPlugin: { channel: "metis:inspect-plugin", method: "plugin/inspect", input: "required" },
+	installPlugin: { channel: "metis:install-plugin", method: "plugin/install", input: "required" },
+	listInstalledPlugins: { channel: "metis:list-installed-plugins", method: "plugin/list", input: "none" },
+	getInstalledPlugin: { channel: "metis:get-installed-plugin", method: "plugin/get", input: "required" },
+	setPluginEnabled: { channel: "metis:set-plugin-enabled", method: "plugin/setEnabled", input: "required" },
+	removePlugin: { channel: "metis:remove-plugin", method: "plugin/remove", input: "required" },
+	inspectPluginUpdate: { channel: "metis:inspect-plugin-update", method: "plugin/update/inspect", input: "required" },
+	updatePlugin: { channel: "metis:update-plugin", method: "plugin/update", input: "required" },
 } as const satisfies Record<string, ForwardingSpec>;
 
 export type DesktopRpcForwardingDefinition = (typeof DESKTOP_RPC_FORWARDING)[keyof typeof DESKTOP_RPC_FORWARDING];

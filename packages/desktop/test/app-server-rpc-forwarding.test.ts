@@ -47,6 +47,29 @@ describe("desktop App Server RPC forwarding", () => {
 		});
 	});
 
+	it("declares plugin RPC forwarding", () => {
+		expect(DESKTOP_RPC_FORWARDING.listPluginMarkets).toEqual({
+			channel: "metis:list-plugin-markets",
+			method: "plugin/market/list",
+			input: "none",
+		});
+		expect(DESKTOP_RPC_FORWARDING.installPlugin).toEqual({
+			channel: "metis:install-plugin",
+			method: "plugin/install",
+			input: "required",
+		});
+		expect(DESKTOP_RPC_FORWARDING.listInstalledPlugins).toEqual({
+			channel: "metis:list-installed-plugins",
+			method: "plugin/list",
+			input: "none",
+		});
+		expect(DESKTOP_RPC_FORWARDING.setPluginEnabled).toEqual({
+			channel: "metis:set-plugin-enabled",
+			method: "plugin/setEnabled",
+			input: "required",
+		});
+	});
+
 	it("reconstructs a coded RPC error after the structured-clone boundary", async () => {
 		const api = createDesktopRpcForwarders(
 			vi.fn().mockResolvedValue(desktopRpcIpcFailure(-32011, "Operation failed")),

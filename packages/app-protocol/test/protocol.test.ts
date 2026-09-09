@@ -448,6 +448,321 @@ const scheduleCases = [
 		},
 		{ data: "aGVsbG8=", mediaType: "image/png" },
 	],
+	[
+		"plugin/market/list",
+		{},
+		{
+			markets: [
+				{
+					id: "official",
+					url: "https://github.com/anthropics/claude-plugins-official",
+					displayName: "Anthropic Official",
+					selected: true,
+					fetchedAt: "2026-09-09T00:00:00.000Z",
+					commit: "1111111111111111111111111111111111111111",
+				},
+			],
+			selectedSourceId: "official",
+			registryRevision: 1,
+		},
+	],
+	[
+		"plugin/market/add",
+		{
+			requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			url: "https://github.com/example/market",
+			expectedRevision: 1,
+		},
+		{
+			markets: [
+				{
+					id: "official",
+					url: "https://github.com/anthropics/claude-plugins-official",
+					displayName: "Anthropic Official",
+					selected: false,
+				},
+				{
+					id: "custom",
+					url: "https://github.com/example/market",
+					displayName: "Custom Market",
+					selected: true,
+				},
+			],
+			selectedSourceId: "custom",
+			registryRevision: 2,
+		},
+	],
+	[
+		"plugin/market/select",
+		{
+			requestId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+			sourceId: "official",
+			expectedRevision: 2,
+		},
+		{
+			markets: [],
+			selectedSourceId: "official",
+			registryRevision: 3,
+		},
+	],
+	[
+		"plugin/market/remove",
+		{
+			requestId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+			sourceId: "custom",
+			expectedRevision: 3,
+		},
+		{
+			markets: [],
+			selectedSourceId: "official",
+			registryRevision: 4,
+		},
+	],
+	[
+		"plugin/market/refresh",
+		{
+			requestId: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+			sourceId: "official",
+		},
+		{
+			catalog: [
+				{
+					id: "plugin-1",
+					name: "Plugin One",
+					description: "A fixture plugin",
+					formatHint: "claude",
+					sourceSupported: true,
+					installState: "not-installed",
+				},
+			],
+			fetchedAt: "2026-09-09T00:00:00.000Z",
+			cacheStatus: "fresh",
+		},
+	],
+	[
+		"plugin/catalog",
+		{
+			sourceId: "official",
+		},
+		{
+			entries: [
+				{
+					id: "plugin-1",
+					name: "Plugin One",
+					description: "A fixture plugin",
+					formatHint: "claude",
+					sourceSupported: true,
+					installState: "not-installed",
+				},
+			],
+			cacheStatus: "cached",
+		},
+	],
+	[
+		"plugin/inspect",
+		{
+			sourceId: "official",
+			entryId: "plugin-1",
+		},
+		{
+			inspectionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+			plugin: {
+				id: "1".repeat(64),
+				name: "plugin-1",
+				displayName: "Plugin One",
+				format: "claude",
+				description: "A fixture plugin",
+				repository: "https://github.com/anthropics/claude-plugins-official",
+				subdir: "plugins/fixture",
+				commit: "1111111111111111111111111111111111111111",
+				sourceId: "official",
+			},
+			components: [
+				{
+					componentId: "p-1111-skill",
+					kind: "skill",
+					displayName: "my-skill",
+					originalName: "my-skill",
+					status: "ready",
+				},
+			],
+			issues: [],
+			sourceCommit: "1111111111111111111111111111111111111111",
+			registryRevision: 1,
+		},
+	],
+	[
+		"plugin/install",
+		{
+			requestId: "ffffffff-ffff-4fff-8fff-ffffffffffff",
+			inspectionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+			expectedRevision: 1,
+			allowPartial: false,
+		},
+		{
+			plugin: {
+				plugin: {
+					id: "1".repeat(64),
+					name: "plugin-1",
+					displayName: "Plugin One",
+					format: "claude",
+					repository: "https://github.com/anthropics/claude-plugins-official",
+					subdir: "plugins/fixture",
+					commit: "1111111111111111111111111111111111111111",
+					sourceId: "official",
+					enabled: true,
+					installedAt: "2026-09-09T00:00:00.000Z",
+					issues: [],
+				},
+				components: [
+					{
+						componentId: "p-1111-skill",
+						kind: "skill",
+						displayName: "my-skill",
+						originalName: "my-skill",
+						status: "ready",
+					},
+				],
+				activation: "applied",
+				runtimeErrors: [],
+			},
+			registryRevision: 2,
+			activation: "applied",
+		},
+	],
+	[
+		"plugin/list",
+		{},
+		{
+			installed: [
+				{
+					id: "1".repeat(64),
+					name: "plugin-1",
+					displayName: "Plugin One",
+					format: "claude",
+					repository: "https://github.com/anthropics/claude-plugins-official",
+					subdir: "plugins/fixture",
+					commit: "1111111111111111111111111111111111111111",
+					sourceId: "official",
+					enabled: true,
+					installedAt: "2026-09-09T00:00:00.000Z",
+					issues: [],
+				},
+			],
+			registryRevision: 2,
+		},
+	],
+	[
+		"plugin/get",
+		{
+			pluginId: "1".repeat(64),
+		},
+		{
+			plugin: {
+				id: "1".repeat(64),
+				name: "plugin-1",
+				displayName: "Plugin One",
+				format: "claude",
+				repository: "https://github.com/anthropics/claude-plugins-official",
+				subdir: "plugins/fixture",
+				commit: "1111111111111111111111111111111111111111",
+				sourceId: "official",
+				enabled: true,
+				installedAt: "2026-09-09T00:00:00.000Z",
+				issues: [],
+			},
+			components: [],
+			activation: "applied",
+			runtimeErrors: [],
+		},
+	],
+	[
+		"plugin/setEnabled",
+		{
+			requestId: "11111111-1111-4111-8111-111111111111",
+			pluginId: "1".repeat(64),
+			enabled: false,
+			expectedRevision: 2,
+		},
+		{
+			plugin: {
+				plugin: {
+					id: "1".repeat(64),
+					name: "plugin-1",
+					displayName: "Plugin One",
+					format: "claude",
+					repository: "https://github.com/anthropics/claude-plugins-official",
+					subdir: "plugins/fixture",
+					commit: "1111111111111111111111111111111111111111",
+					sourceId: "official",
+					enabled: false,
+					installedAt: "2026-09-09T00:00:00.000Z",
+					issues: [],
+				},
+				components: [],
+				activation: "applied",
+				runtimeErrors: [],
+			},
+			registryRevision: 3,
+			activation: "applied",
+		},
+	],
+	[
+		"plugin/remove",
+		{
+			requestId: "22222222-2222-4222-8222-222222222222",
+			pluginId: "1".repeat(64),
+			expectedRevision: 3,
+		},
+		{
+			installed: [],
+			registryRevision: 4,
+			activation: "applied",
+		},
+	],
+	[
+		"plugin/update/inspect",
+		{
+			pluginId: "1".repeat(64),
+		},
+		{
+			pluginId: "1".repeat(64),
+			currentCommit: "1111111111111111111111111111111111111111",
+			upToDate: true,
+		},
+	],
+	[
+		"plugin/update",
+		{
+			requestId: "33333333-3333-4333-8333-333333333333",
+			pluginId: "1".repeat(64),
+			inspectionId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+			expectedRevision: 4,
+			expectedCommit: "1111111111111111111111111111111111111111",
+		},
+		{
+			plugin: {
+				plugin: {
+					id: "1".repeat(64),
+					name: "plugin-1",
+					displayName: "Plugin One",
+					format: "claude",
+					repository: "https://github.com/anthropics/claude-plugins-official",
+					subdir: "plugins/fixture",
+					commit: "1111111111111111111111111111111111111111",
+					sourceId: "official",
+					enabled: true,
+					installedAt: "2026-09-09T00:00:00.000Z",
+					issues: [],
+				},
+				components: [],
+				activation: "applied",
+				runtimeErrors: [],
+			},
+			registryRevision: 5,
+			activation: "applied",
+		},
+	],
 ] as const;
 
 const scheduleEvents = [
@@ -1976,5 +2291,158 @@ it("validates protocol field on declarative hooks and rejects unknown protocols"
 
 	expect(() =>
 		validateClientRequest(makeClientRequest("hooks/upsert", { hook: { ...baseHook, protocol: "unknown-proto" } })),
+	).toThrow();
+});
+
+it("validates plugin schemas strictly: rejects unknown fields, oversized URLs, pseudo-owners, and absolute paths", () => {
+	// Unknown fields rejected in params
+	expect(() =>
+		validateClientRequest(makeClientRequest("plugin/market/list", { unknownField: "bad" } as any)),
+	).toThrow();
+
+	expect(() =>
+		validateClientRequest(
+			makeClientRequest("plugin/market/add", {
+				requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				url: "https://github.com/example/market",
+				expectedRevision: 1,
+				installationPath: "/tmp/escape", // rejected
+			} as any),
+		),
+	).toThrow();
+
+	// Oversized URL (> 2048 bytes) rejected
+	expect(() =>
+		validateClientRequest(
+			makeClientRequest("plugin/market/add", {
+				requestId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				url: `https://github.com/${"a".repeat(2050)}`,
+				expectedRevision: 1,
+			}),
+		),
+	).toThrow();
+
+	// Pseudo-pluginOwner with invalid sha256 or unknown field rejected
+	expect(() =>
+		validateResponseFor(
+			"client",
+			{ jsonrpc: "2.0", id: "1", method: "hooks/list", params: {} },
+			{
+				id: "1",
+				result: {
+					hooks: [
+						{
+							id: "11111111-2222-4333-8444-555555555555",
+							name: "Block dangerous bash",
+							enabled: true,
+							event: "PreToolUse",
+							matcher: "bash",
+							runMode: "shell",
+							command: "echo blocked >&2; exit 2",
+							timeoutSeconds: 30,
+							owner: {
+								kind: "plugin",
+								pluginId: "not-a-sha256",
+								displayName: "Fake Owner",
+								componentId: "fake",
+							},
+						},
+					],
+					loadErrors: [],
+				},
+			},
+		),
+	).toThrow();
+
+	expect(() =>
+		validateResponseFor(
+			"client",
+			{ jsonrpc: "2.0", id: "1", method: "hooks/list", params: {} },
+			{
+				id: "1",
+				result: {
+					hooks: [
+						{
+							id: "11111111-2222-4333-8444-555555555555",
+							name: "Block dangerous bash",
+							enabled: true,
+							event: "PreToolUse",
+							matcher: "bash",
+							runMode: "shell",
+							command: "echo blocked >&2; exit 2",
+							timeoutSeconds: 30,
+							owner: {
+								kind: "plugin",
+								pluginId: "1".repeat(64),
+								displayName: "Fake Owner",
+								componentId: "fake",
+								installationPath: "/absolute/path", // unknown field rejected
+							},
+						},
+					],
+					loadErrors: [],
+				},
+			},
+		),
+	).toThrow();
+
+	// PluginRecordSchema rejects unknown fields and external paths
+	expect(() =>
+		validateResponseFor(
+			"client",
+			{ jsonrpc: "2.0", id: "1", method: "plugin/list", params: {} },
+			{
+				id: "1",
+				result: {
+					installed: [
+						{
+							id: "1".repeat(64),
+							name: "plugin-1",
+							displayName: "Plugin One",
+							format: "claude",
+							repository: "https://github.com/example/plugin",
+							subdir: "",
+							commit: "1111111111111111111111111111111111111111",
+							sourceId: "official",
+							enabled: true,
+							installedAt: "2026-09-09T00:00:00.000Z",
+							issues: [],
+							installationPath: "/root/escape", // rejected
+						},
+					],
+					registryRevision: 1,
+				},
+			},
+		),
+	).toThrow();
+
+	// Responses reject sensitive credential leaks
+	expect(() =>
+		validateResponseFor(
+			"client",
+			{ jsonrpc: "2.0", id: "1", method: "plugin/get", params: { pluginId: "1".repeat(64) } },
+			{
+				id: "1",
+				result: {
+					plugin: {
+						id: "1".repeat(64),
+						name: "plugin-1",
+						displayName: "Plugin One",
+						format: "claude",
+						repository: "https://github.com/example/plugin",
+						subdir: "",
+						commit: "1111111111111111111111111111111111111111",
+						sourceId: "official",
+						enabled: true,
+						installedAt: "2026-09-09T00:00:00.000Z",
+						issues: [],
+					},
+					components: [],
+					activation: "applied",
+					runtimeErrors: [],
+					bearerToken: "secret_token", // unknown credential leak rejected
+				},
+			},
+		),
 	).toThrow();
 });

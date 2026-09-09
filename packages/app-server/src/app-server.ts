@@ -32,6 +32,7 @@ import type { OutboundQueueLimits } from "./outbound-queue.ts";
 import { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import { PermissionRulesService } from "./permission-rules.ts";
 import { PersonalizationService } from "./personalization.ts";
+import { PluginService } from "./plugins.ts";
 import { scheduleEventView } from "./schedule-projection.ts";
 import { SessionCatalog } from "./session-catalog.ts";
 import { SessionRegistry, type SessionRegistryOptions } from "./session-registry.ts";
@@ -48,6 +49,8 @@ export interface AppServerOptions extends SessionRegistryOptions, OutboundQueueL
 	readonly scheduleManager?: ScheduleManager;
 	readonly scheduleExecute?: ScheduleManagerOptions["execute"];
 	readonly titleGenerator?: SessionTitleGenerator;
+	readonly plugins?: PluginService;
+	readonly fetchImpl?: typeof fetch;
 }
 
 /** Parent-owned application server hosting all open Metis sessions. */
@@ -55,6 +58,7 @@ export class AppServer {
 	readonly serverEpoch = randomUUID();
 	readonly catalog: SessionCatalog;
 	readonly registry: SessionRegistry;
+	readonly plugins: PluginService;
 	readonly dispatcher: Dispatcher;
 	readonly subscriptions: SessionSubscriptions;
 	readonly interactions: InteractionBroker;
@@ -108,6 +112,8 @@ export class AppServer {
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
 		const memorySettings = new MemorySettingsService({ agentDir: options.agentDir, authStorage, settingsManager });
 		const hooks = new HooksService(options.agentDir);
+		const plugins = options.plugins ?? new PluginService(options.agentDir, options.fetchImpl);
+		this.plugins = plugins;
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
 				new AgentSessionRuntimeHost({
@@ -134,6 +140,7 @@ export class AppServer {
 			webSearch,
 			memorySettings,
 			hooks,
+			plugins,
 			options.titleGenerator ?? new DefaultSessionTitleGenerator({ modelRegistry, settingsManager }),
 		);
 		this.outboundQueueLimits = {

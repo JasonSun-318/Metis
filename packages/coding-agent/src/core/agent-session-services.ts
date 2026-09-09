@@ -175,14 +175,14 @@ export async function createAgentSessionServices(
 				noExtensions: true,
 			}
 		: requestedResourceLoaderOptions;
-	// Declarative hooks from hooks.json ride along as an inline extension, but
-	// only when extensions load: unattended execution requires zero extensions.
-	const hooksBridge = resourceLoaderOptions.noExtensions ? undefined : createDeclarativeHooksBridge(agentDir);
+	// Declarative hooks ride along as an inline extension resolved dynamically per reload,
+	// but only when extensions load: unattended execution requires zero extensions.
+	const declarativeHooksBridgeProvider = resourceLoaderOptions.noExtensions
+		? undefined
+		: (resourceLoaderOptions.declarativeHooksBridgeProvider ?? createDeclarativeHooksBridge);
 	const resourceLoader = new DefaultResourceLoader({
 		...resourceLoaderOptions,
-		...(hooksBridge
-			? { extensionFactories: [...(resourceLoaderOptions.extensionFactories ?? []), hooksBridge] }
-			: {}),
+		declarativeHooksBridgeProvider,
 		cwd,
 		agentDir,
 		settingsManager,

@@ -16,6 +16,7 @@ import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
+import type { PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -102,6 +103,7 @@ export class Dispatcher {
 	private readonly webSearch: WebSearchService;
 	private readonly memorySettings: MemorySettingsService;
 	private readonly hooks: HooksService;
+	private readonly plugins: PluginService;
 	private readonly titleGenerator: SessionTitleGenerator;
 	private readonly titleJobs = new Set<string>();
 	private readonly profileSummary = new ProfileSummaryCache();
@@ -120,6 +122,7 @@ export class Dispatcher {
 		webSearch: WebSearchService,
 		memorySettings: MemorySettingsService,
 		hooks: HooksService,
+		plugins: PluginService,
 		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
@@ -135,6 +138,7 @@ export class Dispatcher {
 		this.webSearch = webSearch;
 		this.memorySettings = memorySettings;
 		this.hooks = hooks;
+		this.plugins = plugins;
 		this.titleGenerator = titleGenerator;
 	}
 
@@ -559,6 +563,50 @@ export class Dispatcher {
 				return await this.replayMutation(request, async () => this.hooks.upsert(request.params));
 			case "hooks/delete":
 				return await this.replayMutation(request, async () => this.hooks.delete(request.params));
+			case "plugin/market/list":
+				return this.plugins.listMarkets();
+			case "plugin/market/add":
+				return await this.replayMutation(request, async () => this.plugins.addMarket(request.params));
+			case "plugin/market/select":
+				return await this.replayMutation(request, async () => this.plugins.selectMarket(request.params));
+			case "plugin/market/remove":
+				return await this.replayMutation(request, async () => this.plugins.removeMarket(request.params));
+			case "plugin/market/refresh":
+				return await this.plugins.refreshMarket(request.params);
+			case "plugin/catalog":
+				return await this.plugins.getCatalog(request.params.sourceId);
+			case "plugin/inspect":
+				return await this.plugins.inspectPlugin(request.params.sourceId, request.params.entryId);
+			case "plugin/install":
+				return await this.replayMutation(request, async () => {
+					const res = await this.plugins.install(request.params);
+					const hasActive = await this.registry.hasActiveSessions();
+					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+				});
+			case "plugin/list":
+				return this.plugins.listInstalled();
+			case "plugin/get":
+				return this.plugins.getInstalled(request.params.pluginId);
+			case "plugin/setEnabled":
+				return await this.replayMutation(request, async () => {
+					const res = this.plugins.setEnabled(request.params);
+					const hasActive = await this.registry.hasActiveSessions();
+					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+				});
+			case "plugin/remove":
+				return await this.replayMutation(request, async () => {
+					const res = this.plugins.remove(request.params);
+					const hasActive = await this.registry.hasActiveSessions();
+					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+				});
+			case "plugin/update/inspect":
+				return await this.plugins.inspectUpdate(request.params.pluginId);
+			case "plugin/update":
+				return await this.replayMutation(request, async () => {
+					const res = await this.plugins.update(request.params);
+					const hasActive = await this.registry.hasActiveSessions();
+					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+				});
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);
 			case "model/list":

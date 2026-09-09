@@ -250,10 +250,12 @@ export class PluginService {
 		});
 	}
 
-	async refreshMarket(input: {
-		requestId: string;
-		sourceId: string;
-	}): Promise<{ catalog: CatalogEntryView[]; fetchedAt: string; cacheStatus: "fresh" | "cached" }> {
+	async refreshMarket(input: { requestId: string; sourceId: string }): Promise<{
+		catalog: CatalogEntryView[];
+		entries?: CatalogEntryView[];
+		fetchedAt: string;
+		cacheStatus: "fresh" | "cached";
+	}> {
 		const registry = readPluginRegistry(this.agentDir);
 		const market = registry.markets.find((m) => m.id === input.sourceId);
 		if (!market) {
@@ -275,6 +277,7 @@ export class PluginService {
 		const catalogViews = this.projectCatalogViews(inspected.catalog);
 		return {
 			catalog: catalogViews,
+			entries: catalogViews,
 			fetchedAt: new Date().toISOString(),
 			cacheStatus: "fresh",
 		};
@@ -351,7 +354,11 @@ export class PluginService {
 		const market = registry.markets.find((m) => m.id === sourceId);
 		if (!market) throw new AppServerError("NOT_FOUND");
 
-		const cachedMarket = this.readMarketCatalogCache(sourceId);
+		let cachedMarket = this.readMarketCatalogCache(sourceId);
+		if (!cachedMarket) {
+			await this.refreshMarket({ requestId: randomUUID(), sourceId });
+			cachedMarket = this.readMarketCatalogCache(sourceId);
+		}
 		const entry = cachedMarket?.catalog.find((e) => e.id === entryId);
 		if (!entry) throw new AppServerError("NOT_FOUND");
 
@@ -411,7 +418,7 @@ export class PluginService {
 							? comp.originalName
 							: comp.name,
 				status,
-				reason,
+				...(reason !== undefined ? { reason } : {}),
 			});
 		}
 
@@ -433,7 +440,7 @@ export class PluginService {
 				name: parsed.name,
 				displayName: parsed.displayName,
 				format: parsed.format,
-				version: parsed.version,
+				...(parsed.version !== undefined ? { version: parsed.version } : {}),
 				description: parsed.description,
 				repository: resolved.repository,
 				subdir: resolved.subdir,
@@ -540,7 +547,7 @@ export class PluginService {
 			name: inspection.plugin.name,
 			displayName: inspection.plugin.displayName,
 			description: inspection.plugin.description,
-			version: inspection.plugin.version,
+			...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
 			components: normalizedComponents,
 			issues: inspection.issues,
 		};
@@ -582,7 +589,7 @@ export class PluginService {
 				repository: inspection.canonicalRepository,
 				subdir: inspection.subdir,
 				commit,
-				version: inspection.plugin.version,
+				...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
 				sourceId: inspection.sourceId,
 				enabled: true,
 				installedAt: new Date().toISOString(),

@@ -210,6 +210,7 @@ interface RecoveredSessionRuntime {
  */
 export class AgentSessionRuntime {
 	private rebindSession?: (session: AgentSession) => Promise<void>;
+	private beforeTurnAdmission?: () => Promise<void>;
 	private beforeSessionInvalidate?: () => void;
 	private _session: AgentSession;
 	private _services: AgentSessionServices;
@@ -362,6 +363,10 @@ export class AgentSessionRuntime {
 		this.rebindSession = rebindSession;
 	}
 
+	setBeforeTurnAdmission(beforeTurnAdmission?: () => Promise<void>): void {
+		this.beforeTurnAdmission = beforeTurnAdmission;
+	}
+
 	/**
 	 * Set a synchronous callback that runs after `session_shutdown` handlers finish
 	 * but before the current session is invalidated.
@@ -416,6 +421,9 @@ export class AgentSessionRuntime {
 		if (!current) throw new QueuedTurnConflictError(input.queueItemId);
 		if (input.delivery === "start" && this.queuedTurnQueue.list()[0]?.queueItemId !== input.queueItemId) {
 			throw new QueuedTurnConflictError(input.queueItemId);
+		}
+		if (input.delivery === "start" && this.beforeTurnAdmission) {
+			await this.beforeTurnAdmission();
 		}
 		this._session.assertCanDrainAgentEventPersistence();
 		this._session.assertDurablePromptCapacity(current.input);
@@ -552,6 +560,9 @@ export class AgentSessionRuntime {
 		const queued = this._session.activeDurableTurnId !== undefined || this._session.isStreaming;
 		if (queued && submission.input.streamingBehavior === undefined) {
 			throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp').");
+		}
+		if (!queued && this.beforeTurnAdmission) {
+			await this.beforeTurnAdmission();
 		}
 		this._session.assertCanDrainAgentEventPersistence();
 		this._session.assertDurablePromptCapacity(submission.input);

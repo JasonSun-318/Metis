@@ -176,6 +176,18 @@ export class SessionRegistry {
 		return await this.enqueue(this.slotFor(ref), operation);
 	}
 
+	async hasActiveSessions(): Promise<boolean> {
+		for (const slot of this.slots.values()) {
+			try {
+				const runtime = await slot.runtime;
+				if (runtime.isActive()) return true;
+			} catch {
+				// ignore
+			}
+		}
+		return false;
+	}
+
 	async refreshOpenWebSearchSettings(): Promise<void> {
 		if (this.modelServiceRefreshActive) throw new AppServerError("BUSY");
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);

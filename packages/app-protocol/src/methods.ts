@@ -19,6 +19,7 @@ import {
 	SessionIdSchema,
 	Sha256Schema,
 	StrictObject,
+	TimestampSchema,
 	Utf8String,
 	UuidSchema,
 } from "./schema.ts";
@@ -53,6 +54,13 @@ import {
 	PermissionPresetSchema,
 	PermissionSettingsViewSchema,
 	PlanViewSchema,
+	PluginActivationStatusSchema,
+	PluginCatalogEntryViewSchema,
+	PluginInspectionViewSchema,
+	PluginInstalledViewSchema,
+	PluginMarketViewSchema,
+	PluginRecordSchema,
+	PluginUpdateInspectionViewSchema,
 	ProfileUsageSummaryViewSchema,
 	ProjectPermissionRuleViewSchema,
 	QueuedTurnViewSchema,
@@ -1288,6 +1296,116 @@ export const InteractionResultSchema = Type.Union([
 	AskUserInteractionResultSchema,
 ]);
 
+// =========================================================================
+// Plugins
+// =========================================================================
+
+export const PluginMarketListParamsSchema = StrictObject({});
+export const PluginMarketListResultSchema = StrictObject({
+	markets: Type.Array(PluginMarketViewSchema),
+	selectedSourceId: NameSchema,
+	registryRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginMarketAddParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	url: Utf8String(2048, { minLength: 1 }),
+	expectedRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginMarketSelectParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	sourceId: NameSchema,
+	expectedRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginMarketRemoveParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	sourceId: NameSchema,
+	expectedRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginMarketRefreshParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	sourceId: NameSchema,
+});
+
+export const PluginMarketRefreshResultSchema = StrictObject({
+	catalog: Type.Array(PluginCatalogEntryViewSchema),
+	entries: Type.Optional(Type.Array(PluginCatalogEntryViewSchema)),
+	fetchedAt: TimestampSchema,
+	cacheStatus: Type.Union([Type.Literal("fresh"), Type.Literal("cached")]),
+});
+
+export const PluginCatalogParamsSchema = StrictObject({
+	sourceId: NameSchema,
+});
+
+export const PluginCatalogResultSchema = StrictObject({
+	entries: Type.Array(PluginCatalogEntryViewSchema),
+	cacheStatus: Type.Union([Type.Literal("fresh"), Type.Literal("cached"), Type.Literal("offline")]),
+});
+
+export const PluginInspectParamsSchema = StrictObject({
+	sourceId: NameSchema,
+	entryId: NameSchema,
+});
+
+export const PluginInstallParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	inspectionId: UuidSchema,
+	expectedRevision: Type.Integer({ minimum: 0 }),
+	allowPartial: Type.Optional(Type.Boolean()),
+});
+
+export const PluginInstallResultSchema = StrictObject({
+	plugin: PluginInstalledViewSchema,
+	registryRevision: Type.Integer({ minimum: 0 }),
+	activation: PluginActivationStatusSchema,
+});
+
+export const PluginListParamsSchema = StrictObject({});
+export const PluginListResultSchema = StrictObject({
+	installed: Type.Array(PluginRecordSchema),
+	registryRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginGetParamsSchema = StrictObject({
+	pluginId: Sha256Schema,
+});
+
+export const PluginSetEnabledParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	pluginId: Sha256Schema,
+	enabled: Type.Boolean(),
+	expectedRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginRemoveParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	pluginId: Sha256Schema,
+	expectedRevision: Type.Integer({ minimum: 0 }),
+});
+
+export const PluginRemoveResultSchema = StrictObject({
+	installed: Type.Array(PluginRecordSchema),
+	registryRevision: Type.Integer({ minimum: 0 }),
+	activation: PluginActivationStatusSchema,
+});
+
+export const PluginUpdateInspectParamsSchema = StrictObject({
+	pluginId: Sha256Schema,
+});
+
+export const PluginUpdateParamsSchema = StrictObject({
+	requestId: UuidSchema,
+	pluginId: Sha256Schema,
+	inspectionId: UuidSchema,
+	expectedRevision: Type.Integer({ minimum: 0 }),
+	expectedCommit: Type.String({ minLength: 1, maxLength: 128 }),
+	allowPartial: Type.Optional(Type.Boolean()),
+});
+
 export const ClientRequestMethods = {
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
@@ -1390,6 +1508,20 @@ export const ClientRequestMethods = {
 	"schedule/run/mark-read": method(ScheduleRunMarkReadParamsSchema, ScheduleRunMarkReadResultSchema),
 	"schedule/subscribe": method(ScheduleSubscribeParamsSchema, ScheduleSubscribeResultSchema),
 	"schedule/unsubscribe": method(ScheduleSubscribeParamsSchema, ScheduleUnsubscribeResultSchema),
+	"plugin/market/list": method(PluginMarketListParamsSchema, PluginMarketListResultSchema),
+	"plugin/market/add": method(PluginMarketAddParamsSchema, PluginMarketListResultSchema),
+	"plugin/market/select": method(PluginMarketSelectParamsSchema, PluginMarketListResultSchema),
+	"plugin/market/remove": method(PluginMarketRemoveParamsSchema, PluginMarketListResultSchema),
+	"plugin/market/refresh": method(PluginMarketRefreshParamsSchema, PluginMarketRefreshResultSchema),
+	"plugin/catalog": method(PluginCatalogParamsSchema, PluginCatalogResultSchema),
+	"plugin/inspect": method(PluginInspectParamsSchema, PluginInspectionViewSchema),
+	"plugin/install": method(PluginInstallParamsSchema, PluginInstallResultSchema),
+	"plugin/list": method(PluginListParamsSchema, PluginListResultSchema),
+	"plugin/get": method(PluginGetParamsSchema, PluginInstalledViewSchema),
+	"plugin/setEnabled": method(PluginSetEnabledParamsSchema, PluginInstallResultSchema),
+	"plugin/remove": method(PluginRemoveParamsSchema, PluginRemoveResultSchema),
+	"plugin/update/inspect": method(PluginUpdateInspectParamsSchema, PluginUpdateInspectionViewSchema),
+	"plugin/update": method(PluginUpdateParamsSchema, PluginInstallResultSchema),
 	"connection/ack": method(ConnectionAckParamsSchema, ConnectionAckResultSchema),
 } as const;
 

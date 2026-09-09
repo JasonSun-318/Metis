@@ -45,6 +45,7 @@ import {
 	mcpCredentialKey,
 	mcpCredentialState,
 	mcpCredentialStatus,
+	type PluginSnapshot,
 	ProjectTrustStore,
 	QueuedTurnBusyError,
 	QueuedTurnConflictError,
@@ -53,6 +54,7 @@ import {
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
 	readCustomAgentTypes,
+	readPluginSnapshot,
 	readThreadGoal,
 	reducePlanState,
 	reduceRuntimeJournal,
@@ -326,6 +328,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly mcpConfiguration: McpConfigurationCoordinator;
 	private unread: boolean;
 	private readonly notifiedQueueFailureRevisions = new Set<string>();
+	private appliedPluginFingerprint?: string;
+	private pluginReloadPromise?: Promise<void>;
 
 	constructor(
 		runtime: AgentSessionRuntime,
@@ -344,6 +348,11 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		if (!mcpConfiguration) throw new Error("Opened MCP session requires a configuration coordinator");
 		this.mcpConfiguration = mcpConfiguration;
 		this.unread = ref.summary.unread;
+		try {
+			this.appliedPluginFingerprint = readPluginSnapshot(agentDir).fingerprint;
+		} catch {
+			this.appliedPluginFingerprint = undefined;
+		}
 		const journal = this.journal();
 		const reduced = reduceRuntimeJournal(journal);
 		const items = this.itemsFromJournal(journal, reduced);
@@ -403,6 +412,40 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.bind(session);
 			await this.bindExtensionUI(session);
 		});
+		this.runtime.setBeforeTurnAdmission(async () => {
+			await this.ensurePluginsCurrent();
+		});
+	}
+
+	async ensurePluginsCurrent(): Promise<void> {
+		if (this.closed || this.isActive()) {
+			return;
+		}
+		if (this.pluginReloadPromise) {
+			await this.pluginReloadPromise;
+			return;
+		}
+		let snapshot: PluginSnapshot;
+		try {
+			snapshot = readPluginSnapshot(this.agentDir);
+		} catch {
+			return;
+		}
+		if (snapshot.fingerprint === this.appliedPluginFingerprint) {
+			return;
+		}
+		this.pluginReloadPromise = (async () => {
+			try {
+				if (this.isActive()) return;
+				await this.session.reload();
+				this.appliedPluginFingerprint = snapshot.fingerprint;
+			} catch {
+				// Retain existing session runtime so user turns and queues are not lost if reload fails
+			} finally {
+				this.pluginReloadPromise = undefined;
+			}
+		})();
+		await this.pluginReloadPromise;
 	}
 
 	private async bindExtensionUI(session: AgentSession): Promise<void> {

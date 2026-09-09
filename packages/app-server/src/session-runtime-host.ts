@@ -73,6 +73,7 @@ export interface OpenedSessionRuntime {
 	refreshWebSearchSettings?(): Promise<void>;
 	refreshPermissionAutoSettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;
+	ensurePluginsCurrent?(): Promise<void>;
 	applyModelServiceSettingsRefresh?(): Promise<void>;
 	notifyPermissionRulesChanged?(): Promise<void> | void;
 	snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot>;
