@@ -4,7 +4,7 @@ export type { PermissionPreset, PermissionSettings };
 
 const ASK_SETTINGS = Object.freeze({ sandboxPolicy: "workspace-write", approvalPolicy: "user" } as const);
 const AUTO_SETTINGS = Object.freeze({ sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" } as const);
-const FULL_SETTINGS = Object.freeze({ sandboxPolicy: "danger-full-access", approvalPolicy: "user" } as const);
+const FULL_SETTINGS = Object.freeze({ sandboxPolicy: "danger-full-access", approvalPolicy: "never" } as const);
 
 export const PERMISSION_PRESETS: Readonly<Record<PermissionPreset, PermissionSettings>> = Object.freeze({
 	ask: ASK_SETTINGS,
@@ -22,6 +22,7 @@ const APPROVAL_RANK: Readonly<Record<ApprovalPolicy, number>> = Object.freeze({
 	deny: 0,
 	user: 1,
 	"auto-review": 2,
+	never: 3,
 });
 
 const SANDBOX_POLICIES: readonly SandboxPolicy[] = [
@@ -30,7 +31,11 @@ const SANDBOX_POLICIES: readonly SandboxPolicy[] = [
 	"danger-full-access",
 	"external-sandbox",
 ];
-const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ["deny", "user", "auto-review"];
+const APPROVAL_POLICIES: readonly ApprovalPolicy[] = ["deny", "user", "auto-review", "never"];
+
+export function isFullAccess(settings: PermissionSettings): boolean {
+	return settings.sandboxPolicy === "danger-full-access" && settings.approvalPolicy === "never";
+}
 
 export const DEFAULT_PERMISSION_PRESET: PermissionPreset = "auto";
 

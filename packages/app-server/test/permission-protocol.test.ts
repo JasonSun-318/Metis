@@ -18,7 +18,7 @@ const REQUEST_A = "00000000-0000-4000-8000-000000000001";
 const PRESET_SETTINGS = {
 	ask: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
 	auto: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
-	full: { sandboxPolicy: "danger-full-access", approvalPolicy: "user" },
+	full: { sandboxPolicy: "danger-full-access", approvalPolicy: "never" },
 } as const;
 
 class RecordingPeer implements InteractionPeer {

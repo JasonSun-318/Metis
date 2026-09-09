@@ -32,16 +32,16 @@ describe("permission policy matrix", () => {
 		["outside read in Full", "full", outsideRead(), "allow", "medium"],
 		["sensitive read in Ask", "ask", sensitiveRead(), "review", "critical"],
 		["sensitive read in Auto", "auto", sensitiveRead(), "review", "critical"],
-		["sensitive read in Full", "full", sensitiveRead(), "review", "critical"],
+		["sensitive read in Full", "full", sensitiveRead(), "allow", "critical"],
 		["external side effect in Ask", "ask", externalWrite(), "review", "high"],
 		["external side effect in Auto", "auto", externalWrite(), "review", "high"],
-		["external side effect in Full", "full", externalWrite(), "review", "high"],
+		["external side effect in Full", "full", externalWrite(), "allow", "high"],
 		["root recursive delete in Ask", "ask", rootRecursiveDelete(), "deny", "critical"],
 		["root recursive delete in Auto", "auto", rootRecursiveDelete(), "deny", "critical"],
-		["root recursive delete in Full", "full", rootRecursiveDelete(), "deny", "critical"],
+		["root recursive delete in Full", "full", rootRecursiveDelete(), "allow", "high"],
 		["protected metadata write in Ask", "ask", protectedWrite(), "deny", "critical"],
 		["protected metadata write in Auto", "auto", protectedWrite(), "deny", "critical"],
-		["protected metadata write in Full", "full", protectedWrite(), "deny", "critical"],
+		["protected metadata write in Full", "full", protectedWrite(), "allow", "low"],
 	];
 
 	it.each(cases)("routes %s", (_name, preset, action, kind, riskLevel) => {
@@ -99,7 +99,7 @@ describe("permission policy matrix", () => {
 	it.each([
 		["ask", "review", "user"],
 		["auto", "review", "user"],
-		["full", "review", "user"],
+		["full", "allow", undefined],
 	] as const)("routes bounded destructive operations in %s", (preset, kind, minimumReviewer) => {
 		const action = normalizePermissionAction(
 			actionInput({ writePaths: [`${actionInput().cwd}/build`], effects: ["destructive"] }),
@@ -107,7 +107,7 @@ describe("permission policy matrix", () => {
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
 			kind,
 			riskLevel: "high",
-			minimumReviewer,
+			...(minimumReviewer ? { minimumReviewer } : {}),
 		});
 	});
 
@@ -129,7 +129,7 @@ describe("permission policy matrix", () => {
 	});
 
 	it.each(["sensitive-read", "elevation", "security-weakening", "payment", "production-mutation"] as const)(
-		"always sends %s to a user reviewer",
+		"sends %s to a user reviewer in Ask/Auto and allows it in Full",
 		(effect) => {
 			const action = normalizePermissionAction(
 				actionInput({
@@ -138,7 +138,11 @@ describe("permission policy matrix", () => {
 					effects: [effect],
 				}),
 			);
-			for (const preset of ["ask", "auto", "full"] as const) {
+			expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+				kind: "allow",
+				riskLevel: "critical",
+			});
+			for (const preset of ["ask", "auto"] as const) {
 				expect(new PermissionPolicy().evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
 					kind: "review",
 					riskLevel: "critical",

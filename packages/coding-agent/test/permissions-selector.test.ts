@@ -21,7 +21,7 @@ describe("PermissionsSelectorComponent", () => {
 		expect(output).toContain("Auto");
 		expect(output).toContain("Full");
 		expect(output).toContain("workspace sandbox");
-		expect(output).toContain("Critical actions still ask you");
+		expect(output).toContain("Runs without a sandbox or tool approvals");
 		expect(output).not.toContain("no Metis approval");
 	});
 

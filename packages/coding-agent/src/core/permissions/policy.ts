@@ -1,13 +1,15 @@
 import { homedir } from "node:os";
 import { isAbsolute, join, parse, relative, resolve, sep } from "node:path";
+import { getBundledToolsDir } from "../../config.ts";
 import {
 	type AutoCommandRule,
 	matchAutoCommandRule,
+	parseSimpleShellCommand,
 	splitShellSegments,
 	tokenizeShellWords,
 } from "./auto-command-rules.ts";
 import { assertWellFormedAction } from "./normalize.ts";
-import { assertPermissionSettings } from "./settings.ts";
+import { assertPermissionSettings, isFullAccess } from "./settings.ts";
 import type {
 	GrantRequest,
 	MinimumReviewer,
@@ -68,7 +70,7 @@ function grantRequestFor(settings: PermissionSettings, action: NormalizedPermiss
 		executionTarget,
 		readRoots: action.readPaths,
 		writeRoots: action.writePaths,
-		protectedRoots: protectedRootsFor(action),
+		protectedRoots: isFullAccess(settings) ? Object.freeze([]) : protectedRootsFor(action),
 		networkEndpoints: action.networkEndpoints,
 	});
 }
@@ -104,11 +106,6 @@ function isRecursiveDeletionCommand(command: string | undefined): boolean {
 }
 
 function hardDenyReason(action: NormalizedPermissionAction): string | undefined {
-	try {
-		assertWellFormedAction(action);
-	} catch {
-		return "Permission action scope is incomplete";
-	}
 	if (!action.networkEndpoints.every(isExactEndpoint)) return "Wildcard or malformed network grants are forbidden";
 	if (!action.effects.includes("destructive") && !isRecursiveDeletionCommand(action.command)) return undefined;
 
@@ -209,6 +206,25 @@ function isAllowedByAutoCommandRule(input: PermissionPolicyInput): boolean {
 	return input.action.networkEndpoints.length === 0 || rule.allowNetwork;
 }
 
+function isOfficeCliCommand(action: NormalizedPermissionAction): boolean {
+	if (action.provenance !== "builtin" || action.toolName !== "bash" || !action.command) return false;
+	const toolsDir = getBundledToolsDir();
+	const executable = process.platform === "win32" ? "officecli.exe" : "officecli";
+	const segments = splitShellSegments(action.command);
+	return (
+		segments.length > 0 &&
+		segments.every((segment) => {
+			const argv = parseSimpleShellCommand(segment, Number.POSITIVE_INFINITY);
+			const name = argv?.[0];
+			return (
+				name === "officecli" ||
+				name === executable ||
+				(!!toolsDir && name === join(toolsDir, executable).replaceAll("\\", "/"))
+			);
+		})
+	);
+}
+
 function deny(riskLevel: RiskLevel, reason: string): PermissionPolicyDecision {
 	return Object.freeze({ kind: "deny", riskLevel, reason });
 }
@@ -217,8 +233,18 @@ export class PermissionPolicy {
 	evaluate(input: PermissionPolicyInput): PermissionPolicyDecision {
 		try {
 			assertPermissionSettings(input.settings);
+			assertWellFormedAction(input.action);
 		} catch {
-			return deny("critical", "Permission settings are invalid");
+			return deny("critical", "Permission settings or action are invalid");
+		}
+		if (isFullAccess(input.settings)) {
+			const grant = grantRequestFor(input.settings, input.action);
+			return Object.freeze({
+				kind: "allow",
+				riskLevel: riskLevelFor(input.action, grant),
+				reason: "Allowed by Full access",
+				grant,
+			});
 		}
 		const invariant = hardDenyReason(input.action);
 		if (invariant) return deny("critical", invariant);
@@ -240,6 +266,10 @@ export class PermissionPolicy {
 				reason: "Allowed by deterministic read policy",
 				grant,
 			});
+		}
+
+		if (isOfficeCliCommand(input.action)) {
+			return Object.freeze({ kind: "allow", riskLevel, reason: "Allowed by OfficeCLI policy", grant });
 		}
 
 		if (isAllowedByAutoCommandRule(input)) {

@@ -1,6 +1,6 @@
 export type PermissionPreset = "ask" | "auto" | "full";
 export type SandboxPolicy = "read-only" | "workspace-write" | "danger-full-access" | "external-sandbox";
-export type ApprovalPolicy = "user" | "auto-review" | "deny";
+export type ApprovalPolicy = "user" | "auto-review" | "deny" | "never";
 export type MinimumReviewer = "model" | "user";
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 export type ToolProvenance = "builtin" | "host" | "extension" | "sdk" | "mcp";

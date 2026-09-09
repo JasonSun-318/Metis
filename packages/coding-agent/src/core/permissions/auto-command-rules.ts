@@ -187,9 +187,12 @@ function isSimpleShellSource(source: string): boolean {
 	return quote === undefined;
 }
 
-export function parseSimpleShellCommand(source: string): readonly string[] | undefined {
+export function parseSimpleShellCommand(
+	source: string,
+	maxBytes = MAX_AUTO_COMMAND_LENGTH,
+): readonly string[] | undefined {
 	if (typeof source !== "string" || source.length === 0) return undefined;
-	if (Buffer.byteLength(source, "utf8") > MAX_AUTO_COMMAND_LENGTH) return undefined;
+	if (Buffer.byteLength(source, "utf8") > maxBytes) return undefined;
 	if (!isSimpleShellSource(source)) return undefined;
 	const parsed = tokenizeShellWords(source);
 	if (!parsed.complete || parsed.words.length === 0) return undefined;

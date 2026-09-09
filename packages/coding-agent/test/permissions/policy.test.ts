@@ -26,7 +26,7 @@ describe("PermissionPolicy", () => {
 			if (decision.kind !== "deny") expect(decision.grant.executionTarget).toBe("host");
 		},
 	);
-	it("hard-denies recursive deletion of the filesystem root and home in every preset", () => {
+	it("hard-denies recursive deletion of the filesystem root and home in Ask and Auto", () => {
 		const protectedTargets = [parse(projectDir).root, homedir()];
 		for (const target of protectedTargets) {
 			const action = normalizePermissionAction(
@@ -40,7 +40,7 @@ describe("PermissionPolicy", () => {
 					effects: ["destructive"],
 				}),
 			);
-			for (const preset of ["ask", "auto", "full"] as const) {
+			for (const preset of ["ask", "auto"] as const) {
 				expect(new PermissionPolicy().evaluate({ settings: settingsForPreset(preset), action })).toMatchObject({
 					kind: "deny",
 					riskLevel: "critical",
@@ -49,7 +49,7 @@ describe("PermissionPolicy", () => {
 		}
 	});
 
-	it("denies recursive deletion in Auto and reviews it in Full", () => {
+	it("denies recursive deletion in Auto and allows it in Full", () => {
 		const policy = new PermissionPolicy();
 		const build = normalizePermissionAction(
 			actionInput({
@@ -67,8 +67,7 @@ describe("PermissionPolicy", () => {
 			riskLevel: "high",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: build })).toMatchObject({
-			kind: "review",
-			minimumReviewer: "user",
+			kind: "allow",
 			riskLevel: "high",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("ask"), action: build })).toMatchObject({
@@ -92,8 +91,7 @@ describe("PermissionPolicy", () => {
 			riskLevel: "high",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: workspace })).toMatchObject({
-			kind: "review",
-			minimumReviewer: "user",
+			kind: "allow",
 		});
 	});
 
@@ -109,7 +107,7 @@ describe("PermissionPolicy", () => {
 				effects: [],
 			}),
 		);
-		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "deny",
 			riskLevel: "critical",
 		});
@@ -152,13 +150,12 @@ describe("PermissionPolicy", () => {
 			minimumReviewer: "user",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
-			kind: "review",
+			kind: "allow",
 			riskLevel: "high",
-			minimumReviewer: "user",
 		});
 	});
 
-	it("denies concatenated workspace recursive deletion in Auto and reviews it in Full", () => {
+	it("denies concatenated workspace recursive deletion in Auto and allows it in Full", () => {
 		const action = normalizePermissionAction(
 			actionInput({
 				toolName: "bash",
@@ -175,8 +172,7 @@ describe("PermissionPolicy", () => {
 			riskLevel: "high",
 		});
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
-			kind: "review",
-			minimumReviewer: "user",
+			kind: "allow",
 			riskLevel: "high",
 		});
 	});

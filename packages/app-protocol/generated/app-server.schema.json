@@ -11182,6 +11182,10 @@
                                     "anyOf": [
                                       {
                                         "type": "string",
+                                        "const": "never"
+                                      },
+                                      {
+                                        "type": "string",
                                         "const": "user"
                                       },
                                       {
@@ -21922,6 +21926,10 @@
                               "anyOf": [
                                 {
                                   "type": "string",
+                                  "const": "never"
+                                },
+                                {
+                                  "type": "string",
                                   "const": "user"
                                 },
                                 {
@@ -24422,6 +24430,10 @@
                         },
                         "approvalPolicy": {
                           "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "never"
+                            },
                             {
                               "type": "string",
                               "const": "user"
@@ -52621,6 +52633,10 @@
                           "anyOf": [
                             {
                               "type": "string",
+                              "const": "never"
+                            },
+                            {
+                              "type": "string",
                               "const": "user"
                             },
                             {
@@ -55121,6 +55137,10 @@
                     },
                     "approvalPolicy": {
                       "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "never"
+                        },
                         {
                           "type": "string",
                           "const": "user"
@@ -68177,6 +68197,10 @@
                         "anyOf": [
                           {
                             "type": "string",
+                            "const": "never"
+                          },
+                          {
+                            "type": "string",
                             "const": "user"
                           },
                           {
@@ -73713,6 +73737,10 @@
                 },
                 "approvalPolicy": {
                   "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "never"
+                    },
                     {
                       "type": "string",
                       "const": "user"
@@ -82544,6 +82572,10 @@
                                 "anyOf": [
                                   {
                                     "type": "string",
+                                    "const": "never"
+                                  },
+                                  {
+                                    "type": "string",
                                     "const": "user"
                                   },
                                   {
@@ -88991,6 +89023,10 @@
             },
             "approvalPolicy": {
               "anyOf": [
+                {
+                  "type": "string",
+                  "const": "never"
+                },
                 {
                   "type": "string",
                   "const": "user"

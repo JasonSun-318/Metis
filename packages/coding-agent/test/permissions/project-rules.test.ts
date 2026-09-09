@@ -88,7 +88,7 @@ describe("ProjectPermissionRuleStore", () => {
 		});
 		expect(store.rememberAllow(input).decision).toBe("allow");
 		expect(store.match(input)?.decision).toBe("allow");
-		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("full"), action })).toMatchObject({
+		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "deny",
 			riskLevel: "critical",
 		});

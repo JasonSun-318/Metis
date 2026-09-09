@@ -16,6 +16,7 @@ import {
 	validateReviewResult,
 } from "./reviewer.ts";
 import { redactPermissionArguments } from "./reviewer-input.ts";
+import { isFullAccess } from "./settings.ts";
 import type {
 	ExecutionGrant,
 	NormalizedPermissionAction,
@@ -316,7 +317,7 @@ export class ToolAuthorizationRuntime {
 		if (digestCanonical(currentDecision.grant) !== digestCanonical(initialDecision.grant)) {
 			throw new PermissionDeniedError("grant.changed");
 		}
-		const rule = this.matchRule(snapshot.action, currentDecision);
+		const rule = isFullAccess(snapshot.settings) ? undefined : this.matchRule(snapshot.action, currentDecision);
 		if (rule?.decision === "deny") throw new PermissionDeniedError("rule.deny");
 		if (source === "rule" && rule?.decision !== "allow") {
 			throw new PermissionDeniedError("rule.changed");
@@ -362,7 +363,7 @@ export class ToolAuthorizationRuntime {
 			throw new PermissionDeniedError("policy.deny", initialDecision.reason);
 		}
 
-		const initialRule = this.matchRule(initial.action, initialDecision);
+		const initialRule = isFullAccess(initial.settings) ? undefined : this.matchRule(initial.action, initialDecision);
 		if (initialRule?.decision === "deny") {
 			await this.appendAudit(initial.action, initialDecision.riskLevel, "decision", "deny", "rule.deny");
 			throw new PermissionDeniedError("rule.deny");

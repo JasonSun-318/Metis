@@ -8,7 +8,7 @@ import type { ToolDefinition } from "../src/core/extensions/types.ts";
 import { createInteractiveBashBoundary } from "../src/core/interactive-bash-boundary.ts";
 import type { PermissionApprovalRequest } from "../src/core/permissions/approval.ts";
 import { permissionClaim, permissionDescriptor } from "../src/core/tool-permission-adapter.ts";
-import type { BashOperations } from "../src/core/tools/bash.ts";
+import { type BashOperations, createLocalBashOperations } from "../src/core/tools/bash.ts";
 import type { WorkspaceSandbox } from "../src/core/workspace-sandbox.ts";
 import { canonicalizeActionPath } from "../src/utils/paths.ts";
 import { createHarness, getMessageText, type Harness } from "./suite/harness.ts";
@@ -77,7 +77,17 @@ describe("AgentSession permission enforcement", () => {
 		{ mode: "auto", command: "pwd", asks: false, target: "sandbox" },
 		{ mode: "auto", command: "rm -rf ./build", asks: false, target: "none" },
 		{ mode: "auto", command: "curl https://example.test", asks: true, target: "sandbox" },
-		{ mode: "full", command: "rm -rf ./build", asks: true, target: "host" },
+		{ mode: "full", command: "rm -rf ./build", asks: false, target: "host" },
+		{
+			mode: "full",
+			command: `python3 -c "from pathlib import Path; print(Path('/tmp/a').exists())"`,
+			asks: false,
+			target: "host",
+		},
+		{ mode: "full", command: "cat .env", asks: false, target: "host" },
+		{ mode: "full", command: "curl https://example.test", asks: false, target: "host" },
+		// Host execution is mocked, including destructive commands.
+		{ mode: "full", command: "rm -rf /", asks: false, target: "host" },
 	] as const)("routes $mode Bash '$command' to $target", async ({ mode, command, asks, target }) => {
 		const fake = fakeBashBoundary();
 		const requestApproval = vi.fn(async () => ({ decision: "allow" as const }));
@@ -100,6 +110,86 @@ describe("AgentSession permission enforcement", () => {
 		expect(fake.hostExec).toHaveBeenCalledTimes(target === "host" ? 1 : 0);
 		expect(fake.createSandbox).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
 	});
+
+	it("executes Python on the host in Full and restores Ask approval in the same session", async () => {
+		let cwd = process.cwd();
+		const host = createLocalBashOperations();
+		const hostExec = vi.fn(host.exec);
+		const createSandbox = vi.fn(async () => {
+			throw new Error("sandbox must not be used");
+		});
+		const boundary = createInteractiveBashBoundary({
+			hostOperations: { exec: hostExec },
+			context: () => ({ cwd, workspaceRoots: [cwd], readOnlyRoots: [], writeRoots: [] }),
+			createSandbox,
+		});
+		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
+		const harness = await createHarness({
+			permissionPreset: "full",
+			interactiveBashBoundary: boundary,
+			requestPermissionApproval: requestApproval,
+		});
+		harnesses.push(harness);
+		cwd = harness.tempDir;
+		const output = join(cwd, "full-access-python.txt");
+		const command = `python3 -c "from pathlib import Path; Path('full-access-python.txt').write_text('full works')"`;
+		const responses = () => [
+			fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		];
+		harness.setResponses(responses());
+		await harness.session.prompt("write the fixture");
+		expect(readFileSync(output, "utf8")).toBe("full works");
+		expect(requestApproval).not.toHaveBeenCalled();
+		expect(hostExec).toHaveBeenCalledOnce();
+		expect(createSandbox).not.toHaveBeenCalled();
+
+		await harness.session.setPermissionPreset("ask");
+		writeFileSync(output, "unchanged");
+		harness.setResponses(responses());
+		await harness.session.prompt("write the fixture again");
+		expect(requestApproval).toHaveBeenCalledOnce();
+		expect(hostExec).toHaveBeenCalledOnce();
+		expect(readFileSync(output, "utf8")).toBe("unchanged");
+	});
+
+	it.runIf(process.env.METIS_TEST_OS_SANDBOX === "1").each(["ask", "auto", "full"] as const)(
+		"runs real OfficeCLI through the model session without approval in %s",
+		async (preset) => {
+			let cwd = process.cwd();
+			const boundary = createInteractiveBashBoundary({
+				hostOperations: createLocalBashOperations(),
+				context: () => ({ cwd, workspaceRoots: [cwd], readOnlyRoots: [], writeRoots: [] }),
+			});
+			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
+			const harness = await createHarness({
+				permissionPreset: preset,
+				interactiveBashBoundary: boundary,
+				requestPermissionApproval: requestApproval,
+			});
+			harnesses.push(harness);
+			cwd = harness.tempDir;
+			harness.setResponses([
+				fauxAssistantMessage(
+					[
+						fauxToolCall("bash", {
+							command:
+								"officecli create fixture.docx && officecli add fixture.docx /body --type paragraph --prop text=OfficeNoApproval && officecli view fixture.docx text",
+						}),
+					],
+					{ stopReason: "toolUse" },
+				),
+				fauxAssistantMessage("done"),
+			]);
+			await harness.session.prompt("create and inspect the document");
+			expect(requestApproval).not.toHaveBeenCalled();
+			expect(existsSync(join(cwd, "fixture.docx"))).toBe(true);
+			const result = harness.session.messages.find((message) => message.role === "toolResult");
+			expect(result?.isError, getMessageText(result)).toBe(false);
+			expect(getMessageText(result)).toContain("OfficeNoApproval");
+		},
+		30_000,
+	);
 
 	it("runs an allowlisted outside-workspace ls in Auto without approval", async () => {
 		const fake = fakeBashBoundary();

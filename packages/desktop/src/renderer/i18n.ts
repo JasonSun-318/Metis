@@ -655,7 +655,8 @@ const zhCN = {
 	"Runs in the workspace sandbox and asks you when approval is needed.": "在工作区沙箱中运行，需要时向你询问。",
 	"Runs in the workspace sandbox. The current model reviews risky actions when needed.":
 		"在工作区沙箱中运行。当前模型会在需要时进行安全审查。",
-	"May run on the host. Critical actions still ask you.": "可在主机上运行。高风险操作仍会向你询问。",
+	"Runs without a sandbox or tool approvals, including file deletion and network actions.":
+		"不使用沙箱，不弹工具审批；包括删除文件及联网操作。",
 	"Checking security…": "正在检查安全性…",
 	"A parent session limits the effective permissions for this task.": "父会话限制了此任务的有效权限。",
 	"Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.":

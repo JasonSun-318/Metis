@@ -14,14 +14,14 @@ describe("permission settings", () => {
 		});
 		expect(settingsForPreset("full")).toEqual({
 			sandboxPolicy: "danger-full-access",
-			approvalPolicy: "user",
+			approvalPolicy: "never",
 		});
 	});
 
 	it("intersects the two ceilings independently", () => {
 		expect(intersectPermissionSettings(settingsForPreset("full"), settingsForPreset("auto"))).toEqual({
 			sandboxPolicy: "workspace-write",
-			approvalPolicy: "user",
+			approvalPolicy: "auto-review",
 		});
 		expect(
 			intersectPermissionSettings(settingsForPreset("auto"), {

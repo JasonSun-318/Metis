@@ -22,7 +22,7 @@ const PRESET_ITEMS: SelectItem[] = [
 	{
 		value: "full",
 		label: "Full",
-		description: "May run on the host. Critical actions still ask you.",
+		description: "Runs without a sandbox or tool approvals, including file deletion and network actions.",
 	},
 ];
 

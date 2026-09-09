@@ -40,6 +40,7 @@ export const SandboxPolicySchema = Type.Union([
 	Type.Literal("external-sandbox"),
 ]);
 export const ApprovalPolicySchema = Type.Union([
+	Type.Literal("never"),
 	Type.Literal("user"),
 	Type.Literal("auto-review"),
 	Type.Literal("deny"),
