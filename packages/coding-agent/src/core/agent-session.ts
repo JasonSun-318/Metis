@@ -659,6 +659,7 @@ export class AgentSession {
 	private _sessionStartEvent: SessionStartEvent;
 	private _pendingSessionStartContext?: string;
 	private _stopHookActive = false;
+	private _activeRunAbortController?: AbortController;
 	private _extensionUIContext?: ExtensionUIContext;
 	private _extensionMode: ExtensionMode = "print";
 	private _extensionCommandContextActions?: ExtensionCommandContextActions;
@@ -3203,13 +3204,30 @@ export class AgentSession {
 	}
 
 	/** Queue one already-accepted prompt with its durable identity. */
-	enqueueAcceptedDurablePrompt(
+	async enqueueAcceptedDurablePrompt(
 		input: DurablePromptInput,
 		identity: RuntimeRequestIdentity,
 		behavior: "steer" | "followUp",
 		queueItemId = identity.queueItemId,
-	): void {
-		let text = this._expandSkillCommand(input.text, true);
+	): Promise<void> {
+		let userPromptContext: string | undefined;
+		let currentText = input.text;
+		if (this._extensionRunner.hasHandlers("input")) {
+			const inputResult = await this._extensionRunner.emitInput(currentText, undefined, "interactive", behavior);
+			if (inputResult.action === "block") {
+				const reason = inputResult.reason || "Prompt blocked by hook";
+				this._extensionUIContext?.notify?.(reason, "warning");
+				throw new Error(reason);
+			}
+			if (inputResult.action === "transform") {
+				currentText = inputResult.text;
+			}
+			if ("context" in inputResult && inputResult.context) {
+				userPromptContext = inputResult.context;
+			}
+		}
+
+		let text = this._expandSkillCommand(currentText, true);
 		text = expandPromptTemplate(text, [...this.promptTemplates], MAX_DURABLE_PROMPT_TEXT_BYTES);
 		const textBytes = Buffer.byteLength(text, "utf8");
 		if (textBytes > MAX_DURABLE_PROMPT_TEXT_BYTES) {
@@ -3232,8 +3250,8 @@ export class AgentSession {
 		this._durableResidentPayloadBytes += residentPayloadBytes;
 		try {
 			const queueIdentity = { operationId: identity.operationId, queueItemId };
-			if (behavior === "followUp") this._enqueueFollowUp(text, undefined, queueIdentity);
-			else this._enqueueSteer(text, undefined, queueIdentity);
+			if (behavior === "followUp") this._enqueueFollowUp(text, undefined, queueIdentity, userPromptContext);
+			else this._enqueueSteer(text, undefined, queueIdentity, userPromptContext);
 		} catch (error) {
 			this._durableQueues.delete(queueItemId);
 			this._durableResidentPayloadBytes -= residentPayloadBytes;
@@ -3362,6 +3380,8 @@ export class AgentSession {
 		this._activeWorkDir = undefined;
 		this._isAgentRunActive = true;
 		this._stopHookActive = false;
+		const runAbortController = new AbortController();
+		this._activeRunAbortController = runAbortController;
 		try {
 			if (this._agentDir) clearSessionAttachmentNonFiles(this._agentDir, sessionId);
 			const errors: unknown[] = [];
@@ -3392,6 +3412,7 @@ export class AgentSession {
 			if (errors.length === 1) throw errors[0];
 			if (errors.length > 1) throw new AggregateError(errors, "Failed to run and settle the durable agent turn");
 		} finally {
+			this._activeRunAbortController = undefined;
 			this._activeAgentMailboxDelivery = undefined;
 			this._stagedAgentMailboxEventIds = [];
 			const workDir = this._activeWorkDir;
@@ -3404,8 +3425,14 @@ export class AgentSession {
 	}
 
 	private async _handlePostAgentRun(): Promise<boolean> {
-		if (this._runtimeTeardownRequested || this._stopCurrentRunAfterAbort || this._durableRecoveryRequired)
+		if (
+			this._runtimeTeardownRequested ||
+			this._stopCurrentRunAfterAbort ||
+			this._durableRecoveryRequired ||
+			this._disposeCoreComplete
+		) {
 			return false;
+		}
 		const msg = this._lastAssistantMessage;
 		this._lastAssistantMessage = undefined;
 		if (!msg) {
@@ -3457,7 +3484,14 @@ export class AgentSession {
 		// Stop continuation insertion point: Sequence is retry -> compaction -> goal -> queue -> stop continuation.
 		// If no higher-priority queued messages remain and the run was not aborted, command-v1 Stop hooks
 		// can request a continuation (up to once per turn, tracked by _stopHookActive).
-		if (!hasQueuedMessages && msg.stopReason !== "aborted") {
+		if (
+			!hasQueuedMessages &&
+			msg.stopReason !== "aborted" &&
+			!this._stopCurrentRunAfterAbort &&
+			!this._activeRunAbortController?.signal.aborted &&
+			!this._runtimeTeardownRequested &&
+			!this._disposeCoreComplete
+		) {
 			if (this._extensionRunner.hasHandlers("before_agent_stop")) {
 				const candidateText =
 					typeof msg.content === "string"
@@ -3471,6 +3505,15 @@ export class AgentSession {
 					lastAssistantMessage: candidateText,
 					stopHookActive: this._stopHookActive,
 				});
+				if (
+					this._runtimeTeardownRequested ||
+					this._stopCurrentRunAfterAbort ||
+					this._durableRecoveryRequired ||
+					this._activeRunAbortController?.signal.aborted ||
+					this._disposeCoreComplete
+				) {
+					return false;
+				}
 				if (stopResult?.continueReason && !this._stopHookActive) {
 					this._stopHookActive = true;
 					const continuationContent = stopResult.context
@@ -4106,6 +4149,7 @@ export class AgentSession {
 		this.assertCanDrainAgentEventPersistence();
 		if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
 		this._stopCurrentRunAfterAbort = true;
+		this._activeRunAbortController?.abort();
 		this.abortRetry();
 		this.agent.abort();
 		const results = await Promise.allSettled([this.waitForIdle(), this._drainAgentEventPersistence()]);
@@ -4133,6 +4177,7 @@ export class AgentSession {
 		// Durable turns stop instead: queued durable work must be recovered, never
 		// consumed by a fresh provider request after an abort.
 		if (this._durableTurn) this._stopCurrentRunAfterAbort = true;
+		this._activeRunAbortController?.abort();
 		this.abortRetry();
 		this.agent.abort();
 		try {
@@ -4888,9 +4933,7 @@ export class AgentSession {
 
 		this._applyExtensionBindings(this._extensionRunner);
 		const sessionStartResult = await this._extensionRunner.emitSessionStart(this._sessionStartEvent);
-		if (sessionStartResult?.context) {
-			this._pendingSessionStartContext = sessionStartResult.context;
-		}
+		this._pendingSessionStartContext = sessionStartResult?.context;
 		await this.extendResourcesFromExtensions(this._sessionStartEvent.reason === "reload" ? "reload" : "startup");
 		this._continueActiveGoalInBackground();
 	}
@@ -5052,7 +5095,7 @@ export class AgentSession {
 				getModel: () => this.model,
 				isIdle: () => this.isIdle,
 				isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
-				getSignal: () => this.agent.signal,
+				getSignal: () => this._activeRunAbortController?.signal ?? this.agent.signal,
 				abort: () => {
 					if (this._extensionAbortHandler) {
 						this._extensionAbortHandler();
@@ -5449,9 +5492,7 @@ export class AgentSession {
 				type: "session_start",
 				reason: "reload",
 			});
-			if (sessionStartResult?.context) {
-				this._pendingSessionStartContext = sessionStartResult.context;
-			}
+			this._pendingSessionStartContext = sessionStartResult?.context;
 			await this.extendResourcesFromExtensions("reload");
 		}
 	}

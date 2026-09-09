@@ -448,7 +448,7 @@ export class AgentSessionRuntime {
 			this.requestIndex.set(identity.requestId, indexed);
 			this.operationIndex.set(identity.operationId, indexed);
 			if (input.delivery === "steer") {
-				this._session.enqueueAcceptedDurablePrompt(draft.input, identity, "steer", draft.queueItemId);
+				await this._session.enqueueAcceptedDurablePrompt(draft.input, identity, "steer", draft.queueItemId);
 				return { operationId: identity.operationId, queueItemId: draft.queueItemId, status: "accepted" };
 			}
 
@@ -565,7 +565,7 @@ export class AgentSessionRuntime {
 				});
 				queueDurable = true;
 				indexed.queueItemId = identity.queueItemId;
-				this._session.enqueueAcceptedDurablePrompt(submission.input, identity, behavior);
+				await this._session.enqueueAcceptedDurablePrompt(submission.input, identity, behavior);
 				return { operationId: identity.operationId, queueItemId: identity.queueItemId, status: "accepted" };
 			}
 

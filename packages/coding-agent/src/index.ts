@@ -250,12 +250,16 @@ export { createDeclarativeHooksBridge } from "./core/hooks/hook-bridge.ts";
 export {
 	buildCommandHookPayload,
 	COMPATIBLE_TOOL_ALIASES,
+	EVENT_CONTEXT_TRUNCATED_MARKER,
+	HOOK_CONTEXT_TRUNCATED_MARKER,
 	type HookEffect,
 	interpretHookResult,
 	MAX_EVENT_TOTAL_CONTEXT_BYTES,
 	MAX_HOOK_CONTEXT_BYTES,
 	mapToolInput,
 	matchHook,
+	mergeEventContexts,
+	truncateHookContext,
 	truncateUtf8Bytes,
 	validateHookMatcher,
 } from "./core/hooks/hook-protocol.ts";

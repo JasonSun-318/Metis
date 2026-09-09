@@ -21,6 +21,9 @@ export interface HookEffect {
 	diagnostic?: string;
 }
 
+export const HOOK_CONTEXT_TRUNCATED_MARKER = "\n[Hook context truncated to 8 KiB]";
+export const EVENT_CONTEXT_TRUNCATED_MARKER = "\n[Total hook context truncated to 32 KiB]";
+
 /**
  * Safely truncate a UTF-8 string to stay within maxBytes without breaking code units or surrogate pairs.
  */
@@ -34,6 +37,73 @@ export function truncateUtf8Bytes(text: string, maxBytes: number): { text: strin
 		end--;
 	}
 	return { text: buf.subarray(0, end).toString("utf8"), truncated: true };
+}
+
+/**
+ * Truncate a single hook's context to maxBytes (default 8 KiB) and append a truncation note if truncated.
+ */
+export function truncateHookContext(text: string, maxBytes = MAX_HOOK_CONTEXT_BYTES): string {
+	const buf = Buffer.from(text, "utf8");
+	if (buf.length <= maxBytes) {
+		return text;
+	}
+	const marker = HOOK_CONTEXT_TRUNCATED_MARKER;
+	const markerBytes = Buffer.byteLength(marker, "utf8");
+	const targetBytes = Math.max(0, maxBytes - markerBytes);
+	const truncated = truncateUtf8Bytes(text, targetBytes).text;
+	return `${truncated}${marker}`;
+}
+
+/**
+ * Merge multiple hook contexts into a single formatted string, respecting the total event byte budget.
+ */
+export function mergeEventContexts(
+	entries: Array<{ hookName: string; context: string }>,
+	maxTotalBytes = MAX_EVENT_TOTAL_CONTEXT_BYTES,
+): string | undefined {
+	if (entries.length === 0) return undefined;
+
+	const formattedList: string[] = [];
+	let currentBytes = 0;
+	const marker = EVENT_CONTEXT_TRUNCATED_MARKER;
+	const markerBytes = Buffer.byteLength(marker, "utf8");
+
+	for (const entry of entries) {
+		const singleHookText = truncateHookContext(entry.context, MAX_HOOK_CONTEXT_BYTES);
+		const itemText = `[Hook: ${entry.hookName}]\n${singleHookText}`;
+		const separator = formattedList.length > 0 ? "\n\n" : "";
+		const separatorBytes = Buffer.byteLength(separator, "utf8");
+		const itemBytes = Buffer.byteLength(itemText, "utf8");
+
+		if (currentBytes + separatorBytes + itemBytes <= maxTotalBytes) {
+			formattedList.push(itemText);
+			currentBytes += separatorBytes + itemBytes;
+		} else {
+			const remainingForThisItem = maxTotalBytes - currentBytes - separatorBytes - markerBytes;
+			if (remainingForThisItem > 0) {
+				const truncatedItem = truncateUtf8Bytes(itemText, remainingForThisItem).text;
+				formattedList.push(`${truncatedItem}${marker}`);
+			} else if (formattedList.length > 0) {
+				const currentJoined = formattedList.join("\n\n");
+				const availableForMarker = maxTotalBytes - Buffer.byteLength(currentJoined, "utf8");
+				if (availableForMarker >= markerBytes) {
+					formattedList.push(marker.trimStart());
+				} else {
+					const truncatedAll = truncateUtf8Bytes(currentJoined, Math.max(0, maxTotalBytes - markerBytes)).text;
+					return `${truncatedAll}${marker}`;
+				}
+			} else {
+				return truncateUtf8Bytes(marker, maxTotalBytes).text;
+			}
+			break;
+		}
+	}
+
+	const result = formattedList.join("\n\n");
+	if (Buffer.byteLength(result, "utf8") > maxTotalBytes) {
+		return truncateUtf8Bytes(result, maxTotalBytes).text;
+	}
+	return result;
 }
 
 /**
@@ -312,7 +382,7 @@ export function interpretHookResult(
 			(typeof raw.additionalContext === "string" ? raw.additionalContext : undefined) ??
 			(typeof hookSpecific?.additionalContext === "string" ? hookSpecific.additionalContext : undefined);
 
-		const context = rawContext !== undefined ? truncateUtf8Bytes(rawContext, MAX_HOOK_CONTEXT_BYTES).text : undefined;
+		const context = rawContext !== undefined ? truncateHookContext(rawContext) : undefined;
 
 		const effect: HookEffect = {};
 		if (context) effect.context = context;
@@ -328,7 +398,7 @@ export function interpretHookResult(
 		} else if (hook.event === "Stop") {
 			if (decision === "block") {
 				if (reason && reason.trim().length > 0) {
-					effect.continueReason = reason;
+					effect.continueReason = truncateUtf8Bytes(reason, MAX_HOOK_CONTEXT_BYTES).text;
 				} else {
 					diagnostics.push("Stop hook requested continuation without a valid reason");
 				}
@@ -355,7 +425,7 @@ export function interpretHookResult(
 
 	// Plain text stdout
 	if (hook.event === "SessionStart" || hook.event === "UserPromptSubmit") {
-		return { context: truncateUtf8Bytes(cleanStdout, MAX_HOOK_CONTEXT_BYTES).text };
+		return { context: truncateHookContext(cleanStdout) };
 	}
 
 	return { diagnostic: `Hook "${hook.name}" output plain text: ${cleanStdout.slice(0, 100)}` };

@@ -9,6 +9,15 @@ import { AuthStorage } from "../src/core/auth-storage.ts";
 import { type DeclarativeHook, saveDeclarativeHooks } from "../src/core/hooks/declarative-hooks.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
+function isProcessAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (e: any) {
+		return e?.code === "EPERM";
+	}
+}
+
 describe("command-v1 Stop hook continuation", () => {
 	let tempDir: string;
 	const cleanups: (() => Promise<void> | void)[] = [];
@@ -369,5 +378,121 @@ describe("command-v1 Stop hook continuation", () => {
 
 		// Should not have continued after abort
 		expect(callCount).toBe(1);
+	});
+
+	it("aborts session while Stop hook is running: kills hook process, prevents continuation turn, and settles once", async () => {
+		const pidFile = join(tempDir, "stop-hook-pid.txt");
+		process.env.STOP_HOOK_PID_FILE = pidFile;
+		cleanups.push(() => {
+			delete process.env.STOP_HOOK_PID_FILE;
+		});
+
+		const stopHook = makeScriptHook({
+			name: "blocking-stop-hook",
+			event: "Stop",
+			script: `
+				const fs = require('fs');
+				const p = process.env.STOP_HOOK_PID_FILE;
+				if (p) fs.writeFileSync(p, String(process.pid));
+				const end = Date.now() + 5000;
+				while (Date.now() < end) {}
+				console.log(JSON.stringify({
+					decision: "block",
+					reason: "Should not be executed"
+				}));
+			`,
+		});
+
+		const { session, faux } = await setupSession([stopHook]);
+
+		let settledCount = 0;
+		session.subscribe((event) => {
+			if (event.type === "agent_settled") {
+				settledCount++;
+			}
+		});
+
+		let callCount = 0;
+		faux.setResponses([
+			() => {
+				callCount++;
+				return fauxAssistantMessage("Turn 1 assistant answer");
+			},
+			() => {
+				callCount++;
+				return fauxAssistantMessage("Turn 2 assistant answer (unreachable)");
+			},
+		]);
+
+		const promptPromise = session.prompt("Run task with stop abort");
+
+		// Wait for Stop hook to actively start executing
+		await expect.poll(() => existsSync(pidFile), { timeout: 5000 }).toBe(true);
+		const hookPid = parseInt(readFileSync(pidFile, "utf8"), 10);
+		expect(isProcessAlive(hookPid)).toBe(true);
+
+		// Abort session while Stop hook is running
+		await session.abort();
+		await promptPromise.catch(() => {});
+
+		// 1. Model must NOT have been called for turn 2 (exactly 1 call total)
+		expect(callCount).toBe(1);
+
+		// 2. Exactly 1 agent_settled event was emitted
+		expect(settledCount).toBe(1);
+
+		// 3. The Stop hook child process was killed by tree termination
+		await expect.poll(() => isProcessAlive(hookPid), { timeout: 5000 }).toBe(false);
+	});
+
+	it("disposes session while Stop hook is running: kills hook process and prevents continuation turn", async () => {
+		const pidFile = join(tempDir, "stop-dispose-pid.txt");
+		process.env.STOP_HOOK_PID_FILE = pidFile;
+		cleanups.push(() => {
+			delete process.env.STOP_HOOK_PID_FILE;
+		});
+
+		const stopHook = makeScriptHook({
+			name: "blocking-stop-hook-dispose",
+			event: "Stop",
+			script: `
+				const fs = require('fs');
+				const p = process.env.STOP_HOOK_PID_FILE;
+				if (p) fs.writeFileSync(p, String(process.pid));
+				const end = Date.now() + 5000;
+				while (Date.now() < end) {}
+				console.log(JSON.stringify({
+					decision: "block",
+					reason: "Should not be executed after dispose"
+				}));
+			`,
+		});
+
+		const { runtimeHost, session, faux } = await setupSession([stopHook]);
+
+		let callCount = 0;
+		faux.setResponses([
+			() => {
+				callCount++;
+				return fauxAssistantMessage("Turn 1 before dispose");
+			},
+			() => {
+				callCount++;
+				return fauxAssistantMessage("Turn 2 (unreachable)");
+			},
+		]);
+
+		const promptPromise = session.prompt("Run task with stop dispose");
+
+		await expect.poll(() => existsSync(pidFile), { timeout: 5000 }).toBe(true);
+		const hookPid = parseInt(readFileSync(pidFile, "utf8"), 10);
+		expect(isProcessAlive(hookPid)).toBe(true);
+
+		// Session runtime is disposed while Stop hook is running
+		await runtimeHost.dispose();
+		await promptPromise.catch(() => {});
+
+		expect(callCount).toBe(1);
+		await expect.poll(() => isProcessAlive(hookPid), { timeout: 5000 }).toBe(false);
 	});
 });

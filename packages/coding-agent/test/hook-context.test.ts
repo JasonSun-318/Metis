@@ -477,7 +477,7 @@ describe("hook context, blocking, and lifecycle integration", () => {
 		expect(textB).not.toContain("SESSION_A_SECRET");
 	});
 
-	it("preserves hookContext across session reload without re-running completed hooks", async () => {
+	it("preserves hookContext across session persistence recovery without re-running completed hooks", async () => {
 		const markerFile = join(tempDir, "hook_executions.txt");
 		const hook = makeScriptHook({
 			name: "tracked-hook",
@@ -496,18 +496,55 @@ describe("hook context, blocking, and lifecycle integration", () => {
 			delete process.env.MARKER_FILE;
 		});
 
-		const { session, sessionManager, faux } = await setupSession([hook]);
+		const { session, sessionManager, faux, runtimeHost } = await setupSession([hook]);
 
 		faux.setResponses([fauxAssistantMessage("Done turn 1")]);
 		await session.prompt("Turn 1 prompt");
 
 		const entries = sessionManager.getEntries();
-		const userMsg = (entries.find((e) => e.type === "message" && (e.message as any).role === "user") as any)?.message;
+		const userEntry = entries.find((e) => e.type === "message" && (e.message as any).role === "user");
+		expect(userEntry).toBeDefined();
+		const userMsg = (userEntry as any).message;
 		expect(userMsg.hookContext).toContain("RUN_COUNT_1");
 
-		// Check execution count of hook: it should only have been run once for the user prompt
-		const count = parseInt(existsSync(markerFile) ? readFileSync(markerFile, "utf8") : "0", 10);
-		expect(count).toBe(1);
+		// Test 1: session.reload() preserves hookContext and does not re-run completed hook
+		await session.reload();
+		const countAfterReload = parseInt(existsSync(markerFile) ? readFileSync(markerFile, "utf8") : "0", 10);
+		expect(countAfterReload).toBe(1);
+
+		// Test 2: dispose and reopen from disk via SessionManager.open
+		const sessionFile = sessionManager.getSessionFile();
+		expect(sessionFile).toBeDefined();
+		await runtimeHost.dispose();
+
+		const reopenedMgr = SessionManager.open(sessionFile!);
+		const recoveredEntries = reopenedMgr.getEntries();
+		const recoveredUserEntry = recoveredEntries.find(
+			(e) => e.type === "message" && (e.message as any).role === "user",
+		);
+		expect(recoveredUserEntry).toBeDefined();
+		expect((recoveredUserEntry as any).message.hookContext).toContain("RUN_COUNT_1");
+
+		// Test 3: projected UI message bubble renders clean prompt without hookContext
+		const projected = projectMessageEntry({
+			entry: recoveredUserEntry as any,
+			sessionId: reopenedMgr.getSessionId(),
+			turnStates: new Map(),
+			toolStates: new Map(),
+			deliveredFiles: new Map(),
+			fallbackTimestamp: new Date().toISOString(),
+		});
+		expect(projected).toBeDefined();
+		const bubbleText = (projected!.content as any[])
+			.filter((b) => b.type === "text")
+			.map((b) => b.text)
+			.join("\n");
+		expect(bubbleText).toBe("Turn 1 prompt");
+		expect(bubbleText).not.toContain("RUN_COUNT_1");
+
+		// Hook execution count remains 1 across persistence restore
+		const finalCount = parseInt(existsSync(markerFile) ? readFileSync(markerFile, "utf8") : "0", 10);
+		expect(finalCount).toBe(1);
 	});
 
 	it("attaches PostToolUseFailure context to failed tool results while keeping error details intact", async () => {
@@ -603,5 +640,256 @@ describe("hook context, blocking, and lifecycle integration", () => {
 		expect(secondUserMsg).toBeDefined();
 		const secondText = secondUserMsg.content.map((c: any) => c.text).join("\n");
 		expect(secondText).toContain("HOOK_FOR_Second queued prompt");
+	});
+
+	it("bounds combined event hook context to 32 KiB and applies truncation markers", async () => {
+		const hooks: DeclarativeHook[] = [];
+		for (let i = 0; i < 5; i++) {
+			hooks.push(
+				makeScriptHook({
+					name: `startup-hook-${i}`,
+					event: "SessionStart",
+					script: `
+						const payload = "X".repeat(8192);
+						console.log(JSON.stringify({
+							hookSpecificOutput: {
+								hookEventName: "SessionStart",
+								additionalContext: payload
+							}
+						}));
+					`,
+				}),
+			);
+		}
+
+		const { session, faux } = await setupSession(hooks);
+		let capturedContext: any;
+		faux.setResponses([
+			(ctx) => {
+				capturedContext = ctx;
+				return fauxAssistantMessage("Acknowledged startup");
+			},
+		]);
+
+		await session.prompt("Test context bounding");
+		expect(capturedContext).toBeDefined();
+		const userMsg = capturedContext.messages.find((m: any) => m.role === "user");
+		expect(userMsg).toBeDefined();
+		expect(userMsg.hookContext).toBeDefined();
+		expect(Buffer.byteLength(userMsg.hookContext, "utf8")).toBeLessThanOrEqual(32 * 1024);
+		expect(userMsg.hookContext).toContain("[Total hook context truncated to 32 KiB]");
+	});
+
+	it("clears pending SessionStart context after deleting, disabling, or replacing startup hooks and reloading", async () => {
+		const startupHook = makeScriptHook({
+			name: "stale-startup-hook",
+			event: "SessionStart",
+			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: "STALE_STARTUP_SECRET" } }))`,
+		});
+
+		const { session, faux } = await setupSession([startupHook]);
+
+		// Scenario A: Delete all hooks before first prompt and reload
+		saveDeclarativeHooks(tempDir, []);
+		await session.reload();
+
+		let capturedContextA: any;
+		faux.setResponses([
+			(ctx) => {
+				capturedContextA = ctx;
+				return fauxAssistantMessage("Response A");
+			},
+		]);
+
+		await session.prompt("First prompt after delete");
+		const userMsgA = capturedContextA.messages.find((m: any) => m.role === "user");
+		const textA = userMsgA.content.map((c: any) => c.text).join("\n");
+		expect(textA).not.toContain("STALE_STARTUP_SECRET");
+		expect(userMsgA.hookContext).toBeUndefined();
+
+		// Scenario B: Add hook again, bind/reload to get pending context, then disable it and reload
+		saveDeclarativeHooks(tempDir, [{ ...startupHook, enabled: true }]);
+		await session.reload();
+		saveDeclarativeHooks(tempDir, [{ ...startupHook, enabled: false }]);
+		await session.reload();
+
+		let capturedContextB: any;
+		faux.setResponses([
+			(ctx) => {
+				capturedContextB = ctx;
+				return fauxAssistantMessage("Response B");
+			},
+		]);
+
+		await session.prompt("Prompt after disable");
+		const userMsgB = capturedContextB.messages.find((m: any) => m.role === "user");
+		const textB = userMsgB.content.map((c: any) => c.text).join("\n");
+		expect(textB).not.toContain("STALE_STARTUP_SECRET");
+		expect(userMsgB.hookContext).toBeUndefined();
+
+		// Scenario C: Replace with a hook that produces no additional context and reload
+		saveDeclarativeHooks(tempDir, [{ ...startupHook, enabled: true }]);
+		await session.reload();
+		const emptyHook = makeScriptHook({
+			name: "empty-startup-hook",
+			event: "SessionStart",
+			script: `console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart" } }))`,
+		});
+		saveDeclarativeHooks(tempDir, [emptyHook]);
+		await session.reload();
+
+		let capturedContextC: any;
+		faux.setResponses([
+			(ctx) => {
+				capturedContextC = ctx;
+				return fauxAssistantMessage("Response C");
+			},
+		]);
+
+		await session.prompt("Prompt after empty hook");
+		const userMsgC = capturedContextC.messages.find((m: any) => m.role === "user");
+		const textC = userMsgC.content.map((c: any) => c.text).join("\n");
+		expect(textC).not.toContain("STALE_STARTUP_SECRET");
+		expect(userMsgC.hookContext).toBeUndefined();
+	});
+
+	it("enqueues durable prompt via runtimeHost.submitPrompt with followUp and attaches hookContext", async () => {
+		const hook = makeScriptHook({
+			name: "durable-followup-hook",
+			event: "UserPromptSubmit",
+			script: `
+				const fs = require('fs');
+				const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+				const text = input.prompt || input.text || "";
+				console.log(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: "DURABLE_HOOK_FOR_" + text.trim() } }));
+			`,
+		});
+
+		const { runtimeHost, session, faux } = await setupSession([hook]);
+
+		let finishFirstResponse: () => void;
+		const firstResponseGate = new Promise<void>((resolve) => {
+			finishFirstResponse = resolve;
+		});
+
+		const receivedContexts: any[] = [];
+		faux.setResponses([
+			async (ctx) => {
+				receivedContexts.push(ctx);
+				await firstResponseGate;
+				return fauxAssistantMessage("First durable turn done");
+			},
+			(ctx) => {
+				receivedContexts.push(ctx);
+				return fauxAssistantMessage("Second durable turn done");
+			},
+		]);
+
+		// Submit first direct prompt via runtimeHost
+		const firstSubmissionPromise = runtimeHost.submitPrompt({
+			requestId: "req-durable-1",
+			text: "First durable prompt",
+		});
+
+		// Wait briefly for first turn to begin streaming
+		while (!session.isStreaming) {
+			await new Promise((r) => setTimeout(r, 10));
+		}
+
+		// Submit second prompt via runtimeHost with followUp behavior
+		const queuedResult = await runtimeHost.submitPrompt({
+			requestId: "req-durable-2",
+			text: "Second durable queued prompt",
+			streamingBehavior: "followUp",
+		});
+		expect(queuedResult.status).toBe("accepted");
+		expect(queuedResult.queueItemId).toBeDefined();
+
+		// Release first response and let turn 1 complete
+		finishFirstResponse!();
+		await firstSubmissionPromise;
+
+		// Second turn should be processed
+		await expect.poll(() => receivedContexts.length, { timeout: 5000 }).toBe(2);
+
+		// First message has DURABLE_HOOK_FOR_First durable prompt
+		const firstUserMsg = receivedContexts[0].messages.find((m: any) => m.role === "user");
+		const firstText = firstUserMsg.content.map((c: any) => c.text).join("\n");
+		expect(firstText).toContain("DURABLE_HOOK_FOR_First durable prompt");
+
+		// Second message has DURABLE_HOOK_FOR_Second durable queued prompt
+		const secondUserMsg = receivedContexts[1].messages.find(
+			(m: any) => m.role === "user" && m.content.some((c: any) => c.text?.includes("Second durable queued prompt")),
+		);
+		expect(secondUserMsg).toBeDefined();
+		const secondText = secondUserMsg.content.map((c: any) => c.text).join("\n");
+		expect(secondText).toContain("DURABLE_HOOK_FOR_Second durable queued prompt");
+	});
+
+	it("cancels durable queue item when runtimeHost.submitPrompt followUp is blocked by hook", async () => {
+		const hook = makeScriptHook({
+			name: "durable-blocking-hook",
+			event: "UserPromptSubmit",
+			script: `
+				const fs = require('fs');
+				const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+				const text = input.prompt || input.text || "";
+				if (text.includes("blocked")) {
+					console.log(JSON.stringify({ decision: "block", reason: "Denied queued prompt by policy" }));
+				} else {
+					console.log(JSON.stringify({ decision: "allow" }));
+				}
+			`,
+		});
+
+		const { runtimeHost, session, faux, sessionManager } = await setupSession([hook]);
+
+		let finishFirstResponse: () => void;
+		const firstResponseGate = new Promise<void>((resolve) => {
+			finishFirstResponse = resolve;
+		});
+
+		faux.setResponses([
+			async () => {
+				await firstResponseGate;
+				return fauxAssistantMessage("First direct turn completed");
+			},
+		]);
+
+		try {
+			const firstSubmissionPromise = runtimeHost.submitPrompt({
+				requestId: "req-block-1",
+				text: "Allowed initial prompt",
+			});
+
+			while (!session.isStreaming) {
+				await new Promise((r) => setTimeout(r, 10));
+			}
+
+			// Submit second prompt that is blocked by the hook
+			await expect(
+				runtimeHost.submitPrompt({
+					requestId: "req-block-2",
+					text: "This is blocked prompt",
+					streamingBehavior: "followUp",
+				}),
+			).rejects.toThrow("Denied queued prompt by policy");
+
+			// Verify session runtime queue control entry recorded cancellation
+			const rawEntries = (sessionManager as any).rawFileEntries as any[];
+			const queueCancelled = rawEntries.find(
+				(c: any) => c.type === "runtime_queue" && c.state === "cancelled" && c.reason === "admission_failed",
+			);
+			expect(queueCancelled).toBeDefined();
+
+			// Complete first turn
+			finishFirstResponse!();
+			await firstSubmissionPromise;
+
+			// Provider was called only once (0 calls for the blocked prompt)
+			expect(faux.state.callCount).toBe(1);
+		} finally {
+			finishFirstResponse!();
+		}
 	});
 });

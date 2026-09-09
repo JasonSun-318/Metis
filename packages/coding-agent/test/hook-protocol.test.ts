@@ -3,9 +3,15 @@ import type { DeclarativeHook } from "../src/core/hooks/declarative-hooks.ts";
 import type { HookPayload, HookRunResult } from "../src/core/hooks/hook-bridge.ts";
 import {
 	buildCommandHookPayload,
+	EVENT_CONTEXT_TRUNCATED_MARKER,
+	HOOK_CONTEXT_TRUNCATED_MARKER,
 	interpretHookResult,
+	MAX_EVENT_TOTAL_CONTEXT_BYTES,
+	MAX_HOOK_CONTEXT_BYTES,
 	mapToolInput,
 	matchHook,
+	mergeEventContexts,
+	truncateHookContext,
 	validateHookMatcher,
 } from "../src/core/hooks/hook-protocol.ts";
 
@@ -434,5 +440,30 @@ describe("hook-protocol result interpreter matrix", () => {
 
 		const spawnErr = interpretHookResult(makeHook({ event: "PreToolUse" }), makeRun({ spawnError: "ENOENT" }));
 		expect(spawnErr.diagnostic).toContain("spawn");
+	});
+
+	it("legacy UserPromptSubmit exit code 2 does not block and remains observer-only", () => {
+		const legacyHook = makeHook({ protocol: undefined, event: "UserPromptSubmit" });
+		const result = interpretHookResult(legacyHook, makeRun({ code: 2, stdout: "Legacy note" }));
+		expect(result.blockReason).toBeUndefined();
+		expect(result.context).toBeUndefined();
+	});
+
+	it("truncates single hook context exceeding 8 KiB with explicit truncation marker", () => {
+		const longText = "A".repeat(10000);
+		const truncated = truncateHookContext(longText);
+		expect(Buffer.byteLength(truncated, "utf8")).toBeLessThanOrEqual(MAX_HOOK_CONTEXT_BYTES);
+		expect(truncated).toContain(HOOK_CONTEXT_TRUNCATED_MARKER.trim());
+	});
+
+	it("merges multiple hook contexts within 32 KiB budget and appends event truncation marker", () => {
+		const entries = Array.from({ length: 6 }, (_, i) => ({
+			hookName: `hook-${i}`,
+			context: "X".repeat(8192),
+		}));
+		const merged = mergeEventContexts(entries);
+		expect(merged).toBeDefined();
+		expect(Buffer.byteLength(merged!, "utf8")).toBeLessThanOrEqual(MAX_EVENT_TOTAL_CONTEXT_BYTES);
+		expect(merged).toContain(EVENT_CONTEXT_TRUNCATED_MARKER.trim());
 	});
 });

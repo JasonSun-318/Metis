@@ -14,6 +14,7 @@
  */
 
 import { type ChildProcess, spawn } from "node:child_process";
+import { StringDecoder } from "node:string_decoder";
 import { getShellEnv, killProcessTree } from "../../utils/shell.ts";
 import type { ExtensionAPI, ExtensionContext, InlineExtension } from "../extensions/types.ts";
 import {
@@ -28,6 +29,7 @@ import {
 	interpretHookResult,
 	MAX_PIPE_BUFFER_BYTES,
 	matchHook,
+	mergeEventContexts,
 } from "./hook-protocol.ts";
 
 /**
@@ -163,6 +165,10 @@ export function runHookProcess(
 			return;
 		}
 
+		const childPid = child.pid;
+		const stdoutDecoder = new StringDecoder("utf8");
+		const stderrDecoder = new StringDecoder("utf8");
+
 		let killTimer: NodeJS.Timeout | undefined;
 		let forceKillTimer: NodeJS.Timeout | undefined;
 		let abortListener: (() => void) | undefined;
@@ -174,10 +180,24 @@ export function runHookProcess(
 			if (abortListener) options.signal?.removeEventListener("abort", abortListener);
 		};
 
+		const terminateChildTree = () => {
+			if (childPid) {
+				killProcessTree(childPid);
+			}
+			try {
+				child.kill("SIGKILL");
+			} catch {}
+		};
+
 		const finish = (result: Partial<HookRunResult>) => {
 			if (finished) return;
 			finished = true;
+			if (timedOut || aborted) {
+				terminateChildTree();
+			}
 			cleanup();
+			stdout += stdoutDecoder.end();
+			stderr += stderrDecoder.end();
 			child.stdout?.destroy();
 			child.stderr?.destroy();
 			resolve({
@@ -194,21 +214,19 @@ export function runHookProcess(
 			});
 		};
 
-		const terminateChildTree = () => {
-			if (child.pid) {
-				killProcessTree(child.pid);
-			} else {
-				try {
-					child.kill("SIGKILL");
-				} catch {}
-			}
-		};
-
 		killTimer = setTimeout(() => {
 			timedOut = true;
 			try {
-				child.kill("SIGTERM");
-			} catch {}
+				if (childPid && process.platform !== "win32") {
+					process.kill(-childPid, "SIGTERM");
+				} else {
+					child.kill("SIGTERM");
+				}
+			} catch {
+				try {
+					child.kill("SIGTERM");
+				} catch {}
+			}
 			forceKillTimer = setTimeout(() => {
 				terminateChildTree();
 				finish({});
@@ -219,8 +237,16 @@ export function runHookProcess(
 			abortListener = () => {
 				aborted = true;
 				try {
-					child.kill("SIGTERM");
-				} catch {}
+					if (childPid && process.platform !== "win32") {
+						process.kill(-childPid, "SIGTERM");
+					} else {
+						child.kill("SIGTERM");
+					}
+				} catch {
+					try {
+						child.kill("SIGTERM");
+					} catch {}
+				}
 				forceKillTimer = setTimeout(() => {
 					terminateChildTree();
 					finish({});
@@ -237,10 +263,10 @@ export function runHookProcess(
 			if (stdoutBytes < MAX_PIPE_BUFFER_BYTES) {
 				const remaining = MAX_PIPE_BUFFER_BYTES - stdoutBytes;
 				if (chunk.length <= remaining) {
-					stdout += chunk.toString("utf8");
+					stdout += stdoutDecoder.write(chunk);
 					stdoutBytes += chunk.length;
 				} else {
-					stdout += chunk.subarray(0, remaining).toString("utf8");
+					stdout += stdoutDecoder.write(chunk.subarray(0, remaining));
 					stdoutBytes = MAX_PIPE_BUFFER_BYTES;
 					stdoutTruncated = true;
 				}
@@ -253,10 +279,10 @@ export function runHookProcess(
 			if (stderrBytes < MAX_PIPE_BUFFER_BYTES) {
 				const remaining = MAX_PIPE_BUFFER_BYTES - stderrBytes;
 				if (chunk.length <= remaining) {
-					stderr += chunk.toString("utf8");
+					stderr += stderrDecoder.write(chunk);
 					stderrBytes += chunk.length;
 				} else {
-					stderr += chunk.subarray(0, remaining).toString("utf8");
+					stderr += stderrDecoder.write(chunk.subarray(0, remaining));
 					stderrBytes = MAX_PIPE_BUFFER_BYTES;
 					stderrTruncated = true;
 				}
@@ -268,8 +294,12 @@ export function runHookProcess(
 		child.on("exit", (code, signal) => {
 			closeCode = code;
 			closeSignal = signal;
+			if (timedOut || aborted) {
+				terminateChildTree();
+			}
 			// Arm grace timer to release if grandchild holds stdio
 			exitTimer = setTimeout(() => {
+				terminateChildTree();
 				finish({});
 			}, EXIT_STDIO_GRACE_MS);
 		});
@@ -382,7 +412,7 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 						toolCallId: event.toolCallId,
 						input: event.input,
 					}));
-					for (const { hook, result, effect } of results) {
+					for (const { hook, effect } of results) {
 						if (effect?.blockReason) {
 							preToolContexts.delete(event.toolCallId);
 							const reason = effect.context
@@ -390,18 +420,13 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 								: effect.blockReason;
 							return { block: true, reason };
 						}
-						if (result.code === HOOK_BLOCK_EXIT_CODE) {
-							preToolContexts.delete(event.toolCallId);
-							const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
-							const suffix = output ? `: ${output}` : "";
-							return { block: true, reason: `Blocked by hook ${hook.name}${suffix}` };
-						}
 					}
-					const contexts = results
-						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
-						.filter((c): c is string => Boolean(c));
-					if (contexts.length > 0) {
-						preToolContexts.set(event.toolCallId, contexts.join("\n\n"));
+					const entries = results
+						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
+						.filter((c): c is { hookName: string; context: string } => Boolean(c));
+					const context = mergeEventContexts(entries);
+					if (context) {
+						preToolContexts.set(event.toolCallId, context);
 					}
 					return undefined;
 				});
@@ -429,13 +454,17 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 								)
 							: [];
 
-					const postContexts = results
-						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
-						.filter((c): c is string => Boolean(c));
+					const entries = results
+						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
+						.filter((c): c is { hookName: string; context: string } => Boolean(c));
 
-					const allContexts = [preContext, ...postContexts].filter((c): c is string => Boolean(c));
-					if (allContexts.length > 0) {
-						const combined = allContexts.join("\n\n");
+					const allEntries: Array<{ hookName: string; context: string }> = [];
+					if (preContext) {
+						allEntries.push({ hookName: "PreToolUse", context: preContext });
+					}
+					allEntries.push(...entries);
+					const combined = mergeEventContexts(allEntries);
+					if (combined) {
 						return {
 							content: [...event.content, { type: "text" as const, text: combined }],
 						};
@@ -449,10 +478,11 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 					const results = await runMatchingHooks(startHooks, "SessionStart", ctx, () => ({
 						reason: event.reason,
 					}));
-					const contexts = results
-						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
-						.filter((c): c is string => Boolean(c));
-					return contexts.length > 0 ? { context: contexts.join("\n\n") } : undefined;
+					const entries = results
+						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
+						.filter((c): c is { hookName: string; context: string } => Boolean(c));
+					const context = mergeEventContexts(entries);
+					return context ? { context } : undefined;
 				});
 			}
 
@@ -462,22 +492,18 @@ export function createDeclarativeHooksBridge(agentDir: string): InlineExtension 
 						text: event.text,
 						source: event.source,
 					}));
-					for (const { hook, result, effect } of results) {
+					for (const { effect } of results) {
 						if (effect?.blockReason) {
 							return { action: "block", reason: effect.blockReason };
 						}
-						if (result.code === HOOK_BLOCK_EXIT_CODE) {
-							const output = (result.stdout.trim() || result.stderr.trim()).split("\n")[0]?.trim();
-							const suffix = output ? `: ${output}` : "";
-							return { action: "block", reason: `Blocked by hook ${hook.name}${suffix}` };
-						}
 					}
-					const contexts = results
-						.map((r) => (r.effect?.context ? `[Hook: ${r.hook.name}]\n${r.effect.context}` : undefined))
-						.filter((c): c is string => Boolean(c));
+					const entries = results
+						.map((r) => (r.effect?.context ? { hookName: r.hook.name, context: r.effect.context } : undefined))
+						.filter((c): c is { hookName: string; context: string } => Boolean(c));
+					const context = mergeEventContexts(entries);
 					return {
 						action: "continue",
-						...(contexts.length > 0 ? { context: contexts.join("\n\n") } : {}),
+						...(context ? { context } : {}),
 					};
 				});
 			}

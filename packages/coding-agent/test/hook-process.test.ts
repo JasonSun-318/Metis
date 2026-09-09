@@ -200,4 +200,74 @@ describe("hook process execution and bounds", () => {
 		expect(envInfo.officeCliSkipUpdate).toBe("1");
 		expect(envInfo.hasPath).toBe(true);
 	});
+
+	it("decodes UTF-8 sequences split across stdout data chunks without corruption", async () => {
+		const childScript =
+			"process.stdout.write(Buffer.from([0xe2])); " +
+			"setTimeout(() => process.stdout.write(Buffer.from([0x82, 0xac, 0xe4, 0xbd])), 30); " +
+			"setTimeout(() => process.stdout.write(Buffer.from([0xa0, 0xe5, 0xa5, 0xbd])), 60); " +
+			"setTimeout(() => process.exit(0), 100);";
+
+		const hook = makeHook({
+			args: ["-e", childScript],
+			timeoutSeconds: 3,
+		});
+		const result = await runHookProcess(
+			hook,
+			{ event: "SessionStart", hook: { id: hook.id, name: hook.name }, sessionId: "s-utf8", cwd, timestamp: "t" },
+			{ cwd },
+		);
+
+		expect(result.code).toBe(0);
+		expect(result.stdout).toBe("€你好");
+	});
+
+	it("terminates process tree and does not leave inherited-stdio grandchild alive on timeout", async () => {
+		let grandchildPid: number | undefined;
+		const isAlive = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		try {
+			const childScript =
+				"const { spawn } = require('node:child_process'); " +
+				"const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 15000)'], { stdio: ['ignore', 1, 2] }); " +
+				"grandchild.unref(); " +
+				"process.stdout.write(String(grandchild.pid)); " +
+				"setTimeout(() => {}, 5000);";
+
+			const hook = makeHook({
+				args: ["-e", childScript],
+				timeoutSeconds: 1,
+			});
+
+			const result = await runHookProcess(
+				hook,
+				{
+					event: "SessionStart",
+					hook: { id: hook.id, name: hook.name },
+					sessionId: "s-clean",
+					cwd,
+					timestamp: "t",
+				},
+				{ cwd },
+			);
+
+			expect(result.timedOut).toBe(true);
+			grandchildPid = Number(result.stdout.trim());
+			expect(Number.isFinite(grandchildPid)).toBe(true);
+			expect(isAlive(grandchildPid!)).toBe(false);
+		} finally {
+			if (grandchildPid && isAlive(grandchildPid)) {
+				try {
+					process.kill(grandchildPid, "SIGKILL");
+				} catch {}
+			}
+		}
+	});
 });
