@@ -143,6 +143,23 @@ describe("declarative hooks config", () => {
 		expect(loaded.errors[0]).toContain("protocol");
 	});
 
+	it("validates command-v1 regex matchers and rejects matchers for Stop and UserPromptSubmit", () => {
+		expect(
+			validateDeclarativeHook(makeHook({ protocol: "command-v1", event: "PreToolUse", matcher: "Bash|Read" })),
+		).toBeNull();
+		expect(
+			validateDeclarativeHook(makeHook({ protocol: "command-v1", event: "PreToolUse", matcher: "[bad-regex(" })),
+		).toContain("regex");
+		expect(validateDeclarativeHook(makeHook({ protocol: "command-v1", event: "Stop", matcher: "bash" }))).toContain(
+			"not applicable",
+		);
+		expect(
+			validateDeclarativeHook(makeHook({ protocol: "command-v1", event: "UserPromptSubmit", matcher: "bash" })),
+		).toContain("not applicable");
+		// Legacy allows string matchers without regex check or event restrictions
+		expect(validateDeclarativeHook(makeHook({ protocol: "legacy", event: "Stop", matcher: "bash" }))).toBeNull();
+	});
+
 	it("reloading reflects removal of the last hook", () => {
 		const hook = makeHook();
 		saveDeclarativeHooks(agentDir, [hook]);

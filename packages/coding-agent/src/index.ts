@@ -231,12 +231,15 @@ export {
 	HOOK_DEFAULT_TIMEOUT_SECONDS,
 	HOOK_EVENT_NAMES,
 	HOOK_MAX_TIMEOUT_SECONDS,
+	HOOK_PROTOCOLS,
 	HOOK_RUN_MODES,
 	HOOKS_CONFIG_FILENAME,
 	type HookEventName,
+	type HookProtocol,
 	type HookRunMode,
 	hooksConfigPath,
 	isHookEventName,
+	isHookProtocol,
 	isHookRunMode,
 	loadDeclarativeHooks,
 	parseHookMatcher,
@@ -244,6 +247,18 @@ export {
 	validateDeclarativeHook,
 } from "./core/hooks/declarative-hooks.ts";
 export { createDeclarativeHooksBridge } from "./core/hooks/hook-bridge.ts";
+export {
+	buildCommandHookPayload,
+	COMPATIBLE_TOOL_ALIASES,
+	type HookEffect,
+	interpretHookResult,
+	MAX_EVENT_TOTAL_CONTEXT_BYTES,
+	MAX_HOOK_CONTEXT_BYTES,
+	mapToolInput,
+	matchHook,
+	truncateUtf8Bytes,
+	validateHookMatcher,
+} from "./core/hooks/hook-protocol.ts";
 export {
 	buildInteractiveBashReadOnlyRoots,
 	createInteractiveBashBoundary,

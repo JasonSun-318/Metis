@@ -65,6 +65,9 @@ export interface HookPayloadBase {
 	content?: unknown;
 	details?: unknown;
 	isError?: boolean;
+	error?: string;
+	stopHookActive?: boolean;
+	lastAssistantMessage?: string;
 }
 
 /** JSON written to the hook process's stdin. */

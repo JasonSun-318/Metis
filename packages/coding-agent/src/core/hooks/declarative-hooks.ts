@@ -11,6 +11,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
+import { validateHookMatcher } from "./hook-protocol.ts";
 
 export const HOOKS_CONFIG_FILENAME = "hooks.json";
 
@@ -137,6 +138,10 @@ export function validateDeclarativeHook(hook: DeclarativeHook): string | null {
 	}
 	if (hook.matcher !== undefined && typeof hook.matcher !== "string") {
 		return "Hook matcher must be a string";
+	}
+	const matcherError = validateHookMatcher(hook);
+	if (matcherError) {
+		return matcherError;
 	}
 	if (
 		hook.statusMessage !== undefined &&
