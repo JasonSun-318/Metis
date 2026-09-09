@@ -24,7 +24,7 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 	const menu = useRef<HTMLDivElement>(null);
 	const deleteItem = useRef<HTMLButtonElement>(null);
 	const updateMenuPosition = useCallback(() => {
-		if (trigger.current) setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 146, 2));
+		if (trigger.current) setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 200, 1));
 	}, []);
 	const closeMenu = (restoreFocus = true) => {
 		setMenuOpen(false);

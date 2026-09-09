@@ -41,6 +41,8 @@
 	--mode-switch-active: #383838;
 	--mode-switch-track-shadow: none;
 	--mode-switch-shadow: none;
+	--menu-bg: #202020;
+	--menu-hover: #343434;
 	--text: #ededed;
 	--text-muted: #787878;
 	--muted: #8c8c8c;
@@ -239,6 +241,8 @@
 	--mode-switch-active: #ffffff;
 	--mode-switch-track-shadow: none;
 	--mode-switch-shadow: 0 1px 2px rgb(0 0 0 / 8%);
+	--menu-bg: #ffffff;
+	--menu-hover: #eeedea;
 	--text: #252320;
 	--text-muted: #817d76;
 	--muted: #69655f;

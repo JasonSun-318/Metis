@@ -51,7 +51,9 @@ describe("Project sidebar motion", () => {
 		);
 		expect(action.background).toBe("var(--surface-18)");
 		expect(action.boxShadow).toBe("");
-		expect(rule(".session-action-menu").boxShadow).toBe("var(--overlay-shadow)");
+		expect(rule(".composer-add-menu, .composer-skill-menu, .session-action-menu").boxShadow).toBe(
+			"var(--overlay-shadow)",
+		);
 		expect(rule(".mode-switch").boxShadow).toBe("var(--mode-switch-track-shadow)");
 		expect(rule(".mode-switch-indicator").background).toBe("var(--mode-switch-active)");
 		expect(rule(".mode-switch-indicator").boxShadow).toBe("var(--mode-switch-shadow)");
@@ -96,7 +98,7 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-grouping-trigger").width).toBe("24px");
 		expect(rule(".session-grouping-trigger").height).toBe("24px");
 		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").background).toBe(
-			"var(--surface-07)",
+			"var(--menu-bg)",
 		);
 		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").boxShadow).toBe(
 			"var(--overlay-shadow)",
@@ -160,12 +162,12 @@ describe("Project sidebar motion", () => {
 		expect(rule(".account-mark img").objectFit).toBe("cover");
 		expect(rule(".account-menu-name").textOverflow).toBe("ellipsis");
 		const accountMenu = rule(".account-menu-popover");
-		expect(accountMenu.background).toBe("var(--surface-04)");
+		expect(accountMenu.background).toBe("var(--menu-bg)");
 		expect(accountMenu.border).toContain("var(--border-strong)");
-		expect(accountMenu.borderRadius).toBe("10px");
+		expect(accountMenu.borderRadius).toBe("8px");
 		expect(accountMenu.boxShadow).toBe("var(--overlay-shadow)");
 		const hover = rule(".account-menu-item:hover, .account-menu-item:focus-visible");
-		expect(hover.background).toBe("var(--surface-07)");
+		expect(hover.background).toBe("var(--menu-hover)");
 		expect(hover.boxShadow).toBe("");
 		expect(hover.outline).toBe("0px");
 	});

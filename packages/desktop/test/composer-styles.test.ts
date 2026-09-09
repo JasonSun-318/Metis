@@ -72,13 +72,13 @@ describe("Composer visual states", () => {
 		expect(activeAddButton.boxShadow).toBe("");
 		expect(activeAddButton.transform).toBe("none");
 
-		const menu = rule(".composer-add-menu, .composer-skill-menu");
-		expect(menu.minWidth).toBe("218px");
+		const menu = rule(".composer-add-menu, .composer-skill-menu, .session-action-menu");
+		expect(menu.minWidth).toBe("200px");
 		const skillMenu = rule(".composer-skill-menu");
-		expect(skillMenu.minWidth).toBe("190px");
+		expect(skillMenu.minWidth).toBe("180px");
 
-		const item = rule(".composer-add-menu button, .composer-skill-menu button");
-		expect(item.fontSize).toBe("14px");
+		const item = rule(".composer-add-menu button, .composer-skill-menu button, .session-action-menu button");
+		expect(item.fontSize).toBe("12px");
 		expect(item.gap).toBe("8px");
 		expect(item.padding).toBe("0px 8px");
 	});

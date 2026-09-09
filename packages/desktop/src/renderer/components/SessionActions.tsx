@@ -50,8 +50,11 @@ export function SessionActions({
 	const renameInput = useRef<HTMLInputElement>(null);
 	const cancelButton = useRef<HTMLButtonElement>(null);
 	const updateMenuPosition = useCallback(() => {
-		if (trigger.current) setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 146, 2));
-	}, []);
+		if (trigger.current) {
+			const itemCount = Number(Boolean(onPin)) + Number(Boolean(onCopy)) + Number(allowRename) + 1;
+			setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 200, itemCount));
+		}
+	}, [allowRename, onCopy, onPin]);
 
 	const closeMenu = (restoreFocus = true) => {
 		setMenuOpen(false);
