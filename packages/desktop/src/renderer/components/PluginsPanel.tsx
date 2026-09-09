@@ -154,6 +154,72 @@ function eventLabelKey(event: HookEventNameView): string {
 	}
 }
 
+function eventEffectKey(event: HookEventNameView, protocol?: string): string {
+	if (protocol === "command-v1") {
+		switch (event) {
+			case "SessionStart":
+				return "Injects startup context into the first model prompt.";
+			case "UserPromptSubmit":
+				return "Injects prompt context or blocks prompt execution.";
+			case "PreToolUse":
+				return "Injects tool context or denies/blocks tool execution.";
+			case "PostToolUse":
+				return "Appends diagnostic or feedback context to successful tool results.";
+			case "PostToolUseFailure":
+				return "Appends diagnostic or remediation context to failed tool results.";
+			case "Stop":
+				return "Requests agent continuation before final settlement.";
+		}
+	}
+	switch (event) {
+		case "SessionStart":
+			return "Observes session startup.";
+		case "UserPromptSubmit":
+			return "Observes user prompt submission.";
+		case "PreToolUse":
+			return "Can block tool execution with exit code 2.";
+		case "PostToolUse":
+			return "Observes successful tool execution.";
+		case "PostToolUseFailure":
+			return "Observes tool execution failure.";
+		case "Stop":
+			return "Observes completion after turn has settled.";
+	}
+}
+
+function eventTimingKey(event: HookEventNameView, protocol?: string): string {
+	if (protocol === "command-v1") {
+		switch (event) {
+			case "SessionStart":
+				return "Runs once when the session is initialized or reloaded.";
+			case "UserPromptSubmit":
+				return "Runs immediately before prompt template expansion and model request.";
+			case "PreToolUse":
+				return "Runs before the tool is invoked by the agent.";
+			case "PostToolUse":
+				return "Runs immediately after a tool finishes successfully.";
+			case "PostToolUseFailure":
+				return "Runs immediately after a tool fails or exits with an error.";
+			case "Stop":
+				return "Runs before final settlement, allowing continuation.";
+		}
+	}
+	switch (event) {
+		case "SessionStart":
+			return "Runs once when the session is initialized or reloaded.";
+		case "UserPromptSubmit":
+			return "Runs before prompt processing.";
+		case "PreToolUse":
+			return "Runs before tool execution.";
+		case "PostToolUse":
+			return "Runs after tool execution.";
+		case "PostToolUseFailure":
+			return "Runs after tool failure.";
+		case "Stop":
+			return "Runs after the agent has fully settled.";
+	}
+}
+
 function RemoveHookDialog({ error, hook, onCancel, onRemove, pending }: {
 	readonly error: string | null;
 	readonly hook: DeclarativeHookView;
@@ -712,6 +778,7 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				name: draft.name.trim(),
 				enabled: draft.enabled,
 				event: draft.event,
+				protocol: draft.protocol,
 				matcher: draft.matcher.trim() || undefined,
 				runMode: draft.runMode,
 				command: draft.command.trim(),
@@ -841,7 +908,7 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				<div>
 					<h1 id="plugins-title" ref={detailHeading} tabIndex={-1}>{selectedHook.name}</h1>
 					<p>{selectedHook.statusMessage || selectedHook.command}</p>
-					<span>{t(eventLabelKey(selectedHook.event))} · {selectedHook.runMode === "shell" ? t("Shell command") : t("Direct process")} · {selectedHook.enabled ? t("Enabled") : t("Disabled")}</span>
+					<span>{selectedHook.protocol ?? "legacy"} · {t(eventLabelKey(selectedHook.event))} · {selectedHook.runMode === "shell" ? t("Shell command") : t("Direct process")} · {selectedHook.enabled ? t("Enabled") : t("Disabled")}</span>
 				</div>
 				<div className="plugins-detail-actions">
 					<button onClick={() => void toggleHookEnabled(selectedHook)} type="button">
@@ -860,6 +927,10 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				<article className="plugins-detail-document">
 					<h3>{t("Command")}</h3>
 					<pre className="plugins-hook-command-preview"><code>{selectedHook.command} {selectedHook.args?.join(" ")}</code></pre>
+					<h3>{t("Event effect")}</h3>
+					<p>{t(eventEffectKey(selectedHook.event, selectedHook.protocol))}</p>
+					<h3>{t("Execution timing")}</h3>
+					<p>{t(eventTimingKey(selectedHook.event, selectedHook.protocol))}</p>
 					{selectedHook.statusMessage && <>
 						<h3>{t("Status message")}</h3>
 						<p>{selectedHook.statusMessage}</p>
@@ -875,9 +946,10 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				</article>
 				<aside className="plugins-detail-meta">
 					<dl>
+						<dt>{t("Protocol")}</dt><dd>{selectedHook.protocol ?? "legacy"}</dd>
 						<dt>{t("Event")}</dt><dd>{t(eventLabelKey(selectedHook.event))}</dd>
 						<dt>{t("Run mode")}</dt><dd>{selectedHook.runMode === "shell" ? t("Shell command") : t("Direct process")}</dd>
-						<dt>{t("Timeout")}</dt><dd>{selectedHook.timeoutSeconds ? `${selectedHook.timeoutSeconds}s` : t("Default (30s)")}</dd>
+						<dt>{t("Timeout")}</dt><dd>{selectedHook.timeoutSeconds ? `${selectedHook.timeoutSeconds}s` : t("Default (60s)")}</dd>
 						<dt>{t("Status")}</dt><dd>{selectedHook.enabled ? t("Active") : t("Disabled")}</dd>
 					</dl>
 				</aside>

@@ -1482,6 +1482,7 @@ export type EmbeddingSettingsView = Static<typeof EmbeddingSettingsViewSchema>;
 export type RerankSettingsView = Static<typeof RerankSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;
 export type HookRunModeView = Static<typeof HookRunModeSchema>;
+export type HookProtocolView = Static<typeof HookProtocolSchema>;
 export type DeclarativeHookView = Static<typeof DeclarativeHookViewSchema>;
 export type HooksListView = Static<typeof HooksListViewSchema>;
 export type UsageRangeDays = Static<typeof UsageRangeDaysSchema>;

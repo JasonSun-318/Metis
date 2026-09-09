@@ -1,4 +1,9 @@
-import type { DeclarativeHookView, HookEventNameView, HookRunModeView } from "@metis/app-protocol";
+import type {
+	DeclarativeHookView,
+	HookEventNameView,
+	HookProtocolView,
+	HookRunModeView,
+} from "@metis/app-protocol";
 import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -42,6 +47,7 @@ export interface HookDraft {
 	name: string;
 	enabled: boolean;
 	event: HookEventNameView;
+	protocol: HookProtocolView;
 	matcher: string;
 	runMode: HookRunModeView;
 	command: string;
@@ -71,6 +77,9 @@ export function HookEditorDialog({
 	const [name, setName] = useState(initial?.name ?? "");
 	const [enabled, setEnabled] = useState(initial?.enabled ?? true);
 	const [event, setEvent] = useState<HookEventNameView>(initial?.event ?? "PreToolUse");
+	const [protocol, setProtocol] = useState<HookProtocolView>(
+		initial?.protocol ?? (mode === "create" ? "command-v1" : "legacy"),
+	);
 	const [matcher, setMatcher] = useState(initial?.matcher ?? "");
 	const [runMode, setRunMode] = useState<HookRunModeView>(initial?.runMode ?? "process");
 	const [command, setCommand] = useState(initial?.command ?? "");
@@ -83,6 +92,20 @@ export function HookEditorDialog({
 	);
 	const [localError, setLocalError] = useState<string | null>(null);
 
+	const isMatcherApplicable =
+		protocol === "legacy"
+			? TOOL_EVENTS.includes(event)
+			: event === "SessionStart" || TOOL_EVENTS.includes(event);
+
+	let matcherRegexError: string | null = null;
+	if (protocol === "command-v1" && isMatcherApplicable && matcher.trim().length > 0 && matcher.trim() !== "*") {
+		try {
+			new RegExp(matcher.trim());
+		} catch (err) {
+			matcherRegexError = err instanceof Error ? err.message : String(err);
+		}
+	}
+
 	const submit = (e: FormEvent) => {
 		e.preventDefault();
 		if (!name.trim()) {
@@ -92,6 +115,16 @@ export function HookEditorDialog({
 		if (!command.trim()) {
 			setLocalError(t("Enter a command."));
 			return;
+		}
+		if (protocol === "command-v1") {
+			if (!isMatcherApplicable && matcher.trim().length > 0) {
+				setLocalError(t("Matcher is not supported for this event in command-v1."));
+				return;
+			}
+			if (matcherRegexError) {
+				setLocalError(`${t("Invalid regular expression.")}: ${matcherRegexError}`);
+				return;
+			}
 		}
 		const timeoutSeconds = timeout.trim() === "" ? undefined : Number(timeout);
 		if (timeoutSeconds !== undefined && (!Number.isInteger(timeoutSeconds) || timeoutSeconds < 1 || timeoutSeconds > 600)) {
@@ -116,6 +149,7 @@ export function HookEditorDialog({
 			name: name.trim(),
 			enabled,
 			event,
+			protocol,
 			matcher: matcher.trim(),
 			runMode,
 			command: command.trim(),
@@ -153,6 +187,23 @@ export function HookEditorDialog({
 					/>
 				</label>
 				<label>
+					{t("Protocol")}
+					<MenuSelect
+						ariaLabel={t("Protocol")}
+						className="hook-menu-select"
+						disabled={pending}
+						onChange={(val) => setProtocol(val as HookProtocolView)}
+						options={[
+							{ value: "command-v1", label: t("command-v1 (Structured command)") },
+							{ value: "legacy", label: t("legacy (Traditional command)") },
+						]}
+						value={protocol}
+					/>
+					<p className="hook-protocol-hint">
+						{t("Structured command hooks can return context and decisions; legacy command hooks preserve previous behavior.")}
+					</p>
+				</label>
+				<label>
 					{t("Event")}
 					<MenuSelect
 						ariaLabel={t("Event")}
@@ -166,17 +217,54 @@ export function HookEditorDialog({
 						value={event}
 					/>
 				</label>
-				{TOOL_EVENTS.includes(event) && (
+				{isMatcherApplicable ? (
 					<label>
-						{t("Tool matcher (Regex / Tool name)")}
+						{protocol === "command-v1" && event === "SessionStart"
+							? t("Reason matcher (Regex)")
+							: protocol === "command-v1"
+								? t("Tool matcher (Regex)")
+								: t("Tool matcher (Regex / Tool name)")}
 						<input
 							disabled={pending}
 							onChange={(e) => setMatcher(e.target.value)}
-							placeholder="write_to_file|edit_file"
+							placeholder={
+								protocol === "command-v1" && event === "SessionStart"
+									? "startup|reload"
+									: "bash|read|write"
+							}
 							value={matcher}
 						/>
+						{protocol === "command-v1" && (
+							<p className="hook-field-hint">
+								{event === "SessionStart"
+									? t("Regular expression matching the session start reason (startup, reload, clear).")
+									: t("Regular expression matching tool names.")}
+							</p>
+						)}
+						{matcherRegexError && (
+							<p className="hook-field-error" role="alert">
+								{t("Invalid regular expression.")}: {matcherRegexError}
+							</p>
+						)}
 					</label>
-				)}
+				) : protocol === "command-v1" ? (
+					<label>
+						{t("Matcher")}
+						<input
+							disabled={true}
+							placeholder={t("Matcher is not supported for this event in command-v1.")}
+							value=""
+						/>
+						<p className="hook-field-hint">
+							{t("Matcher is not supported for this event in command-v1.")}
+						</p>
+						{matcher.trim().length > 0 && (
+							<p className="hook-field-error" role="alert">
+								{t("Matcher is not supported for this event in command-v1.")}
+							</p>
+						)}
+					</label>
+				) : null}
 				<label>
 					{t("Run mode")}
 					<MenuSelect
@@ -243,7 +331,7 @@ export function HookEditorDialog({
 									max={600}
 									min={1}
 									onChange={(e) => setTimeoutVal(e.target.value)}
-									placeholder="30"
+									placeholder="60"
 									type="number"
 									value={timeout}
 								/>
