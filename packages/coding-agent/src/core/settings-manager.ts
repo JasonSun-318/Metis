@@ -106,6 +106,7 @@ export interface McpStdioServerSettings extends McpCommonServerSettings {
 export interface McpHttpServerSettings extends McpCommonServerSettings {
 	url: string;
 	bearerTokenEnvVar?: string;
+	httpHeaders?: Record<string, string>;
 	envHttpHeaders?: Record<string, string>;
 	command?: never;
 }

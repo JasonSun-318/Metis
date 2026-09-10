@@ -35,6 +35,8 @@ export interface ResolvedMcpServerConfig {
 	bearerTokenEnvVar?: string;
 	httpHeaders?: Record<string, string>;
 	httpHeaderEnv?: Record<string, string>;
+	headerTemplates?: Record<string, string>;
+	missingHeaderVars?: string[];
 }
 
 export function resolvePluginTemplateVariables(value: string, context: { pluginRoot: string; cwd: string }): string {
@@ -57,16 +59,47 @@ export function resolvePluginTemplateVariables(value: string, context: { pluginR
 	);
 }
 
+export function resolveMcpHeaderTemplates(
+	templates: Readonly<Record<string, string>>,
+	environment: Readonly<Record<string, string | undefined>>,
+): { headers: Record<string, string>; missing: string[] } {
+	const missing = new Set<string>();
+	const headers: Record<string, string> = {};
+	for (const [key, template] of Object.entries(templates)) {
+		let complete = true;
+		const value = template.replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, (_match, name: string) => {
+			const found = environment[name];
+			if (found === undefined) {
+				missing.add(name);
+				complete = false;
+				return "";
+			}
+			return found;
+		});
+		if (complete) headers[key] = value;
+	}
+	return { headers, missing: [...missing].sort() };
+}
+
 export interface ResolvedMcpSettings {
 	servers: ResolvedMcpServerConfig[];
 }
 
-type McpFingerprintSource = Pick<ResolvedMcpServerConfig, "transport" | "url" | "command" | "args" | "cwd">;
+export type McpFingerprintSource = Pick<ResolvedMcpServerConfig, "transport" | "url" | "command" | "args" | "cwd"> &
+	Partial<Pick<ResolvedMcpServerConfig, "bearerTokenEnvVar" | "headerTemplates" | "httpHeaders" | "httpHeaderEnv">>;
 
 export function mcpServerFingerprint(config: McpFingerprintSource): string {
 	const identity =
 		config.transport === "http"
-			? ["http", config.url?.href]
+			? [
+					"http",
+					config.url?.href,
+					config.bearerTokenEnvVar,
+					Object.entries(config.headerTemplates ?? config.httpHeaders ?? {}).sort(([a], [b]) =>
+						a.localeCompare(b),
+					),
+					Object.entries(config.httpHeaderEnv ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+				]
 			: ["stdio", config.command, config.args ?? [], config.cwd];
 	return createHash("sha256").update(JSON.stringify(identity)).digest("hex");
 }
@@ -205,6 +238,7 @@ export function resolveMcpServerSettings(
 	) {
 		throw new Error("Invalid MCP bearerTokenEnvVar; expected a non-empty string");
 	}
+	const rawHttpHeaders = stringRecord(http.httpHeaders, "httpHeaders") ?? {};
 	const envHttpHeaders = stringRecord(http.envHttpHeaders, "envHttpHeaders") ?? {};
 	let url: URL;
 	try {
@@ -218,11 +252,13 @@ export function resolveMcpServerSettings(
 	if (url.username || url.password) {
 		throw new Error(`MCP server "${name}" URL must not contain credentials`);
 	}
-	const httpHeaders = Object.fromEntries(
+	const templateResolution = resolveMcpHeaderTemplates(rawHttpHeaders, environment);
+	const fromEnv = Object.fromEntries(
 		Object.entries(envHttpHeaders).flatMap(([header, envName]) =>
 			environment[envName] === undefined ? [] : ([[header, environment[envName]]] as const),
 		),
 	);
+	const httpHeaders = { ...templateResolution.headers, ...fromEnv };
 	return withCredentialKey({
 		...common,
 		transport: "http",
@@ -231,10 +267,12 @@ export function resolveMcpServerSettings(
 		bearerTokenEnvVar: http.bearerTokenEnvVar,
 		httpHeaders,
 		httpHeaderEnv: envHttpHeaders,
+		headerTemplates: rawHttpHeaders,
+		missingHeaderVars: templateResolution.missing,
 	});
 }
 
-function resolvePluginMcpSettings(comp: PluginMcpComponent, cwd: string): McpServerSettings {
+export function resolvePluginMcpSettings(comp: PluginMcpComponent, cwd: string): McpServerSettings {
 	const vars = { pluginRoot: comp.packageDir, cwd };
 	const def = comp.definition;
 	if (typeof def.command === "string") {
@@ -259,9 +297,16 @@ function resolvePluginMcpSettings(comp: PluginMcpComponent, cwd: string): McpSer
 	}
 	if (typeof def.url === "string") {
 		const resolvedUrl = resolvePluginTemplateVariables(def.url, vars);
+		const resolvedHeaders: Record<string, string> = {};
+		if (def.httpHeaders) {
+			for (const [k, v] of Object.entries(def.httpHeaders)) {
+				resolvedHeaders[k] = resolvePluginTemplateVariables(v, vars);
+			}
+		}
 		return {
 			...def,
 			url: resolvedUrl,
+			...(def.httpHeaders ? { httpHeaders: resolvedHeaders } : {}),
 		};
 	}
 	return def;

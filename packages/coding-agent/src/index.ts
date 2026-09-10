@@ -295,10 +295,15 @@ export {
 	mcpCredentialState,
 	mcpCredentialStatus,
 	mcpServerFingerprint,
+	pluginMcpCredentialKeys,
+	type ResolvedMcpServerConfig,
+	resolveMcpHeaderTemplates,
 	resolveMcpServerDefinitions,
 	resolveMcpServerSettings,
 	resolveMcpSettings,
+	resolvePluginMcpSettings,
 	resolvePluginTemplateVariables,
+	storePluginMcpCredential,
 } from "./core/mcp/index.ts";
 export { embedTexts } from "./core/memory/memory-embedder.ts";
 export { clearMemoryHealth, getLatestMemoryError } from "./core/memory/memory-health.ts";

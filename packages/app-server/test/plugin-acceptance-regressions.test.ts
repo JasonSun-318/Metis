@@ -1,7 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readPluginSnapshot, resolveMcpServerDefinitions, withPluginRegistryLock } from "@metis/coding-agent";
+import {
+	readPluginSnapshot,
+	resolveMcpServerDefinitions,
+	resolveMcpServerSettings,
+	withPluginRegistryLock,
+} from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { parsePluginManifest } from "../src/plugin-manifests.ts";
 import { fetchPluginFiles, inspectRepositorySource } from "../src/plugin-sources.ts";
@@ -205,6 +210,28 @@ describe("Plugin acceptance regressions", () => {
 			]),
 		});
 		expect(p.issues.length).toBeGreaterThan(0);
+	});
+
+	it("R11 http headers must map to httpHeaders not envHttpHeaders", () => {
+		const parsed = parsePluginManifest({
+			format: "claude",
+			manifest: {
+				name: "fixture",
+				mcpServers: {
+					remote: {
+						type: "http",
+						url: "https://example.com/mcp",
+						headers: { "X-Test": "literal-value" },
+					},
+				},
+			},
+			files: new Map(),
+		});
+		const remote = parsed.components.find((c) => c.kind === "mcp");
+		if (!remote || remote.kind !== "mcp") throw new Error("Expected remote MCP");
+		expect(resolveMcpServerSettings(remote.name, remote.definition, "/tmp", {}).httpHeaders).toEqual({
+			"X-Test": "literal-value",
+		});
 	});
 
 	it("R13 plugin MCP must coexist with manual same display name", () => {

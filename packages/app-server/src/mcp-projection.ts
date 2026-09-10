@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import type {
 	ClientParams,
 	McpCatalogEntryView,
@@ -11,6 +10,7 @@ import {
 	type McpServerStatus,
 	type McpStdioServerSettings,
 	mcpConfigurationRevision,
+	type ResolvedMcpServerConfig,
 	resolveMcpServerSettings,
 	type SettingsManager,
 } from "@metis/coding-agent";
@@ -227,6 +227,7 @@ export function publicMcpServers(
 	settingsManager: SettingsManager,
 	options: {
 		statuses?: readonly McpServerStatus[];
+		serverConfigs?: readonly ResolvedMcpServerConfig[];
 		credentialStatus?: (
 			scope: "user" | "project",
 			name: string,
@@ -238,6 +239,7 @@ export function publicMcpServers(
 	const user = settingsManager.getGlobalSettings().mcpServers ?? {};
 	const project = settingsManager.getProjectSettings().mcpServers ?? {};
 	const statusByName = new Map((options.statuses ?? []).map((status) => [status.name, status]));
+	const serverConfigByName = new Map((options.serverConfigs ?? []).map((c) => [c.name, c]));
 	const rows: McpServerSummaryView[] = [];
 	for (const [name, server] of Object.entries(user)) {
 		if (name.length === 0 || name.length > 256) continue;
@@ -272,36 +274,50 @@ export function publicMcpServers(
 	}
 	for (const status of options.statuses ?? []) {
 		if (!status.pluginOwner) continue;
-		const originalName = status.originalName ?? status.name;
-		const effective =
-			!(originalName in user) && !(originalName in project) && !(status.name in user) && !(status.name in project);
-		const credentialStatus = options.credentialStatus?.("user", status.name, { command: "plugin" }, effective);
-		const serverInfoName = status.serverInfo?.name.slice(0, 256);
-		rows.push({
-			name: status.name,
-			originalName: status.originalName,
-			pluginOwner: status.pluginOwner,
-			scope: "plugin",
-			effective,
-			revision: createHash("sha256")
-				.update(JSON.stringify(["plugin", status.name, status.pluginOwner]))
-				.digest("hex"),
-			transport: status.transport,
-			enabled: status.state !== "disabled",
-			required: status.required,
-			state: status.state,
-			credentialConfigured: credentialStatus?.configured ?? false,
-			toolCount: status.toolCount,
-			resourceCount: status.resourceCount,
-			resourceTemplateCount: status.resourceTemplateCount,
-			promptCount: status.promptCount,
-			capabilities: status.capabilities,
-			disabledTools: [],
-			...(status.serverInfo && serverInfoName
-				? { serverInfo: { name: serverInfoName, version: status.serverInfo.version.slice(0, 16_000) } }
-				: {}),
-			...(status.lastError ? { lastError: status.lastError.slice(0, 16_000) } : {}),
-		});
+		const effective = !(status.name in user) && !(status.name in project);
+		const config = serverConfigByName.get(status.name);
+		const serverSettings: McpServerSettings = config
+			? config.transport === "http"
+				? {
+						url: config.url ? String(config.url) : "",
+						bearerTokenEnvVar: config.bearerTokenEnvVar,
+						httpHeaders: config.headerTemplates ?? config.httpHeaders,
+						envHttpHeaders: config.httpHeaderEnv,
+						enabled: config.enabled,
+						required: config.required,
+						startupTimeoutSec: config.startupTimeoutMs / 1000,
+						toolTimeoutSec: config.toolTimeoutMs / 1000,
+						description: config.description,
+					}
+				: {
+						command: config.command ?? "",
+						args: config.args,
+						cwd: config.cwd,
+						env: config.env,
+						enabled: config.enabled,
+						required: config.required,
+						startupTimeoutSec: config.startupTimeoutMs / 1000,
+						toolTimeoutSec: config.toolTimeoutMs / 1000,
+						description: config.description,
+					}
+			: status.transport === "http"
+				? { url: "https://unknown.plugin", enabled: status.state !== "disabled", required: status.required }
+				: { command: "plugin", enabled: status.state !== "disabled", required: status.required };
+
+		const credentialStatus = options.credentialStatus?.("user", status.name, serverSettings, effective);
+		rows.push(
+			publicMcpServer({
+				scope: "plugin",
+				name: status.name,
+				originalName: status.originalName,
+				pluginOwner: status.pluginOwner,
+				server: serverSettings,
+				effective,
+				status,
+				credentialConfigured: credentialStatus?.configured ?? false,
+				credentialState: credentialStatus?.revisionState,
+			}),
+		);
 	}
 	const scopePriority = (scope: "user" | "project" | "plugin") => {
 		if (scope === "user") return 0;

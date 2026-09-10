@@ -342,7 +342,8 @@ export class McpServerClient {
 			const missingHeaders = Object.entries(this.config.httpHeaderEnv ?? {}).filter(
 				([header]) => !this.config.httpHeaders?.[header],
 			);
-			if (missingBearer || missingHeaders.length > 0) {
+			const missingTemplates = (this.config.missingHeaderVars ?? []).length > 0;
+			if (missingBearer || missingHeaders.length > 0 || missingTemplates) {
 				const error = new Error("Missing required authentication configuration or environment variables");
 				this.setState("auth_required", error);
 				throw error;

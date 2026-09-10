@@ -668,7 +668,7 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 					originalName: serverName,
 					definition: {
 						url,
-						envHttpHeaders:
+						httpHeaders:
 							typeof srv.headers === "object" && srv.headers !== null
 								? (srv.headers as Record<string, string>)
 								: undefined,
@@ -825,6 +825,10 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 					originalName: serverName,
 					definition: {
 						url: srv.url,
+						httpHeaders:
+							typeof srv.headers === "object" && srv.headers !== null
+								? (srv.headers as Record<string, string>)
+								: undefined,
 						enabled: true,
 					},
 				});

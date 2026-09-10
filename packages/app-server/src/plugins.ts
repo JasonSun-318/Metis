@@ -3,11 +3,13 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, sta
 import { dirname, join } from "node:path";
 import type { PluginInspectionView, PluginUpdateInspectionView } from "@metis/app-protocol";
 import {
+	AuthStorage,
 	type CapabilityKind,
 	getPluginCacheDir,
 	getPluginPackageDir,
 	getPluginPackagesDir,
 	type MarketRecord,
+	type McpCredentialIdentity,
 	type NormalizedComponent,
 	type NormalizedPluginPackage,
 	OFFICIAL_MARKET_ID,
@@ -15,7 +17,9 @@ import {
 	type PluginIssue,
 	type PluginRecord,
 	type PluginRegistry,
+	pluginMcpCredentialKeys,
 	readPluginRegistry,
+	readPluginSnapshot,
 	withPluginRegistryLock,
 } from "@metis/coding-agent";
 import { type FetchImplementation, validArchivePath } from "./github-archive.ts";
@@ -109,16 +113,61 @@ export function makeComponentId(pluginId: string, originalName: string): string 
 	return `${prefix}${slug || "comp"}`;
 }
 
+function getPluginMcpIdentities(agentDir: string, plugin: PluginRecord): McpCredentialIdentity[] {
+	const packageDir = getPluginPackageDir(agentDir, plugin.id, plugin.commit);
+	const normalizedPath = join(packageDir, ".metis-plugin.json");
+	try {
+		const normalized = JSON.parse(readFileSync(normalizedPath, "utf8"));
+		if (Array.isArray(normalized.components)) {
+			return normalized.components
+				.filter((c: any) => c.kind === "mcp" && typeof c.name === "string")
+				.map((c: any) => ({ scope: "user" as const, name: c.name as string }));
+		}
+	} catch {
+		// Fallback to reading snapshot
+	}
+	const snapshot = readPluginSnapshot(agentDir);
+	return snapshot.mcp
+		.filter((c) => c.owner.pluginId === plugin.id)
+		.map((c) => ({ scope: "user" as const, name: c.name }));
+}
+
 export class PluginService {
 	private readonly agentDir: string;
 	private readonly fetchImpl: FetchImplementation;
+	private readonly authStorage: AuthStorage;
 	private readonly inspectionCache = new Map<string, InspectionCacheData>();
 
-	constructor(agentDir: string, fetchImpl: FetchImplementation = globalThis.fetch) {
+	constructor(agentDir: string, fetchImpl: FetchImplementation = globalThis.fetch, authStorage?: AuthStorage) {
 		this.agentDir = agentDir;
 		this.fetchImpl = fetchImpl;
+		this.authStorage = authStorage ?? AuthStorage.create(join(agentDir, "auth.json"));
 		// Ensure registry is initialized
 		readPluginRegistry(this.agentDir);
+		try {
+			this.drainPendingCredentialCleanup();
+		} catch {
+			// Ignore init failure
+		}
+	}
+
+	drainPendingCredentialCleanup(targetKeys?: readonly string[]): void {
+		const registry = readPluginRegistry(this.agentDir);
+		const pending = registry.pendingCredentialCleanup;
+		if (!pending || pending.length === 0) return;
+		const keysToClean = targetKeys ? pending.filter((k) => targetKeys.includes(k)) : [...pending];
+		if (keysToClean.length === 0) return;
+
+		this.authStorage.applyChanges(keysToClean.map((provider) => ({ provider, credential: undefined })));
+
+		withPluginRegistryLock(this.agentDir, (current) => {
+			const remaining = (current.pendingCredentialCleanup ?? []).filter((k) => !keysToClean.includes(k));
+			const next: PluginRegistry = {
+				...current,
+				pendingCredentialCleanup: remaining.length > 0 ? remaining : undefined,
+			};
+			return { next, result: undefined };
+		});
 	}
 
 	listMarkets(): { markets: MarketRecord[]; selectedSourceId: string; registryRevision: number } {
@@ -460,9 +509,7 @@ export class PluginService {
 				repository: params.resolved.repository,
 				subdir: params.resolved.subdir,
 				commit: params.resolved.commit,
-				trackingRef: params.trackingRef,
-				pinnedCommit: params.pinnedCommit,
-				manifestHints: params.manifestHints,
+				...(params.trackingRef !== undefined ? { trackingRef: params.trackingRef } : {}),
 				sourceId: params.sourceId,
 			},
 			components,
@@ -513,10 +560,10 @@ export class PluginService {
 			resolved,
 			format: entry.formatHint,
 			manifestHints: {
-				name: entry.name,
-				description: entry.description,
-				strict: entry.strict,
-				skills: entry.skills,
+				...(entry.name !== undefined ? { name: entry.name } : {}),
+				...(entry.description !== undefined ? { description: entry.description } : {}),
+				...(entry.strict !== undefined ? { strict: entry.strict } : {}),
+				...(entry.skills !== undefined ? { skills: entry.skills } : {}),
 			},
 			registryRevision: registry.revision,
 			trackingRef: market.trackingRef,
@@ -548,6 +595,25 @@ export class PluginService {
 
 		// Stage package files
 		const pluginId = inspection.plugin.id;
+		const currentRegistry = readPluginRegistry(this.agentDir);
+		if (currentRegistry.pendingCredentialCleanup && currentRegistry.pendingCredentialCleanup.length > 0) {
+			const prefix = `p-${pluginId.slice(0, 16)}-`;
+			const matchingKeys = currentRegistry.pendingCredentialCleanup.filter(
+				(k) => k.includes(prefix) || k.includes(pluginId),
+			);
+			if (matchingKeys.length > 0) {
+				try {
+					this.drainPendingCredentialCleanup(matchingKeys);
+				} catch {
+					// Failure to drain will be caught below
+				}
+				const latestRegistry = readPluginRegistry(this.agentDir);
+				if (matchingKeys.some((k) => (latestRegistry.pendingCredentialCleanup ?? []).includes(k))) {
+					throw new AppServerError("OPERATION_FAILED", { requestId: input.requestId });
+				}
+			}
+		}
+
 		const commit = inspection.commit;
 		const stagingDir = join(getPluginPackagesDir(this.agentDir), pluginId, `.staging-${randomUUID()}`);
 
@@ -812,20 +878,34 @@ export class PluginService {
 		registryRevision: number;
 		activation: PluginActivationStatus;
 	} {
-		return withPluginRegistryLock(this.agentDir, (current) => {
+		try {
+			this.drainPendingCredentialCleanup();
+		} catch {
+			// Ignore prior drain errors
+		}
+
+		let keysToRemove: string[] = [];
+
+		const updateResult = withPluginRegistryLock(this.agentDir, (current) => {
 			if (current.revision !== input.expectedRevision) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
-			const exists = current.installed.some((p) => p.id === input.pluginId);
-			if (!exists) {
+			const targetPlugin = current.installed.find((p) => p.id === input.pluginId);
+			if (!targetPlugin) {
 				throw new AppServerError("NOT_FOUND", { requestId: input.requestId });
 			}
 
+			const identities = getPluginMcpIdentities(this.agentDir, targetPlugin);
+			keysToRemove = pluginMcpCredentialKeys(this.authStorage, identities);
+
 			const nextInstalled = current.installed.filter((p) => p.id !== input.pluginId);
+			const pendingCleanup = [...new Set([...(current.pendingCredentialCleanup ?? []), ...keysToRemove])];
+
 			const next: PluginRegistry = {
 				...current,
 				revision: current.revision + 1,
 				installed: nextInstalled,
+				...(pendingCleanup.length > 0 ? { pendingCredentialCleanup: pendingCleanup } : {}),
 			};
 
 			return {
@@ -833,10 +913,24 @@ export class PluginService {
 				result: {
 					installed: nextInstalled,
 					registryRevision: next.revision,
-					activation: "applied",
+					activation: "applied" as PluginActivationStatus,
 				},
 			};
 		});
+
+		if (keysToRemove.length > 0) {
+			this.authStorage.applyChanges(keysToRemove.map((provider) => ({ provider, credential: undefined })));
+			withPluginRegistryLock(this.agentDir, (current) => {
+				const remaining = (current.pendingCredentialCleanup ?? []).filter((k) => !keysToRemove.includes(k));
+				const next: PluginRegistry = {
+					...current,
+					pendingCredentialCleanup: remaining.length > 0 ? remaining : undefined,
+				};
+				return { next, result: undefined };
+			});
+		}
+
+		return updateResult;
 	}
 
 	async inspectUpdate(pluginId: string): Promise<PluginUpdateInspectionView> {

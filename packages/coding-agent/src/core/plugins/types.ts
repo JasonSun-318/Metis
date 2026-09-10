@@ -59,6 +59,7 @@ export interface PluginRegistry {
 	revision: number;
 	markets: MarketRecord[];
 	installed: PluginRecord[];
+	pendingCredentialCleanup?: string[];
 }
 
 export interface PluginSkillComponent {

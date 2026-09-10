@@ -4,10 +4,11 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "@metis/app-protocol";
-import { OFFICIAL_MARKET_ID } from "@metis/coding-agent";
+import { AuthStorage, mcpCredentialKey, OFFICIAL_MARKET_ID, readPluginRegistry } from "@metis/coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
+import { PluginService } from "../src/plugins.ts";
 
 function crc32(bytes: Buffer): number {
 	let crc = 0xffffffff;
@@ -269,7 +270,6 @@ describe("app-server plugin runtime end-to-end", () => {
 			params: { sourceId: OFFICIAL_MARKET_ID, entryId: "entry-gatekeeper" },
 		})) as { result: { inspectionId: string; registryRevision: number } };
 
-		if (!inspectRes.result) console.log("INSPECT_RES_ERROR:", inspectRes);
 		expect(inspectRes.result).toBeDefined();
 
 		const installRes = (await connection.handle({
@@ -792,4 +792,364 @@ describe("app-server plugin runtime end-to-end", () => {
 
 		await expect.poll(() => providerRequestCount, { timeout: 10_000 }).toBe(1);
 	}, 30_000);
+
+	it("handles plugin MCP credentials, header resolution, clear, and persistence", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-plugin-cred-"));
+		temporaryRoots.push(root);
+		const agentDir = join(root, "agent");
+		const projectDir = join(root, "project");
+		const sessionsRoot = join(agentDir, "sessions");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(projectDir, { recursive: true });
+
+		writeFileSync(
+			join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					local: {
+						baseUrl: "http://127.0.0.1:9999/v1",
+						apiKey: "test-key",
+						api: "openai-completions",
+						models: [{ id: "m", name: "m", contextWindow: 32_000, maxTokens: 1024, reasoning: false }],
+					},
+				},
+			}),
+		);
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "local", defaultModel: "m" }));
+
+		const capturedRequests: Array<{ headers: Record<string, string | string[] | undefined>; body: string }> = [];
+		const mcpHttpServer = createServer(async (req, res) => {
+			let body = "";
+			for await (const chunk of req) body += chunk;
+			capturedRequests.push({ headers: { ...req.headers }, body });
+			try {
+				const json = JSON.parse(body);
+				if (json.method === "initialize") {
+					res.writeHead(200, { "content-type": "application/json" });
+					res.end(
+						JSON.stringify({
+							jsonrpc: "2.0",
+							id: json.id,
+							result: {
+								protocolVersion: "2024-11-05",
+								capabilities: {},
+								serverInfo: { name: "test-auth-mcp", version: "1.0.0" },
+							},
+						}),
+					);
+					return;
+				}
+			} catch {}
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ jsonrpc: "2.0", id: 0, result: {} }));
+		});
+		serversToClose.push(mcpHttpServer);
+		const mcpPort = await listen(mcpHttpServer);
+
+		const AUTH_COMMIT = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const marketplaceJson = JSON.stringify({
+			name: "official-market",
+			plugins: [
+				{
+					name: "auth-mcp-plugin",
+					description: "Plugin with auth MCP server",
+					source: "./plugins/auth-mcp-plugin",
+				},
+			],
+		});
+		const repoZip = createZip({
+			[`repo-${AUTH_COMMIT}/plugins/auth-mcp-plugin/.claude-plugin/plugin.json`]: JSON.stringify({
+				name: "auth-mcp-plugin",
+				mcpServers: {
+					"remote-auth": {
+						type: "http",
+						url: `http://127.0.0.1:${mcpPort}/mcp`,
+						headers: {
+							// biome-ignore lint/suspicious/noTemplateCurlyInString: intentional env var template syntax in test fixture
+							"X-Test": "${TEST_VAR}",
+						},
+					},
+				},
+			}),
+		});
+
+		const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+			const url = String(input);
+			if (url.endsWith("/repos/anthropics/claude-plugins-official")) {
+				return new Response(JSON.stringify({ default_branch: "main" }));
+			}
+			if (url.endsWith("/commits/main")) {
+				return new Response(JSON.stringify({ sha: AUTH_COMMIT }));
+			}
+			if (url.includes("/contents/.claude-plugin/marketplace.json")) {
+				return new Response(marketplaceJson);
+			}
+			if (url.includes("codeload.github.com")) {
+				return new Response(repoZip);
+			}
+			return new Response(null, { status: 404 });
+		}) as typeof fetch;
+
+		const server = await AppServer.create({
+			agentDir,
+			sessionsRoot,
+			fetchImpl,
+			titleGenerator: { generate: async () => undefined },
+		});
+
+		const connection = server.connect();
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "init",
+			method: "initialize",
+			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+		});
+
+		const sessionId = "00000000-0000-4000-8000-000000000006";
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "create-session",
+			method: "session/create",
+			params: { requestId: sessionId, cwd: projectDir, permissionPreset: "full" },
+		});
+
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-session",
+			method: "session/open",
+			params: { sessionId },
+		});
+
+		// Install auth-mcp-plugin
+		const inspectRes = (await connection.handle({
+			jsonrpc: "2.0",
+			id: "inspect",
+			method: "plugin/inspect",
+			params: { sourceId: OFFICIAL_MARKET_ID, entryId: "entry-auth-mcp-plugin" },
+		})) as { result: { inspectionId: string; registryRevision: number } };
+
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "install",
+			method: "plugin/install",
+			params: {
+				requestId: "30000000-0000-4000-8000-000000000002",
+				inspectionId: inspectRes.result.inspectionId,
+				expectedRevision: inspectRes.result.registryRevision,
+			},
+		});
+
+		// List MCP servers: should see plugin MCP in auth_required state
+		const listRes = (await connection.handle({
+			jsonrpc: "2.0",
+			id: "list-mcp",
+			method: "mcp/list",
+			params: { sessionId },
+		})) as {
+			result: {
+				servers: Array<{
+					name: string;
+					scope: string;
+					revision: string;
+					state: string;
+					credentialConfigured: boolean;
+				}>;
+			};
+		};
+
+		const mcpRow = listRes.result.servers.find((s) => s.scope === "plugin");
+		expect(mcpRow).toBeDefined();
+		expect(mcpRow!.credentialConfigured).toBe(false);
+		expect(mcpRow!.state).toBe("auth_required");
+
+		// Set credential
+		const setCredRes = (await connection.handle({
+			jsonrpc: "2.0",
+			id: "set-cred",
+			method: "mcp/credential/set",
+			params: {
+				sessionId,
+				requestId: "40000000-0000-4000-8000-000000000001",
+				scope: "plugin",
+				name: mcpRow!.name,
+				expectedRevision: mcpRow!.revision,
+				credential: {
+					bearerToken: "super-secret-token",
+					environment: { TEST_VAR: "custom-resolved-val" },
+				},
+			},
+		})) as { result: { server: { credentialConfigured: boolean; state: string; revision: string } } };
+
+		expect(setCredRes.result).toBeDefined();
+		expect(setCredRes.result.server.credentialConfigured).toBe(true);
+		// Sensitive secrets must NEVER be present in the public response
+		expect(JSON.stringify(setCredRes)).not.toContain("super-secret-token");
+		expect(JSON.stringify(setCredRes)).not.toContain("custom-resolved-val");
+
+		// Verify that manager connects and HTTP server receives the resolved headers
+		await expect
+			.poll(
+				() =>
+					capturedRequests.some(
+						(r) =>
+							r.headers.authorization === "Bearer super-secret-token" &&
+							r.headers["x-test"] === "custom-resolved-val",
+					),
+				{ timeout: 10_000 },
+			)
+			.toBe(true);
+
+		// Clear credential
+		const clearCredRes = (await connection.handle({
+			jsonrpc: "2.0",
+			id: "clear-cred",
+			method: "mcp/credential/clear",
+			params: {
+				sessionId,
+				requestId: "40000000-0000-4000-8000-000000000002",
+				scope: "plugin",
+				name: mcpRow!.name,
+				expectedRevision: setCredRes.result.server.revision,
+			},
+		})) as { result: { server: { credentialConfigured: boolean } } };
+
+		expect(clearCredRes.result.server.credentialConfigured).toBe(false);
+	}, 30_000);
+
+	it("isolates credential cleanup on plugin uninstall and recovers from injected cleanup failure", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-plugin-isolation-"));
+		temporaryRoots.push(root);
+		const agentDir = join(root, "agent");
+		mkdirSync(join(agentDir, "plugins"), { recursive: true });
+
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+
+		const pluginAId = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+		const pluginBId = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+		const keyA = mcpCredentialKey({ scope: "user", name: `p-${pluginAId.slice(0, 16)}-echo` });
+		const keyB = mcpCredentialKey({ scope: "user", name: `p-${pluginBId.slice(0, 16)}-calc` });
+		const keyManual = mcpCredentialKey({ scope: "user", name: "manual-server" });
+
+		authStorage.set(keyA, { type: "mcp_secret", serverFingerprint: "fp-a", env: { TOKEN: "token-a" } });
+		authStorage.set(keyB, { type: "mcp_secret", serverFingerprint: "fp-b", env: { TOKEN: "token-b" } });
+		authStorage.set(keyManual, { type: "mcp_secret", serverFingerprint: "fp-m", env: { TOKEN: "token-m" } });
+
+		expect(authStorage.has(keyA)).toBe(true);
+		expect(authStorage.has(keyB)).toBe(true);
+		expect(authStorage.has(keyManual)).toBe(true);
+
+		// Write initial registry with both plugins installed
+		writeFileSync(
+			join(agentDir, "plugins", "registry.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				revision: 1,
+				markets: [],
+				installed: [
+					{
+						id: pluginAId,
+						name: "plugin-a",
+						displayName: "Plugin A",
+						format: "claude",
+						repository: "repo-a",
+						subdir: "",
+						commit: "c1",
+						sourceId: "m1",
+						enabled: true,
+						installedAt: new Date().toISOString(),
+						issues: [],
+					},
+					{
+						id: pluginBId,
+						name: "plugin-b",
+						displayName: "Plugin B",
+						format: "claude",
+						repository: "repo-b",
+						subdir: "",
+						commit: "c2",
+						sourceId: "m1",
+						enabled: true,
+						installedAt: new Date().toISOString(),
+						issues: [],
+					},
+				],
+			}),
+		);
+
+		// Write package manifests for both plugins
+		const pkgADir = join(agentDir, "plugins", "packages", pluginAId, "c1");
+		const pkgBDir = join(agentDir, "plugins", "packages", pluginBId, "c2");
+		mkdirSync(pkgADir, { recursive: true });
+		mkdirSync(pkgBDir, { recursive: true });
+		writeFileSync(
+			join(pkgADir, ".metis-plugin.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				components: [
+					{
+						componentId: `p-${pluginAId.slice(0, 16)}-echo`,
+						kind: "mcp",
+						name: `p-${pluginAId.slice(0, 16)}-echo`,
+						originalName: "echo",
+						definition: { command: "node" },
+					},
+				],
+			}),
+		);
+		writeFileSync(
+			join(pkgBDir, ".metis-plugin.json"),
+			JSON.stringify({
+				schemaVersion: 1,
+				components: [
+					{
+						componentId: `p-${pluginBId.slice(0, 16)}-calc`,
+						kind: "mcp",
+						name: `p-${pluginBId.slice(0, 16)}-calc`,
+						originalName: "calc",
+						definition: { command: "node" },
+					},
+				],
+			}),
+		);
+
+		const service = new PluginService(agentDir, globalThis.fetch, authStorage);
+
+		// Remove Plugin A: only Plugin A's credentials should disappear
+		service.remove({ requestId: "r-1", pluginId: pluginAId, expectedRevision: 1 });
+
+		expect(authStorage.has(keyA)).toBe(false);
+		expect(authStorage.has(keyB)).toBe(true);
+		expect(authStorage.has(keyManual)).toBe(true);
+
+		// Injected failure during remove of Plugin B
+		const originalApplyChanges = authStorage.applyChanges.bind(authStorage);
+		let injectedFailure = true;
+		authStorage.applyChanges = (changes) => {
+			if (injectedFailure && changes.some((c) => c.provider === keyB && c.credential === undefined)) {
+				throw new Error("Injected disk failure");
+			}
+			return originalApplyChanges(changes);
+		};
+
+		// Removing Plugin B throws because credential cleanup failed
+		expect(() => service.remove({ requestId: "r-2", pluginId: pluginBId, expectedRevision: 2 })).toThrow(
+			"Injected disk failure",
+		);
+
+		// Plugin B is removed from installed, but pendingCredentialCleanup retains keyB
+		const registryAfterFailure = readPluginRegistry(agentDir);
+		expect(registryAfterFailure.installed.some((p) => p.id === pluginBId)).toBe(false);
+		expect(registryAfterFailure.pendingCredentialCleanup).toContain(keyB);
+		expect(authStorage.has(keyB)).toBe(true);
+
+		// Restore applyChanges and simulate service restart
+		injectedFailure = false;
+		authStorage.applyChanges = originalApplyChanges;
+
+		new PluginService(agentDir, globalThis.fetch, authStorage);
+		// Constructor should have executed drainPendingCredentialCleanup()
+		expect(authStorage.has(keyB)).toBe(false);
+		expect(authStorage.has(keyManual)).toBe(true);
+		expect(readPluginRegistry(agentDir).pendingCredentialCleanup).toBeUndefined();
+	});
 });

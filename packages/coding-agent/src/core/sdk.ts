@@ -348,6 +348,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				settingsManager,
 				authStorage,
 				cwd,
+				agentDir,
 				backgroundOptionalStartup: options.backgroundOptionalMcpStartup,
 				configurationCoordinator: options.mcpConfigurationCoordinator,
 			});

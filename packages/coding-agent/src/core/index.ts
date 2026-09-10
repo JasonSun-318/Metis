@@ -127,11 +127,18 @@ export {
 	type McpServerStatus,
 	type McpToolRecord,
 	mcpConfigurationRevision,
+	mcpCredentialState,
+	mcpCredentialStatus,
 	mcpServerFingerprint,
+	pluginMcpCredentialKeys,
+	type ResolvedMcpServerConfig,
+	resolveMcpHeaderTemplates,
 	resolveMcpServerDefinitions,
 	resolveMcpServerSettings,
 	resolveMcpSettings,
+	resolvePluginMcpSettings,
 	resolvePluginTemplateVariables,
+	storePluginMcpCredential,
 } from "./mcp/index.ts";
 export type {
 	ModeProjectSessionTarget,

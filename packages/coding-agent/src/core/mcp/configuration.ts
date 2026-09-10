@@ -12,7 +12,7 @@ import {
 	mcpVersionedCredentialPrefix,
 } from "../auth-storage.ts";
 import type { McpServerSettings, SettingsManager } from "../settings-manager.ts";
-import { mcpServerFingerprint, resolveMcpServerSettings } from "./config.ts";
+import { mcpServerFingerprint, type ResolvedMcpServerConfig, resolveMcpServerSettings } from "./config.ts";
 import type { McpCredentialOverlay, McpManager, McpPreparedConfiguration } from "./manager.ts";
 
 export type McpConfigurationScope = "user" | "project";
@@ -550,4 +550,40 @@ export class McpConfigurationCoordinator {
 			})),
 		};
 	}
+}
+
+export function pluginMcpCredentialKeys(
+	authStorage: AuthStorage,
+	identities: readonly McpCredentialIdentity[],
+): string[] {
+	const exact = new Set(identities.flatMap((i) => [mcpCredentialKey(i), legacyMcpCredentialKey(i.name)]));
+	const prefixes = identities.map((i) => mcpVersionedCredentialPrefix(i));
+	return authStorage.list().filter((key) => exact.has(key) || prefixes.some((prefix) => key.startsWith(prefix)));
+}
+
+export function storePluginMcpCredential(
+	authStorage: AuthStorage,
+	config: ResolvedMcpServerConfig,
+	change: McpCredentialChange,
+): void {
+	if (change.action === "preserve") return;
+	const key = mcpCredentialKey(config.credentialIdentity);
+	const serverFingerprint = mcpServerFingerprint(config);
+	const cleanupKeys = pluginMcpCredentialKeys(authStorage, [config.credentialIdentity]).filter((k) => k !== key);
+	const removals = cleanupKeys.map((k) => ({ provider: k, credential: undefined }));
+	authStorage.applyChanges([
+		...removals,
+		{
+			provider: key,
+			credential:
+				change.action === "remove"
+					? { type: "mcp_revoked", serverFingerprint }
+					: {
+							type: "mcp_secret",
+							serverFingerprint,
+							...(change.bearerToken ? { bearerToken: change.bearerToken } : {}),
+							...(change.environment ? { env: { ...change.environment } } : {}),
+						},
+		},
+	]);
 }

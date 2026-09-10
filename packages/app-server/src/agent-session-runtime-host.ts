@@ -42,7 +42,6 @@ import {
 	McpConfigurationCoordinator,
 	type McpCredentialChange,
 	type McpServerSettings,
-	mcpCredentialKey,
 	mcpCredentialState,
 	mcpCredentialStatus,
 	type PluginSnapshot,
@@ -60,6 +59,8 @@ import {
 	reduceRuntimeJournal,
 	removeCustomAgentType,
 	removeSessionAttachment,
+	resolveMcpServerSettings,
+	resolvePluginMcpSettings,
 	SCHEDULE_MAIN_PROMPT,
 	type ScheduleManager,
 	SessionDeliveredArtifacts,
@@ -67,6 +68,7 @@ import {
 	SettingsManager,
 	type Skill,
 	splitSessionAttachmentPrompt,
+	storePluginMcpCredential,
 	upsertCustomAgentType,
 } from "@metis/coding-agent";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
@@ -1003,6 +1005,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return {
 			servers: publicMcpServers(this.session.settingsManager, {
 				statuses: this.session.mcp?.getStatus() ?? [],
+				serverConfigs: this.session.mcp?.getServerConfigs() ?? [],
 				credentialStatus: (scope, name, server) =>
 					mcpCredentialStatus(this.authStorage, this.mcpCwd(), scope, name, server),
 			}),
@@ -1273,18 +1276,27 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				if (input.credential.bearerToken && row.transport !== "http") {
 					throw new AppServerError("OPERATION_FAILED", { sessionId: this.sessionId, requestId: input.requestId });
 				}
-				const identity = { scope: "user" as const, name: input.name };
-				const key = mcpCredentialKey(identity);
-				this.authStorage.applyChanges([
-					{
-						provider: key,
-						credential: {
-							type: "mcp_secret",
-							...(input.credential.bearerToken ? { bearerToken: input.credential.bearerToken } : {}),
-							...(input.credential.environment ? { env: input.credential.environment } : {}),
-						},
-					},
-				]);
+				let config = this.session.mcp?.getServerConfig(input.name);
+				if (!config) {
+					const snapshot = readPluginSnapshot(this.agentDir);
+					const comp = snapshot.mcp.find((c) => c.name === input.name);
+					if (!comp)
+						throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId, requestId: input.requestId });
+					const instantiated = resolvePluginMcpSettings(comp, this.mcpCwd());
+					config = resolveMcpServerSettings(
+						comp.name,
+						instantiated,
+						this.mcpCwd(),
+						process.env,
+						{ scope: "user", name: comp.name },
+						{ pluginOwner: comp.owner, originalName: comp.originalName },
+					);
+				}
+				storePluginMcpCredential(this.authStorage, config, {
+					action: "replace",
+					...(input.credential.bearerToken ? { bearerToken: input.credential.bearerToken } : {}),
+					...(input.credential.environment ? { environment: input.credential.environment } : {}),
+				});
 				await this.session.mcp?.ensureCurrent();
 				return await this.getMcpServer(input);
 			}
@@ -1318,9 +1330,23 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				if (row.revision !== input.expectedRevision) {
 					throw new AppServerError("CONFLICT", { sessionId: this.sessionId, requestId: input.requestId });
 				}
-				const identity = { scope: "user" as const, name: input.name };
-				const key = mcpCredentialKey(identity);
-				this.authStorage.applyChanges([{ provider: key, credential: undefined }]);
+				let config = this.session.mcp?.getServerConfig(input.name);
+				if (!config) {
+					const snapshot = readPluginSnapshot(this.agentDir);
+					const comp = snapshot.mcp.find((c) => c.name === input.name);
+					if (!comp)
+						throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId, requestId: input.requestId });
+					const instantiated = resolvePluginMcpSettings(comp, this.mcpCwd());
+					config = resolveMcpServerSettings(
+						comp.name,
+						instantiated,
+						this.mcpCwd(),
+						process.env,
+						{ scope: "user", name: comp.name },
+						{ pluginOwner: comp.owner, originalName: comp.originalName },
+					);
+				}
+				storePluginMcpCredential(this.authStorage, config, { action: "remove" });
 				await this.session.mcp?.ensureCurrent();
 				return await this.getMcpServer(input);
 			}
@@ -2546,13 +2572,25 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		readonly cwd: string;
 		readonly settingsManager: SettingsManager;
 	}): ClientResult<"mcp/list"> {
-		const pluginMcpStatuses = readPluginSnapshot(this.agentDir).mcp.map((comp) => ({
-			name: comp.name,
-			originalName: comp.originalName,
-			pluginOwner: comp.owner,
+		const snapshot = readPluginSnapshot(this.agentDir);
+		const serverConfigs = snapshot.mcp.map((comp) => {
+			const instantiated = resolvePluginMcpSettings(comp, context.cwd);
+			return resolveMcpServerSettings(
+				comp.name,
+				instantiated,
+				context.cwd,
+				process.env,
+				{ scope: "user", name: comp.name },
+				{ pluginOwner: comp.owner, originalName: comp.originalName },
+			);
+		});
+		const pluginMcpStatuses = serverConfigs.map((config) => ({
+			name: config.name,
+			originalName: config.originalName,
+			pluginOwner: config.pluginOwner,
 			state: "connected" as const,
-			transport: ("url" in comp.definition ? "http" : "stdio") as "stdio" | "http",
-			required: false,
+			transport: config.transport,
+			required: config.required,
 			toolCount: 0,
 			resourceCount: 0,
 			resourceTemplateCount: 0,
@@ -2562,6 +2600,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		return {
 			servers: publicMcpServers(context.settingsManager, {
 				statuses: pluginMcpStatuses,
+				serverConfigs,
 				credentialStatus: (scope, name, server) =>
 					mcpCredentialStatus(this.authStorage, context.cwd, scope, name, server),
 			}),

@@ -20,6 +20,7 @@ import {
 	mcpServerFingerprint,
 	type ResolvedMcpServerConfig,
 	type ResolvedMcpSettings,
+	resolveMcpHeaderTemplates,
 	resolveMcpServerDefinitions,
 	resolveMcpSettings,
 } from "./config.ts";
@@ -357,14 +358,23 @@ export class McpManager {
 					: ([[header, credential.env[environmentName]]] as const),
 			),
 		);
+		const combinedEnv = { ...(config.env ?? {}), ...(credential.env ?? {}) };
+		let httpHeaders = { ...(config.httpHeaders ?? {}), ...storedHeaders };
+		let missingHeaderVars = config.missingHeaderVars ?? [];
+		if (config.headerTemplates && Object.keys(config.headerTemplates).length > 0) {
+			const resolvedTemplates = resolveMcpHeaderTemplates(config.headerTemplates, combinedEnv);
+			httpHeaders = { ...httpHeaders, ...resolvedTemplates.headers };
+			missingHeaderVars = resolvedTemplates.missing;
+		}
 		return {
 			...config,
 			bearerToken:
 				credential.bearerToken ??
 				(config.bearerTokenEnvVar ? credential.env?.[config.bearerTokenEnvVar] : undefined) ??
 				config.bearerToken,
-			env: { ...(config.env ?? {}), ...(credential.env ?? {}) },
-			httpHeaders: { ...(config.httpHeaders ?? {}), ...storedHeaders },
+			env: combinedEnv,
+			httpHeaders,
+			missingHeaderVars,
 		};
 	}
 
@@ -798,6 +808,14 @@ export class McpManager {
 		const credential = this.storedSecret(config);
 		if (!credential) return {};
 		return { ...(credential.env ?? {}) };
+	}
+
+	getServerConfig(server: string): ResolvedMcpServerConfig | undefined {
+		return this.clients.get(server)?.resolvedConfig;
+	}
+
+	getServerConfigs(): ResolvedMcpServerConfig[] {
+		return [...this.clients.values()].map((client) => client.resolvedConfig);
 	}
 
 	subscribeCatalog(listener: () => void): () => void {

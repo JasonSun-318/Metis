@@ -112,7 +112,7 @@ export class AppServer {
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
 		const memorySettings = new MemorySettingsService({ agentDir: options.agentDir, authStorage, settingsManager });
 		const hooks = new HooksService(options.agentDir);
-		const plugins = options.plugins ?? new PluginService(options.agentDir, options.fetchImpl);
+		const plugins = options.plugins ?? new PluginService(options.agentDir, options.fetchImpl, authStorage);
 		this.plugins = plugins;
 		this.registry = new SessionRegistry(
 			options.runtimeHost ??
