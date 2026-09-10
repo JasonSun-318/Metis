@@ -12,8 +12,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
 import { resolvePluginTemplateVariables } from "../mcp/config.ts";
-import { readPluginSnapshot } from "../plugins/registry.ts";
-import type { PluginHookComponent, PluginOwner } from "../plugins/types.ts";
+import { getPluginDataDir, readPluginSnapshot } from "../plugins/registry.ts";
+import type { PluginHookComponent, PluginOwner, PluginSnapshot } from "../plugins/types.ts";
 import { validateHookMatcher } from "./hook-protocol.ts";
 
 export const HOOKS_CONFIG_FILENAME = "hooks.json";
@@ -263,26 +263,36 @@ export function saveDeclarativeHooks(agentDir: string, hooks: DeclarativeHook[])
  * Loads user-level declarative hooks merged with active plugin hooks.
  * User hooks come first in config order, followed by plugin hooks in snapshot order.
  */
-export function loadEffectiveHooks(agentDir: string): { hooks: DeclarativeHook[]; errors: string[] } {
+export function loadEffectiveHooks(
+	agentDir: string,
+	options?: { snapshot?: PluginSnapshot; cwd?: string },
+): { hooks: DeclarativeHook[]; errors: string[] } {
 	const { hooks: userHooks, errors } = loadDeclarativeHooks(agentDir);
 	let snapshotHooks: PluginHookComponent[] = [];
-	try {
-		snapshotHooks = readPluginSnapshot(agentDir).hooks;
-	} catch {
-		return { hooks: userHooks, errors };
+	if (options?.snapshot) {
+		snapshotHooks = options.snapshot.hooks;
+	} else {
+		try {
+			snapshotHooks = readPluginSnapshot(agentDir).hooks;
+		} catch {
+			return { hooks: userHooks, errors };
+		}
 	}
 
 	const pluginHooks: DeclarativeHook[] = [];
 	for (const comp of snapshotHooks) {
 		const raw = comp.definition;
-		const command = resolvePluginTemplateVariables(raw.command, {
-			pluginRoot: comp.packageDir,
-			cwd: "",
-		});
+		const command =
+			raw.runMode === "shell"
+				? raw.command
+				: resolvePluginTemplateVariables(raw.command, {
+						pluginRoot: comp.packageDir,
+						cwd: options?.cwd ?? "",
+					});
 		const args = raw.args?.map((arg) =>
 			resolvePluginTemplateVariables(arg, {
 				pluginRoot: comp.packageDir,
-				cwd: "",
+				cwd: options?.cwd ?? "",
 			}),
 		);
 		pluginHooks.push({
@@ -291,7 +301,10 @@ export function loadEffectiveHooks(agentDir: string): { hooks: DeclarativeHook[]
 			...(args ? { args } : {}),
 			pluginOwner: comp.owner,
 			env: {
+				...(raw.env ?? {}),
 				CLAUDE_PLUGIN_ROOT: comp.packageDir,
+				CLAUDE_PLUGIN_DATA: getPluginDataDir(agentDir, comp.owner.pluginId),
+				CLAUDE_PROJECT_DIR: options?.cwd ?? "",
 			},
 		});
 	}

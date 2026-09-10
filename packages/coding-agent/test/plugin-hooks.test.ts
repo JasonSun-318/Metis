@@ -268,6 +268,8 @@ describe("Plugin Hooks Runtime Integration", () => {
 		});
 		expect(hooks[1].env).toEqual({
 			CLAUDE_PLUGIN_ROOT: pkgDir,
+			CLAUDE_PLUGIN_DATA: `${agentDir}/plugins/data/plugin-audit`,
+			CLAUDE_PROJECT_DIR: "",
 		});
 	});
 
@@ -546,5 +548,43 @@ console.log(JSON.stringify({
 				env: { MY_VAR: "value" },
 			}),
 		).toBeNull();
+	});
+
+	it("loadEffectiveHooks preserves shell hook raw command and injects env with special paths", () => {
+		const pluginHook: DeclarativeHook = {
+			id: "plugin-shell-hook",
+			name: "Shell hook with vars",
+			enabled: true,
+			event: "SessionStart",
+			runMode: "shell",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: template placeholder
+			command: 'echo "${CLAUDE_PLUGIN_ROOT}/test $(whoami) 中文"',
+		};
+
+		const specialPkgDir = installPluginFixture(agentDir, {
+			pluginId: "plugin-special",
+			name: "special",
+			displayName: "Special Plugin",
+			commit: "c-spec",
+			hooks: [
+				{
+					componentId: "shell-comp",
+					definition: pluginHook,
+				},
+			],
+		});
+
+		const { hooks, errors } = loadEffectiveHooks(agentDir, { cwd: "/workspace/path with space/中文" });
+		expect(errors).toHaveLength(0);
+		const target = hooks.find((h) => h.id === "plugin-shell-hook");
+		expect(target).toBeDefined();
+		// Command must be unmodified string, not text-replaced!
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: template placeholder
+		expect(target!.command).toBe('echo "${CLAUDE_PLUGIN_ROOT}/test $(whoami) 中文"');
+		expect(target!.env).toEqual({
+			CLAUDE_PLUGIN_ROOT: specialPkgDir,
+			CLAUDE_PLUGIN_DATA: `${agentDir}/plugins/data/plugin-special`,
+			CLAUDE_PROJECT_DIR: "/workspace/path with space/中文",
+		});
 	});
 });

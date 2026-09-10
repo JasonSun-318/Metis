@@ -36,6 +36,7 @@ export interface ResourceExtensionPaths {
 
 export interface ResourceLoaderReloadOptions {
 	resolveProjectTrust?: (input: { extensionsResult: LoadExtensionsResult }) => Promise<boolean>;
+	pluginSnapshot?: PluginSnapshot;
 }
 
 export interface ResourceLoader {
@@ -134,7 +135,10 @@ export interface DefaultResourceLoaderOptions {
 	additionalPromptTemplatePaths?: string[];
 	additionalThemePaths?: string[];
 	extensionFactories?: InlineExtension[];
-	declarativeHooksBridgeProvider?: (agentDir: string) => InlineExtension | undefined;
+	declarativeHooksBridgeProvider?: (
+		agentDir: string,
+		options?: { snapshot?: PluginSnapshot; cwd?: string },
+	) => InlineExtension | undefined;
 	noExtensions?: boolean;
 	noSkills?: boolean;
 	noPromptTemplates?: boolean;
@@ -174,7 +178,11 @@ export class DefaultResourceLoader implements ResourceLoader {
 	private additionalPromptTemplatePaths: string[];
 	private additionalThemePaths: string[];
 	private extensionFactories: InlineExtension[];
-	private declarativeHooksBridgeProvider?: (agentDir: string) => InlineExtension | undefined;
+	private declarativeHooksBridgeProvider?: (
+		agentDir: string,
+		options?: { snapshot?: PluginSnapshot; cwd?: string },
+	) => InlineExtension | undefined;
+	private activePluginSnapshot?: PluginSnapshot;
 	private noExtensions: boolean;
 	private noSkills: boolean;
 	private noPromptTemplates: boolean;
@@ -394,6 +402,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 	}
 
 	async reload(options?: ResourceLoaderReloadOptions): Promise<void> {
+		this.activePluginSnapshot = options?.pluginSnapshot;
 		resetTimings("extensions");
 
 		if (this.loaded) {
@@ -683,13 +692,19 @@ export class DefaultResourceLoader implements ResourceLoader {
 		});
 	}
 
-	private loadPluginSkills(): Skill[] {
+	private loadPluginSkills(snapshotOverride?: PluginSnapshot): Skill[] {
 		if (this.noSkills) return [];
 		let snapshot: PluginSnapshot;
-		try {
-			snapshot = readPluginSnapshot(this.agentDir);
-		} catch {
-			return [];
+		if (snapshotOverride) {
+			snapshot = snapshotOverride;
+		} else if (this.activePluginSnapshot) {
+			snapshot = this.activePluginSnapshot;
+		} else {
+			try {
+				snapshot = readPluginSnapshot(this.agentDir);
+			} catch {
+				return [];
+			}
 		}
 
 		const pluginSkills: Skill[] = [];
@@ -1005,7 +1020,10 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 		const factories = [...this.extensionFactories];
 		if (!this.noExtensions && this.declarativeHooksBridgeProvider) {
-			const bridge = this.declarativeHooksBridgeProvider(this.agentDir);
+			const bridge = this.declarativeHooksBridgeProvider(this.agentDir, {
+				snapshot: this.activePluginSnapshot,
+				cwd: this.cwd,
+			});
 			if (bridge) {
 				factories.push(bridge);
 			}

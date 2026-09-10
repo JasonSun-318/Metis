@@ -18,7 +18,7 @@ import { StringDecoder } from "node:string_decoder";
 import { getShellEnv, killProcessTree } from "../../utils/shell.ts";
 import type { ExtensionAPI, ExtensionContext, InlineExtension } from "../extensions/types.ts";
 import { resolvePluginTemplateVariables } from "../mcp/config.ts";
-import type { PluginOwner } from "../plugins/types.ts";
+import type { PluginOwner, PluginSnapshot } from "../plugins/types.ts";
 import {
 	type DeclarativeHook,
 	HOOK_DEFAULT_TIMEOUT_SECONDS,
@@ -414,15 +414,18 @@ async function runMatchingHooks(
  * Returns undefined when hooks.json is absent or empty so sessions without
  * hooks keep a zero-extension runtime (required for unattended execution).
  */
-export function createDeclarativeHooksBridge(agentDir: string): InlineExtension | undefined {
-	const { hooks } = loadEffectiveHooks(agentDir);
+export function createDeclarativeHooksBridge(
+	agentDir: string,
+	options?: { snapshot?: PluginSnapshot; cwd?: string },
+): InlineExtension | undefined {
+	const { hooks } = loadEffectiveHooks(agentDir, options);
 	if (hooks.length === 0) return undefined;
 
 	return {
 		name: "hooks",
 		factory: (metis: ExtensionAPI) => {
 			// Reload so config edits land on new sessions without restarting the host.
-			const { hooks: allHooks } = loadEffectiveHooks(agentDir);
+			const { hooks: allHooks } = loadEffectiveHooks(agentDir, options);
 			if (allHooks.length === 0) return;
 
 			const toolHooks = allHooks.filter((hook) => hook.event === "PreToolUse");

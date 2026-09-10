@@ -17,6 +17,12 @@ export interface SessionRef {
 	readonly scheduled?: { readonly taskId: string; readonly runId: string };
 }
 
+export interface PluginRuntimeStatus {
+	readonly sessionId: string;
+	readonly appliedFingerprint?: string;
+	readonly error?: string;
+}
+
 export type SessionEventListener = (event: DomainEvent) => void;
 
 /** One opened runtime hidden behind app-server operations and projections. */
@@ -74,6 +80,7 @@ export interface OpenedSessionRuntime {
 	refreshPermissionAutoSettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;
 	ensurePluginsCurrent?(): Promise<void>;
+	getPluginRuntimeStatus?(): PluginRuntimeStatus;
 	applyModelServiceSettingsRefresh?(): Promise<void>;
 	notifyPermissionRulesChanged?(): Promise<void> | void;
 	snapshot(serverEpoch: string, currentCursor: () => number): Promise<SessionSnapshot>;

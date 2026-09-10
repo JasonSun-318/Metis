@@ -13,7 +13,7 @@ import {
 	type McpSecretCredential,
 	mcpCredentialKey,
 } from "../auth-storage.ts";
-import type { PluginOwner } from "../plugins/types.ts";
+import type { PluginMcpComponent, PluginOwner } from "../plugins/types.ts";
 import type { McpServerSettings, SettingsManager } from "../settings-manager.ts";
 import { type McpConnectionState, McpServerClient } from "./client.ts";
 import {
@@ -865,8 +865,18 @@ export class McpManager {
 		await Promise.all([...generation.clients.values()].map((client) => client.close()));
 	}
 
-	async reload(): Promise<void> {
-		const prepared = await this.prepareConfiguration();
+	async reload(pluginComponents?: readonly PluginMcpComponent[]): Promise<void> {
+		const settings =
+			pluginComponents !== undefined
+				? resolveMcpServerDefinitions(
+						this.settingsManager.getGlobalSettings().mcpServers ?? {},
+						this.settingsManager.getProjectSettings().mcpServers ?? {},
+						this.cwd,
+						this.environment,
+						pluginComponents,
+					)
+				: resolveMcpSettings(this.settingsManager, this.cwd, this.environment, this.agentDir);
+		const prepared = await this.prepareConfiguration(settings);
 		this.activateConfiguration(prepared);
 	}
 
@@ -922,11 +932,20 @@ export class McpManager {
 		);
 	}
 
-	async ensureCurrent(): Promise<void> {
+	async ensureCurrent(pluginComponents?: readonly PluginMcpComponent[]): Promise<void> {
 		const refresh = this.refreshTail.then(async () => {
 			await this.settingsManager.reload();
 			this.authStorage.reload();
-			const settings = resolveMcpSettings(this.settingsManager, this.cwd, this.environment, this.agentDir);
+			const settings =
+				pluginComponents !== undefined
+					? resolveMcpServerDefinitions(
+							this.settingsManager.getGlobalSettings().mcpServers ?? {},
+							this.settingsManager.getProjectSettings().mcpServers ?? {},
+							this.cwd,
+							this.environment,
+							pluginComponents,
+						)
+					: resolveMcpSettings(this.settingsManager, this.cwd, this.environment, this.agentDir);
 			const revision = this.runtimeConfigurationRevision(settings);
 			if (revision === this.activeRevision) {
 				this.failedRefresh = undefined;

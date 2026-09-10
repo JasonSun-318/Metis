@@ -263,11 +263,11 @@ export function readPluginSnapshot(agentDir: string): PluginSnapshot {
 	}
 
 	const fingerprintData = {
-		revision: registry.revision,
 		plugins: enabledPlugins.map((p) => `${p.id}@${p.commit}`),
-		skills: skills.map((s) => `${s.name}:${s.filePath}`),
-		mcp: mcp.map((m) => m.name),
-		hooks: hooks.map((h) => h.definition.id),
+		skills: skills.map((s) => `${s.name}:${s.filePath}:${Boolean(s.disableModelInvocation)}`),
+		mcp: mcp.map((m) => [m.name, m.definition]),
+		hooks: hooks.map((h) => [h.definition.id, h.definition]),
+		diagnostics: diagnostics.map((d) => [d.componentId, d.code, d.status]),
 	};
 	const fingerprint = createHash("sha256").update(JSON.stringify(fingerprintData)).digest("hex");
 

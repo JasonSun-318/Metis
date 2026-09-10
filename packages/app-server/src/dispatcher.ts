@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { type ClientParams, type ClientRpcRequest, MAX_HISTORY_ITEMS } from "@metis/app-protocol";
 import {
 	type ModelRegistry,
+	type PluginSnapshot,
+	readPluginSnapshot,
 	resolveScheduleCreateTarget,
 	type ScheduleCreateTarget,
 	ScheduleError,
@@ -16,7 +18,7 @@ import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
-import type { PluginService } from "./plugins.ts";
+import type { PluginActivationStatus, PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -439,6 +441,38 @@ export class Dispatcher {
 		}
 	}
 
+	private async getPluginActivationState(): Promise<{
+		activation: PluginActivationStatus;
+		runtimeErrors: Array<{ readonly componentId: string; readonly message: string }>;
+	}> {
+		const statuses = await this.registry.pluginRuntimeStatuses();
+		let snapshot: PluginSnapshot;
+		try {
+			snapshot = readPluginSnapshot(this.plugins.agentDir);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return {
+				activation: "failed",
+				runtimeErrors: [{ componentId: "snapshot", message }],
+			};
+		}
+		const runtimeErrors: Array<{ readonly componentId: string; readonly message: string }> = [];
+		for (const s of statuses) {
+			if (s.error) {
+				runtimeErrors.push({ componentId: s.sessionId, message: s.error });
+			}
+		}
+		const activation: PluginActivationStatus = statuses.some((s) => s.error)
+			? "failed"
+			: statuses.length === 0
+				? "not-running"
+				: statuses.every((s) => s.appliedFingerprint === snapshot.fingerprint)
+					? "applied"
+					: "next-turn";
+
+		return { activation, runtimeErrors };
+	}
+
 	async dispatch(request: ClientRpcRequest, connection: ConnectionState): Promise<unknown> {
 		switch (request.method) {
 			case "initialize":
@@ -580,32 +614,34 @@ export class Dispatcher {
 			case "plugin/install":
 				return await this.replayMutation(request, async () => {
 					const res = await this.plugins.install(request.params);
-					const hasActive = await this.registry.hasActiveSessions();
-					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+					const { activation, runtimeErrors } = await this.getPluginActivationState();
+					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
 				});
 			case "plugin/list":
 				return this.plugins.listInstalled();
-			case "plugin/get":
-				return this.plugins.getInstalled(request.params.pluginId);
+			case "plugin/get": {
+				const { activation, runtimeErrors } = await this.getPluginActivationState();
+				return this.plugins.getInstalled(request.params.pluginId, activation, runtimeErrors);
+			}
 			case "plugin/setEnabled":
 				return await this.replayMutation(request, async () => {
 					const res = this.plugins.setEnabled(request.params);
-					const hasActive = await this.registry.hasActiveSessions();
-					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+					const { activation, runtimeErrors } = await this.getPluginActivationState();
+					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
 				});
 			case "plugin/remove":
 				return await this.replayMutation(request, async () => {
 					const res = this.plugins.remove(request.params);
-					const hasActive = await this.registry.hasActiveSessions();
-					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+					const { activation } = await this.getPluginActivationState();
+					return { ...res, activation };
 				});
 			case "plugin/update/inspect":
 				return await this.plugins.inspectUpdate(request.params.pluginId);
 			case "plugin/update":
 				return await this.replayMutation(request, async () => {
 					const res = await this.plugins.update(request.params);
-					const hasActive = await this.registry.hasActiveSessions();
-					return { ...res, activation: hasActive ? "next-turn" : res.activation };
+					const { activation, runtimeErrors } = await this.getPluginActivationState();
+					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
 				});
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);

@@ -248,4 +248,15 @@ describe("Plugin acceptance regressions", () => {
 		]);
 		expect(cfg.servers.map((s) => s.name)).toEqual(["echo", "p-plugin-echo"]);
 	});
+
+	it("R9 marketplace selection does not change active capabilities", async () => {
+		const h = await installedHarness();
+		const before = readPluginSnapshot(h.agentDir).fingerprint;
+		await h.service.selectMarket({
+			requestId: randomUUID(),
+			sourceId: "official-market",
+			expectedRevision: h.installed.registryRevision,
+		});
+		expect(readPluginSnapshot(h.agentDir).fingerprint).toBe(before);
+	});
 });

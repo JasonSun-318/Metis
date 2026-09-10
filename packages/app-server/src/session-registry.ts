@@ -3,6 +3,7 @@ import { assertValidSessionId } from "@metis/coding-agent";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
+	type PluginRuntimeStatus,
 	type SessionRef,
 	type SessionRuntimeHost,
 } from "./session-runtime-host.ts";
@@ -186,6 +187,21 @@ export class SessionRegistry {
 			}
 		}
 		return false;
+	}
+
+	async pluginRuntimeStatuses(): Promise<PluginRuntimeStatus[]> {
+		const statuses: PluginRuntimeStatus[] = [];
+		for (const slot of this.slots.values()) {
+			try {
+				const runtime = await slot.runtime;
+				if (runtime.getPluginRuntimeStatus) {
+					statuses.push(runtime.getPluginRuntimeStatus());
+				}
+			} catch {
+				// ignore
+			}
+		}
+		return statuses;
 	}
 
 	async refreshOpenWebSearchSettings(): Promise<void> {

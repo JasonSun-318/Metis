@@ -109,6 +109,7 @@ import { readDeliveredFile as readDeliveredFileOnDisk } from "./read-delivered-f
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
+	type PluginRuntimeStatus,
 	type SessionEventListener,
 	type SessionRef,
 	type SessionRuntimeHost,
@@ -331,6 +332,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private unread: boolean;
 	private readonly notifiedQueueFailureRevisions = new Set<string>();
 	private appliedPluginFingerprint?: string;
+	private pluginReloadError?: string;
 	private pluginReloadPromise?: Promise<void>;
 
 	constructor(
@@ -352,8 +354,9 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.unread = ref.summary.unread;
 		try {
 			this.appliedPluginFingerprint = readPluginSnapshot(agentDir).fingerprint;
-		} catch {
+		} catch (error) {
 			this.appliedPluginFingerprint = undefined;
+			this.pluginReloadError = error instanceof Error ? error.message : String(error);
 		}
 		const journal = this.journal();
 		const reduced = reduceRuntimeJournal(journal);
@@ -430,7 +433,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		let snapshot: PluginSnapshot;
 		try {
 			snapshot = readPluginSnapshot(this.agentDir);
-		} catch {
+		} catch (error) {
+			this.pluginReloadError = error instanceof Error ? error.message : String(error);
 			return;
 		}
 		if (snapshot.fingerprint === this.appliedPluginFingerprint) {
@@ -439,15 +443,25 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.pluginReloadPromise = (async () => {
 			try {
 				if (this.isActive()) return;
-				await this.session.reload();
+				await this.session.reload({ pluginSnapshot: snapshot });
 				this.appliedPluginFingerprint = snapshot.fingerprint;
-			} catch {
+				this.pluginReloadError = undefined;
+			} catch (error) {
+				this.pluginReloadError = error instanceof Error ? error.message : String(error);
 				// Retain existing session runtime so user turns and queues are not lost if reload fails
 			} finally {
 				this.pluginReloadPromise = undefined;
 			}
 		})();
 		await this.pluginReloadPromise;
+	}
+
+	getPluginRuntimeStatus(): PluginRuntimeStatus {
+		return {
+			sessionId: this.sessionId,
+			...(this.appliedPluginFingerprint ? { appliedFingerprint: this.appliedPluginFingerprint } : {}),
+			...(this.pluginReloadError ? { error: this.pluginReloadError } : {}),
+		};
 	}
 
 	private async bindExtensionUI(session: AgentSession): Promise<void> {

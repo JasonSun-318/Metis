@@ -36,7 +36,7 @@ import {
 } from "./plugin-sources.ts";
 import { AppServerError } from "./session-runtime-host.ts";
 
-export type PluginActivationStatus = "applied" | "next-turn" | "failed";
+export type PluginActivationStatus = "applied" | "next-turn" | "failed" | "not-running";
 
 export interface ComponentPublicView {
 	readonly componentId: string;
@@ -133,7 +133,7 @@ function getPluginMcpIdentities(agentDir: string, plugin: PluginRecord): McpCred
 }
 
 export class PluginService {
-	private readonly agentDir: string;
+	readonly agentDir: string;
 	private readonly fetchImpl: FetchImplementation;
 	private readonly authStorage: AuthStorage;
 	private readonly inspectionCache = new Map<string, InspectionCacheData>();
@@ -832,11 +832,15 @@ export class PluginService {
 		};
 	}
 
-	getInstalled(pluginId: string): PluginInstalledView {
+	getInstalled(
+		pluginId: string,
+		activation?: PluginActivationStatus,
+		runtimeErrors?: Array<{ readonly componentId: string; readonly message: string }>,
+	): PluginInstalledView {
 		const registry = readPluginRegistry(this.agentDir);
 		const record = registry.installed.find((p) => p.id === pluginId);
 		if (!record) throw new AppServerError("NOT_FOUND");
-		return this.buildInstalledView(record);
+		return this.buildInstalledView(record, activation, runtimeErrors);
 	}
 
 	setEnabled(input: { requestId: string; pluginId: string; enabled: boolean; expectedRevision: number }): {
@@ -1003,7 +1007,11 @@ export class PluginService {
 		});
 	}
 
-	private buildInstalledView(record: PluginRecord): PluginInstalledView {
+	buildInstalledView(
+		record: PluginRecord,
+		activation: PluginActivationStatus = "applied",
+		runtimeErrors: Array<{ readonly componentId: string; readonly message: string }> = [],
+	): PluginInstalledView {
 		const packageDir = getPluginPackageDir(this.agentDir, record.id, record.commit);
 		const normalizedPath = join(packageDir, "normalized.json");
 		const components: ComponentPublicView[] = [];
@@ -1032,8 +1040,8 @@ export class PluginService {
 		return {
 			plugin: record,
 			components,
-			activation: "applied",
-			runtimeErrors: [],
+			activation,
+			runtimeErrors,
 		};
 	}
 

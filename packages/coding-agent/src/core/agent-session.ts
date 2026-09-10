@@ -169,6 +169,7 @@ import type {
 } from "./permissions/types.ts";
 import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
+import type { PluginSnapshot } from "./plugins/types.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import {
@@ -5498,15 +5499,18 @@ export class AgentSession {
 		});
 	}
 
-	async reload(options?: { beforeSessionStart?: () => void | Promise<void> }): Promise<void> {
+	async reload(options?: {
+		beforeSessionStart?: () => void | Promise<void>;
+		pluginSnapshot?: PluginSnapshot;
+	}): Promise<void> {
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
 		await this.settingsManager.reload();
-		await this._mcpManager?.reload();
+		await this._mcpManager?.reload(options?.pluginSnapshot?.mcp);
 		this.syncQueueModesFromSettings();
 		this._modelRegistry.resetExtensionProviders();
 		this._refreshCurrentModelFromRegistry();
-		await this._resourceLoader.reload();
+		await this._resourceLoader.reload({ pluginSnapshot: options?.pluginSnapshot });
 		this._buildRuntime({
 			activeToolNames: this.getConfiguredActiveToolNames(),
 			flagValues: previousFlagValues,

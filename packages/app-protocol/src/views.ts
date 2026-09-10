@@ -1544,6 +1544,7 @@ export const PluginActivationStatusSchema = Type.Union([
 	Type.Literal("applied"),
 	Type.Literal("next-turn"),
 	Type.Literal("failed"),
+	Type.Literal("not-running"),
 ]);
 
 export const PluginComponentPublicViewSchema = StrictObject({

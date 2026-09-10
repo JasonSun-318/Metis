@@ -283,7 +283,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			},
 		})) as { result: { activation: string } };
 
-		expect(installRes.result.activation).toBe("applied");
+		expect(installRes.result.activation).toBe("next-turn");
 
 		// Turn 2: In the same session, submit prompt that triggers the newly installed plugin hook
 		await connection.handle({
@@ -302,6 +302,15 @@ describe("app-server plugin runtime end-to-end", () => {
 
 		// Provider was NOT called for Turn 2
 		expect(providerRequestCount).toBe(1);
+
+		// After turn 2 executed, plugin activation status in the session is now applied
+		const getRes = (await connection.handle({
+			jsonrpc: "2.0",
+			id: "get-after-turn-2",
+			method: "plugin/get",
+			params: { pluginId: (installRes as any).result.plugin.plugin.id },
+		})) as { result: { activation: string } };
+		expect(getRes.result.activation).toBe("applied");
 	}, 30_000);
 
 	it("disables plugin capability on next turn when disabled during active turn", async () => {
@@ -1151,5 +1160,115 @@ describe("app-server plugin runtime end-to-end", () => {
 		expect(authStorage.has(keyB)).toBe(false);
 		expect(authStorage.has(keyManual)).toBe(true);
 		expect(readPluginRegistry(agentDir).pendingCredentialCleanup).toBeUndefined();
+	});
+
+	it("projects activation status correctly across not-running, next-turn, applied, and failed", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-plugin-activation-"));
+		temporaryRoots.push(root);
+		const agentDir = join(root, "agent");
+		const projectDir = join(root, "project");
+		const sessionsRoot = join(agentDir, "sessions");
+		mkdirSync(agentDir, { recursive: true });
+		mkdirSync(projectDir, { recursive: true });
+		mkdirSync(sessionsRoot, { recursive: true });
+
+		const fetchImpl = createPluginMockFetch();
+		const server = await AppServer.create({
+			agentDir,
+			sessionsRoot,
+			fetchImpl,
+			titleGenerator: { generate: async () => undefined },
+		});
+
+		try {
+			const connection = server.connect();
+			const initRes = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "init",
+				method: "initialize",
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+			})) as any;
+			expect(initRes.result).toBeDefined();
+
+			// 1. Install plugin when NO sessions are open
+			const inspectRes = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "inspect",
+				method: "plugin/inspect",
+				params: { sourceId: OFFICIAL_MARKET_ID, entryId: "entry-gatekeeper" },
+			})) as any;
+
+			const installRes = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "install",
+				method: "plugin/install",
+				params: {
+					requestId: "40000000-0000-4000-8000-000000000001",
+					inspectionId: inspectRes.result.inspectionId,
+					expectedRevision: inspectRes.result.registryRevision,
+				},
+			})) as any;
+
+			// When no sessions are open, activation is "not-running"
+			expect(installRes.result.activation).toBe("not-running");
+
+			const pluginId = installRes.result.plugin.plugin.id;
+			const getRes1 = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "get-1",
+				method: "plugin/get",
+				params: { pluginId },
+			})) as any;
+			expect(getRes1.result.activation).toBe("not-running");
+
+			// 2. Open a session - now the open session loads the snapshot at creation
+			const sessionId = "50000000-0000-4000-8000-000000000001";
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create-session",
+				method: "session/create",
+				params: { requestId: sessionId, cwd: projectDir, permissionPreset: "full" },
+			});
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-session",
+				method: "session/open",
+				params: { sessionId },
+			});
+
+			const getRes2 = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "get-2",
+				method: "plugin/get",
+				params: { pluginId },
+			})) as any;
+			// Since open session matches current snapshot, activation is "applied"
+			expect(getRes2.result.activation).toBe("applied");
+
+			// 3. Disable plugin - open session has not run turn admission yet, so mismatch -> "next-turn"
+			const disableRes = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "disable",
+				method: "plugin/setEnabled",
+				params: {
+					requestId: "40000000-0000-4000-8000-000000000002",
+					pluginId,
+					enabled: false,
+					expectedRevision: installRes.result.registryRevision,
+				},
+			})) as any;
+			expect(disableRes.result.activation).toBe("next-turn");
+
+			const getRes3 = (await connection.handle({
+				jsonrpc: "2.0",
+				id: "get-3",
+				method: "plugin/get",
+				params: { pluginId },
+			})) as any;
+			expect(getRes3.result.activation).toBe("next-turn");
+		} finally {
+			server.beginShutdown();
+			await server.waitForShutdown();
+		}
 	});
 });

@@ -38662,6 +38662,10 @@
                             {
                               "type": "string",
                               "const": "failed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "not-running"
                             }
                           ]
                         },
@@ -38708,6 +38712,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     }
@@ -39201,6 +39209,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     },
@@ -39521,6 +39533,10 @@
                             {
                               "type": "string",
                               "const": "failed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "not-running"
                             }
                           ]
                         },
@@ -39567,6 +39583,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     }
@@ -39788,6 +39808,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     }
@@ -40365,6 +40389,10 @@
                             {
                               "type": "string",
                               "const": "failed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "not-running"
                             }
                           ]
                         },
@@ -40411,6 +40439,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     }
@@ -74236,6 +74268,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     },
@@ -74282,6 +74318,10 @@
                     {
                       "type": "string",
                       "const": "failed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-running"
                     }
                   ]
                 }
@@ -74775,6 +74815,10 @@
                     {
                       "type": "string",
                       "const": "failed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-running"
                     }
                   ]
                 },
@@ -75095,6 +75139,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     },
@@ -75141,6 +75189,10 @@
                     {
                       "type": "string",
                       "const": "failed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-running"
                     }
                   ]
                 }
@@ -75362,6 +75414,10 @@
                     {
                       "type": "string",
                       "const": "failed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-running"
                     }
                   ]
                 }
@@ -75939,6 +75995,10 @@
                         {
                           "type": "string",
                           "const": "failed"
+                        },
+                        {
+                          "type": "string",
+                          "const": "not-running"
                         }
                       ]
                     },
@@ -75985,6 +76045,10 @@
                     {
                       "type": "string",
                       "const": "failed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "not-running"
                     }
                   ]
                 }
