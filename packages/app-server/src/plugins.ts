@@ -122,13 +122,22 @@ export class PluginService {
 		expectedRevision: number;
 	}): Promise<{ markets: MarketRecord[]; selectedSourceId: string; registryRevision: number }> {
 		const inspected = await inspectRepositorySource(input.url, this.fetchImpl);
-		const marketId = `market-${createHash("sha256").update(inspected.canonicalRepository).digest("hex").slice(0, 16)}`;
+		const marketKey = `${inspected.canonicalRepository}\0${inspected.root || ""}\0${inspected.trackingRef || ""}\0${inspected.pinnedCommit || ""}`;
+		const marketId = `market-${createHash("sha256").update(marketKey).digest("hex").slice(0, 16)}`;
 
 		return withPluginRegistryLock(this.agentDir, (current) => {
 			if (current.revision !== input.expectedRevision) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
-			if (current.markets.some((m) => m.url.toLowerCase() === inspected.canonicalRepository.toLowerCase())) {
+			if (
+				current.markets.some(
+					(m) =>
+						m.url.toLowerCase() === inspected.canonicalRepository.toLowerCase() &&
+						(m.root || "") === (inspected.root || "") &&
+						(m.trackingRef || "") === (inspected.trackingRef || "") &&
+						(m.pinnedCommit || "") === (inspected.pinnedCommit || ""),
+				)
+			) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
 			}
 
@@ -139,6 +148,9 @@ export class PluginService {
 				selected: true,
 				fetchedAt: new Date().toISOString(),
 				commit: inspected.commit,
+				...(inspected.root ? { root: inspected.root } : {}),
+				...(inspected.trackingRef ? { trackingRef: inspected.trackingRef } : {}),
+				...(inspected.pinnedCommit ? { pinnedCommit: inspected.pinnedCommit } : {}),
 			};
 
 			const nextMarkets = current.markets.map((m) => ({ ...m, selected: false }));
@@ -262,7 +274,12 @@ export class PluginService {
 			throw new AppServerError("NOT_FOUND", { requestId: input.requestId });
 		}
 
-		const inspected = await inspectRepositorySource(market.url, this.fetchImpl);
+		const refPart = market.trackingRef || market.pinnedCommit;
+		const sourceUrl =
+			market.root || refPart
+				? `${market.url}/tree/${refPart || "main"}${market.root ? `/${market.root}` : ""}`
+				: market.url;
+		const inspected = await inspectRepositorySource(sourceUrl, this.fetchImpl);
 		this.writeMarketCatalogCache(input.sourceId, inspected.catalog, inspected.commit);
 
 		// Update market commit & fetchedAt under lock without bumping capability revision
@@ -366,8 +383,8 @@ export class PluginService {
 			canonicalRepository: market.url,
 			owner: canonicalizeRepository(market.url).owner,
 			repo: canonicalizeRepository(market.url).repo,
-			commit: market.commit || "main",
-			root: "",
+			commit: cachedMarket?.commit || market.commit || "main",
+			root: market.root ?? "",
 		};
 
 		const resolved = await fetchPluginFiles(origin, entry, this.fetchImpl);

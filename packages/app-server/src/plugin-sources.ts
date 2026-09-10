@@ -36,6 +36,8 @@ export interface InspectedSource {
 	readonly repo: string;
 	readonly commit: string;
 	readonly root: string;
+	readonly trackingRef?: string;
+	readonly pinnedCommit?: string;
 	readonly catalog: readonly CatalogEntry[];
 	readonly isMarketplace: boolean;
 }
@@ -164,6 +166,8 @@ export async function inspectRepositorySource(
 	const api = `https://api.github.com/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
 	let commit: string | undefined;
 	let root = "";
+	let trackingRef: string | undefined;
+	let pinnedCommit: string | undefined;
 
 	if (!parsed.route) {
 		commit = await resolveCommitSha(fetchImpl, parsed.owner, parsed.repo);
@@ -181,6 +185,11 @@ export async function inspectRepositorySource(
 				throw new AppServerError("OPERATION_FAILED");
 			}
 			commit = result.sha.toLowerCase();
+			if (/^[a-f0-9]{40}$/i.test(candidateRef)) {
+				pinnedCommit = candidateRef.toLowerCase();
+			} else {
+				trackingRef = candidateRef;
+			}
 			root = parsed.route.parts.slice(length).join("/");
 			if (parsed.route.kind === "blob" && posix.basename(root) === "SKILL.md") {
 				root = posix.dirname(root);
@@ -357,6 +366,8 @@ export async function inspectRepositorySource(
 		repo: parsed.repo,
 		commit,
 		root,
+		...(trackingRef ? { trackingRef } : {}),
+		...(pinnedCommit ? { pinnedCommit } : {}),
 		catalog,
 		isMarketplace,
 	};

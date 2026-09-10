@@ -40,6 +40,9 @@ export interface MarketRecord {
 	selected: boolean;
 	fetchedAt?: string;
 	commit?: string;
+	root?: string;
+	trackingRef?: string;
+	pinnedCommit?: string;
 }
 
 export interface PluginRegistry {

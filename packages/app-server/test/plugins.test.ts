@@ -412,4 +412,118 @@ describe("PluginService", () => {
 		expect(restartedService.listInstalled().installed).toHaveLength(0);
 		expect(readPluginSnapshot(agentDir).plugins).toHaveLength(0);
 	});
+
+	it("source matrix: supports catalog root, feature branch, pinned sha, and different root in same repo", async () => {
+		const PINNED_SHA = "4444444444444444444444444444444444444444";
+		const FEATURE_SHA = "5555555555555555555555555555555555555555";
+		const fetchImpl = vi.fn(async (input: string | URL | Request) => {
+			const url = String(input);
+			if (url.endsWith("/repos/acme/multiroot")) {
+				return new Response(JSON.stringify({ default_branch: "main" }));
+			}
+			if (url.endsWith("/commits/main")) {
+				return new Response(JSON.stringify({ sha: COMMIT_1 }));
+			}
+			if (url.endsWith("/commits/feature%2Fplugins")) {
+				return new Response(JSON.stringify({ sha: FEATURE_SHA }));
+			}
+			if (url.endsWith(`/commits/${PINNED_SHA}`)) {
+				return new Response(JSON.stringify({ sha: PINNED_SHA }));
+			}
+			if (url.includes("/contents/catalog/.claude-plugin/marketplace.json")) {
+				return new Response(
+					JSON.stringify({
+						name: "catalog-market",
+						plugins: [{ name: "catalog-plugin", source: "./plugins/cat" }],
+					}),
+				);
+			}
+			if (url.includes("/contents/other/.claude-plugin/marketplace.json")) {
+				return new Response(
+					JSON.stringify({
+						name: "other-market",
+						plugins: [{ name: "other-plugin", source: "./plugins/oth" }],
+					}),
+				);
+			}
+			if (url.includes("codeload.github.com")) {
+				const commit = /zip\/([a-f0-9]+)/.exec(url)?.[1] ?? COMMIT_1;
+				const zip = createZip({
+					[`multiroot-${commit}/catalog/plugins/cat/.claude-plugin/plugin.json`]: JSON.stringify({
+						name: "catalog-plugin",
+					}),
+					[`multiroot-${commit}/catalog/plugins/cat/skills/s1/SKILL.md`]: `---\nname: s1\n---\nSkill 1 ${commit}`,
+					[`multiroot-${commit}/other/plugins/oth/.claude-plugin/plugin.json`]: JSON.stringify({
+						name: "other-plugin",
+					}),
+					[`multiroot-${commit}/other/plugins/oth/skills/s2/SKILL.md`]: `---\nname: s2\n---\nSkill 2 ${commit}`,
+				});
+				return new Response(zip);
+			}
+			return new Response(null, { status: 404 });
+		}) as typeof fetch;
+
+		const service = new PluginService(agentDir, fetchImpl);
+
+		// 1. Add root=catalog on main
+		const m1 = await service.addMarket({
+			requestId: randomUUID(),
+			url: "https://github.com/acme/multiroot/tree/main/catalog",
+			expectedRevision: 1,
+		});
+		expect(m1.markets.find((m) => m.id === m1.selectedSourceId)?.root).toBe("catalog");
+
+		// 2. Add same repo with branch=feature/plugins and root=catalog
+		const m2 = await service.addMarket({
+			requestId: randomUUID(),
+			url: "https://github.com/acme/multiroot/tree/feature/plugins/catalog",
+			expectedRevision: m1.registryRevision,
+		});
+		expect(m2.markets.find((m) => m.id === m2.selectedSourceId)?.trackingRef).toBe("feature/plugins");
+
+		// 3. Add same repo with pinned sha and root=catalog
+		const m3 = await service.addMarket({
+			requestId: randomUUID(),
+			url: `https://github.com/acme/multiroot/tree/${PINNED_SHA}/catalog`,
+			expectedRevision: m2.registryRevision,
+		});
+		expect(m3.markets.find((m) => m.id === m3.selectedSourceId)?.pinnedCommit).toBe(PINNED_SHA);
+
+		// 4. Add same repo with root=other on main
+		const m4 = await service.addMarket({
+			requestId: randomUUID(),
+			url: "https://github.com/acme/multiroot/tree/main/other",
+			expectedRevision: m3.registryRevision,
+		});
+		expect(m4.markets.find((m) => m.id === m4.selectedSourceId)?.root).toBe("other");
+
+		// 5. Duplicate add throws CONFLICT
+		await expect(
+			service.addMarket({
+				requestId: randomUUID(),
+				url: "https://github.com/acme/multiroot/tree/main/catalog",
+				expectedRevision: m4.registryRevision,
+			}),
+		).rejects.toMatchObject({ code: "CONFLICT" });
+
+		// 6. Invalid ref throws
+		await expect(
+			service.addMarket({
+				requestId: randomUUID(),
+				url: "https://github.com/acme/multiroot/tree/nonexistent-ref/catalog",
+				expectedRevision: m4.registryRevision,
+			}),
+		).rejects.toThrow();
+
+		// 7. Restart service: new instance reads from persisted registry and still inspects from original root
+		const restarted = new PluginService(agentDir, fetchImpl);
+		const listed = restarted.listMarkets();
+		expect(listed.markets).toHaveLength(5); // 1 official + 4 added
+
+		const catalogDetail = await restarted.inspectPlugin(m1.selectedSourceId, "entry-catalog-plugin");
+		expect(catalogDetail.components.some((c) => c.kind === "skill")).toBe(true);
+
+		const otherDetail = await restarted.inspectPlugin(m4.selectedSourceId, "entry-other-plugin");
+		expect(otherDetail.components.some((c) => c.kind === "skill")).toBe(true);
+	});
 });

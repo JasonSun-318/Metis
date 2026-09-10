@@ -1597,6 +1597,9 @@ export const PluginMarketViewSchema = StrictObject({
 	selected: Type.Boolean(),
 	fetchedAt: Type.Optional(TimestampSchema),
 	commit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	root: Type.Optional(Utf8String(1024)),
+	trackingRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	pinnedCommit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
 });
 
 export const PluginCatalogEntryViewSchema = StrictObject({

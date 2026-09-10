@@ -37494,88 +37494,17 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "selectedSourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
-                    },
-                    "registryRevision": {
-                      "type": "integer",
-                      "minimum": 0
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              },
-              "additionalProperties": false
-            },
-            {
-              "type": "object",
-              "required": [
-                "jsonrpc",
-                "id",
-                "result"
-              ],
-              "properties": {
-                "jsonrpc": {
-                  "type": "string",
-                  "const": "2.0"
-                },
-                "id": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 128,
-                  "x-metis-maxUtf16Units": 128
-                },
-                "result": {
-                  "type": "object",
-                  "required": [
-                    "markets",
-                    "selectedSourceId",
-                    "registryRevision"
-                  ],
-                  "properties": {
-                    "markets": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "required": [
-                          "id",
-                          "url",
-                          "displayName",
-                          "selected"
-                        ],
-                        "properties": {
-                          "id": {
+                          },
+                          "root": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 1024
+                          },
+                          "trackingRef": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 256,
-                            "x-metis-maxUtf16Units": 256
+                            "maxLength": 128
                           },
-                          "url": {
-                            "type": "string",
-                            "minLength": 1,
-                            "x-metis-maxUtf8Bytes": 2048
-                          },
-                          "displayName": {
-                            "type": "string",
-                            "x-metis-maxUtf8Bytes": 65536
-                          },
-                          "selected": {
-                            "type": "boolean"
-                          },
-                          "fetchedAt": {
-                            "type": "string",
-                            "format": "date-time",
-                            "maxLength": 40
-                          },
-                          "commit": {
+                          "pinnedCommit": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128
@@ -37664,6 +37593,20 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128
+                          },
+                          "root": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 1024
+                          },
+                          "trackingRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "pinnedCommit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
                           }
                         },
                         "additionalProperties": false
@@ -37746,6 +37689,119 @@
                             "maxLength": 40
                           },
                           "commit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "root": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 1024
+                          },
+                          "trackingRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "pinnedCommit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "selectedSourceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    "registryRevision": {
+                      "type": "integer",
+                      "minimum": 0
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "markets",
+                    "selectedSourceId",
+                    "registryRevision"
+                  ],
+                  "properties": {
+                    "markets": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "url",
+                          "displayName",
+                          "selected"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "x-metis-maxUtf16Units": 256
+                          },
+                          "url": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 2048
+                          },
+                          "displayName": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "selected": {
+                            "type": "boolean"
+                          },
+                          "fetchedAt": {
+                            "type": "string",
+                            "format": "date-time",
+                            "maxLength": 40
+                          },
+                          "commit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "root": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 1024
+                          },
+                          "trackingRef": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "pinnedCommit": {
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128
@@ -72808,88 +72864,17 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                },
-                "selectedSourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
-                },
-                "registryRevision": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "required": [
-            "jsonrpc",
-            "id",
-            "result"
-          ],
-          "properties": {
-            "jsonrpc": {
-              "type": "string",
-              "const": "2.0"
-            },
-            "id": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 128,
-              "x-metis-maxUtf16Units": 128
-            },
-            "result": {
-              "type": "object",
-              "required": [
-                "markets",
-                "selectedSourceId",
-                "registryRevision"
-              ],
-              "properties": {
-                "markets": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "required": [
-                      "id",
-                      "url",
-                      "displayName",
-                      "selected"
-                    ],
-                    "properties": {
-                      "id": {
+                      },
+                      "root": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 1024
+                      },
+                      "trackingRef": {
                         "type": "string",
                         "minLength": 1,
-                        "maxLength": 256,
-                        "x-metis-maxUtf16Units": 256
+                        "maxLength": 128
                       },
-                      "url": {
-                        "type": "string",
-                        "minLength": 1,
-                        "x-metis-maxUtf8Bytes": 2048
-                      },
-                      "displayName": {
-                        "type": "string",
-                        "x-metis-maxUtf8Bytes": 65536
-                      },
-                      "selected": {
-                        "type": "boolean"
-                      },
-                      "fetchedAt": {
-                        "type": "string",
-                        "format": "date-time",
-                        "maxLength": 40
-                      },
-                      "commit": {
+                      "pinnedCommit": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128
@@ -72978,6 +72963,20 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128
+                      },
+                      "root": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 1024
+                      },
+                      "trackingRef": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "pinnedCommit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
                       }
                     },
                     "additionalProperties": false
@@ -73060,6 +73059,119 @@
                         "maxLength": 40
                       },
                       "commit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "root": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 1024
+                      },
+                      "trackingRef": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "pinnedCommit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "selectedSourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "x-metis-maxUtf16Units": 256
+                },
+                "registryRevision": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "markets",
+                "selectedSourceId",
+                "registryRevision"
+              ],
+              "properties": {
+                "markets": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "url",
+                      "displayName",
+                      "selected"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "x-metis-maxUtf16Units": 256
+                      },
+                      "url": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 2048
+                      },
+                      "displayName": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "selected": {
+                        "type": "boolean"
+                      },
+                      "fetchedAt": {
+                        "type": "string",
+                        "format": "date-time",
+                        "maxLength": 40
+                      },
+                      "commit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "root": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 1024
+                      },
+                      "trackingRef": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "pinnedCommit": {
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128
