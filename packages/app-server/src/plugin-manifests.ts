@@ -87,6 +87,48 @@ function normalizePath(p: string): string {
 	return normalized.replace(/^\.\//, "").replace(/^\//, "");
 }
 
+export function canonicalComponentPath(input: string): string {
+	const raw = input.replace(/\\/g, "/");
+	if (posix.isAbsolute(raw)) throw new Error("Absolute component path is not allowed");
+	const normalized = posix.normalize(raw);
+	if (normalized === ".." || normalized.startsWith("../")) throw new Error("Component path escapes plugin");
+	return normalized === "." ? "" : normalized.replace(/^\.\//, "").replace(/\/+$/, "");
+}
+
+export function skillEntriesAt(input: string, paths: readonly string[]): string[] {
+	const path = canonicalComponentPath(input);
+	if (path.endsWith("SKILL.md")) return paths.includes(path) ? [path] : [];
+	const prefix = path ? `${path}/` : "";
+	return paths.filter((p) => p.startsWith(prefix) && posix.basename(p) === "SKILL.md");
+}
+
+function unsupportedHandlerReason(handler: Record<string, unknown>): string | undefined {
+	if (handler.type !== undefined && handler.type !== "command") return "Unsupported hook handler type";
+	if (handler.async === true) return "Async hooks are not supported";
+	if (handler.if !== undefined || handler.condition !== undefined) return "Conditional hooks are not supported";
+	return undefined;
+}
+
+function parseJsonWithDiagnostics(
+	buffer: Buffer,
+	filePath: string,
+	componentId: string,
+	issues: PluginIssue[],
+	isManifest = false,
+): unknown {
+	try {
+		return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer));
+	} catch (err) {
+		issues.push({
+			code: isManifest ? "CORRUPT_MANIFEST" : "INVALID_JSON",
+			componentId,
+			message: `Failed to parse JSON file at ${filePath}: ${(err as Error).message}`,
+			status: "unsupported",
+		});
+		return undefined;
+	}
+}
+
 function getFileContent(
 	files: ReadonlyMap<string, Buffer> | Record<string, Buffer>,
 	path: string,
@@ -120,14 +162,6 @@ function listFilePaths(files: ReadonlyMap<string, Buffer> | Record<string, Buffe
 		.map((k) => (normalizedRoot && k.startsWith(`${normalizedRoot}/`) ? k.slice(normalizedRoot.length + 1) : k));
 }
 
-function parseJsonSafe(buffer: Buffer): unknown {
-	try {
-		return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer));
-	} catch {
-		return undefined;
-	}
-}
-
 function slugify(name: string): string {
 	return (
 		name
@@ -154,6 +188,283 @@ function checkVariables(value: string | undefined, componentId: string, issues: 
 			});
 		}
 		match = regex.exec(value);
+	}
+}
+
+function discoverSkillPaths(
+	files: ReadonlyMap<string, Buffer> | Record<string, Buffer>,
+	root: string,
+	declaredSkills: unknown,
+	isStrictFalseBundle: boolean,
+	issues: PluginIssue[],
+): string[] {
+	const allPaths = listFilePaths(files, root);
+	const candidateSkillPaths = new Set<string>();
+
+	if (isStrictFalseBundle) {
+		const list = Array.isArray(declaredSkills) ? declaredSkills : [];
+		for (const s of list) {
+			if (typeof s !== "string") continue;
+			try {
+				const entries = skillEntriesAt(s, allPaths);
+				if (entries.length === 0) {
+					issues.push({
+						code: "MISSING_COMPONENT",
+						componentId: `skill-${slugify(s)}`,
+						message: `Declared skill path does not exist: ${s}`,
+						status: "warning",
+					});
+				} else {
+					for (const e of entries) candidateSkillPaths.add(e);
+				}
+			} catch (err) {
+				issues.push({
+					code: "INVALID_COMPONENT_PATH",
+					componentId: `skill-${slugify(s)}`,
+					message: (err as Error).message,
+					status: "warning",
+				});
+			}
+		}
+		return Array.from(candidateSkillPaths);
+	}
+
+	if (declaredSkills !== undefined && declaredSkills !== null) {
+		const list =
+			typeof declaredSkills === "string" ? [declaredSkills] : Array.isArray(declaredSkills) ? declaredSkills : [];
+		for (const s of list) {
+			if (typeof s !== "string") continue;
+			try {
+				const entries = skillEntriesAt(s, allPaths);
+				if (entries.length === 0) {
+					issues.push({
+						code: "MISSING_COMPONENT",
+						componentId: `skill-${slugify(s)}`,
+						message: `Declared skill path does not exist: ${s}`,
+						status: "warning",
+					});
+				} else {
+					for (const e of entries) candidateSkillPaths.add(e);
+				}
+			} catch (err) {
+				issues.push({
+					code: "INVALID_COMPONENT_PATH",
+					componentId: `skill-${slugify(s)}`,
+					message: (err as Error).message,
+					status: "warning",
+				});
+			}
+		}
+	}
+
+	for (const e of skillEntriesAt("skills", allPaths)) {
+		candidateSkillPaths.add(e);
+	}
+	if (allPaths.includes("SKILL.md")) {
+		candidateSkillPaths.add("SKILL.md");
+	}
+
+	return Array.from(candidateSkillPaths);
+}
+
+function parseSkillComponents(
+	files: ReadonlyMap<string, Buffer> | Record<string, Buffer>,
+	root: string,
+	skillPaths: readonly string[],
+): ParsedSkillComponent[] {
+	const components: ParsedSkillComponent[] = [];
+	for (const skillPath of skillPaths) {
+		const buf = getFileContent(files, skillPath, root);
+		if (!buf) continue;
+		const text = new TextDecoder("utf-8").decode(buf);
+		let frontmatter: Record<string, unknown> = {};
+		try {
+			const parsed = parseFrontmatter<Record<string, unknown>>(text);
+			frontmatter = parsed.frontmatter;
+		} catch {
+			// empty or malformed frontmatter
+		}
+		const originalName =
+			typeof frontmatter.name === "string" && frontmatter.name.trim()
+				? frontmatter.name.trim()
+				: posix.basename(posix.dirname(skillPath)) || "skill";
+		const skillDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
+		const disableModelInvocation = Boolean(frontmatter["disable-model-invocation"]);
+
+		components.push({
+			kind: "skill",
+			id: slugify(originalName),
+			name: originalName,
+			originalName,
+			description: skillDescription,
+			relativeEntryPath: skillPath,
+			relativeBaseDir: posix.dirname(skillPath) === "." ? "" : posix.dirname(skillPath),
+			disableModelInvocation,
+		});
+	}
+	return components;
+}
+
+function parseHooks(
+	files: ReadonlyMap<string, Buffer> | Record<string, Buffer>,
+	root: string,
+	declaredHooks: unknown,
+	pluginName: string,
+	components: ParsedPluginComponent[],
+	issues: PluginIssue[],
+): void {
+	const configsToParse: Array<{ source: string; content: unknown }> = [];
+
+	const defaultHookPath = "hooks/hooks.json";
+	const defaultBuf = getFileContent(files, defaultHookPath, root);
+	if (defaultBuf) {
+		const parsed = parseJsonWithDiagnostics(defaultBuf, defaultHookPath, "hooks", issues);
+		if (parsed) {
+			configsToParse.push({ source: defaultHookPath, content: parsed });
+		}
+	}
+
+	const customPaths: string[] = [];
+	if (typeof declaredHooks === "string") {
+		customPaths.push(declaredHooks);
+	} else if (Array.isArray(declaredHooks)) {
+		for (const h of declaredHooks) {
+			if (typeof h === "string") customPaths.push(h);
+		}
+	}
+
+	const seenCustomPaths = new Set<string>();
+	for (const rawCustom of customPaths) {
+		let canonical: string;
+		try {
+			canonical = canonicalComponentPath(rawCustom);
+		} catch (err) {
+			issues.push({
+				code: "INVALID_COMPONENT_PATH",
+				componentId: `hook-${slugify(rawCustom)}`,
+				message: (err as Error).message,
+				status: "warning",
+			});
+			continue;
+		}
+
+		if (canonical === defaultHookPath || seenCustomPaths.has(canonical)) {
+			continue;
+		}
+		seenCustomPaths.add(canonical);
+
+		const buf = getFileContent(files, canonical, root);
+		if (!buf) {
+			issues.push({
+				code: "MISSING_COMPONENT",
+				componentId: `hook-${slugify(canonical)}`,
+				message: `Declared hooks file does not exist: ${canonical}`,
+				status: "warning",
+			});
+			continue;
+		}
+
+		const parsed = parseJsonWithDiagnostics(buf, canonical, "hooks", issues);
+		if (parsed) {
+			configsToParse.push({ source: canonical, content: parsed });
+		}
+	}
+
+	if (typeof declaredHooks === "object" && declaredHooks !== null && !Array.isArray(declaredHooks)) {
+		configsToParse.push({ source: "inline", content: declaredHooks });
+	}
+
+	let hookIndex = 0;
+	for (const { source: _source, content } of configsToParse) {
+		if (typeof content !== "object" || content === null) continue;
+		const hooksRoot =
+			"hooks" in content &&
+			typeof (content as Record<string, unknown>).hooks === "object" &&
+			(content as Record<string, unknown>).hooks !== null
+				? ((content as Record<string, unknown>).hooks as Record<string, unknown>)
+				: (content as Record<string, unknown>);
+
+		for (const [eventName, groupOrHandlers] of Object.entries(hooksRoot)) {
+			const isSupportedEvent = HOOK_EVENT_NAMES.includes(eventName as HookEventName);
+			if (!isSupportedEvent) {
+				issues.push({
+					code: "UNSUPPORTED_HOOK_EVENT",
+					componentId: `hook-${eventName}`,
+					message: `Unsupported hook event: ${eventName}`,
+					status: "unsupported",
+				});
+				components.push({
+					kind: "unsupported",
+					id: `hook-${eventName}`,
+					name: `Hook: ${eventName}`,
+					reason: `Unsupported hook event: ${eventName}`,
+				});
+				continue;
+			}
+
+			if (!Array.isArray(groupOrHandlers)) continue;
+
+			for (const item of groupOrHandlers) {
+				if (typeof item !== "object" || item === null) continue;
+				const itemObj = item as Record<string, unknown>;
+				const matcher = typeof itemObj.matcher === "string" ? itemObj.matcher : undefined;
+				const handlers: Array<Record<string, unknown>> = Array.isArray(itemObj.hooks)
+					? (itemObj.hooks as Array<Record<string, unknown>>)
+					: [itemObj];
+
+				for (const handler of handlers) {
+					hookIndex += 1;
+					const reason = unsupportedHandlerReason(handler);
+					const stableId = `hook-${eventName}-${matcher ? slugify(matcher) : "all"}-${hookIndex}`;
+
+					if (reason) {
+						issues.push({
+							code: "UNSUPPORTED_HOOK_HANDLER",
+							componentId: stableId,
+							message: reason,
+							status: "unsupported",
+						});
+						components.push({
+							kind: "unsupported",
+							id: stableId,
+							name: `${pluginName || "plugin"} ${eventName} hook`,
+							reason,
+						});
+						continue;
+					}
+
+					const command = typeof handler.command === "string" ? handler.command : "";
+					if (!command) continue;
+
+					const timeoutSeconds =
+						typeof handler.timeout === "number"
+							? handler.timeout
+							: typeof handler.timeoutSeconds === "number"
+								? handler.timeoutSeconds
+								: undefined;
+					const statusMessage = typeof handler.statusMessage === "string" ? handler.statusMessage : undefined;
+
+					components.push({
+						kind: "hook",
+						id: stableId,
+						name: `${pluginName || "plugin"} ${eventName} hook`,
+						event: eventName as HookEventName,
+						definition: {
+							id: stableId,
+							name: `${pluginName || "plugin"} ${eventName} hook`,
+							enabled: true,
+							event: eventName as HookEventName,
+							matcher,
+							runMode: "shell",
+							protocol: "command-v1",
+							command,
+							...(timeoutSeconds !== undefined ? { timeoutSeconds } : {}),
+							...(statusMessage !== undefined ? { statusMessage } : {}),
+						},
+					});
+				}
+			}
+		}
 	}
 }
 
@@ -199,9 +510,21 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 	let version: string | undefined;
 
 	if (format === "claude") {
-		const rawManifest = options.manifest ?? (claudeManifestBuf ? parseJsonSafe(claudeManifestBuf) : undefined);
-		const manifestObj =
-			typeof rawManifest === "object" && rawManifest !== null ? (rawManifest as Record<string, unknown>) : {};
+		let manifestObj: Record<string, unknown> = {};
+		if (options.manifest && typeof options.manifest === "object") {
+			manifestObj = options.manifest as Record<string, unknown>;
+		} else if (claudeManifestBuf) {
+			const parsed = parseJsonWithDiagnostics(
+				claudeManifestBuf,
+				".claude-plugin/plugin.json",
+				"manifest",
+				issues,
+				true,
+			);
+			if (typeof parsed === "object" && parsed !== null) {
+				manifestObj = parsed as Record<string, unknown>;
+			}
+		}
 
 		if (manifestObj.name && typeof manifestObj.name === "string") name = manifestObj.name;
 		if (manifestObj.displayName && typeof manifestObj.displayName === "string") displayName = manifestObj.displayName;
@@ -210,95 +533,67 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 		if (manifestObj.version && typeof manifestObj.version === "string") version = manifestObj.version;
 
 		// Skill discovery
-		const candidateSkillPaths = new Set<string>();
-		if (options.marketEntry?.strict === false && Array.isArray(options.marketEntry?.skills)) {
-			for (const skillPath of options.marketEntry.skills) {
-				const norm = normalizePath(skillPath);
-				candidateSkillPaths.add(norm.endsWith("SKILL.md") ? norm : posix.join(norm, "SKILL.md"));
-			}
-		} else {
-			// Declared skills
-			if (typeof manifestObj.skills === "string") {
-				const norm = normalizePath(manifestObj.skills);
-				candidateSkillPaths.add(norm.endsWith("SKILL.md") ? norm : posix.join(norm, "SKILL.md"));
-			} else if (Array.isArray(manifestObj.skills)) {
-				for (const s of manifestObj.skills) {
-					if (typeof s === "string") {
-						const norm = normalizePath(s);
-						candidateSkillPaths.add(norm.endsWith("SKILL.md") ? norm : posix.join(norm, "SKILL.md"));
-					}
-				}
-			}
-			// Default discovery: look for skills/**/SKILL.md
-			const allPaths = listFilePaths(files, root);
-			for (const p of allPaths) {
-				if (posix.basename(p) === "SKILL.md" && (p.startsWith("skills/") || p === "SKILL.md")) {
-					candidateSkillPaths.add(p);
-				}
-			}
-		}
-
-		for (const skillPath of candidateSkillPaths) {
-			const buf = getFileContent(files, skillPath, root);
-			if (!buf) continue;
-			const text = new TextDecoder("utf-8").decode(buf);
-			let frontmatter: Record<string, unknown> = {};
-			try {
-				const parsed = parseFrontmatter<Record<string, unknown>>(text);
-				frontmatter = parsed.frontmatter;
-			} catch {
-				// empty or malformed frontmatter
-			}
-			const originalName =
-				typeof frontmatter.name === "string" && frontmatter.name.trim()
-					? frontmatter.name.trim()
-					: posix.basename(posix.dirname(skillPath));
-			const skillDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
-			const disableModelInvocation = Boolean(frontmatter["disable-model-invocation"]);
-
-			components.push({
-				kind: "skill",
-				id: slugify(originalName),
-				name: originalName,
-				originalName,
-				description: skillDescription,
-				relativeEntryPath: skillPath,
-				relativeBaseDir: posix.dirname(skillPath) === "." ? "" : posix.dirname(skillPath),
-				disableModelInvocation,
-			});
-		}
-
-		// Check Claude commands
-		const allPaths = listFilePaths(files, root);
-		const commandFiles = allPaths.filter((p) => p.startsWith("commands/") && p.endsWith(".md"));
-		if (commandFiles.length > 0 || manifestObj.commands) {
-			issues.push({
-				code: "UNSUPPORTED_FEATURE",
-				componentId: "commands",
-				message: "Claude commands are not supported in this version",
-				status: "warning",
-			});
-		}
+		const isStrictFalseBundle = Boolean(
+			options.marketEntry?.strict === false && Array.isArray(options.marketEntry?.skills),
+		);
+		const declaredSkills = isStrictFalseBundle ? options.marketEntry?.skills : manifestObj.skills;
+		const candidateSkillPaths = discoverSkillPaths(files, root, declaredSkills, isStrictFalseBundle, issues);
+		const skillComponents = parseSkillComponents(files, root, candidateSkillPaths);
+		components.push(...skillComponents);
 
 		// MCP discovery
 		const mcpServerConfigs = new Map<string, unknown>();
 		let customMcpFile: string | undefined;
 		if (typeof manifestObj.mcpServers === "string") {
-			customMcpFile = normalizePath(manifestObj.mcpServers);
+			customMcpFile = manifestObj.mcpServers;
 		} else if (typeof manifestObj.mcpServers === "object" && manifestObj.mcpServers !== null) {
 			for (const [serverName, srv] of Object.entries(manifestObj.mcpServers as Record<string, unknown>)) {
 				mcpServerConfigs.set(serverName, srv);
 			}
 		}
 
-		const filesToCheck = new Set<string>();
-		if (customMcpFile) filesToCheck.add(customMcpFile);
-		filesToCheck.add(".mcp.json");
+		if (customMcpFile) {
+			let canonical: string;
+			try {
+				canonical = canonicalComponentPath(customMcpFile);
+			} catch (err) {
+				issues.push({
+					code: "INVALID_COMPONENT_PATH",
+					componentId: `mcp-${slugify(customMcpFile)}`,
+					message: (err as Error).message,
+					status: "warning",
+				});
+				canonical = "";
+			}
+			if (canonical) {
+				const buf = getFileContent(files, canonical, root);
+				if (!buf) {
+					issues.push({
+						code: "MISSING_COMPONENT",
+						componentId: `mcp-${slugify(canonical)}`,
+						message: `Declared MCP file does not exist: ${canonical}`,
+						status: "warning",
+					});
+				} else {
+					const parsed = parseJsonWithDiagnostics(buf, canonical, "mcp", issues);
+					if (typeof parsed === "object" && parsed !== null) {
+						const srvMap =
+							"mcpServers" in parsed && typeof (parsed as Record<string, unknown>).mcpServers === "object"
+								? ((parsed as Record<string, unknown>).mcpServers as Record<string, unknown>)
+								: (parsed as Record<string, unknown>);
+						for (const [serverName, srv] of Object.entries(srvMap)) {
+							if (!mcpServerConfigs.has(serverName)) {
+								mcpServerConfigs.set(serverName, srv);
+							}
+						}
+					}
+				}
+			}
+		}
 
-		for (const mcpPath of filesToCheck) {
-			const buf = getFileContent(files, mcpPath, root);
-			if (!buf) continue;
-			const parsed = parseJsonSafe(buf);
+		const defaultMcpBuf = getFileContent(files, ".mcp.json", root);
+		if (defaultMcpBuf) {
+			const parsed = parseJsonWithDiagnostics(defaultMcpBuf, ".mcp.json", "mcp", issues);
 			if (typeof parsed === "object" && parsed !== null) {
 				const srvMap =
 					"mcpServers" in parsed && typeof (parsed as Record<string, unknown>).mcpServers === "object"
@@ -384,136 +679,23 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 		}
 
 		// Hooks discovery
-		let customHooksFile: string | undefined;
-		let inlineHooksObj: unknown;
-		if (typeof manifestObj.hooks === "string") {
-			customHooksFile = normalizePath(manifestObj.hooks);
-		} else if (typeof manifestObj.hooks === "object" && manifestObj.hooks !== null) {
-			inlineHooksObj = manifestObj.hooks;
-		}
-
-		const hooksFilesToCheck = new Set<string>();
-		if (customHooksFile) hooksFilesToCheck.add(customHooksFile);
-		hooksFilesToCheck.add("hooks/hooks.json");
-
-		let rawHooks = inlineHooksObj;
-		if (!rawHooks) {
-			for (const hPath of hooksFilesToCheck) {
-				const buf = getFileContent(files, hPath, root);
-				if (buf) {
-					rawHooks = parseJsonSafe(buf);
-					break;
-				}
-			}
-		}
-
-		if (typeof rawHooks === "object" && rawHooks !== null) {
-			const hooksRoot =
-				"hooks" in rawHooks && typeof (rawHooks as Record<string, unknown>).hooks === "object"
-					? ((rawHooks as Record<string, unknown>).hooks as Record<string, unknown>)
-					: (rawHooks as Record<string, unknown>);
-
-			for (const [eventName, groupOrHandlers] of Object.entries(hooksRoot)) {
-				const isSupportedEvent = HOOK_EVENT_NAMES.includes(eventName as HookEventName);
-				if (!isSupportedEvent) {
-					issues.push({
-						code: "UNSUPPORTED_HOOK_EVENT",
-						componentId: `hook-${eventName}`,
-						message: `Unsupported hook event: ${eventName}`,
-						status: "unsupported",
-					});
-					components.push({
-						kind: "unsupported",
-						id: `hook-${eventName}`,
-						name: `Hook: ${eventName}`,
-						reason: `Unsupported hook event: ${eventName}`,
-					});
-					continue;
-				}
-
-				if (!Array.isArray(groupOrHandlers)) continue;
-
-				let hookIndex = 0;
-				for (const item of groupOrHandlers) {
-					if (typeof item !== "object" || item === null) continue;
-					const itemObj = item as Record<string, unknown>;
-
-					// Could be { matcher: "...", hooks: [ { type: "command", ... } ] }
-					// or { type: "command", command: "...", matcher: "..." }
-					const matcher = typeof itemObj.matcher === "string" ? itemObj.matcher : undefined;
-					const handlers: Array<Record<string, unknown>> = Array.isArray(itemObj.hooks)
-						? (itemObj.hooks as Array<Record<string, unknown>>)
-						: [itemObj];
-
-					for (const handler of handlers) {
-						hookIndex += 1;
-						const handlerType = typeof handler.type === "string" ? handler.type : "command";
-
-						if (handlerType !== "command") {
-							issues.push({
-								code: "UNSUPPORTED_HOOK_HANDLER",
-								componentId: `hook-${eventName}-${hookIndex}`,
-								message: `Unsupported hook handler type: ${handlerType}`,
-								status: "unsupported",
-							});
-							components.push({
-								kind: "unsupported",
-								id: `hook-${eventName}-${hookIndex}`,
-								name: `Hook handler: ${handlerType}`,
-								reason: `Unsupported hook handler type: ${handlerType}`,
-							});
-							continue;
-						}
-
-						if (handler.async === true) {
-							issues.push({
-								code: "UNSUPPORTED_ASYNC_HOOK",
-								componentId: `hook-${eventName}-${hookIndex}`,
-								message: "Async hooks are not supported",
-								status: "unsupported",
-							});
-							components.push({
-								kind: "unsupported",
-								id: `hook-${eventName}-${hookIndex}`,
-								name: `Async hook: ${eventName}`,
-								reason: "Async hooks are not supported",
-							});
-							continue;
-						}
-
-						const command = typeof handler.command === "string" ? handler.command : "";
-						if (!command) continue;
-
-						const stableId = `hook-${eventName}-${matcher ? slugify(matcher) : "all"}-${hookIndex}`;
-						const timeoutSeconds = typeof handler.timeout === "number" ? handler.timeout : undefined;
-						const statusMessage = typeof handler.statusMessage === "string" ? handler.statusMessage : undefined;
-
-						components.push({
-							kind: "hook",
-							id: stableId,
-							name: `${name || "plugin"} ${eventName} hook`,
-							event: eventName as HookEventName,
-							definition: {
-								id: stableId,
-								name: `${name || "plugin"} ${eventName} hook`,
-								enabled: true,
-								event: eventName as HookEventName,
-								matcher,
-								runMode: "shell",
-								protocol: "command-v1",
-								command,
-								timeoutSeconds,
-								statusMessage,
-							},
-						});
-					}
-				}
-			}
-		}
+		parseHooks(files, root, manifestObj.hooks, name, components, issues);
 	} else if (format === "codex") {
-		const rawManifest = options.manifest ?? (codexManifestBuf ? parseJsonSafe(codexManifestBuf) : undefined);
-		const manifestObj =
-			typeof rawManifest === "object" && rawManifest !== null ? (rawManifest as Record<string, unknown>) : {};
+		let manifestObj: Record<string, unknown> = {};
+		if (options.manifest && typeof options.manifest === "object") {
+			manifestObj = options.manifest as Record<string, unknown>;
+		} else if (codexManifestBuf) {
+			const parsed = parseJsonWithDiagnostics(
+				codexManifestBuf,
+				".codex-plugin/plugin.json",
+				"manifest",
+				issues,
+				true,
+			);
+			if (typeof parsed === "object" && parsed !== null) {
+				manifestObj = parsed as Record<string, unknown>;
+			}
+		}
 
 		if (manifestObj.name && typeof manifestObj.name === "string") name = manifestObj.name;
 		const interfaceObj =
@@ -535,81 +717,67 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 		if (manifestObj.version && typeof manifestObj.version === "string") version = manifestObj.version;
 
 		// Skills discovery
-		const candidateSkillPaths = new Set<string>();
-		if (typeof manifestObj.skills === "string") {
-			const norm = normalizePath(manifestObj.skills);
-			candidateSkillPaths.add(norm.endsWith("SKILL.md") ? norm : posix.join(norm, "SKILL.md"));
-			const allPaths = listFilePaths(files, root);
-			for (const p of allPaths) {
-				if (posix.basename(p) === "SKILL.md" && (p.startsWith(`${norm}/`) || p === norm)) {
-					candidateSkillPaths.add(p);
-				}
-			}
-		} else if (Array.isArray(manifestObj.skills)) {
-			for (const s of manifestObj.skills) {
-				if (typeof s === "string") {
-					const norm = normalizePath(s);
-					candidateSkillPaths.add(norm.endsWith("SKILL.md") ? norm : posix.join(norm, "SKILL.md"));
-				}
-			}
-		} else {
-			const allPaths = listFilePaths(files, root);
-			for (const p of allPaths) {
-				if (posix.basename(p) === "SKILL.md") {
-					candidateSkillPaths.add(p);
-				}
-			}
-		}
-
-		for (const skillPath of candidateSkillPaths) {
-			const buf = getFileContent(files, skillPath, root);
-			if (!buf) continue;
-			const text = new TextDecoder("utf-8").decode(buf);
-			let frontmatter: Record<string, unknown> = {};
-			try {
-				const parsed = parseFrontmatter<Record<string, unknown>>(text);
-				frontmatter = parsed.frontmatter;
-			} catch {
-				// empty or malformed frontmatter
-			}
-			const originalName =
-				typeof frontmatter.name === "string" && frontmatter.name.trim()
-					? frontmatter.name.trim()
-					: posix.basename(posix.dirname(skillPath));
-			const skillDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
-			const disableModelInvocation = Boolean(frontmatter["disable-model-invocation"]);
-
-			components.push({
-				kind: "skill",
-				id: slugify(originalName),
-				name: originalName,
-				originalName,
-				description: skillDescription,
-				relativeEntryPath: skillPath,
-				relativeBaseDir: posix.dirname(skillPath) === "." ? "" : posix.dirname(skillPath),
-				disableModelInvocation,
-			});
-		}
+		const isStrictFalseBundle = Boolean(
+			options.marketEntry?.strict === false && Array.isArray(options.marketEntry?.skills),
+		);
+		const declaredSkills = isStrictFalseBundle ? options.marketEntry?.skills : manifestObj.skills;
+		const candidateSkillPaths = discoverSkillPaths(files, root, declaredSkills, isStrictFalseBundle, issues);
+		const skillComponents = parseSkillComponents(files, root, candidateSkillPaths);
+		components.push(...skillComponents);
 
 		// MCP discovery
 		const mcpServerConfigs = new Map<string, unknown>();
 		let customMcpFile: string | undefined;
 		if (typeof manifestObj.mcpServers === "string") {
-			customMcpFile = normalizePath(manifestObj.mcpServers);
+			customMcpFile = manifestObj.mcpServers;
 		} else if (typeof manifestObj.mcpServers === "object" && manifestObj.mcpServers !== null) {
 			for (const [serverName, srv] of Object.entries(manifestObj.mcpServers as Record<string, unknown>)) {
 				mcpServerConfigs.set(serverName, srv);
 			}
 		}
 
-		const filesToCheck = new Set<string>();
-		if (customMcpFile) filesToCheck.add(customMcpFile);
-		filesToCheck.add(".mcp.json");
+		if (customMcpFile) {
+			let canonical: string;
+			try {
+				canonical = canonicalComponentPath(customMcpFile);
+			} catch (err) {
+				issues.push({
+					code: "INVALID_COMPONENT_PATH",
+					componentId: `mcp-${slugify(customMcpFile)}`,
+					message: (err as Error).message,
+					status: "warning",
+				});
+				canonical = "";
+			}
+			if (canonical) {
+				const buf = getFileContent(files, canonical, root);
+				if (!buf) {
+					issues.push({
+						code: "MISSING_COMPONENT",
+						componentId: `mcp-${slugify(canonical)}`,
+						message: `Declared MCP file does not exist: ${canonical}`,
+						status: "warning",
+					});
+				} else {
+					const parsed = parseJsonWithDiagnostics(buf, canonical, "mcp", issues);
+					if (typeof parsed === "object" && parsed !== null) {
+						const srvMap =
+							"mcpServers" in parsed && typeof (parsed as Record<string, unknown>).mcpServers === "object"
+								? ((parsed as Record<string, unknown>).mcpServers as Record<string, unknown>)
+								: (parsed as Record<string, unknown>);
+						for (const [serverName, srv] of Object.entries(srvMap)) {
+							if (!mcpServerConfigs.has(serverName)) {
+								mcpServerConfigs.set(serverName, srv);
+							}
+						}
+					}
+				}
+			}
+		}
 
-		for (const mcpPath of filesToCheck) {
-			const buf = getFileContent(files, mcpPath, root);
-			if (!buf) continue;
-			const parsed = parseJsonSafe(buf);
+		const defaultMcpBuf = getFileContent(files, ".mcp.json", root);
+		if (defaultMcpBuf) {
+			const parsed = parseJsonWithDiagnostics(defaultMcpBuf, ".mcp.json", "mcp", issues);
 			if (typeof parsed === "object" && parsed !== null) {
 				const srvMap =
 					"mcpServers" in parsed && typeof (parsed as Record<string, unknown>).mcpServers === "object"
@@ -664,93 +832,7 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 		}
 
 		// Hooks discovery
-		let customHooksFile: string | undefined;
-		let inlineHooksObj: unknown;
-		if (typeof manifestObj.hooks === "string") {
-			customHooksFile = normalizePath(manifestObj.hooks);
-		} else if (typeof manifestObj.hooks === "object" && manifestObj.hooks !== null) {
-			inlineHooksObj = manifestObj.hooks;
-		}
-
-		const hooksFilesToCheck = new Set<string>();
-		if (customHooksFile) hooksFilesToCheck.add(customHooksFile);
-		hooksFilesToCheck.add("hooks/hooks.json");
-
-		let rawHooks = inlineHooksObj;
-		if (!rawHooks) {
-			for (const hPath of hooksFilesToCheck) {
-				const buf = getFileContent(files, hPath, root);
-				if (buf) {
-					rawHooks = parseJsonSafe(buf);
-					break;
-				}
-			}
-		}
-
-		if (typeof rawHooks === "object" && rawHooks !== null) {
-			const hooksRoot =
-				"hooks" in rawHooks && typeof (rawHooks as Record<string, unknown>).hooks === "object"
-					? ((rawHooks as Record<string, unknown>).hooks as Record<string, unknown>)
-					: (rawHooks as Record<string, unknown>);
-
-			for (const [eventName, groupOrHandlers] of Object.entries(hooksRoot)) {
-				const isSupportedEvent = HOOK_EVENT_NAMES.includes(eventName as HookEventName);
-				if (!isSupportedEvent) {
-					issues.push({
-						code: "UNSUPPORTED_HOOK_EVENT",
-						componentId: `hook-${eventName}`,
-						message: `Unsupported hook event: ${eventName}`,
-						status: "unsupported",
-					});
-					components.push({
-						kind: "unsupported",
-						id: `hook-${eventName}`,
-						name: `Hook: ${eventName}`,
-						reason: `Unsupported hook event: ${eventName}`,
-					});
-					continue;
-				}
-
-				if (!Array.isArray(groupOrHandlers)) continue;
-
-				let hookIndex = 0;
-				for (const item of groupOrHandlers) {
-					if (typeof item !== "object" || item === null) continue;
-					const itemObj = item as Record<string, unknown>;
-					const matcher = typeof itemObj.matcher === "string" ? itemObj.matcher : undefined;
-					const handlers: Array<Record<string, unknown>> = Array.isArray(itemObj.hooks)
-						? (itemObj.hooks as Array<Record<string, unknown>>)
-						: [itemObj];
-
-					for (const handler of handlers) {
-						hookIndex += 1;
-						const command = typeof handler.command === "string" ? handler.command : "";
-						if (!command) continue;
-
-						const stableId = `hook-${eventName}-${matcher ? slugify(matcher) : "all"}-${hookIndex}`;
-						const timeoutSeconds = typeof handler.timeout === "number" ? handler.timeout : undefined;
-
-						components.push({
-							kind: "hook",
-							id: stableId,
-							name: `${name || "codex-plugin"} ${eventName} hook`,
-							event: eventName as HookEventName,
-							definition: {
-								id: stableId,
-								name: `${name || "codex-plugin"} ${eventName} hook`,
-								enabled: true,
-								event: eventName as HookEventName,
-								matcher,
-								runMode: "shell",
-								protocol: "command-v1",
-								command,
-								timeoutSeconds,
-							},
-						});
-					}
-				}
-			}
-		}
+		parseHooks(files, root, manifestObj.hooks, name, components, issues);
 
 		// Apps discovery (Codex app connectors)
 		if (Array.isArray(manifestObj.apps)) {
@@ -778,36 +860,8 @@ export function parsePluginManifest(options: ParsePluginManifestOptions): Parsed
 		// format === "agent-skills"
 		const allPaths = listFilePaths(files, root);
 		const skillPaths = allPaths.filter((p) => posix.basename(p) === "SKILL.md");
-
-		for (const skillPath of skillPaths) {
-			const buf = getFileContent(files, skillPath, root);
-			if (!buf) continue;
-			const text = new TextDecoder("utf-8").decode(buf);
-			let frontmatter: Record<string, unknown> = {};
-			try {
-				const parsed = parseFrontmatter<Record<string, unknown>>(text);
-				frontmatter = parsed.frontmatter;
-			} catch {
-				// empty or malformed frontmatter
-			}
-			const originalName =
-				typeof frontmatter.name === "string" && frontmatter.name.trim()
-					? frontmatter.name.trim()
-					: posix.basename(posix.dirname(skillPath)) || "skill";
-			const skillDescription = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
-			const disableModelInvocation = Boolean(frontmatter["disable-model-invocation"]);
-
-			components.push({
-				kind: "skill",
-				id: slugify(originalName),
-				name: originalName,
-				originalName,
-				description: skillDescription,
-				relativeEntryPath: skillPath,
-				relativeBaseDir: posix.dirname(skillPath) === "." ? "" : posix.dirname(skillPath),
-				disableModelInvocation,
-			});
-		}
+		const skillComponents = parseSkillComponents(files, root, skillPaths);
+		components.push(...skillComponents);
 
 		if (!name && components.length > 0) {
 			name = components[0].name;

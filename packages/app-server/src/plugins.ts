@@ -403,7 +403,7 @@ export class PluginService {
 		const seenIds = new Set<string>();
 
 		for (const comp of parsed.components) {
-			const compId = comp.kind === "hook" ? comp.id : makeComponentId(pluginId, comp.name);
+			const compId = makeComponentId(pluginId, comp.kind === "hook" ? comp.id : comp.name);
 			if (seenIds.has(compId)) {
 				throw new AppServerError("OPERATION_FAILED");
 			}
@@ -851,8 +851,12 @@ export class PluginService {
 			try {
 				const pkg: NormalizedPluginPackage = JSON.parse(readFileSync(normalizedPath, "utf8"));
 				for (const comp of pkg.components) {
+					const componentId =
+						comp.kind === "hook" && !comp.componentId.startsWith(`p-${record.id.slice(0, 8)}-`)
+							? makeComponentId(record.id, comp.componentId)
+							: comp.componentId;
 					components.push({
-						componentId: comp.componentId,
+						componentId,
 						kind: comp.kind,
 						displayName: comp.originalName || comp.name,
 						originalName: comp.originalName || comp.name,

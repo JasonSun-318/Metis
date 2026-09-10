@@ -1,10 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readPluginSnapshot, resolveMcpServerDefinitions } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { parsePluginManifest } from "../src/plugin-manifests.ts";
 import { fetchPluginFiles, inspectRepositorySource } from "../src/plugin-sources.ts";
 import { PluginService } from "../src/plugins.ts";
-import { A, dirs, harness, installedHarness } from "./helpers/plugin-acceptance-fixture.ts";
+import { A, dirs, harness, installedHarness, skill } from "./helpers/plugin-acceptance-fixture.ts";
 
 afterEach(() => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -44,5 +46,110 @@ describe("Plugin acceptance regressions", () => {
 			}),
 		).rejects.toThrow();
 		expect(readFileSync(p, "utf8")).toBe("LIVE-BYTES");
+	});
+
+	it("R5 Codex skills directory field discovers its child skills", () => {
+		const p = parsePluginManifest({
+			files: new Map([
+				[".codex-plugin/plugin.json", Buffer.from(JSON.stringify({ name: "codex-fixture", skills: "./skills/" }))],
+				["skills/helper/SKILL.md", Buffer.from(skill)],
+			]),
+		});
+		expect(p.components.filter((c) => c.kind === "skill")).toHaveLength(1);
+	});
+
+	it.each(["./skills/", "skills", ["./skills/"]])("discovers a skill collection: %j", (skills) => {
+		const parsed = parsePluginManifest({
+			files: new Map([
+				[".codex-plugin/plugin.json", Buffer.from(JSON.stringify({ name: "example", skills }))],
+				["skills/helper/SKILL.md", Buffer.from("---\nname: helper\ndescription: Helper\n---\nHelp")],
+			]),
+		});
+		expect(parsed.components.filter((c) => c.kind === "skill")).toHaveLength(1);
+	});
+
+	it("R6 custom hooks supplement defaults rather than dropping defaults", () => {
+		const config = (event: string) =>
+			Buffer.from(JSON.stringify({ hooks: { [event]: [{ hooks: [{ type: "command", command: "echo OK" }] }] } }));
+		const p = parsePluginManifest({
+			files: new Map([
+				[".claude-plugin/plugin.json", Buffer.from(JSON.stringify({ name: "fixture", hooks: "./custom.json" }))],
+				["custom.json", config("UserPromptSubmit")],
+				["hooks/hooks.json", config("PreToolUse")],
+			]),
+		});
+		expect(p.components.filter((c) => c.kind === "hook")).toHaveLength(2);
+	});
+
+	it("R8 different installed plugins must receive different hook IDs and disabling one preserves the other", async () => {
+		const h = await installedHarness();
+		const other = await h.service.addMarket({
+			requestId: randomUUID(),
+			url: "other/repo",
+			expectedRevision: h.installed.registryRevision,
+		});
+		const detail = await h.service.inspectPlugin(other.selectedSourceId, "entry-fixture-plugin");
+		const otherInstalled = await h.service.install({
+			requestId: randomUUID(),
+			inspectionId: detail.inspectionId,
+			expectedRevision: detail.registryRevision,
+		});
+		const hooks = readPluginSnapshot(h.agentDir).hooks;
+		expect(hooks).toHaveLength(2);
+		expect(new Set(hooks.map((h) => h.definition.id)).size).toBe(2);
+
+		// Disable first plugin; second plugin's hook remains active
+		h.service.setEnabled({
+			requestId: randomUUID(),
+			pluginId: h.installed.plugin.plugin.id,
+			enabled: false,
+			expectedRevision: otherInstalled.registryRevision,
+		});
+		const hooksAfter = readPluginSnapshot(h.agentDir).hooks;
+		expect(hooksAfter).toHaveLength(1);
+		expect(hooksAfter[0].definition.id).toBe(hooks[1].definition.id);
+	});
+
+	it("R10 unknown Codex async hooks are not silently treated as sync hooks", () => {
+		const p = parsePluginManifest({
+			format: "codex",
+			manifest: { name: "fixture" },
+			files: new Map([
+				[
+					"hooks/hooks.json",
+					Buffer.from(
+						JSON.stringify({
+							hooks: { PreToolUse: [{ hooks: [{ type: "command", async: true, command: "echo OK" }] }] },
+						}),
+					),
+				],
+			]),
+		});
+		expect(p.components.some((c) => c.kind === "unsupported")).toBe(true);
+	});
+
+	it("R12 broken manifest must report a diagnostic, not silently become valid", () => {
+		const p = parsePluginManifest({
+			files: new Map([
+				[".claude-plugin/plugin.json", Buffer.from("{broken")],
+				["skills/helper/SKILL.md", Buffer.from(skill)],
+			]),
+		});
+		expect(p.issues.length).toBeGreaterThan(0);
+	});
+
+	it("R13 plugin MCP must coexist with manual same display name", () => {
+		const owner = { pluginId: "f".repeat(64), displayName: "Fixture", componentId: "p-plugin-echo" };
+		const cfg = resolveMcpServerDefinitions({ echo: { command: "node" } }, {}, "/tmp", {}, [
+			{
+				kind: "mcp",
+				name: "p-plugin-echo",
+				originalName: "echo",
+				packageDir: "/tmp",
+				owner,
+				definition: { command: "node" },
+			},
+		]);
+		expect(cfg.servers.map((s) => s.name)).toEqual(["echo", "p-plugin-echo"]);
 	});
 });

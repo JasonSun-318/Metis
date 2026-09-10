@@ -318,7 +318,7 @@ export function resolveMcpServerDefinitions(
 	}
 
 	for (const comp of pluginServers) {
-		if (effective.has(comp.name) || effective.has(comp.originalName)) {
+		if (effective.has(comp.name)) {
 			continue;
 		}
 		const instantiated = resolvePluginMcpSettings(comp, cwd);

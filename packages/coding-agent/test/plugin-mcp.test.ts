@@ -212,7 +212,7 @@ describe("Plugin MCP servers", () => {
 		});
 	});
 
-	it("manual server with same originalName shadows the plugin MCP server", async () => {
+	it("manual server with same originalName coexists with plugin MCP server", async () => {
 		const agentDir = createTempDir("agent-");
 		const cwd = createTempDir("workspace-");
 
@@ -256,8 +256,10 @@ describe("Plugin MCP servers", () => {
 		managers.push(manager);
 
 		const statuses = manager.getStatus();
-		// Plugin server must NOT be mounted
-		expect(statuses.find((s) => s.name === "p-shadow-echo_server")).toBeUndefined();
+		// Plugin server IS mounted
+		const pluginStatus = statuses.find((s) => s.name === "p-shadow-echo_server");
+		expect(pluginStatus).toBeDefined();
+		expect(pluginStatus?.pluginOwner).toBeDefined();
 		// Manual server is mounted
 		const manualStatus = statuses.find((s) => s.name === "echo_server");
 		expect(manualStatus).toBeDefined();
