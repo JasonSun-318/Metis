@@ -1663,6 +1663,13 @@ const zhCN = {
 	"Needs configuration": "需要配置",
 	Unsupported: "不支持",
 	"Update available": "有更新",
+	Enable: "启用",
+	Disable: "停用",
+	Version: "版本",
+	"Not Running": "未运行",
+	"not-running": "未运行",
+	Configuration: "配置",
+	"Runtime Status": "运行状态",
 } satisfies Record<string, string>;
 
 function isAppLocale(value: unknown): value is AppLocale {

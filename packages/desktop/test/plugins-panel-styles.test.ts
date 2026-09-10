@@ -63,4 +63,13 @@ describe("Plugin Center visual contract", () => {
 		expect(css).toContain("grid-template-columns: minmax(0, 1fr)");
 		expect(css).not.toContain("green");
 	});
+
+	it("ensures checkbox styles in partial notice override mcp-dialog label", () => {
+		expect(rule(".mcp-dialog .plugins-partial-checkbox").display).toBe("flex");
+		expect(rule(".mcp-dialog .plugins-partial-checkbox").alignItems).toBe("center");
+		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').flex).toMatch(/(none|0 0 auto)/);
+		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').width).toBe("14px");
+		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').height).toBe("14px");
+		expect(rule(".plugins-partial-checkbox span").minWidth).toBe("0px");
+	});
 });

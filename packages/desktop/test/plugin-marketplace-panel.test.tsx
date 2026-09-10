@@ -12,6 +12,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginsPanel, type PluginSection } from "../src/renderer/components/PluginsPanel.tsx";
+import i18n from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
 const officialMarket: MarketRecord = {
@@ -135,6 +136,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		}
 		container?.remove();
 		document.body.innerHTML = "";
+		await i18n.changeLanguage("en");
 	});
 
 	function createMockApi(overrides?: Partial<Parameters<typeof PluginsPanel>[0]["api"]>) {
@@ -675,5 +677,173 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		// Must display "Already up to date"
 		expect(detailDialog!.textContent).toContain("Already up to date");
 		expect(api.updatePlugin).not.toHaveBeenCalled();
+	});
+
+	it("renders Chinese translations for enable, disable, version, and not-running without fallback to English", async () => {
+		await i18n.changeLanguage("zh-CN");
+
+		const disabledRecord: PluginRecord = {
+			...installedOneRecord,
+			id: "disabled-plugin",
+			name: "disabled-plugin",
+			displayName: "Disabled Plugin",
+			enabled: false,
+		};
+
+		const api = createMockApi({
+			listInstalledPlugins: vi.fn().mockResolvedValue({
+				installed: [installedOneRecord, disabledRecord],
+				registryRevision: 1,
+			}),
+			getInstalledPlugin: vi.fn().mockImplementation(async ({ pluginId }: { pluginId: string }) => {
+				if (pluginId === "disabled-plugin") {
+					return {
+						plugin: disabledRecord,
+						components: [],
+						activation: "not-running",
+						runtimeErrors: [],
+					};
+				}
+				return installedOneDetail;
+			}),
+		});
+
+		const { container } = await renderPanel(api, "plugins");
+
+		// Switch to Installed sub-tab
+		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
+			el.textContent?.includes("已安装") || el.textContent?.includes("Installed"),
+		);
+		await act(async () => installedSubTab!.click());
+		await flush();
+
+		// Check buttons on rows
+		const rowOne = [...container.querySelectorAll(".plugins-installed-row")].find((el) =>
+			el.textContent?.includes("Installed One"),
+		);
+		expect(rowOne).toBeDefined();
+		// Row 1 is enabled -> toggle button must say "停用", not "Disable"
+		const toggleBtn1 = rowOne!.querySelector(".plugins-toggle-btn");
+		expect(toggleBtn1?.textContent).toContain("停用");
+		expect(toggleBtn1?.textContent).not.toContain("Disable");
+
+		const rowDisabled = [...container.querySelectorAll(".plugins-installed-row")].find((el) =>
+			el.textContent?.includes("Disabled Plugin"),
+		);
+		expect(rowDisabled).toBeDefined();
+		// Row 2 is disabled -> toggle button must say "启用", not "Enable"
+		const toggleBtn2 = rowDisabled!.querySelector(".plugins-toggle-btn");
+		expect(toggleBtn2?.textContent).toContain("启用");
+		expect(toggleBtn2?.textContent).not.toContain("Enable");
+
+		// Open disabled plugin detail dialog (which has activation = "not-running")
+		const manageDisabledBtn = rowDisabled!.querySelector(".plugins-inspect-action-btn") as HTMLButtonElement;
+		await act(async () => manageDisabledBtn.click());
+		await flush();
+
+		const detailDialog = document.body.querySelector(".plugins-detail-dialog");
+		expect(detailDialog).not.toBeNull();
+
+		// Detail dialog toggle button must say "启用"
+		const detailButtons = Array.from(detailDialog!.querySelectorAll("button"));
+		const detailToggleBtn = detailButtons.find((b) => b.textContent?.includes("启用"));
+		expect(detailToggleBtn).toBeDefined();
+		expect(detailToggleBtn?.textContent).not.toContain("Enable");
+
+		// Status card must show "未运行" for not-running activation
+		expect(detailDialog!.textContent).toContain("未运行");
+		expect(detailDialog!.textContent).not.toContain("Not Running");
+	});
+
+	it("requires allowPartial to enable update when update contains unsupported components, and blocks if all unsupported", async () => {
+		const api = createMockApi({
+			inspectPluginUpdate: vi.fn().mockResolvedValue({
+				pluginId: "installed-one",
+				currentCommit: "aaa11112222333",
+				newCommit: "aaa99998888777",
+				upToDate: false,
+				inspection: {
+					inspectionId: "insp-partial",
+					components: [
+						{ componentId: "c1", kind: "skill", displayName: "Skill 1", originalName: "s1", status: "ready" },
+						{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported" },
+					],
+					issues: [],
+					registryRevision: 1,
+				},
+			}),
+		});
+
+		const { container } = await renderPanel(api, "plugins");
+
+		// Switch to Installed sub-tab
+		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
+			el.textContent?.includes("Installed"),
+		);
+		await act(async () => installedSubTab!.click());
+		await flush();
+
+		// Open Manage dialog
+		const rowOne = [...container.querySelectorAll(".plugins-installed-row")].find((el) =>
+			el.textContent?.includes("Installed One"),
+		);
+		const manageBtn = button(rowOne!, "Manage");
+		await act(async () => manageBtn.click());
+		await flush();
+
+		const detailDialog = document.body.querySelector(".plugins-detail-dialog");
+		const checkUpdateBtn = button(detailDialog!, "Check for Updates");
+		await act(async () => checkUpdateBtn.click());
+		await flush();
+
+		const updateDialog = document.body.querySelector(".plugins-update-dialog");
+		expect(updateDialog).not.toBeNull();
+
+		// Update button must be disabled until allowPartial is checked
+		const updateBtn = button(updateDialog!, "Update");
+		expect(updateBtn.disabled).toBe(true);
+
+		// Check the allowPartial checkbox
+		const checkbox = updateDialog!.querySelector('input[type="checkbox"]') as HTMLInputElement;
+		expect(checkbox).not.toBeNull();
+		await act(async () => {
+			checkbox.click();
+		});
+		await flush();
+
+		// Now update button must be enabled
+		expect(updateBtn.disabled).toBe(false);
+
+		// Close dialog
+		const cancelBtn = button(updateDialog!, "Cancel");
+		await act(async () => cancelBtn.click());
+		await flush();
+
+		// Now test all unsupported in update
+		(api.inspectPluginUpdate as any).mockResolvedValueOnce({
+			pluginId: "installed-one",
+			currentCommit: "aaa11112222333",
+			newCommit: "aaa99998888777",
+			upToDate: false,
+			inspection: {
+				inspectionId: "insp-all-unsup",
+				components: [
+					{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported" },
+				],
+				issues: [],
+				registryRevision: 1,
+			},
+		});
+
+		await act(async () => checkUpdateBtn.click());
+		await flush();
+
+		const updateDialog2 = document.body.querySelector(".plugins-update-dialog");
+		expect(updateDialog2).not.toBeNull();
+
+		// Must show "Cannot Install" disabled button
+		const cannotInstallBtn = button(updateDialog2!, "Cannot Install");
+		expect(cannotInstallBtn).not.toBeNull();
+		expect(cannotInstallBtn.disabled).toBe(true);
 	});
 });

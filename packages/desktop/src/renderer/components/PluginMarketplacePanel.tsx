@@ -1210,12 +1210,15 @@ function InstalledPluginDetailDialog({
 					{/* Status overview */}
 					<div className="plugins-status-card">
 						<div className="plugins-status-card-row">
-							<span>{t("Status")}:</span>
+							<span>{t("Configuration")}:</span>
 							<span
 								className={`plugins-badge ${detail.plugin.enabled ? "badge-enabled" : "badge-disabled"}`}
 							>
 								{t(detail.plugin.enabled ? "Enabled" : "Disabled")}
 							</span>
+						</div>
+						<div className="plugins-status-card-row">
+							<span>{t("Runtime Status")}:</span>
 							<span
 								className={`plugins-badge badge-${detail.activation}`}
 								title={
@@ -1231,7 +1234,9 @@ function InstalledPluginDetailDialog({
 										? "Active"
 										: detail.activation === "next-turn"
 											? "Pending Turn"
-											: "Failed",
+											: detail.activation === "not-running"
+												? "Not Running"
+												: "Failed",
 								)}
 							</span>
 						</div>
@@ -1379,6 +1384,9 @@ function UpdatePluginDialog({
 	const hasUnsupported = components.some(
 		(c) => c.status === "unsupported" || c.kind === "unsupported",
 	);
+	const allUnsupported =
+		components.length > 0 &&
+		components.every((c) => c.status === "unsupported" || c.kind === "unsupported");
 
 	return (
 		<DialogFrame
@@ -1443,7 +1451,7 @@ function UpdatePluginDialog({
 							</li>
 						))}
 					</ul>
-					{hasUnsupported && (
+					{hasUnsupported && !allUnsupported && (
 						<label className="plugins-partial-checkbox">
 							<input
 								checked={allowPartial}
@@ -1453,6 +1461,16 @@ function UpdatePluginDialog({
 							/>
 							<span>{t("Install Compatible Components")}</span>
 						</label>
+					)}
+					{allUnsupported && (
+						<div className="plugins-unsupported-banner" role="alert">
+							<XCircle aria-hidden="true" size={18} />
+							<p>
+								{t(
+									"No compatible components can be installed from this plugin.",
+								)}
+							</p>
+						</div>
 					)}
 				</div>
 			)}
@@ -1467,14 +1485,20 @@ function UpdatePluginDialog({
 				>
 					{t("Cancel")}
 				</button>
-				<button
-					className="button-primary"
-					disabled={pending || !inspection}
-					onClick={() => onUpdate(allowPartial)}
-					type="button"
-				>
-					{t(pending ? "Updating…" : "Update")}
-				</button>
+				{allUnsupported ? (
+					<button className="button-primary" disabled type="button">
+						{t("Cannot Install")}
+					</button>
+				) : (
+					<button
+						className="button-primary"
+						disabled={pending || !inspection || (hasUnsupported && !allowPartial)}
+						onClick={() => onUpdate(allowPartial)}
+						type="button"
+					>
+						{t(pending ? "Updating…" : "Update")}
+					</button>
+				)}
 			</div>
 		</DialogFrame>
 	);
