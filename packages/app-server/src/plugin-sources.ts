@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { PluginFormat } from "@metis/coding-agent";
+import type { PluginFormat, PluginRecord } from "@metis/coding-agent";
 import {
 	archiveEntries,
 	type FetchImplementation,
@@ -54,7 +54,8 @@ export interface ResolvedPluginFiles {
 
 function normalizeSubdir(p: string): string {
 	const norm = posix.normalize(p.replace(/\\/g, "/"));
-	return norm.replace(/^\.\//, "").replace(/^\//, "").replace(/\/$/, "");
+	const res = norm.replace(/^\.\//, "").replace(/^\//, "").replace(/\/$/, "");
+	return res === "." ? "" : res;
 }
 
 export function canonicalizeRepository(urlOrShorthand: string): {
@@ -153,6 +154,31 @@ export async function resolveCommitSha(
 	const result = (await fetchJson(fetchImpl, `${api}/commits/${encodeURIComponent(refOrSha)}`)) as {
 		sha?: unknown;
 	};
+	if (typeof result.sha !== "string" || !/^[a-f0-9]{40}$/i.test(result.sha)) {
+		throw new AppServerError("OPERATION_FAILED");
+	}
+	return result.sha.toLowerCase();
+}
+
+export async function resolveTrackedPluginCommit(
+	record: PluginRecord,
+	fetchImpl: FetchImplementation = globalThis.fetch,
+): Promise<string> {
+	if (record.pinnedCommit) {
+		return record.pinnedCommit;
+	}
+	const { owner, repo } = canonicalizeRepository(record.repository);
+	let ref = record.trackingRef;
+	if (!ref) {
+		const api = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+		const repoInfo = (await fetchJson(fetchImpl, api)) as { default_branch?: unknown };
+		if (typeof repoInfo.default_branch !== "string" || !repoInfo.default_branch) {
+			throw new AppServerError("OPERATION_FAILED");
+		}
+		ref = repoInfo.default_branch;
+	}
+	const commitUrl = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/commits/${encodeURIComponent(ref)}`;
+	const result = (await fetchJson(fetchImpl, commitUrl)) as { sha?: unknown };
 	if (typeof result.sha !== "string" || !/^[a-f0-9]{40}$/i.test(result.sha)) {
 		throw new AppServerError("OPERATION_FAILED");
 	}
@@ -374,6 +400,58 @@ export async function inspectRepositorySource(
 	};
 }
 
+export async function fetchPluginFilesAtCommit(
+	input: { repository: string; subdir: string; commit: string },
+	fetchImpl: FetchImplementation = globalThis.fetch,
+): Promise<ResolvedPluginFiles> {
+	const { owner, repo } = canonicalizeRepository(input.repository);
+	const targetSubdir = normalizeSubdir(input.subdir);
+	const targetCommit = input.commit;
+
+	// Download ZIP
+	const zipUrl = `https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/${encodeURIComponent(targetCommit)}`;
+	const zipBytes = await fetchBytes(fetchImpl, zipUrl, MAX_PLUGIN_DOWNLOAD_BYTES, "application/zip");
+	if (!zipBytes) throw new AppServerError("OPERATION_FAILED");
+
+	const entries = await archiveEntries(zipBytes, {
+		stripRoot: true,
+		skipNonRegular: true,
+		maxFileBytes: MAX_PLUGIN_FILE_BYTES,
+		maxUncompressedBytes: MAX_PLUGIN_UNCOMPRESSED_BYTES,
+		maxEntries: MAX_PLUGIN_ARCHIVE_ENTRIES,
+	});
+
+	const files = new Map<string, Buffer>();
+	const fileModes = new Map<string, number>();
+	const prefix = targetSubdir ? `${targetSubdir}/` : "";
+
+	for (const e of entries) {
+		const mode = (e.mode & 0o111) !== 0 ? 0o755 : 0o644;
+		if (prefix) {
+			if (e.path.startsWith(prefix)) {
+				const relativePath = e.path.slice(prefix.length);
+				if (relativePath) {
+					files.set(relativePath, e.bytes);
+					fileModes.set(relativePath, mode);
+				}
+			}
+		} else {
+			files.set(e.path, e.bytes);
+			fileModes.set(e.path, mode);
+		}
+	}
+
+	return {
+		repository: `https://github.com/${owner.toLowerCase()}/${repo.toLowerCase()}`,
+		owner,
+		repo,
+		commit: targetCommit,
+		subdir: targetSubdir,
+		files,
+		fileModes,
+	};
+}
+
 export async function fetchPluginFiles(
 	origin: { canonicalRepository: string; owner: string; repo: string; commit: string; root: string },
 	entry: CatalogEntry,
@@ -430,46 +508,12 @@ export async function fetchPluginFiles(
 		throw new AppServerError("INVALID_REQUEST");
 	}
 
-	// Download ZIP
-	const zipUrl = `https://codeload.github.com/${encodeURIComponent(targetOwner)}/${encodeURIComponent(targetRepo)}/zip/${targetCommit}`;
-	const zipBytes = await fetchBytes(fetchImpl, zipUrl, MAX_PLUGIN_DOWNLOAD_BYTES, "application/zip");
-	if (!zipBytes) throw new AppServerError("OPERATION_FAILED");
-
-	const entries = await archiveEntries(zipBytes, {
-		stripRoot: true,
-		skipNonRegular: true,
-		maxFileBytes: MAX_PLUGIN_FILE_BYTES,
-		maxUncompressedBytes: MAX_PLUGIN_UNCOMPRESSED_BYTES,
-		maxEntries: MAX_PLUGIN_ARCHIVE_ENTRIES,
-	});
-
-	const files = new Map<string, Buffer>();
-	const fileModes = new Map<string, number>();
-	const prefix = targetSubdir ? `${targetSubdir}/` : "";
-
-	for (const e of entries) {
-		const mode = (e.mode & 0o111) !== 0 ? 0o755 : 0o644;
-		if (prefix) {
-			if (e.path.startsWith(prefix)) {
-				const relativePath = e.path.slice(prefix.length);
-				if (relativePath) {
-					files.set(relativePath, e.bytes);
-					fileModes.set(relativePath, mode);
-				}
-			}
-		} else {
-			files.set(e.path, e.bytes);
-			fileModes.set(e.path, mode);
-		}
-	}
-
-	return {
-		repository: `https://github.com/${targetOwner.toLowerCase()}/${targetRepo.toLowerCase()}`,
-		owner: targetOwner,
-		repo: targetRepo,
-		commit: targetCommit,
-		subdir: targetSubdir,
-		files,
-		fileModes,
-	};
+	return await fetchPluginFilesAtCommit(
+		{
+			repository: `https://github.com/${targetOwner}/${targetRepo}`,
+			subdir: targetSubdir,
+			commit: targetCommit,
+		},
+		fetchImpl,
+	);
 }

@@ -1562,6 +1562,13 @@ export const PluginIssueSchema = StrictObject({
 	message: PublicTextSchema,
 });
 
+export const PluginManifestHintsSchema = StrictObject({
+	name: Type.Optional(NameSchema),
+	description: Type.Optional(PublicTextSchema),
+	strict: Type.Optional(Type.Boolean()),
+	skills: Type.Optional(Type.Array(SkillNameSchema, { maxItems: 128 })),
+});
+
 export const PluginRecordSchema = StrictObject({
 	id: Sha256Schema,
 	name: NameSchema,
@@ -1572,6 +1579,8 @@ export const PluginRecordSchema = StrictObject({
 	commit: Type.String({ minLength: 1, maxLength: 128 }),
 	version: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
 	trackingRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	pinnedCommit: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+	manifestHints: Type.Optional(PluginManifestHintsSchema),
 	sourceId: NameSchema,
 	enabled: Type.Boolean(),
 	installedAt: TimestampSchema,
@@ -1653,6 +1662,7 @@ export type PluginComponentStatus = Static<typeof PluginComponentStatusSchema>;
 export type PluginActivationStatus = Static<typeof PluginActivationStatusSchema>;
 export type PluginComponentPublicView = Static<typeof PluginComponentPublicViewSchema>;
 export type PluginIssue = Static<typeof PluginIssueSchema>;
+export type PluginManifestHints = Static<typeof PluginManifestHintsSchema>;
 export type PluginRecord = Static<typeof PluginRecordSchema>;
 export type PluginInstalledView = Static<typeof PluginInstalledViewSchema>;
 export type PluginMarketView = Static<typeof PluginMarketViewSchema>;

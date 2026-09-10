@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import type { PluginInspectionView, PluginUpdateInspectionView } from "@metis/app-protocol";
 import {
 	type CapabilityKind,
 	getPluginCacheDir,
@@ -24,7 +25,10 @@ import {
 	canonicalizeRepository,
 	computePluginId,
 	fetchPluginFiles,
+	fetchPluginFilesAtCommit,
 	inspectRepositorySource,
+	type ResolvedPluginFiles,
+	resolveTrackedPluginCommit,
 } from "./plugin-sources.ts";
 import { AppServerError } from "./session-runtime-host.ts";
 
@@ -46,6 +50,12 @@ export interface PluginInstalledView {
 	readonly runtimeErrors: Array<{ readonly componentId: string; readonly message: string }>;
 }
 
+export interface PluginMarketCatalogCache {
+	readonly commit: string;
+	readonly fetchedAt: string;
+	readonly catalog: CatalogEntry[];
+}
+
 export interface CatalogEntryView {
 	readonly id: string;
 	readonly name: string;
@@ -64,6 +74,8 @@ export interface InspectionCacheData {
 	readonly subdir: string;
 	readonly commit: string;
 	readonly trackingRef?: string;
+	readonly pinnedCommit?: string;
+	readonly manifestHints?: PluginRecord["manifestHints"];
 	readonly plugin: {
 		readonly id: string;
 		readonly name: string;
@@ -75,6 +87,8 @@ export interface InspectionCacheData {
 		readonly subdir: string;
 		readonly commit: string;
 		readonly trackingRef?: string;
+		readonly pinnedCommit?: string;
+		readonly manifestHints?: PluginRecord["manifestHints"];
 		readonly sourceId: string;
 	};
 	readonly components: ComponentPublicView[];
@@ -357,45 +371,23 @@ export class PluginService {
 		});
 	}
 
-	async inspectPlugin(
-		sourceId: string,
-		entryId: string,
-	): Promise<{
-		inspectionId: string;
-		plugin: InspectionCacheData["plugin"];
-		components: ComponentPublicView[];
-		issues: PluginIssue[];
-		sourceCommit: string;
+	private createInspection(params: {
+		sourceId: string;
+		entryId: string;
+		resolved: ResolvedPluginFiles;
+		format: PluginFormat;
+		manifestHints?: PluginRecord["manifestHints"];
 		registryRevision: number;
-	}> {
-		const registry = readPluginRegistry(this.agentDir);
-		const market = registry.markets.find((m) => m.id === sourceId);
-		if (!market) throw new AppServerError("NOT_FOUND");
-
-		let cachedMarket = this.readMarketCatalogCache(sourceId);
-		if (!cachedMarket) {
-			await this.refreshMarket({ requestId: randomUUID(), sourceId });
-			cachedMarket = this.readMarketCatalogCache(sourceId);
-		}
-		const entry = cachedMarket?.catalog.find((e) => e.id === entryId);
-		if (!entry) throw new AppServerError("NOT_FOUND");
-
-		const origin = {
-			canonicalRepository: market.url,
-			owner: canonicalizeRepository(market.url).owner,
-			repo: canonicalizeRepository(market.url).repo,
-			commit: cachedMarket?.commit || market.commit || "main",
-			root: market.root ?? "",
-		};
-
-		const resolved = await fetchPluginFiles(origin, entry, this.fetchImpl);
-		const pluginId = computePluginId(resolved.repository, resolved.subdir);
+		trackingRef?: string;
+		pinnedCommit?: string;
+	}): PluginInspectionView {
+		const pluginId = computePluginId(params.resolved.repository, params.resolved.subdir);
 
 		const parsed = parsePluginManifest({
-			format: entry.formatHint,
-			files: resolved.files,
+			format: params.format,
+			files: params.resolved.files,
 			root: "",
-			marketEntry: entry as unknown as import("./plugin-manifests.ts").MarketplacePluginEntry,
+			marketEntry: params.manifestHints as unknown as import("./plugin-manifests.ts").MarketplacePluginEntry,
 		});
 
 		// Check component names and assign unique IDs
@@ -442,19 +434,22 @@ export class PluginService {
 
 		const inspectionId = randomUUID();
 		const filesList: Array<{ path: string; base64: string; mode: number }> = [];
-		for (const [path, buf] of resolved.files.entries()) {
-			const mode = resolved.fileModes.get(path) ?? 0o644;
+		for (const [path, buf] of params.resolved.files.entries()) {
+			const mode = params.resolved.fileModes.get(path) ?? 0o644;
 			filesList.push({ path, base64: buf.toString("base64"), mode });
 		}
 
 		const inspectionData: InspectionCacheData = {
 			cacheVersion: 2,
 			inspectionId,
-			sourceId,
-			entryId,
-			canonicalRepository: resolved.repository,
-			subdir: resolved.subdir,
-			commit: resolved.commit,
+			sourceId: params.sourceId,
+			entryId: params.entryId,
+			canonicalRepository: params.resolved.repository,
+			subdir: params.resolved.subdir,
+			commit: params.resolved.commit,
+			trackingRef: params.trackingRef,
+			pinnedCommit: params.pinnedCommit,
+			manifestHints: params.manifestHints,
 			plugin: {
 				id: pluginId,
 				name: parsed.name,
@@ -462,16 +457,19 @@ export class PluginService {
 				format: parsed.format,
 				...(parsed.version !== undefined ? { version: parsed.version } : {}),
 				description: parsed.description,
-				repository: resolved.repository,
-				subdir: resolved.subdir,
-				commit: resolved.commit,
-				sourceId,
+				repository: params.resolved.repository,
+				subdir: params.resolved.subdir,
+				commit: params.resolved.commit,
+				trackingRef: params.trackingRef,
+				pinnedCommit: params.pinnedCommit,
+				manifestHints: params.manifestHints,
+				sourceId: params.sourceId,
 			},
 			components,
 			parsedComponents: parsed.components,
 			issues: parsed.issues as PluginIssue[],
 			files: filesList,
-			registryRevision: registry.revision,
+			registryRevision: params.registryRevision,
 		};
 
 		this.inspectionCache.set(inspectionId, inspectionData);
@@ -482,9 +480,48 @@ export class PluginService {
 			plugin: inspectionData.plugin,
 			components,
 			issues: [...inspectionData.issues],
-			sourceCommit: resolved.commit,
-			registryRevision: registry.revision,
+			sourceCommit: params.resolved.commit,
+			registryRevision: params.registryRevision,
 		};
+	}
+
+	async inspectPlugin(sourceId: string, entryId: string): Promise<PluginInspectionView> {
+		const registry = readPluginRegistry(this.agentDir);
+		const market = registry.markets.find((m) => m.id === sourceId);
+		if (!market) throw new AppServerError("NOT_FOUND");
+
+		let cachedMarket = this.readMarketCatalogCache(sourceId);
+		if (!cachedMarket) {
+			await this.refreshMarket({ requestId: randomUUID(), sourceId });
+			cachedMarket = this.readMarketCatalogCache(sourceId);
+		}
+		const entry = cachedMarket?.catalog.find((e) => e.id === entryId);
+		if (!entry) throw new AppServerError("NOT_FOUND");
+
+		const origin = {
+			canonicalRepository: market.url,
+			owner: canonicalizeRepository(market.url).owner,
+			repo: canonicalizeRepository(market.url).repo,
+			commit: cachedMarket?.commit || market.commit || "main",
+			root: market.root ?? "",
+		};
+
+		const resolved = await fetchPluginFiles(origin, entry, this.fetchImpl);
+		return this.createInspection({
+			sourceId,
+			entryId,
+			resolved,
+			format: entry.formatHint,
+			manifestHints: {
+				name: entry.name,
+				description: entry.description,
+				strict: entry.strict,
+				skills: entry.skills,
+			},
+			registryRevision: registry.revision,
+			trackingRef: market.trackingRef,
+			pinnedCommit: market.pinnedCommit,
+		});
 	}
 
 	async install(input: {
@@ -492,6 +529,7 @@ export class PluginService {
 		inspectionId: string;
 		expectedRevision: number;
 		allowPartial?: boolean;
+		expectedInstalledCommit?: string;
 	}): Promise<{ plugin: PluginInstalledView; registryRevision: number; activation: PluginActivationStatus }> {
 		const inspection = this.getInspectionData(input.inspectionId);
 		if (!inspection) {
@@ -560,6 +598,7 @@ export class PluginService {
 						kind: "hook",
 						componentId: pub.componentId,
 						name: pub.componentId,
+						originalName: comp.definition.name,
 						definition: {
 							...comp.definition,
 							id: pub.componentId,
@@ -591,7 +630,13 @@ export class PluginService {
 				if (current.revision !== input.expectedRevision) {
 					throw new AppServerError("CONFLICT", { requestId: input.requestId });
 				}
-				return this.commitInspection(current, inspection, stagingDir, input.requestId);
+				return this.commitInspection(
+					current,
+					inspection,
+					stagingDir,
+					input.requestId,
+					input.expectedInstalledCommit,
+				);
 			});
 		} finally {
 			rmSync(stagingDir, { recursive: true, force: true });
@@ -603,6 +648,7 @@ export class PluginService {
 		inspection: InspectionCacheData,
 		stagingDir: string,
 		requestId: string,
+		expectedInstalledCommit?: string,
 	): {
 		next?: PluginRegistry;
 		result: { plugin: PluginInstalledView; registryRevision: number; activation: PluginActivationStatus };
@@ -621,6 +667,12 @@ export class PluginService {
 		}
 
 		const existingIndex = current.installed.findIndex((p) => p.id === pluginId);
+		if (expectedInstalledCommit !== undefined) {
+			if (existingIndex < 0 || current.installed[existingIndex]!.commit !== expectedInstalledCommit) {
+				throw new AppServerError("CONFLICT", { requestId });
+			}
+		}
+
 		if (existingIndex >= 0 && current.installed[existingIndex]!.commit === commit) {
 			// Same commit idempotent install
 			const record = current.installed[existingIndex]!;
@@ -644,6 +696,8 @@ export class PluginService {
 			commit,
 			...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
 			...(inspection.trackingRef !== undefined ? { trackingRef: inspection.trackingRef } : {}),
+			...(inspection.pinnedCommit !== undefined ? { pinnedCommit: inspection.pinnedCommit } : {}),
+			...(inspection.manifestHints !== undefined ? { manifestHints: inspection.manifestHints } : {}),
 			sourceId: inspection.sourceId,
 			enabled: true,
 			installedAt: new Date().toISOString(),
@@ -785,20 +839,14 @@ export class PluginService {
 		});
 	}
 
-	async inspectUpdate(pluginId: string): Promise<{
-		pluginId: string;
-		currentCommit: string;
-		upToDate: boolean;
-		newCommit?: string;
-		inspectionId?: string;
-	}> {
+	async inspectUpdate(pluginId: string): Promise<PluginUpdateInspectionView> {
 		const registry = readPluginRegistry(this.agentDir);
 		const installed = registry.installed.find((p) => p.id === pluginId);
 		if (!installed) throw new AppServerError("NOT_FOUND");
 
-		const latestCommit = await inspectRepositorySource(installed.repository, this.fetchImpl);
+		const targetCommit = await resolveTrackedPluginCommit(installed, this.fetchImpl);
 
-		if (latestCommit.commit === installed.commit) {
+		if (targetCommit === installed.commit) {
 			return {
 				pluginId,
 				currentCommit: installed.commit,
@@ -806,14 +854,33 @@ export class PluginService {
 			};
 		}
 
-		// Newer commit found. Perform inspection
-		const inspected = await this.inspectPlugin(installed.sourceId, `entry-${installed.name.toLowerCase()}`);
+		const resolved = await fetchPluginFilesAtCommit(
+			{
+				repository: installed.repository,
+				subdir: installed.subdir,
+				commit: targetCommit,
+			},
+			this.fetchImpl,
+		);
+
+		const inspection = this.createInspection({
+			sourceId: installed.sourceId,
+			entryId: `entry-${installed.name.toLowerCase()}`,
+			resolved,
+			format: installed.format,
+			manifestHints: installed.manifestHints,
+			registryRevision: registry.revision,
+			trackingRef: installed.trackingRef,
+			pinnedCommit: installed.pinnedCommit,
+		});
+
 		return {
 			pluginId,
 			currentCommit: installed.commit,
 			upToDate: false,
-			newCommit: latestCommit.commit,
-			inspectionId: inspected.inspectionId,
+			newCommit: inspection.sourceCommit,
+			inspectionId: inspection.inspectionId,
+			inspection,
 		};
 	}
 
@@ -825,12 +892,11 @@ export class PluginService {
 		expectedCommit: string;
 		allowPartial?: boolean;
 	}): Promise<{ plugin: PluginInstalledView; registryRevision: number; activation: PluginActivationStatus }> {
-		const registry = readPluginRegistry(this.agentDir);
-		const installed = registry.installed.find((p) => p.id === input.pluginId);
-		if (!installed) {
-			throw new AppServerError("NOT_FOUND", { requestId: input.requestId });
+		const inspection = this.getInspectionData(input.inspectionId);
+		if (!inspection || inspection.plugin.id !== input.pluginId) {
+			throw new AppServerError("INVALID_REQUEST", { requestId: input.requestId });
 		}
-		if (installed.commit !== input.expectedCommit) {
+		if (inspection.commit === input.expectedCommit) {
 			throw new AppServerError("CONFLICT", { requestId: input.requestId });
 		}
 
@@ -839,6 +905,7 @@ export class PluginService {
 			inspectionId: input.inspectionId,
 			expectedRevision: input.expectedRevision,
 			allowPartial: input.allowPartial,
+			expectedInstalledCommit: input.expectedCommit,
 		});
 	}
 

@@ -103,6 +103,7 @@ export function PluginMarketplacePanel({
 	const [updateChecking, setUpdateChecking] = useState(false);
 	const [updatePending, setUpdatePending] = useState(false);
 	const [updateError, setUpdateError] = useState<string | null>(null);
+	const [updateStatusMessage, setUpdateStatusMessage] = useState<string | null>(null);
 
 	const [removeConfirmPlugin, setRemoveConfirmPlugin] = useState<PluginRecord | null>(null);
 	const [removePending, setRemovePending] = useState(false);
@@ -371,16 +372,23 @@ export function PluginMarketplacePanel({
 			if (updateChecking || !serverReady) return;
 			setUpdateChecking(true);
 			setUpdateError(null);
+			setUpdateStatusMessage(null);
 			try {
 				const res = await api.inspectPluginUpdate({ pluginId });
-				setUpdateInspection(res);
+				if (res.upToDate) {
+					setUpdateStatusMessage(t("Already up to date"));
+					setUpdateInspection(null);
+				} else {
+					setUpdateStatusMessage(null);
+					setUpdateInspection(res);
+				}
 			} catch (err) {
 				setUpdateError(message(err));
 			} finally {
 				setUpdateChecking(false);
 			}
 		},
-		[api, serverReady, updateChecking],
+		[api, serverReady, t, updateChecking],
 	);
 
 	// Perform plugin update
@@ -755,6 +763,8 @@ export function PluginMarketplacePanel({
 					onClose={() => {
 						setDetailPluginId(null);
 						setDetailPlugin(null);
+						setUpdateStatusMessage(null);
+						setUpdateError(null);
 						onClearSelectedPlugin?.();
 					}}
 					onOpenHook={onOpenHook}
@@ -763,6 +773,8 @@ export function PluginMarketplacePanel({
 					onToggleEnabled={() => detailPlugin && handleToggleEnabled(detailPlugin.plugin)}
 					onUninstall={() => detailPlugin && setRemoveConfirmPlugin(detailPlugin.plugin)}
 					pending={detailActionPending || updateChecking}
+					updateError={updateError}
+					updateMessage={updateStatusMessage}
 				/>
 			)}
 
@@ -1130,6 +1142,8 @@ function InstalledPluginDetailDialog({
 	onToggleEnabled,
 	onUninstall,
 	pending,
+	updateError,
+	updateMessage,
 }: {
 	readonly detail: PluginInstalledView | null;
 	readonly error: string | null;
@@ -1142,6 +1156,8 @@ function InstalledPluginDetailDialog({
 	readonly onToggleEnabled: () => void;
 	readonly onUninstall: () => void;
 	readonly pending: boolean;
+	readonly updateError?: string | null;
+	readonly updateMessage?: string | null;
 }) {
 	const { t } = useTranslation();
 	const closeRef = useRef<HTMLButtonElement>(null);
@@ -1181,6 +1197,16 @@ function InstalledPluginDetailDialog({
 				</p>
 			) : detail ? (
 				<div className="plugins-installed-detail-body">
+					{updateError && (
+						<p className="mcp-dialog-error" role="alert">
+							{updateError}
+						</p>
+					)}
+					{updateMessage && (
+						<p className="plugins-update-status" role="status">
+							{updateMessage}
+						</p>
+					)}
 					{/* Status overview */}
 					<div className="plugins-status-card">
 						<div className="plugins-status-card-row">
@@ -1386,6 +1412,12 @@ function UpdatePluginDialog({
 				</p>
 			)}
 
+			{!inspection && (
+				<p className="mcp-dialog-error" role="alert">
+					{t("Failed to inspect plugin update. Update cannot be installed.")}
+				</p>
+			)}
+
 			{inspection && (
 				<div className="plugins-update-body">
 					<h3>
@@ -1437,7 +1469,7 @@ function UpdatePluginDialog({
 				</button>
 				<button
 					className="button-primary"
-					disabled={pending}
+					disabled={pending || !inspection}
 					onClick={() => onUpdate(allowPartial)}
 					type="button"
 				>

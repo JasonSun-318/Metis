@@ -38479,6 +38479,40 @@
                               "minLength": 1,
                               "maxLength": 128
                             },
+                            "pinnedCommit": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "manifestHints": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "x-metis-maxUtf16Units": 256
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "strict": {
+                                  "type": "boolean"
+                                },
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                  },
+                                  "maxItems": 128
+                                }
+                              },
+                              "additionalProperties": false
+                            },
                             "sourceId": {
                               "type": "string",
                               "minLength": 1,
@@ -38780,6 +38814,40 @@
                             "minLength": 1,
                             "maxLength": 128
                           },
+                          "pinnedCommit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "manifestHints": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "description": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "strict": {
+                                "type": "boolean"
+                              },
+                              "skills": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "maxItems": 128
+                              }
+                            },
+                            "additionalProperties": false
+                          },
                           "sourceId": {
                             "type": "string",
                             "minLength": 1,
@@ -38949,6 +39017,40 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "pinnedCommit": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "manifestHints": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "description": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "strict": {
+                              "type": "boolean"
+                            },
+                            "skills": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                              },
+                              "maxItems": 128
+                            }
+                          },
+                          "additionalProperties": false
                         },
                         "sourceId": {
                           "type": "string",
@@ -39235,6 +39337,40 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 128
+                            },
+                            "pinnedCommit": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "manifestHints": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "x-metis-maxUtf16Units": 256
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "strict": {
+                                  "type": "boolean"
+                                },
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                  },
+                                  "maxItems": 128
+                                }
+                              },
+                              "additionalProperties": false
                             },
                             "sourceId": {
                               "type": "string",
@@ -39537,6 +39673,40 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 128
+                          },
+                          "pinnedCommit": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128
+                          },
+                          "manifestHints": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "x-metis-maxUtf16Units": 256
+                              },
+                              "description": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "strict": {
+                                "type": "boolean"
+                              },
+                              "skills": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64,
+                                  "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                },
+                                "maxItems": 128
+                              }
+                            },
+                            "additionalProperties": false
                           },
                           "sourceId": {
                             "type": "string",
@@ -40011,6 +40181,40 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 128
+                            },
+                            "pinnedCommit": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128
+                            },
+                            "manifestHints": {
+                              "type": "object",
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "x-metis-maxUtf16Units": 256
+                                },
+                                "description": {
+                                  "type": "string",
+                                  "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "strict": {
+                                  "type": "boolean"
+                                },
+                                "skills": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                                  },
+                                  "maxItems": 128
+                                }
+                              },
+                              "additionalProperties": false
                             },
                             "sourceId": {
                               "type": "string",
@@ -73849,6 +74053,40 @@
                           "minLength": 1,
                           "maxLength": 128
                         },
+                        "pinnedCommit": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "manifestHints": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "description": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "strict": {
+                              "type": "boolean"
+                            },
+                            "skills": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                              },
+                              "maxItems": 128
+                            }
+                          },
+                          "additionalProperties": false
+                        },
                         "sourceId": {
                           "type": "string",
                           "minLength": 1,
@@ -74150,6 +74388,40 @@
                         "minLength": 1,
                         "maxLength": 128
                       },
+                      "pinnedCommit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "manifestHints": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "x-metis-maxUtf16Units": 256
+                          },
+                          "description": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "strict": {
+                            "type": "boolean"
+                          },
+                          "skills": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                            },
+                            "maxItems": 128
+                          }
+                        },
+                        "additionalProperties": false
+                      },
                       "sourceId": {
                         "type": "string",
                         "minLength": 1,
@@ -74319,6 +74591,40 @@
                       "type": "string",
                       "minLength": 1,
                       "maxLength": 128
+                    },
+                    "pinnedCommit": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "manifestHints": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        "description": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "strict": {
+                          "type": "boolean"
+                        },
+                        "skills": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 64,
+                            "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                          },
+                          "maxItems": 128
+                        }
+                      },
+                      "additionalProperties": false
                     },
                     "sourceId": {
                       "type": "string",
@@ -74605,6 +74911,40 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "pinnedCommit": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "manifestHints": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "description": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "strict": {
+                              "type": "boolean"
+                            },
+                            "skills": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                              },
+                              "maxItems": 128
+                            }
+                          },
+                          "additionalProperties": false
                         },
                         "sourceId": {
                           "type": "string",
@@ -74907,6 +75247,40 @@
                         "type": "string",
                         "minLength": 1,
                         "maxLength": 128
+                      },
+                      "pinnedCommit": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                      },
+                      "manifestHints": {
+                        "type": "object",
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "x-metis-maxUtf16Units": 256
+                          },
+                          "description": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "strict": {
+                            "type": "boolean"
+                          },
+                          "skills": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 64,
+                              "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                            },
+                            "maxItems": 128
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "sourceId": {
                         "type": "string",
@@ -75381,6 +75755,40 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 128
+                        },
+                        "pinnedCommit": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "manifestHints": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 256,
+                              "x-metis-maxUtf16Units": 256
+                            },
+                            "description": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "strict": {
+                              "type": "boolean"
+                            },
+                            "skills": {
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+                              },
+                              "maxItems": 128
+                            }
+                          },
+                          "additionalProperties": false
                         },
                         "sourceId": {
                           "type": "string",

@@ -17,6 +17,13 @@ export interface PluginIssue {
 	status: "unsupported" | "needs-configuration" | "warning";
 }
 
+export interface PluginManifestHints {
+	name?: string;
+	description?: string;
+	strict?: boolean;
+	skills?: readonly string[];
+}
+
 export interface PluginRecord {
 	id: string;
 	name: string;
@@ -27,6 +34,8 @@ export interface PluginRecord {
 	commit: string;
 	version?: string;
 	trackingRef?: string;
+	pinnedCommit?: string;
+	manifestHints?: PluginManifestHints;
 	sourceId: string;
 	enabled: boolean;
 	installedAt: string;

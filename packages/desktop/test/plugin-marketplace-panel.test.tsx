@@ -584,6 +584,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		expect(api.updatePlugin).toHaveBeenCalledWith(
 			expect.objectContaining({
 				pluginId: "installed-one",
+				inspectionId: "insp-update",
+				expectedCommit: "aaa11112222333",
 			}),
 		);
 
@@ -606,5 +608,72 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 				pluginId: "installed-one",
 			}),
 		);
+	});
+
+	it("handles update checks: missing inspection disables update, upToDate shows status without opening dialog", async () => {
+		const api = createMockApi({
+			inspectPluginUpdate: vi.fn().mockResolvedValue({
+				pluginId: "installed-one",
+				currentCommit: "aaa11112222333",
+				newCommit: "aaa99998888777",
+				upToDate: false,
+				// inspection intentionally missing
+			}),
+		});
+		const { container } = await renderPanel(api, "plugins");
+
+		// Switch to Installed sub-tab
+		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
+			el.textContent?.includes("Installed"),
+		);
+		await act(async () => installedSubTab!.click());
+		await flush();
+
+		// Open Manage dialog
+		const rowOne = [...container.querySelectorAll(".plugins-installed-row")].find((el) =>
+			el.textContent?.includes("Installed One"),
+		);
+		const manageBtn = button(rowOne!, "Manage");
+		await act(async () => manageBtn.click());
+		await flush();
+
+		const detailDialog = document.body.querySelector(".plugins-detail-dialog");
+		expect(detailDialog).not.toBeNull();
+
+		// Check updates with missing inspection
+		const checkUpdateBtn = button(detailDialog!, "Check for Updates");
+		await act(async () => checkUpdateBtn.click());
+		await flush();
+
+		const updateDialog = document.body.querySelector(".plugins-update-dialog");
+		expect(updateDialog).not.toBeNull();
+		// Visible error must be present
+		expect(updateDialog!.querySelector(".mcp-dialog-error")?.textContent).toContain("Failed to inspect plugin update");
+		// Update button must be disabled
+		const updateBtn = button(updateDialog!, "Update");
+		expect(updateBtn.disabled).toBe(true);
+		expect(api.updatePlugin).not.toHaveBeenCalled();
+
+		// Close update dialog
+		const cancelBtn = button(updateDialog!, "Cancel");
+		await act(async () => cancelBtn.click());
+		await flush();
+
+		// Now simulate upToDate
+		(api.inspectPluginUpdate as any).mockResolvedValueOnce({
+			pluginId: "installed-one",
+			currentCommit: "aaa11112222333",
+			upToDate: true,
+		});
+
+		await act(async () => checkUpdateBtn.click());
+		await flush();
+
+		// Must NOT pop update dialog or "Plugin Update Available" title
+		expect(document.body.querySelector(".plugins-update-dialog")).toBeNull();
+		expect(document.body.textContent).not.toContain("Plugin Update Available");
+		// Must display "Already up to date"
+		expect(detailDialog!.textContent).toContain("Already up to date");
+		expect(api.updatePlugin).not.toHaveBeenCalled();
 	});
 });

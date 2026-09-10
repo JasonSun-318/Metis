@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { readPluginSnapshot, resolveMcpServerDefinitions } from "@metis/coding-agent";
+import { readPluginSnapshot, resolveMcpServerDefinitions, withPluginRegistryLock } from "@metis/coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import { parsePluginManifest } from "../src/plugin-manifests.ts";
 import { fetchPluginFiles, inspectRepositorySource } from "../src/plugin-sources.ts";
 import { PluginService } from "../src/plugins.ts";
-import { A, dirs, harness, installedHarness, skill } from "./helpers/plugin-acceptance-fixture.ts";
+import { A, B, dirs, harness, installedHarness, skill } from "./helpers/plugin-acceptance-fixture.ts";
 
 afterEach(() => {
 	for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -26,6 +26,75 @@ describe("Plugin acceptance regressions", () => {
 		const market = await service.addMarket({ requestId: randomUUID(), url: h.url, expectedRevision: 1 });
 		const detail = await service.inspectPlugin(market.selectedSourceId, "entry-fixture-plugin");
 		expect(detail.components.some((c) => c.kind === "skill")).toBe(true);
+	});
+
+	it("R3 update installs the advertised commit and exposes inspection", async () => {
+		const h = await installedHarness();
+		h.advance();
+		const inspected = await h.service.inspectUpdate(h.installed.plugin.plugin.id);
+		expect(inspected.newCommit).toBe(B);
+		expect(inspected.inspection?.sourceCommit).toBe(B);
+		const result = await h.service.update({
+			requestId: randomUUID(),
+			pluginId: h.installed.plugin.plugin.id,
+			inspectionId: inspected.inspection!.inspectionId,
+			expectedCommit: A,
+			expectedRevision: h.installed.registryRevision,
+		});
+		expect(result.plugin.plugin.commit).toBe(B);
+	});
+
+	it("R3 rejects update when inspectionId or expectedCommit does not match", async () => {
+		const h = await installedHarness();
+		h.advance();
+		const inspected = await h.service.inspectUpdate(h.installed.plugin.plugin.id);
+
+		// Invalid inspection ID
+		await expect(
+			h.service.update({
+				requestId: randomUUID(),
+				pluginId: h.installed.plugin.plugin.id,
+				inspectionId: randomUUID(),
+				expectedCommit: A,
+				expectedRevision: h.installed.registryRevision,
+			}),
+		).rejects.toThrow();
+
+		// Mismatched expectedCommit (already at B or wrong commit)
+		await expect(
+			h.service.update({
+				requestId: randomUUID(),
+				pluginId: h.installed.plugin.plugin.id,
+				inspectionId: inspected.inspection!.inspectionId,
+				expectedCommit: B,
+				expectedRevision: h.installed.registryRevision,
+			}),
+		).rejects.toThrow();
+	});
+
+	it("R3 checks update even after marketplace is removed", async () => {
+		const h = await installedHarness();
+		await h.service.removeMarket({
+			requestId: randomUUID(),
+			sourceId: h.market.selectedSourceId,
+			expectedRevision: h.installed.registryRevision,
+		});
+		h.advance();
+		const inspected = await h.service.inspectUpdate(h.installed.plugin.plugin.id);
+		expect(inspected.newCommit).toBe(B);
+		expect(inspected.inspection?.sourceCommit).toBe(B);
+	});
+
+	it("R3 pinned sha does not advance when repository branch advances", async () => {
+		const h = await installedHarness();
+		withPluginRegistryLock(h.agentDir, (cur) => {
+			cur.installed[0]!.pinnedCommit = A;
+			return { next: cur, result: undefined };
+		});
+		h.advance();
+		const inspected = await h.service.inspectUpdate(h.installed.plugin.plugin.id);
+		expect(inspected.upToDate).toBe(true);
+		expect(inspected.currentCommit).toBe(A);
 	});
 
 	it("R4 preserves executable scripts", async () => {
