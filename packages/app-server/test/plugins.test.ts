@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readPluginSnapshot } from "@metis/coding-agent";
@@ -411,6 +411,67 @@ describe("PluginService", () => {
 		const restartedService = new PluginService(agentDir, fetchImpl);
 		expect(restartedService.listInstalled().installed).toHaveLength(0);
 		expect(readPluginSnapshot(agentDir).plugins).toHaveLength(0);
+	});
+
+	it("failure injection: preserves active package and registry on write/rename/registry failures", async () => {
+		const fetchImpl = createMockFetch();
+		const service = new PluginService(agentDir, fetchImpl);
+
+		const markets = service.listMarkets();
+		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
+		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
+
+		// Initial successful install
+		const initialInstall = await service.install({
+			requestId: randomUUID(),
+			inspectionId: inspection.inspectionId,
+			expectedRevision: 1,
+		});
+		expect(service.listInstalled().installed).toHaveLength(1);
+		const pluginId = initialInstall.plugin.plugin.id;
+		const initialSkillPath = join(agentDir, "plugins/packages", pluginId, COMMIT_1, "skills/helper/SKILL.md");
+		const initialContent = readFileSync(initialSkillPath, "utf8");
+
+		// 1. Filesystem permission error during staging (make parent dir read-only)
+		const packagesDir = join(agentDir, "plugins/packages", pluginId);
+		chmodSync(packagesDir, 0o555);
+		try {
+			await expect(
+				service.install({
+					requestId: randomUUID(),
+					inspectionId: inspection.inspectionId,
+					expectedRevision: initialInstall.registryRevision,
+				}),
+			).rejects.toThrow();
+		} finally {
+			chmodSync(packagesDir, 0o755);
+		}
+
+		// Old package and registry must be completely intact
+		expect(service.listInstalled().installed).toHaveLength(1);
+		expect(readFileSync(initialSkillPath, "utf8")).toBe(initialContent);
+
+		// 2. Registry write failure (read-only registry file)
+		const registryDir = join(agentDir, "plugins");
+		const registryPath = join(registryDir, "registry.json");
+		chmodSync(registryPath, 0o444);
+		chmodSync(registryDir, 0o555);
+		try {
+			await expect(
+				service.install({
+					requestId: randomUUID(),
+					inspectionId: inspection.inspectionId,
+					expectedRevision: initialInstall.registryRevision,
+				}),
+			).rejects.toThrow();
+		} finally {
+			chmodSync(registryDir, 0o755);
+			chmodSync(registryPath, 0o600);
+		}
+
+		// Old package and registry still completely intact
+		expect(service.listInstalled().installed).toHaveLength(1);
+		expect(readFileSync(initialSkillPath, "utf8")).toBe(initialContent);
 	});
 
 	it("source matrix: supports catalog root, feature branch, pinned sha, and different root in same repo", async () => {

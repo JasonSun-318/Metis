@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
 	type CapabilityKind,
@@ -17,7 +17,7 @@ import {
 	readPluginRegistry,
 	withPluginRegistryLock,
 } from "@metis/coding-agent";
-import type { FetchImplementation } from "./github-archive.ts";
+import { type FetchImplementation, validArchivePath } from "./github-archive.ts";
 import { type ParsedPluginComponent, parsePluginManifest } from "./plugin-manifests.ts";
 import {
 	type CatalogEntry,
@@ -56,6 +56,7 @@ export interface CatalogEntryView {
 }
 
 export interface InspectionCacheData {
+	readonly cacheVersion?: number;
 	readonly inspectionId: string;
 	readonly sourceId: string;
 	readonly entryId: string;
@@ -79,7 +80,7 @@ export interface InspectionCacheData {
 	readonly components: ComponentPublicView[];
 	readonly parsedComponents: readonly ParsedPluginComponent[];
 	readonly issues: readonly PluginIssue[];
-	readonly files: Array<{ readonly path: string; readonly base64: string }>;
+	readonly files: Array<{ readonly path: string; readonly base64: string; readonly mode: number }>;
 	readonly registryRevision: number;
 }
 
@@ -440,12 +441,14 @@ export class PluginService {
 		}
 
 		const inspectionId = randomUUID();
-		const filesList: Array<{ path: string; base64: string }> = [];
+		const filesList: Array<{ path: string; base64: string; mode: number }> = [];
 		for (const [path, buf] of resolved.files.entries()) {
-			filesList.push({ path, base64: buf.toString("base64") });
+			const mode = resolved.fileModes.get(path) ?? 0o644;
+			filesList.push({ path, base64: buf.toString("base64"), mode });
 		}
 
 		const inspectionData: InspectionCacheData = {
+			cacheVersion: 2,
 			inspectionId,
 			sourceId,
 			entryId,
@@ -509,132 +512,196 @@ export class PluginService {
 		const pluginId = inspection.plugin.id;
 		const commit = inspection.commit;
 		const stagingDir = join(getPluginPackagesDir(this.agentDir), pluginId, `.staging-${randomUUID()}`);
-		const targetDir = getPluginPackageDir(this.agentDir, pluginId, commit);
 
-		mkdirSync(stagingDir, { recursive: true });
-		for (const file of inspection.files) {
-			const targetFile = join(stagingDir, file.path);
-			mkdirSync(dirname(targetFile), { recursive: true });
-			writeFileSync(targetFile, Buffer.from(file.base64, "base64"));
-		}
-
-		// Create normalized.json
-		const normalizedComponents: NormalizedComponent[] = [];
-		for (let i = 0; i < inspection.parsedComponents.length; i++) {
-			const comp = inspection.parsedComponents[i]!;
-			const pub = inspection.components[i]!;
-
-			if (pub.status === "unsupported") continue; // Skip unsupported in normalized package
-
-			if (comp.kind === "skill") {
-				normalizedComponents.push({
-					kind: "skill",
-					componentId: pub.componentId,
-					name: pub.componentId,
-					originalName: comp.originalName,
-					relativeEntryPath: comp.relativeEntryPath,
-					relativeBaseDir: comp.relativeBaseDir,
-					disableModelInvocation: comp.disableModelInvocation,
-				});
-			} else if (comp.kind === "mcp") {
-				normalizedComponents.push({
-					kind: "mcp",
-					componentId: pub.componentId,
-					name: pub.componentId,
-					originalName: comp.originalName,
-					definition: comp.definition,
-				});
-			} else if (comp.kind === "hook") {
-				normalizedComponents.push({
-					kind: "hook",
-					componentId: pub.componentId,
-					name: pub.componentId,
-					definition: {
-						...comp.definition,
-						id: pub.componentId,
-					},
-				});
-			}
-		}
-
-		const normalizedPackage: NormalizedPluginPackage = {
-			pluginId,
-			commit,
-			format: inspection.plugin.format,
-			name: inspection.plugin.name,
-			displayName: inspection.plugin.displayName,
-			description: inspection.plugin.description,
-			...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
-			components: normalizedComponents,
-			issues: inspection.issues,
-		};
-
-		writeFileSync(join(stagingDir, "normalized.json"), JSON.stringify(normalizedPackage, null, 2), "utf8");
-
-		// Atomic move staging to target directory
-		mkdirSync(dirname(targetDir), { recursive: true });
-		if (existsSync(targetDir)) {
-			rmSync(targetDir, { recursive: true, force: true });
-		}
-		renameSync(stagingDir, targetDir);
-
-		// Registry transaction
-		return withPluginRegistryLock(this.agentDir, (current) => {
-			if (current.revision !== input.expectedRevision) {
-				throw new AppServerError("CONFLICT", { requestId: input.requestId });
+		try {
+			mkdirSync(stagingDir, { recursive: true });
+			for (const file of inspection.files) {
+				if (!validArchivePath(file.path)) {
+					throw new AppServerError("INVALID_REQUEST", { requestId: input.requestId });
+				}
+				const mode = (file.mode & 0o111) !== 0 ? 0o755 : 0o644;
+				const targetFile = join(stagingDir, file.path);
+				mkdirSync(dirname(targetFile), { recursive: true });
+				const bytes = Buffer.from(file.base64, "base64");
+				writeFileSync(targetFile, bytes, { mode });
+				if (process.platform !== "win32") {
+					chmodSync(targetFile, mode);
+				}
 			}
 
-			const existingIndex = current.installed.findIndex((p) => p.id === pluginId);
-			if (existingIndex >= 0 && current.installed[existingIndex]!.commit === commit) {
-				// Same commit idempotent install
-				const record = current.installed[existingIndex]!;
-				return {
-					next: undefined,
-					result: {
-						plugin: this.buildInstalledView(record),
-						registryRevision: current.revision,
-						activation: "applied",
-					},
-				};
+			// Create normalized.json
+			const normalizedComponents: NormalizedComponent[] = [];
+			for (let i = 0; i < inspection.parsedComponents.length; i++) {
+				const comp = inspection.parsedComponents[i]!;
+				const pub = inspection.components[i]!;
+
+				if (pub.status === "unsupported") continue; // Skip unsupported in normalized package
+
+				if (comp.kind === "skill") {
+					normalizedComponents.push({
+						kind: "skill",
+						componentId: pub.componentId,
+						name: pub.componentId,
+						originalName: comp.originalName,
+						relativeEntryPath: comp.relativeEntryPath,
+						relativeBaseDir: comp.relativeBaseDir,
+						disableModelInvocation: comp.disableModelInvocation,
+					});
+				} else if (comp.kind === "mcp") {
+					normalizedComponents.push({
+						kind: "mcp",
+						componentId: pub.componentId,
+						name: pub.componentId,
+						originalName: comp.originalName,
+						definition: comp.definition,
+					});
+				} else if (comp.kind === "hook") {
+					normalizedComponents.push({
+						kind: "hook",
+						componentId: pub.componentId,
+						name: pub.componentId,
+						definition: {
+							...comp.definition,
+							id: pub.componentId,
+						},
+					});
+				}
 			}
 
-			const record: PluginRecord = {
-				id: pluginId,
+			const normalizedPackage: NormalizedPluginPackage = {
+				pluginId,
+				commit,
+				format: inspection.plugin.format,
 				name: inspection.plugin.name,
 				displayName: inspection.plugin.displayName,
-				format: inspection.plugin.format,
-				repository: inspection.canonicalRepository,
-				subdir: inspection.subdir,
-				commit,
+				description: inspection.plugin.description,
 				...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
-				sourceId: inspection.sourceId,
-				enabled: true,
-				installedAt: new Date().toISOString(),
-				issues: [...inspection.issues],
+				components: normalizedComponents,
+				issues: inspection.issues,
 			};
 
-			const nextInstalled = [...current.installed];
-			if (existingIndex >= 0) {
-				nextInstalled[existingIndex] = record;
-			} else {
-				nextInstalled.push(record);
+			const normalizedPath = join(stagingDir, "normalized.json");
+			writeFileSync(normalizedPath, JSON.stringify(normalizedPackage, null, 2), { mode: 0o644 });
+			if (process.platform !== "win32") {
+				chmodSync(normalizedPath, 0o644);
 			}
 
-			const next: PluginRegistry = {
-				...current,
-				revision: current.revision + 1,
-				installed: nextInstalled,
-			};
+			// Registry transaction
+			return withPluginRegistryLock(this.agentDir, (current) => {
+				if (current.revision !== input.expectedRevision) {
+					throw new AppServerError("CONFLICT", { requestId: input.requestId });
+				}
+				return this.commitInspection(current, inspection, stagingDir, input.requestId);
+			});
+		} finally {
+			rmSync(stagingDir, { recursive: true, force: true });
+		}
+	}
 
+	private commitInspection(
+		current: PluginRegistry,
+		inspection: InspectionCacheData,
+		stagingDir: string,
+		requestId: string,
+	): {
+		next?: PluginRegistry;
+		result: { plugin: PluginInstalledView; registryRevision: number; activation: PluginActivationStatus };
+	} {
+		const pluginId = inspection.plugin.id;
+		const commit = inspection.commit;
+		const targetDir = getPluginPackageDir(this.agentDir, pluginId, commit);
+
+		if (existsSync(targetDir)) {
+			if (!this.matchesExistingPackage(targetDir, inspection.files)) {
+				throw new AppServerError("CONFLICT", { requestId });
+			}
+		} else {
+			mkdirSync(dirname(targetDir), { recursive: true });
+			renameSync(stagingDir, targetDir);
+		}
+
+		const existingIndex = current.installed.findIndex((p) => p.id === pluginId);
+		if (existingIndex >= 0 && current.installed[existingIndex]!.commit === commit) {
+			// Same commit idempotent install
+			const record = current.installed[existingIndex]!;
 			return {
-				next,
+				next: undefined,
 				result: {
 					plugin: this.buildInstalledView(record),
-					registryRevision: next.revision,
+					registryRevision: current.revision,
 					activation: "applied",
 				},
 			};
-		});
+		}
+
+		const record: PluginRecord = {
+			id: pluginId,
+			name: inspection.plugin.name,
+			displayName: inspection.plugin.displayName,
+			format: inspection.plugin.format,
+			repository: inspection.canonicalRepository,
+			subdir: inspection.subdir,
+			commit,
+			...(inspection.plugin.version !== undefined ? { version: inspection.plugin.version } : {}),
+			...(inspection.trackingRef !== undefined ? { trackingRef: inspection.trackingRef } : {}),
+			sourceId: inspection.sourceId,
+			enabled: true,
+			installedAt: new Date().toISOString(),
+			issues: [...inspection.issues],
+		};
+
+		const nextInstalled = [...current.installed];
+		if (existingIndex >= 0) {
+			nextInstalled[existingIndex] = record;
+		} else {
+			nextInstalled.push(record);
+		}
+
+		const next: PluginRegistry = {
+			...current,
+			revision: current.revision + 1,
+			installed: nextInstalled,
+		};
+
+		return {
+			next,
+			result: {
+				plugin: this.buildInstalledView(record),
+				registryRevision: next.revision,
+				activation: "applied",
+			},
+		};
+	}
+
+	private matchesExistingPackage(
+		targetDir: string,
+		files: Array<{ readonly path: string; readonly base64: string; readonly mode: number }>,
+	): boolean {
+		try {
+			const expectedSorted = [...files].sort((a, b) => a.path.localeCompare(b.path));
+			const expectedHasher = createHash("sha256");
+			const actualHasher = createHash("sha256");
+
+			for (const f of expectedSorted) {
+				const expectedMode = (f.mode & 0o111) !== 0 ? 0o755 : 0o644;
+				expectedHasher.update(`${f.path}\0${expectedMode}\0`);
+				expectedHasher.update(Buffer.from(f.base64, "base64"));
+
+				const actualPath = join(targetDir, f.path);
+				if (!existsSync(actualPath)) return false;
+				const actualBytes = readFileSync(actualPath);
+				let actualMode = expectedMode;
+				if (process.platform !== "win32") {
+					actualMode = (statSync(actualPath).mode & 0o111) !== 0 ? 0o755 : 0o644;
+				}
+				actualHasher.update(`${f.path}\0${actualMode}\0`);
+				actualHasher.update(actualBytes);
+			}
+
+			return expectedHasher.digest("hex") === actualHasher.digest("hex");
+		} catch {
+			return false;
+		}
 	}
 
 	listInstalled(): { installed: PluginRecord[]; registryRevision: number } {
@@ -807,14 +874,35 @@ export class PluginService {
 
 	private getInspectionData(inspectionId: string): InspectionCacheData | undefined {
 		if (this.inspectionCache.has(inspectionId)) {
-			return this.inspectionCache.get(inspectionId);
+			const cached = this.inspectionCache.get(inspectionId);
+			if (
+				cached &&
+				cached.cacheVersion === 2 &&
+				Array.isArray(cached.files) &&
+				cached.files.every((f) => typeof f.mode === "number")
+			) {
+				return cached;
+			}
+			return undefined;
 		}
 		const diskPath = join(getPluginCacheDir(this.agentDir), "inspections", `${inspectionId}.json`);
 		if (existsSync(diskPath)) {
 			try {
 				const data = JSON.parse(readFileSync(diskPath, "utf8"));
-				this.inspectionCache.set(inspectionId, data);
-				return data;
+				if (
+					typeof data === "object" &&
+					data !== null &&
+					data.cacheVersion === 2 &&
+					Array.isArray(data.files) &&
+					data.files.every(
+						(f: unknown) =>
+							typeof f === "object" && f !== null && typeof (f as { mode?: unknown }).mode === "number",
+					)
+				) {
+					this.inspectionCache.set(inspectionId, data);
+					return data;
+				}
+				return undefined;
 			} catch {
 				return undefined;
 			}

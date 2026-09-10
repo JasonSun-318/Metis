@@ -20,7 +20,7 @@ function harness({ nested = false, single = false } = {}) {
 	const zip = (commit: string) =>
 		createZip({
 			[`repo-${commit}/${pluginPath}.claude-plugin/plugin.json`]: JSON.stringify(manifest),
-			[`repo-${commit}/${pluginPath}skills/helper/SKILL.md`]: skill + "\n" + commit,
+			[`repo-${commit}/${pluginPath}skills/helper/SKILL.md`]: `${skill}\n${commit}`,
 			[`repo-${commit}/${pluginPath}scripts/run.sh`]: { content: "#!/bin/sh\necho OK", mode: 0o100755 },
 			[`repo-${commit}/${pluginPath}hooks/hooks.json`]: JSON.stringify({
 				hooks: { UserPromptSubmit: [{ hooks: [{ type: "command", command: "echo hooked" }] }] },

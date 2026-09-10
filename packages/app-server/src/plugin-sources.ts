@@ -49,6 +49,7 @@ export interface ResolvedPluginFiles {
 	readonly commit: string;
 	readonly subdir: string;
 	readonly files: Map<string, Buffer>;
+	readonly fileModes: Map<string, number>;
 }
 
 function normalizeSubdir(p: string): string {
@@ -443,16 +444,22 @@ export async function fetchPluginFiles(
 	});
 
 	const files = new Map<string, Buffer>();
+	const fileModes = new Map<string, number>();
 	const prefix = targetSubdir ? `${targetSubdir}/` : "";
 
 	for (const e of entries) {
+		const mode = (e.mode & 0o111) !== 0 ? 0o755 : 0o644;
 		if (prefix) {
 			if (e.path.startsWith(prefix)) {
 				const relativePath = e.path.slice(prefix.length);
-				if (relativePath) files.set(relativePath, e.bytes);
+				if (relativePath) {
+					files.set(relativePath, e.bytes);
+					fileModes.set(relativePath, mode);
+				}
 			}
 		} else {
 			files.set(e.path, e.bytes);
+			fileModes.set(e.path, mode);
 		}
 	}
 
@@ -463,5 +470,6 @@ export async function fetchPluginFiles(
 		commit: targetCommit,
 		subdir: targetSubdir,
 		files,
+		fileModes,
 	};
 }
