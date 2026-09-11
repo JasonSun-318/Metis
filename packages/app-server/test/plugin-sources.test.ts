@@ -335,15 +335,17 @@ describe("ZIP security, symlink, limits, and error handling", () => {
 		await expect(archiveEntries(zipLarge, { stripRoot: true, maxUncompressedBytes: 500 })).rejects.toThrow();
 	});
 
-	it("handles 429 rate limiting with retry, and throws on persistent failure", async () => {
+	it("reports 429 rate limiting without immediately spending another request", async () => {
 		let attempts = 0;
 		const fetchImpl = vi.fn(async () => {
 			attempts += 1;
 			return new Response(null, { status: 429 });
 		}) as typeof fetch;
 
-		await expect(resolveCommitSha(fetchImpl, "owner", "repo", "main")).rejects.toThrow();
-		expect(attempts).toBe(2);
+		await expect(resolveCommitSha(fetchImpl, "owner", "repo", "main")).rejects.toMatchObject({
+			code: "GITHUB_RATE_LIMITED",
+		});
+		expect(attempts).toBe(1);
 	});
 
 	it("throws on 404 missing repository", async () => {

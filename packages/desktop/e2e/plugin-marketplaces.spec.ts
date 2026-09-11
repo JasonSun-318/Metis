@@ -1,15 +1,14 @@
-import { type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	createPluginFixtureServer,
 	FIXTURE_COMMIT_A,
 	FIXTURE_COMMIT_B,
-	FIXTURE_MARKET_REPO,
 	FIXTURE_MARKET_URL,
 	type PluginFixtureServer,
 } from "./fixtures/plugin-market-fixture.ts";
@@ -50,6 +49,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 		// Ensure start at Commit A
 		fixtureServer!.setCommit(FIXTURE_COMMIT_A);
 		fixtureServer!.setFailDownload(false);
+		fixtureServer!.setRateLimited(false);
 
 		const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-plugin-e2e-suite-"));
 		const agentDir = path.join(tempRoot, "agent");
@@ -143,14 +143,55 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 
 			// 1. Navigate to Customize -> Plugins (4th tab)
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
+			const skillsSearchBounds = await page.locator(".plugins-search").boundingBox();
+			const skillsButtonBounds = await page.locator(".plugins-page-actions .plugins-new-trigger").boundingBox();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
 			await expect(page.locator(".plugins-market-panel")).toBeVisible();
+			const marketSearchBounds = await page.locator(".plugins-search").boundingBox();
+			expect(marketSearchBounds!.x).toBeCloseTo(skillsSearchBounds!.x, 0);
+			expect(marketSearchBounds!.y).toBeCloseTo(skillsSearchBounds!.y, 0);
+			await expect(page.locator(".plugins-page-header").getByRole("button", { name: "Add Market", exact: true })).toBeVisible();
+			await expect(page.locator(".plugins-sub-tab")).toHaveCount(0);
+			const defaultMarket = page.locator(".plugins-source-row").filter({ hasText: "anthropics/claude-plugins-official" });
+			await expect(defaultMarket).toBeVisible();
+			await expect(defaultMarket.locator("strong")).toHaveText("anthropics/claude-plugins-official");
+			const marketButtonBounds = await page.locator(".plugins-page-actions .plugins-new-btn").boundingBox();
+			expect(marketButtonBounds!.width).toBeCloseTo(skillsButtonBounds!.width, 1);
+			expect(marketButtonBounds!.height).toBeCloseTo(skillsButtonBounds!.height, 1);
+			await defaultMarket.locator(".plugins-source-open").hover();
+			const rowHover = await defaultMarket.evaluate((el) => getComputedStyle(el).backgroundColor);
+			expect(rowHover).not.toBe("rgba(0, 0, 0, 0)");
+			await expect(defaultMarket.locator(".plugins-source-open")).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+			await defaultMarket.locator(".plugins-market-remove-btn").hover();
+			await expect(defaultMarket).toHaveCSS("background-color", rowHover);
+
+			await defaultMarket.locator(".plugins-market-remove-btn").click();
+			await expect(page.getByText("No markets added. Add a GitHub market to discover plugins.", { exact: true })).toBeVisible();
+
 
 			// 2. Add Fixture GitHub Market
 			await page.getByRole("button", { name: "Add Market", exact: true }).click();
 			const addMarketDialog = page.locator(".plugins-add-market-dialog");
 			await expect(addMarketDialog).toBeVisible();
 			await addMarketDialog.locator("input[placeholder*='github.com']").fill(FIXTURE_MARKET_URL);
+			const addButton = addMarketDialog.getByRole("button", { name: "Add", exact: true });
+			const cancelButton = addMarketDialog.getByRole("button", { name: "Cancel", exact: true });
+			for (const theme of ["dark", "light"]) {
+				await page.evaluate((value) => { document.documentElement.dataset.theme = value; }, theme);
+				await addButton.hover();
+				await expect(addButton).toHaveCSS("background-color", theme === "dark" ? "rgb(255, 255, 255)" : "rgb(107, 107, 107)");
+				await expect(addButton).toHaveCSS("color", theme === "dark" ? "rgb(18, 18, 18)" : "rgb(243, 243, 243)");
+				await cancelButton.hover();
+				await expect(cancelButton).toHaveCSS("background-color", theme === "dark" ? "rgb(34, 34, 34)" : "rgb(242, 241, 238)");
+			}
+			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+			fixtureServer!.setRateLimited(true);
+			await addButton.click();
+			await expect(addMarketDialog.getByRole("alert")).toContainText("GitHub request limit reached");
+			await expect(addButton).toBeEnabled();
+			await addButton.hover();
+			await page.screenshot({ path: testInfo.outputPath("market-limit-hover-dark.png") });
+			fixtureServer!.setRateLimited(false);
 			await addMarketDialog.getByRole("button", { name: "Add", exact: true }).click();
 			await expect(addMarketDialog).toHaveCount(0);
 
@@ -179,10 +220,23 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(inspectDialog).toHaveCount(0);
 
 			// 6. Verify Installed Tab
-			await page.locator(".plugins-sub-tab").filter({ hasText: "Installed" }).click();
+			await page.getByRole("button", { name: /Manage plugins/ }).click();
 			const installedRow = page.locator(".plugins-installed-row").filter({ hasText: "Fixture Suite Plugin" });
 			await expect(installedRow).toBeVisible();
 			await expect(installedRow.locator(".badge-enabled")).toBeVisible();
+			const originalViewport = page.viewportSize()!;
+			for (const width of [1200, 720]) {
+				await page.setViewportSize({ width, height: 800 });
+				const toggle = (await installedRow.locator(".plugins-toggle-btn").boundingBox())!;
+				const manage = (await installedRow.locator(".plugins-inspect-action-btn").boundingBox())!;
+				const row = (await installedRow.boundingBox())!;
+				expect(Math.abs(toggle.y - manage.y), "Card buttons share a top edge").toBeLessThanOrEqual(1);
+				expect(toggle.height).toBe(manage.height);
+				expect(manage.x - toggle.x - toggle.width, "Card buttons have an 8px gap").toBeGreaterThanOrEqual(8);
+				expect(manage.x + manage.width).toBeLessThanOrEqual(row.x + row.width);
+				await installedRow.screenshot({ path: testInfo.outputPath(`installed-actions-${width}.png`) });
+			}
+			await page.setViewportSize(originalViewport);
 
 			// 7. Verify Ownership Badges in Original 3 Tabs
 			// Skills tab
@@ -232,7 +286,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
-			await page.locator(".plugins-sub-tab").filter({ hasText: "Installed" }).click();
+			await page.getByRole("button", { name: /Manage plugins/ }).click();
 
 			const activePluginRow = page.locator(".plugins-installed-row").filter({ hasText: "Fixture Suite Plugin" });
 			await activePluginRow.locator(".plugins-inspect-action-btn").click();
@@ -280,15 +334,22 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			const v2Req = agentRequests.find((r) => JSON.stringify(r).includes("FIXTURE_SUITE_HOOK_ACTIVE_CONTEXT_V2"));
 			expect(v2Req, "v2 Hook context must be present in model request messages").toBeDefined();
 
-			// 11. Simulate Download Failure during check/update: installed state remains clean
+			// A real failed download must keep the installed B package and registry unchanged.
+			fixtureServer!.setCommit(FIXTURE_COMMIT_A);
 			fixtureServer!.setFailDownload(true);
+			const registryBeforeFailure = await readFile(path.join(agentDir, "plugins/registry.json"), "utf8");
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
-			await page.locator(".plugins-sub-tab").filter({ hasText: "Installed" }).click();
+			await page.getByRole("button", { name: /Manage plugins/ }).click();
 			await activePluginRow.locator(".plugins-inspect-action-btn").click();
 			await expect(detailDialog).toBeVisible();
+			await detailDialog.getByRole("button", { name: "Check for Updates", exact: true }).click();
+			await expect(detailDialog.locator(".mcp-dialog-error")).toBeVisible();
 			await expect(detailDialog.getByText(FIXTURE_COMMIT_B.slice(0, 7))).toBeVisible();
+			expect(await readFile(path.join(agentDir, "plugins/registry.json"), "utf8")).toBe(registryBeforeFailure);
+			await expect(page.locator(".plugins-update-dialog")).toHaveCount(0);
 			await detailDialog.locator(".mcp-dialog-close").click();
+			fixtureServer!.setCommit(FIXTURE_COMMIT_B);
 			fixtureServer!.setFailDownload(false);
 
 			// 12. Disable Plugin & Verify Next Turn Isolation
@@ -304,13 +365,14 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			const disabledTurnReq = agentRequests[agentRequests.length - 1];
 			const disabledTranscript = JSON.stringify(disabledTurnReq);
 			expect(disabledTranscript.includes("FIXTURE_SUITE_HOOK_ACTIVE_CONTEXT")).toBe(false);
-			const disabledTools = (disabledTurnReq as unknown as { tools?: Array<{ function?: { name: string } }> }).tools ?? [];
+			const disabledTools =
+				(disabledTurnReq as unknown as { tools?: Array<{ function?: { name: string } }> }).tools ?? [];
 			expect(disabledTools.some((t) => t.function?.name?.includes("fixture_suite_echo"))).toBe(false);
 
 			// 13. Enable Plugin back
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
-			await page.locator(".plugins-sub-tab").filter({ hasText: "Installed" }).click();
+			await page.getByRole("button", { name: /Manage plugins/ }).click();
 			await activePluginRow.locator(".plugins-toggle-btn").click();
 			await expect(activePluginRow.locator(".badge-enabled")).toBeVisible();
 
@@ -341,7 +403,10 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Reopen Customize -> Plugins -> Installed
 			await page.getByRole("button", { name: "Customize", exact: true }).click();
 			await page.getByRole("tab", { name: "Plugins", exact: true }).click();
-			await page.locator(".plugins-sub-tab").filter({ hasText: "Installed" }).click();
+			await expect(page.locator(".plugins-source-row").filter({ hasText: "anthropics/claude-plugins-official" })).toHaveCount(0);
+			await page.locator(".plugins-source-row").filter({ hasText: "fixture/plugins-market" }).locator(".plugins-market-remove-btn").click();
+			await expect(page.locator(".plugins-source-row")).toHaveCount(0);
+			await page.getByRole("button", { name: /Manage plugins/ }).click();
 
 			const persistedPlugin = page.locator(".plugins-installed-row").filter({ hasText: "Fixture Suite Plugin" });
 			await expect(persistedPlugin).toBeVisible();
@@ -359,7 +424,9 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(confirmDialog).toHaveCount(0);
 			await expect(detailDialogAfterRestart).toHaveCount(0);
 
-			await expect(page.locator(".plugins-installed-row").filter({ hasText: "Fixture Suite Plugin" })).toHaveCount(0);
+			await expect(page.locator(".plugins-installed-row").filter({ hasText: "Fixture Suite Plugin" })).toHaveCount(
+				0,
+			);
 			await expect(page.getByText("No plugins installed yet.", { exact: true })).toBeVisible();
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
@@ -448,6 +515,19 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await page.getByRole("tab", { name: "插件", exact: true }).click();
 			await expect(page.locator(".plugins-market-panel")).toBeVisible();
 
+			for (const scenario of [{ width: 1200, height: 800, theme: "dark" }, { width: 720, height: 620, theme: "light" }]) {
+				await page.setViewportSize({ width: scenario.width, height: scenario.height });
+				await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, scenario.theme);
+				await expect(page.locator(".plugins-page-header").getByRole("button", { name: "添加市场", exact: true })).toBeVisible();
+				expect(await page.locator(".plugins-panel").evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+				const marketRow = page.locator(".plugins-source-row").first();
+				await expect(marketRow.locator("strong")).toHaveText("anthropics/claude-plugins-official");
+				await marketRow.locator(".plugins-source-open").hover();
+				await page.screenshot({ path: testInfo.outputPath(`markets-home-${scenario.theme}.png`), animations: "disabled" });
+			}
+			await page.setViewportSize({ width: 1200, height: 800 });
+			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+
 			// Add market in Chinese
 			await page.getByRole("button", { name: "添加市场", exact: true }).click();
 			const addDialog = page.locator(".plugins-add-market-dialog");
@@ -502,8 +582,10 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			// Checkbox for partial install
 			const partialCheckbox = partialDialog.locator(".plugins-partial-checkbox input[type='checkbox']");
 			await expect(partialCheckbox).toBeVisible();
-			await expect(partialCheckbox).toBeChecked();
+			await expect(partialCheckbox).not.toBeChecked();
 			const installBtn = partialDialog.locator("button.button-primary");
+			await expect(installBtn).toBeDisabled();
+			await partialCheckbox.click();
 			await expect(installBtn).toBeEnabled();
 
 			// Unchecking the checkbox disables the button
@@ -534,7 +616,10 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 
 				await page.screenshot({
 					animations: "disabled",
-					path: path.join(evidenceDir, `plugin-inspect-partial-${scenario.width}x${scenario.height}-${scenario.theme}.png`),
+					path: path.join(
+						evidenceDir,
+						`plugin-inspect-partial-${scenario.width}x${scenario.height}-${scenario.theme}.png`,
+					),
 				});
 			}
 
@@ -544,7 +629,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(partialDialog).toHaveCount(0);
 
 			// 5. Verify Installed Tab & Detail Dialog Screenshots
-			await page.locator(".plugins-sub-tab").filter({ hasText: "已安装" }).click();
+			await page.getByRole("button", { name: /管理插件/ }).click();
 			const installedPartial = page.locator(".plugins-installed-row").filter({ hasText: "Fixture Partial Plugin" });
 			await expect(installedPartial).toBeVisible();
 
@@ -562,14 +647,18 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 				}, scenario.theme);
 				await page.screenshot({
 					animations: "disabled",
-					path: path.join(evidenceDir, `plugin-installed-detail-${scenario.width}x${scenario.height}-${scenario.theme}.png`),
+					path: path.join(
+						evidenceDir,
+						`plugin-installed-detail-${scenario.width}x${scenario.height}-${scenario.theme}.png`,
+					),
 				});
 			}
 			await detailDialog.locator(".mcp-dialog-close").click();
 			await expect(detailDialog).toHaveCount(0);
 
 			// 6. Test Codex Format Plugin Installation (Step 3: Codex local collection with 2 skills)
-			await page.locator(".plugins-sub-tab").first().click();
+			if (await page.locator(".plugins-market-back").count()) await page.locator(".plugins-market-back").click();
+			await page.locator(".plugins-source-open").filter({ hasText: "fixture/plugins-market" }).click();
 			const codexRow = page.locator(".plugins-market-row").filter({ hasText: "fixture-codex" });
 			await expect(codexRow).toBeVisible();
 			await codexRow.locator(".plugins-inspect-action-btn").click();
@@ -595,7 +684,8 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 
 			// 7. Test Broken Manifest Plugin (cannot install, shows error)
 			await page.getByRole("tab", { name: "插件", exact: true }).click();
-			await page.locator(".plugins-sub-tab").first().click();
+			if (await page.locator(".plugins-market-back").count()) await page.locator(".plugins-market-back").click();
+			await page.locator(".plugins-source-open").filter({ hasText: "fixture/plugins-market" }).click();
 			const brokenRow = page.locator(".plugins-market-row").filter({ hasText: "fixture-broken" });
 			await expect(brokenRow).toBeVisible();
 			await brokenRow.locator(".plugins-inspect-action-btn").click();
@@ -604,9 +694,9 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(brokenDialog).toBeVisible();
 			// Manifest parsing failure: cannot install
 			const cannotInstallBroken = brokenDialog.locator("button.button-primary");
-			if (await cannotInstallBroken.isVisible()) {
-				await expect(cannotInstallBroken).toBeDisabled();
-			}
+			await expect(cannotInstallBroken).toBeVisible();
+			await expect(cannotInstallBroken).toBeDisabled();
+			await expect(brokenDialog.getByText(/Failed to parse JSON file at/)).toBeVisible();
 			await brokenDialog.locator(".mcp-dialog-close").click();
 			await expect(brokenDialog).toHaveCount(0);
 		} catch (error) {
@@ -644,8 +734,39 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 		const userDataDir = path.join(tempRoot, "electron");
 		await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 
-		const fakeProvider = createServer((_req, response) => {
-			respondWithText(response, "hello");
+		const fakeProvider = createServer(async (request, response) => {
+			if (request.method !== "POST") {
+				response.writeHead(404).end();
+				return;
+			}
+			const req = await readOpenAiChatRequest(request);
+			if (JSON.stringify(req.messages).includes("conversation title generator")) {
+				respondWithText(response, "HTTP test");
+				return;
+			}
+			const tools = (req as unknown as { tools?: Array<{ function?: { name: string } }> }).tools ?? [];
+			if (req.messages?.some((m) => m.role === "tool" && String(m.content).includes("match:"))) {
+				respondWithText(response, "HTTP tool succeeded");
+				return;
+			}
+			const httpTool = tools.find((t) => t.function?.name.includes("fixture_http_tool"));
+			if (httpTool) {
+				respondWithToolCall(response, {
+					callId: `http-${Date.now()}`,
+					name: httpTool.function!.name,
+					arguments: { message: "test" },
+				});
+				return;
+			}
+			if (!req.messages?.some((m) => m.role === "tool") && tools.some((t) => t.function?.name === "tool_search")) {
+				respondWithToolCall(response, {
+					callId: `search-${Date.now()}`,
+					name: "tool_search",
+					arguments: { query: "fixture_http_tool" },
+				});
+				return;
+			}
+			respondWithText(response, "HTTP tool unavailable");
 		});
 		const providerPort = await listen(fakeProvider);
 		await writeOfflineProviderConfig(agentDir, providerPort, {
@@ -729,8 +850,63 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await credDialog.getByRole("button", { name: "Save", exact: true }).click();
 			await expect(credDialog).toHaveCount(0);
 
+			const runHttpTool = async (available: boolean) => {
+				const before = fixtureServer!.mcpTestServer.toolCallCount();
+				const sessionId = await createAndRestoreChatSession(page!, projectDir);
+				// Optional MCP startup is asynchronous; authenticate before asking the model to use it.
+				await expect
+					.poll(
+						async () =>
+							page!.evaluate(async (id) => {
+								const result = await (globalThis as unknown as { metis: MetisDesktopApi }).metis.listMcpServers(
+									{ sessionId: id },
+								);
+								return result.servers.find(
+									(server: { originalName?: string }) => server.originalName === "fixture-http-server",
+								)?.state;
+							}, sessionId),
+						{ timeout: 15000 },
+					)
+					.toBe(available ? "connected" : "auth_required");
+				await page!.locator("#composer-input").fill("Run fixture_http_tool");
+				await page!.getByRole("button", { name: "Send message", exact: true }).click();
+				if (available) {
+					await page!.getByRole("button", { name: "Allow once", exact: true }).click();
+					await expect(page!.getByText("HTTP tool succeeded", { exact: true })).toBeVisible();
+					expect(fixtureServer!.mcpTestServer.toolCallCount()).toBeGreaterThan(before);
+				} else {
+					await expect(page!.getByText("HTTP tool unavailable", { exact: true })).toBeVisible();
+					expect(fixtureServer!.mcpTestServer.toolCallCount()).toBe(before);
+				}
+			};
+			// Successful tools/call proves the fixture's required Authorization header was accepted.
+			await runHttpTool(true);
+			await browser.close();
+			await stopProcess(app);
+			debuggingPort = await reservePort();
+			app = launchPackagedDesktop({
+				executable,
+				debuggingPort,
+				userDataDir,
+				projectDir,
+				agentDir,
+				homeDir,
+				diagnostics,
+				env: { HTTPS_PROXY: fixtureServer!.proxyUrl, NODE_TLS_REJECT_UNAUTHORIZED: "0" },
+			});
+			({ browser, page } = await connectToApp(debuggingPort));
+			page.setDefaultTimeout(20_000);
+			await waitForServerReady(page);
+			// Wait for the previous chat to restore before the helper selects a new session.
+			await expect(page.getByText("HTTP tool succeeded", { exact: true })).toBeVisible();
+			await runHttpTool(true);
+			await page.getByRole("button", { name: "Customize", exact: true }).click();
+			await page.getByRole("tab", { name: "MCP", exact: true }).click();
+			await page.locator(".plugins-mcp-row").filter({ hasText: "fixture-http-server" }).click();
+
 			// Verify Clear authentication button appears
-			const clearBtn = detailPage.getByRole("button", { name: "Clear authentication", exact: true });
+			const restoredDetailPage = page.locator(".plugins-detail-page[data-plugin-detail='mcp']");
+			const clearBtn = restoredDetailPage.getByRole("button", { name: "Clear authentication", exact: true });
 			await expect(clearBtn).toBeVisible();
 
 			// Clear authentication to verify clean removal
@@ -738,7 +914,8 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 			await expect(clearBtn).toHaveCount(0);
 
 			// Click back to MCP list
-			await detailPage.getByRole("button", { name: "Back to MCP", exact: true }).click();
+			await restoredDetailPage.getByRole("button", { name: "Back to MCP", exact: true }).click();
+			await runHttpTool(false);
 		} catch (error) {
 			const bodyHtml = await page?.innerHTML("body").catch(() => "failed to get body");
 			await writeFile(

@@ -117,7 +117,17 @@ function parseJsonWithDiagnostics(
 	isManifest = false,
 ): unknown {
 	try {
-		return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer));
+		const parsed: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(buffer));
+		if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+			throw new Error("Expected a JSON object");
+		for (const field of ["mcpServers", "hooks"]) {
+			if (!isManifest && field in parsed) {
+				const value = (parsed as Record<string, unknown>)[field];
+				if (typeof value !== "object" || value === null || Array.isArray(value))
+					throw new Error(`Expected ${field} to be an object`);
+			}
+		}
+		return parsed;
 	} catch (err) {
 		issues.push({
 			code: isManifest ? "CORRUPT_MANIFEST" : "INVALID_JSON",

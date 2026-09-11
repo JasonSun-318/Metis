@@ -48,6 +48,8 @@ export interface ResolvedPluginFiles {
 	readonly repo: string;
 	readonly commit: string;
 	readonly subdir: string;
+	readonly trackingRef?: string;
+	readonly pinnedCommit?: string;
 	readonly files: Map<string, Buffer>;
 	readonly fileModes: Map<string, number>;
 }
@@ -453,7 +455,15 @@ export async function fetchPluginFilesAtCommit(
 }
 
 export async function fetchPluginFiles(
-	origin: { canonicalRepository: string; owner: string; repo: string; commit: string; root: string },
+	origin: {
+		canonicalRepository: string;
+		owner: string;
+		repo: string;
+		commit: string;
+		root: string;
+		trackingRef?: string;
+		pinnedCommit?: string;
+	},
 	entry: CatalogEntry,
 	fetchImpl: FetchImplementation = globalThis.fetch,
 ): Promise<ResolvedPluginFiles> {
@@ -465,6 +475,8 @@ export async function fetchPluginFiles(
 	let targetRepo = origin.repo;
 	let targetCommit = origin.commit;
 	let targetSubdir = origin.root;
+	let trackingRef = origin.trackingRef;
+	let pinnedCommit = origin.pinnedCommit;
 
 	const src = entry.source;
 
@@ -482,33 +494,39 @@ export async function fetchPluginFiles(
 			targetOwner = parts[0];
 			targetRepo = parts[1].replace(/\.git$/, "");
 			targetSubdir = "";
-			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
-			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
-			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
 		} else if (obj.source === "url" && typeof obj.url === "string") {
 			const parsed = canonicalizeRepository(obj.url);
 			targetOwner = parsed.owner;
 			targetRepo = parsed.repo;
 			targetSubdir = "";
-			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
-			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
-			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
 		} else if (obj.source === "git-subdir" && typeof obj.url === "string" && typeof obj.path === "string") {
 			const parsed = canonicalizeRepository(obj.url);
 			targetOwner = parsed.owner;
 			targetRepo = parsed.repo;
 			targetSubdir = normalizeSubdir(obj.path);
-			const sha = typeof obj.sha === "string" ? obj.sha : undefined;
-			const ref = typeof obj.ref === "string" ? obj.ref : undefined;
-			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, sha || ref);
 		} else {
 			throw new AppServerError("INVALID_REQUEST");
+		}
+		if (obj.source !== "local") {
+			const ref = typeof obj.sha === "string" ? obj.sha : typeof obj.ref === "string" ? obj.ref : undefined;
+			pinnedCommit = ref && /^[a-f0-9]{40}$/i.test(ref) ? ref.toLowerCase() : undefined;
+			trackingRef = pinnedCommit ? undefined : ref;
+			if (!pinnedCommit && !trackingRef) {
+				const repository = (await fetchJson(
+					fetchImpl,
+					`https://api.github.com/repos/${encodeURIComponent(targetOwner)}/${encodeURIComponent(targetRepo)}`,
+				)) as { default_branch?: unknown };
+				if (typeof repository.default_branch !== "string" || !repository.default_branch)
+					throw new AppServerError("OPERATION_FAILED");
+				trackingRef = repository.default_branch;
+			}
+			targetCommit = await resolveCommitSha(fetchImpl, targetOwner, targetRepo, pinnedCommit ?? trackingRef);
 		}
 	} else {
 		throw new AppServerError("INVALID_REQUEST");
 	}
 
-	return await fetchPluginFilesAtCommit(
+	const resolved = await fetchPluginFilesAtCommit(
 		{
 			repository: `https://github.com/${targetOwner}/${targetRepo}`,
 			subdir: targetSubdir,
@@ -516,4 +534,5 @@ export async function fetchPluginFiles(
 		},
 		fetchImpl,
 	);
+	return { ...resolved, trackingRef, pinnedCommit };
 }

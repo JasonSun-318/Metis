@@ -18,7 +18,7 @@ import { AppStore } from "../src/renderer/store/app-store.ts";
 const officialMarket: MarketRecord = {
 	id: "official-market",
 	displayName: "Official Marketplace",
-	url: "https://github.com/metis-ai/plugins",
+	url: "https://github.com/anthropics/claude-plugins-official",
 	commit: "main-commit",
 	fetchedAt: "2026-09-09T00:00:00.000Z",
 	selected: true,
@@ -296,7 +296,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		};
 	}
 
-	async function renderPanel(api = createMockApi(), initialSection: PluginSection = "plugins") {
+	async function renderPanel(api = createMockApi(), initialSection: PluginSection = "plugins", openMarket = true) {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const store = new AppStore();
 		store.setSessions({
@@ -340,6 +340,10 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 			await flush();
 		});
 
+		if (initialSection === "plugins" && openMarket) {
+			await act(async () => container.querySelector<HTMLButtonElement>(".plugins-source-open")?.click());
+			await flush();
+		}
 		return { api, container };
 	}
 
@@ -359,8 +363,42 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		});
 
 		expect(api.listPluginMarkets).toHaveBeenCalled();
-		expect(api.getPluginCatalog).toHaveBeenCalledWith({ sourceId: "official-market" });
+		expect(api.getPluginCatalog).not.toHaveBeenCalled();
+		expect(container.textContent).toContain("anthropics/claude-plugins-official");
 		expect(container.querySelector(".plugins-market-panel")).not.toBeNull();
+	});
+
+	it("starts with local markets, aligned header actions, and no catalog request", async () => {
+		const { api, container } = await renderPanel(createMockApi(), "plugins", false);
+		expect(api.getPluginCatalog).not.toHaveBeenCalled();
+		expect(container.querySelector(".plugins-sub-tab")).toBeNull();
+		expect(container.querySelector(".plugins-page-header .plugins-new-btn")?.textContent).toContain("Add Market");
+		expect(container.querySelector(".plugins-page-header .plugins-reload")).not.toBeNull();
+		expect(container.querySelector('.plugins-list-controls input[type="search"]')?.getAttribute("placeholder")).toBe("Search markets…");
+		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
+	});
+
+	it("uses repository paths for old and new market names in either locale", async () => {
+		const api = createMockApi({ listPluginMarkets: vi.fn().mockResolvedValue({
+			markets: [officialMarket, { ...customMarket, displayName: "plugins", url: "https://github.com/openai/plugins" }],
+			selectedSourceId: officialMarket.id, registryRevision: 1,
+		}) });
+		const { container } = await renderPanel(api, "plugins", false);
+		const names = () => [...container.querySelectorAll(".plugins-source-open strong")].map((el) => el.textContent);
+		expect(names()).toEqual(["anthropics/claude-plugins-official", "openai/plugins"]);
+		await act(async () => { await i18n.changeLanguage("zh-CN"); });
+		expect(names()).toEqual(["anthropics/claude-plugins-official", "openai/plugins"]);
+	});
+
+	it("removes the default market while retaining access to installed plugins", async () => {
+		const api = createMockApi({ removePluginMarket: vi.fn().mockResolvedValue({ markets: [], selectedSourceId: null, registryRevision: 2 }) });
+		const { container } = await renderPanel(api, "plugins", false);
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-market-remove-btn")!.click());
+		expect(api.removePluginMarket).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "official-market" }));
+		expect(container.textContent).toContain("No markets added.");
+		expect(api.getPluginCatalog).not.toHaveBeenCalled();
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-manage-installed")!.click());
+		expect(container.textContent).toContain("Installed One");
 	});
 
 	it("switches markets with anti-race generation tracking", async () => {
@@ -382,21 +420,11 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 
 		expect(container.textContent).toContain("Dev Tools");
 
-		// Open market selector dropdown
-		const marketTrigger = container.querySelector<HTMLButtonElement>('button[aria-label="Marketplace"]');
-		expect(marketTrigger).not.toBeNull();
-		await act(async () => marketTrigger!.click());
-		await flush();
-
-		const customOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) =>
-			el.textContent?.includes("custom-org/plugins"),
-		);
+		await act(async () => button(container, "Markets").click());
+		const customOption = [...container.querySelectorAll<HTMLButtonElement>(".plugins-source-open")].find((el) => el.textContent?.includes("custom-org/plugins"));
 		expect(customOption).toBeDefined();
 		await act(async () => customOption!.click());
 		await flush();
-		await act(async () => {
-			await flush();
-		});
 
 		expect(api.selectPluginMarket).toHaveBeenCalledWith(
 			expect.objectContaining({ sourceId: "custom-gh" }),
@@ -440,6 +468,21 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		);
 	});
 
+	it("shows the localized GitHub limit reason and leaves the add dialog retryable", async () => {
+		await i18n.changeLanguage("zh-CN");
+		const api = createMockApi({ addPluginMarket: vi.fn().mockRejectedValue(new Error(
+			"GitHub request limit reached. Please wait and try again, or use a different network or proxy.",
+		)) });
+		const { container } = await renderPanel(api, "plugins");
+		await act(async () => button(container, "添加市场").click());
+		const dialog = document.body.querySelector(".plugins-add-market-dialog")!;
+		await act(async () => setInput(dialog.querySelector("input")!, "https://github.com/openai/plugins.git"));
+		await act(async () => button(dialog, "添加").click());
+		expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("GitHub 请求额度已用完");
+		expect(button(dialog, "添加").disabled).toBe(false);
+		expect(dialog.querySelector("input")?.value).toBe("https://github.com/openai/plugins.git");
+	});
+
 	it("inspects plugin, displays components and issues, and installs with compatible-only option", async () => {
 		const api = createMockApi();
 		const { container } = await renderPanel(api, "plugins");
@@ -472,11 +515,26 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		// Partial plugin has incompatible components, so "Install Compatible Components" checkbox is present
 		const checkbox = dialog!.querySelector<HTMLInputElement>('input[type="checkbox"]');
 		expect(checkbox).not.toBeNull();
-		expect(checkbox!.checked).toBe(true);
-
-		// Install
+		expect(checkbox!.checked).toBe(false);
 		const installBtn = button(dialog!, "Install");
-		await act(async () => installBtn.click());
+		expect(installBtn.disabled).toBe(true);
+		expect(api.installPlugin).not.toHaveBeenCalled();
+
+		// A fresh inspection must clear a previous partial-install choice.
+		await act(async () => inspectBtn.click());
+		await flush();
+		const refreshedDialog = document.body.querySelector(".plugins-inspect-dialog");
+		const refreshedCheckbox = refreshedDialog!.querySelector<HTMLInputElement>('input[type="checkbox"]');
+		expect(refreshedCheckbox!.checked).toBe(false);
+		expect(button(refreshedDialog!, "Install").disabled).toBe(true);
+
+		await act(async () => refreshedCheckbox!.click());
+		await flush();
+		expect(refreshedCheckbox!.checked).toBe(true);
+		expect(button(refreshedDialog!, "Install").disabled).toBe(false);
+
+		// Install after explicitly opting into compatible components.
+		await act(async () => button(refreshedDialog!, "Install").click());
 		await flush();
 
 		expect(api.installPlugin).toHaveBeenCalledWith(
@@ -485,6 +543,60 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 				allowPartial: true,
 			}),
 		);
+	});
+
+	it("blocks install for fatal inspection diagnostics while keeping the reason and primary action visible", async () => {
+		const api = createMockApi({
+			inspectPlugin: vi.fn().mockResolvedValue({
+				inspectionId: "insp-invalid-json",
+				plugin: {
+					id: "dev-tools",
+					name: "dev-tools",
+					displayName: "Dev Tools",
+					format: "native",
+					description: "Malformed plugin manifest",
+					repository: "https://github.com/test/dev-tools",
+					subdir: "",
+					commit: "comm1234",
+					sourceId: "official-market",
+				},
+				components: [
+					{ componentId: "valid-skill", kind: "skill", displayName: "valid-skill", originalName: "valid-skill", status: "ready" },
+					{ componentId: "broken-mcp", kind: "mcp", displayName: "broken-mcp", originalName: "broken-mcp", status: "unsupported", reason: "broken-mcp is unsupported on this platform" },
+				],
+				issues: [
+					{
+						code: "INVALID_JSON",
+						componentId: "manifest",
+						status: "warning",
+						message: "Failed to parse JSON file at .claude-plugin/plugin.json",
+					},
+				],
+				sourceCommit: "comm1234",
+				registryRevision: 1,
+			} satisfies PluginInspectionView),
+		});
+		const { container } = await renderPanel(api, "plugins");
+
+		const row = [...container.querySelectorAll(".plugins-market-row")].find((el) =>
+			el.textContent?.includes("Dev Tools"),
+		);
+		await act(async () => button(row!, "Inspect").click());
+		await flush();
+
+		const dialog = document.body.querySelector(".plugins-inspect-dialog");
+		expect(dialog).not.toBeNull();
+		expect(dialog!.textContent).toMatch(/Failed to parse JSON file at/);
+		const checkbox = dialog!.querySelector<HTMLInputElement>('input[type="checkbox"]');
+		expect(checkbox?.checked).toBe(false);
+		await act(async () => checkbox!.click());
+		await flush();
+
+		const installButton = button(dialog!, "Cannot Install");
+		expect(dialog!.querySelector(".button-primary")).toBe(installButton);
+		expect(installButton.disabled).toBe(true);
+		await act(async () => installButton.click());
+		expect(api.installPlugin).not.toHaveBeenCalled();
 	});
 
 	it("disables install button for completely unsupported plugins", async () => {
@@ -513,8 +625,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
-			el.textContent?.includes("Installed"),
+		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
+			el.textContent?.includes("Manage plugins"),
 		);
 		expect(installedSubTab).toBeDefined();
 		await act(async () => installedSubTab!.click());
@@ -612,6 +724,40 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		);
 	});
 
+	it("renders runtime errors with the affected session/component identity in installed detail", async () => {
+		const api = createMockApi({
+			getInstalledPlugin: vi.fn().mockResolvedValue({
+				...installedOneDetail,
+				runtimeErrors: [
+					{
+						componentId: "live-session/mcp-one",
+						message: "MCP connection failed while applying the plugin snapshot",
+					},
+				],
+			}),
+		});
+		const { container } = await renderPanel(api, "plugins");
+
+		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
+			el.textContent?.includes("Manage plugins"),
+		);
+		await act(async () => installedSubTab!.click());
+		await flush();
+
+		const row = [...container.querySelectorAll(".plugins-installed-row")].find((el) =>
+			el.textContent?.includes("Installed One"),
+		);
+		await act(async () => button(row!, "Manage").click());
+		await flush();
+
+		const detailDialog = document.body.querySelector(".plugins-detail-dialog");
+		expect(detailDialog).not.toBeNull();
+		expect(detailDialog!.textContent).toContain("Runtime Errors");
+		expect(detailDialog!.textContent).toContain("Affected session/component");
+		expect(detailDialog!.textContent).toContain("live-session/mcp-one");
+		expect(detailDialog!.textContent).toContain("MCP connection failed while applying the plugin snapshot");
+	});
+
 	it("handles update checks: missing inspection disables update, upToDate shows status without opening dialog", async () => {
 		const api = createMockApi({
 			inspectPluginUpdate: vi.fn().mockResolvedValue({
@@ -625,8 +771,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
-			el.textContent?.includes("Installed"),
+		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
+			el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -711,8 +857,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
-			el.textContent?.includes("已安装") || el.textContent?.includes("Installed"),
+		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
+			el.textContent?.includes("管理插件") || el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -766,9 +912,9 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 					inspectionId: "insp-partial",
 					components: [
 						{ componentId: "c1", kind: "skill", displayName: "Skill 1", originalName: "s1", status: "ready" },
-						{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported" },
+						{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported", reason: "Unsupported in update" },
 					],
-					issues: [],
+					issues: [{ componentId: "manifest", status: "warning", message: "Update manifest warning" }],
 					registryRevision: 1,
 				},
 			}),
@@ -777,8 +923,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-sub-tab")].find((el) =>
-			el.textContent?.includes("Installed"),
+		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
+			el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -798,6 +944,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 
 		const updateDialog = document.body.querySelector(".plugins-update-dialog");
 		expect(updateDialog).not.toBeNull();
+		expect(updateDialog!.textContent).toContain("Unsupported in update");
+		expect(updateDialog!.textContent).toContain("Update manifest warning");
 
 		// Update button must be disabled until allowPartial is checked
 		const updateBtn = button(updateDialog!, "Update");
@@ -845,5 +993,42 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const cannotInstallBtn = button(updateDialog2!, "Cannot Install");
 		expect(cannotInstallBtn).not.toBeNull();
 		expect(cannotInstallBtn.disabled).toBe(true);
+
+		await act(async () => button(updateDialog2!, "Cancel").click());
+		await flush();
+		(api.inspectPluginUpdate as any).mockResolvedValueOnce({
+			pluginId: "installed-one",
+			currentCommit: "aaa11112222333",
+			newCommit: "aaa99998888777",
+			upToDate: false,
+			inspection: {
+				inspectionId: "insp-invalid-json-update",
+				components: [
+					{ componentId: "c1", kind: "skill", displayName: "Skill 1", originalName: "s1", status: "ready" },
+					{ componentId: "c2", kind: "mcp", displayName: "MCP 2", originalName: "mcp-2", status: "unsupported", reason: "MCP definition is invalid" },
+				],
+				issues: [
+					{
+						code: "CORRUPT_MANIFEST",
+						componentId: "manifest",
+						status: "warning",
+						message: "Failed to parse JSON file at .claude-plugin/plugin.json",
+					},
+				],
+				registryRevision: 1,
+			},
+		});
+
+		await act(async () => checkUpdateBtn.click());
+		await flush();
+		const updateDialog3 = document.body.querySelector(".plugins-update-dialog");
+		expect(updateDialog3).not.toBeNull();
+		expect(updateDialog3!.textContent).toContain("MCP definition is invalid");
+		expect(updateDialog3!.textContent).toMatch(/Failed to parse JSON file at/);
+		const blockedUpdateButton = button(updateDialog3!, "Cannot Install");
+		expect(blockedUpdateButton).not.toBeNull();
+		expect(blockedUpdateButton.disabled).toBe(true);
+		await act(async () => blockedUpdateButton.click());
+		expect(api.updatePlugin).not.toHaveBeenCalled();
 	});
 });

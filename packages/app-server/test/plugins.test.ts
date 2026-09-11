@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -171,6 +172,7 @@ describe("PluginService", () => {
 
 		const before = seedUserFiles(agentDir);
 		const initialMarkets = service.listMarkets();
+		assert(initialMarkets.selectedSourceId, "A new registry contains the default market");
 
 		// Refresh market to populate catalog cache
 		await service.refreshMarket({
@@ -216,6 +218,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
 
@@ -238,6 +241,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
 
@@ -263,6 +267,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
 
@@ -326,6 +331,7 @@ describe("PluginService", () => {
 
 		const service = new PluginService(agentDir, fetchImpl);
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
@@ -351,6 +357,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 
 		// Add a second market pointing to the same plugin repository
@@ -395,6 +402,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
 
@@ -418,6 +426,7 @@ describe("PluginService", () => {
 		const service = new PluginService(agentDir, fetchImpl);
 
 		const markets = service.listMarkets();
+		assert(markets.selectedSourceId, "A new registry contains the default market");
 		await service.refreshMarket({ requestId: randomUUID(), sourceId: markets.selectedSourceId });
 		const inspection = await service.inspectPlugin(markets.selectedSourceId, "entry-fixture-plugin");
 

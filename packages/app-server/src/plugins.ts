@@ -12,14 +12,12 @@ import {
 	type McpCredentialIdentity,
 	type NormalizedComponent,
 	type NormalizedPluginPackage,
-	OFFICIAL_MARKET_ID,
 	type PluginFormat,
 	type PluginIssue,
 	type PluginRecord,
 	type PluginRegistry,
 	pluginMcpCredentialKeys,
 	readPluginRegistry,
-	readPluginSnapshot,
 	withPluginRegistryLock,
 } from "@metis/coding-agent";
 import { type FetchImplementation, validArchivePath } from "./github-archive.ts";
@@ -61,6 +59,7 @@ export interface PluginMarketCatalogCache {
 }
 
 export interface CatalogEntryView {
+	readonly installedPluginId?: string;
 	readonly id: string;
 	readonly name: string;
 	readonly description: string;
@@ -115,21 +114,11 @@ export function makeComponentId(pluginId: string, originalName: string): string 
 
 function getPluginMcpIdentities(agentDir: string, plugin: PluginRecord): McpCredentialIdentity[] {
 	const packageDir = getPluginPackageDir(agentDir, plugin.id, plugin.commit);
-	const normalizedPath = join(packageDir, ".metis-plugin.json");
-	try {
-		const normalized = JSON.parse(readFileSync(normalizedPath, "utf8"));
-		if (Array.isArray(normalized.components)) {
-			return normalized.components
-				.filter((c: any) => c.kind === "mcp" && typeof c.name === "string")
-				.map((c: any) => ({ scope: "user" as const, name: c.name as string }));
-		}
-	} catch {
-		// Fallback to reading snapshot
-	}
-	const snapshot = readPluginSnapshot(agentDir);
-	return snapshot.mcp
-		.filter((c) => c.owner.pluginId === plugin.id)
-		.map((c) => ({ scope: "user" as const, name: c.name }));
+	const normalized: NormalizedPluginPackage = JSON.parse(readFileSync(join(packageDir, "normalized.json"), "utf8"));
+	if (!Array.isArray(normalized.components)) throw new AppServerError("OPERATION_FAILED");
+	return normalized.components
+		.filter((component) => component.kind === "mcp" && typeof component.name === "string")
+		.map((component) => ({ scope: "user" as const, name: component.name }));
 }
 
 export class PluginService {
@@ -170,12 +159,12 @@ export class PluginService {
 		});
 	}
 
-	listMarkets(): { markets: MarketRecord[]; selectedSourceId: string; registryRevision: number } {
+	listMarkets(): { markets: MarketRecord[]; selectedSourceId: string | null; registryRevision: number } {
 		const registry = readPluginRegistry(this.agentDir);
 		const selected = registry.markets.find((m) => m.selected) || registry.markets[0];
 		return {
 			markets: registry.markets,
-			selectedSourceId: selected?.id || OFFICIAL_MARKET_ID,
+			selectedSourceId: selected?.id ?? null,
 			registryRevision: registry.revision,
 		};
 	}
@@ -208,7 +197,7 @@ export class PluginService {
 			const nextRecord: MarketRecord = {
 				id: marketId,
 				url: inspected.canonicalRepository,
-				displayName: inspected.repo,
+				displayName: `${inspected.owner}/${inspected.repo}`,
 				selected: true,
 				fetchedAt: new Date().toISOString(),
 				commit: inspected.commit,
@@ -278,13 +267,9 @@ export class PluginService {
 
 	removeMarket(input: { requestId: string; sourceId: string; expectedRevision: number }): {
 		markets: MarketRecord[];
-		selectedSourceId: string;
+		selectedSourceId: string | null;
 		registryRevision: number;
 	} {
-		if (input.sourceId === OFFICIAL_MARKET_ID) {
-			throw new AppServerError("INVALID_REQUEST", { requestId: input.requestId });
-		}
-
 		return withPluginRegistryLock(this.agentDir, (current) => {
 			if (current.revision !== input.expectedRevision) {
 				throw new AppServerError("CONFLICT", { requestId: input.requestId });
@@ -294,20 +279,9 @@ export class PluginService {
 				throw new AppServerError("NOT_FOUND", { requestId: input.requestId });
 			}
 
-			let nextMarkets = current.markets.filter((m) => m.id !== input.sourceId);
-			let selectedSourceId = input.sourceId;
-
-			// If removing currently selected, fall back to official market
-			if (toRemove.selected) {
-				nextMarkets = nextMarkets.map((m) => ({
-					...m,
-					selected: m.id === OFFICIAL_MARKET_ID,
-				}));
-				selectedSourceId = OFFICIAL_MARKET_ID;
-			} else {
-				const currentSel = nextMarkets.find((m) => m.selected);
-				selectedSourceId = currentSel?.id || OFFICIAL_MARKET_ID;
-			}
+			const remaining = current.markets.filter((m) => m.id !== input.sourceId);
+			const selectedSourceId = (remaining.find((m) => m.selected) ?? remaining[0])?.id ?? null;
+			const nextMarkets = remaining.map((m) => ({ ...m, selected: m.id === selectedSourceId }));
 
 			const next: PluginRegistry = {
 				...current,
@@ -355,7 +329,7 @@ export class PluginService {
 			return { next, result: undefined };
 		});
 
-		const catalogViews = this.projectCatalogViews(inspected.catalog);
+		const catalogViews = this.projectCatalogViews(inspected.catalog, input.sourceId);
 		return {
 			catalog: catalogViews,
 			entries: catalogViews,
@@ -368,43 +342,35 @@ export class PluginService {
 		entries: CatalogEntryView[];
 		cacheStatus: "fresh" | "cached" | "offline";
 	}> {
-		const cached = this.readMarketCatalogCache(sourceId);
-		if (cached) {
-			return {
-				entries: this.projectCatalogViews(cached.catalog),
-				cacheStatus: "cached",
-			};
-		}
-
 		const registry = readPluginRegistry(this.agentDir);
 		const market = registry.markets.find((m) => m.id === sourceId);
 		if (!market) {
 			throw new AppServerError("NOT_FOUND");
 		}
 
-		try {
-			const refreshed = await this.refreshMarket({ requestId: randomUUID(), sourceId });
+		const cached = this.readMarketCatalogCache(sourceId);
+		if (cached) {
 			return {
-				entries: refreshed.catalog,
-				cacheStatus: "fresh",
-			};
-		} catch {
-			return {
-				entries: [],
-				cacheStatus: "offline",
+				entries: this.projectCatalogViews(cached.catalog, sourceId),
+				cacheStatus: "cached",
 			};
 		}
+
+		const refreshed = await this.refreshMarket({ requestId: randomUUID(), sourceId });
+		return { entries: refreshed.catalog, cacheStatus: "fresh" };
 	}
 
-	private projectCatalogViews(catalog: readonly CatalogEntry[]): CatalogEntryView[] {
+	private projectCatalogViews(catalog: readonly CatalogEntry[], sourceId: string): CatalogEntryView[] {
 		const registry = readPluginRegistry(this.agentDir);
 
 		return catalog.map((entry) => {
 			let installState: "installed" | "not-installed" | "update-available" = "not-installed";
+			let installedPluginId: string | undefined;
 			// Check if already installed
 			for (const inst of registry.installed) {
-				if (inst.name.toLowerCase() === entry.name.toLowerCase()) {
+				if (inst.sourceId === sourceId && inst.name.toLowerCase() === entry.name.toLowerCase()) {
 					installState = "installed";
+					installedPluginId = inst.id;
 					break;
 				}
 			}
@@ -416,6 +382,7 @@ export class PluginService {
 				formatHint: entry.formatHint,
 				sourceSupported: entry.sourceSupported,
 				installState,
+				...(installedPluginId ? { installedPluginId } : {}),
 			};
 		});
 	}
@@ -444,7 +411,10 @@ export class PluginService {
 		const seenIds = new Set<string>();
 
 		for (const comp of parsed.components) {
-			const compId = makeComponentId(pluginId, comp.kind === "hook" ? comp.id : comp.name);
+			const compId = makeComponentId(
+				pluginId,
+				comp.kind === "hook" || comp.kind === "unsupported" ? comp.id : comp.name,
+			);
 			if (seenIds.has(compId)) {
 				throw new AppServerError("OPERATION_FAILED");
 			}
@@ -551,6 +521,8 @@ export class PluginService {
 			repo: canonicalizeRepository(market.url).repo,
 			commit: cachedMarket?.commit || market.commit || "main",
 			root: market.root ?? "",
+			trackingRef: market.trackingRef,
+			pinnedCommit: market.pinnedCommit,
 		};
 
 		const resolved = await fetchPluginFiles(origin, entry, this.fetchImpl);
@@ -566,8 +538,8 @@ export class PluginService {
 				...(entry.skills !== undefined ? { skills: entry.skills } : {}),
 			},
 			registryRevision: registry.revision,
-			trackingRef: market.trackingRef,
-			pinnedCommit: market.pinnedCommit,
+			trackingRef: resolved.trackingRef,
+			pinnedCommit: resolved.pinnedCommit,
 		});
 	}
 
@@ -585,6 +557,9 @@ export class PluginService {
 
 		const hasUnsupported = inspection.components.some((c) => c.status === "unsupported");
 		const hasReady = inspection.components.some((c) => c.status === "ready" || c.status === "needs-configuration");
+		if (inspection.issues.some((issue) => issue.code === "CORRUPT_MANIFEST" || issue.code === "INVALID_JSON")) {
+			throw new AppServerError("INVALID_REQUEST", { requestId: input.requestId });
+		}
 
 		if (hasUnsupported && !input.allowPartial) {
 			throw new AppServerError("INVALID_REQUEST", { requestId: input.requestId });
@@ -1016,24 +991,37 @@ export class PluginService {
 		const normalizedPath = join(packageDir, "normalized.json");
 		const components: ComponentPublicView[] = [];
 
-		if (existsSync(normalizedPath)) {
-			try {
-				const pkg: NormalizedPluginPackage = JSON.parse(readFileSync(normalizedPath, "utf8"));
-				for (const comp of pkg.components) {
-					const componentId =
-						comp.kind === "hook" && !comp.componentId.startsWith(`p-${record.id.slice(0, 8)}-`)
-							? makeComponentId(record.id, comp.componentId)
-							: comp.componentId;
-					components.push({
-						componentId,
-						kind: comp.kind,
-						displayName: comp.originalName || comp.name,
-						originalName: comp.originalName || comp.name,
-						status: "ready",
-					});
-				}
-			} catch {
-				// ignore
+		try {
+			const pkg: NormalizedPluginPackage = JSON.parse(readFileSync(normalizedPath, "utf8"));
+			if (!Array.isArray(pkg.components)) throw new Error("Invalid plugin component list");
+			for (const comp of pkg.components) {
+				const componentId =
+					comp.kind === "hook" &&
+					!comp.componentId.startsWith(`p-${record.id.slice(0, 16)}-`) &&
+					!comp.componentId.startsWith(`p-${record.id.slice(0, 8)}-`)
+						? makeComponentId(record.id, comp.componentId)
+						: comp.componentId;
+				const issue = (pkg.issues ?? record.issues).find(
+					(issue) =>
+						[comp.componentId, comp.name, comp.originalName].includes(issue.componentId) &&
+						issue.status === "needs-configuration",
+				);
+				components.push({
+					componentId,
+					kind: comp.kind,
+					displayName: comp.originalName || comp.name,
+					originalName: comp.originalName || comp.name,
+					status: issue ? "needs-configuration" : "ready",
+					...(issue ? { reason: issue.message } : {}),
+				});
+			}
+		} catch {
+			activation = "failed";
+			if (!runtimeErrors.some((error) => error.componentId === record.id)) {
+				runtimeErrors = [
+					...runtimeErrors,
+					{ componentId: record.id, message: `Plugin package for ${record.displayName} is missing or corrupted` },
+				];
 			}
 		}
 

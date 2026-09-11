@@ -1613,6 +1613,7 @@ export const PluginMarketViewSchema = StrictObject({
 });
 
 export const PluginCatalogEntryViewSchema = StrictObject({
+	installedPluginId: Type.Optional(Sha256Schema),
 	id: NameSchema,
 	name: NameSchema,
 	description: PublicTextSchema,

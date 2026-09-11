@@ -1091,7 +1091,7 @@ describe("app-server plugin runtime end-to-end", () => {
 		mkdirSync(pkgADir, { recursive: true });
 		mkdirSync(pkgBDir, { recursive: true });
 		writeFileSync(
-			join(pkgADir, ".metis-plugin.json"),
+			join(pkgADir, "normalized.json"),
 			JSON.stringify({
 				schemaVersion: 1,
 				components: [
@@ -1106,7 +1106,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			}),
 		);
 		writeFileSync(
-			join(pkgBDir, ".metis-plugin.json"),
+			join(pkgBDir, "normalized.json"),
 			JSON.stringify({
 				schemaVersion: 1,
 				components: [

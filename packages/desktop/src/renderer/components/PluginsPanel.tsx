@@ -471,6 +471,7 @@ function keyNavigation(event: KeyboardEvent<HTMLDivElement>): void {
 export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWithMetis = async () => undefined, onSkillsChanged = noop, preferences, serverReady, state }: PluginsPanelProps) {
 	const { t } = useTranslation();
 	const [section, setSection] = useState<PluginSection>(initialSection);
+	const [marketplaceActionsTarget, setMarketplaceActionsTarget] = useState<HTMLDivElement | null>(null);
 	const [page, setPage] = useState<PluginPage>({ kind: "catalog" });
 	const [skillFilter, setSkillFilter] = useState<SkillFilter>("all");
 	const [mcpFilter, setMcpFilter] = useState<McpFilter>("all");
@@ -858,7 +859,9 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 				<h1 id="plugins-title">{t("Customize")}</h1>
 				<p>{t("Extend Metis with built-in capabilities, MCP servers, and hooks.")}</p>
 			</div>
-			{section !== "plugins" && (
+			{section === "plugins" ? (
+				<div className="plugins-page-actions" ref={setMarketplaceActionsTarget} />
+			) : (
 				<div className="plugins-page-actions">
 					{section === "skills" && (
 						<button aria-label={t(skillsState.status === "loading" ? "Reloading skills…" : "Reload Skills")} className="plugins-reload" disabled={!serverReady || skillsState.status === "loading" || activeSession?.state === "running"} onClick={() => { onSkillsChanged(); setSkillRetry((value) => value + 1); }} title={t("Reload Skills")} type="button">
@@ -891,6 +894,7 @@ export function PluginsPanel({ api, initialSection = "skills", onCreateSkillWith
 		</div>
 		{section === "plugins" ? (
 			<PluginMarketplacePanel
+				headerActionsTarget={marketplaceActionsTarget}
 				api={api as unknown as MetisDesktopApi}
 				onClearSelectedPlugin={() => setSelectedPluginId(null)}
 				onOpenHook={(id) => {

@@ -1303,7 +1303,7 @@ export const InteractionResultSchema = Type.Union([
 export const PluginMarketListParamsSchema = StrictObject({});
 export const PluginMarketListResultSchema = StrictObject({
 	markets: Type.Array(PluginMarketViewSchema),
-	selectedSourceId: NameSchema,
+	selectedSourceId: Type.Union([NameSchema, Type.Null()]),
 	registryRevision: Type.Integer({ minimum: 0 }),
 });
 

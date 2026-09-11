@@ -221,9 +221,17 @@ export async function fetchBytes(
 				signal: AbortSignal.timeout(60_000),
 			});
 		} catch {
-			if (attempt === 1) throw new AppServerError("OPERATION_FAILED");
+			if (attempt === 1) throw new AppServerError("GITHUB_DOWNLOAD_FAILED");
 			await new Promise((resolveRetry) => setTimeout(resolveRetry, 250));
 			continue;
+		}
+		if (
+			response.status === 429 ||
+			(response.status === 403 &&
+				(response.headers.get("x-ratelimit-remaining") === "0" || response.headers.has("retry-after")))
+		) {
+			await response.body?.cancel().catch(() => undefined);
+			throw new AppServerError("GITHUB_RATE_LIMITED");
 		}
 		if (attempt === 0 && RETRYABLE_HTTP_STATUS.has(response.status)) {
 			await response.body?.cancel().catch(() => undefined);
@@ -236,7 +244,12 @@ export async function fetchBytes(
 		await response.body?.cancel().catch(() => undefined);
 		return undefined;
 	}
-	if (!response?.ok || !response.body) throw new AppServerError("OPERATION_FAILED");
+	if (!response?.ok || !response.body) {
+		await response?.body?.cancel().catch(() => undefined);
+		throw new AppServerError(
+			response && [401, 403, 404].includes(response.status) ? "GITHUB_ACCESS_DENIED" : "GITHUB_DOWNLOAD_FAILED",
+		);
+	}
 	const declared = Number(response.headers.get("content-length"));
 	if (Number.isFinite(declared) && declared > maximum) throw new AppServerError("INVALID_REQUEST");
 	const reader = response.body.getReader();
@@ -253,6 +266,9 @@ export async function fetchBytes(
 			}
 			chunks.push(Buffer.from(value));
 		}
+	} catch (error) {
+		if (error instanceof AppServerError) throw error;
+		throw new AppServerError("GITHUB_DOWNLOAD_FAILED");
 	} finally {
 		reader.releaseLock();
 	}

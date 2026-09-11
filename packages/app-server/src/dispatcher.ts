@@ -18,7 +18,7 @@ import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
 import type { PersonalizationService } from "./personalization.ts";
-import type { PluginActivationStatus, PluginService } from "./plugins.ts";
+import type { PluginActivationStatus, PluginInstalledView, PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
 import { scheduleRunView, scheduleTaskView } from "./schedule-projection.ts";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -88,6 +88,27 @@ function validatePersistedFork(
 		);
 	});
 	if (markers.length !== 1) throw new AppServerError("REQUEST_ID_REUSED", { requestId: input.requestId });
+}
+
+type PluginRuntimeError = { readonly componentId: string; readonly message: string };
+
+interface PluginActivationState {
+	readonly activation: PluginActivationStatus;
+	readonly runtimeErrors: PluginRuntimeError[];
+}
+
+function withPluginActivationState<T extends { plugin: PluginInstalledView; activation: PluginActivationStatus }>(
+	result: T,
+	state: PluginActivationState,
+): T {
+	const runtimeErrors = [
+		...state.runtimeErrors,
+		...result.plugin.runtimeErrors.filter(
+			(error) => !state.runtimeErrors.some((existing) => existing.componentId === error.componentId),
+		),
+	];
+	const activation = result.plugin.activation === "failed" ? "failed" : state.activation;
+	return { ...result, activation, plugin: { ...result.plugin, activation, runtimeErrors } };
 }
 
 export class Dispatcher {
@@ -441,10 +462,7 @@ export class Dispatcher {
 		}
 	}
 
-	private async getPluginActivationState(): Promise<{
-		activation: PluginActivationStatus;
-		runtimeErrors: Array<{ readonly componentId: string; readonly message: string }>;
-	}> {
+	private async getPluginActivationState(pluginId?: string): Promise<PluginActivationState> {
 		const statuses = await this.registry.pluginRuntimeStatuses();
 		let snapshot: PluginSnapshot;
 		try {
@@ -456,19 +474,28 @@ export class Dispatcher {
 				runtimeErrors: [{ componentId: "snapshot", message }],
 			};
 		}
-		const runtimeErrors: Array<{ readonly componentId: string; readonly message: string }> = [];
+		const runtimeErrors: PluginRuntimeError[] = [];
 		for (const s of statuses) {
 			if (s.error) {
 				runtimeErrors.push({ componentId: s.sessionId, message: s.error });
 			}
 		}
-		const activation: PluginActivationStatus = statuses.some((s) => s.error)
-			? "failed"
-			: statuses.length === 0
-				? "not-running"
-				: statuses.every((s) => s.appliedFingerprint === snapshot.fingerprint)
-					? "applied"
-					: "next-turn";
+		for (const diagnostic of snapshot.diagnostics ?? []) {
+			if (
+				(diagnostic.code !== "PACKAGE_MISSING" && diagnostic.code !== "PACKAGE_CORRUPTED") ||
+				(pluginId !== undefined && diagnostic.componentId !== pluginId)
+			)
+				continue;
+			runtimeErrors.push({ componentId: diagnostic.componentId, message: diagnostic.message });
+		}
+		const activation: PluginActivationStatus =
+			runtimeErrors.length > 0
+				? "failed"
+				: statuses.length === 0
+					? "not-running"
+					: statuses.every((s) => s.appliedFingerprint === snapshot.fingerprint)
+						? "applied"
+						: "next-turn";
 
 		return { activation, runtimeErrors };
 	}
@@ -614,20 +641,20 @@ export class Dispatcher {
 			case "plugin/install":
 				return await this.replayMutation(request, async () => {
 					const res = await this.plugins.install(request.params);
-					const { activation, runtimeErrors } = await this.getPluginActivationState();
-					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
+					const state = await this.getPluginActivationState(res.plugin.plugin.id);
+					return withPluginActivationState(res, state);
 				});
 			case "plugin/list":
 				return this.plugins.listInstalled();
 			case "plugin/get": {
-				const { activation, runtimeErrors } = await this.getPluginActivationState();
+				const { activation, runtimeErrors } = await this.getPluginActivationState(request.params.pluginId);
 				return this.plugins.getInstalled(request.params.pluginId, activation, runtimeErrors);
 			}
 			case "plugin/setEnabled":
 				return await this.replayMutation(request, async () => {
 					const res = this.plugins.setEnabled(request.params);
-					const { activation, runtimeErrors } = await this.getPluginActivationState();
-					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
+					const state = await this.getPluginActivationState(res.plugin.plugin.id);
+					return withPluginActivationState(res, state);
 				});
 			case "plugin/remove":
 				return await this.replayMutation(request, async () => {
@@ -640,8 +667,8 @@ export class Dispatcher {
 			case "plugin/update":
 				return await this.replayMutation(request, async () => {
 					const res = await this.plugins.update(request.params);
-					const { activation, runtimeErrors } = await this.getPluginActivationState();
-					return { ...res, activation, plugin: { ...res.plugin, activation, runtimeErrors } };
+					const state = await this.getPluginActivationState(res.plugin.plugin.id);
+					return withPluginActivationState(res, state);
 				});
 			case "usage/get":
 				return this.profileSummary.usage(this.allSessionRefs(), request.params.rangeDays);

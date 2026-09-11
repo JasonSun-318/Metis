@@ -12,6 +12,7 @@ import type {
 } from "@metis/app-protocol";
 import {
 	ArrowSquareOut,
+	ArrowLeft,
 	ArrowsClockwise,
 	CaretRight,
 	CheckCircle,
@@ -28,17 +29,27 @@ import {
 	XCircle,
 } from "@phosphor-icons/react";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { MenuSelect } from "./MenuSelect.tsx";
+import i18n from "../i18n.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
 
 function message(cause: unknown): string {
-	if (cause instanceof Error) return cause.message;
+	if (cause instanceof Error) return i18n.t(cause.message);
 	return String(cause ?? "An error occurred.");
 }
 
+function marketName(market: PluginMarketView): string {
+	return market.url.replace(/^https:\/\/github\.com\//iu, "").replace(/\/$/u, "").replace(/\.git$/u, "");
+}
+
+function isFatalInspectionIssue(issue: PluginIssue): boolean {
+	return issue.code === "CORRUPT_MANIFEST" || issue.code === "INVALID_JSON";
+}
+
 export interface PluginMarketplacePanelProps {
+	readonly headerActionsTarget: HTMLElement | null;
 	readonly api: MetisDesktopApi;
 	readonly serverReady: boolean;
 	readonly selectedPluginId?: string | null;
@@ -48,9 +59,10 @@ export interface PluginMarketplacePanelProps {
 	readonly onOpenHook?: (id: string) => void;
 }
 
-type ViewMode = "browse" | "installed";
+type ViewMode = "markets" | "browse" | "installed";
 
 export function PluginMarketplacePanel({
+	headerActionsTarget,
 	api,
 	serverReady,
 	selectedPluginId,
@@ -60,9 +72,13 @@ export function PluginMarketplacePanel({
 	onOpenHook,
 }: PluginMarketplacePanelProps) {
 	const { t } = useTranslation();
-	const [viewMode, setViewMode] = useState<ViewMode>("browse");
+	const [viewMode, setViewMode] = useState<ViewMode>("markets");
 
 	// Markets and catalog state
+	const [marketQuery, setMarketQuery] = useState("");
+	const [marketsLoading, setMarketsLoading] = useState(false);
+	const [marketError, setMarketError] = useState<string | null>(null);
+	const [marketRemovingId, setMarketRemovingId] = useState<string | null>(null);
 	const [markets, setMarkets] = useState<readonly PluginMarketView[]>([]);
 	const [selectedMarketId, setSelectedMarketId] = useState<string>("");
 	const [registryRevision, setRegistryRevision] = useState(0);
@@ -115,13 +131,17 @@ export function PluginMarketplacePanel({
 	// Load markets on mount / server ready
 	const loadMarkets = useCallback(async () => {
 		if (!serverReady) return;
+		setMarketsLoading(true);
+		setMarketError(null);
 		try {
 			const res = await api.listPluginMarkets();
 			setMarkets(res.markets);
-			setSelectedMarketId(res.selectedSourceId);
+			setSelectedMarketId(res.selectedSourceId ?? "");
 			setRegistryRevision(res.registryRevision);
 		} catch (err) {
-			setCatalogError(message(err));
+			setMarketError(message(err));
+		} finally {
+			setMarketsLoading(false);
 		}
 	}, [api, serverReady]);
 
@@ -172,10 +192,11 @@ export function PluginMarketplacePanel({
 
 	// When selectedMarketId changes, load catalog
 	useEffect(() => {
-		if (selectedMarketId) {
+		if (viewMode === "browse" && selectedMarketId) {
 			loadCatalog(selectedMarketId);
 		}
-	}, [selectedMarketId, loadCatalog]);
+		return () => { marketGeneration.current += 1; };
+	}, [viewMode, selectedMarketId, loadCatalog]);
 
 	// Switch to installed plugin detail when selectedPluginId is provided
 	useEffect(() => {
@@ -213,7 +234,9 @@ export function PluginMarketplacePanel({
 	// Select a market
 	const handleSelectMarket = useCallback(
 		async (sourceId: string) => {
-			if (sourceId === selectedMarketId || !serverReady) return;
+			if (!serverReady) return;
+			setCatalogQuery("");
+			if (sourceId === selectedMarketId) { setViewMode("browse"); return; }
 			try {
 				const res = await api.selectPluginMarket({
 					requestId: crypto.randomUUID(),
@@ -221,10 +244,11 @@ export function PluginMarketplacePanel({
 					expectedRevision: registryRevision,
 				});
 				setMarkets(res.markets);
-				setSelectedMarketId(res.selectedSourceId);
+				setSelectedMarketId(res.selectedSourceId ?? "");
 				setRegistryRevision(res.registryRevision);
+				setViewMode("browse");
 			} catch (err) {
-				setCatalogError(message(err));
+				setMarketError(message(err));
 			}
 		},
 		[api, registryRevision, selectedMarketId, serverReady],
@@ -259,9 +283,11 @@ export function PluginMarketplacePanel({
 					expectedRevision: registryRevision,
 				});
 				setMarkets(res.markets);
-				setSelectedMarketId(res.selectedSourceId);
+				setSelectedMarketId(res.selectedSourceId ?? "");
 				setRegistryRevision(res.registryRevision);
 				setAddMarketOpen(false);
+				setCatalogQuery("");
+				setViewMode("browse");
 			} catch (err) {
 				setAddMarketError(message(err));
 			} finally {
@@ -271,22 +297,23 @@ export function PluginMarketplacePanel({
 		[api, registryRevision],
 	);
 
-	// Remove custom market
-	const handleRemoveMarket = useCallback(async () => {
-		if (!selectedMarketId || selectedMarketId === "official-market" || !serverReady) return;
+	// Removing a source preserves installed plugins and their runtime capabilities.
+	const handleRemoveMarket = useCallback(async (sourceId: string) => {
+		if (!serverReady || marketRemovingId) return;
+		setMarketRemovingId(sourceId);
+		setMarketError(null);
 		try {
-			const res = await api.removePluginMarket({
-				requestId: crypto.randomUUID(),
-				sourceId: selectedMarketId,
-				expectedRevision: registryRevision,
-			});
+			const res = await api.removePluginMarket({ requestId: crypto.randomUUID(), sourceId, expectedRevision: registryRevision });
 			setMarkets(res.markets);
-			setSelectedMarketId(res.selectedSourceId);
+			setSelectedMarketId(res.selectedSourceId ?? "");
 			setRegistryRevision(res.registryRevision);
+			if (sourceId === selectedMarketId) setViewMode("markets");
 		} catch (err) {
-			setCatalogError(message(err));
+			setMarketError(message(err));
+		} finally {
+			setMarketRemovingId(null);
 		}
-	}, [api, registryRevision, selectedMarketId, serverReady]);
+	}, [api, registryRevision, selectedMarketId, serverReady, marketRemovingId]);
 
 	// Inspect a plugin entry
 	const handleInspectEntry = useCallback(
@@ -314,7 +341,7 @@ export function PluginMarketplacePanel({
 	// Install a plugin
 	const handleInstall = useCallback(
 		async (allowPartial: boolean) => {
-			if (!inspection || installPending || !serverReady) return;
+			if (!inspection || inspection.issues.some(isFatalInspectionIssue) || installPending || !serverReady) return;
 			setInstallPending(true);
 			setInspectionError(null);
 			try {
@@ -394,7 +421,14 @@ export function PluginMarketplacePanel({
 	// Perform plugin update
 	const handlePerformUpdate = useCallback(
 		async (allowPartial = false) => {
-			if (!updateInspection || !updateInspection.inspection || updatePending || !serverReady) return;
+			if (
+				!updateInspection ||
+				!updateInspection.inspection ||
+				updateInspection.inspection.issues.some(isFatalInspectionIssue) ||
+				updatePending ||
+				!serverReady
+			)
+				return;
 			setUpdatePending(true);
 			setUpdateError(null);
 			try {
@@ -472,106 +506,51 @@ export function PluginMarketplacePanel({
 	}, [installedList, installedQuery]);
 
 	const selectedMarket = markets.find((m) => m.id === selectedMarketId);
+	const visibleMarkets = markets.filter((market) => `${marketName(market)} ${market.url}`.toLowerCase().includes(marketQuery.trim().toLowerCase()));
+	const searchLabel = viewMode === "markets" ? "Search markets…" : viewMode === "browse" ? "Search plugins…" : "Search installed plugins…";
+	const reloading = viewMode === "markets" ? marketsLoading : viewMode === "browse" ? marketRefreshing || catalogLoading : installedLoading;
 
 	return (
 		<div className="plugins-market-panel">
-			{/* Sub-view switcher: Browse vs Installed */}
-			<div className="plugins-sub-switch-row">
-				<div aria-label={t("Plugin views")} className="plugins-sub-switch" role="tablist">
-					<button
-						aria-selected={viewMode === "browse"}
-						className={`plugins-sub-tab ${viewMode === "browse" ? "active" : ""}`}
-						onClick={() => setViewMode("browse")}
-						role="tab"
-						type="button"
-					>
-						{t("Browse")}
-					</button>
-					<button
-						aria-selected={viewMode === "installed"}
-						className={`plugins-sub-tab ${viewMode === "installed" ? "active" : ""}`}
-						onClick={() => setViewMode("installed")}
-						role="tab"
-						type="button"
-					>
-						{t("Installed")}
-						{(installedList?.length ?? 0) > 0 && (
-							<span className="plugins-count-pill">{installedList.length}</span>
-						)}
-					</button>
+			{headerActionsTarget && createPortal(<>
+				<button aria-label={t(reloading ? "Reloading…" : "Reload")} className="plugins-reload" disabled={!serverReady || reloading || !!marketRemovingId}
+					onClick={viewMode === "markets" ? loadMarkets : viewMode === "browse" ? handleRefreshMarket : loadInstalled} type="button">
+					<ArrowsClockwise aria-hidden="true" className={reloading ? "plugins-spin" : undefined} size={16} />{t("Reload")}
+				</button>
+				<button className="plugins-new-btn" disabled={!serverReady || !!marketRemovingId} onClick={() => { setAddMarketError(null); setAddMarketOpen(true); }} type="button">
+					<Plus aria-hidden="true" size={16} /><span>{t("Add Market")}</span>
+				</button>
+			</>, headerActionsTarget)}
+			<div className="plugins-list-controls plugins-installed-controls">
+				<div className="plugins-search">
+					<MagnifyingGlass aria-hidden="true" size={16} />
+					<input aria-label={t(searchLabel)} placeholder={t(searchLabel)} type="search"
+						onChange={(event) => viewMode === "markets" ? setMarketQuery(event.target.value) : viewMode === "browse" ? setCatalogQuery(event.target.value) : setInstalledQuery(event.target.value)}
+						value={viewMode === "markets" ? marketQuery : viewMode === "browse" ? catalogQuery : installedQuery} />
 				</div>
 			</div>
-
-			{viewMode === "browse" ? (
+			<div className="plugins-market-navigation">
+				{viewMode !== "markets" ? <button className="plugins-market-back" onClick={() => { setViewMode("markets"); setMarketError(null); }} type="button"><ArrowLeft aria-hidden="true" size={15} />{t("Markets")}</button> : <span>{t("Markets")}</span>}
+				{viewMode === "browse" && <span className="plugins-current-market" title={selectedMarket?.url}>{selectedMarket ? marketName(selectedMarket) : ""}</span>}
+				{viewMode === "installed" ? <span>{t("Manage plugins")}</span> : <button className="plugins-manage-installed" onClick={() => setViewMode("installed")} type="button">{t("Manage plugins")}<span className="plugins-count-pill">{installedList.length}</span></button>}
+			</div>
+			{marketError && <p className="mcp-dialog-error" role="alert">{marketError}</p>}
+			{viewMode === "markets" ? (
+				<div className="plugins-full-list plugins-market-sources" aria-label={t("Markets")}>
+					{marketsLoading ? <p className="plugins-catalog-message" role="status">{t("Loading markets…")}</p> : visibleMarkets.length === 0 ? <p className="plugins-catalog-message">{t(marketQuery ? "No markets match your search." : "No markets added. Add a GitHub market to discover plugins.")}</p> : visibleMarkets.map((market) => (
+						<div className="plugins-source-row" key={market.id}>
+							<button className="plugins-list-row plugins-source-open" disabled={!serverReady || !!marketRemovingId} onClick={() => handleSelectMarket(market.id)} type="button">
+								<span className="plugins-row-icon"><Package aria-hidden="true" size={22} /></span>
+								<span className="plugins-row-copy"><strong>{marketName(market)}</strong><small>{market.url}</small></span>
+								<CaretRight aria-hidden="true" size={17} />
+							</button>
+							<button aria-label={t("Remove market {{name}}", { name: marketName(market) })} title={t("Remove market; installed plugins are kept")}
+								className="plugins-market-remove-btn" disabled={!serverReady || !!marketRemovingId} onClick={() => handleRemoveMarket(market.id)} type="button"><Trash aria-hidden="true" size={16} /></button>
+						</div>
+					))}
+				</div>
+			) : viewMode === "browse" ? (
 				<>
-					{/* Browse Toolbar */}
-					<div className="plugins-market-toolbar">
-						<div className="plugins-market-selector-wrapper">
-							<MenuSelect
-								ariaLabel={t("Marketplace")}
-								className="plugins-filter"
-								disabled={!serverReady || markets.length === 0}
-								onChange={handleSelectMarket}
-								options={markets.map((m) => ({
-									value: m.id,
-									label: m.displayName || m.url,
-								}))}
-								value={selectedMarketId}
-							/>
-							{selectedMarket && selectedMarket.id !== "official-market" && (
-								<button
-									aria-label={t("Remove Market")}
-									className="plugins-market-remove-btn"
-									disabled={!serverReady}
-									onClick={handleRemoveMarket}
-									title={t("Remove Market")}
-									type="button"
-								>
-									<Trash aria-hidden="true" size={15} />
-								</button>
-							)}
-						</div>
-						<div className="plugins-search plugins-market-search">
-							<MagnifyingGlass aria-hidden="true" size={16} />
-							<input
-								aria-label={t("Search plugins…")}
-								onChange={(e) => setCatalogQuery(e.target.value)}
-								placeholder={t("Search plugins…")}
-								type="search"
-								value={catalogQuery}
-							/>
-						</div>
-						<div className="plugins-market-toolbar-actions">
-							<button
-								aria-label={t(marketRefreshing ? "Refreshing market…" : "Refresh")}
-								className="plugins-reload"
-								disabled={!serverReady || marketRefreshing || catalogLoading}
-								onClick={handleRefreshMarket}
-								title={t("Refresh")}
-								type="button"
-							>
-								<ArrowsClockwise
-									aria-hidden="true"
-									className={marketRefreshing ? "plugins-spin" : undefined}
-									size={16}
-								/>
-								{t("Refresh")}
-							</button>
-							<button
-								className="plugins-market-btn"
-								disabled={!serverReady}
-								onClick={() => {
-									setAddMarketError(null);
-									setAddMarketOpen(true);
-								}}
-								type="button"
-							>
-								<Plus aria-hidden="true" size={16} />
-								<span>{t("Add Market")}</span>
-							</button>
-						</div>
-					</div>
-
 					{/* Catalog List */}
 					<div className="plugins-full-list" role="listbox">
 						{catalogLoading ? (
@@ -613,10 +592,10 @@ export function PluginMarketplacePanel({
 									<button
 										className="plugins-inspect-action-btn"
 										disabled={!serverReady}
-										onClick={() => handleInspectEntry(entry)}
+										onClick={() => { if (entry.installedPluginId) setDetailPluginId(entry.installedPluginId); else handleInspectEntry(entry); }}
 										type="button"
 									>
-										{t("Inspect")}
+										{t(entry.installedPluginId ? "Manage" : "Inspect")}
 									</button>
 								</div>
 							))
@@ -625,37 +604,6 @@ export function PluginMarketplacePanel({
 				</>
 			) : (
 				<>
-					{/* Installed Toolbar */}
-					<div className="plugins-market-toolbar">
-						<div className="plugins-search plugins-market-search">
-							<MagnifyingGlass aria-hidden="true" size={16} />
-							<input
-								aria-label={t("Search installed plugins…")}
-								onChange={(e) => setInstalledQuery(e.target.value)}
-								placeholder={t("Search installed plugins…")}
-								type="search"
-								value={installedQuery}
-							/>
-						</div>
-						<div className="plugins-market-toolbar-actions">
-							<button
-								aria-label={t(installedLoading ? "Reloading…" : "Reload")}
-								className="plugins-reload"
-								disabled={!serverReady || installedLoading}
-								onClick={loadInstalled}
-								title={t("Reload")}
-								type="button"
-							>
-								<ArrowsClockwise
-									aria-hidden="true"
-									className={installedLoading ? "plugins-spin" : undefined}
-									size={16}
-								/>
-								{t("Reload")}
-							</button>
-						</div>
-					</div>
-
 					{/* Installed List */}
 					<div className="plugins-full-list" role="listbox">
 						{installedLoading ? (
@@ -734,12 +682,9 @@ export function PluginMarketplacePanel({
 			{/* Dialog: Inspect & Install Plugin */}
 			{inspectingEntry && (
 				<InspectPluginDialog
+					key={`${inspectingEntry.id}:${inspection?.inspectionId ?? "pending"}`}
 					entry={inspectingEntry}
 					error={inspectionError}
-					initialAllowPartial={Boolean(
-						inspection?.components.some((c) => c.status === "unsupported") ||
-						inspection?.issues.some((i) => i.status === "unsupported"),
-					)}
 					inspection={inspection}
 					installPending={installPending}
 					installResult={installResult}
@@ -889,7 +834,6 @@ function AddMarketDialog({
 function InspectPluginDialog({
 	entry,
 	error,
-	initialAllowPartial,
 	inspection,
 	installPending,
 	installResult,
@@ -899,7 +843,6 @@ function InspectPluginDialog({
 }: {
 	readonly entry: PluginCatalogEntryView;
 	readonly error: string | null;
-	readonly initialAllowPartial: boolean;
 	readonly inspection: PluginInspectionView | null;
 	readonly installPending: boolean;
 	readonly installResult: {
@@ -912,11 +855,7 @@ function InspectPluginDialog({
 }) {
 	const { t } = useTranslation();
 	const closeRef = useRef<HTMLButtonElement>(null);
-	const [allowPartial, setAllowPartial] = useState(initialAllowPartial);
-
-	useEffect(() => {
-		setAllowPartial(initialAllowPartial);
-	}, [initialAllowPartial]);
+	const [allowPartial, setAllowPartial] = useState(false);
 
 	// Capability evaluation
 	const components = inspection?.components ?? [];
@@ -928,6 +867,7 @@ function InspectPluginDialog({
 	);
 	const hasUnsupported = unsupportedComponents.length > 0;
 	const allUnsupported = supportedComponents.length === 0;
+	const blockedByInspection = Boolean(inspection?.issues.some(isFatalInspectionIssue));
 
 	return (
 		<DialogFrame
@@ -1109,14 +1049,14 @@ function InspectPluginDialog({
 						>
 							{t("Cancel")}
 						</button>
-						{allUnsupported ? (
+						{allUnsupported || blockedByInspection ? (
 							<button className="button-primary" disabled type="button">
 								{t("Cannot Install")}
 							</button>
 						) : (
 							<button
 								className="button-primary"
-								disabled={installPending || (hasUnsupported && !allowPartial)}
+								disabled={installPending || blockedByInspection || (hasUnsupported && !allowPartial)}
 								onClick={() => onInstall(allowPartial)}
 								type="button"
 							>
@@ -1250,6 +1190,27 @@ function InstalledPluginDetailDialog({
 						</div>
 					</div>
 
+					{detail.runtimeErrors.length > 0 && (
+						<div className="plugins-inspect-section" role="alert">
+							<h3>{t("Runtime Errors")}</h3>
+							<ul className="plugins-component-list">
+								{detail.runtimeErrors.map((runtimeError, index) => (
+									<li className="plugins-component-item" key={`${runtimeError.componentId}-${index}`}>
+										<div className="plugins-component-icon">
+											<WarningCircle aria-hidden="true" size={16} />
+										</div>
+										<div className="plugins-component-copy">
+											<strong>
+												{t("Affected session/component")}: <code>{runtimeError.componentId}</code>
+											</strong>
+											<small>{runtimeError.message}</small>
+										</div>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
+
 					{/* Components */}
 					<div className="plugins-inspect-section">
 						<h3>
@@ -1379,6 +1340,10 @@ function UpdatePluginDialog({
 	const closeRef = useRef<HTMLButtonElement>(null);
 	const [allowPartial, setAllowPartial] = useState(false);
 
+	useEffect(() => {
+		setAllowPartial(false);
+	}, [updateInfo.inspection?.inspectionId]);
+
 	const inspection = updateInfo.inspection;
 	const components = inspection?.components ?? [];
 	const hasUnsupported = components.some(
@@ -1387,6 +1352,7 @@ function UpdatePluginDialog({
 	const allUnsupported =
 		Boolean(inspection) &&
 		components.every((c) => c.status === "unsupported" || c.kind === "unsupported");
+	const blockedByInspection = Boolean(inspection?.issues.some(isFatalInspectionIssue));
 
 	return (
 		<DialogFrame
@@ -1447,10 +1413,24 @@ function UpdatePluginDialog({
 									<strong>{c.displayName || c.originalName}</strong>
 									<span className="plugins-component-kind">{c.kind}</span>
 									<ComponentStatusBadge status={c.status} />
+									{c.reason && <small>{c.reason}</small>}
 								</div>
 							</li>
 						))}
 					</ul>
+					{inspection.issues.length > 0 && (
+						<div className="plugins-inspect-section">
+							<h3>{t("Issues and limitations")}</h3>
+							<ul className="plugins-issues-list">
+								{inspection.issues.map((issue, index) => (
+									<li className={`plugins-issue-item status-${issue.status}`} key={index}>
+										<Warning aria-hidden="true" size={15} />
+										<span>{issue.message}</span>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
 					{hasUnsupported && !allUnsupported && (
 						<label className="plugins-partial-checkbox">
 							<input
@@ -1485,14 +1465,14 @@ function UpdatePluginDialog({
 				>
 					{t("Cancel")}
 				</button>
-				{allUnsupported ? (
+				{allUnsupported || blockedByInspection ? (
 					<button className="button-primary" disabled type="button">
 						{t("Cannot Install")}
 					</button>
 				) : (
 					<button
 						className="button-primary"
-						disabled={pending || !inspection || (hasUnsupported && !allowPartial)}
+						disabled={pending || !inspection || blockedByInspection || (hasUnsupported && !allowPartial)}
 						onClick={() => onUpdate(allowPartial)}
 						type="button"
 					>

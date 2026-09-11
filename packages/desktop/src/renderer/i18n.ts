@@ -10,6 +10,21 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	Markets: "插件市场",
+	"Search markets…": "搜索插件市场…",
+	"Manage plugins": "管理插件",
+	"Loading markets…": "正在加载插件市场…",
+	"No markets match your search.": "没有匹配的插件市场。",
+	"No markets added. Add a GitHub market to discover plugins.": "尚未添加插件市场，可通过 GitHub 地址添加。",
+	"Remove market {{name}}": "移除市场 {{name}}",
+	"Remove market; installed plugins are kept": "移除市场，保留已安装的插件",
+
+	"GitHub request limit reached. Please wait and try again, or use a different network or proxy.":
+		"GitHub 请求额度已用完，请稍后重试，或切换网络／代理出口。",
+	"Could not download from GitHub. Check your network or proxy and try again later.":
+		"无法从 GitHub 下载，请检查网络或代理，稍后重试。",
+	"GitHub repository is unavailable or access was denied. Check the address and repository visibility.":
+		"GitHub 仓库不存在或访问被拒绝，请检查地址及仓库是否公开。",
 	"Save this file before referencing its contents": "此文件有未保存的修改，请先保存再引用",
 	"Selected text actions": "选中文字操作",
 	"Request changes": "请求更改",
@@ -1670,6 +1685,8 @@ const zhCN = {
 	"not-running": "未运行",
 	Configuration: "配置",
 	"Runtime Status": "运行状态",
+	"Runtime Errors": "运行错误",
+	"Affected session/component": "受影响的会话/组件",
 } satisfies Record<string, string>;
 
 function isAppLocale(value: unknown): value is AppLocale {

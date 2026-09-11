@@ -23,6 +23,9 @@ export const RPC_ERROR_CODES = {
 	SCHEDULE_STORE_CORRUPT: -32013,
 	CONFLICT: -32014,
 	INVALID_CURSOR: -32015,
+	GITHUB_RATE_LIMITED: -32016,
+	GITHUB_DOWNLOAD_FAILED: -32017,
+	GITHUB_ACCESS_DENIED: -32018,
 } as const;
 
 export type RpcErrorName = keyof typeof RPC_ERROR_CODES;
@@ -49,6 +52,10 @@ const ERROR_MESSAGES: Record<RpcErrorName, string> = {
 	SCHEDULE_STORE_CORRUPT: "Scheduled task store is corrupt",
 	CONFLICT: "Resource changed",
 	INVALID_CURSOR: "Cursor is invalid or no longer available",
+	GITHUB_RATE_LIMITED: "GitHub request limit reached. Please wait and try again, or use a different network or proxy.",
+	GITHUB_DOWNLOAD_FAILED: "Could not download from GitHub. Check your network or proxy and try again later.",
+	GITHUB_ACCESS_DENIED:
+		"GitHub repository is unavailable or access was denied. Check the address and repository visibility.",
 };
 
 const RETRYABLE: Record<RpcErrorName, boolean> = {
@@ -72,6 +79,9 @@ const RETRYABLE: Record<RpcErrorName, boolean> = {
 	SCHEDULE_STORE_CORRUPT: false,
 	CONFLICT: false,
 	INVALID_CURSOR: false,
+	GITHUB_RATE_LIMITED: true,
+	GITHUB_DOWNLOAD_FAILED: true,
+	GITHUB_ACCESS_DENIED: false,
 };
 
 const STANDARD_ERROR_NAMES = new Set<RpcErrorName>([
@@ -129,6 +139,9 @@ export const RpcErrorObjectSchema = Type.Union([
 	ApplicationErrorSchema("SCHEDULE_STORE_CORRUPT"),
 	ApplicationErrorSchema("CONFLICT"),
 	ApplicationErrorSchema("INVALID_CURSOR"),
+	ApplicationErrorSchema("GITHUB_RATE_LIMITED"),
+	ApplicationErrorSchema("GITHUB_DOWNLOAD_FAILED"),
+	ApplicationErrorSchema("GITHUB_ACCESS_DENIED"),
 ]);
 
 export interface RpcErrorContext {

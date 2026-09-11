@@ -15,7 +15,7 @@ import type {
 
 export const OFFICIAL_MARKET_ID = "official-market";
 export const OFFICIAL_MARKET_URL = "https://github.com/anthropics/claude-plugins-official";
-export const OFFICIAL_MARKET_NAME = "Claude 官方市场";
+export const OFFICIAL_MARKET_NAME = "anthropics/claude-plugins-official";
 
 export function getPluginsDir(agentDir: string): string {
 	return join(agentDir, "plugins");

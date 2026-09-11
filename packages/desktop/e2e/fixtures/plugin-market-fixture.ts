@@ -17,6 +17,7 @@ export interface PluginFixtureServer {
 	readonly close: () => Promise<void>;
 	readonly setCommit: (commit: string) => void;
 	readonly setFailDownload: (fail: boolean) => void;
+	readonly setRateLimited: (limited: boolean) => void;
 	readonly mcpTestServer: McpTestServer;
 }
 
@@ -254,7 +255,15 @@ When asked about fixture suite, use the suite echo tool.
 	);
 
 	// 5. Fixture Broken Manifest Plugin
-	zip.file(`${root}/plugins/fixture-broken/.claude-plugin/plugin.json`, `{\n  "name": "fixture-broken",\n  invalid_json:\n`);
+	zip.file(
+		`${root}/plugins/fixture-broken/.claude-plugin/plugin.json`,
+		`{\n  "name": "fixture-broken",\n  invalid_json:\n`,
+	);
+
+	zip.file(
+		`${root}/plugins/fixture-broken/skills/valid/SKILL.md`,
+		"---\nname: valid\ndescription: valid skill with a broken plugin manifest\n---\nHelp",
+	);
 
 	// 6. Fixture Subdirectory Plugin (with scripts & resources)
 	const subdirManifest = {
@@ -282,7 +291,10 @@ When asked about fixture suite, use the suite echo tool.
 		version: "1.0.0",
 		mcpServers: "./mcp.json",
 	};
-	zip.file(`${root}/plugins/fixture-http-token/.claude-plugin/plugin.json`, JSON.stringify(httpTokenManifest, null, 2));
+	zip.file(
+		`${root}/plugins/fixture-http-token/.claude-plugin/plugin.json`,
+		JSON.stringify(httpTokenManifest, null, 2),
+	);
 	zip.file(
 		`${root}/plugins/fixture-http-token/mcp.json`,
 		JSON.stringify(
@@ -344,11 +356,18 @@ export async function createPluginFixtureServer(): Promise<PluginFixtureServer> 
 
 	let currentCommit = FIXTURE_COMMIT_A;
 	let shouldFailDownload = false;
+	let rateLimited = false;
 
 	// 4. Create HTTPS GitHub Fixture Server
 	const httpsServer = createHttpsServer({ key, cert }, async (req: IncomingMessage, res: ServerResponse) => {
 		const host = req.headers.host ?? "";
 		const url = req.url ?? "";
+
+		if (rateLimited) {
+			res.writeHead(403, { "content-type": "application/json", "x-ratelimit-remaining": "0" });
+			res.end(JSON.stringify({ message: "API rate limit exceeded" }));
+			return;
+		}
 
 		// Codeload zip downloads
 		if (host.includes("codeload.github.com") || url.includes("/zip/")) {
@@ -357,7 +376,7 @@ export async function createPluginFixtureServer(): Promise<PluginFixtureServer> 
 				res.end("Simulated download failure");
 				return;
 			}
-			const currentZip = currentCommit === FIXTURE_COMMIT_B ? zipB : zipA;
+			const currentZip = url.endsWith(FIXTURE_COMMIT_B) ? zipB : zipA;
 			res.writeHead(200, {
 				"content-type": "application/zip",
 				"content-length": String(currentZip.length),
@@ -469,6 +488,7 @@ export async function createPluginFixtureServer(): Promise<PluginFixtureServer> 
 		setCommit: (commit: string) => {
 			currentCommit = commit;
 		},
+		setRateLimited: (limited: boolean) => { rateLimited = limited; },
 		setFailDownload: (fail: boolean) => {
 			shouldFailDownload = fail;
 		},
