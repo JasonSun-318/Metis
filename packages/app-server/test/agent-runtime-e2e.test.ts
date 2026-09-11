@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION, type ServerRpcRequest } from "@metis/app-protocol";
 import { getSessionAgentDir, SessionManager } from "@metis/coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
 
@@ -200,6 +200,10 @@ describe("agent runtime e2e", () => {
 			outbound.flatMap((message) =>
 				"method" in message && message.method === "connection/events" ? message.params.events : [],
 			);
+		const deleteSession = vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+			rmSync(path, { force: true });
+			return { ok: true, method: "unlink" };
+		});
 		try {
 			await connection.handle({
 				jsonrpc: "2.0",
@@ -324,6 +328,7 @@ describe("agent runtime e2e", () => {
 				}),
 			);
 		} finally {
+			deleteSession.mockRestore();
 			leafResponse?.end("data: [DONE]\n\n");
 			server.beginShutdown();
 			await server.waitForShutdown();
