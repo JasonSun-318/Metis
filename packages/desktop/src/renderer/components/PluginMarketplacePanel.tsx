@@ -927,7 +927,7 @@ function InspectPluginDialog({
 		(c) => c.status !== "unsupported" && c.kind !== "unsupported",
 	);
 	const hasUnsupported = unsupportedComponents.length > 0;
-	const allUnsupported = components.length > 0 && supportedComponents.length === 0;
+	const allUnsupported = supportedComponents.length === 0;
 
 	return (
 		<DialogFrame
@@ -1385,7 +1385,7 @@ function UpdatePluginDialog({
 		(c) => c.status === "unsupported" || c.kind === "unsupported",
 	);
 	const allUnsupported =
-		components.length > 0 &&
+		Boolean(inspection) &&
 		components.every((c) => c.status === "unsupported" || c.kind === "unsupported");
 
 	return (
