@@ -4,6 +4,7 @@ import {
 	type FormEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
 	type ReactNode,
+	type Ref,
 	useCallback,
 	useEffect,
 	useRef,
@@ -266,6 +267,11 @@ export interface ComposerSubmission {
 	readonly skills?: readonly SkillSummaryView[];
 }
 
+export interface ComposerPrefillRequest {
+	readonly id: number;
+	readonly text: string;
+}
+
 interface ComposerProps {
 	readonly disabled: boolean;
 	readonly running: boolean;
@@ -274,6 +280,7 @@ interface ComposerProps {
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabledSlashCommands?: ReadonlySet<ComposerSlashCommand>;
 	readonly disabledSlashReasons?: Partial<Record<ComposerSlashCommand, string>>;
+	readonly formRef?: Ref<HTMLFormElement>;
 	readonly onInterrupt: () => Promise<void>;
 	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
 	readonly onResolveDroppedFiles?: (files: readonly File[]) => readonly DesktopAttachmentSelection[];
@@ -293,6 +300,7 @@ interface ComposerProps {
 	readonly mcpServers?: readonly McpServerSummaryView[];
 	readonly permissionControl?: ReactNode;
 	readonly placeholder?: string;
+	readonly prefillRequest?: ComposerPrefillRequest;
 	readonly skills?: readonly SkillSummaryView[];
 	readonly submitDisabled?: boolean;
 	readonly tasks?: readonly SessionTaskView[];
@@ -311,6 +319,7 @@ export function Composer({
 	commandRequest,
 	disabledSlashCommands = noSlashCommands,
 	disabledSlashReasons,
+	formRef,
 	onInterrupt,
 	onSubmit,
 	onManageMcp,
@@ -333,6 +342,7 @@ export function Composer({
 	mcpServers = [],
 	permissionControl,
 	placeholder,
+	prefillRequest,
 	skills = [],
 	submitDisabled = false,
 	tasks = [],
@@ -377,6 +387,37 @@ export function Composer({
 			setSlashQuery(undefined);
 		}
 	}, [attachments.length, dismissedSlashText]);
+
+	const consumedPrefillId = useRef<number | null>(null);
+	const untouchedPrefillText = useRef<string | null>(null);
+
+	useEffect(() => {
+		const editor = editorRef.current;
+		if (!editor || !prefillRequest || disabled || submitting ||
+				consumedPrefillId.current === prefillRequest.id) return;
+		const text = prefillRequest.text.trim();
+		if (!text) return;
+		const parsed = parseComposerContent(editor);
+		const replaceTemplate = !parsed.hasGoalToken &&
+			untouchedPrefillText.current !== null && parsed.cleanText === untouchedPrefillText.current;
+		if (replaceTemplate) {
+			const skillTokens = Array.from(editor.querySelectorAll(".composer-skill-token"));
+			editor.replaceChildren(...skillTokens, document.createTextNode(text));
+		} else {
+			editor.append(document.createTextNode(`${parsed.cleanText ? "\n\n" : ""}${text}`));
+		}
+		untouchedPrefillText.current = !parsed.cleanText || replaceTemplate ? text : null;
+		consumedPrefillId.current = prefillRequest.id;
+		editor.focus({ preventScroll: true });
+		const range = document.createRange();
+		range.selectNodeContents(editor);
+		range.collapse(false);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+		setDismissedSlashText(undefined);
+		syncEditorState();
+	}, [prefillRequest, disabled, submitting, syncEditorState]);
 
 	const processFiles = useCallback(async (files: readonly File[]) => {
 		if (files.length === 0) return;
@@ -702,6 +743,7 @@ export function Composer({
 			{queuedTurnControl}
 			<form
 				className={`composer composer-${appearance}`}
+				ref={formRef}
 				onDragOver={(event) => event.preventDefault()}
 				onDrop={handleDrop}
 				onPaste={handlePaste}

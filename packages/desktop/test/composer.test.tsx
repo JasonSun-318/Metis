@@ -195,6 +195,75 @@ describe("Composer slash commands", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("prefills once, replaces an untouched template, and preserves an edited draft", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onSubmit = vi.fn(async () => undefined);
+		const render = (id: number, text: string) => root.render(
+			<Composer disabled={false} running={false} onInterrupt={async () => undefined}
+				onSubmit={onSubmit} prefillRequest={{ id, text }} />,
+		);
+		await act(async () => render(1, "Prepare a report"));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		expect(editor.textContent).toBe("Prepare a report");
+		expect(document.activeElement).toBe(editor);
+		await act(async () => render(1, "Prepare a report"));
+		expect(editor.textContent).toBe("Prepare a report");
+		await act(async () => render(2, "Create slides"));
+		expect(editor.textContent).toBe("Create slides");
+		await act(async () => type(editor, "My existing notes"));
+		await act(async () => render(3, "Analyze a table"));
+		expect(editor.textContent).toBe("My existing notes\n\nAnalyze a table");
+		expect(onSubmit).not.toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
+	it("keeps a goal chip and its text while appending a starter", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const props = { disabled: false, running: false, onInterrupt: async () => undefined,
+			onSubmit: vi.fn(async () => undefined) };
+		await act(async () => root.render(<Composer {...props} />));
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => type(editor, "/goal Keep original goal"));
+		const goal = editor.querySelector('[data-token-kind="goal"]');
+		await act(async () => root.render(<Composer {...props}
+			prefillRequest={{ id: 1, text: "Add a report outline" }} />));
+		expect(editor.querySelector('[data-token-kind="goal"]')).toBe(goal);
+		expect(editor.textContent).toContain("Keep original goal");
+		expect(editor.textContent).toContain("Add a report outline");
+		expect(props.onSubmit).not.toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
+	it("submits a prefilled prompt with the existing attachment", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const attachment = { path: "/tmp/report.pdf", name: "report.pdf" };
+		const onSubmit = vi.fn(async () => undefined);
+		const props = { disabled: false, running: false, onInterrupt: async () => undefined,
+			onSubmit, onPickFiles: async () => [attachment] };
+		await act(async () => root.render(<Composer {...props} />));
+		const form = container.querySelector<HTMLFormElement>("form")!;
+		const file = new File(["report"], "report.pdf", { type: "application/pdf" });
+		const drop = new Event("drop", { bubbles: true, cancelable: true });
+		Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
+		await act(async () => root.render(<Composer {...props}
+			onResolveDroppedFiles={() => [attachment]} />));
+		await act(async () => form.dispatchEvent(drop));
+		await act(async () => root.render(<Composer {...props}
+			onResolveDroppedFiles={() => [attachment]}
+			prefillRequest={{ id: 1, text: "Summarize this report" }} />));
+		await act(async () => form.requestSubmit());
+		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+			text: "Summarize this report", attachments: [expect.objectContaining(attachment)],
+		}));
+		await act(async () => root.unmount());
+	});
+
 	it("shows image thumbnails and typed file cards above the input", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
