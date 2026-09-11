@@ -18,7 +18,7 @@ import {
 	type ThinkingSelectionView,
 } from "@metis/app-protocol";
 import { Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { contextUsagePercent } from "../context-usage.ts";
@@ -33,6 +33,7 @@ import { useAppStore } from "../hooks/use-app-store.ts";
 import { useConversationPlanFlow } from "../hooks/use-conversation-plan-flow.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
+import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
 import { rpcErrorCode } from "../rpc-error.ts";
 import { SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
@@ -430,8 +431,24 @@ export function App({ api, store }: AppProps) {
 		}).catch(reportError);
 	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError, visibleSessionId]);
 
+	const homeComposerFormRef = useRef<HTMLFormElement>(null);
+	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
+	const pendingHomeTransition = useRef<{
+		source: DOMRectReadOnly;
+		home: HTMLFormElement;
+		sessionId: string | null;
+	} | null>(null);
+	const homeTransitionAnimation = useRef<Animation | null>(null);
+	const cancelHomeTransition = useCallback(() => {
+		pendingHomeTransition.current = null;
+		homeTransitionAnimation.current?.cancel();
+		homeTransitionAnimation.current = null;
+	}, []);
+	useEffect(() => () => cancelHomeTransition(), [cancelHomeTransition]);
+
 	const activateBrowserSession = useCallback(
 		(sessionId: string) => {
+			cancelHomeTransition();
 			setDestination("tasks");
 			setToolsSidebarOpen(true);
 			if (store.getSnapshot().activeSessionId === sessionId) {
@@ -440,7 +457,7 @@ export function App({ api, store }: AppProps) {
 			}
 			void workspaceWorkflow.openVisibleSession(sessionId).catch(() => undefined);
 		},
-		[store, workspaceWorkflow],
+		[cancelHomeTransition, store, workspaceWorkflow],
 	);
 	const requestScheduleSnapshot = useCallback(
 		(replace = false): Promise<void> => {
@@ -539,13 +556,14 @@ export function App({ api, store }: AppProps) {
 	);
 
 	const openVisibleSession = useCallback(async (sessionId: string) => {
+		cancelHomeTransition();
 		setDestination("tasks");
 		try {
 			await workspaceWorkflow.openVisibleSession(sessionId);
 		} catch {
 			// The workflow reports the error while preserving the current projection.
 		}
-	}, [workspaceWorkflow]);
+	}, [cancelHomeTransition, workspaceWorkflow]);
 	const forkFromReply = async (entryId: string) => {
 		try {
 			await workspaceWorkflow.forkSession(entryId);
@@ -564,27 +582,42 @@ export function App({ api, store }: AppProps) {
 		api.createProjectFolder(input);
 
 	const startNewTask = useCallback(() => {
+		cancelHomeTransition();
 		setDestination("tasks");
 		setError(null);
 		workspaceWorkflow.startNewTask();
-	}, [workspaceWorkflow]);
+	}, [cancelHomeTransition, workspaceWorkflow]);
 	const cancelNewTask = () => {
+		cancelHomeTransition();
 		setError(null);
 		workspaceWorkflow.cancelNewTask();
 	};
 
 	const changeMode = useCallback((nextMode: AgentMode) => {
 		if (nextMode === mode) return;
+		cancelHomeTransition();
 		setDestination("tasks");
 		setError(null);
 		void workspaceWorkflow.selectMode(nextMode);
-	}, [mode, workspaceWorkflow]);
+	}, [cancelHomeTransition, mode, workspaceWorkflow]);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 
 	const submitNewTaskDraft = async (input: ComposerSubmission) => {
 		if (!visibleNewTaskDraft) return;
-		await workspaceWorkflow.submitNewTask(input);
+		const home = homeComposerFormRef.current;
+		const ticket = mode === "chat" && home && !reducedMotion ? {
+			source: home.getBoundingClientRect(),
+			home,
+			sessionId: visibleNewTaskDraft.sessionId,
+		} : null;
+		pendingHomeTransition.current = ticket;
+		try {
+			await workspaceWorkflow.submitNewTask(input);
+		} catch (cause) {
+			if (pendingHomeTransition.current === ticket) cancelHomeTransition();
+			throw cause;
+		}
 	};
 
 	const createScheduleWithMetis = async (cwd: string | null) => {
@@ -618,6 +651,51 @@ export function App({ api, store }: AppProps) {
 	const toolsSidebarAvailable = visibleActiveSession !== undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
+	useLayoutEffect(() => {
+		if (mode !== "chat" || destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
+			cancelHomeTransition();
+			return;
+		}
+		const pending = pendingHomeTransition.current;
+		if (!pending) return;
+		if (newTaskOpen) {
+			if (homeComposerFormRef.current !== pending.home) {
+				cancelHomeTransition();
+				return;
+			}
+			pending.source = pending.home.getBoundingClientRect();
+			pending.sessionId = visibleNewTaskDraft?.sessionId ?? pending.sessionId;
+			return;
+		}
+		const target = conversationComposerFormRef.current;
+		pendingHomeTransition.current = null;
+		if (!target || !visibleActiveSession ||
+				(pending.sessionId !== null && pending.sessionId !== visibleActiveSession.sessionId)) return;
+		homeTransitionAnimation.current?.cancel();
+		const animation = animateNewTaskComposer(target, pending.source, reducedMotion);
+		homeTransitionAnimation.current = animation;
+		const focusTarget = () => {
+			if (!target.isConnected || conversationComposerFormRef.current !== target) return;
+			if (document.activeElement !== document.body && document.activeElement !== target) return;
+			target.querySelector<HTMLElement>(".composer-editable-input")?.focus({ preventScroll: true });
+		};
+		if (animation) void animation.finished.then(focusTarget).catch(() => undefined);
+		else focusTarget();
+	});
+	useEffect(() => {
+		const resize = () => {
+			const pending = pendingHomeTransition.current;
+			if (pending?.home.isConnected) pending.source = pending.home.getBoundingClientRect();
+			homeTransitionAnimation.current?.cancel();
+			homeTransitionAnimation.current = null;
+		};
+		window.addEventListener("resize", resize);
+		return () => window.removeEventListener("resize", resize);
+	}, []);
+	useEffect(() => {
+		homeTransitionAnimation.current?.cancel();
+		homeTransitionAnimation.current = null;
+	}, [sessionSidebarWidth, toolsSidebarWidth]);
 	useEffect(() => {
 		statusGeneration.current += 1;
 		contextStatusRef.current = null;
@@ -1487,6 +1565,7 @@ export function App({ api, store }: AppProps) {
 					<NewTaskHome
 						busy={draftBusy || !serverReady}
 						commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
+						composerFormRef={homeComposerFormRef}
 						disabledSlashCommands={disabledSlashCommands}
 						disabledSlashReasons={disabledSlashReasons}
 						folder={visibleNewTaskDraft.folder}
@@ -1546,6 +1625,7 @@ export function App({ api, store }: AppProps) {
 								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || collaborationModeChanging}
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
+								formRef={conversationComposerFormRef}
 								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} sandboxHealth={state.sandboxHealth} /> : undefined}
 								goalControl={
 									<GoalBar

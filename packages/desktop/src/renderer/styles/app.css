@@ -1434,6 +1434,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .transcript-code :is(.code-turn-answer, .code-turn-status) th { background: var(--surface-06); color: var(--text-24); font-weight: 600; }
 
 .composer-dock { position: relative; padding: 8px max(24px, calc((100% - var(--conversation-width)) / 2)) 10px; }
+.composer[data-home-transition="running"] { will-change: transform; transition: none; }
 .task-list-slot { display: grid; min-height: 0; grid-template-rows: 1fr; margin: 0 16px; animation: task-list-enter 200ms cubic-bezier(.16, 1, .3, 1); }
 .goal-bar-slot { margin: 0 16px; animation: task-list-enter 200ms cubic-bezier(.16, 1, .3, 1); }
 .goal-bar-panel {

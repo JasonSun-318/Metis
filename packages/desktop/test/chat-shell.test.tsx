@@ -12,6 +12,7 @@ import {
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
+import { GENERAL_PREFERENCES_STORAGE_KEY } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomePeriod, HOME_GREETINGS } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
@@ -2734,6 +2735,241 @@ describe("Chat desktop shell", () => {
 		);
 		expect(api.startTurn).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
+	})
+	// --- First-send composer transition ---
+
+	function spyHomeTransition() {
+		const originalAnimate = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "animate");
+		const originalRect = HTMLElement.prototype.getBoundingClientRect;
+		const animate = vi.fn().mockReturnValue({
+			finished: Promise.resolve(),
+			cancel: vi.fn(),
+		} as unknown as Animation);
+		Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+		const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
+			.mockImplementation(function (this: HTMLElement) {
+				if (this.matches(".new-task-home .composer")) return new DOMRect(410, 196, 770, 132);
+				if (this.matches(".conversation-column .composer")) return new DOMRect(410, 700, 770, 120);
+				return originalRect.call(this);
+			});
+		return {
+			animate,
+			restore: async (root?: { unmount: () => Promise<void> }) => {
+				if (root) await act(async () => root.unmount());
+				rectSpy.mockRestore();
+				if (originalAnimate) Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
+				else Reflect.deleteProperty(HTMLElement.prototype, "animate");
+			},
+		};
+	}
+
+	it("keeps a failed first message editable on the home page", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		vi.mocked(api.startTurn).mockRejectedValueOnce(new Error("offline"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "New task").click());
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Keep this report draft"));
+		await act(async () => container.querySelector<HTMLFormElement>(".new-task-home form")!.requestSubmit());
+		await flush();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(editor.textContent).toBe("Keep this report draft");
+		expect(editor.getAttribute("contenteditable")).toBe("true");
+		expect(container.querySelector('[data-home-transition="running"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("animates the real conversation composer once after the first successful send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const transition = spyHomeTransition();
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "New task").click());
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(editor, "Create a report"));
+			await act(async () => container.querySelector<HTMLFormElement>(".new-task-home form")!.requestSubmit());
+			await flush();
+			await flush();
+			expect(api.startTurn).toHaveBeenCalledTimes(1);
+			expect(container.querySelector(".new-task-home")).toBeNull();
+			expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+			expect(transition.animate).toHaveBeenCalledTimes(1);
+			expect(transition.animate.mock.calls[0]?.[0]).toEqual([
+				{ transform: "translate(0px, -504px)" },
+				{ transform: "translate(0px, 0px)" },
+			]);
+		} finally {
+			await transition.restore(root);
+		}
+	});
+
+	it("animates once when the retried first send succeeds", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const transition = spyHomeTransition();
+		const { api } = createHarness({ loseFirstStartResponse: true });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "New task").click());
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(editor, "Report draft that survives a lost response"));
+			const form = container.querySelector<HTMLFormElement>(".new-task-home form")!;
+			await act(async () => form.requestSubmit());
+			await flush();
+			expect(container.querySelector(".new-task-home")).not.toBeNull();
+			expect(transition.animate).not.toHaveBeenCalled();
+			await act(async () => form.requestSubmit());
+			await flush();
+			await flush();
+			expect(api.createSession).toHaveBeenCalledTimes(1);
+			expect(api.startTurn).toHaveBeenCalledTimes(2);
+			expect(container.querySelector(".new-task-home")).toBeNull();
+			expect(transition.animate).toHaveBeenCalledTimes(1);
+		} finally {
+			await transition.restore(root);
+		}
+	});
+
+	it("does not animate when the user opens settings during the first send", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const transition = spyHomeTransition();
+		const { api } = createHarness();
+		let release!: () => void;
+		const pendingStart = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
+			await pendingStart;
+			return {};
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "New task").click());
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(editor, "A draft that is still being submitted"));
+			await act(async () => container.querySelector<HTMLFormElement>(".new-task-home form")!.requestSubmit());
+			await flush();
+			expect(container.querySelector(".new-task-home")).not.toBeNull();
+			expect(transition.animate).not.toHaveBeenCalled();
+			// Sidebar navigation is disabled while the draft is busy, but the account
+			// menu stays available: opening settings must cancel the pending ticket.
+			await act(async () => button(container, "Metis User").click());
+			await act(async () => button(container, "Settings").click());
+			await flush();
+			await act(async () => button(container, "Back to app").click());
+			await flush();
+			await act(async () => release());
+			await flush();
+			expect(container.querySelector(".new-task-home")).toBeNull();
+			expect(transition.animate).not.toHaveBeenCalled();
+		} finally {
+			await transition.restore(root);
+		}
+	});
+
+	it("plays the transition once across a resize while the first send is in flight", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const transition = spyHomeTransition();
+		const { api } = createHarness();
+		let release!: () => void;
+		const pendingStart = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
+			await pendingStart;
+			return {};
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "New task").click());
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(editor, "Resized during submit"));
+			await act(async () => container.querySelector<HTMLFormElement>(".new-task-home form")!.requestSubmit());
+			await flush();
+			await act(async () => window.dispatchEvent(new Event("resize")));
+			await act(async () => release());
+			await flush();
+			await flush();
+			expect(transition.animate).toHaveBeenCalledTimes(1);
+			expect(container.querySelector(".new-task-home")).toBeNull();
+		} finally {
+			await transition.restore(root);
+		}
+	});
+
+	it("does not replay the home transition for follow-up sends in a conversation", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const transition = spyHomeTransition();
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "Chat project task").click());
+			await flush();
+			await flush();
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(editor, "A later message"));
+			await act(async () => container.querySelector<HTMLFormElement>(".conversation-column form")!.requestSubmit());
+			await flush();
+			expect(api.startTurn).toHaveBeenCalledTimes(1);
+			expect(transition.animate).not.toHaveBeenCalled();
+		} finally {
+			await transition.restore(root);
+		}
+	});
+
+	it("skips the transition entirely under reduced motion and after unmount", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem(GENERAL_PREFERENCES_STORAGE_KEY, JSON.stringify({ motion: "reduced" }));
+		const transition = spyHomeTransition();
+		const { api } = createHarness();
+		let release!: () => void;
+		const pendingStart = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
+			await pendingStart;
+			return {};
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "New task").click());
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Reduced motion draft"));
+		await act(async () => container.querySelector<HTMLFormElement>(".new-task-home form")!.requestSubmit());
+		await flush();
+		// Unmount while the request is in flight: the pending ticket must die with the app.
+		await transition.restore(root);
+		await act(async () => release());
+		await flush();
+		expect(transition.animate).not.toHaveBeenCalled();
 	});
 
 	it("forks a conversation from an assistant reply and opens the forked session", async () => {
