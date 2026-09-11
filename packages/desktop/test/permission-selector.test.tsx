@@ -51,7 +51,7 @@ function option(container: HTMLElement, label: string) {
 }
 
 describe("PermissionSelector", () => {
-	it("describes Ask, Auto, and Full without claiming Full skips approval", async () => {
+	it("describes sandboxed Ask/Auto and unrestricted Full", async () => {
 		const { container } = mount({ value: "ask" });
 		await openMenu(container);
 		expect(option(container, "Ask").textContent).toContain(
@@ -60,7 +60,7 @@ describe("PermissionSelector", () => {
 		expect(option(container, "Auto").textContent).toContain(
 			"Runs in the workspace sandbox. The current model reviews risky actions when needed.",
 		);
-		expect(option(container, "Full").textContent).toContain("May run on the host. Critical actions still ask you.");
+		expect(option(container, "Full").textContent).toContain("Runs without a sandbox or tool approvals, including file deletion and network actions.");
 		expect(container.textContent).not.toMatch(/without Metis approval/i);
 		expect(container.textContent).not.toContain("Full access");
 	});
@@ -77,7 +77,7 @@ describe("PermissionSelector", () => {
 		expect(option(container, "自动").textContent).toContain(
 			"在工作区沙箱中运行。当前模型会在需要时进行安全审查。",
 		);
-		expect(option(container, "完全访问").textContent).toContain("可在主机上运行。高风险操作仍会向你询问。");
+		expect(option(container, "完全访问").textContent).toContain("不使用沙箱，不弹工具审批；包括删除文件及联网操作。");
 	});
 
 	it("shows a parent ceiling without rewriting the saved preset", async () => {
