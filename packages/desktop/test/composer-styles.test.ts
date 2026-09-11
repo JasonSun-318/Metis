@@ -84,7 +84,8 @@ describe("Composer visual states", () => {
 	});
 
 	it("uses a stationary composer over a full-screen New Task ray field", () => {
-		expect(rule(".new-task-home").alignItems).toBe("flex-start");
+		expect(rule(".new-task-home").overflow).toBe("hidden");
+		expect(rule(".new-task-home-scroll").overflowY).toBe("auto");
 
 		const rays = rule(".new-task-side-rays");
 		expect(rays.position).toBe("absolute");

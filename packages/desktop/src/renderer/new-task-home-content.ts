@@ -7,8 +7,19 @@ export interface HomeGreeting {
 	readonly anonymousKey?: string;
 }
 
+export type HomeStarterId =
+	| "report"
+	| "slides"
+	| "spreadsheet"
+	| "research"
+	| "document"
+	| "plan"
+	| "writing"
+	| "compare"
+	| "meeting";
+
 export interface HomeStarter {
-	readonly id: string;
+	readonly id: HomeStarterId;
 	readonly title: string;
 	readonly description: string;
 	readonly prompt: string;
