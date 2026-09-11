@@ -291,10 +291,18 @@ function walk(root) {
 
 function extract(archivePath, destination) {
 	const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
-	const tar = process.platform === "win32" && systemRoot ? join(systemRoot, "System32", "tar.exe") : "tar";
-	const result = spawnSync(tar, ["-xf", archivePath, "-C", destination], { encoding: "utf8" });
+	const useUnzip = process.platform !== "win32" && archivePath.toLowerCase().endsWith(".zip");
+	const command = useUnzip
+		? "unzip"
+		: process.platform === "win32" && systemRoot
+			? join(systemRoot, "System32", "tar.exe")
+			: "tar";
+	const args = useUnzip ? ["-q", archivePath, "-d", destination] : ["-xf", archivePath, "-C", destination];
+	const result = spawnSync(command, args, { encoding: "utf8" });
 	if (result.error || result.status !== 0) {
-		throw new Error(`Could not extract ${basename(archivePath)}: ${result.error?.message ?? result.stderr.trim()}`);
+		throw new Error(
+			`Could not extract ${basename(archivePath)}: ${result.error?.message ?? result.stderr?.trim() ?? `exit ${result.status}`}`,
+		);
 	}
 }
 
