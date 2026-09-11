@@ -70,4 +70,16 @@ describe("Desktop locale preference", () => {
 		expect(document.documentElement.lang).toBe("en");
 		expect(localeForIntl()).toBe("en-US");
 	});
+
+	it("translates every home starter and greeting", async () => {
+		await setLocale("zh-CN", localStorage);
+		const { HOME_GREETINGS, HOME_STARTERS } = await import("../src/renderer/new-task-home-content.ts");
+		const keys = [
+			...HOME_GREETINGS.flatMap((item) => [item.key, ...(item.anonymousKey ? [item.anonymousKey] : [])]),
+			...HOME_STARTERS.flatMap((item) => [item.title, item.description, item.prompt]),
+		];
+		for (const key of keys) expect(i18n.exists(key, { lng: "zh-CN" })).toBe(true);
+		expect(i18n.t("A good day starts with an idea.")).toBe("美好的一天，从一个想法开始。");
+		expect(i18n.t("Good morning, {{name}}. Where shall we start?", { name: "小林" })).toContain("小林");
+	});
 });
