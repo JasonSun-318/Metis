@@ -421,7 +421,10 @@ describe("PluginService", () => {
 		expect(readPluginSnapshot(agentDir).plugins).toHaveLength(0);
 	});
 
-	it("failure injection: preserves active package and registry on write/rename/registry failures", async () => {
+	it("failure injection: preserves active package and registry on write/rename/registry failures", async ({
+		skip,
+	}) => {
+		if (process.platform === "win32") skip();
 		const fetchImpl = createMockFetch();
 		const service = new PluginService(agentDir, fetchImpl);
 

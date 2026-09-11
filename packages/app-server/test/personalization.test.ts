@@ -31,7 +31,7 @@ describe("PersonalizationService", () => {
 		});
 		const path = join(agentDir, "AGENTS.md");
 		expect(readFileSync(path, "utf8")).toBe("First line\n第二行");
-		expect(statSync(path).mode & 0o777).toBe(0o600);
+		if (process.platform !== "win32") expect(statSync(path).mode & 0o777).toBe(0o600);
 		expect(service.view()).toEqual({ instructions: "First line\n第二行" });
 	});
 

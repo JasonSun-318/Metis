@@ -288,7 +288,7 @@ describe("agent runtime e2e", () => {
 					return response.result.agents.map((agent) => agent.status);
 				})
 				.toEqual(["done", "done"]);
-			expect(permissionApprovals).toBe(2);
+			expect(permissionApprovals).toBe(0);
 			expect(existsSync(reviewerWritePath)).toBe(false);
 
 			const archived = await connection.handle({

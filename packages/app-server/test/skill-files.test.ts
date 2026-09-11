@@ -337,7 +337,9 @@ describe("Skill files", () => {
 			candidateIds: ["bundle/alpha"],
 		});
 		expect(readFileSync(join(cwd, ".metis", "skills", "alpha", "references", "example.md"), "utf8")).toBe("example");
-		expect(statSync(join(cwd, ".metis", "skills", "alpha", "scripts", "run.sh")).mode & 0o111).toBe(0o100);
+		if (process.platform !== "win32") {
+			expect(statSync(join(cwd, ".metis", "skills", "alpha", "scripts", "run.sh")).mode & 0o111).toBe(0o100);
+		}
 		expect(existsSync(join(cwd, ".metis", "skills", "beta"))).toBe(false);
 	});
 

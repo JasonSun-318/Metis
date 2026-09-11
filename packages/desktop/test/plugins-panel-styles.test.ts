@@ -31,8 +31,8 @@ describe("Plugin Center visual contract", () => {
 		);
 		expect(rule(".plugins-detail-grid").gridTemplateColumns).toBe("minmax(0, 1fr) 320px");
 		expect(rule(".plugins-page-header h1, .plugins-detail-header h1").fontSize).toBe("27px");
-		expect(rule(".plugins-new-trigger").height).toBe("32px");
-		expect(rule(".plugins-new-trigger").minWidth).toBe("112px");
+		expect(rule(".plugins-new-trigger, .plugins-new-btn").height).toBe("32px");
+		expect(rule(".plugins-new-trigger, .plugins-new-btn").minWidth).toBe("112px");
 		expect(rule(".plugins-reload").height).toBe("32px");
 		expect(rule(".plugins-reload").display).toBe("inline-flex");
 		expect(rule(".plugins-section-switch").height).toBe("40px");

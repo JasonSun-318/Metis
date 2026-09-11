@@ -105,7 +105,8 @@ describe("Plugin acceptance regressions", () => {
 	it("R4 preserves executable scripts", async () => {
 		const h = await installedHarness();
 		const p = join(h.agentDir, "plugins/packages", h.installed.plugin.plugin.id, A, "scripts/run.sh");
-		expect(statSync(p).mode & 0o111).not.toBe(0);
+		expect(readFileSync(p, "utf8")).toBe("#!/bin/sh\necho OK");
+		if (process.platform !== "win32") expect(statSync(p).mode & 0o111).not.toBe(0);
 	});
 
 	it("R7 rejected revision does not replace live bytes", async () => {

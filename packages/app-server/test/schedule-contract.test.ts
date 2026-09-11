@@ -365,6 +365,10 @@ describe("AppServer schedule contract", () => {
 		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
 			result: { session: { sessionId: run.sessionId!, scheduled: { taskId: TASK_ID, runId: RUN_ID } } },
 		});
+		vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+			rmSync(path, { force: true });
+			return { ok: true, method: "trash" };
+		});
 		expect(
 			await connection.handle(
 				request("session/delete", {

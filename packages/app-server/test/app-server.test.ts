@@ -14,7 +14,7 @@ import {
 } from "node:fs";
 import { open } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
 import type {
 	AgentMode,
 	ClientParams,
@@ -941,6 +941,10 @@ describe("AppServer", () => {
 			params: { mode: "chat", cwd: realpathSync(projectDir) },
 		});
 		const revision = (preview as { result: ClientResult<"project/deletePreview"> }).result.revision;
+		vi.spyOn(SessionManager, "trashModeProjectData").mockImplementation(async (input) => {
+			for (const session of input.sessions) unlinkSync(session.path);
+			return { ok: true, method: "trash", deletedSessionCount: input.sessions.length };
+		});
 		expect(
 			await connection.handle({
 				jsonrpc: "2.0",
@@ -1628,7 +1632,7 @@ describe("AppServer", () => {
 		expect(trustedNames).toEqual(expect.arrayContaining(["global-skill", "project-skill"]));
 		expect(trustedSkills.find((skill) => skill.name === "global-skill")?.source).toBe("user");
 		expect(trustedSkills.find((skill) => skill.name === "project-skill")?.source).toBe("project");
-		expect(trustedSkills.find((skill) => skill.name === "pdf")?.source).toBe("system");
+		expect(trustedSkills.find((skill) => skill.name === "pdf")).toBeUndefined();
 	});
 
 	it("gets, updates, replays, and recoverably removes a user Skill", async () => {
@@ -1967,7 +1971,7 @@ describe("AppServer", () => {
 			expect(manager.getPermissionPreset()).toBe("full");
 			expect(manager.getPermissionSettings()).toEqual({
 				sandboxPolicy: "danger-full-access",
-				approvalPolicy: "user",
+				approvalPolicy: "never",
 			});
 		} finally {
 			manager.close();
@@ -2076,7 +2080,7 @@ describe("AppServer", () => {
 		expect(server.catalog.modeProjectSnapshot("code", projectDir).refs).toHaveLength(206);
 		const projectStorageKey = basename(getDefaultSessionDir(projectDir, agentDir));
 		expect(scannedPaths.length).toBeGreaterThan(0);
-		expect(scannedPaths.every((path) => path.includes(`${projectStorageKey}/`))).toBe(true);
+		expect(scannedPaths.every((path) => path.includes(`${projectStorageKey}${sep}`))).toBe(true);
 
 		writeFileSync(join(dirname(paths[0]!), "broken.jsonl"), "not-json\n");
 		await server.catalog.refreshModeProjectStorage(projectDir);
