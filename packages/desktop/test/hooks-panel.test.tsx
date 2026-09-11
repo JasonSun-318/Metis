@@ -53,14 +53,13 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		});
 		await flush();
 
-		// Should show protocol hint
-		expect(container.textContent).toContain(
-			"Structured command hooks can return context and decisions; legacy command hooks preserve previous behavior.",
-		);
+		expect(container.textContent).toContain("When to run");
+		expect(container.textContent).toContain("What to run");
+		expect(container.querySelector('[aria-label="Protocol"]')).toBeNull();
 
 		// Fill required fields
-		const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="pre-commit-lint"]');
-		const commandInput = container.querySelector<HTMLInputElement>('input[placeholder="/usr/local/bin/node"]');
+		const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]');
+		const commandInput = container.querySelector<HTMLInputElement>('input[placeholder="node"]');
 		expect(nameInput).not.toBeNull();
 		expect(commandInput).not.toBeNull();
 
@@ -69,6 +68,19 @@ describe("HookEditorDialog and PluginsPanel", () => {
 			setInputValue(commandInput!, "node script.js");
 		});
 		await flush();
+
+		// Switching to an event without a matcher must not leave a hidden rule blocking save.
+		await act(async () => {
+			setInputValue(container.querySelector<HTMLInputElement>('input[placeholder="bash|read|write"]')!, "bash");
+			container.querySelector<HTMLButtonElement>('button[aria-label="Event"]')!.click();
+		});
+		await flush();
+		await act(async () => {
+			Array.from(container.querySelectorAll<HTMLButtonElement>('[role="option"]'))
+				.find((option) => option.textContent === "User prompt submit")!.click();
+		});
+		await flush();
+		expect(container.querySelector('input[placeholder="bash|read|write"]')).toBeNull();
 
 		// Submit form
 		const form = container.querySelector("form")!;
@@ -80,6 +92,8 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		expect(submitted).toBeDefined();
 		expect(submitted!.protocol).toBe("command-v1");
 		expect(submitted!.name).toBe("my-command-hook");
+		expect(submitted!.event).toBe("UserPromptSubmit");
+		expect(submitted!.matcher).toBe("");
 	});
 
 	it("defaults protocol to legacy in edit mode when protocol is omitted", async () => {
@@ -138,8 +152,8 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		});
 		await flush();
 
-		const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="pre-commit-lint"]')!;
-		const commandInput = container.querySelector<HTMLInputElement>('input[placeholder="/usr/local/bin/node"]')!;
+		const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]')!;
+		const commandInput = container.querySelector<HTMLInputElement>('input[placeholder="node"]')!;
 		const matcherInput = container.querySelector<HTMLInputElement>('input[placeholder="bash|read|write"]')!;
 
 		await act(async () => {

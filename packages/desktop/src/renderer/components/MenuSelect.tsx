@@ -1,6 +1,6 @@
 import { CaretDown, Check } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
 
@@ -53,11 +53,11 @@ export function MenuSelect<T extends string>({
 		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
 		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
 		const dialogRect = root.current?.closest<HTMLElement>('dialog, [role="dialog"]')?.getBoundingClientRect();
-		const boundaryLeft = dialogRect ? dialogRect.left + 8 : 8;
-		const boundaryRight = dialogRect ? dialogRect.right - 8 : viewportWidth - 8;
-		const boundaryTop = dialogRect ? dialogRect.top + 8 : 8;
-		const boundaryBottom = dialogRect ? dialogRect.bottom - 8 : viewportHeight - 8;
-		const width = Math.max(rect.width, menuMinWidth);
+		const boundaryLeft = Math.max(8, dialogRect ? dialogRect.left + 8 : 8);
+		const boundaryRight = Math.min(viewportWidth - 8, dialogRect ? dialogRect.right - 8 : viewportWidth - 8);
+		const boundaryTop = Math.max(8, dialogRect ? dialogRect.top + 8 : 8);
+		const boundaryBottom = Math.min(viewportHeight - 8, dialogRect ? dialogRect.bottom - 8 : viewportHeight - 8);
+		const width = Math.min(Math.max(rect.width, menuMinWidth), Math.max(0, boundaryRight - boundaryLeft));
 		const preferredLeft = menuAlign === "end" ? rect.right - width : rect.left;
 		const left = Math.max(boundaryLeft, Math.min(preferredLeft, boundaryRight - width));
 		const below = boundaryBottom - rect.bottom;
@@ -65,8 +65,8 @@ export function MenuSelect<T extends string>({
 		const neededHeight = Math.min(280, options.length * 34 + 10);
 		setPosition(
 			below >= neededHeight || below >= above
-				? { top: rect.bottom + 6, left, width, maxHeight: Math.max(96, below - 6) }
-				: { bottom: viewportHeight - rect.top + 6, left, width, maxHeight: Math.max(96, above - 6) },
+				? { top: rect.bottom + 6, left, width, maxHeight: Math.max(0, below - 6) }
+				: { bottom: viewportHeight - rect.top + 6, left, width, maxHeight: Math.max(0, above - 6) },
 		);
 	}, [menuAlign, menuMinWidth, options.length]);
 	const close = useCallback((restoreFocus = false) => {
@@ -78,12 +78,14 @@ export function MenuSelect<T extends string>({
 		if (disabled) close();
 	}, [close, disabled]);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!open) return;
+		// The native top layer escapes transformed dialogs and their scrolling/clipping containers.
+		menu.current?.showPopover?.();
 		updatePosition();
 		queueMicrotask(() => {
 			const selectedItem = menu.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)');
-			(selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus();
+			(selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({ preventScroll: true });
 		});
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
@@ -132,7 +134,8 @@ export function MenuSelect<T extends string>({
 							: items[(current <= 0 ? items.length : current) - 1];
 				next?.focus();
 			}}
-			ref={menu}
+				ref={menu}
+				popover="manual"
 			role="listbox"
 			style={position}
 		>
