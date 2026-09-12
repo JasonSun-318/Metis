@@ -42,6 +42,7 @@ function clone<T>(value: T): T {
 /** Incremental, normalized state for one open session. */
 export class SessionProjection {
 	private session: SessionSummary;
+	private process: SessionSnapshot["process"];
 	private readonly turnsById = new Map<string, TurnView>();
 	private readonly turnOrder: string[] = [];
 	private readonly itemsById = new Map<string, ItemView>();
@@ -88,6 +89,10 @@ export class SessionProjection {
 	/** Applies one event and returns the exact event clients should observe. */
 	apply(event: DomainEvent): DomainEvent | undefined {
 		switch (event.type) {
+			case "session/processChanged":
+				this.assertSession(event.sessionId);
+				this.process = clone(event.process);
+				return clone(event);
 			case "server/state":
 			case "interaction/notify":
 				return clone(event);
@@ -218,6 +223,7 @@ export class SessionProjection {
 		const startIndex = recentItemIds.length > 0 ? this.itemIndexById.get(recentItemIds[0]!)! : 0;
 		return {
 			session: this.getSummary(),
+			...(this.process ? { process: clone(this.process) } : {}),
 			turns,
 			recentItems: recentItemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
 			nextBeforeItemId: startIndex > 0 ? recentItemIds[0]! : null,

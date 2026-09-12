@@ -104,6 +104,7 @@ import {
 	publicMcpServers,
 } from "./mcp-projection.ts";
 import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-file.ts";
+import { ProcessProjector } from "./process-projector.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
 import { readDeliveredFile as readDeliveredFileOnDisk } from "./read-delivered-file.ts";
 import {
@@ -312,6 +313,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	private readonly runtime: AgentSessionRuntime;
 	private session: AgentSession;
 	private readonly ref: SessionRef;
+	private readonly processProjector = new ProcessProjector();
 	private readonly projection: SessionProjection;
 	private readonly agentLive: AgentLiveProjector;
 	private readonly liveItemIds = new WeakMap<object, string>();
@@ -524,6 +526,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
 			if (event.type === "activity") {
+				this.publishProcess(event.event, event.agentId);
 				this.agentLive.apply(event.agentId, event.taskId, event.event);
 				return;
 			}
@@ -585,7 +588,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return new Map(this.deliveredFileViews().map((file) => [file.fileId, file]));
 	}
 
+	private publishProcess(event: AgentSessionEvent, agentId?: string): void {
+		const process = this.processProjector.apply(event, agentId);
+		if (process) this.publish({ type: "session/processChanged", sessionId: this.sessionId, process });
+	}
+
 	private onAgentEvent(event: AgentSessionEvent): void {
+		this.publishProcess(event);
 		if (event.type === "message_start") {
 			const assistant = event.message.role === "assistant";
 			if (assistant) this.liveAssistantItemId = undefined;
