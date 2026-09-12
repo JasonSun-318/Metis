@@ -589,6 +589,14 @@ function createHarness(options: {
 
 beforeEach(async () => {
 	await setLocale("en");
+	Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+		configurable: true,
+		value: vi.fn(),
+	});
+	Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+		configurable: true,
+		value: vi.fn(),
+	});
 });
 
 afterEach(() => {
@@ -1795,7 +1803,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("docks ask_user above the active composer and returns a structured answer", async () => {
+	it("opens ask_user from the composer and confirms before returning a structured answer", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
@@ -1838,13 +1846,17 @@ describe("Chat desktop shell", () => {
 		const panel = container.querySelector<HTMLElement>(".ask-user-panel")!;
 		expect(panel).not.toBeNull();
 		expect(dock.contains(panel)).toBe(true);
+		expect(dock.querySelector(".composer")?.classList.contains("is-awaiting-answer")).toBe(true);
+		expect(dock.querySelector(".composer-editable-input")?.getAttribute("contenteditable")).toBe("false");
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
-		expect(container.querySelector(".composer-dock > .ask-user-slot + .composer-chat")).not.toBeNull();
+		expect(container.querySelector(".conversation-column > .ask-user-slot")).toBeNull();
 		expect(panel.textContent).toContain("Where should the data be stored?");
 		expect(panel.textContent).toContain("Something else");
 
 		await act(async () => [...panel.querySelectorAll<HTMLButtonElement>(".ask-user-option")]
 			.find((candidate) => candidate.textContent?.includes("Cloud"))?.click());
+		expect(api.respondToInteraction).not.toHaveBeenCalled();
+		await act(async () => { panel.querySelector<HTMLButtonElement>(".ask-user-step")!.click(); await new Promise(r => setTimeout(r, 180)); });
 		await flush();
 		expect(api.respondToInteraction).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000206",
@@ -1853,6 +1865,7 @@ describe("Chat desktop shell", () => {
 			answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
 		});
 		expect(container.querySelector(".ask-user-panel")).toBeNull();
+		expect(document.activeElement).toBe(dock.querySelector(".composer-editable-input"));
 		await act(async () => root.unmount());
 	});
 
@@ -2434,7 +2447,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("opens an empty Code session immediately after choosing an existing folder", async () => {
+	it("keeps Code project selection in the draft until first send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api, order } = createHarness();
@@ -2448,15 +2461,31 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => button(container, "New task").click());
 
-		expect(container.textContent).toContain("Create a new project");
-		expect(container.querySelectorAll("#composer-input")).toHaveLength(0);
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 		expect(api.selectProjectFolder).not.toHaveBeenCalled();
 		expect(api.createSession).not.toHaveBeenCalled();
 
-		await act(async () => button(container, "Use an existing folder").click());
-		expect(container.textContent).toContain("Choose a folder and Metis will treat its files as project context.");
-		order.length = 0;
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Keep this draft while choosing a project"));
+		await act(async () => container.querySelector<HTMLButtonElement>(".home-project-picker-select .menu-select-trigger")!.click());
+		const recentProject = [...document.querySelectorAll<HTMLButtonElement>('.home-project-picker-menu [role="option"]')]
+			.find((candidate) => candidate.textContent?.includes("code-project"));
+		expect(recentProject).not.toBeUndefined();
+		await act(async () => recentProject!.click());
+		expect(container.textContent).toContain("code-project");
+		expect(editor.value).toBe("Keep this draft while choosing a project");
+		expect(api.createSession).not.toHaveBeenCalled();
+
 		await act(async () => button(container, "Choose folder").click());
+		await flush();
+		expect(api.selectProjectFolder).toHaveBeenCalledTimes(1);
+		expect(api.createSession).not.toHaveBeenCalled();
+		expect(container.textContent).toContain("selected-project");
+
+		await act(async () => changeTextarea(editor, "Inspect this codebase"));
+		order.length = 0;
+		await act(async () => editor.form!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -2464,13 +2493,16 @@ describe("Chat desktop shell", () => {
 			mode: "code",
 			cwd: "/work/selected-project",
 		}));
-		expect(api.startTurn).not.toHaveBeenCalled();
-		expect(order).toEqual(["create", "open", "list"]);
-		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "code-created",
+			text: "Inspect this codebase",
+		}));
+		expect(order).toEqual(["create", "list", "open", "start"]);
+		expect(container.querySelector(".new-task-home")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
-	it("lets users dismiss Code project setup without auto-selecting an existing session", async () => {
+	it("opens the Code home without opening a project setup dialog", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
 		const container = document.createElement("div");
@@ -2481,19 +2513,52 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Code").click());
 		await flush();
-		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Create a new project");
-		await act(async () => document.activeElement?.dispatchEvent(
-			new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
-		));
-
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "A Code task still needs a project"));
+		expect(button(container, "Send message").disabled).toBe(true);
+		await act(async () => editor.form!.requestSubmit());
+		expect(api.createSession).not.toHaveBeenCalled();
 		expect(projectRow(container, "/work/code-project")).not.toBeNull();
 		expect(container.querySelector('[data-active-session-id="code-existing"]')).toBeNull();
 		expect(api.openSession).not.toHaveBeenCalled();
+		expect(api.createSession).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 
-	it("creates a new folder and immediately opens its empty Code session", async () => {
+	it("isolates the home draft when switching from Chat to a historyless Code mode", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		saveProfileIdentity({ displayName: "Ava", avatarDataUrl: null });
+		vi.spyOn(Math, "random").mockReturnValue(0.999999);
+		const { api } = createHarness({ sessions: [] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("chat");
+			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(9);
+			const chatEditor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => changeTextarea(chatEditor, "Chat draft must not follow the mode switch"));
+
+			await act(async () => button(container, "Code").click());
+			await flush();
+
+			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("code");
+			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(6);
+			const codeEditor = container.querySelector<HTMLElement>("#composer-input")!;
+			expect(codeEditor.value).toBe("");
+			expect(container.querySelector(".new-task-home-heading h1")?.textContent).toContain("build");
+		} finally {
+			saveProfileIdentity(DEFAULT_PROFILE_IDENTITY);
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("keeps a newly created Code project in the draft until first send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
@@ -2505,7 +2570,16 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Code").click());
 		await flush();
 		await act(async () => button(container, "New task").click());
-		await act(async () => button(container, "Start from scratch").click());
+		const draftEditor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(draftEditor, "Draft survives project setup cancellation"));
+		await act(async () => button(container, "Create a new project").click());
+		await flush();
+		await act(async () => button(container, "Cancel").click());
+		expect(container.querySelector("[role=dialog]")).toBeNull();
+		expect(draftEditor.value).toBe("Draft survives project setup cancellation");
+		expect(api.createSession).not.toHaveBeenCalled();
+
+		await act(async () => button(container, "Create a new project").click());
 		await flush();
 
 		expect(container.querySelector<HTMLInputElement>("#code-project-name")?.value).toBe("");
@@ -2520,11 +2594,60 @@ describe("Chat desktop shell", () => {
 			name: "Desktop App",
 			files: [],
 		});
+		expect(container.querySelector("[role=dialog]")).toBeNull();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.textContent).toContain("Desktop App");
+		expect(api.createSession).not.toHaveBeenCalled();
+
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Initialize the app"));
+		await act(async () => editor.form!.requestSubmit());
+		await flush();
+		await flush();
+
 		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
 			mode: "code",
 			cwd: "/Users/test/Metis Projects/Desktop App",
 		}));
-		expect(api.startTurn).not.toHaveBeenCalled();
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "code-created",
+			text: "Initialize the app",
+		}));
+		await act(async () => root.unmount());
+	});
+
+	it("ignores a stale Code project creation callback after the draft changes", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		let resolveCreate!: (cwd: string) => void;
+		api.createProjectFolder = vi.fn(() => new Promise<string>((resolve) => {
+			resolveCreate = resolve;
+		}));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "New task").click());
+		await act(async () => button(container, "Create a new project").click());
+		await flush();
+		await act(async () => changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Stale Project"));
+		await act(async () => container.querySelector<HTMLFormElement>(".code-project-form")!.requestSubmit());
+		await flush();
+
+		await act(async () => button(container, "Chat").click());
+		await flush();
+		await act(async () => button(container, "Code").click());
+		await flush();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(container.textContent).not.toContain("Stale Project");
+
+		await act(async () => resolveCreate("/work/stale-project"));
+		await flush();
+		expect(container.textContent).not.toContain("stale-project");
+		expect(api.createSession).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 
@@ -2805,8 +2928,8 @@ describe("Chat desktop shell", () => {
 			expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 			expect(transition.animate).toHaveBeenCalledTimes(1);
 			expect(transition.animate.mock.calls[0]?.[0]).toEqual([
-				{ transform: "translate(0px, -504px)" },
-				{ transform: "translate(0px, 0px)" },
+				{ transform: "translate(0px, -504px)", width: "770px" },
+				{ transform: "translate(0px, 0px)", width: "770px" },
 			]);
 		} finally {
 			await transition.restore(root);
@@ -3714,7 +3837,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("retries an existing Code folder with the same idempotent create request after open fails", async () => {
+	it("keeps a Code draft retryable after the first open fails", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness({ failOpenSessionIds: ["code-created"] });
@@ -3726,21 +3849,26 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Code").click());
 		await flush();
 		await act(async () => button(container, "New task").click());
-		await act(async () => button(container, "Use an existing folder").click());
 		await act(async () => button(container, "Choose folder").click());
+		await flush();
+		expect(api.createSession).not.toHaveBeenCalled();
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		await act(async () => changeTextarea(editor, "Retry this Code task"));
+		await act(async () => editor.form!.requestSubmit());
 		await flush();
 
 		expect(container.textContent).toContain("open failed once");
 		expect(api.createSession).toHaveBeenCalledTimes(1);
-		const firstRequestId = vi.mocked(api.createSession).mock.calls[0]![0].requestId;
-		await act(async () => button(container, "Choose folder").click());
+		await act(async () => editor.form!.requestSubmit());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledTimes(2);
-		expect(vi.mocked(api.createSession).mock.calls[1]![0].requestId).toBe(firstRequestId);
-		expect(api.startTurn).not.toHaveBeenCalled();
-		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
+		expect(api.createSession).toHaveBeenCalledTimes(1);
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "code-created",
+			text: "Retry this Code task",
+		}));
+		expect(container.querySelector(".new-task-home")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
@@ -5089,6 +5217,7 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Metis User").click());
 		await act(async () => button(container, "Settings").click());
+		await act(async () => button(container, "General").click());
 		await act(async () => button(container, "中文").click());
 		await act(async () => button(container, "返回应用").click());
 

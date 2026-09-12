@@ -103,6 +103,28 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
 	});
 
+	it("uses the shared compact home proportions and mode font variables", () => {
+		expect(css).toMatch(/\.new-task-home-content\s*\{[^}]*width:\s*min\(720px,\s*100%\)/);
+		expect(rule(".new-task-home-scroll").containerType).toBe("size");
+		expect(rule(".new-task-home-hero").display).toBe("contents");
+		expect(rule(".new-task-home-hero-main").position).toBe("sticky");
+		expect(rule(".new-task-home-heading h1").fontFamily).toBe("var(--home-heading-font)");
+		expect(rule(".new-task-home-heading h1").fontSize).toBe("40px");
+		expect(rule(".new-task-home-heading h1").lineHeight).toBe("1.25");
+		expect(rule(".new-task-home-heading").textAlign).toBe("center");
+		expect(rule(".new-task-home-heading").marginBottom).toBe("28px");
+		expect(rule(".new-task-home .composer").minHeight).toBe("112px");
+		expect(rule(".new-task-home .composer .composer-editable-input").minHeight).toBe("44px");
+		expect(rule(".new-task-home .composer .composer-editable-input").fontSize).toBe("var(--content-font-size)");
+		expect(rule(".new-task-home-project-control").minHeight).toBe("40px");
+		expect(rule(".new-task-home .home-project-picker-select .menu-select-trigger").justifyContent).toBe("flex-start");
+		expect(rule(".new-task-home .home-project-picker-select .menu-select-value").marginRight).toBe("auto");
+		expect(rule(".new-task-home .home-project-picker-hint").fontSize).toBe("11px");
+		expect(rule(".new-task-home-heading h1").whiteSpace).toBe("nowrap");
+		expect(rule(".new-task-starters").minHeight).toBe("");
+		expect(rule(".new-task-starters").scrollMarginTop).toContain("var(--home-hero-height)");
+	});
+
 	it("uses the compact Metis task list above the composer", () => {
 		const slot = rule(".task-list-slot");
 		expect(slot.margin).toBe("0px 16px");
@@ -168,19 +190,20 @@ describe("Composer visual states", () => {
 		expect(css).toContain(".permission-approval-slot");
 	});
 
-	it("wraps ask-user questions and answer text instead of hiding it", () => {
-		expect(rule(".ask-user-header h2").whiteSpace).toBe("normal");
-		expect(rule(".ask-user-header h2").maxHeight).toBe("74px");
-		expect(rule(".ask-user-header h2").overflowY).toBe("auto");
-		expect(rule(".ask-user-header h2").overflowWrap).toBe("anywhere");
+	it("keeps long questions in a single content scroller with readable choices", () => {
+		expect(rule(".ask-user-content").overflowY).toBe("auto");
+		expect(rule(".ask-user-content h2").whiteSpace).toBe("normal");
+		expect(rule(".ask-user-content h2").overflowWrap).toBe("anywhere");
+		expect(rule(".ask-user-content h2").maxHeight).toBe("");
 		expect(rule(".ask-user-option-copy strong").whiteSpace).toBe("normal");
 		expect(rule(".ask-user-option-copy small").whiteSpace).toBe("normal");
 	});
 
-	it("uses the shared neutral hover surface for ask-user choices", () => {
-		const hover = rule(".ask-user-option:hover:not(:disabled), .ask-user-option:focus");
-		expect(hover.background).toBe("var(--surface-11)");
-		expect(hover.boxShadow).toBe("");
+	it("distinguishes selected choices from focus and keeps unchecked controls visible", () => {
+		expect(rule(".ask-user-option:hover:not(:disabled)").background).toBe("var(--panel-hover)");
+		expect(rule(".ask-user-option:focus-visible").outline).toContain("2px");
+		expect(css).not.toContain("var(KEEP_WHITE)");
+		expect(rule(".ask-user-checkbox").border).toContain("1px solid");
 	});
 
 	it("uses the compact narrow rectangular box and bottom actions for Code mode", () => {
