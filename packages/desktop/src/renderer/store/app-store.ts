@@ -73,6 +73,7 @@ export interface AppStoreSnapshot {
 	readonly tasks: SessionSnapshot["tasks"];
 	readonly deliveredFiles: SessionSnapshot["deliveredFiles"];
 	readonly goal: SessionSnapshot["goal"];
+	readonly process: SessionSnapshot["process"];
 	readonly queuedTurns: readonly QueuedTurnView[];
 	readonly agentTranscript: AgentTranscriptState;
 	readonly supervisor: SupervisorView;
@@ -303,6 +304,7 @@ export class AppStore {
 			tasks: this.state.tasks,
 			deliveredFiles: this.state.deliveredFiles,
 			goal: this.state.goal,
+			process: this.state.process,
 			queuedTurns: this.state.queuedTurns,
 			agentTranscript: this.state.agentTranscript,
 			supervisor: this.supervisor,

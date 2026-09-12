@@ -79,6 +79,36 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("restores current process, applies live output and clears it on session switch", () => {
+		const store = new AppStore();
+		const process = {
+			processId: "p1",
+			command: "echo hello",
+			output: "",
+			state: "running" as const,
+			truncated: false,
+		};
+		store.applySnapshot({ ...snapshot(), process });
+		expect(store.getSnapshot().process).toEqual(process);
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "session/processChanged",
+						sessionId: "session-1",
+						process: { ...process, output: "hello", state: "completed" },
+					},
+				],
+			}),
+		).toBe("applied");
+		expect(store.getSnapshot().process).toMatchObject({ output: "hello", state: "completed" });
+		store.applySnapshot({ ...snapshot(), session: session("session-2") });
+		expect(store.getSnapshot().process).toBeUndefined();
+	});
+
 	it("coalesces streaming-only subscriber notifications to one frame", async () => {
 		vi.useFakeTimers();
 		try {

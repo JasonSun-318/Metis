@@ -56,6 +56,7 @@ export interface MutableProjectionState {
 	tasks: SessionSnapshot["tasks"];
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
+	process: SessionSnapshot["process"];
 	queuedTurns: QueuedTurnView[];
 	readonly agentTranscript: MutableAgentTranscriptState;
 }
@@ -106,6 +107,7 @@ export function createProjectionState(): MutableProjectionState {
 		tasks: [],
 		deliveredFiles: [],
 		goal: null,
+		process: undefined,
 		queuedTurns: [],
 		agentTranscript: {
 			agentId: null,
@@ -164,6 +166,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	state.nextAgentAfterId = null;
 	state.tasks = [];
 	state.goal = null;
+	state.process = undefined;
 	state.queuedTurns = [];
 	clearAgentTranscript(state.agentTranscript);
 	return true;
@@ -208,6 +211,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	state.nextAgentAfterId = null;
 	state.tasks = [];
 	state.goal = null;
+	state.process = undefined;
 	state.queuedTurns = [];
 	clearAgentTranscript(state.agentTranscript);
 	return true;
@@ -265,6 +269,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.tasks = snapshot.tasks;
 	state.deliveredFiles = snapshot.deliveredFiles;
 	state.goal = snapshot.goal;
+	state.process = snapshot.process;
 	state.queuedTurns = snapshot.queuedTurns;
 	if (sessionChanged) clearAgentTranscript(state.agentTranscript);
 	else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
@@ -319,6 +324,7 @@ function eventSessionId(event: DomainEvent): string | undefined {
 		case "session/tasksChanged":
 		case "session/deliveredFilesChanged":
 		case "session/goalChanged":
+		case "session/processChanged":
 		case "turn/queueChanged":
 			return event.sessionId;
 		case "interaction/notify":
@@ -389,6 +395,9 @@ function appendItemDelta(
 
 function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 	switch (event.type) {
+		case "session/processChanged":
+			state.process = structuredClone(event.process);
+			return;
 		case "server/state":
 			return;
 		case "interaction/notify":

@@ -1,4 +1,4 @@
-import type { AgentMode, PlanView, SessionSummary } from "@metis/app-protocol";
+import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@metis/app-protocol";
 import { ClipboardText, FileText, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +19,7 @@ import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
 import { PlanPreview } from "./PlanPreview.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
+import { ProcessPanel } from "./ProcessPanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
@@ -79,7 +80,14 @@ interface PreviewTab {
 	readonly file: UniversalPreviewTarget;
 }
 
-type ToolTab = TerminalTab | BrowserTab | FileTab | ReviewTab | AgentTab | PreviewTab | PlanTab;
+interface ProcessTab {
+	readonly kind: "process";
+	readonly id: string;
+	readonly title: string;
+	readonly process: SessionProcessView;
+}
+
+type ToolTab = ProcessTab | TerminalTab | BrowserTab | FileTab | ReviewTab | AgentTab | PreviewTab | PlanTab;
 
 interface ToolWorkspace {
 	readonly tabs: readonly ToolTab[];
@@ -99,6 +107,8 @@ interface ToolsSidebarProps {
 	readonly cleanupSessionIds: readonly string[];
 	readonly mode: AgentMode;
 	readonly onClose: () => void;
+	readonly onOpen?: () => void;
+	readonly process?: SessionProcessView;
 	readonly onActivateSession: (sessionId: string) => void;
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
 	readonly onDirtySessionIdsChange: (sessionIds: readonly string[]) => void;
@@ -175,7 +185,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onActivateSession, onClose, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onActivateSession, onClose, onOpen, process, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -207,6 +217,36 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 		.map(([ownerSessionId]) => ownerSessionId)
 		.sort(), [fileDrafts, workspaces]);
 	const dirtySessionKey = dirtySessionIds.join("\0");
+
+	const seenProcesses = useRef(new Map<string, string>());
+
+	const openProcess = useCallback(() => {
+		if (!sessionId || !process) return;
+		const id = `process-${sessionId}`;
+		setWorkspaces((current) => {
+			const owner = current.get(sessionId) ?? { tabs: [], activeId: id, nextNumber: 1 };
+			const tab: ProcessTab = { kind: "process", id, title: "Process", process };
+			const tabs = owner.tabs.some((item) => item.id === id) ? owner.tabs.map((item) => item.id === id ? tab : item) : [...owner.tabs, tab];
+			return new Map(current).set(sessionId, { ...owner, tabs, activeId: id });
+		});
+		setMenuOpen(false);
+		onOpen?.();
+	}, [onOpen, process, sessionId]);
+
+	useEffect(() => {
+		if (!sessionId || !process) return;
+		const previousId = seenProcesses.current.get(sessionId);
+		seenProcesses.current.set(sessionId, process.processId);
+		if (previousId !== process.processId) {
+			openProcess();
+			return;
+		}
+		setWorkspaces((current) => {
+			const owner = current.get(sessionId);
+			if (!owner?.tabs.some((tab) => tab.kind === "process")) return current;
+			return new Map(current).set(sessionId, { ...owner, tabs: owner.tabs.map((tab) => tab.kind === "process" ? { ...tab, process } : tab) });
+		});
+	}, [openProcess, process, sessionId]);
 
 	useEffect(() => {
 		let active = true;
@@ -907,6 +947,10 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 					<span>{t("Review")}</span>
 				</button>
 			)}
+			<button aria-label="Process" disabled={!process} onClick={openProcess} role={compact ? "menuitem" : undefined} type="button">
+				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 20} /></div>
+				<span>Process</span>
+			</button>
 			<button aria-label={t("Terminal")} disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button">
 				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 20} /></div>
 				<span>{t("Terminal")}</span>
@@ -985,7 +1029,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-									>{tab.kind === "terminal" ? <TerminalWindow aria-hidden="true" size={13} /> : tab.kind === "browser" ? <Globe aria-hidden="true" size={13} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={13} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={13} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+									>{tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} /> : tab.kind === "browser" ? <Globe aria-hidden="true" size={13} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={13} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={13} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
@@ -1011,7 +1055,16 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 						tab.relativePath && savingFileTabIds.has(tab.id) ? [tab.relativePath] : [],
 					);
 					const panels = ownerWorkspace.tabs.flatMap((tab) =>
-						tab.kind === "terminal" ? (
+						tab.kind === "process" ? (
+							<ProcessPanel
+								key={tab.id}
+								panelId={`process-panel-${tab.id}`}
+								process={tab.process}
+								theme={theme}
+								onError={onError}
+								visible={open && !menuOpen && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
+							/>
+						) : tab.kind === "terminal" ? (
 							<TerminalPanel
 								api={api}
 								cwd={tab.cwd}
