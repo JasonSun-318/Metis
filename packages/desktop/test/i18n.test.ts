@@ -73,13 +73,26 @@ describe("Desktop locale preference", () => {
 
 	it("translates every home starter and greeting", async () => {
 		await setLocale("zh-CN", localStorage);
-		const { HOME_GREETINGS, HOME_STARTERS } = await import("../src/renderer/new-task-home-content.ts");
+		const { CODE_HOME_GREETINGS, HOME_GREETINGS, getHomeStarters } = await import(
+			"../src/renderer/new-task-home-content.ts"
+		);
 		const keys = [
-			...HOME_GREETINGS.flatMap((item) => [item.key, ...(item.anonymousKey ? [item.anonymousKey] : [])]),
-			...HOME_STARTERS.flatMap((item) => [item.title, item.description, item.prompt]),
+			...CODE_HOME_GREETINGS.flatMap((item) => [item.key, item.anonymousKey]),
+			...HOME_GREETINGS.flatMap((item) => [item.key, item.anonymousKey]),
+			...getHomeStarters("chat").flatMap((item) => [item.title, item.description, item.prompt]),
+			...getHomeStarters("code").flatMap((item) => [item.title, item.description, item.prompt]),
 		];
 		for (const key of keys) expect(i18n.exists(key, { lng: "zh-CN" })).toBe(true);
-		expect(i18n.t("A good day starts with an idea.")).toBe("美好的一天，从一个想法开始。");
-		expect(i18n.t("Good morning, {{name}}. Where shall we start?", { name: "小林" })).toContain("小林");
+		expect(i18n.t("A good day starts now.")).toBe("美好的一天开始了。");
+		expect(i18n.t("Good morning, {{name}}.", { name: "小林" })).toBe("上午好，小林。");
+		expect(i18n.t("Explore tasks")).toBe("探索任务");
+		expect(i18n.t("Recent projects")).toBe("最近项目");
+		expect(i18n.t("Implement a feature")).toBe("实现功能");
+		expect(i18n.t("Fix a bug")).toBe("修复问题");
+		expect(i18n.t("Understand this project")).toBe("理解项目");
+		expect(i18n.t("Review the code")).toBe("审查代码");
+		expect(i18n.t("Add tests")).toBe("补充测试");
+		expect(i18n.t("Improve performance")).toBe("优化性能");
+		expect(i18n.t("{{name}}, ready to build?", { name: "小林" })).toBe("小林，准备开始写代码？");
 	});
 });
