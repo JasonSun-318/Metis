@@ -1,3 +1,4 @@
+import type { AskUserDraft } from "./AskUserPanel.tsx";
 import {
 	type AgentMode,
 	type InteractionResponseInput,
@@ -35,7 +36,7 @@ import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
 import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
 import { rpcErrorCode } from "../rpc-error.ts";
-import { SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
+import { SessionWorkspaceWorkflow, sessionProjectKey, type NewTaskDraft } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
@@ -51,8 +52,10 @@ import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
+import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import {
+	buildSessionTree,
 	clampSessionSidebarPreferredWidth,
 	clampSessionSidebarWidth,
 	type ProjectSessionGroup,
@@ -80,6 +83,11 @@ const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
 const MCP_STATUS_POLL_MS = 500;
 const MCP_RECONNECT_POLL_MS = 4_000;
+
+interface CodeProjectSetupRequest {
+	readonly draft: NewTaskDraft;
+	readonly generation: number;
+}
 
 function queuedTurnActionError(cause: unknown): Error {
 	const code = rpcErrorCode(cause);
@@ -185,7 +193,11 @@ export function App({ api, store }: AppProps) {
 	const bootstrapped = workspaceState.bootstrapped;
 	const draftBusy = workspaceState.draftBusy;
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
+	const askUserDrafts = useRef(new Map<string, AskUserDraft>());
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [codeProjectSetupOpen, setCodeProjectSetupOpen] = useState(false);
+	const codeProjectSetupGeneration = useRef(0);
+	const codeProjectSetupRequest = useRef<CodeProjectSetupRequest | null>(null);
 	const settingsReturnFocusRef = useRef<HTMLElement | null>(null);
 	const [selectedScheduleTaskId, setSelectedScheduleTaskId] = useState<string | null>(null);
 	const projectPreferences = workspaceState.projectPreferences;
@@ -533,10 +545,23 @@ export function App({ api, store }: AppProps) {
 		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ mode: group.mode, cwd: group.cwd }),
 		[workspaceWorkflow],
 	);
+	const closeCodeProjectSetup = useCallback(() => {
+		codeProjectSetupGeneration.current += 1;
+		codeProjectSetupRequest.current = null;
+		setCodeProjectSetupOpen(false);
+	}, []);
 	const createEmptySessionInProject = useCallback(async (projectMode: AgentMode, cwd: string): Promise<void> => {
+		if (projectMode === "code") {
+			cancelHomeTransition();
+			setDestination("tasks");
+			closeCodeProjectSetup();
+			workspaceWorkflow.startNewTask("code");
+			workspaceWorkflow.setDraftFolder(cwd);
+			return;
+		}
 		setDestination("tasks");
 		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
-	}, [workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
 	const createEmptyProjectSession = useCallback(
 		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
 		[createEmptySessionInProject],
@@ -558,12 +583,13 @@ export function App({ api, store }: AppProps) {
 	const openVisibleSession = useCallback(async (sessionId: string) => {
 		cancelHomeTransition();
 		setDestination("tasks");
+		closeCodeProjectSetup();
 		try {
 			await workspaceWorkflow.openVisibleSession(sessionId);
 		} catch {
 			// The workflow reports the error while preserving the current projection.
 		}
-	}, [cancelHomeTransition, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
 	const forkFromReply = async (entryId: string) => {
 		try {
 			await workspaceWorkflow.forkSession(entryId);
@@ -580,15 +606,56 @@ export function App({ api, store }: AppProps) {
 	const chooseCodeProjectFolder = () => api.selectProjectFolder();
 	const createCodeProjectFolder = (input: Parameters<MetisDesktopApi["createProjectFolder"]>[0]) =>
 		api.createProjectFolder(input);
+	const openCodeProjectSetup = useCallback(() => {
+		const draft = workspaceWorkflow.getSnapshot().draft;
+		if (!draft || draft.mode !== "code" || draft.sessionId !== null) return;
+		const request = {
+			draft,
+			generation: codeProjectSetupGeneration.current + 1,
+		};
+		codeProjectSetupGeneration.current = request.generation;
+		codeProjectSetupRequest.current = request;
+		setCodeProjectSetupOpen(true);
+	}, [workspaceWorkflow]);
+	const setHomeDraftFolder = useCallback((projectMode: AgentMode, cwd: string | null) => {
+		const draft = workspaceWorkflow.getSnapshot().draft;
+		if (!draft || draft.mode !== projectMode || draft.sessionId !== null) return;
+		workspaceWorkflow.setDraftFolder(cwd);
+	}, [workspaceWorkflow]);
+	const selectHomeProject = useCallback((projectMode: AgentMode, cwd: string) => {
+		setHomeDraftFolder(projectMode, cwd);
+	}, [setHomeDraftFolder]);
+	const clearHomeProject = useCallback((projectMode: AgentMode) => {
+		setHomeDraftFolder(projectMode, null);
+	}, [setHomeDraftFolder]);
+	const selectCodeProject = useCallback((cwd: string, request: CodeProjectSetupRequest | null) => {
+		const current = workspaceWorkflow.getSnapshot().draft;
+		const active = codeProjectSetupRequest.current;
+		if (
+			!request ||
+			active?.generation !== request.generation ||
+			active.draft !== request.draft ||
+			current !== request.draft ||
+			current.mode !== "code" ||
+			current.sessionId !== null
+		) return;
+		workspaceWorkflow.setDraftFolder(cwd);
+		closeCodeProjectSetup();
+	}, [closeCodeProjectSetup, workspaceWorkflow]);
+	const handleCodeProjectCreated = useCallback((cwd: string, request: CodeProjectSetupRequest | null) => {
+		selectCodeProject(cwd, request);
+	}, [selectCodeProject]);
 
 	const startNewTask = useCallback(() => {
 		cancelHomeTransition();
 		setDestination("tasks");
+		closeCodeProjectSetup();
 		setError(null);
 		workspaceWorkflow.startNewTask();
-	}, [cancelHomeTransition, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
 	const cancelNewTask = () => {
 		cancelHomeTransition();
+		closeCodeProjectSetup();
 		setError(null);
 		workspaceWorkflow.cancelNewTask();
 	};
@@ -597,16 +664,22 @@ export function App({ api, store }: AppProps) {
 		if (nextMode === mode) return;
 		cancelHomeTransition();
 		setDestination("tasks");
+		closeCodeProjectSetup();
 		setError(null);
 		void workspaceWorkflow.selectMode(nextMode);
-	}, [cancelHomeTransition, mode, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, mode, workspaceWorkflow]);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
+	const homeProjects = useMemo(
+		() => buildSessionTree(state, mode, projectPreferences).projects,
+		[mode, projectPreferences, state],
+	);
+	const activeCodeProjectSetupRequest = codeProjectSetupRequest.current;
 
 	const submitNewTaskDraft = async (input: ComposerSubmission) => {
 		if (!visibleNewTaskDraft) return;
 		const home = homeComposerFormRef.current;
-		const ticket = mode === "chat" && home && !reducedMotion ? {
+		const ticket = home && !reducedMotion ? {
 			source: home.getBoundingClientRect(),
 			home,
 			sessionId: visibleNewTaskDraft.sessionId,
@@ -652,7 +725,7 @@ export function App({ api, store }: AppProps) {
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
-		if (mode !== "chat" || destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
+		if (destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
 			cancelHomeTransition();
 			return;
 		}
@@ -786,6 +859,14 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
+	const waitingForAnswer = visibleInteraction?.kind === "ask_user";
+	useEffect(() => {
+		if (state.syncStatus !== "ready") return;
+		for (const id of askUserDrafts.current.keys()) {
+			const draft = askUserDrafts.current.get(id)!;
+			if (!state.sessionsById.has(draft.sessionId) || (draft.sessionId === state.activeSessionId && !state.interactionsById.has(id))) askUserDrafts.current.delete(id);
+		}
+	}, [state.activeSessionId, state.interactionOrder, state.sessionOrder, state.syncStatus]);
 	const inlineInteraction =
 		visibleInteraction?.kind === "ask_user" || visibleInteraction?.kind === "session_permission_approval"
 			? visibleInteraction
@@ -1549,47 +1630,67 @@ export function App({ api, store }: AppProps) {
 					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (
 					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
-				) : newTaskOpen && mode === "code" ? (
-					<CodeProjectSetup
-						busy={draftBusy || !serverReady}
-						onCancel={cancelNewTask}
-						onChooseExisting={chooseCodeProjectFolder}
-						onChooseLocation={chooseCodeProjectFolder}
-						onCreateProject={createCodeProjectFolder}
-						onGetDefaultLocation={api.getDefaultProjectLocation}
-						onOpenProject={(cwd) => createEmptySessionInProject("code", cwd)}
-						onPickFiles={pickAttachmentFiles}
-						onResolveDroppedFiles={api.resolveDroppedFiles}
-					/>
 				) : newTaskOpen ? (
-					<NewTaskHome
-						busy={draftBusy || !serverReady}
-						commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
-						composerFormRef={homeComposerFormRef}
-						disabledSlashCommands={disabledSlashCommands}
-						disabledSlashReasons={disabledSlashReasons}
-						folder={visibleNewTaskDraft.folder}
-						folderLocked={visibleNewTaskDraft.sessionId !== null}
-						mode={mode}
-						modelControl={modelControl}
-						permissionControl={permissionControl}
-						onChooseFolder={chooseNewTaskFolder}
-						onManageMcp={openMcpManagement}
-						onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
-						onPickFiles={pickAttachmentFiles}
-						onResolveDroppedFiles={api.resolveDroppedFiles}
-						reducedMotion={reducedMotion}
-						onSlashCommand={handleSlashCommand}
-						onSubmit={submitNewTaskDraft}
-						skills={skills}
-						thinkingControl={thinkingControl}
-					/>
+					<>
+						<NewTaskHome
+							key={mode}
+							busy={draftBusy || !serverReady}
+							commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
+							composerFormRef={homeComposerFormRef}
+							disabledSlashCommands={disabledSlashCommands}
+							disabledSlashReasons={disabledSlashReasons}
+							folder={visibleNewTaskDraft.folder}
+							folderLocked={visibleNewTaskDraft.sessionId !== null}
+							mode={mode}
+							modelControl={modelControl}
+							permissionControl={permissionControl}
+							onChooseFolder={chooseNewTaskFolder}
+							projectControl={
+								<HomeProjectPicker
+									busy={draftBusy || !serverReady}
+									folder={visibleNewTaskDraft.folder}
+									folderLocked={visibleNewTaskDraft.sessionId !== null}
+									mode={mode}
+									onChooseFolder={chooseNewTaskFolder}
+									onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
+							onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
+									onSelectProject={(cwd) => selectHomeProject(mode, cwd)}
+									projects={homeProjects}
+								/>
+							}
+							onManageMcp={openMcpManagement}
+							onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
+							onPickFiles={pickAttachmentFiles}
+							onResolveDroppedFiles={api.resolveDroppedFiles}
+							reducedMotion={reducedMotion}
+							onSlashCommand={handleSlashCommand}
+							onSubmit={submitNewTaskDraft}
+							skills={skills}
+							thinkingControl={thinkingControl}
+						/>
+					{mode === "code" && codeProjectSetupOpen && (
+						<CodeProjectSetup
+								busy={draftBusy || !serverReady}
+								initialStep="create"
+							onCancel={closeCodeProjectSetup}
+								onChooseExisting={chooseCodeProjectFolder}
+								onChooseLocation={chooseCodeProjectFolder}
+								onCreateProject={createCodeProjectFolder}
+								onGetDefaultLocation={api.getDefaultProjectLocation}
+							onOpenProject={async (cwd) => selectCodeProject(cwd, activeCodeProjectSetupRequest)}
+							onProjectCreated={(cwd) => handleCodeProjectCreated(cwd, activeCodeProjectSetupRequest)}
+								onPickFiles={pickAttachmentFiles}
+								onResolveDroppedFiles={api.resolveDroppedFiles}
+							/>
+						)}
+					</>
 				) : visibleActiveSession ? (
 					<div className="workspace-body">
-						<div className="conversation-column">
+						<div className="conversation-column" data-mode={visibleActiveSession.mode}>
 							<RecoveryBanner session={visibleActiveSession} />
 							<Transcript
 								activeTurnId={state.activeTurnId}
+								waitingForAnswer={waitingForAnswer}
 								activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined}
 								appearance={visibleActiveSession.mode}
 								autoLoadOlder
@@ -1611,6 +1712,7 @@ export function App({ api, store }: AppProps) {
 							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
 								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
 							)}
+							<div className="conversation-composer">
 								<Composer
 									appearance={visibleActiveSession.mode}
 									collaborationControl={collaborationControl}
@@ -1626,7 +1728,8 @@ export function App({ api, store }: AppProps) {
 								disabledSlashCommands={disabledSlashCommands}
 								disabledSlashReasons={disabledSlashReasons}
 								formRef={conversationComposerFormRef}
-								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} sandboxHealth={state.sandboxHealth} /> : undefined}
+								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} sandboxHealth={state.sandboxHealth} askUserDrafts={askUserDrafts.current} disabled={!serverReady || state.syncStatus !== "ready"} /> : undefined}
+								awaitingAnswer={waitingForAnswer}
 								goalControl={
 									<GoalBar
 										goal={state.goal}
@@ -1649,7 +1752,7 @@ export function App({ api, store }: AppProps) {
 								onSubmit={submit}
 								permissionControl={permissionControl}
 								placeholder={t(
-									planRevisionTarget
+									waitingForAnswer ? "Answer the questions above to continue." : planRevisionTarget
 										? "Describe what should change in this plan…"
 										: running || state.queuedTurns.length > 0
 											? "Add a queued message…"
@@ -1663,6 +1766,7 @@ export function App({ api, store }: AppProps) {
 								tasks={state.tasks}
 								thinkingControl={thinkingControl}
 							/>
+							</div>
 						</div>
 					</div>
 				) : null}
@@ -1672,6 +1776,8 @@ export function App({ api, store }: AppProps) {
 					cleanupSessionIds={toolCleanupSessionIds}
 					mode={mode}
 					onActivateSession={activateBrowserSession}
+					onOpen={showToolsSidebar}
+					process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
 					onClose={() => setToolsSidebarOpen(false)}
 					onCleanupSessionIdsHandled={handleToolCleanupHandled}
 					onDirtySessionIdsChange={handleDirtySessionIdsChange}

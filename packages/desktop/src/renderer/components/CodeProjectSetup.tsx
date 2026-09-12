@@ -13,12 +13,14 @@ type SetupStep = "choose" | "create" | "existing";
 
 interface CodeProjectSetupProps {
 	readonly busy: boolean;
+	readonly initialStep?: SetupStep;
 	readonly onChooseExisting: () => Promise<string | null>;
 	readonly onChooseLocation: () => Promise<string | null>;
 	readonly onCancel: () => void;
 	readonly onCreateProject: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	readonly onGetDefaultLocation: () => Promise<string>;
 	readonly onOpenProject: (cwd: string) => Promise<void>;
+	readonly onProjectCreated?: (cwd: string) => Promise<void> | void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
 	readonly onResolveDroppedFiles: (files: readonly File[]) => readonly DesktopAttachmentSelection[];
 }
@@ -47,17 +49,19 @@ function errorMessage(cause: unknown): string {
 
 export function CodeProjectSetup({
 	busy,
+	initialStep = "choose",
 	onChooseExisting,
 	onChooseLocation,
 	onCancel,
 	onCreateProject,
 	onGetDefaultLocation,
 	onOpenProject,
+	onProjectCreated,
 	onPickFiles,
 	onResolveDroppedFiles,
 }: CodeProjectSetupProps) {
 	const { t } = useTranslation();
-	const [step, setStep] = useState<SetupStep>("choose");
+	const [step, setStep] = useState<SetupStep>(initialStep);
 	const [name, setName] = useState("");
 	const [files, setFiles] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [location, setLocation] = useState("");
@@ -137,7 +141,7 @@ export function CodeProjectSetup({
 				files: files.map(({ path, name }) => ({ path, name })),
 			});
 			setCreatedProject(cwd);
-			await onOpenProject(cwd);
+			await (onProjectCreated ?? onOpenProject)(cwd);
 		} catch (cause) {
 			setError(errorMessage(cause));
 		} finally {
