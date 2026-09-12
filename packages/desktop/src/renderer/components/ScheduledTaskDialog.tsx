@@ -253,6 +253,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					<h2 id="scheduled-task-dialog-title">{t(task ? "Edit scheduled task" : "Create scheduled task")}</h2>
 					<button aria-label={t("Close")} disabled={busy} onClick={onClose} type="button"><X aria-hidden="true" size={17} /></button>
 				</header>
+				<div className="scheduled-task-dialog-fields">
 				<label>{t("Name")}<input autoFocus maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
 					<label>{t("Description")}<input maxLength={512} onChange={(event) => setDescription(event.target.value)} placeholder={t("Optional display description")} value={description} /></label>
 					<label>{t("Instructions")}<textarea onChange={(event) => setInstruction(event.target.value)} required rows={5} value={instruction} /></label>
@@ -306,6 +307,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 						{schedule.kind === "interval" && <><div className="scheduled-task-recurrence-fields"><label>{t("Every")}<input max={10000} min={1} onChange={(event) => setSchedule({ ...schedule, every: Number(event.target.value) })} required type="number" value={schedule.every} /></label><div className="scheduled-task-field"><span>{t("Unit")}</span><MenuSelect ariaLabel={t("Unit")} onChange={(unit) => setSchedule({ ...schedule, unit })} options={[{ value: "minute", label: t("Minutes") }, { value: "hour", label: t("Hours") }]} value={schedule.unit} /></div></div><div className="scheduled-task-recurrence-fields"><label>{t("Start date")}<input onChange={(event) => setSchedule({ ...schedule, startDate: event.target.value })} required type="date" value={schedule.startDate} /></label><label>{t("Start time")}<input onChange={(event) => setSchedule({ ...schedule, startTime: event.target.value })} required type="time" value={schedule.startTime} /></label></div></>}
 				</fieldset>
 				{error && <p className="scheduled-task-form-error" role="alert">{t(error)}</p>}
+				</div>
 				<footer><button className="button-secondary" disabled={busy} onClick={onClose} type="button">{t("Cancel")}</button><button disabled={busy || models.length === 0} type="submit">{t(busy ? "Saving…" : "Save")}</button></footer>
 			</form>
 		</dialog>

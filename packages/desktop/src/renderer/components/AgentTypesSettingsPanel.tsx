@@ -303,7 +303,7 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 							<Robot aria-hidden="true" size={16} />
 							<div className="agent-types-card-main">
 								<strong>{view.displayName}</strong>
-								<p>{view.description}</p>
+								<p>{t(view.description)}</p>
 							</div>
 							<span className="agent-types-tools-badge">
 								{view.allowedTools.length > 0
