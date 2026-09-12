@@ -9,8 +9,11 @@ export function animateNewTaskComposer(
 	try {
 		const animation = target.animate(
 			[
-				{ transform: `translate(${source.left - destination.left}px, ${source.top - destination.top}px)` },
-				{ transform: "translate(0px, 0px)" },
+				{
+					transform: `translate(${source.left - destination.left}px, ${source.top - destination.top}px)`,
+					width: `${source.width}px`,
+				},
+				{ transform: "translate(0px, 0px)", width: `${destination.width}px` },
 			],
 			{ duration: 360, easing: "cubic-bezier(.16, 1, .3, 1)", fill: "none" },
 		);
