@@ -205,6 +205,8 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
+	const [catalogOpen, setCatalogOpen] = useState(false);
+	const [providerQuery, setProviderQuery] = useState("");
 	const [settings, setSettings] = useState<ModelSettingsView | null>(null);
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
@@ -710,6 +712,18 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		}
 	};
 
+	const renderProvider = (provider: ModelSettingsProviderView) => (<button aria-haspopup="dialog" className="model-provider-card" key={provider.provider} onClick={() => openProvider(provider)} type="button">
+							<span className="model-provider-card-heading">
+								<span className="model-provider-card-title">
+									<span className={`model-provider-dot ${provider.auth.configured ? "configured" : ""}`} />
+									<strong title={provider.name}>{provider.name}</strong>
+								</span>
+								<span className={`model-provider-badge ${provider.auth.configured ? "configured" : ""}`}>{provider.auth.configured ? t("Configured") : t("Set up")}</span>
+							</span>
+							<small>{t("{{count}} models", { count: provider.models.length })}</small>
+						</button>);
+	const availableProviders = providers.filter((provider) => !provider.auth.configured && `${provider.name} ${provider.provider}`.toLocaleLowerCase().includes(providerQuery.trim().toLocaleLowerCase()));
+
 	if (!settings && !error) return <div aria-label={t("Loading model settings")} className="settings-loading" role="status" />;
 	const thinkingOptions = THINKING_LEVELS.map((level) => ({
 		value: level,
@@ -719,28 +733,28 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		<section className="settings-page model-settings-page">
 			<div className="settings-section">
 				<header className="settings-section-heading">
-					<h3>{t("Providers")}</h3>
+					<h3>{t("Configured providers")}</h3>
 				</header>
-				<p className="model-provider-intro">{t("Select a provider to configure its credentials. Built-in model details stay managed by Metis.")}</p>
+				<p className="model-provider-intro">{t("Manage your connected providers and add more when you need them.")}</p>
 				{settings?.loadError ? <p className="settings-inline-error" role="alert">{settings.loadError}</p> : null}
 				<div className="model-provider-grid">
-					{providers.map((provider) => (
-						<button aria-haspopup="dialog" className="model-provider-card" key={provider.provider} onClick={() => openProvider(provider)} type="button">
-							<span className="model-provider-card-heading">
-								<span className="model-provider-card-title">
-									<span className={`model-provider-dot ${provider.auth.configured ? "configured" : ""}`} />
-									<strong title={provider.name}>{provider.name}</strong>
-								</span>
-								<span className={`model-provider-badge ${provider.auth.configured ? "configured" : ""}`}>{provider.auth.configured ? t("Configured") : t("Set up")}</span>
-							</span>
-							<small>{t("{{count}} models", { count: provider.models.length })}</small>
-						</button>
-					))}
+					{providers.filter((provider) => provider.auth.configured).map(renderProvider)}
 				</div>
+				{!providers.some((provider) => provider.auth.configured) && <p className="model-provider-intro">{t("No providers configured. Browse the catalog to connect one.")}</p>}
+				<div className="model-provider-catalog-actions">
+					<button aria-expanded={catalogOpen} className="settings-secondary-button" onClick={() => setCatalogOpen(!catalogOpen)} type="button">{t("Browse providers")}</button>
+
 				<button className="settings-secondary-button model-add-provider" disabled={!serverReady || busy} onClick={() => openCustomEditor()} type="button">
 					<Plus aria-hidden="true" size={15} />
 					{t("Add provider")}
 				</button>
+				</div>
+				{catalogOpen && <div className="model-provider-catalog">
+					<input aria-label={t("Search providers")} onChange={(event) => setProviderQuery(event.target.value)} placeholder={t("Search providers…")} type="search" value={providerQuery} />
+					<div className="model-provider-grid">{availableProviders.map(renderProvider)}</div>
+					{availableProviders.length === 0 && <p>{t("No providers match your search.")}</p>}
+				</div>}
+
 			</div>
 
 			<div className="settings-section model-service-section">
@@ -748,7 +762,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 					<h3>{t("Specialized models")}</h3>
 				</header>
 				<p className="model-provider-intro">
-					{t("Extract sends bounded text to your Embedding service and up to 50 candidate facts to optional Rerank.")}
+					{t("Optional services for images and long-term memory. Your chat model works independently.")}
 				</p>
 
 				<article className="settings-card model-service-panel">
