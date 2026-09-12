@@ -1875,6 +1875,109 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it.each(["answer", "expiry", "interruption"] as const)(
+		"keeps unanswered questions across session switches and releases them after %s",
+		async (completion) => {
+			const ipcMain = new FakeIpcMain();
+			const { emitMessage, supervisor } = supervisorHarness();
+			const currentSessionId = "11111111-1111-4111-8111-111111111211";
+			const replacementSessionId = "11111111-1111-4111-8111-111111111212";
+			supervisor.request.mockImplementation(async (request) => ({
+				jsonrpc: "2.0",
+				id: request.id,
+				result:
+					request.method === "session/subscribe"
+						? { snapshot: { session: { sessionId: request.params.sessionId } } }
+						: {},
+			}));
+			const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+			const webContents = new FakeWebContents();
+			broker.attach({ webContents: webContents as never });
+			const event = { sender: webContents, senderFrame: webContents.mainFrame };
+			const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+			await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!(event);
+			await openSession(event, { sessionId: currentSessionId });
+			const request = {
+				jsonrpc: "2.0" as const,
+				id: "ask-across-sessions",
+				method: "interaction/request" as const,
+				params: {
+					serverEpoch: "11111111-1111-4111-8111-111111111111",
+					interaction: {
+						interactionId: "33333333-3333-4333-8333-333333333311",
+						sessionId: currentSessionId,
+						title: "Question",
+						message: "Choose",
+						createdAt: "2026-07-16T00:00:00.000Z",
+						...(completion === "expiry" ? { expiresAt: new Date(Date.now() + 150).toISOString() } : {}),
+						kind: "ask_user" as const,
+						questions: [
+							{
+								id: "q1",
+								question: "Which option?",
+								multiple: false,
+								choices: [
+									{ id: "a", label: "Option A" },
+									{ id: "b", label: "Option B" },
+								],
+							},
+						],
+					},
+				},
+			};
+			emitMessage(request);
+			supervisor.request.mockClear();
+			await openSession(event, { sessionId: replacementSessionId });
+			expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+			expect(supervisor.request).not.toHaveBeenCalledWith(
+				expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
+			);
+			const restored = await openSession(event, { sessionId: currentSessionId });
+			expect(restored).toEqual(expect.objectContaining({ pendingInteractions: [request.params.interaction] }));
+			expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+			await openSession(event, { sessionId: replacementSessionId });
+			supervisor.request.mockClear();
+			if (completion === "answer") {
+				await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.respondToInteraction)!(event, {
+					interactionId: request.params.interaction.interactionId,
+					kind: "ask_user",
+					cancelled: false,
+					answers: [{ questionId: "q1", choiceIds: ["a"] }],
+				});
+			}
+			if (completion === "interruption") {
+				emitMessage({
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: request.params.serverEpoch,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "turn/interrupted",
+								turn: {
+									turnId: "turn-question",
+									sessionId: currentSessionId,
+									operationIds: ["operation-question"],
+									state: "interrupted",
+									startedAt: "2026-07-15T23:59:59.000Z",
+									completedAt: "2026-07-16T00:00:01.000Z",
+								},
+							},
+						],
+					},
+				});
+			}
+			await new Promise((resolve) => setTimeout(resolve, completion === "expiry" ? 180 : 0));
+			expect(supervisor.respondToServerRequest).toHaveBeenCalledTimes(1);
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: currentSessionId } }),
+			);
+			broker.dispose();
+		},
+	);
+
 	it("forgets a local session subscription when renderer teardown loses the unsubscribe response", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();

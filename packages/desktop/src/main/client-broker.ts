@@ -310,6 +310,7 @@ export class ClientBroker {
 	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
+	private readonly backgroundQuestionSessions = new Set<string>();
 	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
 	private scheduleSubscribed = false;
 	private subscriptionMutation = Promise.resolve();
@@ -468,6 +469,7 @@ export class ClientBroker {
 					this.browserToolHost.cancelAll("server_restarted");
 					this.dropPendingInteractions();
 					this.subscribedSessions.clear();
+					this.backgroundQuestionSessions.clear();
 					this.subscribedSessionScopes.clear();
 					this.scheduleSubscribed = false;
 					this.workspaceFiles.clear();
@@ -597,6 +599,7 @@ export class ClientBroker {
 					await this.clientCall("session/open", params);
 					const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
 					this.subscribedSessions.add(params.sessionId);
+					this.backgroundQuestionSessions.delete(params.sessionId);
 					const session = subscribed.snapshot.session;
 					this.subscribedSessionScopes.set(session.sessionId, {
 						mode: session.mode,
@@ -607,13 +610,34 @@ export class ClientBroker {
 					else this.workspaceFiles.revoke(params.sessionId);
 					for (const previousSessionId of previousSessionIds) this.workspaceFiles.revoke(previousSessionId);
 					const previousSessions = new Set(previousSessionIds);
-					this.cancelPendingInteractionsForSessions(previousSessions);
-					await this.unsubscribeSessions(previousSessionIds, true);
+					// Keep the owner of an unanswered question alive while the user visits another task.
+					// Permission approvals still cancel when their task is hidden.
+					for (const sessionId of previousSessionIds) {
+						if (this.hasPendingQuestion(sessionId)) this.backgroundQuestionSessions.add(sessionId);
+					}
+					this.cancelPendingInteractionsForSessions(previousSessions, true);
+					const releasedSessions = previousSessionIds.filter(
+						(sessionId) => !this.backgroundQuestionSessions.has(sessionId),
+					);
+					await this.unsubscribeSessions(releasedSessions, true);
 					// A request can cross the process boundary while unsubscribe is in flight.
-					this.cancelPendingInteractionsForSessions(previousSessions);
+					this.cancelPendingInteractionsForSessions(new Set(releasedSessions));
 					for (const event of this.browserManager.replayEvents(params.sessionId)) this.sendBrowserEvent(event);
 					this.onSessionOpened?.(params.sessionId);
-					return subscribed.snapshot;
+					const questions = [...this.pendingInteractions.values()]
+						.map(({ request }) => request.params.interaction)
+						.filter(
+							(interaction) => interaction.sessionId === params.sessionId && interaction.kind === "ask_user",
+						);
+					if (questions.length === 0) return subscribed.snapshot;
+					const pending = new Map(
+						(subscribed.snapshot.pendingInteractions ?? []).map((interaction) => [
+							interaction.interactionId,
+							interaction,
+						]),
+					);
+					for (const question of questions) pending.set(question.interactionId, question);
+					return { ...subscribed.snapshot, pendingInteractions: [...pending.values()] };
 				}),
 			);
 		});
@@ -866,6 +890,10 @@ export class ClientBroker {
 				throw new Error("App-server reused a pending interaction id");
 			}
 			const interaction = interactionRequest.params.interaction;
+			if (this.backgroundQuestionSessions.has(interaction.sessionId) && interaction.kind !== "ask_user") {
+				this.cancelServerInteraction(interactionRequest);
+				return;
+			}
 			const expiresAt = interaction.expiresAt ? Date.parse(interaction.expiresAt) : Number.NaN;
 			const delay = expiresAt - Date.now();
 			const timer = Number.isFinite(delay)
@@ -888,6 +916,18 @@ export class ClientBroker {
 		}
 		if (notification.method !== "connection/events") return;
 		for (const event of notification.params.events) {
+			if ((event.type === "turn/completed" || event.type === "turn/interrupted") && event.turn.completedAt) {
+				for (const [id, { request }] of this.pendingInteractions) {
+					const interaction = request.params.interaction;
+					if (
+						interaction.kind === "ask_user" &&
+						interaction.sessionId === event.turn.sessionId &&
+						Date.parse(interaction.createdAt) >= Date.parse(event.turn.startedAt) &&
+						Date.parse(interaction.createdAt) <= Date.parse(event.turn.completedAt)
+					)
+						this.expireInteraction(id);
+				}
+			}
 			if (event.type === "session/updated") this.onSessionUpdated?.(event.session);
 			else if (event.type === "session/invalidated" && event.reason === "deleted") {
 				this.onSessionDeleted?.(event.sessionId);
@@ -910,6 +950,7 @@ export class ClientBroker {
 		this.supervisor.respondToServerRequest(pending.request, response);
 		if (pending.timer) clearTimeout(pending.timer);
 		this.pendingInteractions.delete(input.interactionId);
+		this.releaseAnsweredBackgroundSession(pending.request.params.interaction.sessionId);
 	}
 
 	private sendEvent(event: DesktopApiEvent): boolean {
@@ -955,9 +996,10 @@ export class ClientBroker {
 		}
 	}
 
-	private cancelPendingInteractionsForSessions(sessionIds: ReadonlySet<string>): void {
+	private cancelPendingInteractionsForSessions(sessionIds: ReadonlySet<string>, keepQuestions = false): void {
 		for (const [interactionId, pending] of this.pendingInteractions) {
 			if (!sessionIds.has(pending.request.params.interaction.sessionId)) continue;
+			if (keepQuestions && pending.request.params.interaction.kind === "ask_user") continue;
 			this.pendingInteractions.delete(interactionId);
 			if (pending.timer) clearTimeout(pending.timer);
 			this.cancelServerInteraction(pending.request);
@@ -977,6 +1019,22 @@ export class ClientBroker {
 		this.pendingInteractions.delete(interactionId);
 		this.cancelServerInteraction(pending.request);
 		this.sendEvent({ type: "interaction-cancelled", interactionId });
+		this.releaseAnsweredBackgroundSession(pending.request.params.interaction.sessionId);
+	}
+
+	private hasPendingQuestion(sessionId: string): boolean {
+		return [...this.pendingInteractions.values()].some(
+			({ request }) =>
+				request.params.interaction.sessionId === sessionId && request.params.interaction.kind === "ask_user",
+		);
+	}
+
+	private releaseAnsweredBackgroundSession(sessionId: string): void {
+		void this.enqueueSubscriptionMutation(async () => {
+			if (!this.backgroundQuestionSessions.has(sessionId) || this.hasPendingQuestion(sessionId)) return;
+			await this.unsubscribeSessions([sessionId], true);
+			this.cancelPendingInteractionsForSessions(new Set([sessionId]));
+		});
 	}
 
 	private cancelServerInteraction(request: ServerRpcRequest<"interaction/request">): void {
@@ -1054,6 +1112,7 @@ export class ClientBroker {
 		for (const sessionId of ids) {
 			this.workspaceFiles.revoke(sessionId);
 			this.subscribedSessions.delete(sessionId);
+			this.backgroundQuestionSessions.delete(sessionId);
 			this.subscribedSessionScopes.delete(sessionId);
 		}
 		this.browserToolHost.cancelSessions(ids);
@@ -1094,11 +1153,13 @@ export class ClientBroker {
 				try {
 					await this.clientCall("session/unsubscribe", { sessionId });
 					this.subscribedSessions.delete(sessionId);
+					this.backgroundQuestionSessions.delete(sessionId);
 					this.subscribedSessionScopes.delete(sessionId);
 				} catch (error) {
 					if (ignoreErrors) {
 						// Renderer teardown is authoritative locally; reconnect builds a fresh subscription set.
 						this.subscribedSessions.delete(sessionId);
+						this.backgroundQuestionSessions.delete(sessionId);
 						this.subscribedSessionScopes.delete(sessionId);
 					} else {
 						errors.push(error);
