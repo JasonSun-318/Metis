@@ -4,7 +4,7 @@ export interface HomeGreeting {
 	readonly id: string;
 	readonly period: HomePeriod | "anytime";
 	readonly key: string;
-	readonly anonymousKey?: string;
+	readonly anonymousKey: string;
 }
 
 export type HomeStarterId =
@@ -16,7 +16,13 @@ export type HomeStarterId =
 	| "plan"
 	| "writing"
 	| "compare"
-	| "meeting";
+	| "meeting"
+	| "feature"
+	| "debug"
+	| "explain"
+	| "review"
+	| "test"
+	| "performance";
 
 export interface HomeStarter {
 	readonly id: HomeStarterId;
@@ -29,67 +35,147 @@ export const HOME_GREETINGS: readonly HomeGreeting[] = [
 	{
 		id: "morning-hello",
 		period: "morning",
-		key: "Good morning, {{name}}. Where shall we start?",
-		anonymousKey: "Good morning. Where shall we start?",
+		key: "Good morning, {{name}}.",
+		anonymousKey: "Good morning.",
 	},
-	{ id: "morning-start", period: "morning", key: "A good day starts with an idea." },
+	{
+		id: "morning-start",
+		period: "morning",
+		key: "{{name}}, a good day starts now.",
+		anonymousKey: "A good day starts now.",
+	},
 	{
 		id: "morning-first",
 		period: "morning",
-		key: "{{name}}, let me help with the first task of the day.",
-		anonymousKey: "Let me help with the first task of the day.",
+		key: "{{name}}, ready for your first win?",
+		anonymousKey: "Ready for your first win?",
 	},
 	{
 		id: "noon-hello",
 		period: "noon",
-		key: "Hello, {{name}}. What shall we work on this lunchtime?",
-		anonymousKey: "What shall we work on this lunchtime?",
+		key: "Hello, {{name}}.",
+		anonymousKey: "Hello.",
 	},
-	{ id: "noon-idea", period: "noon", key: "A lunchtime idea? Let's explore it." },
-	{ id: "noon-small", period: "noon", key: "Start with one small task for an easier afternoon." },
+	{
+		id: "noon-idea",
+		period: "noon",
+		key: "{{name}}, what's today's idea?",
+		anonymousKey: "What's today's idea?",
+	},
+	{
+		id: "noon-small",
+		period: "noon",
+		key: "{{name}}, one small step?",
+		anonymousKey: "One small step?",
+	},
 	{
 		id: "afternoon-hello",
 		period: "afternoon",
-		key: "Good afternoon, {{name}}. Let's move an idea forward.",
-		anonymousKey: "Good afternoon. Let's move an idea forward.",
+		key: "Good afternoon, {{name}}.",
+		anonymousKey: "Good afternoon.",
 	},
 	{
 		id: "afternoon-progress",
 		period: "afternoon",
-		key: "Make room for an idea and a little progress this afternoon.",
+		key: "{{name}}, keep the momentum going.",
+		anonymousKey: "Keep the momentum going.",
 	},
 	{
 		id: "afternoon-unblock",
 		period: "afternoon",
-		key: "{{name}}, let's untangle anything that's stuck.",
-		anonymousKey: "Let's untangle anything that's stuck.",
+		key: "{{name}}, clear a roadblock?",
+		anonymousKey: "Clear a roadblock?",
 	},
 	{
 		id: "evening-hello",
 		period: "evening",
-		key: "Good evening, {{name}}. Any ideas on your mind?",
-		anonymousKey: "Good evening. Any ideas on your mind?",
+		key: "Good evening, {{name}}.",
+		anonymousKey: "Good evening.",
 	},
-	{ id: "evening-wrap", period: "evening", key: "Reflect on today, or start with a new idea." },
-	{ id: "evening-tomorrow", period: "evening", key: "Make a clear starting point for tomorrow." },
-	{ id: "late-idea", period: "late", key: "It's late, and an idea is still glowing." },
+	{
+		id: "evening-wrap",
+		period: "evening",
+		key: "{{name}}, wrap up today or start fresh.",
+		anonymousKey: "Wrap up today or start fresh.",
+	},
+	{
+		id: "evening-tomorrow",
+		period: "evening",
+		key: "{{name}}, set tomorrow up well.",
+		anonymousKey: "Set tomorrow up well.",
+	},
+	{
+		id: "late-idea",
+		period: "late",
+		key: "{{name}}, still chasing an idea?",
+		anonymousKey: "Still chasing an idea?",
+	},
 	{
 		id: "late-company",
 		period: "late",
-		key: "I'm here, {{name}}. What's on your mind?",
-		anonymousKey: "I'm here. What's on your mind?",
+		key: "I'm here, {{name}}.",
+		anonymousKey: "I'm here.",
 	},
-	{ id: "anytime-idea", period: "anytime", key: "Have an idea you'd like to try together?" },
-	{ id: "anytime-shape", period: "anytime", key: "Bring an idea. Let's make it clearer." },
+	{
+		id: "anytime-idea",
+		period: "anytime",
+		key: "{{name}}, what shall we try?",
+		anonymousKey: "What shall we try?",
+	},
+	{
+		id: "anytime-shape",
+		period: "anytime",
+		key: "{{name}}, let's shape an idea.",
+		anonymousKey: "Let's shape an idea.",
+	},
 	{
 		id: "anytime-task",
 		period: "anytime",
-		key: "{{name}}, what would you like a hand with today?",
-		anonymousKey: "What would you like a hand with today?",
+		key: "{{name}}, what can I take on?",
+		anonymousKey: "What can I take on?",
 	},
-	{ id: "anytime-result", period: "anytime", key: "From a question to something worth sharing." },
-	{ id: "anytime-start", period: "anytime", key: "It doesn't need to be fully formed. We can start by talking." },
+	{
+		id: "anytime-result",
+		period: "anytime",
+		key: "{{name}}, let's make it shareable.",
+		anonymousKey: "Let's make it shareable.",
+	},
+	{
+		id: "anytime-start",
+		period: "anytime",
+		key: "{{name}}, let's start with a chat.",
+		anonymousKey: "Let's start with a chat.",
+	},
 ];
+
+const CODE_ONLY_GREETINGS: readonly HomeGreeting[] = [
+	{
+		id: "code-morning-idea",
+		period: "morning",
+		key: "{{name}}, ready to build?",
+		anonymousKey: "Ready to build?",
+	},
+	{
+		id: "code-afternoon-change",
+		period: "afternoon",
+		key: "{{name}}, ready to ship a change?",
+		anonymousKey: "Ready to ship a change?",
+	},
+	{
+		id: "code-evening-clearer",
+		period: "evening",
+		key: "{{name}}, leave the code better.",
+		anonymousKey: "Leave the code better.",
+	},
+	{
+		id: "code-anytime-build",
+		period: "anytime",
+		key: "{{name}}, what shall we build?",
+		anonymousKey: "What shall we build?",
+	},
+];
+
+export const CODE_HOME_GREETINGS: readonly HomeGreeting[] = [...HOME_GREETINGS, ...CODE_ONLY_GREETINGS];
 
 export const HOME_STARTERS: readonly HomeStarter[] = [
 	{
@@ -157,6 +243,55 @@ export const HOME_STARTERS: readonly HomeStarter[] = [
 	},
 ];
 
+export const CODE_HOME_STARTERS: readonly HomeStarter[] = [
+	{
+		id: "feature",
+		title: "Implement a feature",
+		description: "Turn a requirement into a working change",
+		prompt:
+			"Help me implement [feature] in this project. First inspect the relevant code and explain the current behavior, then propose a small implementation plan. Clarify acceptance criteria, constraints, and affected files when they are missing. Implement the change only after the approach is clear, and verify it with focused tests.",
+	},
+	{
+		id: "debug",
+		title: "Fix a bug",
+		description: "Trace the cause and make a safe repair",
+		prompt:
+			"Help me investigate and fix [bug] in this project. Start by reproducing or tracing the behavior and identify the root cause. Ask for the expected behavior, error details, and reproduction steps if essential information is missing. Propose the smallest safe fix, implement it, and verify the regression with a focused test.",
+	},
+	{
+		id: "explain",
+		title: "Understand this project",
+		description: "Map the structure, flow, and key entry points",
+		prompt:
+			"Explain this project's structure and how [area or feature] works. Trace the relevant entry points, data flow, and key dependencies from the repository. Point out where I should make a change and note any uncertainty instead of guessing. Ask me to specify the area if needed.",
+	},
+	{
+		id: "review",
+		title: "Review the code",
+		description: "Find concrete defects, risks, and missing tests",
+		prompt:
+			"Review the current changes in this project for concrete bugs, regressions, security issues, and missing tests. Start with the highest-risk findings, cite the relevant files and lines, and explain why each matters. Ask me to provide a diff or clarify the review scope if it is unavailable. Do not modify files.",
+	},
+	{
+		id: "test",
+		title: "Add tests",
+		description: "Cover important behavior and edge cases",
+		prompt:
+			"Add focused tests for [behavior] in this project. First inspect the existing test conventions and identify the cases that matter, including edge cases and failure paths. Ask for the expected behavior if it is unclear, then implement the tests and run the narrowest relevant checks.",
+	},
+	{
+		id: "performance",
+		title: "Improve performance",
+		description: "Measure a bottleneck and optimize with evidence",
+		prompt:
+			"Investigate and improve the performance of [operation] in this project. First measure or trace the current bottleneck and establish a useful baseline. Ask for the target workload or constraints if essential information is missing. Propose the smallest evidence-based optimization and verify that behavior remains correct with focused checks.",
+	},
+];
+
+export function getHomeStarters(mode: "chat" | "code"): readonly HomeStarter[] {
+	return mode === "code" ? CODE_HOME_STARTERS : HOME_STARTERS;
+}
+
 export function getHomePeriod(date: Date): HomePeriod {
 	const hour = date.getHours();
 	if (hour >= 5 && hour < 11) return "morning";
@@ -166,10 +301,22 @@ export function getHomePeriod(date: Date): HomePeriod {
 	return "late";
 }
 
-export function pickHomeGreeting(date: Date, previousId?: string, random: () => number = Math.random): HomeGreeting {
+export function pickHomeGreeting(
+	date: Date,
+	previousId?: string,
+	random: () => number = Math.random,
+	mode: "chat" | "code" = "chat",
+): HomeGreeting {
 	const period = getHomePeriod(date);
-	const pool = HOME_GREETINGS.filter(
+	const greetings = mode === "code" ? CODE_HOME_GREETINGS : HOME_GREETINGS;
+	const pool = greetings.filter(
 		(item) => (item.period === period || item.period === "anytime") && item.id !== previousId,
 	);
-	return pool[Math.floor(random() * pool.length)]!;
+	const eligible =
+		pool.length > 0 ? pool : greetings.filter((item) => item.period === period || item.period === "anytime");
+	const sample = random();
+	const index = Number.isFinite(sample)
+		? Math.min(eligible.length - 1, Math.max(0, Math.floor(sample * eligible.length)))
+		: 0;
+	return eligible[index]!;
 }
