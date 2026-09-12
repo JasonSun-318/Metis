@@ -994,7 +994,22 @@ export const SessionStatusViewSchema = Type.Refine(
 	"Context usage status is inconsistent",
 );
 
+export const SessionProcessViewSchema = StrictObject({
+	processId: OpaqueIdSchema,
+	command: PublicTextSchema,
+	state: Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed")]),
+	output: PublicTextSchema,
+	truncated: Type.Boolean(),
+});
+
+export const ProcessChangedEventSchema = StrictObject({
+	type: Type.Literal("session/processChanged"),
+	sessionId: SessionIdSchema,
+	process: SessionProcessViewSchema,
+});
+
 export const SessionSnapshotSchema = StrictObject({
+	process: Type.Optional(SessionProcessViewSchema),
 	session: SessionSummarySchema,
 	collaborationMode: CollaborationModeSchema,
 	permissionPreset: PermissionPresetSchema,
@@ -1388,6 +1403,7 @@ export const ScheduleRunUpdatedEventSchema = StrictObject({
 export const ScheduleRefreshedEventSchema = StrictObject({ type: Type.Literal("schedule/refreshed") });
 
 export const DomainEventSchema = Type.Union([
+	ProcessChangedEventSchema,
 	SessionUpdatedEventSchema,
 	SessionInvalidatedEventSchema,
 	ProjectInvalidatedEventSchema,
@@ -1671,3 +1687,5 @@ export type PluginMarketView = Static<typeof PluginMarketViewSchema>;
 export type PluginCatalogEntryView = Static<typeof PluginCatalogEntryViewSchema>;
 export type PluginInspectionView = Static<typeof PluginInspectionViewSchema>;
 export type PluginUpdateInspectionView = Static<typeof PluginUpdateInspectionViewSchema>;
+
+export type SessionProcessView = Static<typeof SessionProcessViewSchema>;

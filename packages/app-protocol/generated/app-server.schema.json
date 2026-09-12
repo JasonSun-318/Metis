@@ -10650,6 +10650,72 @@
                             "type": "object",
                             "required": [
                               "type",
+                              "sessionId",
+                              "process"
+                            ],
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "session/processChanged"
+                              },
+                              "sessionId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                              },
+                              "process": {
+                                "type": "object",
+                                "required": [
+                                  "processId",
+                                  "command",
+                                  "state",
+                                  "output",
+                                  "truncated"
+                                ],
+                                "properties": {
+                                  "processId": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                  },
+                                  "command": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 65536
+                                  },
+                                  "state": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "running"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "completed"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "failed"
+                                      }
+                                    ]
+                                  },
+                                  "output": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 65536
+                                  },
+                                  "truncated": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "required": [
+                              "type",
                               "session"
                             ],
                             "properties": {
@@ -23491,6 +23557,52 @@
                         "cursor"
                       ],
                       "properties": {
+                        "process": {
+                          "type": "object",
+                          "required": [
+                            "processId",
+                            "command",
+                            "state",
+                            "output",
+                            "truncated"
+                          ],
+                          "properties": {
+                            "processId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "command": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "state": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "running"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "completed"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "failed"
+                                }
+                              ]
+                            },
+                            "output": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
                         "session": {
                           "type": "object",
                           "required": [
@@ -37514,10 +37626,17 @@
                       }
                     },
                     "selectedSourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "registryRevision": {
                       "type": "integer",
@@ -37613,10 +37732,17 @@
                       }
                     },
                     "selectedSourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "registryRevision": {
                       "type": "integer",
@@ -37712,10 +37838,17 @@
                       }
                     },
                     "selectedSourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "registryRevision": {
                       "type": "integer",
@@ -37811,10 +37944,17 @@
                       }
                     },
                     "selectedSourceId": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 256,
-                      "x-metis-maxUtf16Units": 256
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 256,
+                          "x-metis-maxUtf16Units": 256
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
                     },
                     "registryRevision": {
                       "type": "integer",
@@ -37865,6 +38005,10 @@
                           "installState"
                         ],
                         "properties": {
+                          "installedPluginId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
                           "id": {
                             "type": "string",
                             "minLength": 1,
@@ -37933,6 +38077,10 @@
                           "installState"
                         ],
                         "properties": {
+                          "installedPluginId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
                           "id": {
                             "type": "string",
                             "minLength": 1,
@@ -38049,6 +38197,10 @@
                           "installState"
                         ],
                         "properties": {
+                          "installedPluginId": {
+                            "type": "string",
+                            "pattern": "^[a-f0-9]{64}$"
+                          },
                           "id": {
                             "type": "string",
                             "minLength": 1,
@@ -42606,6 +42758,174 @@
                         "name": {
                           "type": "string",
                           "const": "INVALID_CURSOR"
+                        },
+                        "retryable": {
+                          "type": "boolean",
+                          "const": false
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "interactionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "const": -32016
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "GitHub request limit reached. Please wait and try again, or use a different network or proxy."
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "GITHUB_RATE_LIMITED"
+                        },
+                        "retryable": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "interactionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "const": -32017
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "Could not download from GitHub. Check your network or proxy and try again later."
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "GITHUB_DOWNLOAD_FAILED"
+                        },
+                        "retryable": {
+                          "type": "boolean",
+                          "const": true
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        },
+                        "sessionId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                        },
+                        "operationId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "interactionId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "required": [
+                    "code",
+                    "message",
+                    "data"
+                  ],
+                  "properties": {
+                    "code": {
+                      "type": "number",
+                      "const": -32018
+                    },
+                    "message": {
+                      "type": "string",
+                      "const": "GitHub repository is unavailable or access was denied. Check the address and repository visibility."
+                    },
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "name",
+                        "retryable"
+                      ],
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "const": "GITHUB_ACCESS_DENIED"
                         },
                         "retryable": {
                           "type": "boolean",
@@ -59097,6 +59417,52 @@
                     "cursor"
                   ],
                   "properties": {
+                    "process": {
+                      "type": "object",
+                      "required": [
+                        "processId",
+                        "command",
+                        "state",
+                        "output",
+                        "truncated"
+                      ],
+                      "properties": {
+                        "processId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128,
+                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                        },
+                        "command": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "state": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "const": "running"
+                            },
+                            {
+                              "type": "string",
+                              "const": "completed"
+                            },
+                            {
+                              "type": "string",
+                              "const": "failed"
+                            }
+                          ]
+                        },
+                        "output": {
+                          "type": "string",
+                          "x-metis-maxUtf8Bytes": 65536
+                        },
+                        "truncated": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
                     "session": {
                       "type": "object",
                       "required": [
@@ -73120,10 +73486,17 @@
                   }
                 },
                 "selectedSourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "registryRevision": {
                   "type": "integer",
@@ -73219,10 +73592,17 @@
                   }
                 },
                 "selectedSourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "registryRevision": {
                   "type": "integer",
@@ -73318,10 +73698,17 @@
                   }
                 },
                 "selectedSourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "registryRevision": {
                   "type": "integer",
@@ -73417,10 +73804,17 @@
                   }
                 },
                 "selectedSourceId": {
-                  "type": "string",
-                  "minLength": 1,
-                  "maxLength": 256,
-                  "x-metis-maxUtf16Units": 256
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "x-metis-maxUtf16Units": 256
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
                 },
                 "registryRevision": {
                   "type": "integer",
@@ -73471,6 +73865,10 @@
                       "installState"
                     ],
                     "properties": {
+                      "installedPluginId": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
                       "id": {
                         "type": "string",
                         "minLength": 1,
@@ -73539,6 +73937,10 @@
                       "installState"
                     ],
                     "properties": {
+                      "installedPluginId": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
                       "id": {
                         "type": "string",
                         "minLength": 1,
@@ -73655,6 +74057,10 @@
                       "installState"
                     ],
                     "properties": {
+                      "installedPluginId": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{64}$"
+                      },
                       "id": {
                         "type": "string",
                         "minLength": 1,
@@ -76122,6 +76528,72 @@
           "type": "array",
           "items": {
             "anyOf": [
+              {
+                "type": "object",
+                "required": [
+                  "type",
+                  "sessionId",
+                  "process"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "const": "session/processChanged"
+                  },
+                  "sessionId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                  },
+                  "process": {
+                    "type": "object",
+                    "required": [
+                      "processId",
+                      "command",
+                      "state",
+                      "output",
+                      "truncated"
+                    ],
+                    "properties": {
+                      "processId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "command": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "state": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "running"
+                          },
+                          {
+                            "type": "string",
+                            "const": "completed"
+                          },
+                          {
+                            "type": "string",
+                            "const": "failed"
+                          }
+                        ]
+                      },
+                      "output": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": false
+              },
               {
                 "type": "object",
                 "required": [
@@ -81664,6 +82136,72 @@
     },
     "DomainEvent": {
       "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "sessionId",
+            "process"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "session/processChanged"
+            },
+            "sessionId": {
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+            },
+            "process": {
+              "type": "object",
+              "required": [
+                "processId",
+                "command",
+                "state",
+                "output",
+                "truncated"
+              ],
+              "properties": {
+                "processId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "command": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "state": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "running"
+                    },
+                    {
+                      "type": "string",
+                      "const": "completed"
+                    },
+                    {
+                      "type": "string",
+                      "const": "failed"
+                    }
+                  ]
+                },
+                "output": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "required": [
@@ -89487,6 +90025,174 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "data"
+          ],
+          "properties": {
+            "code": {
+              "type": "number",
+              "const": -32016
+            },
+            "message": {
+              "type": "string",
+              "const": "GitHub request limit reached. Please wait and try again, or use a different network or proxy."
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "name",
+                "retryable"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "const": "GITHUB_RATE_LIMITED"
+                },
+                "retryable": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "operationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "interactionId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "data"
+          ],
+          "properties": {
+            "code": {
+              "type": "number",
+              "const": -32017
+            },
+            "message": {
+              "type": "string",
+              "const": "Could not download from GitHub. Check your network or proxy and try again later."
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "name",
+                "retryable"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "const": "GITHUB_DOWNLOAD_FAILED"
+                },
+                "retryable": {
+                  "type": "boolean",
+                  "const": true
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "operationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "interactionId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "message",
+            "data"
+          ],
+          "properties": {
+            "code": {
+              "type": "number",
+              "const": -32018
+            },
+            "message": {
+              "type": "string",
+              "const": "GitHub repository is unavailable or access was denied. Check the address and repository visibility."
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "name",
+                "retryable"
+              ],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "const": "GITHUB_ACCESS_DENIED"
+                },
+                "retryable": {
+                  "type": "boolean",
+                  "const": false
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "operationId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "interactionId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
         }
       ]
     },
@@ -90446,6 +91152,174 @@
                 }
               },
               "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "data"
+              ],
+              "properties": {
+                "code": {
+                  "type": "number",
+                  "const": -32016
+                },
+                "message": {
+                  "type": "string",
+                  "const": "GitHub request limit reached. Please wait and try again, or use a different network or proxy."
+                },
+                "data": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "const": "GITHUB_RATE_LIMITED"
+                    },
+                    "retryable": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "interactionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "data"
+              ],
+              "properties": {
+                "code": {
+                  "type": "number",
+                  "const": -32017
+                },
+                "message": {
+                  "type": "string",
+                  "const": "Could not download from GitHub. Check your network or proxy and try again later."
+                },
+                "data": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "const": "GITHUB_DOWNLOAD_FAILED"
+                    },
+                    "retryable": {
+                      "type": "boolean",
+                      "const": true
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "interactionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "code",
+                "message",
+                "data"
+              ],
+              "properties": {
+                "code": {
+                  "type": "number",
+                  "const": -32018
+                },
+                "message": {
+                  "type": "string",
+                  "const": "GitHub repository is unavailable or access was denied. Check the address and repository visibility."
+                },
+                "data": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "retryable"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "const": "GITHUB_ACCESS_DENIED"
+                    },
+                    "retryable": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "operationId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "interactionId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
             }
           ]
         }
@@ -90497,6 +91371,72 @@
                   "type": "array",
                   "items": {
                     "anyOf": [
+                      {
+                        "type": "object",
+                        "required": [
+                          "type",
+                          "sessionId",
+                          "process"
+                        ],
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "session/processChanged"
+                          },
+                          "sessionId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                          },
+                          "process": {
+                            "type": "object",
+                            "required": [
+                              "processId",
+                              "command",
+                              "state",
+                              "output",
+                              "truncated"
+                            ],
+                            "properties": {
+                              "processId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                              },
+                              "command": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "state": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "running"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "completed"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "failed"
+                                  }
+                                ]
+                              },
+                              "output": {
+                                "type": "string",
+                                "x-metis-maxUtf8Bytes": 65536
+                              },
+                              "truncated": {
+                                "type": "boolean"
+                              }
+                            },
+                            "additionalProperties": false
+                          }
+                        },
+                        "additionalProperties": false
+                      },
                       {
                         "type": "object",
                         "required": [
@@ -98622,6 +99562,52 @@
         "cursor"
       ],
       "properties": {
+        "process": {
+          "type": "object",
+          "required": [
+            "processId",
+            "command",
+            "state",
+            "output",
+            "truncated"
+          ],
+          "properties": {
+            "processId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+            },
+            "command": {
+              "type": "string",
+              "x-metis-maxUtf8Bytes": 65536
+            },
+            "state": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "const": "running"
+                },
+                {
+                  "type": "string",
+                  "const": "completed"
+                },
+                {
+                  "type": "string",
+                  "const": "failed"
+                }
+              ]
+            },
+            "output": {
+              "type": "string",
+              "x-metis-maxUtf8Bytes": 65536
+            },
+            "truncated": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        },
         "session": {
           "type": "object",
           "required": [
