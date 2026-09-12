@@ -18,6 +18,7 @@ export function GeneralPanel({
 	generalPreferences,
 	onGeneralPreferencesChange,
 	onThemeChange,
+	onDirtyChange,
 	serverReady,
 	theme,
 }: {
@@ -28,6 +29,7 @@ export function GeneralPanel({
 	readonly generalPreferences: GeneralPreferences;
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
+	readonly onDirtyChange?: (dirty: boolean) => void;
 	readonly serverReady: boolean;
 	readonly theme: AppTheme;
 }) {
@@ -135,7 +137,7 @@ export function GeneralPanel({
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Chat font")}</span>
-							<p>{t("Font used for assistant prose in Chat mode.")}</p>
+							<p>{t("Font used for Chat replies, greetings, and questions.")}</p>
 							{generalPreferences.chatFont === "anthropic-serif" ? (
 								<small>{t("Anthropic Serif falls back to the system serif for unsupported characters.")}</small>
 							) : null}
@@ -154,7 +156,7 @@ export function GeneralPanel({
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Code font")}</span>
-							<p>{t("Font used for assistant prose in Code mode. Code and tools remain monospaced.")}</p>
+							<p>{t("Font used for Code replies, greetings, and questions. Code and tools remain monospaced.")}</p>
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
@@ -170,7 +172,7 @@ export function GeneralPanel({
 				</div>
 			</section>
 
-			<WebSearchSettingsPanel api={api} serverReady={serverReady} />
+			<WebSearchSettingsPanel onDirtyChange={onDirtyChange} api={api} serverReady={serverReady} />
 		</div>
 	);
 }

@@ -1,22 +1,17 @@
-import type { MemoryEngine, MemorySettingsView } from "@metis/app-protocol";
+import type { MemorySettingsView } from "@metis/app-protocol";
 import { BookBookmark, CheckCircle, Cpu, Info, Sparkle, WarningCircle, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { MenuSelect } from "./MenuSelect.tsx";
-
-const ENGINES: readonly { readonly value: MemoryEngine; readonly labelKey: string }[] = [
-	{ value: "index", labelKey: "Index (catalog)" },
-	{ value: "extract", labelKey: "Extract (retrieve)" },
-];
-
-export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
+export function MemorySettingsPanel({ api, onConfigureModels, serverReady, onDirtyChange }: {
 	readonly api: Pick<MetisDesktopApi, "getMemorySettings" | "updateMemorySettings">;
 	readonly onConfigureModels: () => void;
+	readonly onDirtyChange?: (dirty: boolean) => void;
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
 	const [settings, setSettings] = useState<MemorySettingsView | null>(null);
+	const [savedSettings, setSavedSettings] = useState<MemorySettingsView | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
@@ -27,7 +22,7 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 		setError(null);
 		void api.getMemorySettings().then(
 			(result) => {
-				if (current) setSettings(result);
+				if (current) { setSettings(result); setSavedSettings(result); }
 			},
 			(cause) => {
 				if (current) setError(cause instanceof Error ? cause.message : t("Couldn’t load memory settings."));
@@ -44,6 +39,9 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 		return () => clearTimeout(timer);
 	}, [notice]);
 
+	const dirty = Boolean(savedSettings && (settings?.autoMemoryEnabled !== savedSettings.autoMemoryEnabled || settings?.memoryEngine !== savedSettings.memoryEngine));
+	useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 	if (!settings && !error) {
 		return <div aria-label={t("Memory settings")} className="settings-loading" role="status" />;
 	}
@@ -78,6 +76,7 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 				memoryEngine: settings.memoryEngine,
 			});
 			setSettings(next);
+			setSavedSettings(next);
 			setNotice(t("Saved"));
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Couldn’t save memory settings."));
@@ -126,30 +125,15 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 							<span>{t("Active engine")}</span>
 							<p>{t("Index injects the memory catalog. Extract retrieves relevant facts for the current message.")}</p>
 						</div>
-						<div className="general-setting-control">
-							<MenuSelect
-								ariaLabel={t("Memory engine")}
-								className="memory-engine-select"
-								disabled={!serverReady || busy}
-								menuAlign="end"
-								onChange={(memoryEngine) => update({ memoryEngine })}
-								options={ENGINES.map((option) => ({
-									value: option.value,
-									label: t(option.labelKey),
-									disabled: option.value === "extract" && extractBlocked,
-								}))}
-								value={settings?.memoryEngine ?? "index"}
-							/>
-						</div>
 					</div>
 
-					<div className="memory-engine-grid">
-						<div
+					<div aria-label={t("Memory engine")} className="memory-engine-grid" role="group">
+						<button
 							className={`memory-engine-card ${settings?.memoryEngine === "index" ? "selected" : ""}`}
 							onClick={() => update({ memoryEngine: "index" })}
-							onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") update({ memoryEngine: "index" }); }}
-							role="button"
-							tabIndex={0}
+							type="button"
+							aria-pressed={settings?.memoryEngine === "index"}
+							disabled={!serverReady || busy}
 						>
 							<div className="memory-engine-card-header">
 								<div className="memory-engine-card-title">
@@ -161,14 +145,14 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 							<p className="memory-engine-card-desc">
 								{t("Injects memory catalog outlines directly into prompt context. Lightweight, deterministic, and works without embedding models.")}
 							</p>
-						</div>
+						</button>
 
-						<div
+						<button
 							className={`memory-engine-card ${settings?.memoryEngine === "extract" ? "selected" : ""} ${extractBlocked ? "disabled" : ""}`}
 							onClick={() => { if (!extractBlocked) update({ memoryEngine: "extract" }); }}
-							onKeyDown={(e) => { if (!extractBlocked && (e.key === "Enter" || e.key === " ")) update({ memoryEngine: "extract" }); }}
-							role="button"
-							tabIndex={extractBlocked ? -1 : 0}
+							type="button"
+							aria-pressed={settings?.memoryEngine === "extract"}
+							disabled={!serverReady || busy || extractBlocked}
 						>
 							<div className="memory-engine-card-header">
 								<div className="memory-engine-card-title">
@@ -182,7 +166,7 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 							<p className="memory-engine-card-desc">
 								{t("Performs semantic vector search over memory items. Retrieves only targeted, highly relevant facts for each user query.")}
 							</p>
-						</div>
+						</button>
 					</div>
 
 					<div className="memory-info-banner">
@@ -191,8 +175,8 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 					</div>
 
 					{engineWarning ? (
-						<div className="memory-warning-banner memory-settings-warning" role="status">
-							<WarningCircle aria-hidden="true" size={15} />
+						<div className={`${settings?.memoryEngine === "extract" ? "memory-warning-banner" : "memory-info-banner"} memory-settings-warning`} role="status">
+							<Info aria-hidden="true" size={15} />
 							<span>{engineWarning}</span>
 						</div>
 					) : null}
@@ -251,6 +235,7 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady }: {
 			</section>
 
 			<div className="settings-form-actions memory-form-actions">
+				{dirty && <span className="settings-unsaved-label" role="status">{t("Unsaved changes")}</span>}
 				{error ? (
 					<p className="settings-action-message error web-search-message" role="alert">
 						<XCircle aria-hidden="true" size={15} />

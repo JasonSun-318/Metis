@@ -80,13 +80,11 @@ describe("MemorySettingsPanel", () => {
 
 		expect(container.querySelector(".memory-settings-warning")?.textContent).toMatch(/embedding model/i);
 
-		const engineTrigger = () => container.querySelector<HTMLButtonElement>('button[aria-label="Memory engine"]')!;
-		await act(async () => engineTrigger().click());
-		await flush();
-		const extractOption = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((item) =>
+				const extractOption = [...container.querySelectorAll<HTMLButtonElement>('.memory-engine-card')].find((item) =>
 			item.textContent?.includes("Extract"),
 		);
 		expect(extractOption?.disabled).toBe(true);
+		expect(container.querySelector(".memory-settings-warning")?.classList.contains("memory-info-banner")).toBe(true);
 
 		await act(async () => button(container, "Configure in Models").click());
 		expect(onConfigureModels).toHaveBeenCalledOnce();
@@ -106,10 +104,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} onConfigureModels={vi.fn()} serverReady />));
 		await flush();
 
-		const engineTrigger = () => container.querySelector<HTMLButtonElement>('button[aria-label="Memory engine"]')!;
-		await act(async () => engineTrigger().click());
-		await flush();
-		const enabledExtract = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((item) =>
+				const enabledExtract = [...container.querySelectorAll<HTMLButtonElement>('.memory-engine-card')].find((item) =>
 			item.textContent?.includes("Extract"),
 		);
 		expect(enabledExtract?.disabled).toBe(false);

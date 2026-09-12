@@ -42,9 +42,10 @@ const PRESET_INSTRUCTIONS = [
 	},
 ] as const;
 
-export function PersonalizationPanel({ api, serverReady }: {
+export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
 	readonly api: Pick<MetisDesktopApi, "getPersonalization" | "updatePersonalization">;
 	readonly serverReady: boolean;
+	readonly onDirtyChange?: (dirty: boolean) => void;
 }) {
 	const { t } = useTranslation();
 	const [instructions, setInstructions] = useState("");
@@ -55,6 +56,9 @@ export function PersonalizationPanel({ api, serverReady }: {
 	const [saved, setSaved] = useState(false);
 	const [request, setRequest] = useState(0);
 	const instructionBytes = useMemo(() => new TextEncoder().encode(instructions).byteLength, [instructions]);
+	const dirty = savedInstructions !== null && instructions !== savedInstructions;
+	useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 	const oversized = instructionBytes > MAX_INSTRUCTION_BYTES;
 
 	useEffect(() => {
@@ -168,9 +172,10 @@ export function PersonalizationPanel({ api, serverReady }: {
 					</label>
 					<div className="personalization-footer">
 						<div className="personalization-meta">
-							<span className="personalization-bytes">{instructionBytes.toLocaleString()} / {MAX_INSTRUCTION_BYTES.toLocaleString()} UTF-8 bytes</span>
+							<span className="personalization-bytes">{t("{{used}} / {{max}} bytes", { used: instructionBytes.toLocaleString(), max: MAX_INSTRUCTION_BYTES.toLocaleString() })}</span>
 							{oversized ? <span className="personalization-error" role="alert">{t("Global instructions are too large.")}</span> : null}
-							{saved ? <span className="personalization-saved-badge" role="status">{t("Saved")}</span> : null}
+							{dirty ? <span className="personalization-unsaved" role="status">{t("Unsaved changes")}</span> : null}
+								{saved ? <span className="personalization-saved-badge" role="status">{t("Saved")}</span> : null}
 							{error === "save" ? <span className="personalization-error" role="alert">{t("Couldn’t save global instructions.")}</span> : null}
 						</div>
 						<div className="personalization-actions">
