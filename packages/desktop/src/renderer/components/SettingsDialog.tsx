@@ -1,5 +1,5 @@
-import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle } from "@phosphor-icons/react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
@@ -26,8 +26,11 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 	readonly theme: AppTheme;
 }) {
 	const { t } = useTranslation();
-	const [page, setPage] = useState<SettingsPage>("general");
+	const [page, setPage] = useState<SettingsPage>("profile");
 	const [closing, setClosing] = useState(false);
+	const [dirty, setDirty] = useState(false);
+	const [pendingDestination, setPendingDestination] = useState<SettingsPage | "close" | null>(null);
+	const unsavedDialog = useRef<HTMLDialogElement>(null);
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const firstNavRef = useRef<HTMLButtonElement>(null);
 	const pageScrollRef = useRef<HTMLDivElement>(null);
@@ -35,7 +38,7 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 
 	const delay = closeDelayMs ?? ((globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === "test" ? 0 : 160);
 
-	const triggerClose = () => {
+	const finishClose = useCallback(() => {
 		if (closing) return;
 		setClosing(true);
 		if (delay <= 0) {
@@ -43,7 +46,30 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 			return;
 		}
 		closingTimerRef.current = setTimeout(onClose, delay);
+	}, [closing, delay, onClose]);
+	const triggerClose = useCallback(() => {
+		if (dirty) setPendingDestination("close");
+		else finishClose();
+	}, [dirty, finishClose]);
+	const navigate = (target: SettingsPage) => {
+		if (target === page) return;
+		if (dirty) setPendingDestination(target);
+		else setPage(target);
 	};
+	useEffect(() => { firstNavRef.current?.focus(); }, []);
+	useEffect(() => {
+		if (!pendingDestination) return;
+		const dialog = unsavedDialog.current!;
+		const previous = document.activeElement as HTMLElement | null;
+		if (typeof dialog.showModal === "function") dialog.showModal();
+		else dialog.setAttribute("open", "");
+		dialog.querySelector<HTMLButtonElement>("button")?.focus();
+		return () => {
+			if (typeof dialog.close === "function") dialog.close();
+			else dialog.removeAttribute("open");
+			if (previous?.isConnected) previous.focus();
+		};
+	}, [pendingDestination]);
 
 	useEffect(() => {
 		return () => {
@@ -58,7 +84,6 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 	}, [page]);
 
 	useEffect(() => {
-		firstNavRef.current?.focus();
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (dialogRef.current?.querySelector("dialog[open]")) return;
 			if (event.key === "Escape") {
@@ -119,10 +144,10 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 									className={`settings-nav-item ${isActive ? "active" : ""}`}
 									key={id}
 									onClick={() => {
-										setPage(id);
+										navigate(id);
 										if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
 									}}
-									ref={id === "general" ? firstNavRef : undefined}
+									ref={id === "profile" ? firstNavRef : undefined}
 									type="button"
 								>
 									<Icon aria-hidden="true" size={18} />
@@ -139,9 +164,6 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 								<h1>{t(activePage.label)}</h1>
 								<p>{t(activePage.description)}</p>
 							</div>
-							<button aria-label={t("Back to app")} className="settings-close-button" onClick={triggerClose} title={`${t("Back to app")} (Esc)`} type="button">
-								<X aria-hidden="true" size={16} />
-							</button>
 						</div>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
@@ -150,15 +172,16 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 								<GeneralPanel
 									api={api}
 									generalPreferences={generalPreferences}
-									onGeneralPreferencesChange={onGeneralPreferencesChange}
+									onDirtyChange={setDirty}
+										onGeneralPreferencesChange={onGeneralPreferencesChange}
 									onThemeChange={onThemeChange}
 									serverReady={serverReady}
 									theme={theme}
 								/>
 							) : null}
 							{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
-							{page === "personalization" ? <PersonalizationPanel api={api} serverReady={serverReady} /> : null}
-							{page === "memory" ? <MemorySettingsPanel api={api} onConfigureModels={() => setPage("model")} serverReady={serverReady} /> : null}
+							{page === "personalization" ? <PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} /> : null}
+							{page === "memory" ? <MemorySettingsPanel onDirtyChange={setDirty} api={api} onConfigureModels={() => navigate("model")} serverReady={serverReady} /> : null}
 							{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
 							{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
 							{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
@@ -175,6 +198,21 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 						</div>
 					</div>
 				</div>
+				{pendingDestination && <dialog aria-labelledby="settings-unsaved-title" aria-describedby="settings-unsaved-copy" className="settings-unsaved-dialog" onCancel={(event) => { event.preventDefault(); setPendingDestination(null); }} ref={unsavedDialog}>
+					<h2 id="settings-unsaved-title">{t("Unsaved changes")}</h2>
+					<p id="settings-unsaved-copy">{t("Your changes have not been saved. Keep editing to save them, or discard them to leave.")}</p>
+					<div className="settings-form-actions">
+						<button className="settings-primary-button" onClick={() => setPendingDestination(null)} type="button">{t("Keep editing")}</button>
+						<button className="settings-secondary-button" onClick={() => {
+							const target = pendingDestination;
+							setPendingDestination(null);
+							setDirty(false);
+							if (target === "close") finishClose();
+							else setPage(target);
+						}} type="button">{t("Discard changes")}</button>
+					</div>
+				</dialog>}
+
 			</div>
 		</div>
 	);

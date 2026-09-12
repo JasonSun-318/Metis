@@ -42,6 +42,24 @@ const modelSettings: ModelSettingsView = {
 	loadError: null,
 };
 
+const profileSummary = {
+	generatedAt: "2026-08-08T12:00:00.000Z",
+	totalTokens: 0,
+	peakDailyTokens: 0,
+	longestSessionMs: 0,
+	currentStreakDays: 0,
+	longestStreakDays: 0,
+	sessionCount: 0,
+	mostUsedMode: null,
+	mostUsedModePercent: 0,
+	mostUsedThinkingLevel: null,
+	mostUsedThinkingLevelPercent: 0,
+	usedSkillCount: 0,
+	skillUseCount: 0,
+	activity: [],
+	topSkills: [],
+};
+
 function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 	const daily = Array.from({ length: rangeDays }, (_, index) => ({
 		date: new Date(Date.UTC(2026, 7, 8 - rangeDays + index + 1)).toISOString().slice(0, 10),
@@ -84,12 +102,39 @@ afterEach(() => {
 });
 
 describe("SettingsDialog", () => {
+ it("protects an unsaved personalization draft and keeps navigation focus", async () => {
+  const api = { getProfile: vi.fn().mockResolvedValue(profileSummary), getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }), getPersonalization: vi.fn().mockResolvedValue({ instructions: "" }), updatePersonalization: vi.fn().mockRejectedValue(new Error("offline")), getMemorySettings: vi.fn().mockResolvedValue({ autoMemoryEnabled: true, memoryEngine: "index", embeddingConfigured: false, rerankConfigured: false, lastError: null, memoryMigrationNotice: null }) } as unknown as MetisDesktopApi;
+  const container = document.createElement("div"); document.body.append(container);
+  const root = createRoot(container); const onClose = vi.fn();
+  await act(async () => root.render(<SettingsDialog api={api} generalPreferences={generalPreferences} onClose={onClose} onGeneralPreferencesChange={() => undefined} onThemeChange={() => undefined} serverReady theme="dark" closeDelayMs={0} />));
+  await act(async () => { button(container, "Personalization").focus(); button(container, "Personalization").click(); });
+  await flush();
+  expect(document.activeElement).toBe(button(container, "Personalization"));
+  act(() => setValue(container.querySelector("textarea")!, "Keep this draft"));
+  act(() => button(container, "Memory").click());
+  expect(container.textContent).toContain("Unsaved changes");
+  act(() => button(container, "Keep editing").click());
+  expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
+  await act(async () => button(container, "Save instructions").click());
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(onClose).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("Unsaved changes");
+  act(() => button(container, "Keep editing").click());
+  expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
+  act(() => button(container, "Memory").click());
+  act(() => button(container, "Discard changes").click());
+  await flush();
+  expect(container.querySelector(".memory-page")).not.toBeNull();
+  expect(container.querySelector(".personalization-page")).toBeNull();
+  await act(async () => root.unmount());
+ });
+
 	it("keeps only the active page mounted and closes with Escape", async () => {
 		const listBrowserProfiles = vi.fn().mockResolvedValue([]);
 		const listBrowserDownloads = vi.fn().mockResolvedValue([]);
 		const listBrowserHistory = vi.fn().mockResolvedValue([]);
 		const api = {
-			getProfile: vi.fn().mockResolvedValue({ generatedAt: "2026-08-08T12:00:00.000Z", totalTokens: 0, peakDailyTokens: 0, longestSessionMs: 0, currentStreakDays: 0, longestStreakDays: 0, sessionCount: 0, mostUsedMode: null, mostUsedModePercent: 0, mostUsedThinkingLevel: null, mostUsedThinkingLevelPercent: 0, usedSkillCount: 0, skillUseCount: 0, activity: [], topSkills: [] }),
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getUsage: vi.fn(({ rangeDays }: { rangeDays: UsageRangeDays }) => Promise.resolve(usage(rangeDays))),
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings: vi.fn().mockResolvedValue(modelSettings),
@@ -128,13 +173,10 @@ describe("SettingsDialog", () => {
 			/>,
 		));
 		await flush();
-		expect(api.getProfile).not.toHaveBeenCalled();
+		expect(api.getProfile).toHaveBeenCalledTimes(1);
 		expect(api.getUsage).not.toHaveBeenCalled();
 		expect(api.getMemorySettings).not.toHaveBeenCalled();
 		expect(listBrowserProfiles).not.toHaveBeenCalled();
-		await act(async () => button(container, "Profile").click());
-		await flush();
-		expect(api.getProfile).toHaveBeenCalledTimes(1);
 		const pageScroll = container.querySelector<HTMLElement>(".settings-page-scroll")!;
 		pageScroll.scrollTop = 120;
 		await act(async () => button(container, "Usage").click());
@@ -171,6 +213,7 @@ describe("SettingsDialog", () => {
 	it("opens the global Permissions page without a session or project", async () => {
 		const getPermissionAutoSettings = vi.fn().mockResolvedValue({ rules: [], suggestions: ["ls"] });
 		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getPermissionAutoSettings,
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
@@ -202,6 +245,7 @@ describe("SettingsDialog", () => {
 
 	it("changes language, appearance, motion, content size, and independent prose fonts from General", async () => {
 		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
 		const onClose = vi.fn();
@@ -221,6 +265,8 @@ describe("SettingsDialog", () => {
 				theme="dark"
 			/>,
 		));
+		await flush();
+		await act(async () => button(container, "General").click());
 		await flush();
 		expect(container.querySelector(".general-page")).not.toBeNull();
 		expect(container.querySelector(".web-search-toggle")).not.toBeNull();
@@ -255,6 +301,7 @@ describe("SettingsDialog", () => {
 			.fn()
 			.mockImplementation(async ({ instructions }: { instructions: string }) => ({ instructions }));
 		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getPersonalization,
 			updatePersonalization,
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
@@ -303,6 +350,23 @@ describe("SettingsDialog", () => {
 });
 
 describe("ModelSettingsPanel", () => {
+ it("keeps configured providers visible and searches the optional provider catalog", async () => {
+  const unconfigured = { ...modelSettings.providers[0]!, provider: "anthropic", name: "Anthropic", auth: { configured: false, source: "none" as const, label: null } };
+  const api = { getModelSettings: vi.fn().mockResolvedValue({ ...modelSettings, providers: [...modelSettings.providers, unconfigured] }) } as unknown as MetisDesktopApi;
+  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
+  await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+  expect(container.textContent).toContain("Specialized models");
+  act(() => button(container, "Browse providers").click());
+  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
+  act(() => setValue(container.querySelector('input[type="search"]')!, "no match"));
+  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+  expect(container.textContent).toContain("No providers match your search.");
+  act(() => setValue(container.querySelector('input[type="search"]')!, "anthropic"));
+  expect(container.querySelector(".model-provider-catalog")?.textContent).toContain("Anthropic");
+  await act(async () => root.unmount());
+ });
+
 	it("opens a built-in provider as a credential-first form", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
 		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 42 });
@@ -312,7 +376,7 @@ describe("ModelSettingsPanel", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
-		expect(container.querySelector(".model-provider-intro")?.textContent).toContain("Select a provider");
+		expect(container.querySelector(".model-provider-intro")?.textContent).toContain("Manage your connected providers");
 		expect(container.querySelector(".model-settings-page h2")?.textContent).not.toBe("Providers");
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
@@ -945,6 +1009,7 @@ describe("WebSearchSettingsPanel", () => {
 	it("applies is-closing class and calls onClose after delay when closeDelayMs is configured", async () => {
 		const onClose = vi.fn();
 		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
