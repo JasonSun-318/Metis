@@ -1,3 +1,4 @@
+import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import {
 	CaretRight,
@@ -227,9 +228,10 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 	);
 }
 
-export function TranscriptTurn({ items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: {
+export function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
+	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
@@ -286,6 +288,7 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 								results={results}
 								running={segment.running}
 							/>
+							{segment.calls.filter((call) => call.name === "ask_user").map((call) => <AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />)}
 							{sessionId ? (
 								<ToolResultImages
 									images={toolResultImagesFromBlocks(segment.blocks, results)}
@@ -316,7 +319,7 @@ export function TranscriptTurn({ items, running: runtimeRunning = false, started
 					)}
 				</div>
 			)}
-			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
+			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />}
 		</>
 	);
 }

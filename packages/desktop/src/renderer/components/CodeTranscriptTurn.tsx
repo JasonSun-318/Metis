@@ -1,3 +1,4 @@
+import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
@@ -181,6 +182,7 @@ function CodeExecution({ calls, results, orphanResults }: {
 
 export function CodeTranscriptTurn({
 	items,
+	waitingForAnswer = false,
 	running = false,
 	startedAt,
 	onFork,
@@ -190,6 +192,7 @@ export function CodeTranscriptTurn({
 }: {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
+	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
@@ -226,6 +229,7 @@ export function CodeTranscriptTurn({
 									orphanResults={segment.orphanResults}
 									results={results}
 								/>
+							{segment.calls.filter((call) => call.name === "ask_user").map((call) => <AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />)}
 								{sessionId ? (
 									<ToolResultImages
 										images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
@@ -272,7 +276,7 @@ export function CodeTranscriptTurn({
 					)}
 				</div>
 			)}
-			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} />}
+			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />}
 		</>
 	);
 }

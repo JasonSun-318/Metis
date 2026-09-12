@@ -274,6 +274,7 @@ export interface ComposerPrefillRequest {
 
 interface ComposerProps {
 	readonly disabled: boolean;
+	readonly awaitingAnswer?: boolean;
 	readonly running: boolean;
 	readonly queueing?: boolean;
 	readonly commandPanel?: ReactNode;
@@ -313,6 +314,7 @@ interface ComposerProps {
 
 export function Composer({
 	disabled,
+	awaitingAnswer = false,
 	running,
 	queueing = false,
 	commandPanel,
@@ -456,6 +458,7 @@ export function Composer({
 	}, [onResolveDroppedFiles]);
 
 	const handlePaste = useCallback((event: React.ClipboardEvent) => {
+		if (awaitingAnswer) { event.preventDefault(); return; }
 		const files = Array.from(event.clipboardData.files);
 		if (files.length > 0) {
 			event.preventDefault();
@@ -470,15 +473,16 @@ export function Composer({
 			insertPlainTextAtSelection(editor, text);
 			syncEditorState();
 		}
-	}, [processFiles, syncEditorState]);
+	}, [awaitingAnswer, processFiles, syncEditorState]);
 
 	const handleDrop = useCallback((event: React.DragEvent) => {
+		if (awaitingAnswer) { event.preventDefault(); return; }
 		const files = Array.from(event.dataTransfer.files);
 		if (files.length > 0) {
 			event.preventDefault();
 			void processFiles(files);
 		}
-	}, [processFiles]);
+	}, [awaitingAnswer, processFiles]);
 
 	useEffect(() => {
 		const el = editorRef.current;
@@ -661,7 +665,7 @@ export function Composer({
 			parsed.tokenSkills.length > 0 ||
 			parsed.hasGoalToken;
 
-		if (!hasContent || disabled || submitDisabled || submitting) return;
+		if (!hasContent || disabled || awaitingAnswer || submitDisabled || submitting) return;
 
 		// 1. Check Goal Token
 		if (parsed.hasGoalToken && onGoalCommand) {
@@ -721,13 +725,19 @@ export function Composer({
 		}
 	};
 
+	const previouslyAwaitingAnswer = useRef(awaitingAnswer);
+	useEffect(() => {
+		if (previouslyAwaitingAnswer.current && !awaitingAnswer) editorRef.current?.focus();
+		previouslyAwaitingAnswer.current = awaitingAnswer;
+	}, [awaitingAnswer]);
+
 	const isCode = appearance === "code";
 
 	return (
 		<div className={`composer-dock composer-dock-${appearance}`}>
 			<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
 			{goalControl}
-			{interactionControl}
+			{!awaitingAnswer && interactionControl}
 			{commandPanel}
 			{slashQuery !== undefined && (
 				<SlashCommandMenu
@@ -741,8 +751,9 @@ export function Composer({
 				/>
 			)}
 			{queuedTurnControl}
+			{awaitingAnswer && interactionControl}
 			<form
-				className={`composer composer-${appearance}`}
+				className={`composer composer-${appearance}${awaitingAnswer ? " is-awaiting-answer" : ""}`}
 				ref={formRef}
 				onDragOver={(event) => event.preventDefault()}
 				onDrop={handleDrop}
@@ -780,7 +791,8 @@ export function Composer({
 						<div
 							aria-label={t("Message Metis")}
 							className="composer-editable-input"
-							contentEditable={!disabled && !submitting}
+							aria-disabled={awaitingAnswer || undefined}
+							contentEditable={!disabled && !awaitingAnswer && !submitting}
 							data-empty={!hasInput ? "true" : undefined}
 							data-placeholder={placeholder ?? (isCode ? t("Describe a task or ask a question") : t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…"))}
 							id="composer-input"
@@ -799,12 +811,12 @@ export function Composer({
 						/>
 						{isCode && (
 							<div className="composer-code-action">
-								{running && !hasInput ? (
+								{running && (!hasInput || awaitingAnswer) ? (
 									<button aria-label={t("Stop task")} className="composer-code-stop" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
 										<Stop aria-hidden="true" size={13} weight="fill" />
 									</button>
 								) : (
-									<button aria-label={t(running || queueing ? "Queue message" : "Send message")} className={`composer-code-submit ${hasInput ? "is-active" : ""}`} disabled={disabled || submitDisabled || submitting || !hasInput} type="submit">
+									<button aria-label={t(running || queueing ? "Queue message" : "Send message")} className={`composer-code-submit ${hasInput ? "is-active" : ""}`} disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput} type="submit">
 										<svg aria-hidden="true" fill="currentColor" height="13" viewBox="0 0 256 256" width="13">
 											<path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z" transform="scale(-1, 1) translate(-256, 0)" />
 										</svg>
@@ -818,7 +830,7 @@ export function Composer({
 					<div className="composer-leading">
 						<ComposerAddMenu
 							commandRequest={commandRequest}
-							disabled={disabled || submitting}
+							disabled={disabled || awaitingAnswer || submitting}
 							iconSize={isCode ? 13 : 16}
 							mcpServers={mcpServers}
 							onAddFiles={() => void addFiles().catch(() => undefined)}
@@ -844,11 +856,11 @@ export function Composer({
 						{modelControl}
 						{thinkingControl}
 						{!isCode && (
-							running && !hasInput ? (
+							running && (!hasInput || awaitingAnswer) ? (
 								<button aria-label={t("Stop task")} className="composer-icon-button composer-stop button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
 									<Stop aria-hidden="true" size={16} weight="fill" />
 								</button>
-							) : <button aria-label={t(running || queueing ? "Queue message" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || submitDisabled || submitting || !hasInput} type="submit">
+							) : <button aria-label={t(running || queueing ? "Queue message" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput} type="submit">
 								<ArrowUp aria-hidden="true" size={19} weight="bold" />
 							</button>
 						)}

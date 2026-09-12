@@ -4,7 +4,7 @@ import type { InteractionView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AskUserPanel } from "../src/renderer/components/AskUserPanel.tsx";
+import { AskUserPanel, type AskUserDraft } from "../src/renderer/components/AskUserPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 
 type AskUserInteraction = Extract<InteractionView, { kind: "ask_user" }>;
@@ -52,14 +52,14 @@ afterEach(async () => {
 	document.body.replaceChildren();
 });
 
-function mount(candidate: AskUserInteraction = interaction) {
+function mount(candidate: AskUserInteraction = interaction, draftCache?: Map<string, AskUserDraft>) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
 	const onRespond = vi.fn().mockResolvedValue(undefined);
-	act(() => root.render(<AskUserPanel interaction={candidate} onRespond={onRespond} />));
-	return { container, onRespond };
+	act(() => root.render(<AskUserPanel interaction={candidate} onRespond={onRespond} draftCache={draftCache} />));
+	return { container, root, onRespond };
 }
 
 function option(container: HTMLElement, label: string): HTMLButtonElement {
@@ -69,133 +69,79 @@ function option(container: HTMLElement, label: string): HTMLButtonElement {
 	return candidate;
 }
 
-function inputValue(input: HTMLInputElement, value: string): void {
-	Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(input, value);
+function inputValue(input: HTMLInputElement | HTMLTextAreaElement, value: string): void {
+	Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, "value")?.set?.call(input, value);
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 describe("AskUserPanel", () => {
-	it("answers single and multi-select questions atomically, including Something else", async () => {
-		const { container, onRespond } = mount();
+ it("selects without advancing and submits all questions only after confirmation", async () => {
+  const { container, onRespond } = mount();
+  act(() => option(container, "Cloud sync").click());
+  expect(container.textContent).toContain("Where should task data be stored?");
+  expect(onRespond).not.toHaveBeenCalled();
+  act(() => button(container, "Continue").click());
+  expect(container.textContent).toContain("Which clients should be supported?");
+  act(() => option(container, "Desktop").click());
+  act(() => option(container, "Mobile").click());
+  act(() => button(container, "Something else").click());
+  const custom = container.querySelector<HTMLTextAreaElement>("textarea")!;
+  act(() => inputValue(custom, "Linux later\nAfter release"));
+  act(() => button(container, "Previous question").click());
+  expect(option(container, "Cloud sync").getAttribute("aria-checked")).toBe("true");
+  act(() => button(container, "Continue").click());
+  expect(container.querySelector("textarea")?.value).toBe("Linux later\nAfter release");
+  await act(async () => { button(container, "Confirm and continue").click(); await new Promise(r => setTimeout(r, 180)); });
+  expect(onRespond).toHaveBeenCalledExactlyOnceWith({ interactionId: interaction.interactionId, kind: "ask_user", cancelled: false, answers: [
+   { questionId: "question:0", choiceIds: ["choice:1"] },
+   { questionId: "question:1", choiceIds: ["choice:0", "choice:2"], customAnswer: "Linux later\nAfter release" },
+  ] });
+ });
 
-		expect(container.querySelector(".ask-user-slot .ask-user-panel")).not.toBeNull();
-		const singleGroup = container.querySelector<HTMLElement>("[role=radiogroup]")!;
-		expect(singleGroup).not.toBeNull();
-		expect(singleGroup.getAttribute("aria-labelledby")).toBe(`ask-user-title-${interaction.interactionId}`);
-		expect(container.textContent).toContain("1 of 2");
-		expect(container.querySelectorAll(".ask-user-option-number")).toHaveLength(2);
-		expect(container.querySelectorAll(".ask-user-checkbox")).toHaveLength(0);
-		expect(container.textContent).toContain("Something else");
+ it("collapses without cancelling and restores the answer after remount", async () => {
+  const cache = new Map<string, AskUserDraft>();
+  const { container, root, onRespond } = mount(interaction, cache);
+  act(() => option(container, "Cloud sync").click());
+  act(() => container.querySelector(".ask-user-panel")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(onRespond).not.toHaveBeenCalled();
+  expect(container.querySelector(".ask-user-panel")).toBeNull();
+  act(() => root.render(null));
+  act(() => root.render(<AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={cache} />));
+  act(() => button(container, "Continue answering").click());
+  expect(option(container, "Cloud sync").getAttribute("aria-checked")).toBe("true");
+  await act(async () => { button(container, "Skip all questions").click(); await new Promise(r => setTimeout(r, 180)); });
+  expect(onRespond).toHaveBeenCalledExactlyOnceWith({ interactionId: interaction.interactionId, kind: "ask_user", cancelled: true, answers: [] });
+ });
 
-		act(() => option(container, "Cloud sync").click());
-		expect(container.textContent).toContain("Which clients should be supported?");
-		const multipleGroup = container.querySelector<HTMLElement>("[role=group]")!;
-		expect(multipleGroup).not.toBeNull();
-		expect(multipleGroup.getAttribute("aria-labelledby")).toBe(`ask-user-title-${interaction.interactionId}`);
-		expect(container.querySelectorAll(".ask-user-option-number")).toHaveLength(0);
-		expect(container.querySelectorAll(".ask-user-checkbox")).toHaveLength(4);
-		expect(onRespond).not.toHaveBeenCalled();
+ it("handles radio arrows and numeric selection without submitting; ignores IME", () => {
+  const { container, onRespond } = mount({ ...interaction, questions: [interaction.questions[0]!] });
+  act(() => { option(container, "Local database").focus(); option(container, "Local database").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })); });
+  expect(document.activeElement).toBe(option(container, "Cloud sync"));
+  expect(option(container, "Cloud sync").getAttribute("aria-checked")).toBe("true");
+  act(() => container.querySelector(".ask-user-panel")!.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true, isComposing: true })));
+  expect(option(container, "Cloud sync").getAttribute("aria-checked")).toBe("true");
+  act(() => container.querySelector(".ask-user-panel")!.dispatchEvent(new KeyboardEvent("keydown", { key: "1", bubbles: true })));
+  expect(option(container, "Local database").getAttribute("aria-checked")).toBe("true");
+  expect(onRespond).not.toHaveBeenCalled();
+ });
 
-		act(() => option(container, "Desktop").click());
-		act(() => option(container, "Mobile").click());
-		expect(container.textContent).toContain("2 selected");
-		act(() => [...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Something else")?.click());
-		const custom = container.querySelector<HTMLInputElement>(".ask-user-custom input")!;
-		act(() => inputValue(custom, "Linux later"));
-		expect(container.textContent).toContain("3 selected");
-		await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Submit answers"]')?.click());
-
-		expect(onRespond).toHaveBeenCalledWith({
-			interactionId: interaction.interactionId,
-			kind: "ask_user",
-			cancelled: false,
-			answers: [
-				{ questionId: "question:0", choiceIds: ["choice:1"] },
-				{
-					questionId: "question:1",
-					choiceIds: ["choice:0", "choice:2"],
-					customAnswer: "Linux later",
-				},
-			],
-		});
-	});
-
-	it("uses a custom answer as the single answer and supports numbered shortcuts", async () => {
-		const single = { ...interaction, questions: [interaction.questions[0]] } satisfies AskUserInteraction;
-		const customMounted = mount(single);
-		act(() => [...customMounted.container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Something else")?.click());
-		const custom = customMounted.container.querySelector<HTMLInputElement>(".ask-user-custom input")!;
-		act(() => inputValue(custom, "Store it in SQLite"));
-		await act(async () => customMounted.container
-			.querySelector<HTMLButtonElement>('button[aria-label="Use custom answer"]')?.click());
-		expect(customMounted.onRespond).toHaveBeenCalledWith({
-			interactionId: interaction.interactionId,
-			kind: "ask_user",
-			cancelled: false,
-			answers: [{ questionId: "question:0", choiceIds: [], customAnswer: "Store it in SQLite" }],
-		});
-
-		const shortcutMounted = mount(single);
-		await act(async () => shortcutMounted.container.querySelector(".ask-user-panel")?.dispatchEvent(
-			new KeyboardEvent("keydown", { bubbles: true, key: "2" }),
-		));
-		expect(shortcutMounted.onRespond).toHaveBeenCalledWith(expect.objectContaining({
-			cancelled: false,
-			answers: [{ questionId: "question:0", choiceIds: ["choice:1"] }],
-		}));
-	});
-
-	it("uses checkbox rows with arrow navigation for consecutive multi-select questions", () => {
-		const multi = {
-			...interaction,
-			questions: [
-				interaction.questions[1],
-				{
-					...interaction.questions[1],
-					id: "question:2",
-					question: "Which platforms should launch first?",
-				},
-			],
-		} satisfies AskUserInteraction;
-		const { container } = mount(multi);
-
-		expect(container.querySelector(".ask-user-step.is-submit")).toBeNull();
-		act(() => option(container, "Desktop").click());
-		expect(container.textContent).toContain("1 selected");
-		act(() => container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.click());
-		expect(container.textContent).toContain("Which platforms should launch first?");
-		expect(container.textContent).toContain("2 of 2");
-		expect(container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.disabled).toBe(true);
-		act(() => option(container, "Web").click());
-		expect(container.querySelector('.ask-user-step.is-submit[aria-label="Submit answers"]')).not.toBeNull();
-	});
-
-	it("restores previous answers and cancels the whole request with Escape", async () => {
-		const { container, onRespond } = mount();
-		const next = container.querySelector<HTMLButtonElement>('button[aria-label="Next question"]')!;
-		expect(next.disabled).toBe(false);
-		act(() => next.click());
-		expect(container.textContent).toContain("Which clients should be supported?");
-		act(() => option(container, "Desktop").click());
-		act(() => container.querySelector<HTMLButtonElement>('.ask-user-step[aria-label="Next question"]')?.click());
-		expect(container.textContent).toContain("Where should task data be stored?");
-		expect(onRespond).not.toHaveBeenCalled();
-		act(() => option(container, "Local database").click());
-		act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Previous question"]')?.click());
-		expect(option(container, "Local database").getAttribute("aria-checked")).toBe("true");
-		expect(container.querySelector<HTMLButtonElement>('button[aria-label="Previous question"]')?.disabled).toBe(true);
-		expect(container.querySelector<HTMLButtonElement>('button[aria-label="Next question"]')?.disabled).toBe(false);
-
-		await act(async () => container.querySelector(".ask-user-panel")?.dispatchEvent(
-			new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }),
-		));
-		expect(onRespond).toHaveBeenCalledWith({
-			interactionId: interaction.interactionId,
-			kind: "ask_user",
-			cancelled: true,
-			answers: [],
-		});
-	});
+ it("preserves custom text on failed submission and prevents duplicate requests", async () => {
+  const { container, onRespond } = mount({ ...interaction, questions: [interaction.questions[0]!] });
+  onRespond.mockRejectedValueOnce(new Error("Connection lost"));
+  act(() => button(container, "Something else").click());
+  act(() => inputValue(container.querySelector("textarea")!, "SQLite"));
+  const submit = button(container, "Confirm and continue");
+  await act(async () => { submit.click(); submit.click(); await new Promise(r => setTimeout(r, 180)); });
+  expect(onRespond).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("Connection lost");
+  expect(container.querySelector("textarea")?.value).toBe("SQLite");
+  await act(async () => { button(container, "Confirm and continue").click(); await new Promise(r => setTimeout(r, 180)); });
+  expect(onRespond).toHaveBeenCalledTimes(2);
+ });
 });
+
+function button(container: HTMLElement, name: string): HTMLButtonElement {
+ const match = [...container.querySelectorAll<HTMLButtonElement>("button")].find(b => b.getAttribute("aria-label") === name || b.textContent?.trim() === name);
+ if (!match) throw new Error(`Missing button: ${name}`);
+ return match;
+}

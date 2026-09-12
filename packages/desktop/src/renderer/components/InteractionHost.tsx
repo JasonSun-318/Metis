@@ -1,12 +1,14 @@
 import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { AskUserPanel } from "./AskUserPanel.tsx";
+import { AskUserPanel, type AskUserDraft } from "./AskUserPanel.tsx";
 import { PermissionApprovalPanel } from "./PermissionApprovalPanel.tsx";
 
 interface InteractionHostProps {
 	readonly interaction: InteractionView | undefined;
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
+	readonly askUserDrafts?: Map<string, AskUserDraft>;
+	readonly disabled?: boolean;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
 }
 
@@ -16,7 +18,7 @@ function approvalErrorMessage(cause: unknown): string {
 	return message;
 }
 
-export function InteractionHost({ interaction, onRespond, sandboxHealth = "healthy" }: InteractionHostProps) {
+export function InteractionHost({ interaction, onRespond, askUserDrafts, disabled, sandboxHealth = "healthy" }: InteractionHostProps) {
 	const { t } = useTranslation();
 	const firstControl = useRef<HTMLElement>(null);
 	const [input, setInput] = useState("");
@@ -36,7 +38,7 @@ export function InteractionHost({ interaction, onRespond, sandboxHealth = "healt
 
 	if (!interaction) return null;
 	if (interaction.kind === "ask_user") {
-		return <AskUserPanel interaction={interaction} onRespond={onRespond} />;
+		return <AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={askUserDrafts} disabled={disabled} />;
 	}
 	if (interaction.kind === "session_permission_approval") {
 		return (

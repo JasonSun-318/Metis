@@ -1,332 +1,191 @@
 import type { InteractionResponseInput, InteractionView } from "@metis/app-protocol";
-import {
-	ArrowBendDownLeft,
-	ArrowRight,
-	ArrowUp,
-	CaretLeft,
-	CaretRight,
-	Check,
-	PencilSimple,
-	X,
-} from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { ArrowRight, CaretDown, CaretLeft, Check, ChatCircleDots, PencilSimple } from "@phosphor-icons/react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 type AskUserInteraction = Extract<InteractionView, { kind: "ask_user" }>;
-
-interface AskUserPanelProps {
-	readonly interaction: AskUserInteraction;
-	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
-}
-
 interface AnswerDraft {
 	readonly choiceIds: readonly string[];
 	readonly customAnswer: string;
 }
-
-function blankDraft(): AnswerDraft {
-	return { choiceIds: [], customAnswer: "" };
+export interface AskUserDraft {
+	readonly sessionId: string;
+	readonly questionIndex: number;
+	readonly answers: readonly AnswerDraft[];
+	readonly customQuestionId?: string;
+	readonly collapsed: boolean;
+}
+interface AskUserPanelProps {
+	readonly interaction: AskUserInteraction;
+	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
+	readonly draftCache?: Map<string, AskUserDraft>;
+	readonly disabled?: boolean;
+}
+function hasAnswer(answer: AnswerDraft): boolean {
+	return answer.choiceIds.length > 0 || answer.customAnswer.trim().length > 0;
 }
 
-function draftHasAnswer(draft: AnswerDraft): boolean {
-	return draft.choiceIds.length > 0 || draft.customAnswer.trim().length > 0;
-}
-
-export function AskUserPanel({ interaction, onRespond }: AskUserPanelProps) {
+export function AskUserPanel({ interaction, onRespond, draftCache, disabled = false }: AskUserPanelProps) {
 	const { t } = useTranslation();
-	const [questionIndex, setQuestionIndex] = useState(0);
-	const [drafts, setDrafts] = useState<readonly AnswerDraft[]>(() =>
-		interaction.questions.map(() => blankDraft()),
-	);
-	const [customQuestionId, setCustomQuestionId] = useState<string>();
+	const [draft, setDraft] = useState<AskUserDraft>(() => draftCache?.get(interaction.interactionId) ?? {
+		sessionId: interaction.sessionId,
+		questionIndex: 0,
+		answers: interaction.questions.map(() => ({ choiceIds: [], customAnswer: "" })),
+		collapsed: false,
+	});
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string>();
-	const firstOption = useRef<HTMLButtonElement>(null);
-	const customInput = useRef<HTMLInputElement>(null);
-	const previousFocus = useRef<HTMLElement | null>(null);
-	const question = interaction.questions[questionIndex]!;
-	const questionHeadingId = `ask-user-title-${interaction.interactionId}`;
-	const draft = drafts[questionIndex] ?? blankDraft();
-	const customOpen = customQuestionId === question.id || draft.customAnswer.length > 0;
-	const hasAnswer = draftHasAnswer(draft);
-	const allAnswered = drafts.every(draftHasAnswer);
-	const selectedCount = draft.choiceIds.length + (draft.customAnswer.trim().length > 0 ? 1 : 0);
+	const busyRef = useRef(false);
+	const mounted = useRef(true);
+	const panel = useRef<HTMLElement>(null);
+	const heading = useRef<HTMLHeadingElement>(null);
+	const resume = useRef<HTMLButtonElement>(null);
+	const customInput = useRef<HTMLTextAreaElement>(null);
+	const question = interaction.questions[draft.questionIndex]!;
+	const answer = draft.answers[draft.questionIndex]!;
+	const titleId = `ask-user-title-${interaction.interactionId}`;
+	const customOpen = draft.customQuestionId === question.id || answer.customAnswer.length > 0;
+	const finalQuestion = draft.questionIndex === interaction.questions.length - 1;
+	const unavailable = busy || disabled;
+
+	const update = (next: AskUserDraft) => {
+		draftCache?.set(interaction.interactionId, next);
+		setDraft(next);
+	};
+	const updateAnswer = (next: AnswerDraft, customQuestionId: string | null | undefined = draft.customQuestionId) => {
+		update({ ...draft, customQuestionId: customQuestionId ?? undefined, answers: draft.answers.map((value, index) => index === draft.questionIndex ? next : value) });
+	};
 
 	useEffect(() => {
-		previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		queueMicrotask(() => firstOption.current?.focus());
-		return () => previousFocus.current?.focus();
+		mounted.current = true;
+		const conversation = panel.current?.closest(".conversation-column") ?? resume.current?.closest(".conversation-column");
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		return () => {
+			mounted.current = false;
+			queueMicrotask(() => {
+				if (conversation?.isConnected && !conversation.querySelector(".ask-user-slot, .ask-user-resume")) {
+					conversation.querySelector<HTMLElement>('[contenteditable="true"]')?.focus();
+				} else if (previous?.isConnected && !previous.closest("[hidden]")) previous.focus();
+			});
+		};
 	}, []);
-
 	useEffect(() => {
-		queueMicrotask(() => firstOption.current?.focus());
-	}, [questionIndex]);
+		(draft.collapsed ? resume.current : heading.current)?.focus();
+	}, [draft.collapsed, draft.questionIndex]);
 
-	const respond = async (response: InteractionResponseInput) => {
+	const choose = (choiceId: string) => {
+		if (unavailable) return;
+		if (!question.multiple) {
+			updateAnswer({ choiceIds: [choiceId], customAnswer: "" }, null);
+			return;
+		}
+		updateAnswer({ ...answer, choiceIds: answer.choiceIds.includes(choiceId)
+			? answer.choiceIds.filter((id) => id !== choiceId) : [...answer.choiceIds, choiceId] });
+	};
+	const respond = async (cancelled: boolean) => {
+		if (busyRef.current || disabled || (!cancelled && !draft.answers.every(hasAnswer))) return;
+		busyRef.current = true;
 		setBusy(true);
 		setError(undefined);
+		// Allow the exit transition to finish; never send if this interaction was removed meanwhile.
+		const reduced = document.documentElement.dataset.motion === "reduced";
+		await new Promise((resolve) => setTimeout(resolve, reduced ? 0 : 140));
+		if (!mounted.current) return;
 		try {
-			await onRespond(response);
+			await onRespond({
+				interactionId: interaction.interactionId, kind: "ask_user", cancelled,
+				answers: cancelled ? [] : interaction.questions.map((candidate, index) => ({
+					questionId: candidate.id,
+					choiceIds: [...draft.answers[index]!.choiceIds],
+					...(draft.answers[index]!.customAnswer.trim() ? { customAnswer: draft.answers[index]!.customAnswer.trim() } : {}),
+				})),
+			});
 		} catch (cause) {
+			if (!mounted.current) return;
 			setError(cause instanceof Error ? cause.message : "The response could not be sent.");
+			busyRef.current = false;
 			setBusy(false);
 		}
 	};
-
-	const cancel = () => respond({
-		interactionId: interaction.interactionId,
-		kind: "ask_user",
-		cancelled: true,
-		answers: [],
-	});
-
-	const submitAnswers = (nextDrafts: readonly AnswerDraft[]) => respond({
-		interactionId: interaction.interactionId,
-		kind: "ask_user",
-		cancelled: false,
-		answers: interaction.questions.map((candidate, index) => {
-			const answer = nextDrafts[index] ?? blankDraft();
-			const customAnswer = answer.customAnswer.trim();
-			return {
-				questionId: candidate.id,
-				choiceIds: [...answer.choiceIds],
-				...(customAnswer ? { customAnswer } : {}),
-			};
-		}),
-	});
-
-	const continueWith = (nextDrafts: readonly AnswerDraft[]) => {
-		if (questionIndex < interaction.questions.length - 1) {
-			setQuestionIndex((current) => current + 1);
-			return;
-		}
-		const unansweredIndex = nextDrafts.findIndex((candidate) => !draftHasAnswer(candidate));
-		if (unansweredIndex >= 0) {
-			setQuestionIndex(unansweredIndex);
-			return;
-		}
-		void submitAnswers(nextDrafts);
-	};
-
-	const replaceCurrentDraft = (nextDraft: AnswerDraft): AnswerDraft[] => {
-		const next = [...drafts];
-		next[questionIndex] = nextDraft;
-		setDrafts(next);
-		return next;
-	};
-
-	const choose = (choiceId: string) => {
-		if (busy) return;
-		if (!question.multiple) {
-			const next = replaceCurrentDraft({ choiceIds: [choiceId], customAnswer: "" });
-			continueWith(next);
-			return;
-		}
-		const selected = draft.choiceIds.includes(choiceId)
-			? draft.choiceIds.filter((id) => id !== choiceId)
-			: [...draft.choiceIds, choiceId];
-		replaceCurrentDraft({ ...draft, choiceIds: selected });
-	};
-
-	const openCustom = () => {
-		if (busy) return;
-		setCustomQuestionId(question.id);
-		if (!question.multiple && draft.choiceIds.length > 0) {
-			replaceCurrentDraft({ choiceIds: [], customAnswer: draft.customAnswer });
-		}
-		queueMicrotask(() => customInput.current?.focus());
-	};
-
-	const updateCustom = (value: string) => {
-		replaceCurrentDraft({
-			choiceIds: question.multiple ? draft.choiceIds : [],
-			customAnswer: value,
-		});
-	};
-
 	const continueCurrent = () => {
-		if (!hasAnswer || busy) return;
-		continueWith(drafts);
+		if (unavailable || !hasAnswer(answer)) return;
+		if (finalQuestion) void respond(false);
+		else update({ ...draft, questionIndex: draft.questionIndex + 1 });
 	};
-
-	const previousQuestion = () => {
-		if (busy || questionIndex === 0) return;
-		setQuestionIndex((current) => current - 1);
-	};
-
-	const nextQuestion = () => {
-		if (busy || questionIndex === interaction.questions.length - 1) return;
-		setQuestionIndex((current) => current + 1);
-	};
-
-	const submitCustom = (event: FormEvent) => {
-		event.preventDefault();
-		continueCurrent();
-	};
-
-	const handlePanelKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-		if (event.key === "Escape" && !busy) {
+	const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+		if (event.nativeEvent.isComposing || event.keyCode === 229 || unavailable) return;
+		if (event.key === "Escape") {
 			event.preventDefault();
-			void cancel();
+			event.stopPropagation();
+			update({ ...draft, collapsed: true });
 			return;
 		}
-		if (event.target instanceof HTMLInputElement || event.metaKey || event.ctrlKey || event.altKey) return;
-		const optionIndex = Number(event.key) - 1;
-		if (!Number.isInteger(optionIndex) || optionIndex < 0 || optionIndex >= question.choices.length) return;
-		event.preventDefault();
-		choose(question.choices[optionIndex]!.id);
+		if (event.target instanceof HTMLTextAreaElement || event.metaKey || event.ctrlKey || event.altKey) return;
+		const controls = [...(panel.current?.querySelectorAll<HTMLButtonElement>(".ask-user-option") ?? [])];
+		const current = controls.indexOf(event.target as HTMLButtonElement);
+		if (current >= 0 && ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) {
+			event.preventDefault();
+			const index = event.key === "Home" ? 0 : event.key === "End" ? controls.length - 1
+				: (current + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1) + controls.length) % controls.length;
+			if (!question.multiple) choose(question.choices[index]!.id);
+			controls[index]?.focus();
+			return;
+		}
+		const index = Number(event.key) - 1;
+		if (/^[1-4]$/.test(event.key) && question.choices[index]) {
+			event.preventDefault();
+			choose(question.choices[index]!.id);
+			controls[index]?.focus();
+		}
 	};
+
+	if (draft.collapsed) return (
+		<div className="ask-user-resume">
+			<ChatCircleDots aria-hidden="true" size={20} />
+			<div><strong>{t("Waiting for your answer")}</strong><span>{question.question}</span></div>
+			<button className="button-secondary" onClick={() => update({ ...draft, collapsed: false })} ref={resume} type="button">{t("Continue answering")}</button>
+		</div>
+	);
 
 	return (
-		<div className="ask-user-slot">
-			<section
-				aria-busy={busy}
-				aria-labelledby={questionHeadingId}
-				className="ask-user-panel"
-				onKeyDown={handlePanelKeyDown}
-				role="dialog"
-			>
-				<header className="ask-user-header">
-					<h2 aria-atomic="true" aria-live="polite" id={questionHeadingId}>{question.question}</h2>
-					<div className="ask-user-header-actions">
-						{interaction.questions.length > 1 && (
-							<div className="ask-user-progress">
-								<button
-									aria-label={t("Previous question")}
-									disabled={busy || questionIndex === 0}
-									onClick={previousQuestion}
-									type="button"
-								>
-									<CaretLeft aria-hidden="true" size={14} />
-								</button>
-								<small aria-live="polite">
-									{t("{{current}} of {{total}}", {
-										current: questionIndex + 1,
-										total: interaction.questions.length,
-									})}
-								</small>
-								<button
-									aria-label={t("Next question")}
-									disabled={busy || questionIndex === interaction.questions.length - 1}
-									onClick={nextQuestion}
-									type="button"
-								>
-									<CaretRight aria-hidden="true" size={14} />
-								</button>
-							</div>
-						)}
-					<button
-						aria-label={t("Skip questions")}
-						className="ask-user-close"
-						disabled={busy}
-						onClick={() => void cancel()}
-						type="button"
-					>
-						<X aria-hidden="true" size={15} />
-					</button>
-					</div>
-				</header>
-
-				<div
-					aria-labelledby={questionHeadingId}
-					className="ask-user-options"
-					role={question.multiple ? "group" : "radiogroup"}
-				>
-					{question.choices.map((choice, index) => {
-						const selected = draft.choiceIds.includes(choice.id);
-						return (
-							<button
-								aria-checked={selected}
-								className={`ask-user-option${question.multiple ? " is-multiple" : " is-single"}${selected ? " is-selected" : ""}`}
-								disabled={busy}
-								key={choice.id}
-								onClick={() => choose(choice.id)}
-								ref={index === 0 ? firstOption : undefined}
-								role={question.multiple ? "checkbox" : "radio"}
-								type="button"
-							>
-								{question.multiple ? (
-									<span className="ask-user-checkbox" aria-hidden="true">
-										{selected && <Check size={13} weight="bold" />}
-									</span>
-								) : (
-									<span className="ask-user-option-number" aria-hidden="true">{index + 1}</span>
-								)}
-								<span className="ask-user-option-copy">
-									<strong>{choice.label}</strong>
-									{choice.description && <small>{choice.description}</small>}
-								</span>
-								{!question.multiple && <ArrowBendDownLeft aria-hidden="true" size={15} />}
-							</button>
-						);
-					})}
-
-					<div className={`ask-user-custom${question.multiple ? " is-multiple" : " is-single"}${customOpen ? " is-open" : ""}`}>
-						{question.multiple ? (
-							<span className={`ask-user-checkbox${draft.customAnswer.trim() ? " is-selected" : ""}`} aria-hidden="true">
-								{draft.customAnswer.trim() && <Check size={13} weight="bold" />}
-							</span>
-						) : <PencilSimple aria-hidden="true" size={15} />}
-						{customOpen ? (
-							<form onSubmit={submitCustom}>
-								<label className="sr-only" htmlFor={`ask-user-custom-${interaction.interactionId}`}>
-									{t("Something else")}
-								</label>
-								<input
-									autoComplete="off"
-									disabled={busy}
-									id={`ask-user-custom-${interaction.interactionId}`}
-									maxLength={4096}
-									onChange={(event) => updateCustom(event.target.value)}
-									placeholder={t("Type your own answer…")}
-									ref={customInput}
-									value={draft.customAnswer}
-								/>
-								<button aria-label={t("Use custom answer")} disabled={!draft.customAnswer.trim() || busy} type="submit">
-									<ArrowBendDownLeft aria-hidden="true" size={15} />
-								</button>
-							</form>
-						) : (
-							<button
-								aria-checked={question.multiple ? false : undefined}
-								disabled={busy}
-								onClick={openCustom}
-								role={question.multiple ? "checkbox" : undefined}
-								type="button"
-							>
-								{t("Something else")}
-							</button>
-						)}
-						{!question.multiple && (
-							<button className="ask-user-skip" disabled={busy} onClick={() => void cancel()} type="button">
-								{t("Skip")}
-							</button>
-						)}
-					</div>
-				</div>
-
-				{question.multiple && (
-					<footer className="ask-user-actions">
-						<span aria-live="polite">{t("{{count}} selected", { count: selectedCount })}</span>
-						<div>
-							<button className="ask-user-skip" disabled={busy} onClick={() => void cancel()} type="button">
-								{t("Skip")}
-							</button>
-							<button
-								aria-label={t(questionIndex === interaction.questions.length - 1 && allAnswered ? "Submit answers" : "Next question")}
-								className={`ask-user-step${questionIndex === interaction.questions.length - 1 && allAnswered ? " is-submit" : ""}`}
-								disabled={!hasAnswer || busy}
-								onClick={continueCurrent}
-								type="button"
-							>
-								{questionIndex === interaction.questions.length - 1 && allAnswered
-									? <ArrowUp aria-hidden="true" size={16} />
-									: <ArrowRight aria-hidden="true" size={16} />}
-							</button>
+		<div className={`ask-user-slot${busy ? " is-submitting" : ""}`}>
+			<section aria-busy={busy} aria-labelledby={titleId} className="ask-user-panel" onKeyDown={handleKeyDown} ref={panel} role="dialog">
+				<div className="ask-user-content" key={question.id}>
+					<header className="ask-user-header">
+						<h2 id={titleId} ref={heading} tabIndex={-1}>{question.question}</h2>
+						<div className="ask-user-header-actions">
+							<small aria-label={t("{{current}} of {{total}}", { current: draft.questionIndex + 1, total: interaction.questions.length })}>{draft.questionIndex + 1} / {interaction.questions.length}</small>
+							<button aria-label={t("Collapse questions")} disabled={busy} onClick={() => update({ ...draft, collapsed: true })} type="button"><CaretDown aria-hidden="true" size={16} /></button>
 						</div>
-					</footer>
-				)}
-				{error && <p className="error-copy ask-user-error" role="alert">{t(error)}</p>}
+					</header>
+					<div aria-labelledby={titleId} className="ask-user-options" role={question.multiple ? "group" : "radiogroup"}>
+						{question.choices.map((choice, index) => {
+							const selected = answer.choiceIds.includes(choice.id);
+							return <button aria-checked={selected} className={`ask-user-option${selected ? " is-selected" : ""}`} disabled={unavailable} key={choice.id} onClick={() => choose(choice.id)} role={question.multiple ? "checkbox" : "radio"} tabIndex={question.multiple || selected || (answer.choiceIds.length === 0 && index === 0) ? 0 : -1} type="button">
+								<span aria-hidden="true" className={question.multiple ? "ask-user-checkbox" : "ask-user-option-number"}>{selected ? <Check size={12} weight="bold" /> : !question.multiple && index + 1}</span>
+								<span className="ask-user-option-copy"><strong>{choice.label}</strong>{choice.description && <small>{choice.description}</small>}</span>
+							</button>;
+						})}
+					</div>
+					{customOpen && <div className="ask-user-custom">
+						<textarea aria-label={t("Something else")} disabled={unavailable} maxLength={4096} onChange={(event) => updateAnswer({ choiceIds: question.multiple ? answer.choiceIds : [], customAnswer: event.target.value })} placeholder={t("Type your own answer…")} ref={customInput} rows={2} value={answer.customAnswer} />
+					</div>}
+					{disabled && <p role="status">{t("Reconnecting. Your answers are kept.")}</p>}
+					{error && <p className="error-copy ask-user-error" role="alert">{t(error)}</p>}
+				</div>
+				<footer className="ask-user-actions">
+					<div>
+						<button aria-expanded={customOpen} className="ask-user-custom-trigger" disabled={unavailable} onClick={() => {
+							updateAnswer(question.multiple ? answer : { choiceIds: [], customAnswer: answer.customAnswer }, question.id);
+							queueMicrotask(() => customInput.current?.focus());
+						}} type="button"><PencilSimple aria-hidden="true" size={14} />{t("Something else")}</button>
+						<button aria-label={t("Skip all questions")} className="ask-user-skip" disabled={unavailable} onClick={() => void respond(true)} type="button">{t("Skip all")}</button>
+					</div>
+					<div>
+						{draft.questionIndex > 0 && <button aria-label={t("Previous question")} className="button-secondary" disabled={unavailable} onClick={() => update({ ...draft, questionIndex: draft.questionIndex - 1 })} type="button"><CaretLeft aria-hidden="true" size={15} />{t("Back")}</button>}
+						<button className="ask-user-step" disabled={!hasAnswer(answer) || unavailable} onClick={continueCurrent} type="button">{t(busy ? "Sending…" : finalQuestion ? "Confirm and continue" : "Continue")}<ArrowRight aria-hidden="true" size={15} /></button>
+					</div>
+				</footer>
 			</section>
 		</div>
 	);

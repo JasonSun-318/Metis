@@ -7,6 +7,7 @@ import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
 interface TranscriptProps {
+	readonly waitingForAnswer?: boolean;
 	readonly activeTurnId?: string | null;
 	readonly activeTurnStartedAt?: string;
 	readonly appearance: AgentMode;
@@ -63,7 +64,7 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
+export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const loadingOlderRef = useRef(false);
@@ -210,8 +211,8 @@ export function Transcript({ activeTurnId, activeTurnStartedAt, appearance, aria
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
 								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
-									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} startedAt={activeTurnStartedAt} />
-									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} startedAt={activeTurnStartedAt} />}
+									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />
+									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}

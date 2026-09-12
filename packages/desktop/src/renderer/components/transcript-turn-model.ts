@@ -345,7 +345,7 @@ interface AskAnswer {
 	readonly answer?: string;
 }
 
-function askAnswers(result: ToolResultBlock | undefined): AskAnswer[] {
+export function askAnswers(result: ToolResultBlock | undefined): AskAnswer[] {
 	const prefix = "User answers:\n";
 	if (!result?.output.startsWith(prefix)) return [];
 	const value = jsonValue(result.output.slice(prefix.length));

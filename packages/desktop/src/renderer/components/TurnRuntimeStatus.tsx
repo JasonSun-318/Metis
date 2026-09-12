@@ -42,9 +42,10 @@ export function advanceDisplayedTokens(current: number, target: number): number 
 	return current + Math.sign(difference) * Math.min(step, Math.abs(difference));
 }
 
-export function TurnRuntimeStatus({ items, running, startedAt, variant = "turn" }: {
+export function TurnRuntimeStatus({ items, running, startedAt, waitingForAnswer = false, variant = "turn" }: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
+	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
 	readonly variant?: "turn" | "compaction";
 }) {
@@ -62,15 +63,16 @@ export function TurnRuntimeStatus({ items, running, startedAt, variant = "turn" 
 	);
 
 	useEffect(() => {
-		if (!running) return;
+		if (!running || waitingForAnswer) return;
 		const interval = window.setInterval(() => {
 			if (variant === "turn") setDisplayedTokens((current) => advanceDisplayedTokens(current, targetRef.current));
 			setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1_000)));
 		}, 100);
 		return () => window.clearInterval(interval);
-	}, [running, startedAtMs, variant]);
+	}, [running, startedAtMs, variant, waitingForAnswer]);
 
 	if (!running) return null;
+	if (waitingForAnswer) return <div className="turn-runtime-status is-waiting" role="status">{t("Waiting for your answer")}</div>;
 	return (
 		<div
 			aria-label={t(variant === "compaction" ? "Compacting conversation…" : "Thinking…")}
