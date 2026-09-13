@@ -9,8 +9,9 @@ import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 let roots: Root[] = [];
 
-function apiFixture(running = false) {
+function apiFixture(running = false, platform: "darwin" | "win32" = "darwin") {
 	return {
+		platform,
 		listBrowserImportSources: vi.fn(async () => [{
 			sourceId: "chrome" as const,
 			name: "Google Chrome",
@@ -84,6 +85,25 @@ describe("BrowserImportDialog", () => {
 			profile: expect.objectContaining({ sourceProfileId: "Profile 2" }),
 		}));
 		expect(container.textContent).not.toMatch(/password|autofill/iu);
+	});
+
+	it("offers only browsing history on Windows", async () => {
+		const api = apiFixture(false, "win32");
+		const { container } = renderDialog(api);
+		await flush();
+
+		expect(container.textContent).toContain("On Windows, Metis currently imports browsing history only.");
+		expect(container.textContent).not.toContain("Import website sign-in state");
+		expect([...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]).toHaveLength(1);
+
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
+			.find((button) => button.textContent === "Import")!;
+		await act(async () => importButton.click());
+		expect(api.importBrowserData).toHaveBeenCalledWith({
+			sourceId: "chrome",
+			sourceProfileId: "Default",
+			dataTypes: { cookies: false, history: true },
+		});
 	});
 
 	it("blocks import while the source browser is running", async () => {

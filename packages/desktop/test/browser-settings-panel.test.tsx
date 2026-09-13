@@ -47,6 +47,7 @@ function download(overrides: Partial<DesktopDownloadItem> & { downloadId: string
 function fixture(overrides: {
 	history?: Readonly<Record<string, readonly DesktopHistoryEntry[]>>;
 	downloads?: readonly DesktopDownloadItem[];
+	platform?: "darwin" | "win32";
 } = {}) {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
 	const history = overrides.history ?? {
@@ -61,6 +62,7 @@ function fixture(overrides: {
 		[chromeProfileId]: [historyEntry({ entryId: "chrome-history", title: "Chrome profile docs" })],
 	};
 	const api = {
+		platform: overrides.platform ?? "darwin",
 		getBrowserDownloadDirectory: vi.fn().mockResolvedValue("/Users/test/Downloads"),
 		openBrowserDownloadDirectory: vi.fn().mockResolvedValue(undefined),
 		listBrowserProfiles: vi.fn().mockResolvedValue(profiles),
@@ -140,6 +142,14 @@ describe("BrowserSettingsPanel", () => {
 		expect(api.openBrowserDownloadDirectory).toHaveBeenCalledOnce();
 		await act(async () => button(container, "Import browser data").click());
 		expect(document.body.textContent).toContain("Import from browser");
+	});
+
+	it("describes Windows import as history-only", async () => {
+		const { api } = fixture({ platform: "win32" });
+		const container = renderPanel(api);
+		await flush();
+		expect(container.textContent).toContain("Import browsing history from a supported Chromium profile.");
+		expect(container.textContent).not.toContain("Import Cookies and browsing history");
 	});
 
 	it("refreshes profiles and selects the imported profile after a successful import", async () => {

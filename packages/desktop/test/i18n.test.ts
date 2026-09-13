@@ -67,6 +67,17 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("What's new")).toBe("更新日志");
 		expect(i18n.t("Open unread release notes")).toBe("打开未读更新日志");
 		expect(i18n.t("Release notes are unavailable for this version.")).toBe("此版本暂无更新说明。");
+		expect(
+			i18n.t(
+				"On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.",
+			),
+		).toBe("Windows 版 Metis 目前仅导入浏览记录，不会导入 Cookie 或登录状态。");
+		expect(i18n.t("Bring in browser history and manage profile-specific history.")).toBe(
+			"导入浏览记录，并管理各浏览器资料的独立历史记录。",
+		);
+		expect(i18n.t("Import browsing history from a supported Chromium profile.")).toBe(
+			"从支持的 Chromium 浏览器资料导入浏览记录。",
+		);
 
 		await setLocale("en", localStorage);
 		expect(localStorage.getItem(APP_LOCALE_STORAGE_KEY)).toBe("en");

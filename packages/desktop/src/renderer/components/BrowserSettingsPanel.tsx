@@ -111,6 +111,7 @@ function DownloadRow({ download, onAction }: {
 
 export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi }) {
 	const { i18n, t } = useTranslation();
+	const windowsHistoryOnly = api.platform === "win32";
 	const [view, setView] = useState<BrowserSettingsView>("overview");
 	const [profiles, setProfiles] = useState<readonly DesktopBrowserProfile[]>([]);
 	const [selectedProfileId, setSelectedProfileId] = useState(DEFAULT_BROWSER_PROFILE_ID);
@@ -320,10 +321,14 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			{error && <p className="settings-inline-error" role="alert">{error}</p>}
 			{notice && <p className="settings-action-message" role="status">{notice}</p>}
 			<section className="settings-section">
-				<header className="settings-section-heading"><div><h3>{t("Browser data")}</h3><p>{t("Bring in existing sessions and manage profile-specific history.")}</p></div></header>
-				<div className="settings-card">
-					<div className="general-setting-row">
-						<div className="general-setting-copy"><span>{t("Import browser data")}</span><p>{t("Import Cookies and browsing history from a supported Chromium profile.")}</p></div>
+			<header className="settings-section-heading"><div><h3>{t("Browser data")}</h3><p>{t(windowsHistoryOnly
+					? "Bring in browser history and manage profile-specific history."
+					: "Bring in existing sessions and manage profile-specific history.")}</p></div></header>
+			<div className="settings-card">
+				<div className="general-setting-row">
+					<div className="general-setting-copy"><span>{t("Import browser data")}</span><p>{t(windowsHistoryOnly
+						? "Import browsing history from a supported Chromium profile."
+						: "Import Cookies and browsing history from a supported Chromium profile.")}</p></div>
 						<div className="general-setting-control"><button aria-label={t("Import browser data")} className="settings-secondary-button" onClick={() => setImportOpen(true)} type="button">{t("Import…")}</button></div>
 					</div>
 					<div className="general-setting-row">

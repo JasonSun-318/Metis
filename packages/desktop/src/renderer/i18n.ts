@@ -1409,9 +1409,13 @@ const zhCN = {
 	"Browser data": "浏览器数据",
 	"Bring in existing sessions and manage profile-specific history.":
 		"导入现有登录状态，并管理各浏览器资料的独立历史记录。",
+	"Bring in browser history and manage profile-specific history.": "导入浏览记录，并管理各浏览器资料的独立历史记录。",
 	"Import browser data": "导入浏览器数据",
 	"Import Cookies and browsing history from a supported Chromium profile.":
 		"从支持的 Chromium 浏览器资料导入 Cookie 和浏览记录。",
+	"Import browsing history from a supported Chromium profile.": "从支持的 Chromium 浏览器资料导入浏览记录。",
+	"On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.":
+		"Windows 版 Metis 目前仅导入浏览记录，不会导入 Cookie 或登录状态。",
 	"Import…": "导入…",
 	"View and clear up to the newest 500 entries for each isolated browser profile.":
 		"查看或清除每个独立浏览器资料中最近的 500 条记录。",

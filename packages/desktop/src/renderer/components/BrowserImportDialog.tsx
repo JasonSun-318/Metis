@@ -19,10 +19,11 @@ interface BrowserImportDialogProps {
 export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImportDialogProps) {
 	const { t } = useTranslation();
 	const closeRef = useRef<HTMLButtonElement>(null);
+	const supportsCookieImport = api.platform === "darwin";
 	const [sources, setSources] = useState<readonly DesktopBrowserImportSource[]>([]);
 	const [sourceId, setSourceId] = useState<DesktopBrowserSourceId | "">("");
 	const [sourceProfileId, setSourceProfileId] = useState("");
-	const [cookies, setCookies] = useState(true);
+	const [cookies, setCookies] = useState(supportsCookieImport);
 	const [history, setHistory] = useState(true);
 	const [loading, setLoading] = useState(true);
 	const [pending, setPending] = useState(false);
@@ -54,7 +55,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 		setPending(true);
 		setError(null);
 		try {
-			onImported(await api.importBrowserData({ sourceId, sourceProfileId, dataTypes: { cookies, history } }));
+			onImported(await api.importBrowserData({ sourceId, sourceProfileId, dataTypes: { cookies: supportsCookieImport && cookies, history } }));
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Browser data could not be imported"));
 			setPending(false);
@@ -104,11 +105,18 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 					</div>
 				)}
 				<div aria-label={t("Data to import")} className="browser-import-data" role="group">
-					<label>
-						<span>{t("Cookies")}</span>
-						<small>{t("Import website sign-in state. No numeric limit is applied.")}</small>
-						<input checked={cookies} disabled={pending} onChange={(event) => setCookies(event.target.checked)} type="checkbox" />
-					</label>
+					{supportsCookieImport && (
+						<label>
+							<span>{t("Cookies")}</span>
+							<small>{t("Import website sign-in state. No numeric limit is applied.")}</small>
+							<input checked={cookies} disabled={pending} onChange={(event) => setCookies(event.target.checked)} type="checkbox" />
+						</label>
+					)}
+					{!supportsCookieImport && (
+						<p className="browser-import-empty">
+							{t("On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.")}
+						</p>
+					)}
 					<label>
 						<span>{t("Browsing history")}</span>
 						<small>{t("Merge with this profile and retain the newest 500 total entries.")}</small>
