@@ -32,6 +32,7 @@ const CODE_ID = "10000000-0000-4000-8000-000000000003";
 const SCHEDULE_ID = "10000000-0000-4000-8000-000000000004";
 const SESSION_ACTION_ID = "10000000-0000-4000-8000-000000000005";
 const COMPLETED_TASK_ID = "10000000-0000-4000-8000-000000000006";
+const TEMP_REMOVE_OPTIONS = { force: true, maxRetries: 10, recursive: true, retryDelay: 200 } as const;
 
 function cssGridTrackCount(template: string): number {
 	const repeat = /^repeat\((\d+)/u.exec(template.trim());
@@ -619,9 +620,9 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 
 		phase = "checking Code task list";
 		await page.getByRole("button", { name: "Code", exact: true }).click();
-		await page.getByRole("dialog", { name: "Create a new project" }).waitFor();
-		await page.keyboard.press("Escape");
-		await page.getByRole("button", { name: "Task list Code fixture", exact: true }).click();
+		const codeSession = page.getByRole("button", { name: "Task list Code fixture", exact: true });
+		await expect(codeSession).toBeVisible();
+		await codeSession.click();
 		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
 		const codeExecution = page.locator(".code-execution").first();
 		await expect(codeExecution).not.toHaveAttribute("open", "");
@@ -664,7 +665,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -871,7 +872,7 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		await closeServer(fakeProvider);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -1125,7 +1126,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await browser?.close().catch(() => undefined);
 		if (app) await stopProcess(app);
 		await closeServer(fakeProvider);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -2086,7 +2087,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		await closeServer(fakeProvider);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -2382,7 +2383,7 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -2606,7 +2607,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		await Promise.all([urlServer.close(), customServer.close(), jsonServer.close()]);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -3015,7 +3016,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -3126,7 +3127,7 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -3352,7 +3353,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -3549,7 +3550,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -3835,7 +3836,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		await closeServer(fixtureServer);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4069,7 +4070,7 @@ test("packaged General settings and Personalization persist across restart", asy
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4139,7 +4140,7 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		const downloadDirectory = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.getBrowserDownloadDirectory(),
 		);
-		expect(downloadDirectory).toMatch(/\/Downloads$/u);
+		expect(path.basename(downloadDirectory)).toBe("Downloads");
 		await expect(page.getByText(downloadDirectory, { exact: true })).toBeVisible();
 		await expect(page.getByText("2 profiles · 3 entries in selected profile", { exact: true })).toBeVisible();
 		expect(await page.locator(".settings-page-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
@@ -4149,12 +4150,30 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		await page.getByRole("button", { name: "Import browser data", exact: true }).click();
 		const importDialog = page.getByRole("dialog", { name: "Import from browser", exact: true });
 		await expect(importDialog).toBeVisible();
-		await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
-		await importDialog.getByRole("button", { name: "Close", exact: true }).click();
+		if (process.platform === "win32") {
+			await expect(importDialog.getByText("Google Chrome", { exact: true })).toBeVisible();
+			await expect(
+				importDialog.getByText(
+					"On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.",
+					{ exact: true },
+				),
+			).toBeVisible();
+			await expect(importDialog.getByText("Cookies", { exact: true })).toHaveCount(0);
+			await importDialog.getByRole("button", { name: "Import", exact: true }).click();
+			await expect(importDialog).toHaveCount(0);
+			await expect(page.getByText(/\d+ history entries retained/u)).toBeVisible();
+		} else {
+			await expect(importDialog.getByText("No supported browser profiles found", { exact: true })).toBeVisible();
+			await importDialog.getByRole("button", { name: "Close", exact: true }).click();
+		}
 
 		phase = "managing profile history";
 		await page.getByRole("button", { name: "Manage browsing history", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "Browsing history", exact: true })).toBeVisible();
+		if (process.platform === "win32") {
+			await page.getByRole("button", { name: "Browser profile", exact: true }).click();
+			await page.getByRole("option", { name: "Metis — Default profile", exact: true }).click();
+		}
 		await expect(page.getByText("Metis browser docs", { exact: true })).toBeVisible();
 		await expect(page.locator(".browser-settings-history-group")).toHaveCount(2);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "history-dark-1440x900.png") });
@@ -4195,7 +4214,7 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4275,7 +4294,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4580,7 +4599,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
 		if (!scheduleRemoved) await fixtures.ScheduleManager.create({ agentDir }).delete(SCHEDULE_ID, { deleteSessions: false }).catch(() => undefined);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4698,7 +4717,7 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });
 
@@ -4766,6 +4785,6 @@ test("packaged project delete fails closed for a held session lease and retries"
 		if (!leaseReleased) held.close();
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, TEMP_REMOVE_OPTIONS);
 	}
 });

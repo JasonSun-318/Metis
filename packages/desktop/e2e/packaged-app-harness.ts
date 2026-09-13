@@ -303,6 +303,11 @@ export async function createAndRestoreChatSession(
 
 export async function stopProcess(child: ChildProcess): Promise<void> {
 	if (child.exitCode !== null || child.signalCode !== null) return;
+	if (process.platform === "win32" && child.pid !== undefined) {
+		spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+		await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+		return;
+	}
 	child.kill("SIGTERM");
 	await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
 	if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
