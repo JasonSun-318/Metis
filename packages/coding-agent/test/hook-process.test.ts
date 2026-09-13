@@ -1,6 +1,6 @@
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { DeclarativeHook } from "../src/core/hooks/declarative-hooks.ts";
 import { MAX_PIPE_BUFFER_BYTES, runHookProcess } from "../src/core/hooks/hook-bridge.ts";
 import { interpretHookResult } from "../src/core/hooks/hook-protocol.ts";
@@ -291,7 +291,7 @@ describe("hook process execution and bounds", () => {
 			expect(result.timedOut).toBe(true);
 			grandchildPid = Number(result.stdout.trim());
 			expect(Number.isFinite(grandchildPid)).toBe(true);
-			expect(isAlive(grandchildPid!)).toBe(false);
+			await vi.waitFor(() => expect(isAlive(grandchildPid!)).toBe(false));
 		} finally {
 			if (grandchildPid && isAlive(grandchildPid)) {
 				try {
