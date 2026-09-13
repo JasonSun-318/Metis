@@ -46,6 +46,12 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 describe("Process sidebar", () => {
 	it.each(["chat", "code"] as const)("opens one read-only tab in %s, streams output and clears it for the next command", async (mode) => {
 		await render(undefined, sessionId, mode);
+		expect(container.querySelector('[role="tab"][aria-label="Process"]')).toBeNull();
+		expect(container.querySelector('.tool-sidebar-menu button[aria-label="Process"]')).toBeNull();
+		if (mode === "code") {
+			expect(container.querySelector('.tool-sidebar-menu button[aria-label="Files"] .animated-nav-icon')).toBeNull();
+			expect(container.querySelector('.tool-sidebar-menu button[aria-label="Files"] svg')).not.toBeNull();
+		}
 		await render(command("one"), sessionId, mode);
 		expect(onOpen).toHaveBeenCalledOnce();
 		expect(container.querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
@@ -66,6 +72,7 @@ describe("Process sidebar", () => {
 	it("respects closing the tab, then opens for a new command even when it completed within one batch", async () => {
 		await render(command("one"));
 		await act(async () => (container.querySelector('[aria-label="Close Process"]') as HTMLButtonElement).click());
+		expect(container.querySelector('.tool-sidebar-menu button[aria-label="Process"]')).toBeNull();
 		await render(command("one", "late"));
 		expect(container.querySelector('[role="tab"][aria-label="Process"]')).toBeNull();
 		expect(onOpen).toHaveBeenCalledOnce();

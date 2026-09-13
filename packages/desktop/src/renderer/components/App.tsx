@@ -215,6 +215,12 @@ export function App({ api, store }: AppProps) {
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
+	const processAutoOpenSuppressed = useRef(new Set<string>());
+	const processAutoOpenedSessionId = useRef<string | null>(null);
+	const previousRunningSession = useRef<{ readonly sessionId: string | null; readonly running: boolean }>({
+		sessionId: null,
+		running: false,
+	});
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
@@ -279,7 +285,7 @@ export function App({ api, store }: AppProps) {
 			localStorage.setItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${state.activeSessionId}`, String(width));
 		}
 	}, [state.activeSessionId]);
-	const showToolsSidebar = useCallback(() => {
+	const openToolsSidebar = useCallback(() => {
 		if (state.activeSessionId) {
 			const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth ?? window.innerWidth;
 			const preferredWidth = loadToolsSidebarPreferredWidth(state.activeSessionId, workspaceWidth);
@@ -288,6 +294,21 @@ export function App({ api, store }: AppProps) {
 		}
 		setToolsSidebarOpen(true);
 	}, [state.activeSessionId]);
+	const showToolsSidebar = useCallback(() => {
+		if (state.activeSessionId) processAutoOpenSuppressed.current.delete(state.activeSessionId);
+		openToolsSidebar();
+	}, [openToolsSidebar, state.activeSessionId]);
+	const openProcessSidebar = useCallback((sessionId: string) => {
+		if (processAutoOpenSuppressed.current.has(sessionId)) return;
+		if (!toolsSidebarOpen) processAutoOpenedSessionId.current = sessionId;
+		openToolsSidebar();
+	}, [openToolsSidebar, toolsSidebarOpen]);
+	const hideToolsSidebar = useCallback(() => {
+		const sessionId = state.activeSessionId;
+		if (sessionId && state.process?.state === "running") processAutoOpenSuppressed.current.add(sessionId);
+		if (processAutoOpenedSessionId.current === sessionId) processAutoOpenedSessionId.current = null;
+		setToolsSidebarOpen(false);
+	}, [state.activeSessionId, state.process?.state]);
 	const handlePreviewDeliveredFile = useCallback(
 		(file: SessionDeliveredFileView) => {
 			if (!state.activeSessionId) return;
@@ -742,6 +763,19 @@ export function App({ api, store }: AppProps) {
 		: undefined;
 	const toolsSidebarAvailable = visibleActiveSession !== undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
+	useEffect(() => {
+		const sessionId = visibleActiveSession?.sessionId ?? null;
+		const previous = previousRunningSession.current;
+		previousRunningSession.current = { sessionId, running };
+		if (previous.sessionId !== sessionId) {
+			if (processAutoOpenedSessionId.current !== sessionId) processAutoOpenedSessionId.current = null;
+			return;
+		}
+		if (sessionId && previous.running && !running && processAutoOpenedSessionId.current === sessionId) {
+			processAutoOpenedSessionId.current = null;
+			setToolsSidebarOpen(false);
+		}
+	}, [running, visibleActiveSession?.sessionId]);
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
 		if (destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
@@ -1615,7 +1649,7 @@ export function App({ api, store }: AppProps) {
 						aria-pressed={toolsSidebarOpen}
 						className="details-sidebar-toggle"
 						onClick={() => {
-							if (toolsSidebarOpen) setToolsSidebarOpen(false);
+							if (toolsSidebarOpen) hideToolsSidebar();
 							else showToolsSidebar();
 						}}
 						type="button"
@@ -1810,9 +1844,9 @@ export function App({ api, store }: AppProps) {
 					cleanupSessionIds={toolCleanupSessionIds}
 					mode={mode}
 					onActivateSession={activateBrowserSession}
-					onOpen={showToolsSidebar}
+					onOpen={openProcessSidebar}
 					process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
-					onClose={() => setToolsSidebarOpen(false)}
+					onClose={hideToolsSidebar}
 					onCleanupSessionIdsHandled={handleToolCleanupHandled}
 					onDirtySessionIdsChange={handleDirtySessionIdsChange}
 					onError={reportError}

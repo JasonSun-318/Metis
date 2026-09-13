@@ -22,7 +22,6 @@ import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { ProcessPanel } from "./ProcessPanel.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
-import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 const FILE_BROWSER_STORAGE_PREFIX = "metis.file-browser.v1:";
 const BROWSER_PROFILE_STORAGE_KEY = "metis.browser-profile.v1";
@@ -107,7 +106,7 @@ interface ToolsSidebarProps {
 	readonly cleanupSessionIds: readonly string[];
 	readonly mode: AgentMode;
 	readonly onClose: () => void;
-	readonly onOpen?: () => void;
+	readonly onOpen?: (sessionId: string) => void;
 	readonly process?: SessionProcessView;
 	readonly onActivateSession: (sessionId: string) => void;
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
@@ -230,7 +229,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 			return new Map(current).set(sessionId, { ...owner, tabs, activeId: id });
 		});
 		setMenuOpen(false);
-		onOpen?.();
+		onOpen?.(sessionId);
 	}, [onOpen, process, sessionId]);
 
 	useEffect(() => {
@@ -947,10 +946,6 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 					<span>{t("Review")}</span>
 				</button>
 			)}
-			<button aria-label="Process" disabled={!process} onClick={openProcess} role={compact ? "menuitem" : undefined} type="button">
-				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 20} /></div>
-				<span>Process</span>
-			</button>
 			<button aria-label={t("Terminal")} disabled={!activeSession?.cwd} onClick={addTerminal} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before starting a terminal")} type="button">
 				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={compact ? 14 : 20} /></div>
 				<span>{t("Terminal")}</span>
@@ -961,7 +956,7 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 			</button>
 			{mode === "code" && (
 				<button aria-label={t("Files")} disabled={!activeSession?.cwd} onClick={addFiles} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before browsing files")} type="button">
-					<div className="tool-menu-icon"><AnimatedNavIcon kind="folder" size={compact ? 14 : 20} /></div>
+					<div className="tool-menu-icon"><FileText aria-hidden="true" size={compact ? 14 : 20} /></div>
 					<span>{t("Files")}</span>
 				</button>
 			)}

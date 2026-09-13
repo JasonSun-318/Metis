@@ -4402,6 +4402,85 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("collapses an automatically opened Process sidebar after the turn and keeps its tab available", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={store} />));
+		await flush();
+
+		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		await act(async () => store.applySnapshot({
+			...snapshot(running),
+			activeTurnId: "turn-running",
+			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
+		}));
+		expect(button(container, "Hide tools sidebar")).not.toBeNull();
+		expect(container.querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
+
+		await act(async () => store.applySnapshot({
+			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+			process: { processId: "process-one", command: "echo one", output: "one\n", state: "completed", truncated: false },
+		}));
+		expect(button(container, "Show tools sidebar")).not.toBeNull();
+		expect(container.querySelector(".tool-sidebar")?.hasAttribute("hidden")).toBe(true);
+		expect(container.querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector(".process-panel:not([hidden])")?.textContent).toContain("Command completed");
+		await act(async () => root.unmount());
+	});
+
+	it("does not reopen Process after a user collapses it during execution until they reopen the sidebar", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={store} />));
+		await flush();
+
+		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		await act(async () => store.applySnapshot({
+			...snapshot(running),
+			activeTurnId: "turn-running",
+			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
+		}));
+		await act(async () => button(container, "Hide tools sidebar").click());
+
+		await act(async () => store.applySnapshot({
+			...snapshot(running),
+			activeTurnId: "turn-running",
+			process: { processId: "process-two", command: "echo two", output: "two\n", state: "running", truncated: false },
+		}));
+		expect(button(container, "Show tools sidebar")).not.toBeNull();
+		expect(container.querySelector(".tool-sidebar")?.hasAttribute("hidden")).toBe(true);
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain("echo two");
+		await act(async () => store.applySnapshot({
+			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+			process: { processId: "process-two", command: "echo two", output: "two\n", state: "completed", truncated: false },
+		}));
+		expect(button(container, "Hide tools sidebar")).not.toBeNull();
+
+		await act(async () => button(container, "Hide tools sidebar").click());
+		await act(async () => store.applySnapshot({
+			...snapshot(running),
+			activeTurnId: "turn-next",
+			process: { processId: "process-three", command: "echo three", output: "", state: "running", truncated: false },
+		}));
+		expect(button(container, "Hide tools sidebar")).not.toBeNull();
+		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain("echo three");
+		await act(async () => root.unmount());
+	});
+
 	it("opens one Review tab in Code mode and reselects it instead of duplicating it", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
