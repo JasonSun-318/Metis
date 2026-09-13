@@ -63,15 +63,15 @@ describe("Interactive Transitions", () => {
 		expect(scroll.scrollbarWidth).toBe("none");
 	});
 
-	it("defines spring zoom entrance for modal dialogs and smooth toast float", () => {
+	it("defines spring zoom entrance for modal dialogs and smooth notices", () => {
 		const backdrop = rule(".modal-backdrop");
 		expect(backdrop.animation).toContain("modal-fade-in");
 
 		const dialog = rule(".interaction-dialog");
 		expect(dialog.animation).toContain("modal-card-in");
 
-		const toast = rule(".toast");
-		expect(toast.animation).toContain("toast-slide-in");
+		const notice = rule(".system-notice");
+		expect(notice.animation).toContain("system-notice-in");
 	});
 
 	it("defines smooth meter transitions for context ring and pop-in for attachments", () => {
