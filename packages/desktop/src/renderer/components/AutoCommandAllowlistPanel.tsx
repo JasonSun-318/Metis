@@ -1,8 +1,9 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { CheckCircle, Info, Terminal } from "@phosphor-icons/react";
+import { Info, Terminal } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 const MAX_AUTO_COMMAND_RULES = 64;
 
@@ -217,12 +218,7 @@ export function AutoCommandAllowlistPanel({
 					</div>
 				</div>
 			) : null}
-			{notice ? (
-				<div className="toast settings-toast" role="status">
-					<CheckCircle aria-hidden="true" size={15} />
-					{notice}
-				</div>
-			) : null}
+			{notice ? <FloatingSystemNotice title={notice} tone="success" /> : null}
 		</section>
 	);
 }

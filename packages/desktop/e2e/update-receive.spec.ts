@@ -163,7 +163,7 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		// Production acceptance requires a successful remote check. Failure and
 		// unsupported-build feedback are covered separately in chat-shell tests.
 		expect(["available", "unavailable"]).toContain(updateState.status);
-		const toast = page.locator(".toast");
+		const toast = page.locator(".system-notice");
 		const updateButton = page.locator(".sidebar-update-button");
 		if (updateState.status === "available") {
 			await expect(updateButton).toHaveText(/更新新版本|Update to new version/u);

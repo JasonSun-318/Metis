@@ -946,7 +946,7 @@ describe("WebSearchSettingsPanel", () => {
 			provider: "serpapi",
 			credential: { action: "set", value: "serp-key" },
 		});
-		expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
+		expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toContain("Saved");
 		await act(async () => root.unmount());
 	});
 
@@ -963,9 +963,9 @@ describe("WebSearchSettingsPanel", () => {
 		vi.useFakeTimers();
 		try {
 			await act(async () => button(container, "Save").click());
-			expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
+			expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toContain("Saved");
 			await act(async () => vi.advanceTimersByTimeAsync(2_500));
-			expect(container.querySelector(".settings-toast")).toBeNull();
+			expect(container.querySelector(".system-notice")).toBeNull();
 		} finally {
 			vi.useRealTimers();
 			await act(async () => root.unmount());

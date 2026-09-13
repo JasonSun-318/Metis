@@ -234,7 +234,7 @@ test("packaged projection client recovers across renderer and app-server restart
 		process.kill(crashedServerPid, "SIGKILL");
 		await expect.poll(() => appServerPid(rootPid), { timeout: 10_000 }).not.toBe(crashedServerPid);
 		await waitForServerReady(page);
-		await expect(page.locator(".recovery-banner")).toContainText("last turn was interrupted");
+		await expect(page.locator('.system-notice[data-tone="warning"]')).toContainText("last turn was interrupted");
 		await expect(page.locator("#composer-input")).toBeEnabled();
 
 		expect(requestCount).toBe(2);

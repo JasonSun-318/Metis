@@ -1,8 +1,9 @@
 import type { MemorySettingsView } from "@metis/app-protocol";
-import { BookBookmark, CheckCircle, Cpu, Info, Sparkle, WarningCircle, XCircle } from "@phosphor-icons/react";
+import { BookBookmark, Cpu, Info, Sparkle, WarningCircle, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { FloatingSystemNotice } from "./SystemNotice.tsx";
 export function MemorySettingsPanel({ api, onConfigureModels, serverReady, onDirtyChange }: {
 	readonly api: Pick<MetisDesktopApi, "getMemorySettings" | "updateMemorySettings">;
 	readonly onConfigureModels: () => void;
@@ -252,12 +253,7 @@ export function MemorySettingsPanel({ api, onConfigureModels, serverReady, onDir
 				</button>
 			</div>
 
-			{notice ? (
-				<div className="toast settings-toast" role="status">
-					<CheckCircle aria-hidden="true" size={15} />
-					{notice}
-				</div>
-			) : null}
+			{notice ? <FloatingSystemNotice title={notice} tone="success" /> : null}
 		</div>
 	);
 }

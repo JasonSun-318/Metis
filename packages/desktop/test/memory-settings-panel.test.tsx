@@ -63,7 +63,7 @@ describe("MemorySettingsPanel", () => {
 			autoMemoryEnabled: false,
 			memoryEngine: "index",
 		});
-		expect(container.querySelector(".settings-toast")?.textContent).toContain("Saved");
+		expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toContain("Saved");
 		await act(async () => root.unmount());
 	});
 

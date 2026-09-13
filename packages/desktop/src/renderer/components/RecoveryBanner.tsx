@@ -1,8 +1,10 @@
 import type { SessionSummary } from "@metis/app-protocol";
-import { useTranslation } from "react-i18next";
+import { SystemNotice, systemErrorNoticeForCode } from "./SystemNotice.tsx";
 
-export function RecoveryBanner({ session }: { readonly session: SessionSummary }) {
-	const { t } = useTranslation();
+export function RecoveryBanner({ errorCode, session }: {
+	readonly errorCode?: string;
+	readonly session: SessionSummary;
+}) {
 	if (
 		!session.recoveryNotice &&
 		session.state !== "interrupted" &&
@@ -10,12 +12,16 @@ export function RecoveryBanner({ session }: { readonly session: SessionSummary }
 		session.state !== "in_use"
 	)
 		return null;
+	if (errorCode) {
+		const copy = systemErrorNoticeForCode(errorCode);
+		return <SystemNotice message={copy.message} title={copy.title} tone="error" />;
+	}
 	const message =
 		session.recoveryNotice ??
 		(session.state === "interrupted"
-			? t("The last turn was interrupted. Your saved work is intact; send a new message to continue.")
+			? "The last turn was interrupted. Your saved work is intact; send a new message to continue."
 			: session.state === "corrupt"
-				? t("This session is corrupt. Metis left the source data untouched.")
-				: t("This session is currently open in another process."));
-	return <div className="recovery-banner" role="status">{message}</div>;
+				? "This session is corrupt. Metis left the source data untouched."
+				: "This session is currently open in another process.");
+	return <SystemNotice message={message} title="Task needs attention" tone="warning" />;
 }

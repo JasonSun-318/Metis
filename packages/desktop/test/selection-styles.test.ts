@@ -31,7 +31,7 @@ describe("App text selection", () => {
 		expect(selectable?.selectorText).toContain("input");
 		expect(selectable?.selectorText).toContain('[contenteditable="true"]');
 		expect(selectable?.selectorText).toContain(".cm-content");
-		expect(selectable?.selectorText).toContain(".toast-error");
+		expect(selectable?.selectorText).toContain(".system-notice-copy");
 		expect(selectable?.selectorText).toContain(".error-copy");
 		expect(selectable?.selectorText).toContain(".file-empty-state.is-error");
 		expect(selectable?.selectorText).toContain(".preview-error-state");

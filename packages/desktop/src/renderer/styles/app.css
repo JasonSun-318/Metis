@@ -5,7 +5,7 @@ html, body, #root { width: 100%; height: 100%; margin: 0; user-select: none; }
 body { overflow: hidden; background: var(--app-bg); color: var(--text); font-weight: 400; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 button, input, textarea, select { color: inherit; font: inherit; }
 input, textarea, select, [contenteditable="true"], .cm-content,
-[role="alert"], .toast-error, .error-copy, .notice-error, .tool-block-error,
+[role="alert"], .system-notice-copy, .error-copy, .notice-error, .tool-block-error,
 .app-error-boundary, .file-empty-state.is-error, .preview-error-state { user-select: text; }
 button { --button-hover-bg: var(--panel-hover); border: 0; border-radius: 7px; background: transparent; cursor: pointer; padding: 0; }
 button:hover:not(:disabled) { background: var(--button-hover-bg); }
@@ -2120,8 +2120,24 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 @keyframes effort-label-forward { from { opacity: 0; filter: blur(2px); transform: translateY(3px); } to { opacity: 1; filter: none; transform: none; } }
 @keyframes effort-label-backward { from { opacity: 0; filter: blur(2px); transform: translateY(-3px); } to { opacity: 1; filter: none; transform: none; } }
 @keyframes effort-pixels-in { from { opacity: 0; } to { opacity: 1; } }
-.server-banner, .recovery-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--warning-banner-border); background: var(--warning-banner-bg); color: var(--warning-banner-text); padding: 10px 22px; }
-.server-banner button { border-radius: 7px; --button-hover-bg: var(--button-primary-bg-hover); background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 6px 10px; }
+@keyframes system-notice-in {
+	from { opacity: 0; transform: translateY(-8px) scale(.98); }
+	to { opacity: 1; transform: none; }
+}
+.system-notice-stack { position: absolute; z-index: 80; top: 48px; left: 50%; display: grid; width: min(480px, calc(100% - 40px)); gap: 8px; pointer-events: none; transform: translateX(-50%); }
+.system-notice-stack.is-global { position: fixed; z-index: 10030; }
+.system-notice { display: grid; min-height: 48px; align-items: center; gap: 10px; grid-template-columns: 20px minmax(0, 1fr) auto auto; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--panel-raised); box-shadow: var(--overlay-shadow); color: var(--text-24); padding: 9px 10px 9px 12px; pointer-events: auto; animation: system-notice-in 200ms cubic-bezier(.16, 1, .3, 1) both; -webkit-app-region: no-drag; }
+.system-notice-icon { color: var(--text-14); }
+.system-notice[data-tone="success"] .system-notice-icon { color: var(--success-dot); }
+.system-notice[data-tone="warning"] .system-notice-icon { color: var(--warning-icon); }
+.system-notice[data-tone="error"] .system-notice-icon { color: var(--danger); }
+.system-notice-copy { display: grid; min-width: 0; gap: 2px; }
+.system-notice-copy strong { color: var(--text-27); font-size: 12px; font-weight: 560; line-height: 1.35; }
+.system-notice-copy span { color: var(--text-12); font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.system-notice-action { min-height: 28px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-06); color: var(--text-24); padding: 0 9px; font-size: 11px; white-space: nowrap; }
+.system-notice-action:hover:not(:disabled) { background: var(--surface-10); color: var(--text-28); }
+.system-notice-dismiss { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-09); }
+.system-notice-dismiss:hover:not(:disabled) { background: var(--surface-08); color: var(--text-24); }
 @keyframes modal-fade-in {
 	from { opacity: 0; }
 	to { opacity: 1; }
@@ -2130,14 +2146,6 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 	from { opacity: 0; transform: scale(0.96) translateY(-4px); }
 	to { opacity: 1; transform: scale(1) translateY(0); }
 }
-@keyframes toast-slide-in {
-	from { opacity: 0; transform: translateY(12px) scale(0.96); }
-	to { opacity: 1; transform: translateY(0) scale(1); }
-}
-
-.toast { position: absolute; z-index: 8; right: 22px; bottom: 126px; max-width: 440px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--panel-raised); box-shadow: var(--overlay-shadow); padding: 10px 13px; animation: toast-slide-in 220ms cubic-bezier(.16, 1, .3, 1) both; transition: opacity 160ms ease, transform 160ms ease; }
-.toast-error { border-color: var(--danger-toast-border); color: var(--danger); }
-
 .modal-backdrop { position: fixed; z-index: 10010; display: grid; inset: 0; place-items: center; background: rgb(0 0 0 / 52%); padding: 24px; -webkit-app-region: no-drag; animation: modal-fade-in 180ms ease both; }
 .modal-backdrop:has(> .mcp-dialog) { background: rgb(0 0 0 / 52%); backdrop-filter: blur(3px); -webkit-app-region: no-drag; }
 .interaction-dialog, .project-dialog, .code-project-dialog, .mcp-dialog { animation: modal-card-in 200ms cubic-bezier(.16, 1, .3, 1) both; }
@@ -2726,7 +2734,6 @@ classes so their inline layout wins the cascade. */
 .hooks-advanced summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
 .hooks-advanced-chevron { transition: transform 120ms ease; color: var(--text-09); }
 .hooks-advanced[open] .hooks-advanced-chevron { transform: rotate(90deg); }
-.settings-toast { position: fixed; z-index: 10030; right: 24px; bottom: 24px; display: flex; align-items: center; gap: 8px; }
 .appearance-segmented button { display: grid; width: 34px; min-width: 34px; place-items: center; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); clip-path: inset(50%); white-space: nowrap; }
 
@@ -2937,7 +2944,7 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] .usage-bar, :root[data-motion="reduced"] .usage-tooltip, :root[data-motion="reduced"] .profile-activity-view, :root[data-motion="reduced"] .profile-usage-view { animation: none; transition: none; }
 :root[data-motion="reduced"] .usage-bar > i { transition: none; }
 :root[data-motion="reduced"] .settings-backdrop, :root[data-motion="reduced"] .settings-backdrop.is-closing, :root[data-motion="reduced"] .settings-page-mount { animation: none; transition: none; }
-:root[data-motion="reduced"] .modal-backdrop, :root[data-motion="reduced"] .interaction-dialog, :root[data-motion="reduced"] .project-dialog, :root[data-motion="reduced"] .code-project-dialog, :root[data-motion="reduced"] .mcp-dialog, :root[data-motion="reduced"] .toast { animation: none; transition: none; }
+:root[data-motion="reduced"] .modal-backdrop, :root[data-motion="reduced"] .interaction-dialog, :root[data-motion="reduced"] .project-dialog, :root[data-motion="reduced"] .code-project-dialog, :root[data-motion="reduced"] .mcp-dialog, :root[data-motion="reduced"] .system-notice { animation: none; transition: none; }
 :root[data-motion="reduced"] .context-usage-ring-meter, :root[data-motion="reduced"] .composer-code .composer-file-card, :root[data-motion="reduced"] .composer-image-preview, :root[data-motion="reduced"] .composer-file-card, :root[data-motion="reduced"] .slash-command-menu { animation: none; transition: none; }
 :root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .tool-stage > [aria-hidden="false"] { animation: none; transition: none; }
 :root[data-motion="reduced"] .plugins-section-indicator { transition: none; }

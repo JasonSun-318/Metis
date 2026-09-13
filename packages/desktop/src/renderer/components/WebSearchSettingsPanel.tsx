@@ -1,9 +1,10 @@
 import type { WebSearchProvider, WebSearchSettingsView } from "@metis/app-protocol";
-import { CheckCircle, Eye, EyeSlash, XCircle } from "@phosphor-icons/react";
+import { Eye, EyeSlash, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
+import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 const PROVIDERS: readonly { readonly value: WebSearchProvider; readonly label: string }[] = [
 	{ value: "brave", label: "Brave Search" },
@@ -258,7 +259,7 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 
 				{error ? <p className="settings-action-message error web-search-message" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
 			</div>
-			{notice ? <div className="toast settings-toast" role="status"><CheckCircle aria-hidden="true" size={15} />{notice}</div> : null}
+			{notice ? <FloatingSystemNotice title={notice} tone="success" /> : null}
 		</section>
 	);
 }

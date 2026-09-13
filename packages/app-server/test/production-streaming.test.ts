@@ -535,6 +535,16 @@ describe("production runtime streaming", () => {
 					lastTurnOutcome: "failed",
 					unread: true,
 				});
+			const interruptedTurn = outbound
+				.flatMap((message) =>
+					"method" in message && message.method === "connection/events" ? message.params.events : [],
+				)
+				.reverse()
+				.find((event) => event.type === "turn/interrupted");
+			expect(interruptedTurn).toMatchObject({
+				type: "turn/interrupted",
+				turn: { error: { name: "MODEL_NETWORK_ERROR", retryable: true } },
+			});
 		} finally {
 			server.beginShutdown();
 			await server.waitForShutdown();

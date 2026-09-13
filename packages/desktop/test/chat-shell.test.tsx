@@ -882,28 +882,31 @@ describe("Chat desktop shell", () => {
 		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
 		await act(async () => refreshBtn.click());
 		await flush();
-		expect(container.querySelector(".toast")?.textContent).toBe("Metis is up to date");
+		const upToDate = container.querySelector('.system-notice[data-tone="success"]');
+		expect(upToDate?.textContent).toBe("Metis is up to date");
+		expect(upToDate?.closest(".workspace")).not.toBeNull();
+		expect(container.querySelector(".sidebar-toast")).toBeNull();
 
 		// 2. Failure notice and retry
 		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("offline"));
 		await act(async () => refreshBtn.click());
 		await flush();
-		expect(container.querySelector(".toast")?.textContent).toBe(
-			"Could not check for updates. Check your connection and try again.",
-		);
+		const failed = container.querySelector('.system-notice[data-tone="error"]');
+		expect(failed?.textContent).toContain("Update check failed");
+		expect(failed?.textContent).toContain("Could not check for updates. Check your connection and try again.");
 		expect(refreshBtn.disabled).toBe(false);
 
 		// Retry succeeds
 		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
 		await act(async () => refreshBtn.click());
 		await flush();
-		expect(container.querySelector(".toast")?.textContent).toBe("Metis is up to date");
+		expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toBe("Metis is up to date");
 
 		// 3. Unsupported build notice
 		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("Update checks are unavailable in this build"));
 		await act(async () => refreshBtn.click());
 		await flush();
-		expect(container.querySelector(".toast")?.textContent).toBe("Update checks are not supported in this build");
+		expect(container.querySelector('.system-notice[data-tone="info"]')?.textContent).toBe("Update checks are not supported in this build");
 
 		// 4. Stale check does not overwrite downloading/ready state
 		let resolveDelayedCheck: ((val: { status: "unavailable" }) => void) | undefined;
@@ -4751,7 +4754,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.querySelector('[role="dialog"][aria-label="Unsaved changes"]')).not.toBeNull();
 		expect(codeEditor(container, "Edit README.md").state.doc.toString()).toBe("stale draft");
-		expect(container.querySelector('[role="alert"]')?.textContent).toBe("Workspace file changed on disk");
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Workspace file changed on disk");
 		await act(async () => button(container, "Don’t Save").click());
 		await flush();
 		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({

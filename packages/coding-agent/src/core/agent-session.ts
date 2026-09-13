@@ -507,6 +507,36 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
+
+export function classifyRuntimeFailure(
+	message?: string,
+	interruptedByUser = false,
+): { readonly code: string; readonly message: string } {
+	const detail = message?.trim() ?? "";
+	if (!detail || interruptedByUser) {
+		return { code: "RUNTIME_INTERRUPTED", message: "The operation did not complete." };
+	}
+	if (/\b404\b|not found/iu.test(detail)) {
+		return { code: "MODEL_ENDPOINT_NOT_FOUND", message: "The model endpoint returned 404." };
+	}
+	if (/\b401\b|unauthorized|invalid api key|authentication/iu.test(detail)) {
+		return { code: "MODEL_AUTHENTICATION_FAILED", message: "The model API key was rejected." };
+	}
+	if (/\b403\b|forbidden|permission denied|access denied/iu.test(detail)) {
+		return { code: "MODEL_ACCESS_DENIED", message: "The provider denied access to the selected model." };
+	}
+	if (/\b429\b|rate.?limit|too many requests/iu.test(detail)) {
+		return { code: "MODEL_RATE_LIMITED", message: "The provider rate limit was reached." };
+	}
+	if (/timed? out|timeout/iu.test(detail)) {
+		return { code: "MODEL_TIMEOUT", message: "The model request timed out." };
+	}
+	if (/network|offline|fetch failed|econn|enotfound|socket|terminated|disconnected/iu.test(detail)) {
+		return { code: "MODEL_NETWORK_ERROR", message: "The model provider could not be reached." };
+	}
+	return { code: "MODEL_REQUEST_FAILED", message: "The model provider could not complete the request." };
+}
+
 const IMMEDIATE_EXTERNALIZATION_BUILTINS = new Set([
 	"web_fetch",
 	"web_search",
@@ -3370,6 +3400,10 @@ export class AgentSession {
 				? "completed"
 				: "interrupted";
 		const operationIds = turn.operations.map((operation) => operation.identity.operationId);
+		const failure = classifyRuntimeFailure(
+			this.agent.state.errorMessage,
+			this._stopCurrentRunAfterAbort || this._activeRunAbortController?.signal.aborted === true,
+		);
 		this.sessionManager.appendRuntimeControl({
 			type: "runtime_turn",
 			turnId: turn.turnId,
@@ -3386,9 +3420,7 @@ export class AgentSession {
 				kind: operation.kind,
 				state,
 				turnId: turn.turnId,
-				...(state === "interrupted"
-					? { error: { code: "RUNTIME_INTERRUPTED", message: "The operation did not complete." } }
-					: {}),
+				...(state === "interrupted" ? { error: failure } : {}),
 			});
 		}
 		this._durableTerminalStates.set(turn.turnId, state);

@@ -2,6 +2,7 @@ import type { InteractionResponseInput, InteractionView, SessionSnapshot } from 
 import { Warning } from "@phosphor-icons/react";
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { useTranslation } from "react-i18next";
+import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 type PermissionApprovalInteraction = Extract<InteractionView, { kind: "session_permission_approval" }>;
 
@@ -75,7 +76,7 @@ export function PermissionApprovalPanel({
 	}, [interaction.interactionId]);
 
 	if (dismissedInteractionId === interaction.interactionId) {
-		return <p className="toast toast-error" role="status">{t("This approval is no longer available.")}</p>;
+		return <FloatingSystemNotice title={t("This approval is no longer available.")} tone="warning" />;
 	}
 
 	const respond = async (response: InteractionResponseInput) => {

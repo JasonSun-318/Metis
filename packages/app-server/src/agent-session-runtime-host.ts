@@ -286,6 +286,7 @@ function mapRuntimeTurns(
 	fallbackTimestamp: string,
 ): TurnView[] {
 	const times = new Map<string, { startedAt: string; completedAt?: string }>();
+	const operations = new Map(reduced.operations.map((operation) => [operation.operationId, operation]));
 	for (const entry of journal) {
 		if (typeof entry !== "object" || entry === null) continue;
 		const record = entry as Record<string, unknown>;
@@ -297,6 +298,15 @@ function mapRuntimeTurns(
 	}
 	return reduced.turns.slice(-MAX_TURNS).map((turn) => {
 		const at = times.get(turn.turnId) ?? { startedAt: fallbackTimestamp };
+		const operationError = turn.operationIds
+			.map((operationId) => operations.get(operationId)?.error)
+			.find((error) => error !== undefined);
+		const errorName =
+			operationError && /^[A-Z][A-Z0-9_]{0,63}$/u.test(operationError.code)
+				? operationError.code
+				: operationError
+					? "RUNTIME_INTERRUPTED"
+					: undefined;
 		return {
 			turnId: opaqueId(turn.turnId, "turn"),
 			sessionId,
@@ -304,6 +314,18 @@ function mapRuntimeTurns(
 			state: turn.state === "active" ? "running" : turn.state,
 			startedAt: at.startedAt,
 			...(at.completedAt === undefined ? {} : { completedAt: at.completedAt }),
+			...(errorName === undefined
+				? {}
+				: {
+						error: {
+							name: errorName,
+							retryable: ![
+								"MODEL_ENDPOINT_NOT_FOUND",
+								"MODEL_AUTHENTICATION_FAILED",
+								"MODEL_ACCESS_DENIED",
+							].includes(errorName),
+						},
+					}),
 		};
 	});
 }

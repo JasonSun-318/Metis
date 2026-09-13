@@ -922,6 +922,9 @@ const zhCN = {
 	External: "外部",
 	"The last turn was interrupted. Your saved work is intact; send a new message to continue.":
 		"上一次对话被中断。已保存的工作不受影响，请发送新消息继续。",
+	"Task needs attention": "任务需要处理",
+	"Task stopped": "任务已停止",
+	"The task stopped before it completed. Send a new message to continue.": "任务在完成前停止，请发送新消息继续。",
 	"This session is corrupt. Metis left the source data untouched.": "此会话已损坏，Metis 未改动源数据。",
 	"This session is currently open in another process.": "此会话当前正在另一个进程中打开。",
 	"Session grouping": "会话分组",
@@ -1057,11 +1060,36 @@ const zhCN = {
 	"Session ready": "会话已就绪",
 	"Start a new Chat task": "新建聊天任务",
 	"Metis could not complete the request.": "Metis 无法完成此请求。",
+	"Request failed": "请求失败",
+	"The request did not complete. Try again; if it keeps failing, check the selected model and connection.":
+		"请求未完成，请重试；如果问题持续出现，请检查所选模型和网络连接。",
+	"Model configuration needs attention": "模型配置需要检查",
+	"The model endpoint returned 404. Check the provider protocol, Base URL, and model ID in Model Settings.":
+		"模型接口返回 404，请在模型设置中检查服务协议、Base URL 和模型 ID。",
+	"API key was rejected": "API Key 未通过验证",
+	"Check the provider API key in Model Settings and try again.": "请在模型设置中检查服务商 API Key，然后重试。",
+	"Model access was denied": "模型访问被拒绝",
+	"This API key cannot use the selected model. Check the account plan and model access.":
+		"此 API Key 无权使用所选模型，请检查账户套餐和模型权限。",
+	"Model provider is busy": "模型服务繁忙",
+	"The provider rate limit was reached. Wait briefly or choose another model, then try again.":
+		"已达到服务商速率限制，请稍候或选择其他模型后重试。",
+	"Model request timed out": "模型请求超时",
+	"The provider did not respond in time. Check your connection and try again.":
+		"服务商未及时响应，请检查网络连接后重试。",
+	"Metis could not reach the service. Check your network or proxy and try again.":
+		"Metis 无法连接服务，请检查网络或代理后重试。",
+	"Model request failed": "模型请求失败",
+	"The provider could not complete the request. Try again or choose another configured model.":
+		"服务商未能完成请求，请重试或选择其他已配置模型。",
+	"Dismiss notification": "关闭提醒",
 	"Show sessions sidebar": "显示会话侧边栏",
 	"Hide tools sidebar": "隐藏工具侧边栏",
 	"Show tools sidebar": "显示工具侧边栏",
 	"App Server could not recover.": "App Server 无法恢复。",
+	"Metis service stopped": "Metis 服务已停止",
 	"App Server is recovering. Your saved session is safe.": "App Server 正在恢复，已保存的会话不受影响。",
+	"Update check failed": "检查更新失败",
 	"Write a message…": "输入消息…",
 	"Plan mode": "计划模式",
 	Plan: "计划",

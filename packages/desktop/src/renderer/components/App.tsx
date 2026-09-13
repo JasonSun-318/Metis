@@ -68,6 +68,7 @@ import { SessionStatusPanel } from "./SessionStatusPanel.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
 import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
+import { SystemNotice, systemErrorNotice, type SystemNoticeTone } from "./SystemNotice.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
 import { Transcript } from "./Transcript.tsx";
@@ -87,6 +88,12 @@ const MCP_RECONNECT_POLL_MS = 4_000;
 interface CodeProjectSetupRequest {
 	readonly draft: NewTaskDraft;
 	readonly generation: number;
+}
+
+interface TransientSystemNotice {
+	readonly tone: SystemNoticeTone;
+	readonly title: string;
+	readonly message?: string;
 }
 
 function queuedTurnActionError(cause: unknown): Error {
@@ -230,6 +237,7 @@ export function App({ api, store }: AppProps) {
 	const [message, setMessage] = useState("Starting Metis…");
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
+	const [updateNotice, setUpdateNotice] = useState<TransientSystemNotice | null>(null);
 	const [composerControl, setComposerControl] = useState<{ readonly id: number; readonly target: "model" | "thinking" | "mcp" | null }>({ id: 0, target: null });
 	const [sessionStatusPanel, setSessionStatusPanel] = useState<{
 		readonly sessionId: string;
@@ -365,6 +373,11 @@ export function App({ api, store }: AppProps) {
 		const timer = setTimeout(() => setNotice(null), 4000);
 		return () => clearTimeout(timer);
 	}, [notice]);
+	useEffect(() => {
+		if (updateNotice === null) return;
+		const timer = setTimeout(() => setUpdateNotice(null), 4000);
+		return () => clearTimeout(timer);
+	}, [updateNotice]);
 	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
 		setComposerControl((current) => ({ id: current.id + 1, target }));
 	}, []);
@@ -399,6 +412,7 @@ export function App({ api, store }: AppProps) {
 	}, [api]);
 	const checkDesktopUpdate = useCallback(() => {
 		if (updateCheckTask.current) return;
+		setUpdateNotice(null);
 		setCheckingUpdate(true);
 		const task = api
 			.checkForUpdate()
@@ -407,14 +421,18 @@ export function App({ api, store }: AppProps) {
 					if (current.status === "downloading" || current.status === "ready") return current;
 					return next;
 				});
-				if (next.status === "unavailable") setNotice(t("Metis is up to date"));
+				if (next.status === "unavailable") setUpdateNotice({ tone: "success", title: "Metis is up to date" });
 			})
 			.catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message.includes("unavailable in this build") || message.includes("not supported in this build")) {
-					setNotice(t("Update checks are not supported in this build"));
+					setUpdateNotice({ tone: "info", title: "Update checks are not supported in this build" });
 				} else {
-					setNotice(t("Could not check for updates. Check your connection and try again."));
+					setUpdateNotice({
+						tone: "error",
+						title: "Update check failed",
+						message: "Could not check for updates. Check your connection and try again.",
+					});
 				}
 			})
 			.finally(() => {
@@ -874,6 +892,10 @@ export function App({ api, store }: AppProps) {
 	const latestNotification = [...state.notifications]
 		.reverse()
 		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
+	const latestTurnErrorCode = state.turnOrder.length > 0
+		? state.turnsById.get(state.turnOrder[state.turnOrder.length - 1]!)?.error?.name
+		: undefined;
+	const errorNotice = error ? systemErrorNotice(error) : undefined;
 	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
 	const {
 		collaborationMode: collaborationModeValue,
@@ -1606,6 +1628,32 @@ export function App({ api, store }: AppProps) {
 						<SidebarSimple aria-hidden="true" size={17} />
 					</button>}
 				</div>
+				<div className="system-notice-stack">
+					{state.supervisor.state === "failed" && (
+						<SystemNotice
+							action={{ label: "Retry", onClick: () => void api.retryServer().catch(reportError) }}
+							message={state.supervisor.failure || "App Server could not recover."}
+							title="Metis service stopped"
+							tone="error"
+						/>
+					)}
+					{state.supervisor.state === "restarting" && (
+						<SystemNotice title="App Server is recovering. Your saved session is safe." tone="info" />
+					)}
+					{visibleActiveSession && <RecoveryBanner errorCode={latestTurnErrorCode} session={visibleActiveSession} />}
+					{errorNotice && (
+						<SystemNotice message={errorNotice.message} onDismiss={clearError} title={errorNotice.title} tone="error" />
+					)}
+					{!errorNotice && updateNotice && (
+						<SystemNotice message={updateNotice.message} onDismiss={() => setUpdateNotice(null)} title={updateNotice.title} tone={updateNotice.tone} />
+					)}
+					{!errorNotice && !updateNotice && notice && (
+						<SystemNotice onDismiss={() => setNotice(null)} title={notice} tone="info" />
+					)}
+					{latestNotification && !errorNotice && !updateNotice && !notice && (
+						<SystemNotice title={latestNotification.message} tone={latestNotification.level} />
+					)}
+				</div>
 				{visibleActiveSession && <WorkspaceSessionHeader
 					deleteDisabled={running || visibleInteraction !== undefined}
 					disabled={!serverReady || draftBusy}
@@ -1617,15 +1665,6 @@ export function App({ api, store }: AppProps) {
 					pinned={pinnedSessionIds.has(visibleActiveSession.sessionId)}
 					session={visibleActiveSession}
 				/>}
-				{state.supervisor.state === "failed" && (
-					<div className="server-banner" role="alert">
-						<span>{t(state.supervisor.failure || "App Server could not recover.")}</span>
-						<button onClick={() => void api.retryServer().catch(reportError)} type="button">{t("Retry")}</button>
-					</div>
-				)}
-				{state.supervisor.state === "restarting" && (
-					<div className="server-banner" role="status">{t("App Server is recovering. Your saved session is safe.")}</div>
-				)}
 				{!bootstrapped ? null : destination === "skills" ? (
 					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (
@@ -1687,7 +1726,6 @@ export function App({ api, store }: AppProps) {
 				) : visibleActiveSession ? (
 					<div className="workspace-body">
 						<div className="conversation-column" data-mode={visibleActiveSession.mode}>
-							<RecoveryBanner session={visibleActiveSession} />
 							<Transcript
 								activeTurnId={state.activeTurnId}
 								waitingForAnswer={waitingForAnswer}
@@ -1791,10 +1829,7 @@ export function App({ api, store }: AppProps) {
 					theme={resolvedTheme}
 					width={toolsSidebarWidth}
 				/>
-					<div className="sr-only" aria-live="polite">{t(error || notice || latestNotification?.message || message)}</div>
-					{error && <div className="toast toast-error" role="alert">{t(error)}</div>}
-					{!error && notice && <div className="toast" role="status">{t(notice)}</div>}
-					{latestNotification && !error && !notice && <div className="toast" role="status">{t(latestNotification.message)}</div>}
+					<div className="sr-only" aria-live="polite">{t(message)}</div>
 			</main>
 			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} sandboxHealth={state.sandboxHealth} />
 		</div>
