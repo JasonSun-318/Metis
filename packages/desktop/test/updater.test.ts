@@ -7,6 +7,7 @@ import { DesktopUpdater } from "../src/main/updater.ts";
 
 const BASE_URL = "https://updates.example.test/metis";
 const VERSION = "0.80.6";
+const RELEASE_NOTES = "## Highlights\n\n- Faster startup\n- Safer updates";
 const temporaryDirectories: string[] = [];
 const updaters: DesktopUpdater[] = [];
 
@@ -31,6 +32,7 @@ function manifest(version: string, dmg: Uint8Array, hash = sha256(dmg)) {
 	return {
 		schemaVersion: 1,
 		version,
+		releaseNotes: RELEASE_NOTES,
 		publishedAt: "2026-08-10T00:00:00.000Z",
 		dmg: {
 			url: `${BASE_URL}/darwin/arm64/releases/${version}/Metis-${version}-darwin-arm64.dmg`,
@@ -123,12 +125,52 @@ describe("DesktopUpdater", () => {
 		const { fetch, states, updater } = await harness();
 		expect(updater.start()).toBe(true);
 		expect(updater.view()).toEqual({ status: "checking" });
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		const available = {
+			status: "available" as const,
+			version: "0.81.0",
+			releaseNotes: RELEASE_NOTES,
+		};
+		await vi.waitFor(() => expect(updater.view()).toEqual(available));
 		expect(fetch).toHaveBeenCalledWith(
 			`${BASE_URL}/darwin/arm64/latest.json`,
 			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
 		);
-		expect(states).toContainEqual({ status: "available", version: "0.81.0" });
+		expect(states).toContainEqual(available);
+	});
+
+	it("accepts a legacy manifest without release notes and exposes an empty fallback", async () => {
+		const dmg = new TextEncoder().encode("legacy release");
+		const current = manifest("0.81.0", dmg);
+		const { releaseNotes: _releaseNotes, ...legacy } = current;
+		const fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify(legacy), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const { updater } = await harness({ dmg, fetch });
+		await expect(updater.checkForUpdate()).resolves.toEqual({
+			status: "available",
+			version: "0.81.0",
+			releaseNotes: "",
+		});
+	});
+
+	it.each([
+		["non-string", 42],
+		["blank", "   "],
+		["oversized", "x".repeat(64 * 1024 + 1)],
+	])("rejects a %s present release-notes value", async (_case, releaseNotes) => {
+		const dmg = new TextEncoder().encode("invalid notes release");
+		const invalid = { ...manifest("0.81.0", dmg), releaseNotes };
+		const fetch = vi.fn().mockResolvedValue(
+			new Response(JSON.stringify(invalid), {
+				headers: { "content-type": "application/json" },
+				status: 200,
+			}),
+		);
+		const { updater } = await harness({ fetch });
+		await expect(updater.checkForUpdate()).rejects.toThrow("Invalid update manifest");
 	});
 
 	it("hides malformed or cross-origin releases without interrupting the app", async () => {
@@ -144,7 +186,9 @@ describe("DesktopUpdater", () => {
 	it("downloads once, reports progress, verifies the DMG, and reopens the verified file", async () => {
 		const { dmg, fetch, openPath, states, updater } = await harness();
 		updater.start();
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await vi.waitFor(() =>
+			expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }),
+		);
 
 		await Promise.all([updater.downloadAndOpen(), updater.downloadAndOpen()]);
 
@@ -153,8 +197,13 @@ describe("DesktopUpdater", () => {
 		const openedPath = openPath.mock.calls[0]?.[0];
 		expect(openedPath).toMatch(/Metis-0\.81\.0-darwin-arm64\.dmg$/u);
 		expect(await readFile(openedPath!)).toEqual(Buffer.from(dmg));
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
-		expect(states).toContainEqual({ status: "downloading", version: "0.81.0", progress: 100 });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
+		expect(states).toContainEqual({
+			status: "downloading",
+			version: "0.81.0",
+			releaseNotes: RELEASE_NOTES,
+			progress: 100,
+		});
 
 		await updater.downloadAndOpen();
 		expect(fetch).toHaveBeenCalledTimes(2);
@@ -164,7 +213,9 @@ describe("DesktopUpdater", () => {
 	it("re-verifies a ready DMG and downloads it again if the file was replaced", async () => {
 		const { dmg, fetch, openPath, updater } = await harness();
 		updater.start();
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await vi.waitFor(() =>
+			expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }),
+		);
 		await updater.downloadAndOpen();
 		const openedPath = openPath.mock.calls[0]?.[0];
 		await writeFile(openedPath!, "replaced after verification");
@@ -180,7 +231,7 @@ describe("DesktopUpdater", () => {
 		expect(fetch).toHaveBeenCalledTimes(3);
 		expect(openPath).toHaveBeenCalledTimes(2);
 		expect(await readFile(openedPath!)).toEqual(Buffer.from(dmg));
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 	});
 
 	it("deletes a corrupt partial download and keeps the update retryable", async () => {
@@ -188,10 +239,12 @@ describe("DesktopUpdater", () => {
 		const release = manifest("0.81.0", dmg, "0".repeat(64));
 		const { downloadsDirectory, onDiagnostic, openPath, updater } = await harness({ dmg, manifest: release });
 		updater.start();
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await vi.waitFor(() =>
+			expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }),
+		);
 
 		await expect(updater.downloadAndOpen()).rejects.toThrow("Downloaded update failed verification");
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).not.toHaveBeenCalled();
 		expect(onDiagnostic).toHaveBeenCalledWith("Update download failed");
 		const files = await readdir(downloadsDirectory);
@@ -210,7 +263,9 @@ describe("DesktopUpdater", () => {
 		});
 		const { updater } = await harness({ checkIntervalMs: 20, dmg, fetch });
 		expect(updater.start()).toBe(true);
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await vi.waitFor(() =>
+			expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }),
+		);
 		updater.stop();
 		expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2);
 	});
@@ -218,11 +273,13 @@ describe("DesktopUpdater", () => {
 	it("keeps an available update if a later check fails", async () => {
 		const { fetch, updater } = await harness({ checkIntervalMs: 20 });
 		updater.start();
-		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "available", version: "0.81.0" }));
+		await vi.waitFor(() =>
+			expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }),
+		);
 		fetch.mockRejectedValue(new Error("offline"));
 		await vi.waitFor(() => expect(fetch.mock.calls.length).toBeGreaterThanOrEqual(2));
 		updater.stop();
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 	});
 
 	it("fetches a newer release on manual check after starting with no update", async () => {
@@ -242,8 +299,8 @@ describe("DesktopUpdater", () => {
 		expect(fetch).toHaveBeenCalledTimes(1);
 
 		const result = await updater.checkForUpdate();
-		expect(result).toEqual({ status: "available", version: "0.81.0" });
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(result).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
 
@@ -269,8 +326,8 @@ describe("DesktopUpdater", () => {
 			}),
 		);
 		const [res1, res2] = await Promise.all([check1, check2]);
-		expect(res1).toEqual({ status: "available", version: "0.81.0" });
-		expect(res2).toEqual({ status: "available", version: "0.81.0" });
+		expect(res1).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
+		expect(res2).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(fetch).toHaveBeenCalledTimes(1);
 
 		fetch.mockResolvedValueOnce(
@@ -322,11 +379,11 @@ describe("DesktopUpdater", () => {
 		);
 		const { updater } = await harness({ dmg, fetch });
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 
 		fetch.mockRejectedValueOnce(new Error("offline"));
 		await expect(updater.checkForUpdate()).rejects.toThrow("offline");
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 
 		fetch.mockResolvedValueOnce(
 			new Response(JSON.stringify(manifest("0.81.0", dmg)), {
@@ -334,7 +391,11 @@ describe("DesktopUpdater", () => {
 				status: 200,
 			}),
 		);
-		await expect(updater.checkForUpdate()).resolves.toEqual({ status: "available", version: "0.81.0" });
+		await expect(updater.checkForUpdate()).resolves.toEqual({
+			status: "available",
+			version: "0.81.0",
+			releaseNotes: RELEASE_NOTES,
+		});
 
 		fetch.mockResolvedValueOnce(
 			new Response(dmg.buffer as ArrayBuffer, {
@@ -343,11 +404,11 @@ describe("DesktopUpdater", () => {
 			}),
 		);
 		await updater.downloadAndOpen();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 
 		fetch.mockRejectedValueOnce(new Error("offline"));
 		await expect(updater.checkForUpdate()).rejects.toThrow("offline");
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 	});
 
 	it("ignores checks during download without issuing a fetch or resetting progress", async () => {
@@ -388,7 +449,7 @@ describe("DesktopUpdater", () => {
 
 		releaseChunk!();
 		await downloadPromise;
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 	});
 
 	it("interleaves check then download: check returning older manifest during download does not overwrite state and allows opening ready installer", async () => {
@@ -430,7 +491,7 @@ describe("DesktopUpdater", () => {
 		});
 		const { openPath, updater } = await harness({ dmg, fetch });
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "available", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 
 		// 1. Start check first
 		const checkPromise = updater.checkForUpdate();
@@ -447,7 +508,7 @@ describe("DesktopUpdater", () => {
 		// 4. Finish the download
 		releaseChunk!();
 		await downloadPromise;
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).toHaveBeenCalledTimes(1);
 
 		// 5. Subsequent open must succeed without throwing "No desktop update is available"
@@ -503,7 +564,7 @@ describe("DesktopUpdater", () => {
 
 		releaseChunk!();
 		await downloadPromise;
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).toHaveBeenCalledTimes(1);
 
 		await updater.downloadAndOpen();
@@ -566,7 +627,7 @@ describe("DesktopUpdater", () => {
 
 		releaseChunk!();
 		await downloadPromise;
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).toHaveBeenCalledTimes(1);
 
 		// Verified opening the downloaded 0.81.0 installer succeeds
@@ -575,8 +636,8 @@ describe("DesktopUpdater", () => {
 
 		// Now subsequent check detects the newer 0.82.0
 		const nextCheck = await updater.checkForUpdate();
-		expect(nextCheck).toEqual({ status: "available", version: "0.82.0" });
-		expect(updater.view()).toEqual({ status: "available", version: "0.82.0" });
+		expect(nextCheck).toEqual({ status: "available", version: "0.82.0", releaseNotes: RELEASE_NOTES });
+		expect(updater.view()).toEqual({ status: "available", version: "0.82.0", releaseNotes: RELEASE_NOTES });
 	});
 
 	it("keeps verified DMG on same or lower remote version, and switches to available on higher remote version", async () => {
@@ -599,7 +660,7 @@ describe("DesktopUpdater", () => {
 		const { openPath, updater } = await harness({ dmg, fetch });
 		await updater.checkForUpdate();
 		await updater.downloadAndOpen();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).toHaveBeenCalledTimes(1);
 
 		// Remote serves same version 0.81.0 -> stays ready, can open again
@@ -610,7 +671,7 @@ describe("DesktopUpdater", () => {
 			}),
 		);
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		await updater.downloadAndOpen();
 		expect(openPath).toHaveBeenCalledTimes(2);
 
@@ -622,7 +683,7 @@ describe("DesktopUpdater", () => {
 			}),
 		);
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 		await updater.downloadAndOpen();
 		expect(openPath).toHaveBeenCalledTimes(3);
 
@@ -634,7 +695,7 @@ describe("DesktopUpdater", () => {
 			}),
 		);
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES });
 
 		// Remote serves higher version 0.82.0 -> transitions to available
 		fetch
@@ -651,9 +712,9 @@ describe("DesktopUpdater", () => {
 				}),
 			);
 		await updater.checkForUpdate();
-		expect(updater.view()).toEqual({ status: "available", version: "0.82.0" });
+		expect(updater.view()).toEqual({ status: "available", version: "0.82.0", releaseNotes: RELEASE_NOTES });
 		await updater.downloadAndOpen();
-		expect(updater.view()).toEqual({ status: "ready", version: "0.82.0" });
+		expect(updater.view()).toEqual({ status: "ready", version: "0.82.0", releaseNotes: RELEASE_NOTES });
 		expect(openPath).toHaveBeenCalledTimes(4);
 	});
 

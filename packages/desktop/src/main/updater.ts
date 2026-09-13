@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
-import type { DesktopUpdateState } from "../shared/desktop-api.ts";
+import { DESKTOP_RELEASE_NOTES_MAX_CHARACTERS, type DesktopUpdateState } from "../shared/desktop-api.ts";
 
 interface UpdateManifest {
 	readonly version: string;
+	readonly releaseNotes: string;
 	readonly dmg: {
 		readonly url: string;
 		readonly size: number;
@@ -67,6 +68,14 @@ function parseManifest(value: unknown, baseUrl: URL): UpdateManifest {
 	if (record.schemaVersion !== 1 || typeof record.version !== "string" || !STABLE_VERSION.test(record.version)) {
 		throw new Error("Invalid update manifest");
 	}
+	let releaseNotes = "";
+	if (record.releaseNotes !== undefined) {
+		if (typeof record.releaseNotes !== "string") throw new Error("Invalid update manifest");
+		releaseNotes = record.releaseNotes.trim();
+		if (!releaseNotes || releaseNotes.length > DESKTOP_RELEASE_NOTES_MAX_CHARACTERS) {
+			throw new Error("Invalid update manifest");
+		}
+	}
 	if (typeof record.dmg !== "object" || record.dmg === null || Array.isArray(record.dmg)) {
 		throw new Error("Invalid update manifest");
 	}
@@ -96,6 +105,7 @@ function parseManifest(value: unknown, baseUrl: URL): UpdateManifest {
 	}
 	return {
 		version: record.version,
+		releaseNotes,
 		dmg: { url: url.href, size: Number(dmg.size), sha256: dmg.sha256 },
 	};
 }
@@ -174,7 +184,11 @@ export class DesktopUpdater {
 				return;
 			}
 			this.downloadedPath = undefined;
-			this.setState({ status: "available", version: this.manifest.version });
+			this.setState({
+				status: "available",
+				version: this.manifest.version,
+				releaseNotes: this.manifest.releaseNotes,
+			});
 		}
 		if (this.state.status !== "available" || !this.manifest) throw new Error("No desktop update is available");
 		const task = this.downloadAndOpenAvailable(this.manifest);
@@ -229,7 +243,11 @@ export class DesktopUpdater {
 			}
 			this.manifest = manifest;
 			this.downloadedPath = undefined;
-			this.setState({ status: "available", version: manifest.version });
+			this.setState({
+				status: "available",
+				version: manifest.version,
+				releaseNotes: manifest.releaseNotes,
+			});
 		} catch (error) {
 			this.options.onDiagnostic?.("Update check failed");
 			if (this.state.status === "checking") {
@@ -259,20 +277,33 @@ export class DesktopUpdater {
 			}
 			this.manifest = manifest;
 			this.downloadedPath = destination;
-			this.setState({ status: "ready", version: manifest.version });
+			this.setState({
+				status: "ready",
+				version: manifest.version,
+				releaseNotes: manifest.releaseNotes,
+			});
 			await this.openDownloadedPath(destination);
 		} catch (error) {
 			await rm(partial, { force: true }).catch(() => undefined);
 			this.downloadedPath = undefined;
 			this.manifest = manifest;
-			this.setState({ status: "available", version: manifest.version });
+			this.setState({
+				status: "available",
+				version: manifest.version,
+				releaseNotes: manifest.releaseNotes,
+			});
 			this.options.onDiagnostic?.("Update download failed");
 			throw error;
 		}
 	}
 
 	private async download(manifest: UpdateManifest, partial: string): Promise<void> {
-		this.setState({ status: "downloading", version: manifest.version, progress: 0 });
+		this.setState({
+			status: "downloading",
+			version: manifest.version,
+			releaseNotes: manifest.releaseNotes,
+			progress: 0,
+		});
 		const response = await this.options.fetch(manifest.dmg.url, { cache: "no-store" });
 		if (!response.ok || !response.body) throw new Error(`Update download failed with ${response.status}`);
 		const contentLength = response.headers.get("content-length");
@@ -298,7 +329,12 @@ export class DesktopUpdater {
 				const progress = Math.floor((received / manifest.dmg.size) * 100);
 				if (progress !== lastProgress) {
 					lastProgress = progress;
-					this.setState({ status: "downloading", version: manifest.version, progress });
+					this.setState({
+						status: "downloading",
+						version: manifest.version,
+						releaseNotes: manifest.releaseNotes,
+						progress,
+					});
 				}
 			}
 		} finally {

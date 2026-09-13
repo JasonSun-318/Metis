@@ -28,6 +28,7 @@ import { loadSessionPins, saveSessionPins } from "../src/renderer/store/session-
 import { DEFAULT_BROWSER_PROFILE_ID, type DesktopUpdateState, type MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
+const RELEASE_NOTES = "## Highlights\n\n- Added release notes";
 
 function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: string): SessionSummary {
 	return {
@@ -815,10 +816,10 @@ describe("Chat desktop shell", () => {
 	it("shows the update action above Metis only when a newer version is available and handles manual check flow", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api, emitUpdate } = createHarness();
-		let resolveCheck: ((state: { status: "available"; version: string }) => void) | undefined;
+		let resolveCheck: ((state: { status: "available"; version: string; releaseNotes: string }) => void) | undefined;
 		api.checkForUpdate = vi.fn(
 			() =>
-				new Promise<{ status: "available"; version: string }>((resolve) => {
+				new Promise<{ status: "available"; version: string; releaseNotes: string }>((resolve) => {
 					resolveCheck = resolve;
 				}),
 		);
@@ -844,8 +845,8 @@ describe("Chat desktop shell", () => {
 		await act(async () => refreshBtn.click());
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
 
-		await act(async () => emitUpdate({ status: "available", version: "0.81.0" }));
-		await act(async () => resolveCheck!({ status: "available", version: "0.81.0" }));
+		await act(async () => emitUpdate({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
+		await act(async () => resolveCheck!({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
 		await flush();
 
 		expect(refreshBtn.disabled).toBe(false);
@@ -859,9 +860,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => update.click());
 		expect(api.startUpdate).toHaveBeenCalledOnce();
 
-		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", progress: 42 }));
+		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 42 }));
 		expect(button(notice, "Downloading update 42%").disabled).toBe(true);
-		await act(async () => emitUpdate({ status: "ready", version: "0.81.0" }));
+		await act(async () => emitUpdate({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
 		expect(button(notice, "Open installer").disabled).toBe(false);
 
 		await act(async () => root.unmount());
@@ -917,7 +918,7 @@ describe("Chat desktop shell", () => {
 				}),
 		);
 		await act(async () => refreshBtn.click());
-		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", progress: 60 }));
+		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 60 }));
 		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
 		expect(button(notice, "Downloading update 60%")).not.toBeNull();
 

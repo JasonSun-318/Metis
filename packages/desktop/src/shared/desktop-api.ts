@@ -38,10 +38,21 @@ export const DESKTOP_FULLSCREEN_CHANNEL = "metis:window-fullscreen";
 /** Standalone IPC channel for querying window fullscreen state. */
 export const DESKTOP_IS_FULLSCREEN_CHANNEL = "metis:is-fullscreen";
 
+export const DESKTOP_RELEASE_NOTES_MAX_CHARACTERS = 64 * 1024;
+
 export type DesktopUpdateState =
 	| { readonly status: "unavailable" | "checking" }
-	| { readonly status: "available" | "ready"; readonly version: string }
-	| { readonly status: "downloading"; readonly version: string; readonly progress: number };
+	| {
+			readonly status: "available" | "ready";
+			readonly version: string;
+			readonly releaseNotes: string;
+	  }
+	| {
+			readonly status: "downloading";
+			readonly version: string;
+			readonly releaseNotes: string;
+			readonly progress: number;
+	  };
 
 export type DesktopApiEvent =
 	| {
@@ -841,26 +852,32 @@ export function validateDesktopUpdateState(value: unknown): DesktopUpdateState {
 		return { status };
 	}
 	if (status === "available" || status === "ready") {
-		const state = exactRecord(value, ["status", "version"], "desktop update state");
-		if (typeof state.version !== "string" || !/^\d+\.\d+\.\d+$/u.test(state.version)) {
-			throw new TypeError("Invalid desktop update version");
-		}
-		return { status, version: state.version };
+		const state = exactRecord(value, ["status", "version", "releaseNotes"], "desktop update state");
+		return { status, ...desktopUpdateDetails(state) };
 	}
 	if (status === "downloading") {
-		const state = exactRecord(value, ["status", "version", "progress"], "desktop update state");
-		if (
-			typeof state.version !== "string" ||
-			!/^\d+\.\d+\.\d+$/u.test(state.version) ||
-			!Number.isInteger(state.progress) ||
-			Number(state.progress) < 0 ||
-			Number(state.progress) > 100
-		) {
+		const state = exactRecord(value, ["status", "version", "releaseNotes", "progress"], "desktop update state");
+		if (!Number.isInteger(state.progress) || Number(state.progress) < 0 || Number(state.progress) > 100) {
 			throw new TypeError("Invalid desktop update progress");
 		}
-		return { status, version: state.version, progress: Number(state.progress) };
+		return { status, ...desktopUpdateDetails(state), progress: Number(state.progress) };
 	}
 	throw new TypeError("Invalid desktop update state");
+}
+
+function desktopUpdateDetails(state: Record<string, unknown>): {
+	readonly version: string;
+	readonly releaseNotes: string;
+} {
+	if (
+		typeof state.version !== "string" ||
+		!/^\d+\.\d+\.\d+$/u.test(state.version) ||
+		typeof state.releaseNotes !== "string" ||
+		state.releaseNotes.length > DESKTOP_RELEASE_NOTES_MAX_CHARACTERS
+	) {
+		throw new TypeError("Invalid desktop update details");
+	}
+	return { version: state.version, releaseNotes: state.releaseNotes };
 }
 
 function terminalId(value: unknown): string {

@@ -19,6 +19,7 @@ import {
 	validateCreateBrowserInput,
 	validateDesktopApiEvent,
 	validateDesktopBrowserEvent,
+	validateDesktopUpdateState,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
 	validateReadWorkspaceFileInput,
@@ -312,6 +313,33 @@ describe("desktop trust boundaries", () => {
 		expect(() =>
 			validateWorkspaceEditState({ dirty: true, language: "en", visibleSessionId: "", extra: true }),
 		).toThrow();
+	});
+
+	it("validates release notes on every versioned desktop update state", () => {
+		expect(
+			validateDesktopUpdateState({
+				status: "available",
+				version: "0.81.0",
+				releaseNotes: "## Highlights",
+			}),
+		).toEqual({ status: "available", version: "0.81.0", releaseNotes: "## Highlights" });
+		expect(
+			validateDesktopUpdateState({
+				status: "downloading",
+				version: "0.81.0",
+				releaseNotes: "## Highlights",
+				progress: 42,
+			}),
+		).toEqual({ status: "downloading", version: "0.81.0", releaseNotes: "## Highlights", progress: 42 });
+
+		for (const invalid of [
+			{ status: "available", version: "0.81.0" },
+			{ status: "available", version: "0.81.0", releaseNotes: null },
+			{ status: "available", version: "0.81.0", releaseNotes: "x".repeat(64 * 1024 + 1) },
+			{ status: "ready", version: "0.81.0", releaseNotes: "ok", extra: true },
+		]) {
+			expect(() => validateDesktopUpdateState(invalid)).toThrow("Invalid desktop update");
+		}
 	});
 
 	it("accepts exact browser commands and rejects unsafe renderer payloads", () => {
