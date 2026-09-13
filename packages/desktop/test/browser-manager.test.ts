@@ -140,6 +140,10 @@ function browserHarness(
 		contentView: backgroundContentView,
 		destroy: vi.fn(),
 		isDestroyed: vi.fn(() => false),
+		setIgnoreMouseEvents: vi.fn(),
+		setOpacity: vi.fn(),
+		setPosition: vi.fn(),
+		showInactive: vi.fn(),
 	};
 	const willDownloadHandlers: ((...args: any[]) => void)[] = [];
 	const browserSession = {
@@ -496,6 +500,23 @@ describe("BrowserManager", () => {
 		});
 
 		expect(harness.contentView.addChildView).not.toHaveBeenCalled();
+	});
+
+	it("keeps the composited background host transparent and non-interactive", () => {
+		const harness = browserHarness();
+		harness.manager.create({
+			sessionId: SESSION_ID,
+			browserId: "10000000-0000-4000-8000-000000000090",
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+
+		expect(harness.backgroundWindow.setOpacity).toHaveBeenCalledWith(0);
+		expect(harness.backgroundWindow.setIgnoreMouseEvents).toHaveBeenCalledWith(true);
+		expect(harness.backgroundWindow.showInactive).toHaveBeenCalledOnce();
+		expect(harness.backgroundWindow.setPosition).toHaveBeenCalledWith(-20_000, -20_000, false);
+		expect(harness.backgroundWindow.showInactive.mock.invocationCallOrder[0]).toBeLessThan(
+			harness.backgroundWindow.setPosition.mock.invocationCallOrder[0]!,
+		);
 	});
 
 	it("adopts safe popups as owned tabs and enforces the per-task tab cap", async () => {

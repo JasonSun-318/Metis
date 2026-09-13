@@ -95,7 +95,10 @@ interface BrowserRecord {
 
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
 type BrowserProgressEvent = Extract<DesktopBrowserEvent, { type: "activity" | "state" }>;
-type BrowserBackgroundWindow = Pick<BaseWindow, "contentView" | "destroy" | "isDestroyed">;
+type BrowserBackgroundWindow = Pick<
+	BaseWindow,
+	"contentView" | "destroy" | "isDestroyed" | "setIgnoreMouseEvents" | "setOpacity" | "setPosition" | "showInactive"
+>;
 
 type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close" | "leaseSignal">;
 
@@ -267,12 +270,13 @@ export class BrowserManager {
 			createView: (options) => new WebContentsView(options),
 			createBackgroundWindow: () =>
 				new BaseWindow({
-					show: true,
+					show: false,
 					frame: false,
 					focusable: true,
+					hasShadow: false,
+					hiddenInMissionControl: true,
+					opacity: 0,
 					skipTaskbar: true,
-					x: -20_000,
-					y: -20_000,
 					width: DEFAULT_BROWSER_BOUNDS.width,
 					height: DEFAULT_BROWSER_BOUNDS.height,
 				}),
@@ -979,6 +983,10 @@ export class BrowserManager {
 	private backgroundHost(): BrowserViewHost {
 		if (!this.automationWindow || this.automationWindow.isDestroyed()) {
 			this.automationWindow = this.dependencies.createBackgroundWindow();
+			this.automationWindow.setOpacity(0);
+			this.automationWindow.setIgnoreMouseEvents(true);
+			this.automationWindow.showInactive();
+			this.automationWindow.setPosition(-20_000, -20_000, false);
 		}
 		return this.automationWindow.contentView;
 	}
