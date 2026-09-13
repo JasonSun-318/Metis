@@ -221,7 +221,7 @@ export function CodeTranscriptTurn({
 							</div>
 						);
 					}
-					if (segment.type === "tools") {
+						if (segment.type === "tools") {
 						return (
 							<div key={`tools-${segmentIndex}`}>
 								<CodeExecution
@@ -238,8 +238,9 @@ export function CodeTranscriptTurn({
 								) : null}
 							</div>
 						);
-					}
-					return (
+						}
+						if (segment.answer && final?.state === "streaming") return null;
+						return (
 						<div
 							className={segment.answer ? "code-turn-answer" : "code-turn-status"}
 							data-transcript-answer={segment.answer ? true : undefined}

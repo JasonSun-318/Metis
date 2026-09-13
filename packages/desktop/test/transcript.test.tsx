@@ -93,7 +93,7 @@ const turnItems: ItemView[] = [
 afterEach(() => document.body.replaceChildren());
 
 describe("TranscriptTurn", () => {
-	it("keeps each execution chain after the intermediate reply that starts it", async () => {
+	it("keeps one ordered execution chain across intermediate progress text", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -118,14 +118,17 @@ describe("TranscriptTurn", () => {
 		]} />));
 
 		const chains = [...container.querySelectorAll<HTMLElement>(".execution-chain")];
-		const update = container.querySelector<HTMLElement>(".turn-intermediate");
+		const chain = chains[0]!;
+		const firstThought = [...chain.querySelectorAll("p")].find((node) => node.textContent === "先读取当前状态。");
+		const update = [...chain.querySelectorAll("p")].find((node) => node.textContent === "状态已读取，现在继续修改。");
+		const secondThought = [...chain.querySelectorAll("p")].find((node) => node.textContent === "根据读取结果执行修改。");
 		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
-		expect(chains).toHaveLength(2);
-		expect(chains[0]!.textContent).toContain("先读取当前状态");
-		expect(chains[1]!.textContent).toContain("根据读取结果执行修改");
-		expect(chains[0]!.compareDocumentPosition(update!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		expect(update!.compareDocumentPosition(chains[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		expect(chains[1]!.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(chains).toHaveLength(1);
+		expect(container.querySelector(".turn-intermediate")).toBeNull();
+		expect(chain.querySelector(".activity-step-dot")).toBeNull();
+		expect(firstThought!.compareDocumentPosition(update!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(update!.compareDocumentPosition(secondThought!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(chain.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
 		await act(async () => root.unmount());
 	});
@@ -160,55 +163,75 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("matches the collapsed, capped, show-more, and nested-command states", async () => {
+	it("matches the collapsed, height-capped, show-more, and nested-command states", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const defaultResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
+		TriggerResizeObserver.instances.length = 0;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
 
 		const chains = [...container.querySelectorAll<HTMLDetailsElement>("details.execution-chain")];
-		expect(chains).toHaveLength(2);
-		const [thoughtChain, chain] = chains as [HTMLDetailsElement, HTMLDetailsElement];
-		expect(thoughtChain.open).toBe(false);
-		expect(thoughtChain.querySelector(":scope > summary")?.textContent).toContain("Thought process");
-		expect(thoughtChain.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
+		expect(chains).toHaveLength(1);
+		const chain = chains[0]!;
 		expect(chain.open).toBe(false);
-		expect(chain!.querySelector(":scope > summary")?.textContent).toContain("Ran a command, used a tool");
-		expect(chain!.querySelector(".execution-chain-caret")).not.toBeNull();
-		expect(chain!.querySelector(".tool-step-static")?.textContent).toContain("Asked to access a folder");
-		expect(chain!.querySelector("details.tool-step:not(.tool-step-command)")).toBeNull();
-		expect(chain!.querySelector(".tool-step-command > summary")?.textContent).toContain("Ran command");
+		expect(chain.querySelector(":scope > summary")?.textContent).toContain("Execution complete");
+		expect(chain.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
+		expect(chain.querySelector(".execution-chain-caret")).not.toBeNull();
+		expect(chain.querySelector(".tool-step-static")?.textContent).toContain("Asked to access a folder");
+		expect(chain.querySelector("details.tool-step:not(.tool-step-command)")).toBeNull();
+		expect(chain.querySelector(".tool-step-command > summary")?.textContent).toContain("Ran command");
 		expect(container.querySelector(".turn-thought-label")).toBeNull();
 		const intermediate = [...container.querySelectorAll("p")].find((node) => node.textContent?.startsWith("我需要先请求访问"));
 		expect(intermediate).toBeDefined();
-		expect(chain!.contains(intermediate!)).toBe(false);
-		expect(thoughtChain.compareDocumentPosition(intermediate!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		expect(intermediate!.compareDocumentPosition(chain)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(chain.contains(intermediate!)).toBe(true);
 
 		const final = [...container.querySelectorAll("p")].find((node) => node.textContent === "桌面上有 file.txt。");
 		expect(final).toBeDefined();
 		expect(final!.closest("[data-transcript-answer]")).not.toBeNull();
-		expect(chain!.contains(final!)).toBe(false);
+		expect(chain.contains(final!)).toBe(false);
 
-		await act(async () => thoughtChain.querySelector(":scope > summary")!.click());
-		expect(thoughtChain.open).toBe(true);
-		expect(thoughtChain.textContent).toContain("用户希望查看桌面内容");
-		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
-		expect(thoughtChain.querySelector(".execution-chain-done")).toBeNull();
-		const showMore = [...thoughtChain.querySelectorAll("button")].find((node) => node.textContent === "Show more");
+		await act(async () => chain.querySelector(":scope > summary")!.click());
+		expect(chain.open).toBe(true);
+		expect(chain.textContent).toContain("用户希望查看桌面内容");
+		const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
+		const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
+		Object.defineProperties(viewport, {
+			clientHeight: { configurable: true, value: 520 },
+			scrollHeight: { configurable: true, value: 680 },
+		});
+		for (const child of timeline.children) {
+			const height = child.matches("details.tool-step-command") ? 50 : 120;
+			Object.defineProperty(child, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({ height } as DOMRect),
+			});
+			const summary = child.querySelector(":scope > summary");
+			if (summary) {
+				Object.defineProperty(summary, "getBoundingClientRect", {
+					configurable: true,
+					value: () => ({ height } as DOMRect),
+				});
+			}
+		}
+		await act(async () => TriggerResizeObserver.trigger(timeline));
+		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		expect(chain.querySelector(".execution-chain-done")).toBeNull();
+		const showMore = [...chain.querySelectorAll("button")].find((node) => node.textContent === "Show more");
 		expect(showMore).toBeDefined();
 		await act(async () => showMore!.click());
-		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
-		const showLess = [...thoughtChain.querySelectorAll("button")].find((node) => node.textContent === "Show less");
+		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
+		const showLess = [...chain.querySelectorAll("button")].find((node) => node.textContent === "Show less");
 		expect(showLess).toBeDefined();
-		const done = thoughtChain.querySelector(".execution-chain-done");
+		const done = chain.querySelector(".execution-chain-done");
 		expect(done).not.toBeNull();
 		expect(done!.compareDocumentPosition(showLess!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 		await act(async () => showLess!.click());
-		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
 
-		const command = chain!.querySelector<HTMLDetailsElement>("details.tool-step-command");
+		const command = chain.querySelector<HTMLDetailsElement>("details.tool-step-command");
 		expect(command).not.toBeNull();
 		expect(command!.open).toBe(false);
 
@@ -217,11 +240,125 @@ describe("TranscriptTurn", () => {
 		expect(command!.textContent).toContain("ls -la /Users/ent/Desktop");
 		expect(command!.textContent).toContain("file.txt");
 
-		await act(async () => thoughtChain.querySelector(":scope > summary")!.click());
-		expect(thoughtChain.open).toBe(false);
-		expect(thoughtChain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
+		await act(async () => chain.querySelector(":scope > summary")!.click());
+		expect(chain.open).toBe(false);
+		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
 
 		await act(async () => root.unmount());
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
+		TriggerResizeObserver.instances.length = 0;
+	});
+
+	it("opens while running and collapses when the turn completes", async () => {
+		const defaultResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
+		TriggerResizeObserver.instances.length = 0;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const runningItems = turnItems.slice(0, -1).map((entry) =>
+			entry.itemId === "assistant-synthesis" ? { ...entry, state: "streaming" as const } : entry,
+		);
+		await act(async () => root.render(<TranscriptTurn items={runningItems} running />));
+		const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
+		expect(chain.open).toBe(true);
+		expect(chain.querySelector(":scope > summary")?.textContent).toContain("Execution process");
+		expect(chain.querySelector(".turn-runtime-status")).not.toBeNull();
+		const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
+		const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
+		Object.defineProperties(viewport, {
+			clientHeight: { configurable: true, value: 520 },
+			scrollHeight: { configurable: true, value: 680 },
+		});
+		for (const child of timeline.children) {
+			const height = child.matches("details.tool-step-command") ? 50 : 120;
+			Object.defineProperty(child, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({ height } as DOMRect),
+			});
+			const summary = child.querySelector(":scope > summary");
+			if (summary) {
+				Object.defineProperty(summary, "getBoundingClientRect", {
+					configurable: true,
+					value: () => ({ height } as DOMRect),
+				});
+			}
+		}
+		await act(async () => TriggerResizeObserver.trigger(timeline));
+		expect(viewport.scrollTop).toBe(680);
+
+		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
+		expect(container.querySelector<HTMLDetailsElement>(".execution-chain")!.open).toBe(false);
+		expect(container.querySelector(":scope .execution-chain > summary")?.textContent).toContain("Execution complete");
+		await act(async () => root.unmount());
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
+		TriggerResizeObserver.instances.length = 0;
+	});
+
+	it("does not count expanded command output toward the outer chain cap", async () => {
+		const defaultResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
+		TriggerResizeObserver.instances.length = 0;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<TranscriptTurn items={[
+				item("short-user", "user", [{ type: "text", text: "列出文件" }]),
+				item("short-command", "assistant", [{
+					type: "tool_call",
+					toolCallId: "short-command-tool",
+					name: "bash",
+					state: "completed",
+					inputPreview: JSON.stringify({ command: "ls -la" }),
+				}]),
+				item("short-result", "tool", [{
+					type: "tool_result",
+					toolCallId: "short-command-tool",
+					name: "bash",
+					isError: false,
+					output: "a very long command output".repeat(100),
+				}]),
+				item("short-answer", "assistant", [{ type: "text", text: "完成。" }]),
+			]} />));
+
+			const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
+			await act(async () => chain.querySelector(":scope > summary")!.click());
+			const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
+			const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
+			const command = chain.querySelector<HTMLDetailsElement>("details.tool-step-command")!;
+			const commandSummary = command.querySelector<HTMLElement>(":scope > summary")!;
+			let timelineHeight = 32;
+			Object.defineProperties(viewport, {
+				clientHeight: { configurable: true, value: 520 },
+				scrollHeight: { configurable: true, get: () => timelineHeight },
+			});
+			Object.defineProperty(timeline, "scrollHeight", {
+				configurable: true,
+				get: () => timelineHeight,
+			});
+			Object.defineProperty(command, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({ height: timelineHeight } as DOMRect),
+			});
+			Object.defineProperty(commandSummary, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({ height: 32 } as DOMRect),
+			});
+
+			await act(async () => TriggerResizeObserver.trigger(timeline));
+			expect(chain.querySelector(".execution-chain-show-more")).toBeNull();
+			await act(async () => commandSummary.click());
+			timelineHeight = 900;
+			await act(async () => TriggerResizeObserver.trigger(timeline));
+			expect(command.open).toBe(true);
+			expect(chain.querySelector(".execution-chain-show-more")).toBeNull();
+			expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
+		} finally {
+			await act(async () => root.unmount());
+			Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
+			TriggerResizeObserver.instances.length = 0;
+		}
 	});
 
 	it("does not add a thought process to a plain answer", async () => {
@@ -428,8 +565,8 @@ describe("TranscriptTurn", () => {
 			item("mixed-result", "tool", [{ type: "tool_result", toolCallId: "mixed-stop", name: "interrupt_agent", isError: false, output: "stopped" }]),
 		]} />));
 
-		expect(container.querySelector(".turn-intermediate strong")?.textContent).toBe("Summary");
-		expect(container.querySelector(".turn-intermediate table")?.textContent).toContain("Child");
+		expect(container.querySelector(".execution-chain strong")?.textContent).toBe("Summary");
+		expect(container.querySelector(".execution-chain table")?.textContent).toContain("Child");
 		await act(async () => root.unmount());
 	});
 
@@ -487,6 +624,20 @@ describe("TranscriptTurn", () => {
 });
 
 describe("CodeTranscriptTurn", () => {
+	it("does not expose assistant working text while a Code turn is running", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<CodeTranscriptTurn items={[
+			item("private-user", "user", [{ type: "text", text: "实现这个功能" }]),
+			item("private-working", "assistant", [{ type: "text", text: "我需要先分析内部实现细节。" }], "streaming"),
+		]} running />));
+
+		expect(container.textContent).not.toContain("我需要先分析内部实现细节");
+		expect(container.querySelector(".turn-runtime-status")).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
 	it("renders tool-result images outside collapsed code tools", async () => {
 		const image = { hash: "a".repeat(64), mediaType: "image/png" as const, byteLength: 4 };
 		const readSessionImage = vi.fn().mockResolvedValue({ data: "aGVsbG8=", mediaType: "image/png" });
@@ -707,6 +858,7 @@ describe("Transcript", () => {
 		expect(container.querySelector(".code-execution > summary")?.textContent).toContain("Ran a command, used a tool");
 		expect(container.querySelector(".code-turn-answer")?.textContent).toContain("桌面上有 file.txt");
 		expect(container.textContent).not.toContain(LONG_THINKING);
+		expect(container.textContent).not.toContain("我需要先请求访问你的桌面文件夹");
 
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
 		expect(execution.open).toBe(false);
@@ -781,7 +933,7 @@ describe("Transcript", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders Code Markdown while streaming and in assistant messages that also call tools", async () => {
+	it("hides Code working text coupled to tools and shows the final answer after completion", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -795,8 +947,8 @@ describe("Transcript", () => {
 		);
 
 		await act(async () => render([user, report]));
-		expect(container.querySelector(".code-turn-status strong")?.textContent).toBe("Summary");
-		expect(container.querySelector(".code-turn-status table")?.textContent).toContain("Child");
+		expect(container.querySelector(".code-turn-status")).toBeNull();
+		expect(container.textContent).not.toContain("Summary");
 
 		const completedReport = {
 			...report,
@@ -810,8 +962,8 @@ describe("Transcript", () => {
 			item("markdown-code-result", "tool", [{ type: "tool_result", toolCallId: "stop-child", name: "interrupt_agent", isError: false, output: "stopped" }]),
 			item("markdown-code-final", "assistant", [{ type: "text", text: "All agents closed." }]),
 		]));
-		expect(container.querySelector(".code-turn-status strong")?.textContent).toBe("Summary");
-		expect(container.querySelector(".code-turn-status table")?.textContent).toContain("Child");
+		expect(container.querySelector(".code-turn-status")).toBeNull();
+		expect(container.textContent).not.toContain("Summary");
 		expect(container.querySelector(".code-turn-answer")?.textContent).toBe("All agents closed.");
 		await act(async () => root.unmount());
 	});

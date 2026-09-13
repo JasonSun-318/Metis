@@ -64,20 +64,23 @@ describe("transcript turn presentation", () => {
 	it("separates public answer text from thinking and pairs tool results", () => {
 		const view = buildTurnPresentation(turnItems);
 		expect(view.users.map((entry) => entry.itemId)).toEqual(["user-1"]);
-		expect(view.segments.map((segment) => segment.type)).toEqual([
-			"user",
-			"activity",
-			"intermediate",
-			"activity",
-			"answer",
-		]);
+		expect(view.segments.map((segment) => segment.type)).toEqual(["user", "activity", "answer"]);
 		expect(view.segments[1]?.type === "activity" && view.segments[1].blocks[0]?.type).toBe("thinking");
-		expect(view.segments[2]?.type === "intermediate" && view.segments[2].blocks.map((block) => block.text)).toEqual([
-			"我需要先请求访问你的桌面文件夹才能查看里面的内容。",
+		expect(view.segments[1]?.type === "activity" && view.segments[1].blocks.map((block) => block.type)).toEqual([
+			"thinking",
+			"text",
+			"tool_call",
 		]);
+		expect(
+			view.segments[1]?.type === "activity" && view.segments[1].blocks.find((block) => block.type === "text")?.text,
+		).toBe("我需要先请求访问你的桌面文件夹才能查看里面的内容。");
 		expect(view.final?.itemId).toBe("assistant-final");
 		expect(view.results.get("tool-command")?.output).toBe("file.txt");
-		expect(view.segments[3]?.type === "activity" && actionSummary(view.segments[3].calls)).toBe("Ran a command");
+		expect(view.segments[1]?.type === "activity" && actionSummary(view.segments[1].calls)).toBe("Ran a command");
+
+		const code = buildCodeTurnPresentation(turnItems);
+		expect(code.segments.map((segment) => segment.type)).toEqual(["user", "tools", "content"]);
+		expect(JSON.stringify(code.segments)).not.toContain("我需要先请求");
 	});
 
 	it("extracts display-safe command previews", () => {

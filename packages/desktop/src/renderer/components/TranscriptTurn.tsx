@@ -12,14 +12,13 @@ import {
 	TerminalWindow,
 	Wrench,
 } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
-	actionSummary,
 	buildTurnPresentation,
 	commandText,
 	isCommandTool,
@@ -105,31 +104,75 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 	);
 }
 
-function activityLength(blocks: readonly ItemContentBlockView[], results: ReadonlyMap<string, ToolResultBlock>): number {
-	return blocks.reduce((total, block) => {
-		if (block.type === "thinking") return total + block.text.length;
-		if (block.type === "tool_call") return total + (block.inputPreview?.length ?? 0) + (results.get(block.toolCallId)?.output.length ?? 0);
-		if (block.type === "tool_result") return total + block.output.length;
-		return total;
+function executionChainPreviewHeight(): number {
+	return Math.min(520, Math.max(360, window.innerHeight * 0.46));
+}
+
+function collapsedExecutionChainHeight(timeline: HTMLElement): number {
+	const children = Array.from(timeline.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
+	const rowGap = Number.parseFloat(getComputedStyle(timeline).rowGap) || 0;
+	const contentHeight = children.reduce((total, child) => {
+		if (child.matches("details.tool-step-command")) {
+			const summary = child.querySelector<HTMLElement>(":scope > summary");
+			return total + (summary?.getBoundingClientRect().height ?? 0);
+		}
+		return total + child.getBoundingClientRect().height;
 	}, 0);
+	return contentHeight + Math.max(0, children.length - 1) * rowGap;
 }
 
 function ExecutionChain({
 	activity,
-	calls,
+	items,
 	results,
 	running,
+	startedAt,
+	waitingForAnswer,
 }: {
 	readonly activity: readonly ItemContentBlockView[];
-	readonly calls: readonly ToolCallBlock[];
+	readonly items: readonly ItemView[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 	readonly running: boolean;
+	readonly startedAt?: string;
+	readonly waitingForAnswer: boolean;
 }) {
 	const { t } = useTranslation();
-	const [open, setOpen] = useState(false);
+	const [open, setOpen] = useState(running);
 	const [showAll, setShowAll] = useState(false);
-	// ponytail: content-size heuristic avoids layout observers; measure actual overflow if transcript typography becomes user-configurable.
-	const canExpand = activity.length > 4 || activityLength(activity, results) > 600;
+	const [canExpand, setCanExpand] = useState(false);
+	const viewportRef = useRef<HTMLDivElement>(null);
+	const timelineRef = useRef<HTMLDivElement>(null);
+	const wasRunning = useRef(running);
+
+	useEffect(() => {
+		if (running) setOpen(true);
+		else if (wasRunning.current) {
+			setOpen(false);
+			setShowAll(false);
+		}
+		wasRunning.current = running;
+	}, [running]);
+
+	useLayoutEffect(() => {
+		if (!open || showAll) return;
+		const viewport = viewportRef.current;
+		const timeline = timelineRef.current;
+		if (!viewport || !timeline) return;
+		const measure = () => {
+			const overflowing = collapsedExecutionChainHeight(timeline) > executionChainPreviewHeight() + 1;
+			setCanExpand(overflowing);
+			if (overflowing && running) viewport.scrollTop = viewport.scrollHeight;
+		};
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(viewport);
+		observer.observe(timeline);
+		window.addEventListener("resize", measure);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", measure);
+		};
+	}, [activity, canExpand, open, results, running, showAll]);
 
 	return (
 		<details
@@ -144,20 +187,27 @@ function ExecutionChain({
 			<summary onClick={() => {
 				if (open) setShowAll(false);
 			}}>
-				<span>{actionSummary(calls, t)}</span>
+				<span aria-live="polite">{t(running ? "Execution process" : "Execution complete")}</span>
 				<CaretRight aria-hidden="true" className="execution-chain-caret" size={16} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div>
-					<div className={`execution-chain-content${canExpand && !showAll ? " is-capped" : ""}`}>
-						<div className="execution-chain-viewport">
-							<div className="execution-chain-timeline">
+					<div className={`execution-chain-content${showAll ? "" : " is-preview"}${canExpand && !showAll ? " is-capped" : ""}`}>
+						<div className="execution-chain-viewport" ref={viewportRef}>
+							<div className="execution-chain-timeline" ref={timelineRef}>
 								{activity.map((block, index) => {
 									if (block.type === "thinking") {
 										return (
 											<div className="activity-step" key={`thinking-${index}`}>
 												<span className="activity-step-icon"><ClockCounterClockwise aria-hidden="true" size={17} /></span>
 												<p>{block.text}</p>
+											</div>
+										);
+									}
+									if (block.type === "text") {
+										return (
+											<div className="activity-step activity-step-message" key={`text-${index}`}>
+												<div><Markdown text={block.text} /></div>
 											</div>
 										);
 									}
@@ -185,10 +235,12 @@ function ExecutionChain({
 							</button>
 						)}
 					</div>
-					{(!canExpand || showAll) && (
+					{running ? (
+						<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+					) : (!canExpand || showAll) && (
 						<div className="execution-chain-done">
-							{running ? <CircleNotch aria-hidden="true" className="tool-step-spinner" size={17} /> : <CheckCircle aria-hidden="true" size={17} />}
-							<span>{t(running ? "Working" : "Done")}</span>
+							<CheckCircle aria-hidden="true" size={17} />
+							<span>{t("Done")}</span>
 						</div>
 					)}
 					{canExpand && showAll && (
@@ -243,6 +295,16 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
+	let activeActivityIndex = -1;
+	if (runtimeRunning) {
+		for (let index = segments.length - 1; index >= 0; index -= 1) {
+			if (segments[index]?.type === "user") break;
+			if (segments[index]?.type === "activity") {
+				activeActivityIndex = index;
+				break;
+			}
+		}
+	}
 
 		return (
 			<>
@@ -284,9 +346,11 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 						<div key={`activity-${index}`}>
 							<ExecutionChain
 								activity={segment.blocks}
-								calls={segment.calls}
+								items={items}
 								results={results}
-								running={segment.running}
+								running={index === activeActivityIndex}
+								startedAt={startedAt}
+								waitingForAnswer={waitingForAnswer}
 							/>
 							{segment.calls.filter((call) => call.name === "ask_user").map((call) => <AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />)}
 							{sessionId ? (
@@ -319,7 +383,9 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 					)}
 				</div>
 			)}
-			{runtimeRunning && <TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />}
+			{runtimeRunning && activeActivityIndex < 0 && (
+				<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+			)}
 		</>
 	);
 }

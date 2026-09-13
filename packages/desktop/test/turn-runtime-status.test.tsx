@@ -48,6 +48,14 @@ describe("TurnRuntimeStatus", () => {
 		expect(advanceDisplayedTokens(50, 44)).toBe(48);
 	});
 
+	it("estimates streaming output while a provider reports placeholder zero usage", () => {
+		const target = turnTokenTarget([
+			assistant("placeholder", [{ type: "text", text: "正在分析当前代码并准备结果" }], { outputTokens: 0 }),
+		]);
+		expect(target.tokens).toBeGreaterThan(0);
+		expect(target.exact).toBe(false);
+	});
+
 	it("renders one local spinner and cleans up its progress timer", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));

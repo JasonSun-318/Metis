@@ -26,10 +26,10 @@ export function turnTokenTarget(items: readonly ItemView[]): { readonly tokens: 
 	let exact = true;
 	for (const item of items) {
 		if (item.role !== "assistant") continue;
-		if (item.usage) tokens += item.usage.outputTokens;
+		if (item.state === "completed" && item.usage) tokens += item.usage.outputTokens;
 		else {
 			exact = false;
-			tokens += estimateOutputTokens(assistantOutputText(item));
+			tokens += Math.max(item.usage?.outputTokens ?? 0, estimateOutputTokens(assistantOutputText(item)));
 		}
 	}
 	return { tokens, exact };

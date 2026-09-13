@@ -81,7 +81,7 @@ export type ChatTranscriptSegment =
 	  }
 	| {
 			readonly type: "activity";
-			readonly blocks: readonly (ThinkingBlock | ToolCallBlock | ToolResultBlock)[];
+			readonly blocks: readonly (TextBlock | ThinkingBlock | ToolCallBlock | ToolResultBlock)[];
 			readonly calls: readonly ToolCallBlock[];
 			readonly running: boolean;
 	  }
@@ -638,32 +638,31 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 		}
 	}
 	const segments: ChatTranscriptSegment[] = [];
-	let activity: (ThinkingBlock | ToolCallBlock | ToolResultBlock)[] = [];
-	let activityCalls: ToolCallBlock[] = [];
-	let intermediateText: TextBlock[] = [];
+	let phase: (TextBlock | ThinkingBlock | ToolCallBlock | ToolResultBlock)[] = [];
+	let phaseCalls: ToolCallBlock[] = [];
+	let phaseHasActivity = false;
 	const deliveredFiles: SessionDeliveredFileView[] = [];
-	const flushActivity = () => {
-		if (activity.length === 0) return;
-		segments.push({
-			type: "activity",
-			blocks: activity,
-			calls: activityCalls,
-			running: activityCalls.some((call) => call.state === "running" || call.state === "pending"),
-		});
-		activity = [];
-		activityCalls = [];
-	};
-	const flushIntermediateText = () => {
-		if (intermediateText.length === 0) return;
-		segments.push({ type: "intermediate", blocks: intermediateText });
-		intermediateText = [];
+	const flushPhase = () => {
+		if (phase.length === 0) return;
+		if (phaseHasActivity) {
+			segments.push({
+				type: "activity",
+				blocks: phase,
+				calls: phaseCalls,
+				running: phaseCalls.some((call) => call.state === "running" || call.state === "pending"),
+			});
+		} else {
+			segments.push({ type: "intermediate", blocks: phase as TextBlock[] });
+		}
+		phase = [];
+		phaseCalls = [];
+		phaseHasActivity = false;
 	};
 
 	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 		const item = items[itemIndex]!;
 		if (item.role === "user") {
-			flushActivity();
-			flushIntermediateText();
+			flushPhase();
 			segments.push({ type: "user", item });
 			continue;
 		}
@@ -672,8 +671,7 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 			if (block.type === "text") {
 				if (itemIndex === finalIndex || thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))
 					continue;
-				flushActivity();
-				intermediateText.push(block);
+				phase.push(block);
 				continue;
 			}
 			if (block.type === "tool_call" && block.name === "deliver_file") continue;
@@ -690,18 +688,16 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 				(block.type !== "tool_result" || callIds.has(block.toolCallId))
 			)
 				continue;
-			flushIntermediateText();
-			activity.push(block);
-			if (block.type === "tool_call") activityCalls.push(block);
+			phase.push(block);
+			phaseHasActivity = true;
+			if (block.type === "tool_call") phaseCalls.push(block);
 		}
 		if (itemIndex === finalIndex) {
-			flushActivity();
-			flushIntermediateText();
+			flushPhase();
 			segments.push({ type: "answer", item });
 		}
 	}
-	flushActivity();
-	flushIntermediateText();
+	flushPhase();
 	return {
 		users,
 		segments,
@@ -761,10 +757,12 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 			continue;
 		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
+		const hasToolCall = toolCalls(item).length > 0;
 		const answer = itemIndex === finalIndex;
 		const markdown = item.role === "assistant";
 		for (const block of item.content) {
 			if (block.type === "thinking" || block.type === "compaction" || block.type === "plan") continue;
+			if (block.type === "text" && hasToolCall) continue;
 			if (block.type === "tool_call") {
 				if (block.name === "deliver_file") continue;
 				flushContent();

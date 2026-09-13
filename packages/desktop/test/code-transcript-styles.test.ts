@@ -61,6 +61,11 @@ describe("Code transcript visual contract", () => {
 		expect(rule('.transcript-drawer[data-open="true"]').gridTemplateRows).toBe("1fr");
 		expect(rule(".transcript-drawer > *").transform).toBe("translateY(-12px)");
 		expect(rule('.transcript-drawer[data-open="true"] > *').transform).toBe("none");
+		expect(rule(".execution-chain-viewport").overflow).toBe("visible");
+		expect(rule(".execution-chain-content.is-capped .execution-chain-viewport").maxHeight).toBe(
+			"clamp(360px, 46vh, 520px)",
+		);
+		expect(rule(".execution-chain-content.is-capped .execution-chain-viewport").overflow).toBe("hidden");
 	});
 
 	it("slides the latest user bubble in from the right and respects reduced motion", () => {
