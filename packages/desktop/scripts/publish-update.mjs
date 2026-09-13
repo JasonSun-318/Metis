@@ -17,6 +17,24 @@ const MAX_UPDATE_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_RELEASE_NOTES_CHARACTERS = 64 * 1024;
 const MAX_CHANGELOG_RELEASES = 100;
 
+function releaseTarget(platform) {
+	if (platform === "darwin") {
+		return {
+			manifestKey: "dmg",
+			extension: ".dmg",
+			assetRelative: (arch, version) => `darwin/${arch}/releases/${version}/Metis-${version}-darwin-${arch}.dmg`,
+		};
+	}
+	if (platform === "win32") {
+		return {
+			manifestKey: "exe",
+			extension: ".exe",
+			assetRelative: (arch, version) => `win32/${arch}/releases/${version}/Metis-${version}-win32-${arch}-Setup.exe`,
+		};
+	}
+	throw new Error(`Unsupported platform: ${platform}`);
+}
+
 export function normalizeReleaseNotes(value) {
 	if (typeof value !== "string") throw new Error("Invalid update release notes");
 	const normalized = value.trim();
@@ -93,9 +111,8 @@ export function objectPrefix(baseUrl) {
 
 export function releaseKeys(baseUrl, platform, arch, version) {
 	const prefix = objectPrefix(baseUrl);
-	const assetRelative = platform === "darwin"
-		? `darwin/${arch}/releases/${version}/Metis-${version}-darwin-${arch}.dmg`
-		: `win32/${arch}/releases/${version}/Metis-${version}-win32-${arch}-Setup.exe`;
+	const target = releaseTarget(platform);
+	const assetRelative = target.assetRelative(arch, version);
 	const manifestRelative = `${platform}/${arch}/latest.json`;
 	const changelogRelative = "changelog.json";
 	return {
@@ -109,7 +126,7 @@ export function releaseKeys(baseUrl, platform, arch, version) {
 }
 
 export function buildLatestManifest({ platform, version, assetUrl, size, sha256 }) {
-	const key = platform === "darwin" ? "dmg" : "exe";
+	const key = releaseTarget(platform).manifestKey;
 	return {
 		schemaVersion: 1,
 		version,
@@ -122,7 +139,7 @@ export function assertClientAccepts(manifest, baseUrl, platform) {
 	if (manifest.schemaVersion !== 1 || typeof manifest.version !== "string" || !STABLE_VERSION.test(manifest.version)) {
 		throw new Error("Invalid update manifest");
 	}
-	const key = platform === "darwin" ? "dmg" : "exe";
+	const { extension, manifestKey: key } = releaseTarget(platform);
 	const artifact = manifest[key];
 	if (
 		typeof artifact?.url !== "string" ||
@@ -141,7 +158,7 @@ export function assertClientAccepts(manifest, baseUrl, platform) {
 		url.password ||
 		url.origin !== baseUrl.origin ||
 		!url.pathname.startsWith(baseUrl.pathname) ||
-		!url.pathname.endsWith(key === "dmg" ? ".dmg" : ".exe") ||
+		!url.pathname.endsWith(extension) ||
 		url.search ||
 		url.hash
 	) {
@@ -212,19 +229,13 @@ async function findWindowsInstaller(version, arch) {
 		return installer;
 	} catch {
 		throw new Error(
-			`No packaged Windows installer. Run on Windows: METIS_UPDATE_BASE_URL=... npm run make --workspace @metis/desktop -- --arch=${arch}`,
+			`No packaged Windows installer. Run in PowerShell: $env:METIS_UPDATE_BASE_URL="https://..."; npm run make --workspace @metis/desktop -- --arch=${arch}`,
 		);
 	}
 }
 
-function ossutilBin() {
-	const fromEnv = process.env.OSSUTIL;
-	if (fromEnv) return fromEnv;
-	const found = spawnSync("which", ["ossutil"], { encoding: "utf8" });
-	if (found.status === 0 && found.stdout.trim()) return found.stdout.trim();
-	throw new Error(
-		"ossutil is not installed. Install with:\n  curl -o ossutil.zip https://gosspublic.alicdn.com/ossutil/v2/2.3.0/ossutil-2.3.0-mac-arm64.zip && unzip ossutil.zip && sudo mv ossutil /usr/local/bin/\nThen run: ossutil config",
-	);
+export function ossutilBin(environment = process.env) {
+	return environment.OSSUTIL || "ossutil";
 }
 
 function runOssutil(args) {
@@ -233,6 +244,7 @@ function runOssutil(args) {
 	if (!args.includes("-e") && !args.includes("--endpoint")) extra.push("-e", "oss-cn-shenzhen.aliyuncs.com");
 	if (!args.includes("--region")) extra.push("--region", "cn-shenzhen");
 	const result = spawnSync(bin, [...extra, ...args], { stdio: "inherit" });
+	if (result.error) throw new Error(`ossutil is unavailable: ${result.error.message}`);
 	if (result.status !== 0) throw new Error(`ossutil ${args[0]} failed`);
 }
 
@@ -276,7 +288,7 @@ function usage() {
 Uploads changelog.json, <platform>/<arch>/latest.json, and the release artifact to oss://metis-release with public-read.
 The changelog defaults to packages/desktop/changelog.json and must contain the complete newest-first
 history. Its first version must match the version being published. latest.json contains updater/download metadata only.
-Requires ossutil on PATH (credentials via \`ossutil config\`, never committed).
+Requires ossutil on PATH or in OSSUTIL (credentials via \`ossutil config\`, never committed).
 Packaged builds must set METIS_UPDATE_BASE_URL at make time (same HTTPS origin as --base-url).
 `;
 }

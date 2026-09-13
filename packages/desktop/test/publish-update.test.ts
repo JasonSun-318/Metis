@@ -9,6 +9,7 @@ import {
 	buildLatestManifest,
 	normalizeChangelog,
 	objectPrefix,
+	ossutilBin,
 	releaseKeys,
 	trustedBaseUrl,
 } from "../scripts/publish-update.mjs";
@@ -23,6 +24,29 @@ const CHANGELOG = {
 };
 
 describe("publish-update", () => {
+	it("uses the platform PATH unless ossutil is explicitly overridden", () => {
+		expect(ossutilBin({})).toBe("ossutil");
+		expect(ossutilBin({ OSSUTIL: "C:\\Tools\\ossutil.exe" })).toBe("C:\\Tools\\ossutil.exe");
+	});
+
+	it("reports a missing PATH executable without relying on a POSIX locator", () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "metis-missing-ossutil-test-"));
+		try {
+			const desktopRoot = process.cwd().endsWith(`${path.sep}packages${path.sep}desktop`)
+				? process.cwd()
+				: path.join(process.cwd(), "packages", "desktop");
+			const result = spawnSync(process.execPath, [path.join(desktopRoot, "scripts", "publish-update.mjs"), "ls"], {
+				encoding: "utf8",
+				env: { ...process.env, OSSUTIL: "", PATH: directory },
+			});
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("ossutil is unavailable");
+			expect(result.stderr).not.toContain("sudo");
+		} finally {
+			rmSync(directory, { force: true, recursive: true });
+		}
+	});
+
 	it("builds separate updater and changelog objects", () => {
 		const baseUrl = trustedBaseUrl(BASE);
 		expect(baseUrl?.href).toBe(`${BASE}/`);
