@@ -33,6 +33,7 @@ interface HomeSnapshot {
 	headingLineHeight: number;
 	composer: RectSnapshot;
 	discovery: RectSnapshot;
+	recentSection: RectSnapshot | null;
 	cards: readonly RectSnapshot[];
 }
 
@@ -104,6 +105,7 @@ async function snapshot(page: Page): Promise<HomeSnapshot> {
 		};
 		const scroll = document.querySelector<HTMLElement>(".new-task-home-scroll");
 		if (!scroll) throw new Error("Home scroll container is missing");
+		const recentSection = document.querySelector(".new-task-recent-projects");
 		return {
 			scrollTop: scroll.scrollTop,
 			scrollHeight: scroll.scrollHeight,
@@ -115,6 +117,7 @@ async function snapshot(page: Page): Promise<HomeSnapshot> {
 			),
 			composer: rect(document.querySelector(".new-task-home-composer")),
 			discovery: rect(document.querySelector(".new-task-home-discovery")),
+			recentSection: recentSection ? rect(recentSection) : null,
 			cards: Array.from(document.querySelectorAll(".new-task-starter"), (card) => rect(card)),
 		};
 	});
@@ -165,12 +168,14 @@ async function runGeometryCase(page: Page, testInfo: TestInfo, fixtureUrl: strin
 	const stickyScroll = Math.min(maximumScroll, Math.max(follow.scrollTop + 80, Math.round(maximumScroll * 0.6)));
 	const sticky = await scrollAndSnapshot(page, stickyScroll);
 	const bottom = await scrollAndSnapshot(page, maximumScroll);
+	const firstContentTop = mode === "code" ? bottom.recentSection?.top : bottom.cards[0]?.top;
 
 	if (process.env.METIS_HOME_SCROLL_LOG === "1") {
 		console.log(`[home geometry] ${mode} ${viewport.width}x${viewport.height}`, JSON.stringify({
 			scrollHeight: initial.scrollHeight,
 			composerTops: [initial.composer.top, follow.composer.top, middle.composer.top, sticky.composer.top, bottom.composer.top],
 			composerBottom: bottom.composer.bottom,
+			contentGap: firstContentTop === undefined ? null : firstContentTop - bottom.composer.bottom,
 			cardBounds: [bottom.cards[0]?.top, bottom.cards.at(-1)?.bottom],
 			discovery: { top: initial.discovery.top, bottom: initial.discovery.bottom, height: initial.discovery.height },
 		}));
@@ -188,7 +193,7 @@ async function runGeometryCase(page: Page, testInfo: TestInfo, fixtureUrl: strin
 	expect(initial.headingText).toContain("QA User");
 	expect(initial.headingText).not.toContain("{{name}}");
 	expect(initial.scrollHeight).toBeGreaterThan(initial.clientHeight);
-	expect(initial.cards[0]?.top ?? Number.NEGATIVE_INFINITY).toBeGreaterThanOrEqual(viewport.height);
+	expect(initial.cards[0]?.top ?? Number.NEGATIVE_INFINITY).toBeGreaterThanOrEqual(viewport.height - 1);
 	expect(initial.heading.top).toBeGreaterThan(viewport.width >= 1280 ? 100 : 64);
 	expect(initial.headingLineHeight).toBeGreaterThan(0);
 	expect(initial.heading.height).toBeLessThanOrEqual(initial.headingLineHeight * 1.15);
@@ -200,15 +205,18 @@ async function runGeometryCase(page: Page, testInfo: TestInfo, fixtureUrl: strin
 	expect(sticky.composer.top).toBeLessThan(initial.composer.top - 20);
 	expect(Math.abs(bottom.composer.top - sticky.composer.top)).toBeLessThan(3);
 	expect(bottom.cards[0]?.top ?? Number.POSITIVE_INFINITY).toBeLessThan(sticky.cards[0]?.top ?? Number.NEGATIVE_INFINITY);
-	expect(bottom.cards.at(-1)?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(viewport.height + 1);
+	expect(bottom.cards.at(-1)?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(viewport.height - 28);
+	expect(firstContentTop).toBeDefined();
+	expect((firstContentTop ?? Number.POSITIVE_INFINITY) - bottom.composer.bottom).toBeGreaterThanOrEqual(28);
+	expect((firstContentTop ?? Number.NEGATIVE_INFINITY) - bottom.composer.bottom).toBeLessThanOrEqual(36);
 	if (viewport.width >= 1280) {
 		const lastCard = bottom.cards.at(-1);
 		if (!lastCard) throw new Error("Expected a final starter card");
-		expect(Math.abs(lastCard.bottom - (viewport.height - 32))).toBeLessThanOrEqual(4);
+		expect(Math.abs(lastCard.bottom - (viewport.height - 32))).toBeLessThanOrEqual(1);
 		expect(Math.abs((sticky.composer.top + sticky.composer.bottom) / 2 - viewport.height / 2)).toBeLessThanOrEqual(120);
 		for (const card of bottom.cards) {
 			expect(card.top).toBeGreaterThanOrEqual(bottom.composer.bottom - 1);
-			expect(card.bottom).toBeLessThanOrEqual(viewport.height + 1);
+			expect(card.bottom).toBeLessThanOrEqual(viewport.height - 28);
 		}
 	}
 	expect(errors).toEqual([]);

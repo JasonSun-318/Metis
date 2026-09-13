@@ -69,9 +69,6 @@ export function HomeProjectPicker({
 				value={value}
 				triggerIcon={<FolderSimple aria-hidden="true" size={15} />}
 			/>
-			{mode === "chat" && !folder && (
-				<span className="folder-picker-hint home-project-picker-hint">{t("Optional")}</span>
-			)}
 			<button
 				aria-label={t("Choose folder")}
 				className="folder-picker home-project-picker-browse"

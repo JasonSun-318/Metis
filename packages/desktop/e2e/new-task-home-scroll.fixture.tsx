@@ -39,6 +39,7 @@ async function mount(): Promise<void> {
 			onManageMcp={() => undefined}
 			onManageSkills={() => undefined}
 			onPickFiles={async () => []}
+			onSelectRecentProject={() => undefined}
 			onSubmit={async () => undefined}
 			projectControl={
 				<div className="home-project-picker" data-fixture-project="true">
@@ -46,6 +47,11 @@ async function mount(): Promise<void> {
 				</div>
 			}
 			reducedMotion={reducedMotion}
+			recentProjects={mode === "code" ? [
+				{ cwd: "/tmp/metis-home-qa", name: "Metis", updatedAt: "2026-09-12T09:00:00.000Z" },
+				{ cwd: "/tmp/website", name: "Website", updatedAt: "2026-09-11T09:00:00.000Z" },
+				{ cwd: "/tmp/demo", name: "Demo", updatedAt: "2026-09-10T09:00:00.000Z" },
+			] : []}
 			skills={[]}
 		/>,
 	);

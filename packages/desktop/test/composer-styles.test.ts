@@ -101,10 +101,18 @@ describe("Composer visual states", () => {
 	it("keeps the New Task folder row translucent and separate from the composer", () => {
 		expect(css).toContain("background: var(--app-bg-58)");
 		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
+		expect(rule(".new-task-home-composer").boxShadow).toBe("var(--shadow)");
 	});
 
 	it("uses the shared compact home proportions and mode font variables", () => {
-		expect(css).toMatch(/\.new-task-home-content\s*\{[^}]*width:\s*min\(720px,\s*100%\)/);
+		expect(css).toMatch(/\.new-task-home-content\s*\{[^}]*width:\s*min\(820px,\s*100%\)/);
+		expect(rule(".new-task-home-hero-main").width).toBe("100%");
+		expect(rule(".new-task-home-hero-main").maxWidth).toBe("720px");
+		expect(css).toContain(
+			"--home-initial-top: max(32px, calc((100cqh - var(--home-hero-height) - 92px) / 2 + 32px))",
+		);
+		expect(css).toContain("--home-sticky-floor: min(clamp(32px, 7cqh, 72px)");
+		expect(css).toContain("var(--home-starters-height) - var(--home-section-gap) - var(--home-bottom-gap))");
 		expect(rule(".new-task-home-scroll").containerType).toBe("size");
 		expect(rule(".new-task-home-hero").display).toBe("contents");
 		expect(rule(".new-task-home-hero-main").position).toBe("sticky");
@@ -119,10 +127,22 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home-project-control").minHeight).toBe("40px");
 		expect(rule(".new-task-home .home-project-picker-select .menu-select-trigger").justifyContent).toBe("flex-start");
 		expect(rule(".new-task-home .home-project-picker-select .menu-select-value").marginRight).toBe("auto");
-		expect(rule(".new-task-home .home-project-picker-hint").fontSize).toBe("11px");
+		expect(rule(".new-task-home .home-project-picker-select").maxWidth).toBe("280px");
+		expect(rule(".new-task-home .home-project-picker-browse").marginLeft).toBe("auto");
+		expect(css).not.toContain(".home-project-picker-hint");
 		expect(rule(".new-task-home-heading h1").whiteSpace).toBe("nowrap");
 		expect(rule(".new-task-starters").minHeight).toBe("");
-		expect(rule(".new-task-starters").scrollMarginTop).toContain("var(--home-hero-height)");
+		expect(rule(".new-task-starters").marginTop).toBe("0px");
+		expect(rule(".new-task-starters").scrollMarginTop).toBe(
+			"calc(var(--home-sticky-top) + var(--home-hero-height) + 16px)",
+		);
+		expect(rule(".new-task-home-discovery").transition).toContain("opacity 260ms");
+		expect(rule(".new-task-home-discovery").transition).toContain("transform 260ms");
+		expect(rule('.new-task-home-discovery[data-hidden="true"]').transform).toBe("translateY(-8px)");
+		expect(rule(".new-task-starter").minHeight).toBe("96px");
+		expect(rule(".new-task-recent-project").height).toBe("46px");
+		expect(css).toContain("@container new-task-scroll (height < 900px)");
+		expect(css).toContain("@container new-task-scroll (height < 640px)");
 	});
 
 	it("uses the compact Metis task list above the composer", () => {

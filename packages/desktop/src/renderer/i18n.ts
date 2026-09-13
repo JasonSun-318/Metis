@@ -424,7 +424,6 @@ const zhCN = {
 	"No project folder": "无项目文件夹",
 	"Work in a project or folder": "在项目或文件夹中工作",
 	"Describe your task, or drop in files…": "描述你的任务，或拖入文件…",
-	"Start here": "从这里开始",
 	"Explore tasks": "探索任务",
 	"Scroll to explore": "向下滚动探索",
 	"Scroll down": "向下滚动",

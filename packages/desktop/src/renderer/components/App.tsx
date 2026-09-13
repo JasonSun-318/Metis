@@ -45,7 +45,7 @@ import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
-import { NewTaskHome } from "./NewTaskHome.tsx";
+import { NewTaskHome, recentProjectsFromGroups } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
@@ -713,6 +713,10 @@ export function App({ api, store }: AppProps) {
 	const homeProjects = useMemo(
 		() => buildSessionTree(state, mode, projectPreferences).projects,
 		[mode, projectPreferences, state],
+	);
+	const recentCodeProjects = useMemo(
+		() => mode === "code" ? recentProjectsFromGroups(homeProjects) : [],
+		[homeProjects, mode],
 	);
 	const activeCodeProjectSetupRequest = codeProjectSetupRequest.current;
 
@@ -1721,7 +1725,7 @@ export function App({ api, store }: AppProps) {
 									mode={mode}
 									onChooseFolder={chooseNewTaskFolder}
 									onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
-							onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
+									onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
 									onSelectProject={(cwd) => selectHomeProject(mode, cwd)}
 									projects={homeProjects}
 								/>
@@ -1730,23 +1734,25 @@ export function App({ api, store }: AppProps) {
 							onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
 							onPickFiles={pickAttachmentFiles}
 							onResolveDroppedFiles={api.resolveDroppedFiles}
+							onSelectRecentProject={(cwd) => selectHomeProject("code", cwd)}
 							reducedMotion={reducedMotion}
 							onSlashCommand={handleSlashCommand}
 							onSubmit={submitNewTaskDraft}
+							recentProjects={recentCodeProjects}
 							skills={skills}
 							thinkingControl={thinkingControl}
 						/>
-					{mode === "code" && codeProjectSetupOpen && (
-						<CodeProjectSetup
+						{mode === "code" && codeProjectSetupOpen && (
+							<CodeProjectSetup
 								busy={draftBusy || !serverReady}
 								initialStep="create"
-							onCancel={closeCodeProjectSetup}
+								onCancel={closeCodeProjectSetup}
 								onChooseExisting={chooseCodeProjectFolder}
 								onChooseLocation={chooseCodeProjectFolder}
 								onCreateProject={createCodeProjectFolder}
 								onGetDefaultLocation={api.getDefaultProjectLocation}
-							onOpenProject={async (cwd) => selectCodeProject(cwd, activeCodeProjectSetupRequest)}
-							onProjectCreated={(cwd) => handleCodeProjectCreated(cwd, activeCodeProjectSetupRequest)}
+								onOpenProject={async (cwd) => selectCodeProject(cwd, activeCodeProjectSetupRequest)}
+								onProjectCreated={(cwd) => handleCodeProjectCreated(cwd, activeCodeProjectSetupRequest)}
 								onPickFiles={pickAttachmentFiles}
 								onResolveDroppedFiles={api.resolveDroppedFiles}
 							/>

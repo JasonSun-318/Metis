@@ -1945,7 +1945,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders a stable nickname greeting without leaking the default name", async () => {
+	it("renders a stable configured-name greeting and updates the nickname", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const poolFor = (previousId?: string) => HOME_GREETINGS.filter(
 			(item) => (item.period === getHomePeriod(new Date()) || item.period === "anytime") && item.id !== previousId,
@@ -1955,16 +1955,18 @@ describe("Chat desktop shell", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		try {
-			// Prime the module-level previous greeting, then aim the random mock at a
-			// named greeting ("anytime-task") inside the pool that excludes it.
+			// Prime the module-level previous greeting, then aim the random mock at
+			// "anytime-task" inside the pool that excludes it.
 			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
 			await act(async () => button(container, "New task").click());
 			const primed = container.querySelector(".new-task-home-heading h1")?.textContent;
-			const primedId = HOME_GREETINGS.find((item) => (item.anonymousKey ?? item.key) === primed)?.id;
+			const primedId = HOME_GREETINGS.find(
+				(item) => item.key.replace("{{name}}", DEFAULT_PROFILE_IDENTITY.displayName) === primed,
+			)?.id;
 			expect(primedId).toBeDefined();
-			expect(primed).not.toContain("Metis User");
+			expect(primed).toContain(DEFAULT_PROFILE_IDENTITY.displayName);
 			await act(async () => root.unmount());
 
 			const target = poolFor(primedId).findIndex((item) => item.id === "anytime-task");
@@ -2471,6 +2473,15 @@ describe("Chat desktop shell", () => {
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "Keep this draft while choosing a project"));
+		const recentProjectRow = [...container.querySelectorAll<HTMLButtonElement>(".new-task-recent-project")]
+			.find((candidate) => candidate.textContent?.includes("code-project"));
+		expect(recentProjectRow).not.toBeUndefined();
+		await act(async () => recentProjectRow!.click());
+		expect(container.textContent).toContain("code-project");
+		expect(editor.value).toBe("Keep this draft while choosing a project");
+		expect(document.activeElement).toBe(editor);
+		expect(api.createSession).not.toHaveBeenCalled();
+
 		await act(async () => container.querySelector<HTMLButtonElement>(".home-project-picker-select .menu-select-trigger")!.click());
 		const recentProject = [...document.querySelectorAll<HTMLButtonElement>('.home-project-picker-menu [role="option"]')]
 			.find((candidate) => candidate.textContent?.includes("code-project"));
@@ -5298,7 +5309,8 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("新建任务");
 		expect(container.textContent).toContain("自定义");
 		expect(container.textContent).toContain("定时任务");
-		expect(container.querySelector(".new-task-starters-label")?.textContent).toBe("从这里开始");
+		expect(container.querySelector(".new-task-starters-label")).toBeNull();
+		expect(container.querySelector(".home-project-picker-hint")).toBeNull();
 		expect(container.querySelector('[aria-label="隐藏会话侧边栏"]')).not.toBeNull();
 		await act(async () => root.unmount());
 	});

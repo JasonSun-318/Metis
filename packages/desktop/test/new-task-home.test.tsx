@@ -3,7 +3,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { NewTaskHome } from "../src/renderer/components/NewTaskHome.tsx";
+import type { ProjectSessionGroup } from "../src/renderer/components/SessionSidebar.tsx";
+import { NewTaskHome, recentProjectsFromGroups } from "../src/renderer/components/NewTaskHome.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomeStarters } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
@@ -13,6 +14,26 @@ vi.mock("../src/renderer/components/SideRays.tsx", () => ({
 }));
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+function project(cwd: string, name: string, updatedAt: string): ProjectSessionGroup {
+	return {
+		cwd,
+		mode: "code",
+		name,
+		pinned: false,
+		sessions: [{
+			sessionId: `${name}-session`,
+			mode: "code",
+			cwdOrigin: "user-selected",
+			cwd,
+			createdAt: updatedAt,
+			updatedAt,
+			state: "idle",
+			archived: false,
+			unread: false,
+		}],
+	};
+}
 
 function props(mode: "chat" | "code") {
 	return {
@@ -77,6 +98,52 @@ describe("NewTaskHome", () => {
 			const editor = container.querySelector<HTMLElement>("#composer-input")!;
 			const projectControl = container.querySelector<HTMLElement>("[data-testid='project-control']")!;
 			expect(editor.compareDocumentPosition(projectControl) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("orders and deduplicates recent Code projects by their latest conversation", () => {
+		const recent = recentProjectsFromGroups([
+			project("/work/older", "Older", "2026-09-09T08:00:00.000Z"),
+			project("/work/metis/", "Metis old path", "2026-09-10T08:00:00.000Z"),
+			project("/work/newest", "Newest", "2026-09-12T08:00:00.000Z"),
+			project("/work/metis", "Metis", "2026-09-11T08:00:00.000Z"),
+			project("/work/fourth", "Fourth", "2026-09-08T08:00:00.000Z"),
+		]);
+
+		expect(recent.map(({ cwd, name }) => ({ cwd, name }))).toEqual([
+			{ cwd: "/work/newest", name: "Newest" },
+			{ cwd: "/work/metis", name: "Metis" },
+			{ cwd: "/work/older", name: "Older" },
+		]);
+	});
+
+	it("selects a recent Code project and returns focus to the composer", async () => {
+		const onSelectRecentProject = vi.fn();
+		const recentProjects = recentProjectsFromGroups([
+			project("/work/metis", "Metis", "2026-09-12T08:00:00.000Z"),
+			project("/work/website", "Website", "2026-09-11T08:00:00.000Z"),
+		]);
+		const { container, root } = await renderHome("code", { onSelectRecentProject, recentProjects });
+		try {
+			const rows = [...container.querySelectorAll<HTMLButtonElement>(".new-task-recent-project")];
+			expect(rows.map((row) => row.querySelector("strong")?.textContent)).toEqual(["Metis", "Website"]);
+			expect(container.querySelector(".new-task-starters-label")).toBeNull();
+
+			await act(async () => rows[1]!.click());
+			expect(onSelectRecentProject).toHaveBeenCalledWith("/work/website");
+			expect(document.activeElement).toBe(container.querySelector("#composer-input"));
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it.each(["chat", "code"] as const)("includes the configured profile name in the %s greeting", async (mode) => {
+		const { container, root } = await renderHome(mode);
+		try {
+			expect(container.querySelector(".new-task-home-heading h1")?.textContent)
+				.toContain(DEFAULT_PROFILE_IDENTITY.displayName);
 		} finally {
 			await act(async () => root.unmount());
 		}
