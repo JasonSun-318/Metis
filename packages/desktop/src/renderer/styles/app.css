@@ -203,7 +203,64 @@ textarea { resize: none; }
 :root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar-actions .sessions-sidebar-toggle-fixed { position: fixed; top: 7px; left: 76px; z-index: 60; }
 .workspace-titlebar-actions button { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--text-14); pointer-events: auto; transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
 .workspace-titlebar-actions button:hover { color: var(--text); }
-.workspace-titlebar-actions .details-sidebar-toggle { margin-left: auto; }
+.workspace-titlebar-end {
+	position: relative;
+	display: flex;
+	align-items: center;
+	margin-left: auto;
+	pointer-events: none;
+	-webkit-app-region: no-drag;
+}
+.workspace-titlebar-end .details-sidebar-toggle { margin-left: 0; }
+.release-notes-control { pointer-events: auto; -webkit-app-region: no-drag; }
+.release-notes-trigger { position: relative; }
+.release-notes-unread-dot {
+	position: absolute;
+	top: 4px;
+	right: 4px;
+	width: 7px;
+	height: 7px;
+	border: 1px solid var(--app-bg);
+	border-radius: 999px;
+	background: var(--danger-count);
+}
+.release-notes-popover {
+	position: absolute;
+	z-index: 100;
+	top: 36px;
+	right: 0;
+	display: flex;
+	width: min(360px, calc(100vw - 32px));
+	max-height: min(480px, calc(100vh - 56px));
+	flex-direction: column;
+	overflow: hidden;
+	border: 1px solid var(--border-strong);
+	border-radius: 10px;
+	background: var(--menu-bg);
+	box-shadow: var(--overlay-shadow);
+	color: var(--text);
+	pointer-events: auto;
+	-webkit-app-region: no-drag;
+}
+.release-notes-popover > header { display: flex; min-height: 42px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--surface-10); padding: 7px 9px 7px 13px; }
+.release-notes-popover > header strong { font-size: 13px; font-weight: 600; }
+.release-notes-popover button.release-notes-close { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 6px; color: var(--text-09); }
+.release-notes-popover button.release-notes-close:hover { background: var(--menu-hover); color: var(--text-27); }
+.release-notes-version { margin: 0; color: var(--text-12); font-size: 12px; }
+.release-notes-body { min-height: 72px; overflow-y: auto; padding: 12px 14px; font-size: 13px; line-height: 1.55; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.release-notes-body > :first-child { margin-top: 0; }
+.release-notes-body > :last-child { margin-bottom: 0; }
+.release-notes-body :is(h1, h2, h3, h4, h5, h6) { margin: 14px 0 6px; font: inherit; font-weight: 650; }
+.release-notes-body :is(ul, ol) { margin: 7px 0; padding-left: 20px; }
+.release-notes-body li > p { margin: 0; }
+.release-notes-body a { color: var(--link); }
+.release-notes-body :not(pre) > code { border-radius: 4px; background: var(--surface-07); padding: 1px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+.release-notes-status { margin: 0; padding: 18px 14px; color: var(--text-12); font-size: 12px; line-height: 1.45; }
+.release-notes-status.is-error { color: var(--danger-soft-text); }
+.release-notes-actions { border-top: 1px solid var(--surface-10); padding: 9px; }
+.release-notes-popover button.release-notes-update-button { display: flex; width: 100%; height: 32px; align-items: center; justify-content: center; border-radius: 7px; background: var(--surface-09); color: var(--text-24); font-size: 12px; }
+.release-notes-popover button.release-notes-update-button:hover:not(:disabled) { background: var(--menu-hover); }
+.release-notes-popover button.release-notes-update-button:disabled { color: var(--text-06); cursor: not-allowed; }
 .details-sidebar-toggle svg { transform: scaleX(-1); }
 .tool-sidebar[hidden] { display: none; }
 .tool-sidebar { position: absolute; z-index: 6; top: 7px; right: 7px; bottom: 7px; min-width: 280px; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--sidebar); container-type: inline-size; animation: tool-sidebar-slide-in 200ms cubic-bezier(.16, 1, .3, 1); }

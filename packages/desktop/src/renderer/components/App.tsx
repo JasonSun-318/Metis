@@ -52,6 +52,7 @@ import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
+import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
 import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import {
@@ -258,6 +259,7 @@ export function App({ api, store }: AppProps) {
 	const dirtyToolSessionIds = [...workspaceState.dirtySessionIds];
 	const toolCleanupSessionIds = workspaceState.cleanupSessionIds;
 	const [checkingUpdate, setCheckingUpdate] = useState(false);
+	const [updateCheckFailure, setUpdateCheckFailure] = useState<"failed" | "unsupported" | null>(null);
 	const updateCheckTask = useRef<Promise<void> | null>(null);
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const [fullscreen, setFullscreen] = useState(false);
@@ -435,6 +437,7 @@ export function App({ api, store }: AppProps) {
 	const checkDesktopUpdate = useCallback(() => {
 		if (updateCheckTask.current) return;
 		setUpdateNotice(null);
+		setUpdateCheckFailure(null);
 		setCheckingUpdate(true);
 		const task = api
 			.checkForUpdate()
@@ -448,8 +451,10 @@ export function App({ api, store }: AppProps) {
 			.catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message.includes("unavailable in this build") || message.includes("not supported in this build")) {
+					setUpdateCheckFailure("unsupported");
 					setUpdateNotice({ tone: "info", title: "Update checks are not supported in this build" });
 				} else {
+					setUpdateCheckFailure("failed");
 					setUpdateNotice({
 						tone: "error",
 						title: "Update check failed",
@@ -1648,18 +1653,31 @@ export function App({ api, store }: AppProps) {
 							</button>
 						)
 					)}
-					{toolsSidebarAvailable && <button
-						aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
-						aria-pressed={toolsSidebarOpen}
-						className="details-sidebar-toggle"
-						onClick={() => {
-							if (toolsSidebarOpen) hideToolsSidebar();
-							else showToolsSidebar();
-						}}
-						type="button"
-					>
-						<SidebarSimple aria-hidden="true" size={17} />
-					</button>}
+					{toolsSidebarAvailable && (
+						<div className="workspace-titlebar-end">
+							{!toolsSidebarOpen && (
+								<ReleaseNotesPopover
+									checking={checkingUpdate || updateState.status === "checking"}
+									checkFailure={updateCheckFailure}
+									onCheck={checkDesktopUpdate}
+									onUpdate={startDesktopUpdate}
+									state={updateState}
+								/>
+							)}
+							<button
+								aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
+								aria-pressed={toolsSidebarOpen}
+								className="details-sidebar-toggle"
+								onClick={() => {
+									if (toolsSidebarOpen) hideToolsSidebar();
+									else showToolsSidebar();
+								}}
+								type="button"
+							>
+								<SidebarSimple aria-hidden="true" size={17} />
+							</button>
+						</div>
+					)}
 				</div>
 				<div className="system-notice-stack">
 					{state.supervisor.state === "failed" && (

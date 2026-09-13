@@ -815,14 +815,14 @@ describe("Chat desktop shell", () => {
 
 	it("shows the update action above Metis only when a newer version is available and handles manual check flow", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const available = { status: "available" as const, version: "0.81.0", releaseNotes: RELEASE_NOTES };
 		const { api, emitUpdate } = createHarness();
-		let resolveCheck: ((state: { status: "available"; version: string; releaseNotes: string }) => void) | undefined;
-		api.checkForUpdate = vi.fn(
-			() =>
-				new Promise<{ status: "available"; version: string; releaseNotes: string }>((resolve) => {
-					resolveCheck = resolve;
-				}),
-		);
+		let resolveCheck: ((state: typeof available) => void) | undefined;
+		api.checkForUpdate = vi.fn()
+			.mockImplementationOnce(() => new Promise<typeof available>((resolve) => { resolveCheck = resolve; }))
+			.mockResolvedValue(available);
 
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -845,12 +845,19 @@ describe("Chat desktop shell", () => {
 		await act(async () => refreshBtn.click());
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
 
-		await act(async () => emitUpdate({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
-		await act(async () => resolveCheck!({ status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
+		await act(async () => emitUpdate(available));
+		await act(async () => resolveCheck!(available));
 		await flush();
 
 		expect(refreshBtn.disabled).toBe(false);
 		expect(refreshBtn.getAttribute("aria-busy")).toBe("false");
+
+		const callsBeforeBell = vi.mocked(api.checkForUpdate).mock.calls.length;
+		await act(async () => button(container, "Open unread release notes").click());
+		expect(api.checkForUpdate).toHaveBeenCalledTimes(callsBeforeBell + 1);
+		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.81.0");
+		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Added release notes");
+		expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
 
 		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
 		expect(notice).not.toBeNull();
@@ -926,6 +933,36 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(button(notice, "Downloading update 60%")).not.toBeNull();
 
+		await act(async () => root.unmount());
+	});
+
+	it("places release notes immediately left of the closed tools-sidebar toggle", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const { api } = createHarness({
+			updateState: { status: "available", version: "0.81.0", releaseNotes: RELEASE_NOTES },
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const end = container.querySelector<HTMLElement>(".workspace-titlebar-end")!;
+		expect(end).not.toBeNull();
+		expect([...end.children].map((child) => child.className)).toEqual([
+			"release-notes-control",
+			"details-sidebar-toggle",
+		]);
+		expect(button(container, "Open unread release notes")).toBeTruthy();
+
+		await act(async () => button(container, "Show tools sidebar").click());
+		expect(container.querySelector(".release-notes-control")).toBeNull();
+		expect(button(container, "Hide tools sidebar")).toBeTruthy();
+
+		await act(async () => button(container, "Hide tools sidebar").click());
+		expect(button(container, "Open unread release notes")).toBeTruthy();
 		await act(async () => root.unmount());
 	});
 

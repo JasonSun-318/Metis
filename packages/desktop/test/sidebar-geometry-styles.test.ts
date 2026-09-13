@@ -53,4 +53,17 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		const toolSidebarCollapse = rule(".tool-sidebar-collapse");
 		expect(toolSidebarCollapse.top).toBe("0px");
 	});
+
+	it("keeps the release bell and tools toggle in one right-aligned group", () => {
+		const end = rule(".workspace-titlebar-end");
+		expect(end.position).toBe("relative");
+		expect(end.display).toBe("flex");
+		expect(end.marginLeft).toBe("auto");
+
+		const popover = rule(".release-notes-popover");
+		expect(popover.top).toBe("36px");
+		expect(popover.right).toBe("0px");
+		expect(popover.maxHeight).toContain("480px");
+		expect(popover.boxShadow).toBe("var(--overlay-shadow)");
+	});
 });
