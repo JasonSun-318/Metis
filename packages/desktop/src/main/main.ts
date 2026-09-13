@@ -41,6 +41,7 @@ declare const METIS_UPDATE_BASE_URL: string | null;
 registerAppScheme();
 const explicitUserData = app.commandLine.hasSwitch("user-data-dir");
 if (!explicitUserData) app.setPath("userData", join(app.getPath("appData"), "Metis"));
+if (process.platform === "win32") app.setAppUserModelId("com.squirrel.Metis.Metis");
 
 let mainWindow: BrowserWindow | null = null;
 let allowQuit = false;
@@ -147,7 +148,7 @@ async function launch(): Promise<void> {
 			if (process.platform === "darwin") app.setBadgeCount(count);
 		},
 		notify: ({ sessionId, mode, name, outcome }) => {
-			if (process.platform !== "darwin" || !Notification.isSupported()) return;
+			if (!Notification.isSupported()) return;
 			const zh = workspaceEditState.language === "zh";
 			const taskName = name || (zh ? "当前任务" : "Current task");
 			const success = outcome === "completed";
