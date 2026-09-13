@@ -1657,11 +1657,7 @@ export function App({ api, store }: AppProps) {
 						<div className="workspace-titlebar-end">
 							{!toolsSidebarOpen && (
 								<ReleaseNotesPopover
-									checking={checkingUpdate || updateState.status === "checking"}
-									checkFailure={updateCheckFailure}
-									onCheck={checkDesktopUpdate}
-									onUpdate={startDesktopUpdate}
-									state={updateState}
+									loadChangelog={api.getChangelog}
 								/>
 							)}
 							<button

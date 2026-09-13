@@ -25,6 +25,7 @@ import { installAppProtocol, registerAppScheme } from "./app-protocol-scheme.ts"
 import { AppServerSupervisor, type UtilityChild } from "./app-server-supervisor.ts";
 import { createBackgroundCompletionTracker } from "./background-completion.ts";
 import { BrowserManager } from "./browser-manager.ts";
+import { loadDesktopChangelog } from "./changelog.ts";
 import { ClientBroker } from "./client-broker.ts";
 import { DiagnosticLog } from "./diagnostic-log.ts";
 import { createProjectFolder } from "./project-folder.ts";
@@ -215,6 +216,7 @@ async function launch(): Promise<void> {
 		getDefaultProjectLocation: async () => join(app.getPath("home"), "Metis Projects"),
 		createProjectFolder,
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
+		loadChangelog: () => loadDesktopChangelog({ baseUrl: METIS_UPDATE_BASE_URL, fetch: globalThis.fetch }),
 		updater,
 		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),
 		onSessionUpdated: (session) => completionTracker.update(session),

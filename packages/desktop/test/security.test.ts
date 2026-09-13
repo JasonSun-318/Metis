@@ -19,6 +19,7 @@ import {
 	validateCreateBrowserInput,
 	validateDesktopApiEvent,
 	validateDesktopBrowserEvent,
+	validateDesktopChangelog,
 	validateDesktopUpdateState,
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
@@ -55,10 +56,8 @@ it("uses only the Metis Desktop profile", () => {
 
 it("uses the Squirrel identity and allows supported Windows notifications", () => {
 	const main = source("src/main/main.ts");
-	expect(main).toContain(
-		'if (process.platform === "win32") app.setAppUserModelId("com.squirrel.Metis.Metis")',
-	);
-	expect(main).toContain('if (!Notification.isSupported()) return;');
+	expect(main).toContain('if (process.platform === "win32") app.setAppUserModelId("com.squirrel.Metis.Metis")');
+	expect(main).toContain("if (!Notification.isSupported()) return;");
 	expect(main).not.toContain('process.platform !== "darwin" || !Notification.isSupported()');
 	expect(main).toContain('if (process.platform === "darwin") app.setBadgeCount(count)');
 });
@@ -349,6 +348,33 @@ describe("desktop trust boundaries", () => {
 			{ status: "ready", version: "0.81.0", releaseNotes: "ok", extra: true },
 		]) {
 			expect(() => validateDesktopUpdateState(invalid)).toThrow("Invalid desktop update");
+		}
+	});
+
+	it("accepts only bounded, newest-first desktop changelogs", () => {
+		const valid = {
+			schemaVersion: 1,
+			releases: [
+				{ version: "0.82.0", notes: "## Added\n\n- History" },
+				{ version: "0.81.0", notes: "## Fixed\n\n- Updates" },
+			],
+		};
+		expect(validateDesktopChangelog(valid)).toEqual(valid);
+		for (const invalid of [
+			{ ...valid, extra: true },
+			{ schemaVersion: 1, releases: [] },
+			{ schemaVersion: 1, releases: [{ version: "v0.82.0", notes: "notes" }] },
+			{ schemaVersion: 1, releases: [{ version: "0.82.0", notes: "  " }] },
+			{ schemaVersion: 1, releases: [{ version: "0.82.0", notes: " notes " }] },
+			{ schemaVersion: 1, releases: [{ version: "0.82.0", notes: "x".repeat(64 * 1024 + 1) }] },
+			{ schemaVersion: 1, releases: [valid.releases[1], valid.releases[0]] },
+			{ schemaVersion: 1, releases: [{ ...valid.releases[0] }, { ...valid.releases[0] }] },
+			{
+				schemaVersion: 1,
+				releases: Array.from({ length: 101 }, (_, index) => ({ version: `0.0.${101 - index}`, notes: "notes" })),
+			},
+		]) {
+			expect(() => validateDesktopChangelog(invalid)).toThrow("Invalid desktop changelog");
 		}
 	});
 
@@ -1374,6 +1400,11 @@ describe("desktop trust boundaries", () => {
 		const writeClipboardText = vi.fn();
 		const setWorkspaceEditState = vi.fn();
 		const openPath = vi.fn(async () => "");
+		const changelog = {
+			schemaVersion: 1 as const,
+			releases: [{ version: "0.81.0", notes: "## Highlights" }],
+		};
+		const loadChangelog = vi.fn(async () => changelog);
 		const updater = {
 			view: vi.fn(() => ({ status: "unavailable" as const })),
 			checkForUpdate: vi.fn(async () => ({ status: "unavailable" as const })),
@@ -1385,6 +1416,7 @@ describe("desktop trust boundaries", () => {
 			writeClipboardText,
 			setWorkspaceEditState,
 			openPath,
+			loadChangelog,
 			updater,
 		});
 		const webContents = new FakeWebContents();
@@ -1422,6 +1454,7 @@ describe("desktop trust boundaries", () => {
 		const interruptAgent = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.interruptAgent)!;
 		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
 		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
+		const getChangelog = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getChangelog)!;
 
 		await expect(copyText(event, { text: "copied" })).resolves.toBeUndefined();
 		expect(writeClipboardText).toHaveBeenCalledWith("copied");
@@ -1434,6 +1467,9 @@ describe("desktop trust boundaries", () => {
 			language: "zh",
 			visibleSessionId: "session-1",
 		});
+		await expect(getChangelog(event, { extra: true })).rejects.toThrow("Invalid desktop IPC arguments");
+		await expect(getChangelog(event)).resolves.toEqual(changelog);
+		expect(loadChangelog).toHaveBeenCalledOnce();
 		await expect(reportEditState(event, { dirty: true, language: "zh-CN", visibleSessionId: null })).rejects.toThrow(
 			"Invalid workspace edit state",
 		);

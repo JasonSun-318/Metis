@@ -39,6 +39,17 @@ export const DESKTOP_FULLSCREEN_CHANNEL = "metis:window-fullscreen";
 export const DESKTOP_IS_FULLSCREEN_CHANNEL = "metis:is-fullscreen";
 
 export const DESKTOP_RELEASE_NOTES_MAX_CHARACTERS = 64 * 1024;
+export const DESKTOP_CHANGELOG_MAX_RELEASES = 100;
+
+export interface DesktopChangelogRelease {
+	readonly version: string;
+	readonly notes: string;
+}
+
+export interface DesktopChangelog {
+	readonly schemaVersion: 1;
+	readonly releases: readonly DesktopChangelogRelease[];
+}
 
 export type DesktopUpdateState =
 	| { readonly status: "unavailable" | "checking" }
@@ -114,6 +125,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	getWorkspaceReviewFileContext: "metis:get-workspace-review-file-context",
 	writeClipboardText: "metis:write-clipboard-text",
 	setWorkspaceEditState: "metis:set-workspace-edit-state",
+	getChangelog: "metis:get-changelog",
 	getUpdateState: "metis:get-update-state",
 	checkForUpdate: "metis:check-for-update",
 	startUpdate: "metis:start-update",
@@ -589,6 +601,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	getWorkspaceReviewFileContext(input: DesktopWorkspaceReviewFileInput): Promise<DesktopWorkspaceReviewFileContext>;
 	writeClipboardText(input: DesktopWriteClipboardTextInput): Promise<void>;
 	setWorkspaceEditState(input: DesktopWorkspaceEditState): Promise<void>;
+	getChangelog(): Promise<DesktopChangelog>;
 	getUpdateState(): Promise<DesktopUpdateState>;
 	checkForUpdate(): Promise<DesktopUpdateState>;
 	startUpdate(): Promise<void>;
@@ -840,6 +853,59 @@ export function validateWorkspaceEditState(value: unknown): DesktopWorkspaceEdit
 		language: input.language,
 		visibleSessionId: input.visibleSessionId as string | null,
 	};
+}
+
+const STABLE_DESKTOP_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
+
+function compareDesktopVersions(left: string, right: string): number {
+	const leftParts = left.split(".").map(Number);
+	const rightParts = right.split(".").map(Number);
+	for (let index = 0; index < 3; index++) {
+		const difference = leftParts[index]! - rightParts[index]!;
+		if (difference !== 0) return difference;
+	}
+	return 0;
+}
+
+export function validateDesktopChangelog(value: unknown): DesktopChangelog {
+	const changelog = exactRecord(value, ["schemaVersion", "releases"], "desktop changelog");
+	const releaseValues = changelog.releases;
+	if (
+		changelog.schemaVersion !== 1 ||
+		!Array.isArray(releaseValues) ||
+		releaseValues.length === 0 ||
+		releaseValues.length > DESKTOP_CHANGELOG_MAX_RELEASES
+	) {
+		throw new TypeError("Invalid desktop changelog");
+	}
+	const releases = releaseValues.map((value, index): DesktopChangelogRelease => {
+		const release = exactRecord(value, ["version", "notes"], "desktop changelog release");
+		if (
+			typeof release.version !== "string" ||
+			!STABLE_DESKTOP_VERSION.test(release.version) ||
+			typeof release.notes !== "string" ||
+			release.notes.trim().length === 0 ||
+			release.notes !== release.notes.trim() ||
+			release.notes.length > DESKTOP_RELEASE_NOTES_MAX_CHARACTERS
+		) {
+			throw new TypeError("Invalid desktop changelog release");
+		}
+		const previous = index > 0 ? releaseValues[index - 1] : undefined;
+		const previousVersion =
+			previous && typeof previous === "object" && !Array.isArray(previous)
+				? (previous as { readonly version?: unknown }).version
+				: undefined;
+		if (
+			index > 0 &&
+			(typeof previousVersion !== "string" ||
+				!STABLE_DESKTOP_VERSION.test(previousVersion) ||
+				compareDesktopVersions(previousVersion, release.version) <= 0)
+		) {
+			throw new TypeError("Invalid desktop changelog order");
+		}
+		return { version: release.version, notes: release.notes };
+	});
+	return { schemaVersion: 1, releases };
 }
 
 export function validateDesktopUpdateState(value: unknown): DesktopUpdateState {

@@ -12,6 +12,7 @@ import {
 	DESKTOP_UPDATE_EVENT_CHANNEL,
 	type DesktopApiEvent,
 	type DesktopBrowserEvent,
+	type DesktopChangelog,
 	type DesktopTerminalEvent,
 	type DesktopThemePreference,
 	type DesktopUpdateState,
@@ -31,6 +32,7 @@ import {
 	validateCreateTerminalInput,
 	validateDesktopApiEvent,
 	validateDesktopBrowserEvent,
+	validateDesktopChangelog,
 	validateDesktopClientParams,
 	validateDesktopTerminalEvent,
 	validateDesktopUpdateState,
@@ -215,6 +217,8 @@ const api = {
 	setWorkspaceEditState: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setWorkspaceEditState, validateWorkspaceEditState(input));
 	},
+	getChangelog: async (): Promise<DesktopChangelog> =>
+		validateDesktopChangelog(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getChangelog)),
 	getUpdateState: async () =>
 		validateDesktopUpdateState(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getUpdateState)),
 	checkForUpdate: async () =>

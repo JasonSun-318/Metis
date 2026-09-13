@@ -66,7 +66,11 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Revision {{revision}}", { revision: 3 })).toBe("第 3 版");
 		expect(i18n.t("What's new")).toBe("更新日志");
 		expect(i18n.t("Open unread release notes")).toBe("打开未读更新日志");
-		expect(i18n.t("Release notes are unavailable for this version.")).toBe("此版本暂无更新说明。");
+		expect(i18n.t("Loading release notes...")).toBe("正在加载更新日志……");
+		expect(i18n.t("Could not load release notes. Check your connection and try again.")).toBe(
+			"更新日志加载失败，请检查网络后重试。",
+		);
+		expect(i18n.t("Latest")).toBe("最新");
 		expect(
 			i18n.t(
 				"On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.",

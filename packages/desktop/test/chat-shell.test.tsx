@@ -25,10 +25,22 @@ import {
 	setProjectPinned,
 } from "../src/renderer/store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins } from "../src/renderer/store/session-pins.ts";
-import { DEFAULT_BROWSER_PROFILE_ID, type DesktopUpdateState, type MetisDesktopApi } from "../src/shared/desktop-api.ts";
+import {
+	DEFAULT_BROWSER_PROFILE_ID,
+	type DesktopChangelog,
+	type DesktopUpdateState,
+	type MetisDesktopApi,
+} from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 const RELEASE_NOTES = "## Highlights\n\n- Added release notes";
+const CHANGELOG: DesktopChangelog = {
+	schemaVersion: 1,
+	releases: [
+		{ version: "0.82.0", notes: "## Highlights\n\n- Added changelog history" },
+		{ version: "0.81.0", notes: RELEASE_NOTES },
+	],
+};
 
 function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: string): SessionSummary {
 	return {
@@ -220,6 +232,7 @@ function createHarness(options: {
 	scheduleTasks?: readonly ScheduleTaskView[];
 	sessions?: readonly SessionSummary[];
 	mcpLists?: readonly (readonly McpServerSummaryView[])[];
+	changelog?: DesktopChangelog;
 	updateState?: DesktopUpdateState;
 } = {}) {
 	localStorage.setItem(
@@ -445,6 +458,7 @@ function createHarness(options: {
 		setWorkspaceEditState: vi.fn().mockResolvedValue(undefined),
 		getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		updateWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		getChangelog: vi.fn().mockResolvedValue(options.changelog ?? CHANGELOG),
 		getUpdateState: vi.fn(async () => updateState),
 		checkForUpdate: vi.fn(async () => updateState),
 		startUpdate: vi.fn().mockResolvedValue(undefined),
@@ -852,12 +866,16 @@ describe("Chat desktop shell", () => {
 		expect(refreshBtn.disabled).toBe(false);
 		expect(refreshBtn.getAttribute("aria-busy")).toBe("false");
 
-		const callsBeforeBell = vi.mocked(api.checkForUpdate).mock.calls.length;
+		const updateCallsBeforeBell = vi.mocked(api.checkForUpdate).mock.calls.length;
+		const changelogCallsBeforeBell = vi.mocked(api.getChangelog).mock.calls.length;
 		await act(async () => button(container, "Open unread release notes").click());
-		expect(api.checkForUpdate).toHaveBeenCalledTimes(callsBeforeBell + 1);
-		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.81.0");
-		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Added release notes");
+		await flush();
+		expect(api.checkForUpdate).toHaveBeenCalledTimes(updateCallsBeforeBell);
+		expect(api.getChangelog).toHaveBeenCalledTimes(changelogCallsBeforeBell + 1);
+		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
+		expect(container.querySelector('[role="dialog"]')?.textContent).toContain("Added changelog history");
 		expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+		expect(container.querySelector(".system-notice")?.textContent ?? "").not.toContain("Metis is up to date");
 
 		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
 		expect(notice).not.toBeNull();

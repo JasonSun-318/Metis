@@ -1,30 +1,47 @@
-import { BellSimple, X } from "@phosphor-icons/react";
+import { BellSimple, CaretDown, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DesktopUpdateState } from "../../shared/desktop-api.ts";
+import type { DesktopChangelog } from "../../shared/desktop-api.ts";
 import { Markdown } from "./Markdown.tsx";
 
 export const RELEASE_NOTES_READ_VERSION_STORAGE_KEY = "metis.release-notes-read-version.v1";
 
 interface ReleaseNotesPopoverProps {
-	readonly checking: boolean;
-	readonly checkFailure: "failed" | "unsupported" | null;
-	readonly onCheck: () => void;
-	readonly onUpdate: () => void;
-	readonly state: DesktopUpdateState;
+	readonly loadChangelog: () => Promise<DesktopChangelog>;
 }
 
-export function ReleaseNotesPopover({
-	checking,
-	checkFailure,
-	onCheck,
-	onUpdate,
-	state,
-}: ReleaseNotesPopoverProps) {
+function ReleaseNotesEntry({
+	latest,
+	notes,
+	version,
+}: {
+	readonly latest: boolean;
+	readonly notes: string;
+	readonly version: string;
+}) {
 	const { t } = useTranslation();
-	const release = "version" in state
-		? { version: state.version, releaseNotes: state.releaseNotes }
-		: null;
+	const [expanded, setExpanded] = useState(latest);
+	return (
+		<details
+			className="release-notes-release"
+			onToggle={(event) => setExpanded(event.currentTarget.open)}
+			open={expanded}
+		>
+			<summary>
+				<span>{t("Version")} {version}</span>
+				{latest && <small>{t("Latest")}</small>}
+				<CaretDown aria-hidden="true" size={14} />
+			</summary>
+			<div className="release-notes-markdown"><Markdown text={notes} /></div>
+		</details>
+	);
+}
+
+export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps) {
+	const { t } = useTranslation();
+	const [changelog, setChangelog] = useState<DesktopChangelog | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [failed, setFailed] = useState(false);
 	const [readVersion, setReadVersion] = useState<string | null>(() => {
 		try {
 			return localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY);
@@ -33,17 +50,49 @@ export function ReleaseNotesPopover({
 		}
 	});
 	const [open, setOpen] = useState(false);
-	const unread = release !== null && release.version !== readVersion;
+	const latestVersion = changelog?.releases[0]?.version ?? null;
+	const unread = latestVersion !== null && latestVersion !== readVersion;
+	const mountedRef = useRef(true);
+	const loadTaskRef = useRef<Promise<void> | null>(null);
+
+	const refresh = useCallback(() => {
+		if (loadTaskRef.current) return loadTaskRef.current;
+		if (mountedRef.current) {
+			setLoading(true);
+			setFailed(false);
+		}
+		const task = loadChangelog()
+			.then((next) => {
+				if (mountedRef.current) setChangelog(next);
+			})
+			.catch(() => {
+				if (mountedRef.current) setFailed(true);
+			})
+			.finally(() => {
+				if (loadTaskRef.current === task) loadTaskRef.current = null;
+				if (mountedRef.current) setLoading(false);
+			});
+		loadTaskRef.current = task;
+		return task;
+	}, [loadChangelog]);
 
 	useEffect(() => {
-		if (!open || !release || release.version === readVersion) return;
-		setReadVersion(release.version);
+		mountedRef.current = true;
+		void refresh();
+		return () => {
+			mountedRef.current = false;
+		};
+	}, [refresh]);
+
+	useEffect(() => {
+		if (!open || !latestVersion || latestVersion === readVersion) return;
+		setReadVersion(latestVersion);
 		try {
-			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, release.version);
+			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, latestVersion);
 		} catch {
 			// Keep the release read for this renderer lifetime when persistence is unavailable.
 		}
-	}, [open, readVersion, release]);
+	}, [latestVersion, open, readVersion]);
 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
@@ -76,28 +125,12 @@ export function ReleaseNotesPopover({
 			return;
 		}
 		setOpen(true);
-		onCheck();
+		void refresh();
 	};
-
-	const statusText = checking || state.status === "checking"
-		? t("Checking for updates")
-		: checkFailure === "unsupported"
-			? t("Update checks are not supported in this build")
-			: checkFailure === "failed"
-				? t("Could not check for updates. Check your connection and try again.")
-				: t("Metis is up to date");
-	const updateLabel = state.status === "available"
-		? t("Update to new version")
-		: state.status === "downloading"
-			? t("Downloading update {{progress}}%", { progress: state.progress })
-			: state.status === "ready"
-				? t("Open installer")
-				: null;
 
 	return (
 		<div className="release-notes-control" ref={rootRef}>
 			<button
-				aria-busy={checking}
 				aria-controls="release-notes-popover"
 				aria-expanded={open}
 				aria-haspopup="dialog"
@@ -124,34 +157,19 @@ export function ReleaseNotesPopover({
 							<X aria-hidden="true" size={16} />
 						</button>
 					</header>
-					{release ? (
-						<div className="release-notes-body">
-							<p className="release-notes-version">{t("Version")} {release.version}</p>
-							{release.releaseNotes
-								? <Markdown text={release.releaseNotes} />
-								: <p>{t("Release notes are unavailable for this version.")}</p>}
-						</div>
-					) : (
-						<p
-							className={`release-notes-status${checkFailure === "failed" ? " is-error" : ""}`}
-							role={checkFailure === "failed" ? "alert" : "status"}
-						>
-							{statusText}
-						</p>
-					)}
-					{updateLabel && (
-						<footer className="release-notes-actions">
-							<button
-								aria-label={updateLabel}
-								className="release-notes-update-button"
-								disabled={state.status === "downloading"}
-								onClick={onUpdate}
-								type="button"
-							>
-								{updateLabel}
-							</button>
-						</footer>
-					)}
+					<div className="release-notes-body">
+						{loading && !changelog && <p className="release-notes-status" role="status">{t("Loading release notes...")}</p>}
+						{failed && <p className="release-notes-status is-error" role="alert">{t("Could not load release notes. Check your connection and try again.")}</p>}
+						{!loading && !failed && (!changelog || changelog.releases.length === 0) && <p className="release-notes-status" role="status">{t("No release notes are available yet.")}</p>}
+						{changelog?.releases.map((release, index) => (
+							<ReleaseNotesEntry
+								key={release.version}
+								latest={index === 0}
+								notes={release.notes}
+								version={release.version}
+							/>
+						))}
+					</div>
 				</section>
 			)}
 		</div>

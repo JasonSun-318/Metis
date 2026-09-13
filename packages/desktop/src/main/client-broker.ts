@@ -32,6 +32,7 @@ import {
 	type DesktopApiEvent,
 	type DesktopAttachmentSelection,
 	type DesktopBrowserEvent,
+	type DesktopChangelog,
 	type DesktopCreateProjectFolderInput,
 	type DesktopRpcOutcome,
 	type DesktopTerminalEvent,
@@ -92,6 +93,7 @@ interface ClientBrokerOptions {
 	readonly createProjectFolder?: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	readonly setScheduleKeepAwake?: (enabled: boolean) => Promise<void> | void;
 	readonly openPath?: (path: string) => Promise<string>;
+	readonly loadChangelog?: () => Promise<DesktopChangelog>;
 	readonly updater?: BrokerUpdater;
 	readonly terminalManager?: Pick<TerminalManager, "create" | "write" | "resize" | "close" | "closeAll" | "onEvent">;
 	readonly browserManager?: Pick<
@@ -252,6 +254,7 @@ export class ClientBroker {
 	private readonly createProjectFolder: (input: DesktopCreateProjectFolderInput) => Promise<string>;
 	private readonly setScheduleKeepAwake: (enabled: boolean) => Promise<void> | void;
 	private readonly openPath: (path: string) => Promise<string>;
+	private readonly loadChangelog: () => Promise<DesktopChangelog>;
 	private readonly updater: BrokerUpdater;
 	private readonly terminalManager: Pick<
 		TerminalManager,
@@ -335,6 +338,11 @@ export class ClientBroker {
 			});
 		this.setScheduleKeepAwake = options.setScheduleKeepAwake ?? (() => undefined);
 		this.openPath = options.openPath ?? (async () => "Skill folder opening is unavailable");
+		this.loadChangelog =
+			options.loadChangelog ??
+			(async () => {
+				throw new Error("Release notes are unavailable in this build");
+			});
 		this.updater = options.updater ?? {
 			view: () => ({ status: "unavailable" }),
 			checkForUpdate: async () => {
@@ -683,6 +691,7 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();
 		});
+		this.register(DESKTOP_IPC_CHANNELS.getChangelog, 0, async () => this.loadChangelog());
 		this.register(DESKTOP_IPC_CHANNELS.getUpdateState, 0, async () => this.updater.view());
 		this.register(DESKTOP_IPC_CHANNELS.checkForUpdate, 0, async () => this.updater.checkForUpdate());
 		this.register(DESKTOP_IPC_CHANNELS.startUpdate, 0, async () => {
