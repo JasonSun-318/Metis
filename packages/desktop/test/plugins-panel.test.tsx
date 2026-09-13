@@ -286,6 +286,21 @@ describe("PluginsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("keeps MCP creation in the page header when the current scope is empty", async () => {
+		const desktop = api();
+		desktop.listMcpServers.mockResolvedValue({ servers: [] });
+		const { container, root } = await renderPanel(desktop);
+		await act(async () => button(container, "MCP").click());
+		await flush();
+		try {
+			expect(container.textContent).toContain("No MCP servers in this scope.");
+			expect(button(container, "New MCP")).not.toBeNull();
+			expect(container.querySelector(".plugins-full-list .settings-primary-button")).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("protects system Skills and sends exact identity, revision, and bytes for user mutations", async () => {
 		const changed = vi.fn();
 		const desktop = api();
@@ -859,4 +874,3 @@ describe("PluginsPanel", () => {
 		await act(async () => root.unmount());
 	});
 });
-
