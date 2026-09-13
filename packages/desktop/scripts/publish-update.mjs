@@ -39,6 +39,7 @@ export function releaseKeys(baseUrl, arch, version) {
 		dmgKey: `${prefix}${dmgRelative}`,
 		manifestKey: `${prefix}${manifestRelative}`,
 		dmgUrl: new URL(dmgRelative, baseUrl).href,
+		manifestUrl: new URL(manifestRelative, baseUrl).href,
 	};
 }
 
@@ -197,7 +198,7 @@ async function publish(options) {
 	const metadata = await stat(dmgPath);
 	if (!metadata.isFile()) throw new Error(`Not a file: ${dmgPath}`);
 	const sha256 = await fileSha256(dmgPath);
-	const { dmgKey, manifestKey, dmgUrl } = releaseKeys(baseUrl, options.arch, version);
+	const { dmgKey, manifestKey, dmgUrl, manifestUrl } = releaseKeys(baseUrl, options.arch, version);
 	const manifest = buildLatestManifest({ version, dmgUrl, size: metadata.size, sha256 });
 	assertClientAccepts(manifest, baseUrl);
 	const manifestText = `${JSON.stringify(manifest, null, "\t")}\n`;
@@ -223,8 +224,7 @@ async function publish(options) {
 	} catch {
 		runOssutil(["cp", manifestFile, `oss://${options.bucket}/${manifestKey}`, "--acl", "public-read", "-f"]);
 	}
-	const publicManifest = new URL(manifestKey, baseUrl).href;
-	console.log(`Uploaded. Check: ${publicManifest}`);
+	console.log(`Uploaded. Check: ${manifestUrl}`);
 }
 
 async function main(argv) {

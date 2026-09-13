@@ -18,6 +18,7 @@ describe("publish-update", () => {
 		const keys = releaseKeys(baseUrl!, "arm64", "0.0.5");
 		expect(keys.dmgKey).toBe("metis/darwin/arm64/releases/0.0.5/Metis-0.0.5-darwin-arm64.dmg");
 		expect(keys.manifestKey).toBe("metis/darwin/arm64/latest.json");
+		expect(keys.manifestUrl).toBe(`${BASE}/darwin/arm64/latest.json`);
 		const sha256 = createHash("sha256").update("dmg").digest("hex");
 		const manifest = buildLatestManifest({
 			version: "0.0.5",
