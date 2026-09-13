@@ -165,7 +165,7 @@ describe("tool permission adapter", () => {
 		expect(action.effects).toContain("unknown");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "model",
+			minimumReviewer: "user",
 		});
 	});
 
@@ -174,7 +174,7 @@ describe("tool permission adapter", () => {
 		expect(action.effects).toContain("unknown");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "model",
+			minimumReviewer: "user",
 		});
 	});
 
@@ -195,7 +195,7 @@ describe("tool permission adapter", () => {
 		expect(rmGlob.effects).toContain("unknown");
 		expect(new PermissionPolicy().evaluate({ settings: settingsForPreset("auto"), action: rmGlob })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "model",
+			minimumReviewer: "user",
 		});
 	});
 
@@ -228,12 +228,9 @@ describe("tool permission adapter", () => {
 		expect(rm.writePaths).toContain(join(permissionProject, "file.txt"));
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: rm })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "model",
-		});
-		expect(policy.evaluate({ settings: settingsForPreset("full"), action: rm })).toMatchObject({
-			kind: "review",
 			minimumReviewer: "user",
 		});
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: rm })).toMatchObject({ kind: "allow" });
 
 		const python = describeBash("python ./script.py");
 		expect(python.effects).not.toContain("unknown");
@@ -241,8 +238,7 @@ describe("tool permission adapter", () => {
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: python })).toMatchObject({ kind: "allow" });
 
 		expect(policy.evaluate({ settings: settingsForPreset("full"), action: describeBash("rm -rf .") })).toMatchObject({
-			kind: "review",
-			minimumReviewer: "user",
+			kind: "allow",
 		});
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: describeBash("rm -rf .") })).toMatchObject({
 			kind: "deny",
@@ -251,7 +247,7 @@ describe("tool permission adapter", () => {
 		expect(dynamic.effects).toContain("unknown");
 		expect(policy.evaluate({ settings: settingsForPreset("auto"), action: dynamic })).toMatchObject({
 			kind: "review",
-			minimumReviewer: "model",
+			minimumReviewer: "user",
 		});
 		expect(
 			new PermissionPolicy().evaluate({
@@ -273,11 +269,14 @@ describe("tool permission adapter", () => {
 		});
 		const homeDelete = describeBash("rm -rf ~");
 		expect(homeDelete.writePaths).toContain(homedir());
-		for (const preset of ["ask", "auto", "full"] as const) {
+		for (const preset of ["ask", "auto"] as const) {
 			expect(policy.evaluate({ settings: settingsForPreset(preset), action: homeDelete })).toMatchObject({
 				kind: "deny",
 				riskLevel: "critical",
 			});
 		}
+		expect(policy.evaluate({ settings: settingsForPreset("full"), action: homeDelete })).toMatchObject({
+			kind: "allow",
+		});
 	});
 });

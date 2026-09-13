@@ -141,7 +141,7 @@ describe("MCP agent loop", () => {
 		}
 	});
 
-	it("denies an incompletely annotated destructive MCP tool before approval or execution", async () => {
+	it("requires approval before executing an incompletely annotated destructive MCP tool", async () => {
 		const requestPermissionApproval = vi.fn(async (_request: PermissionApprovalRequest) => ({
 			decision: "allow" as const,
 			reason: "test approval",
@@ -175,8 +175,8 @@ describe("MCP agent loop", () => {
 
 		await harness.session.prompt("Delete it");
 
-		expect(requestPermissionApproval).not.toHaveBeenCalled();
-		expect(server.toolCallCount()).toBe(0);
+		expect(requestPermissionApproval).toHaveBeenCalledOnce();
+		expect(server.toolCallCount()).toBe(1);
 	});
 
 	it("reviews and executes one exactly scoped destructive MCP call", async () => {

@@ -656,7 +656,7 @@ describe("SubagentManager", () => {
 		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
 		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual({
 			sandboxPolicy: "workspace-write",
-			approvalPolicy: "user",
+			approvalPolicy: "auto-review",
 		});
 		harness.runtimes[0]!.session.settle();
 	});
@@ -679,7 +679,7 @@ describe("SubagentManager", () => {
 		expect(harness.runtimes[0]!.session.sessionManager.getPermissionPreset()).toBe("full");
 		expect(harness.runtimes[0]!.session.permissionView.effectiveSettings).toEqual({
 			sandboxPolicy: "workspace-write",
-			approvalPolicy: "user",
+			approvalPolicy: "auto-review",
 		});
 		expect(harness.manager.listSummaries(ROOT_ID)[0]).toMatchObject({ agentId: childId, status: "running" });
 
