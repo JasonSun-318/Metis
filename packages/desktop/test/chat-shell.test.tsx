@@ -3432,7 +3432,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("queues a running-task message, then edits and promotes it as guidance", async () => {
+	it("recalls a queued message into the composer for editing", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
@@ -3483,25 +3483,16 @@ describe("Chat desktop shell", () => {
 		}));
 		expect(container.querySelector(".queued-turn-text")?.textContent).toBe("Check the failing test next");
 
-		await act(async () => button(container, "Queued message actions").click());
-		await act(async () => button(document.body, "Edit").click());
-		const editor = container.querySelector<HTMLTextAreaElement>(".queued-turn-editor textarea")!;
-		await act(async () => changeTextarea(editor, "Inspect the reducer first"));
-		await act(async () => button(container, "Save").click());
+		await act(async () => button(container, "Edit queued message").click());
 		await flush();
-		expect(api.updateQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
+		expect(api.deleteQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
 			queueItemId: "queue-1",
 			expectedRevision: "revision-1",
-			text: "Inspect the reducer first",
 		}));
-
-		await act(async () => button(container, "Guide").click());
-		await flush();
-		expect(api.sendQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
-			queueItemId: "queue-1",
-			expectedRevision: "revision-1",
-			delivery: "steer",
-		}));
+		expect(textarea.value).toBe("Check the failing test next");
+		expect(document.activeElement).toBe(textarea);
+		expect(api.updateQueuedTurn).not.toHaveBeenCalled();
+		expect(api.sendQueuedTurn).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 

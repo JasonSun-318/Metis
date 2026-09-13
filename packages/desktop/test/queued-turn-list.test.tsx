@@ -50,23 +50,18 @@ async function mount(options: { running?: boolean; queuedTurns?: readonly Queued
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
-	const handlers = { onDelete: vi.fn(), onSend: vi.fn(), onUpdate: vi.fn() };
+	const handlers = { onDelete: vi.fn(), onEdit: vi.fn(), onSend: vi.fn() };
 	await act(async () => root.render(
 		<QueuedTurnList
-			disabled={false}
-			onDelete={handlers.onDelete}
-			onSend={handlers.onSend}
-			onUpdate={handlers.onUpdate}
-			running={options.running ?? false}
+				disabled={false}
+				onDelete={handlers.onDelete}
+				onEdit={handlers.onEdit}
+				onSend={handlers.onSend}
+				running={options.running ?? false}
 			turns={options.queuedTurns ?? turns}
 		/>,
 	));
 	return { container, handlers };
-}
-
-function changeTextarea(textarea: HTMLTextAreaElement, value: string): void {
-	Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
-	textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 describe("QueuedTurnList", () => {
@@ -84,37 +79,28 @@ describe("QueuedTurnList", () => {
 		expect(handlers.onSend).toHaveBeenCalledWith(turns[0], "start");
 	});
 
-	it("edits from the ellipsis menu with the current revision and keeps attachments", async () => {
+	it("recalls a queued message from a direct Edit button", async () => {
 		const { container, handlers } = await mount({ running: true });
 		expect([...container.querySelectorAll(".queued-turn-send")].map(({ textContent }) => textContent)).toEqual(["Guide", "Guide"]);
-		await act(async () => button(container, "Queued message actions").click());
-		await act(async () => button(document.body, "Edit").click());
-		const textarea = container.querySelector<HTMLTextAreaElement>(".queued-turn-editor textarea")!;
-		expect(document.activeElement).toBe(textarea);
-		expect(container.textContent).toContain("notes.txt");
-		await act(async () => changeTextarea(textarea, "Edited message"));
-		await act(async () => button(container, "Save").click());
-		expect(handlers.onUpdate).toHaveBeenCalledWith(turns[0], "Edited message");
+		await act(async () => button(container, "Edit queued message").click());
+		expect(handlers.onEdit).toHaveBeenCalledWith(turns[0]);
+		expect(container.querySelector('[aria-label="Queued message actions"]')).toBeNull();
+		expect(container.querySelector(".queued-turn-editor")).toBeNull();
 
 		await act(async () => button(container, "Guide").click());
 		expect(handlers.onSend).toHaveBeenCalledWith(turns[0], "steer");
 	});
 
-	it("keeps rejected empty attachment-free edits local and disables sending rows", async () => {
+	it("disables edit and delete while a queued message is sending", async () => {
 		const editable = { ...turns[1], state: "queued" as const };
 		const sending = { ...turns[0], state: "sending" as const };
 		const { container, handlers } = await mount({ running: true, queuedTurns: [editable, sending] });
-		const actionMenus = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Queued message actions"]')];
-		expect(actionMenus[1]?.disabled).toBe(true);
+		const editButtons = [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Edit queued message"]')];
+		expect(editButtons[0]?.disabled).toBe(false);
+		expect(editButtons[1]?.disabled).toBe(true);
 		expect(container.textContent).toContain("Sending…");
-
-		await act(async () => actionMenus[0]!.click());
-		await act(async () => button(document.body, "Edit").click());
-		const textarea = container.querySelector<HTMLTextAreaElement>(".queued-turn-editor textarea")!;
-		await act(async () => changeTextarea(textarea, ""));
-		expect(button(container, "Save").disabled).toBe(true);
-		await act(async () => textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-		expect(container.querySelector(".queued-turn-editor")).toBeNull();
+		await act(async () => editButtons[0]!.click());
+		expect(handlers.onEdit).toHaveBeenCalledWith(editable);
 		await act(async () => button(container, "Delete queued message").click());
 		expect(handlers.onDelete).toHaveBeenCalledWith(editable);
 	});

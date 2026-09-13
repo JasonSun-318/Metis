@@ -1197,6 +1197,8 @@ const zhCN = {
 	"Send queued message": "发送待发送消息",
 	"Guide with queued message": "使用待发送消息引导",
 	"Queued messages are sent in order": "待发送消息将按顺序发送",
+	"The message was returned to the composer. Add its attachments again before sending.":
+		"消息已撤回到输入框，请重新添加附件后再发送。",
 	Guide: "引导",
 	Send: "发送",
 	Edit: "编辑",

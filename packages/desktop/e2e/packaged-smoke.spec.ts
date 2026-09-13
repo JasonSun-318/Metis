@@ -803,10 +803,12 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await expect(queuedRows).toHaveCount(1);
 		const guideRow = page.getByRole("group", { name: "Queued message 1", exact: true });
 		await expect(guideRow).toContainText("guide-original");
-		await guideRow.getByRole("button", { name: "Queued message actions", exact: true }).click();
-		await page.locator(".queued-turn-popover").getByRole("menuitem", { name: "Edit", exact: true }).click();
-		await page.getByRole("textbox", { name: "Edit queued message", exact: true }).fill("guide-edited");
-		await guideRow.getByRole("button", { name: "Save", exact: true }).click();
+		await guideRow.getByRole("button", { name: "Edit queued message", exact: true }).click();
+		await expect(queuedRows).toHaveCount(0);
+		await expect(input).toHaveText("guide-original");
+		await input.fill("guide-edited");
+		await page.getByRole("button", { name: "Queue message", exact: true }).click();
+		await expect(queuedRows).toHaveCount(1);
 		await expect(guideRow).toContainText("guide-edited");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-left-radius", "21px");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-right-radius", "21px");

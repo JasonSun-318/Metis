@@ -3281,7 +3281,7 @@ export class AgentSession {
 			hookEvaluated: true,
 		};
 
-		const isTurnActive = this._durableTurn !== undefined && this._isAgentRunActive;
+		const isTurnActive = this._durableTurn !== undefined;
 		if (!isTurnActive) {
 			return { enqueuedToActiveTurn: false, preparedInput };
 		}

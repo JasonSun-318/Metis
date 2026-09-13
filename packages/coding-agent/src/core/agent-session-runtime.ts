@@ -574,6 +574,7 @@ export class AgentSessionRuntime {
 			requestId: identity.requestId,
 			requestHash: identity.requestHash,
 			operationId: identity.operationId,
+			...(queued ? { queueItemId: identity.queueItemId } : {}),
 		};
 		try {
 			this._session.sessionManager.appendRuntimeControl({

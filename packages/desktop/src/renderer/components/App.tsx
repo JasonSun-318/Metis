@@ -41,7 +41,7 @@ import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
-import { Composer, type ComposerSubmission } from "./Composer.tsx";
+import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
@@ -238,6 +238,7 @@ export function App({ api, store }: AppProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [updateNotice, setUpdateNotice] = useState<TransientSystemNotice | null>(null);
+	const [conversationPrefillRequest, setConversationPrefillRequest] = useState<ComposerPrefillRequest>();
 	const [composerControl, setComposerControl] = useState<{ readonly id: number; readonly target: "model" | "thinking" | "mcp" | null }>({ id: 0, target: null });
 	const [sessionStatusPanel, setSessionStatusPanel] = useState<{
 		readonly sessionId: string;
@@ -795,6 +796,7 @@ export function App({ api, store }: AppProps) {
 		requestComposerControl(null);
 		setCompactingSession((current) => current?.sessionId === visibleActiveSession?.sessionId ? current : null);
 		setPlanPreviewRequest(null);
+		setConversationPrefillRequest(undefined);
 	}, [requestComposerControl, visibleActiveSession?.sessionId]);
 	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
 	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
@@ -927,24 +929,6 @@ export function App({ api, store }: AppProps) {
 		reportError,
 	});
 
-	const updateQueuedTurn = async (turn: QueuedTurnView, text: string) => {
-		if (!visibleActiveSession) return;
-		setError(null);
-		try {
-			await api.updateQueuedTurn({
-				sessionId: visibleActiveSession.sessionId,
-				requestId: crypto.randomUUID(),
-				queueItemId: turn.queueItemId,
-				expectedRevision: turn.revision,
-				text,
-			});
-		} catch (cause) {
-			const error = queuedTurnActionError(cause);
-			reportError(error);
-			throw error;
-		}
-	};
-
 	const deleteQueuedTurn = async (turn: QueuedTurnView) => {
 		if (!visibleActiveSession) return;
 		setError(null);
@@ -959,6 +943,17 @@ export function App({ api, store }: AppProps) {
 			const error = queuedTurnActionError(cause);
 			reportError(error);
 			throw error;
+		}
+	};
+
+	const editQueuedTurn = async (turn: QueuedTurnView) => {
+		await deleteQueuedTurn(turn);
+		setConversationPrefillRequest((current) => ({
+			id: (current?.id ?? 0) + 1,
+			text: turn.text,
+		}));
+		if (turn.attachments.length > 0) {
+			setNotice("The message was returned to the composer. Add its attachments again before sending.");
 		}
 	};
 
@@ -1796,7 +1791,8 @@ export function App({ api, store }: AppProps) {
 											? "Add a queued message…"
 											: "Write a message…",
 								)}
-								queuedTurnControl={<QueuedTurnList disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null} onDelete={deleteQueuedTurn} onSend={sendQueuedTurn} onUpdate={updateQueuedTurn} running={running} turns={state.queuedTurns} />}
+								prefillRequest={conversationPrefillRequest}
+								queuedTurnControl={<QueuedTurnList disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null} onDelete={deleteQueuedTurn} onEdit={editQueuedTurn} onSend={sendQueuedTurn} running={running} turns={state.queuedTurns} />}
 								queueing={state.queuedTurns.length > 0}
 								running={running}
 								skills={skills}
