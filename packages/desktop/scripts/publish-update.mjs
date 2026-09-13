@@ -14,6 +14,16 @@ const DEFAULT_BUCKET = "metis-release";
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const MAX_DMG_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_RELEASE_NOTES_CHARACTERS = 64 * 1024;
+
+export function normalizeReleaseNotes(value) {
+	if (typeof value !== "string") throw new Error("Invalid update release notes");
+	const normalized = value.trim();
+	if (!normalized || normalized.length > MAX_RELEASE_NOTES_CHARACTERS) {
+		throw new Error("Invalid update release notes");
+	}
+	return normalized;
+}
 
 export function trustedBaseUrl(value) {
 	if (!value) return undefined;
@@ -43,10 +53,11 @@ export function releaseKeys(baseUrl, arch, version) {
 	};
 }
 
-export function buildLatestManifest({ version, dmgUrl, size, sha256 }) {
+export function buildLatestManifest({ version, releaseNotes, dmgUrl, size, sha256 }) {
 	return {
 		schemaVersion: 1,
 		version,
+		releaseNotes,
 		dmg: { url: dmgUrl, size, sha256 },
 	};
 }
@@ -56,6 +67,7 @@ export function assertClientAccepts(manifest, baseUrl) {
 	if (manifest.schemaVersion !== 1 || typeof manifest.version !== "string" || !STABLE_VERSION.test(manifest.version)) {
 		throw new Error("Invalid update manifest");
 	}
+	normalizeReleaseNotes(manifest.releaseNotes);
 	const dmg = manifest.dmg;
 	if (
 		typeof dmg?.url !== "string" ||
@@ -155,6 +167,7 @@ function parseArgs(argv) {
 		bucket: process.env.METIS_OSS_BUCKET || DEFAULT_BUCKET,
 		dmg: undefined,
 		dryRun: false,
+		notesFile: undefined,
 		version: undefined,
 	};
 	while (rest.length > 0) {
@@ -164,19 +177,23 @@ function parseArgs(argv) {
 		else if (flag === "--base-url") options.baseUrl = rest.shift();
 		else if (flag === "--bucket") options.bucket = rest.shift();
 		else if (flag === "--dmg") options.dmg = rest.shift();
+		else if (flag === "--notes-file") options.notesFile = rest.shift();
 		else if (flag === "--version") options.version = rest.shift();
 		else throw new Error(`Unknown argument: ${flag}`);
 	}
 	if (!options.arch) throw new Error("Missing --arch");
+	if (command === "publish" && !options.notesFile) throw new Error("Missing --notes-file");
 	return { command, options };
 }
 
 function usage() {
 	return `Usage:
   node scripts/publish-update.mjs ls
-  node scripts/publish-update.mjs publish [--dmg path] [--dry-run]
+  node scripts/publish-update.mjs publish --notes-file path [--version x.y.z] [--arch arm64|x64] [--dmg path] [--dry-run]
 
 Uploads darwin/<arch>/latest.json and the DMG to oss://metis-release with public-read.
+--notes-file must point to a UTF-8 Markdown file with 1-65536 characters after trimming;
+its trimmed content is embedded as the manifest releaseNotes field.
 Requires ossutil on PATH (credentials via \`ossutil config\`, never committed).
 Packaged builds must set METIS_UPDATE_BASE_URL at make time (same HTTPS origin as --base-url).
 `;
@@ -194,12 +211,13 @@ async function publish(options) {
 	if (!baseUrl) {
 		throw new Error("METIS_UPDATE_BASE_URL must be a credential-free https URL with no query or hash");
 	}
+	const releaseNotes = normalizeReleaseNotes(readFileSync(path.resolve(options.notesFile), "utf8"));
 	const dmgPath = options.dmg ?? (await findDmg(version, options.arch));
 	const metadata = await stat(dmgPath);
 	if (!metadata.isFile()) throw new Error(`Not a file: ${dmgPath}`);
 	const sha256 = await fileSha256(dmgPath);
 	const { dmgKey, manifestKey, dmgUrl, manifestUrl } = releaseKeys(baseUrl, options.arch, version);
-	const manifest = buildLatestManifest({ version, dmgUrl, size: metadata.size, sha256 });
+	const manifest = buildLatestManifest({ version, releaseNotes, dmgUrl, size: metadata.size, sha256 });
 	assertClientAccepts(manifest, baseUrl);
 	const manifestText = `${JSON.stringify(manifest, null, "\t")}\n`;
 	console.log(JSON.stringify({ dmg: dmgPath, size: metadata.size, sha256, dmgKey, manifestKey, dmgUrl }, null, 2));
