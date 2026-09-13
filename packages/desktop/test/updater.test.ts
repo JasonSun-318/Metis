@@ -42,10 +42,24 @@ function manifest(version: string, dmg: Uint8Array, hash = sha256(dmg)) {
 	};
 }
 
+function windowsManifest(version: string, bytes: Uint8Array, hash = sha256(bytes)) {
+	return {
+		schemaVersion: 1,
+		version,
+		releaseNotes: RELEASE_NOTES,
+		publishedAt: "2026-08-10T00:00:00.000Z",
+		exe: {
+			url: `${BASE_URL}/win32/x64/releases/${version}/Metis-${version}-win32-x64-Setup.exe`,
+			size: bytes.byteLength,
+			sha256: hash,
+		},
+	};
+}
+
 async function harness(
 	options: {
 		readonly dmg?: Uint8Array;
-		readonly manifest?: ReturnType<typeof manifest>;
+		readonly manifest?: ReturnType<typeof manifest> | ReturnType<typeof windowsManifest>;
 		readonly isPackaged?: boolean;
 		readonly platform?: NodeJS.Platform;
 		readonly arch?: string;
@@ -94,8 +108,14 @@ async function harness(
 }
 
 describe("DesktopUpdater", () => {
-	it("stays unavailable outside packaged macOS on a supported architecture", async () => {
-		for (const options of [{ isPackaged: false }, { platform: "win32" as const }, { arch: "ia32" }]) {
+	it("stays unavailable when unpackaged or on an unsupported platform/architecture", async () => {
+		for (const options of [
+			{ isPackaged: false },
+			{ platform: "linux" as const },
+			{ platform: "win32" as const, arch: "arm64" },
+			{ platform: "win32" as const, arch: "ia32" },
+			{ platform: "darwin" as const, arch: "ia32" },
+		]) {
 			const { fetch, updater } = await harness(options);
 			expect(updater.start()).toBe(false);
 			expect(updater.view()).toEqual({ status: "unavailable" });
@@ -136,6 +156,28 @@ describe("DesktopUpdater", () => {
 			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
 		);
 		expect(states).toContainEqual(available);
+	});
+
+	it("checks, verifies, saves, and opens a Windows x64 installer", async () => {
+		const installer = new TextEncoder().encode("verified Metis Windows installer");
+		const release = windowsManifest("0.81.0", installer);
+		const { downloadsDirectory, fetch, openPath, updater } = await harness({
+			dmg: installer,
+			manifest: release,
+			platform: "win32",
+			arch: "x64",
+		});
+
+		await expect(updater.checkForUpdate()).resolves.toMatchObject({ status: "available", version: "0.81.0" });
+		expect(fetch).toHaveBeenNthCalledWith(
+			1,
+			`${BASE_URL}/win32/x64/latest.json`,
+			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
+		);
+		await updater.downloadAndOpen();
+		const expected = join(downloadsDirectory, "Metis-0.81.0-win32-x64-Setup.exe");
+		expect(openPath).toHaveBeenCalledWith(expected);
+		expect(await readFile(expected)).toEqual(Buffer.from(installer));
 	});
 
 	it("accepts a legacy manifest without release notes and exposes an empty fallback", async () => {
@@ -181,6 +223,33 @@ describe("DesktopUpdater", () => {
 		updater.start();
 		await vi.waitFor(() => expect(updater.view()).toEqual({ status: "unavailable" }));
 		expect(onDiagnostic).toHaveBeenCalledWith("Update check failed");
+	});
+
+	it("rejects Windows artifacts outside the trusted release scope", async () => {
+		for (const url of [
+			"https://attacker.example/Metis.exe",
+			"https://updates.example.test/outside/Metis.exe",
+			"https://updates.example.test/metis/win32/x64/releases/0.81.0/Metis.dmg",
+			"https://updates.example.test/metis/win32/x64/releases/0.81.0/Metis.exe?token=secret",
+		]) {
+			const installer = new TextEncoder().encode("invalid Windows artifact");
+			const release = windowsManifest("0.81.0", installer);
+			release.exe.url = url;
+			const fetch = vi.fn().mockResolvedValue(
+				new Response(JSON.stringify(release), {
+					headers: { "content-type": "application/json" },
+					status: 200,
+				}),
+			);
+			const { updater } = await harness({
+				dmg: installer,
+				manifest: release,
+				platform: "win32",
+				arch: "x64",
+				fetch,
+			});
+			await expect(updater.checkForUpdate()).rejects.toThrow("Invalid update manifest");
+		}
 	});
 
 	it("downloads once, reports progress, verifies the DMG, and reopens the verified file", async () => {
@@ -721,8 +790,10 @@ describe("DesktopUpdater", () => {
 	it("rejects manual check when unpackaged, on unsupported platform, or without valid base URL", async () => {
 		for (const options of [
 			{ isPackaged: false },
-			{ platform: "win32" as const },
-			{ arch: "ia32" },
+			{ platform: "linux" as const },
+			{ platform: "win32" as const, arch: "arm64" },
+			{ platform: "win32" as const, arch: "ia32" },
+			{ platform: "darwin" as const, arch: "ia32" },
 			{ baseUrl: "http://insecure.example.test" },
 		]) {
 			const { fetch, updater } = await harness(options);

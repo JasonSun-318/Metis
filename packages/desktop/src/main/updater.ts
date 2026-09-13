@@ -4,14 +4,43 @@ import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DESKTOP_RELEASE_NOTES_MAX_CHARACTERS, type DesktopUpdateState } from "../shared/desktop-api.ts";
 
+interface UpdateArtifact {
+	readonly url: string;
+	readonly size: number;
+	readonly sha256: string;
+}
+
 interface UpdateManifest {
 	readonly version: string;
 	readonly releaseNotes: string;
-	readonly dmg: {
-		readonly url: string;
-		readonly size: number;
-		readonly sha256: string;
-	};
+	readonly artifact: UpdateArtifact;
+}
+
+interface UpdateTarget {
+	readonly manifestPath: string;
+	readonly manifestKey: "dmg" | "exe";
+	readonly extension: ".dmg" | ".exe";
+	fileName(version: string): string;
+}
+
+function updateTarget(platform: NodeJS.Platform, arch: string): UpdateTarget | undefined {
+	if (platform === "darwin" && (arch === "arm64" || arch === "x64")) {
+		return {
+			manifestPath: `darwin/${arch}/latest.json`,
+			manifestKey: "dmg",
+			extension: ".dmg",
+			fileName: (version) => `Metis-${version}-darwin-${arch}.dmg`,
+		};
+	}
+	if (platform === "win32" && arch === "x64") {
+		return {
+			manifestPath: "win32/x64/latest.json",
+			manifestKey: "exe",
+			extension: ".exe",
+			fileName: (version) => `Metis-${version}-win32-x64-Setup.exe`,
+		};
+	}
+	return undefined;
 }
 
 export interface DesktopUpdaterOptions {
@@ -28,7 +57,7 @@ export interface DesktopUpdaterOptions {
 	readonly checkIntervalMs?: number;
 }
 
-const MAX_DMG_BYTES = 4 * 1024 * 1024 * 1024;
+const MAX_UPDATE_BYTES = 4 * 1024 * 1024 * 1024;
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const DEFAULT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -62,7 +91,7 @@ export function compareStableVersions(left: string, right: string): number {
 	return 0;
 }
 
-function parseManifest(value: unknown, baseUrl: URL): UpdateManifest {
+function parseManifest(value: unknown, baseUrl: URL, target: UpdateTarget): UpdateManifest {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Invalid update manifest");
 	const record = value as Record<string, unknown>;
 	if (record.schemaVersion !== 1 || typeof record.version !== "string" || !STABLE_VERSION.test(record.version)) {
@@ -76,28 +105,32 @@ function parseManifest(value: unknown, baseUrl: URL): UpdateManifest {
 			throw new Error("Invalid update manifest");
 		}
 	}
-	if (typeof record.dmg !== "object" || record.dmg === null || Array.isArray(record.dmg)) {
-		throw new Error("Invalid update manifest");
-	}
-	const dmg = record.dmg as Record<string, unknown>;
 	if (
-		typeof dmg.url !== "string" ||
-		!Number.isSafeInteger(dmg.size) ||
-		Number(dmg.size) < 1 ||
-		Number(dmg.size) > MAX_DMG_BYTES ||
-		typeof dmg.sha256 !== "string" ||
-		!SHA256.test(dmg.sha256)
+		typeof record[target.manifestKey] !== "object" ||
+		record[target.manifestKey] === null ||
+		Array.isArray(record[target.manifestKey])
 	) {
 		throw new Error("Invalid update manifest");
 	}
-	const url = new URL(dmg.url);
+	const declared = record[target.manifestKey] as Record<string, unknown>;
+	if (
+		typeof declared.url !== "string" ||
+		!Number.isSafeInteger(declared.size) ||
+		Number(declared.size) < 1 ||
+		Number(declared.size) > MAX_UPDATE_BYTES ||
+		typeof declared.sha256 !== "string" ||
+		!SHA256.test(declared.sha256)
+	) {
+		throw new Error("Invalid update manifest");
+	}
+	const url = new URL(declared.url);
 	if (
 		url.protocol !== "https:" ||
 		url.username ||
 		url.password ||
 		url.origin !== baseUrl.origin ||
 		!url.pathname.startsWith(baseUrl.pathname) ||
-		!url.pathname.endsWith(".dmg") ||
+		!url.pathname.endsWith(target.extension) ||
 		url.search ||
 		url.hash
 	) {
@@ -106,7 +139,7 @@ function parseManifest(value: unknown, baseUrl: URL): UpdateManifest {
 	return {
 		version: record.version,
 		releaseNotes,
-		dmg: { url: url.href, size: Number(dmg.size), sha256: dmg.sha256 },
+		artifact: { url: url.href, size: Number(declared.size), sha256: declared.sha256 },
 	};
 }
 
@@ -119,16 +152,19 @@ async function fileSha256(path: string): Promise<string> {
 async function verifiedFile(path: string, manifest: UpdateManifest): Promise<boolean> {
 	try {
 		const file = await stat(path);
-		return file.isFile() && file.size === manifest.dmg.size && (await fileSha256(path)) === manifest.dmg.sha256;
+		return (
+			file.isFile() && file.size === manifest.artifact.size && (await fileSha256(path)) === manifest.artifact.sha256
+		);
 	} catch {
 		return false;
 	}
 }
 
-/** Checks a static release manifest and opens only a verified macOS DMG. */
+/** Checks a static release manifest and opens only a verified platform installer. */
 export class DesktopUpdater {
 	private readonly options: DesktopUpdaterOptions;
 	private readonly baseUrl?: URL;
+	private readonly target?: UpdateTarget;
 	private state: DesktopUpdateState = { status: "unavailable" };
 	private manifest?: UpdateManifest;
 	private downloadedPath?: string;
@@ -140,15 +176,12 @@ export class DesktopUpdater {
 	constructor(options: DesktopUpdaterOptions) {
 		this.options = options;
 		this.baseUrl = trustedBaseUrl(options.baseUrl);
+		this.target = updateTarget(options.platform, options.arch);
 	}
 
 	isSupported(): boolean {
 		return Boolean(
-			this.options.isPackaged &&
-				this.options.platform === "darwin" &&
-				["arm64", "x64"].includes(this.options.arch) &&
-				this.baseUrl &&
-				versionParts(this.options.currentVersion),
+			this.options.isPackaged && this.target && this.baseUrl && versionParts(this.options.currentVersion),
 		);
 	}
 
@@ -220,13 +253,13 @@ export class DesktopUpdater {
 
 	private async performCheck(): Promise<void> {
 		try {
-			const manifestUrl = new URL(`darwin/${this.options.arch}/latest.json`, this.baseUrl!).href;
+			const manifestUrl = new URL(this.target!.manifestPath, this.baseUrl!).href;
 			const response = await this.options.fetch(manifestUrl, {
 				cache: "no-store",
 				signal: AbortSignal.timeout(15_000),
 			});
 			if (!response.ok) throw new Error(`Update manifest request failed with ${response.status}`);
-			const manifest = parseManifest(await response.json(), this.baseUrl!);
+			const manifest = parseManifest(await response.json(), this.baseUrl!, this.target!);
 			if (this.downloadTask || this.state.status === "downloading") {
 				return;
 			}
@@ -259,10 +292,7 @@ export class DesktopUpdater {
 	}
 
 	private async downloadAndOpenAvailable(manifest: UpdateManifest): Promise<void> {
-		const destination = join(
-			this.options.downloadsDirectory,
-			`Metis-${manifest.version}-darwin-${this.options.arch}.dmg`,
-		);
+		const destination = join(this.options.downloadsDirectory, this.target!.fileName(manifest.version));
 		const partial = `${destination}.part`;
 		try {
 			await mkdir(this.options.downloadsDirectory, { recursive: true });
@@ -304,10 +334,10 @@ export class DesktopUpdater {
 			releaseNotes: manifest.releaseNotes,
 			progress: 0,
 		});
-		const response = await this.options.fetch(manifest.dmg.url, { cache: "no-store" });
+		const response = await this.options.fetch(manifest.artifact.url, { cache: "no-store" });
 		if (!response.ok || !response.body) throw new Error(`Update download failed with ${response.status}`);
 		const contentLength = response.headers.get("content-length");
-		if (contentLength !== null && Number(contentLength) !== manifest.dmg.size) {
+		if (contentLength !== null && Number(contentLength) !== manifest.artifact.size) {
 			throw new Error("Downloaded update size does not match the release manifest");
 		}
 
@@ -319,14 +349,15 @@ export class DesktopUpdater {
 			for await (const sourceChunk of response.body as unknown as AsyncIterable<Uint8Array>) {
 				const chunk = Buffer.from(sourceChunk);
 				received += chunk.byteLength;
-				if (received > manifest.dmg.size) throw new Error("Downloaded update exceeds the release manifest size");
+				if (received > manifest.artifact.size)
+					throw new Error("Downloaded update exceeds the release manifest size");
 				hash.update(chunk);
 				let offset = 0;
 				while (offset < chunk.byteLength) {
 					const { bytesWritten } = await file.write(chunk, offset, chunk.byteLength - offset, null);
 					offset += bytesWritten;
 				}
-				const progress = Math.floor((received / manifest.dmg.size) * 100);
+				const progress = Math.floor((received / manifest.artifact.size) * 100);
 				if (progress !== lastProgress) {
 					lastProgress = progress;
 					this.setState({
@@ -340,7 +371,7 @@ export class DesktopUpdater {
 		} finally {
 			await file.close();
 		}
-		if (received !== manifest.dmg.size || hash.digest("hex") !== manifest.dmg.sha256) {
+		if (received !== manifest.artifact.size || hash.digest("hex") !== manifest.artifact.sha256) {
 			throw new Error("Downloaded update failed verification");
 		}
 	}
