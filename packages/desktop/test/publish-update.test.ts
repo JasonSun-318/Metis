@@ -147,6 +147,8 @@ describe("publish-update", () => {
 				[
 					script,
 					"publish",
+					"--platform",
+					"darwin",
 					"--arch",
 					"arm64",
 					"--version",
@@ -167,6 +169,8 @@ describe("publish-update", () => {
 				[
 					script,
 					"publish",
+					"--platform",
+					"darwin",
 					"--arch",
 					"arm64",
 					"--version",

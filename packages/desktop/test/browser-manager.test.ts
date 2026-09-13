@@ -1265,12 +1265,12 @@ describe("BrowserManager", () => {
 
 			const first = downloadItemHarness();
 			harness.willDownload(first.item);
-			expect(first.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report.pdf");
+			expect(first.item.setSavePath).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report.pdf"));
 			expect(latestDownloads(events)).toHaveLength(1);
 			const downloadId = latestDownloads(events)[0]!.downloadId;
 			expect(latestDownloads(events)[0]).toMatchObject({
 				filename: "report.pdf",
-				savePath: "/tmp/metis-downloads/report.pdf",
+				savePath: join("/tmp/metis-downloads", "report.pdf"),
 				state: "progressing",
 				totalBytes: 1_000,
 				url: "https://example.com/files/report.pdf",
@@ -1296,10 +1296,10 @@ describe("BrowserManager", () => {
 			first.emit("done", "cancelled");
 			expect(latestDownloads(events)[0]!.state).toBe("cancelled");
 
-			harness.pathExists.mockImplementation((path: string) => path === "/tmp/metis-downloads/report.pdf");
+			harness.pathExists.mockImplementation((path: string) => path === join("/tmp/metis-downloads", "report.pdf"));
 			const second = downloadItemHarness();
 			harness.willDownload(second.item);
-			expect(second.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+			expect(second.item.setSavePath).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report (1).pdf"));
 			const secondId = latestDownloads(events)[0]!.downloadId;
 			expect(latestDownloads(events)).toHaveLength(2);
 
@@ -1313,9 +1313,9 @@ describe("BrowserManager", () => {
 
 			await expect(harness.manager.controlDownload({ type: "open", downloadId })).rejects.toThrow("not complete");
 			await harness.manager.controlDownload({ type: "open", downloadId: secondId });
-			expect(harness.openPath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+			expect(harness.openPath).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report (1).pdf"));
 			await harness.manager.controlDownload({ type: "reveal", downloadId: secondId });
-			expect(harness.showItemInFolder).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+			expect(harness.showItemInFolder).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report (1).pdf"));
 
 			await expect(harness.manager.controlDownload({ type: "retry", downloadId: secondId })).rejects.toThrow(
 				"Download cannot be retried",
@@ -1345,8 +1345,8 @@ describe("BrowserManager", () => {
 		harness.willDownload(first.item);
 		harness.willDownload(second.item);
 
-		expect(first.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report.pdf");
-		expect(second.item.setSavePath).toHaveBeenCalledWith("/tmp/metis-downloads/report (1).pdf");
+		expect(first.item.setSavePath).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report.pdf"));
+		expect(second.item.setSavePath).toHaveBeenCalledWith(join("/tmp/metis-downloads", "report (1).pdf"));
 	});
 
 	it("propagates file-open failures", async () => {
