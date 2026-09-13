@@ -106,7 +106,7 @@ Skill content here.`,
 			expect(pptxInstructions).toContain("two separate shell tool calls");
 			expect(pptxInstructions).toContain("sed -n '1,400p'");
 			expect(pptxInstructions).toContain("sed -n '401,900p'");
-			expect(skills.some((skill) => skill.name === "pdf")).toBe(true);
+			expect(skills.some((skill) => skill.name === "pdf")).toBe(false);
 
 			const createSkill = skills.find((skill) => skill.name === "create-skill");
 			expect(createSkill).toBeDefined();
