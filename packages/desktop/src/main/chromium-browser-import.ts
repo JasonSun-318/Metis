@@ -18,36 +18,38 @@ import {
 const execFileAsync = promisify(execFile);
 const CHROMIUM_EPOCH_MICROSECONDS = 11_644_473_600_000_000n;
 
+type BrowserImportPlatform = "darwin" | "win32";
+
 const BROWSERS = [
 	{
 		sourceId: "chrome",
 		name: "Google Chrome",
-		directory: "Google/Chrome",
-		processName: "Google Chrome",
+		directories: { darwin: "Google/Chrome", win32: "Google/Chrome/User Data" },
+		processNames: { darwin: "Google Chrome", win32: "chrome.exe" },
 		keychainService: "Chrome Safe Storage",
 		keychainAccount: "Chrome",
 	},
 	{
 		sourceId: "edge",
 		name: "Microsoft Edge",
-		directory: "Microsoft Edge",
-		processName: "Microsoft Edge",
+		directories: { darwin: "Microsoft Edge", win32: "Microsoft/Edge/User Data" },
+		processNames: { darwin: "Microsoft Edge", win32: "msedge.exe" },
 		keychainService: "Microsoft Edge Safe Storage",
 		keychainAccount: "Microsoft Edge",
 	},
 	{
 		sourceId: "brave",
 		name: "Brave",
-		directory: "BraveSoftware/Brave-Browser",
-		processName: "Brave Browser",
+		directories: { darwin: "BraveSoftware/Brave-Browser", win32: "BraveSoftware/Brave-Browser/User Data" },
+		processNames: { darwin: "Brave Browser", win32: "brave.exe" },
 		keychainService: "Brave Safe Storage",
 		keychainAccount: "Brave",
 	},
 	{
 		sourceId: "chromium",
 		name: "Chromium",
-		directory: "Chromium",
-		processName: "Chromium",
+		directories: { darwin: "Chromium", win32: "Chromium/User Data" },
+		processNames: { darwin: "Chromium", win32: "chromium.exe" },
 		keychainService: "Chromium Safe Storage",
 		keychainAccount: "Chromium",
 	},
@@ -63,18 +65,33 @@ export interface ImportedBrowserData {
 
 interface ChromiumBrowserImporterDependencies {
 	readonly platform: NodeJS.Platform;
-	readonly applicationSupportPath: string;
+	readonly dataDirectory: string;
 	readonly roots?: Partial<Record<DesktopBrowserSourceId, string>>;
 	readonly isRunning: (processName: string) => Promise<boolean>;
 	readonly readSafeStoragePassword: (browser: BrowserDescriptor) => Promise<string>;
 }
 
-async function processIsRunning(processName: string): Promise<boolean> {
+function defaultBrowserDataDirectory(platform: NodeJS.Platform): string {
+	if (platform === "darwin") return join(homedir(), "Library", "Application Support");
+	if (platform === "win32") return process.env.LOCALAPPDATA ?? "";
+	return "";
+}
+
+async function processIsRunning(platform: BrowserImportPlatform, processName: string): Promise<boolean> {
 	try {
+		if (platform === "win32") {
+			const executable = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "tasklist.exe");
+			const { stdout } = await execFileAsync(
+				executable,
+				["/FI", `IMAGENAME eq ${processName}`, "/FO", "CSV", "/NH"],
+				{ encoding: "utf8", windowsHide: true },
+			);
+			return stdout.toLowerCase().includes(`"${processName.toLowerCase()}"`);
+		}
 		await execFileAsync("/usr/bin/pgrep", ["-x", processName]);
 		return true;
 	} catch (cause) {
-		if ((cause as { code?: unknown }).code === 1) return false;
+		if (platform === "darwin" && (cause as { code?: unknown }).code === 1) return false;
 		throw new Error("Browser process state could not be checked");
 	}
 }
@@ -165,8 +182,8 @@ export class ChromiumBrowserImporter {
 	constructor(
 		dependencies: ChromiumBrowserImporterDependencies = {
 			platform: process.platform,
-			applicationSupportPath: join(homedir(), "Library", "Application Support"),
-			isRunning: processIsRunning,
+			dataDirectory: defaultBrowserDataDirectory(process.platform),
+			isRunning: (processName) => processIsRunning(process.platform as BrowserImportPlatform, processName),
 			readSafeStoragePassword: safeStoragePassword,
 		},
 	) {
@@ -174,7 +191,13 @@ export class ChromiumBrowserImporter {
 	}
 
 	async listSources(): Promise<readonly DesktopBrowserImportSource[]> {
-		if (this.dependencies.platform !== "darwin") throw new Error("Browser import is available on macOS only");
+		if (this.dependencies.platform !== "darwin" && this.dependencies.platform !== "win32") {
+			throw new Error("Browser import is available on macOS and Windows only");
+		}
+		if (!this.dependencies.dataDirectory && !this.dependencies.roots) {
+			throw new Error("Browser data location is unavailable");
+		}
+		const platform = this.dependencies.platform;
 		const sources: DesktopBrowserImportSource[] = [];
 		for (const browser of BROWSERS) {
 			const root = this.root(browser);
@@ -189,7 +212,7 @@ export class ChromiumBrowserImporter {
 				sources.push({
 					sourceId: browser.sourceId,
 					name: browser.name,
-					running: await this.dependencies.isRunning(browser.processName),
+					running: await this.dependencies.isRunning(browser.processNames[platform]),
 					profiles,
 				});
 			}
@@ -198,6 +221,9 @@ export class ChromiumBrowserImporter {
 	}
 
 	async readProfile(input: DesktopBrowserImportInput): Promise<ImportedBrowserData> {
+		if (this.dependencies.platform === "win32" && input.dataTypes.cookies) {
+			throw new Error("Cookie import is not available on Windows");
+		}
 		const source = (await this.listSources()).find((candidate) => candidate.sourceId === input.sourceId);
 		const sourceProfile = source?.profiles.find((candidate) => candidate.sourceProfileId === input.sourceProfileId);
 		if (!source || !sourceProfile) throw new Error("Browser profile is no longer available");
@@ -212,9 +238,10 @@ export class ChromiumBrowserImporter {
 	}
 
 	private root(browser: BrowserDescriptor): string {
+		const platform = this.dependencies.platform as BrowserImportPlatform;
 		return (
 			this.dependencies.roots?.[browser.sourceId] ??
-			join(this.dependencies.applicationSupportPath, browser.directory)
+			join(this.dependencies.dataDirectory, browser.directories[platform])
 		);
 	}
 

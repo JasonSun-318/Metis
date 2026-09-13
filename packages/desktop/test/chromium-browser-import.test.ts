@@ -1,15 +1,39 @@
 import { createCipheriv, createHash, pbkdf2Sync } from "node:crypto";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChromiumBrowserImporter } from "../src/main/chromium-browser-import.ts";
 
 const CHROMIUM_EPOCH_MICROSECONDS = 11_644_473_600_000_000n;
 
+const temporaryDirectories: string[] = [];
+
+afterEach(async () => {
+	await Promise.all(
+		temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })),
+	);
+});
+
+const WINDOWS_BROWSERS = [
+	{ sourceId: "chrome", directory: "Google/Chrome/User Data", processName: "chrome.exe" },
+	{ sourceId: "edge", directory: "Microsoft/Edge/User Data", processName: "msedge.exe" },
+	{ sourceId: "brave", directory: "BraveSoftware/Brave-Browser/User Data", processName: "brave.exe" },
+	{ sourceId: "chromium", directory: "Chromium/User Data", processName: "chromium.exe" },
+] as const;
+
+async function writeProfileRoot(root: string): Promise<void> {
+	await mkdir(join(root, "Default"), { recursive: true });
+	await writeFile(
+		join(root, "Local State"),
+		JSON.stringify({ profile: { info_cache: { Default: { name: "Personal", user_name: "person@example.com" } } } }),
+	);
+}
+
 async function fixture(options: { running?: boolean; platform?: NodeJS.Platform } = {}) {
 	const root = await mkdtemp(join(tmpdir(), "metis-chromium-source-"));
+	temporaryDirectories.push(root);
 	const profile = join(root, "Default");
 	await mkdir(join(profile, "Network"), { recursive: true });
 	await writeFile(
@@ -21,7 +45,7 @@ async function fixture(options: { running?: boolean; platform?: NodeJS.Platform 
 	const readSafeStoragePassword = vi.fn(async () => "fixture-password");
 	const importer = new ChromiumBrowserImporter({
 		platform: options.platform ?? "darwin",
-		applicationSupportPath: join(root, "missing"),
+		dataDirectory: join(root, "missing"),
 		roots: { chrome: root },
 		isRunning: vi.fn(async () => options.running ?? false),
 		readSafeStoragePassword,
@@ -51,9 +75,7 @@ describe("ChromiumBrowserImporter", () => {
 		expect(JSON.stringify(sources)).not.toContain(root);
 	});
 
-	it("rejects unsupported platforms and running browsers", async () => {
-		const unsupported = await fixture({ platform: "win32" });
-		await expect(unsupported.importer.listSources()).rejects.toThrow("macOS only");
+	it("rejects imports while the source browser is running", async () => {
 		const running = await fixture({ running: true });
 		await expect(
 			running.importer.readProfile({
@@ -62,6 +84,43 @@ describe("ChromiumBrowserImporter", () => {
 				dataTypes: { cookies: false, history: true },
 			}),
 		).rejects.toThrow("Close Google Chrome");
+	});
+
+	it("discovers standard Windows Chromium roots and executable names", async () => {
+		const dataDirectory = await mkdtemp(join(tmpdir(), "metis-windows-browser-data-"));
+		temporaryDirectories.push(dataDirectory);
+		const isRunning = vi.fn(async (_processName: string) => false);
+		for (const browser of WINDOWS_BROWSERS) await writeProfileRoot(join(dataDirectory, browser.directory));
+		const importer = new ChromiumBrowserImporter({
+			platform: "win32",
+			dataDirectory,
+			isRunning,
+			readSafeStoragePassword: vi.fn(async () => "unused"),
+		});
+
+		await expect(importer.listSources()).resolves.toEqual(
+			WINDOWS_BROWSERS.map((browser) => expect.objectContaining({ sourceId: browser.sourceId, running: false })),
+		);
+		expect(isRunning.mock.calls.map(([name]) => name)).toEqual(
+			WINDOWS_BROWSERS.map(({ processName }) => processName),
+		);
+	});
+
+	it("rejects Cookie requests on Windows before reading protected browser data", async () => {
+		const { importer, readSafeStoragePassword } = await fixture({ platform: "win32" });
+		await expect(
+			importer.readProfile({
+				sourceId: "chrome",
+				sourceProfileId: "Default",
+				dataTypes: { cookies: true, history: true },
+			}),
+		).rejects.toThrow("Cookie import is not available on Windows");
+		expect(readSafeStoragePassword).not.toHaveBeenCalled();
+	});
+
+	it("still rejects platforms outside macOS and Windows", async () => {
+		const unsupported = await fixture({ platform: "linux" });
+		await expect(unsupported.importer.listSources()).rejects.toThrow("macOS and Windows only");
 	});
 
 	it("copies History, converts Chromium time, and leaves the source unchanged", async () => {
@@ -90,6 +149,30 @@ describe("ChromiumBrowserImporter", () => {
 		]);
 		expect(await readFile(historyPath)).toEqual(before);
 		expect(data.cookies).toEqual([]);
+	});
+
+	it("imports Windows history without requesting a Safe Storage password", async () => {
+		const { importer, profile, readSafeStoragePassword } = await fixture({ platform: "win32" });
+		const database = new DatabaseSync(join(profile, "History"));
+		database.exec(
+			"CREATE TABLE urls (id INTEGER PRIMARY KEY, url TEXT, title TEXT, last_visit_time INTEGER, hidden INTEGER DEFAULT 0)",
+		);
+		database
+			.prepare("INSERT INTO urls (url, title, last_visit_time) VALUES (?, ?, ?)")
+			.run("https://example.com/", "Example", 13_380_163_200_000_000n);
+		database.close();
+
+		const data = await importer.readProfile({
+			sourceId: "chrome",
+			sourceProfileId: "Default",
+			dataTypes: { cookies: false, history: true },
+		});
+		expect(data.history).toEqual([
+			expect.objectContaining({ url: "https://example.com/", visitedAt: 1_735_689_600_000 }),
+		]);
+		expect(data.cookies).toEqual([]);
+		expect(data.cookieSkipped).toBe(0);
+		expect(readSafeStoragePassword).not.toHaveBeenCalled();
 	});
 
 	it("decrypts valid v10 cookies and skips expired, partitioned, and mismatched rows", async () => {
