@@ -27,6 +27,7 @@ profiles-*/
 *~
 
 # Package specific
+packages/ai/src/providers/data/
 .npm/
 coverage/
 .nyc_output/
