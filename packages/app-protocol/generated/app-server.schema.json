@@ -3375,40 +3375,32 @@
                     "selection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     }
@@ -4109,7 +4101,7 @@
                                   "name",
                                   "contextWindow",
                                   "maxOutputTokens",
-                                  "reasoning",
+                                  "reasoningMode",
                                   "imageInput"
                                 ],
                                 "properties": {
@@ -4135,8 +4127,21 @@
                                     "minimum": 1,
                                     "maximum": 10000000
                                   },
-                                  "reasoning": {
-                                    "type": "boolean"
+                                  "reasoningMode": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "auto"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "off"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "generic"
+                                      }
+                                    ]
                                   },
                                   "imageInput": {
                                     "type": "boolean"
@@ -4262,40 +4267,32 @@
                             "thinkingSelection": {
                               "anyOf": [
                                 {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "off"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "minimal"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "low"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "medium"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "high"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "xhigh"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "max"
-                                    }
-                                  ]
+                                  "type": "string",
+                                  "const": "off"
                                 },
                                 {
                                   "type": "string",
-                                  "const": "ultra"
+                                  "const": "minimal"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "low"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "medium"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "high"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "xhigh"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "max"
                                 }
                               ]
                             }
@@ -12817,40 +12814,32 @@
                               "thinkingSelection": {
                                 "anyOf": [
                                   {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "off"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "minimal"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "low"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "medium"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "high"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "xhigh"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "max"
-                                      }
-                                    ]
+                                    "type": "string",
+                                    "const": "off"
                                   },
                                   {
                                     "type": "string",
-                                    "const": "ultra"
+                                    "const": "minimal"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "xhigh"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "max"
                                   }
                                 ]
                               },
@@ -12891,40 +12880,32 @@
                                 "items": {
                                   "anyOf": [
                                     {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "const": "off"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "minimal"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "low"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "medium"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "high"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "xhigh"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "max"
-                                        }
-                                      ]
+                                      "type": "string",
+                                      "const": "off"
                                     },
                                     {
                                       "type": "string",
-                                      "const": "ultra"
+                                      "const": "minimal"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "low"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "medium"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "high"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "xhigh"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "max"
                                     }
                                   ]
                                 },
@@ -12980,40 +12961,32 @@
                               "thinkingSelection": {
                                 "anyOf": [
                                   {
-                                    "anyOf": [
-                                      {
-                                        "type": "string",
-                                        "const": "off"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "minimal"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "low"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "medium"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "high"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "xhigh"
-                                      },
-                                      {
-                                        "type": "string",
-                                        "const": "max"
-                                      }
-                                    ]
+                                    "type": "string",
+                                    "const": "off"
                                   },
                                   {
                                     "type": "string",
-                                    "const": "ultra"
+                                    "const": "minimal"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "xhigh"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "max"
                                   }
                                 ]
                               },
@@ -13054,40 +13027,32 @@
                                 "items": {
                                   "anyOf": [
                                     {
-                                      "anyOf": [
-                                        {
-                                          "type": "string",
-                                          "const": "off"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "minimal"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "low"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "medium"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "high"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "xhigh"
-                                        },
-                                        {
-                                          "type": "string",
-                                          "const": "max"
-                                        }
-                                      ]
+                                      "type": "string",
+                                      "const": "off"
                                     },
                                     {
                                       "type": "string",
-                                      "const": "ultra"
+                                      "const": "minimal"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "low"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "medium"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "high"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "xhigh"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "max"
                                     }
                                   ]
                                 },
@@ -25392,40 +25357,32 @@
                         "thinkingSelection": {
                           "anyOf": [
                             {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "off"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "minimal"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "low"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "medium"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "high"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "xhigh"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "max"
-                                }
-                              ]
+                              "type": "string",
+                              "const": "off"
                             },
                             {
                               "type": "string",
-                              "const": "ultra"
+                              "const": "minimal"
+                            },
+                            {
+                              "type": "string",
+                              "const": "low"
+                            },
+                            {
+                              "type": "string",
+                              "const": "medium"
+                            },
+                            {
+                              "type": "string",
+                              "const": "high"
+                            },
+                            {
+                              "type": "string",
+                              "const": "xhigh"
+                            },
+                            {
+                              "type": "string",
+                              "const": "max"
                             }
                           ]
                         },
@@ -25466,40 +25423,32 @@
                           "items": {
                             "anyOf": [
                               {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "off"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "minimal"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "low"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "medium"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "high"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "xhigh"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "max"
-                                  }
-                                ]
+                                "type": "string",
+                                "const": "off"
                               },
                               {
                                 "type": "string",
-                                "const": "ultra"
+                                "const": "minimal"
+                              },
+                              {
+                                "type": "string",
+                                "const": "low"
+                              },
+                              {
+                                "type": "string",
+                                "const": "medium"
+                              },
+                              {
+                                "type": "string",
+                                "const": "high"
+                              },
+                              {
+                                "type": "string",
+                                "const": "xhigh"
+                              },
+                              {
+                                "type": "string",
+                                "const": "max"
                               }
                             ]
                           },
@@ -26115,40 +26064,32 @@
                     "thinkingSelection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -26189,40 +26130,32 @@
                       "items": {
                         "anyOf": [
                           {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "off"
-                              },
-                              {
-                                "type": "string",
-                                "const": "minimal"
-                              },
-                              {
-                                "type": "string",
-                                "const": "low"
-                              },
-                              {
-                                "type": "string",
-                                "const": "medium"
-                              },
-                              {
-                                "type": "string",
-                                "const": "high"
-                              },
-                              {
-                                "type": "string",
-                                "const": "xhigh"
-                              },
-                              {
-                                "type": "string",
-                                "const": "max"
-                              }
-                            ]
+                            "type": "string",
+                            "const": "off"
                           },
                           {
                             "type": "string",
-                            "const": "ultra"
+                            "const": "minimal"
+                          },
+                          {
+                            "type": "string",
+                            "const": "low"
+                          },
+                          {
+                            "type": "string",
+                            "const": "medium"
+                          },
+                          {
+                            "type": "string",
+                            "const": "high"
+                          },
+                          {
+                            "type": "string",
+                            "const": "xhigh"
+                          },
+                          {
+                            "type": "string",
+                            "const": "max"
                           }
                         ]
                       },
@@ -27193,40 +27126,32 @@
                     "thinkingSelection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -27267,40 +27192,32 @@
                       "items": {
                         "anyOf": [
                           {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "off"
-                              },
-                              {
-                                "type": "string",
-                                "const": "minimal"
-                              },
-                              {
-                                "type": "string",
-                                "const": "low"
-                              },
-                              {
-                                "type": "string",
-                                "const": "medium"
-                              },
-                              {
-                                "type": "string",
-                                "const": "high"
-                              },
-                              {
-                                "type": "string",
-                                "const": "xhigh"
-                              },
-                              {
-                                "type": "string",
-                                "const": "max"
-                              }
-                            ]
+                            "type": "string",
+                            "const": "off"
                           },
                           {
                             "type": "string",
-                            "const": "ultra"
+                            "const": "minimal"
+                          },
+                          {
+                            "type": "string",
+                            "const": "low"
+                          },
+                          {
+                            "type": "string",
+                            "const": "medium"
+                          },
+                          {
+                            "type": "string",
+                            "const": "high"
+                          },
+                          {
+                            "type": "string",
+                            "const": "xhigh"
+                          },
+                          {
+                            "type": "string",
+                            "const": "max"
                           }
                         ]
                       },
@@ -27589,40 +27506,32 @@
                     "defaultThinkingSelection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -27730,6 +27639,9 @@
                                 "contextWindow",
                                 "maxOutputTokens",
                                 "reasoning",
+                                "thinkingLevels",
+                                "reasoningMode",
+                                "reasoningSource",
                                 "imageInput",
                                 "custom"
                               ],
@@ -27764,6 +27676,93 @@
                                 },
                                 "reasoning": {
                                   "type": "boolean"
+                                },
+                                "thinkingLevels": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "off"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "minimal"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "low"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "medium"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "high"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "xhigh"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "max"
+                                      }
+                                    ]
+                                  },
+                                  "maxItems": 7,
+                                  "uniqueItems": true
+                                },
+                                "reasoningMode": {
+                                  "anyOf": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "auto"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "off"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "generic"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "reasoningSource": {
+                                  "anyOf": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "catalog"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "generic"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "off"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unrecognized"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "imageInput": {
                                   "type": "boolean"
@@ -28010,40 +28009,32 @@
                     "defaultThinkingSelection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -28151,6 +28142,9 @@
                                 "contextWindow",
                                 "maxOutputTokens",
                                 "reasoning",
+                                "thinkingLevels",
+                                "reasoningMode",
+                                "reasoningSource",
                                 "imageInput",
                                 "custom"
                               ],
@@ -28185,6 +28179,93 @@
                                 },
                                 "reasoning": {
                                   "type": "boolean"
+                                },
+                                "thinkingLevels": {
+                                  "type": "array",
+                                  "items": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "off"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "minimal"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "low"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "medium"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "high"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "xhigh"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "max"
+                                      }
+                                    ]
+                                  },
+                                  "maxItems": 7,
+                                  "uniqueItems": true
+                                },
+                                "reasoningMode": {
+                                  "anyOf": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "auto"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "off"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "generic"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "reasoningSource": {
+                                  "anyOf": [
+                                    {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "catalog"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "generic"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "off"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "unrecognized"
+                                        }
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
                                 },
                                 "imageInput": {
                                   "type": "boolean"
@@ -46332,40 +46413,32 @@
                 "selection": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "off"
-                        },
-                        {
-                          "type": "string",
-                          "const": "minimal"
-                        },
-                        {
-                          "type": "string",
-                          "const": "low"
-                        },
-                        {
-                          "type": "string",
-                          "const": "medium"
-                        },
-                        {
-                          "type": "string",
-                          "const": "high"
-                        },
-                        {
-                          "type": "string",
-                          "const": "xhigh"
-                        },
-                        {
-                          "type": "string",
-                          "const": "max"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "off"
                     },
                     {
                       "type": "string",
-                      "const": "ultra"
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
                     }
                   ]
                 }
@@ -47066,7 +47139,7 @@
                               "name",
                               "contextWindow",
                               "maxOutputTokens",
-                              "reasoning",
+                              "reasoningMode",
                               "imageInput"
                             ],
                             "properties": {
@@ -47092,8 +47165,21 @@
                                 "minimum": 1,
                                 "maximum": 10000000
                               },
-                              "reasoning": {
-                                "type": "boolean"
+                              "reasoningMode": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "auto"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "off"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "generic"
+                                  }
+                                ]
                               },
                               "imageInput": {
                                 "type": "boolean"
@@ -47219,40 +47305,32 @@
                         "thinkingSelection": {
                           "anyOf": [
                             {
-                              "anyOf": [
-                                {
-                                  "type": "string",
-                                  "const": "off"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "minimal"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "low"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "medium"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "high"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "xhigh"
-                                },
-                                {
-                                  "type": "string",
-                                  "const": "max"
-                                }
-                              ]
+                              "type": "string",
+                              "const": "off"
                             },
                             {
                               "type": "string",
-                              "const": "ultra"
+                              "const": "minimal"
+                            },
+                            {
+                              "type": "string",
+                              "const": "low"
+                            },
+                            {
+                              "type": "string",
+                              "const": "medium"
+                            },
+                            {
+                              "type": "string",
+                              "const": "high"
+                            },
+                            {
+                              "type": "string",
+                              "const": "xhigh"
+                            },
+                            {
+                              "type": "string",
+                              "const": "max"
                             }
                           ]
                         }
@@ -61252,40 +61330,32 @@
                     "thinkingSelection": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -61326,40 +61396,32 @@
                       "items": {
                         "anyOf": [
                           {
-                            "anyOf": [
-                              {
-                                "type": "string",
-                                "const": "off"
-                              },
-                              {
-                                "type": "string",
-                                "const": "minimal"
-                              },
-                              {
-                                "type": "string",
-                                "const": "low"
-                              },
-                              {
-                                "type": "string",
-                                "const": "medium"
-                              },
-                              {
-                                "type": "string",
-                                "const": "high"
-                              },
-                              {
-                                "type": "string",
-                                "const": "xhigh"
-                              },
-                              {
-                                "type": "string",
-                                "const": "max"
-                              }
-                            ]
+                            "type": "string",
+                            "const": "off"
                           },
                           {
                             "type": "string",
-                            "const": "ultra"
+                            "const": "minimal"
+                          },
+                          {
+                            "type": "string",
+                            "const": "low"
+                          },
+                          {
+                            "type": "string",
+                            "const": "medium"
+                          },
+                          {
+                            "type": "string",
+                            "const": "high"
+                          },
+                          {
+                            "type": "string",
+                            "const": "xhigh"
+                          },
+                          {
+                            "type": "string",
+                            "const": "max"
                           }
                         ]
                       },
@@ -61975,40 +62037,32 @@
                 "thinkingSelection": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "off"
-                        },
-                        {
-                          "type": "string",
-                          "const": "minimal"
-                        },
-                        {
-                          "type": "string",
-                          "const": "low"
-                        },
-                        {
-                          "type": "string",
-                          "const": "medium"
-                        },
-                        {
-                          "type": "string",
-                          "const": "high"
-                        },
-                        {
-                          "type": "string",
-                          "const": "xhigh"
-                        },
-                        {
-                          "type": "string",
-                          "const": "max"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "off"
                     },
                     {
                       "type": "string",
-                      "const": "ultra"
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
                     }
                   ]
                 },
@@ -62049,40 +62103,32 @@
                   "items": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "off"
-                          },
-                          {
-                            "type": "string",
-                            "const": "minimal"
-                          },
-                          {
-                            "type": "string",
-                            "const": "low"
-                          },
-                          {
-                            "type": "string",
-                            "const": "medium"
-                          },
-                          {
-                            "type": "string",
-                            "const": "high"
-                          },
-                          {
-                            "type": "string",
-                            "const": "xhigh"
-                          },
-                          {
-                            "type": "string",
-                            "const": "max"
-                          }
-                        ]
+                        "type": "string",
+                        "const": "off"
                       },
                       {
                         "type": "string",
-                        "const": "ultra"
+                        "const": "minimal"
+                      },
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "xhigh"
+                      },
+                      {
+                        "type": "string",
+                        "const": "max"
                       }
                     ]
                   },
@@ -63053,40 +63099,32 @@
                 "thinkingSelection": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "off"
-                        },
-                        {
-                          "type": "string",
-                          "const": "minimal"
-                        },
-                        {
-                          "type": "string",
-                          "const": "low"
-                        },
-                        {
-                          "type": "string",
-                          "const": "medium"
-                        },
-                        {
-                          "type": "string",
-                          "const": "high"
-                        },
-                        {
-                          "type": "string",
-                          "const": "xhigh"
-                        },
-                        {
-                          "type": "string",
-                          "const": "max"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "off"
                     },
                     {
                       "type": "string",
-                      "const": "ultra"
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
                     }
                   ]
                 },
@@ -63127,40 +63165,32 @@
                   "items": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "off"
-                          },
-                          {
-                            "type": "string",
-                            "const": "minimal"
-                          },
-                          {
-                            "type": "string",
-                            "const": "low"
-                          },
-                          {
-                            "type": "string",
-                            "const": "medium"
-                          },
-                          {
-                            "type": "string",
-                            "const": "high"
-                          },
-                          {
-                            "type": "string",
-                            "const": "xhigh"
-                          },
-                          {
-                            "type": "string",
-                            "const": "max"
-                          }
-                        ]
+                        "type": "string",
+                        "const": "off"
                       },
                       {
                         "type": "string",
-                        "const": "ultra"
+                        "const": "minimal"
+                      },
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "xhigh"
+                      },
+                      {
+                        "type": "string",
+                        "const": "max"
                       }
                     ]
                   },
@@ -63449,40 +63479,32 @@
                 "defaultThinkingSelection": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "off"
-                        },
-                        {
-                          "type": "string",
-                          "const": "minimal"
-                        },
-                        {
-                          "type": "string",
-                          "const": "low"
-                        },
-                        {
-                          "type": "string",
-                          "const": "medium"
-                        },
-                        {
-                          "type": "string",
-                          "const": "high"
-                        },
-                        {
-                          "type": "string",
-                          "const": "xhigh"
-                        },
-                        {
-                          "type": "string",
-                          "const": "max"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "off"
                     },
                     {
                       "type": "string",
-                      "const": "ultra"
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
                     }
                   ]
                 },
@@ -63590,6 +63612,9 @@
                             "contextWindow",
                             "maxOutputTokens",
                             "reasoning",
+                            "thinkingLevels",
+                            "reasoningMode",
+                            "reasoningSource",
                             "imageInput",
                             "custom"
                           ],
@@ -63624,6 +63649,93 @@
                             },
                             "reasoning": {
                               "type": "boolean"
+                            },
+                            "thinkingLevels": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "off"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "minimal"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "xhigh"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "max"
+                                  }
+                                ]
+                              },
+                              "maxItems": 7,
+                              "uniqueItems": true
+                            },
+                            "reasoningMode": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "auto"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "off"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "generic"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "reasoningSource": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "catalog"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "generic"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "off"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "unrecognized"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "imageInput": {
                               "type": "boolean"
@@ -63870,40 +63982,32 @@
                 "defaultThinkingSelection": {
                   "anyOf": [
                     {
-                      "anyOf": [
-                        {
-                          "type": "string",
-                          "const": "off"
-                        },
-                        {
-                          "type": "string",
-                          "const": "minimal"
-                        },
-                        {
-                          "type": "string",
-                          "const": "low"
-                        },
-                        {
-                          "type": "string",
-                          "const": "medium"
-                        },
-                        {
-                          "type": "string",
-                          "const": "high"
-                        },
-                        {
-                          "type": "string",
-                          "const": "xhigh"
-                        },
-                        {
-                          "type": "string",
-                          "const": "max"
-                        }
-                      ]
+                      "type": "string",
+                      "const": "off"
                     },
                     {
                       "type": "string",
-                      "const": "ultra"
+                      "const": "minimal"
+                    },
+                    {
+                      "type": "string",
+                      "const": "low"
+                    },
+                    {
+                      "type": "string",
+                      "const": "medium"
+                    },
+                    {
+                      "type": "string",
+                      "const": "high"
+                    },
+                    {
+                      "type": "string",
+                      "const": "xhigh"
+                    },
+                    {
+                      "type": "string",
+                      "const": "max"
                     }
                   ]
                 },
@@ -64011,6 +64115,9 @@
                             "contextWindow",
                             "maxOutputTokens",
                             "reasoning",
+                            "thinkingLevels",
+                            "reasoningMode",
+                            "reasoningSource",
                             "imageInput",
                             "custom"
                           ],
@@ -64045,6 +64152,93 @@
                             },
                             "reasoning": {
                               "type": "boolean"
+                            },
+                            "thinkingLevels": {
+                              "type": "array",
+                              "items": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "const": "off"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "minimal"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "low"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "medium"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "high"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "xhigh"
+                                  },
+                                  {
+                                    "type": "string",
+                                    "const": "max"
+                                  }
+                                ]
+                              },
+                              "maxItems": 7,
+                              "uniqueItems": true
+                            },
+                            "reasoningMode": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "auto"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "off"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "generic"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "reasoningSource": {
+                              "anyOf": [
+                                {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "catalog"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "generic"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "off"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "unrecognized"
+                                    }
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
                             },
                             "imageInput": {
                               "type": "boolean"
@@ -78699,40 +78893,32 @@
                   "thinkingSelection": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "off"
-                          },
-                          {
-                            "type": "string",
-                            "const": "minimal"
-                          },
-                          {
-                            "type": "string",
-                            "const": "low"
-                          },
-                          {
-                            "type": "string",
-                            "const": "medium"
-                          },
-                          {
-                            "type": "string",
-                            "const": "high"
-                          },
-                          {
-                            "type": "string",
-                            "const": "xhigh"
-                          },
-                          {
-                            "type": "string",
-                            "const": "max"
-                          }
-                        ]
+                        "type": "string",
+                        "const": "off"
                       },
                       {
                         "type": "string",
-                        "const": "ultra"
+                        "const": "minimal"
+                      },
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "xhigh"
+                      },
+                      {
+                        "type": "string",
+                        "const": "max"
                       }
                     ]
                   },
@@ -78773,40 +78959,32 @@
                     "items": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -78862,40 +79040,32 @@
                   "thinkingSelection": {
                     "anyOf": [
                       {
-                        "anyOf": [
-                          {
-                            "type": "string",
-                            "const": "off"
-                          },
-                          {
-                            "type": "string",
-                            "const": "minimal"
-                          },
-                          {
-                            "type": "string",
-                            "const": "low"
-                          },
-                          {
-                            "type": "string",
-                            "const": "medium"
-                          },
-                          {
-                            "type": "string",
-                            "const": "high"
-                          },
-                          {
-                            "type": "string",
-                            "const": "xhigh"
-                          },
-                          {
-                            "type": "string",
-                            "const": "max"
-                          }
-                        ]
+                        "type": "string",
+                        "const": "off"
                       },
                       {
                         "type": "string",
-                        "const": "ultra"
+                        "const": "minimal"
+                      },
+                      {
+                        "type": "string",
+                        "const": "low"
+                      },
+                      {
+                        "type": "string",
+                        "const": "medium"
+                      },
+                      {
+                        "type": "string",
+                        "const": "high"
+                      },
+                      {
+                        "type": "string",
+                        "const": "xhigh"
+                      },
+                      {
+                        "type": "string",
+                        "const": "max"
                       }
                     ]
                   },
@@ -78936,40 +79106,32 @@
                     "items": {
                       "anyOf": [
                         {
-                          "anyOf": [
-                            {
-                              "type": "string",
-                              "const": "off"
-                            },
-                            {
-                              "type": "string",
-                              "const": "minimal"
-                            },
-                            {
-                              "type": "string",
-                              "const": "low"
-                            },
-                            {
-                              "type": "string",
-                              "const": "medium"
-                            },
-                            {
-                              "type": "string",
-                              "const": "high"
-                            },
-                            {
-                              "type": "string",
-                              "const": "xhigh"
-                            },
-                            {
-                              "type": "string",
-                              "const": "max"
-                            }
-                          ]
+                          "type": "string",
+                          "const": "off"
                         },
                         {
                           "type": "string",
-                          "const": "ultra"
+                          "const": "minimal"
+                        },
+                        {
+                          "type": "string",
+                          "const": "low"
+                        },
+                        {
+                          "type": "string",
+                          "const": "medium"
+                        },
+                        {
+                          "type": "string",
+                          "const": "high"
+                        },
+                        {
+                          "type": "string",
+                          "const": "xhigh"
+                        },
+                        {
+                          "type": "string",
+                          "const": "max"
                         }
                       ]
                     },
@@ -84307,40 +84469,32 @@
             "thinkingSelection": {
               "anyOf": [
                 {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "off"
-                    },
-                    {
-                      "type": "string",
-                      "const": "minimal"
-                    },
-                    {
-                      "type": "string",
-                      "const": "low"
-                    },
-                    {
-                      "type": "string",
-                      "const": "medium"
-                    },
-                    {
-                      "type": "string",
-                      "const": "high"
-                    },
-                    {
-                      "type": "string",
-                      "const": "xhigh"
-                    },
-                    {
-                      "type": "string",
-                      "const": "max"
-                    }
-                  ]
+                  "type": "string",
+                  "const": "off"
                 },
                 {
                   "type": "string",
-                  "const": "ultra"
+                  "const": "minimal"
+                },
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "xhigh"
+                },
+                {
+                  "type": "string",
+                  "const": "max"
                 }
               ]
             },
@@ -84381,40 +84535,32 @@
               "items": {
                 "anyOf": [
                   {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "const": "off"
-                      },
-                      {
-                        "type": "string",
-                        "const": "minimal"
-                      },
-                      {
-                        "type": "string",
-                        "const": "low"
-                      },
-                      {
-                        "type": "string",
-                        "const": "medium"
-                      },
-                      {
-                        "type": "string",
-                        "const": "high"
-                      },
-                      {
-                        "type": "string",
-                        "const": "xhigh"
-                      },
-                      {
-                        "type": "string",
-                        "const": "max"
-                      }
-                    ]
+                    "type": "string",
+                    "const": "off"
                   },
                   {
                     "type": "string",
-                    "const": "ultra"
+                    "const": "minimal"
+                  },
+                  {
+                    "type": "string",
+                    "const": "low"
+                  },
+                  {
+                    "type": "string",
+                    "const": "medium"
+                  },
+                  {
+                    "type": "string",
+                    "const": "high"
+                  },
+                  {
+                    "type": "string",
+                    "const": "xhigh"
+                  },
+                  {
+                    "type": "string",
+                    "const": "max"
                   }
                 ]
               },
@@ -84470,40 +84616,32 @@
             "thinkingSelection": {
               "anyOf": [
                 {
-                  "anyOf": [
-                    {
-                      "type": "string",
-                      "const": "off"
-                    },
-                    {
-                      "type": "string",
-                      "const": "minimal"
-                    },
-                    {
-                      "type": "string",
-                      "const": "low"
-                    },
-                    {
-                      "type": "string",
-                      "const": "medium"
-                    },
-                    {
-                      "type": "string",
-                      "const": "high"
-                    },
-                    {
-                      "type": "string",
-                      "const": "xhigh"
-                    },
-                    {
-                      "type": "string",
-                      "const": "max"
-                    }
-                  ]
+                  "type": "string",
+                  "const": "off"
                 },
                 {
                   "type": "string",
-                  "const": "ultra"
+                  "const": "minimal"
+                },
+                {
+                  "type": "string",
+                  "const": "low"
+                },
+                {
+                  "type": "string",
+                  "const": "medium"
+                },
+                {
+                  "type": "string",
+                  "const": "high"
+                },
+                {
+                  "type": "string",
+                  "const": "xhigh"
+                },
+                {
+                  "type": "string",
+                  "const": "max"
                 }
               ]
             },
@@ -84544,40 +84682,32 @@
               "items": {
                 "anyOf": [
                   {
-                    "anyOf": [
-                      {
-                        "type": "string",
-                        "const": "off"
-                      },
-                      {
-                        "type": "string",
-                        "const": "minimal"
-                      },
-                      {
-                        "type": "string",
-                        "const": "low"
-                      },
-                      {
-                        "type": "string",
-                        "const": "medium"
-                      },
-                      {
-                        "type": "string",
-                        "const": "high"
-                      },
-                      {
-                        "type": "string",
-                        "const": "xhigh"
-                      },
-                      {
-                        "type": "string",
-                        "const": "max"
-                      }
-                    ]
+                    "type": "string",
+                    "const": "off"
                   },
                   {
                     "type": "string",
-                    "const": "ultra"
+                    "const": "minimal"
+                  },
+                  {
+                    "type": "string",
+                    "const": "low"
+                  },
+                  {
+                    "type": "string",
+                    "const": "medium"
+                  },
+                  {
+                    "type": "string",
+                    "const": "high"
+                  },
+                  {
+                    "type": "string",
+                    "const": "xhigh"
+                  },
+                  {
+                    "type": "string",
+                    "const": "max"
                   }
                 ]
               },
@@ -93542,40 +93672,32 @@
                           "thinkingSelection": {
                             "anyOf": [
                               {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "off"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "minimal"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "low"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "medium"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "high"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "xhigh"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "max"
-                                  }
-                                ]
+                                "type": "string",
+                                "const": "off"
                               },
                               {
                                 "type": "string",
-                                "const": "ultra"
+                                "const": "minimal"
+                              },
+                              {
+                                "type": "string",
+                                "const": "low"
+                              },
+                              {
+                                "type": "string",
+                                "const": "medium"
+                              },
+                              {
+                                "type": "string",
+                                "const": "high"
+                              },
+                              {
+                                "type": "string",
+                                "const": "xhigh"
+                              },
+                              {
+                                "type": "string",
+                                "const": "max"
                               }
                             ]
                           },
@@ -93616,40 +93738,32 @@
                             "items": {
                               "anyOf": [
                                 {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "off"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "minimal"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "low"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "medium"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "high"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "xhigh"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "max"
-                                    }
-                                  ]
+                                  "type": "string",
+                                  "const": "off"
                                 },
                                 {
                                   "type": "string",
-                                  "const": "ultra"
+                                  "const": "minimal"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "low"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "medium"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "high"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "xhigh"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "max"
                                 }
                               ]
                             },
@@ -93705,40 +93819,32 @@
                           "thinkingSelection": {
                             "anyOf": [
                               {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "const": "off"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "minimal"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "low"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "medium"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "high"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "xhigh"
-                                  },
-                                  {
-                                    "type": "string",
-                                    "const": "max"
-                                  }
-                                ]
+                                "type": "string",
+                                "const": "off"
                               },
                               {
                                 "type": "string",
-                                "const": "ultra"
+                                "const": "minimal"
+                              },
+                              {
+                                "type": "string",
+                                "const": "low"
+                              },
+                              {
+                                "type": "string",
+                                "const": "medium"
+                              },
+                              {
+                                "type": "string",
+                                "const": "high"
+                              },
+                              {
+                                "type": "string",
+                                "const": "xhigh"
+                              },
+                              {
+                                "type": "string",
+                                "const": "max"
                               }
                             ]
                           },
@@ -93779,40 +93885,32 @@
                             "items": {
                               "anyOf": [
                                 {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "const": "off"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "minimal"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "low"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "medium"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "high"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "xhigh"
-                                    },
-                                    {
-                                      "type": "string",
-                                      "const": "max"
-                                    }
-                                  ]
+                                  "type": "string",
+                                  "const": "off"
                                 },
                                 {
                                   "type": "string",
-                                  "const": "ultra"
+                                  "const": "minimal"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "low"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "medium"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "high"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "xhigh"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "max"
                                 }
                               ]
                             },
@@ -101397,40 +101495,32 @@
         "thinkingSelection": {
           "anyOf": [
             {
-              "anyOf": [
-                {
-                  "type": "string",
-                  "const": "off"
-                },
-                {
-                  "type": "string",
-                  "const": "minimal"
-                },
-                {
-                  "type": "string",
-                  "const": "low"
-                },
-                {
-                  "type": "string",
-                  "const": "medium"
-                },
-                {
-                  "type": "string",
-                  "const": "high"
-                },
-                {
-                  "type": "string",
-                  "const": "xhigh"
-                },
-                {
-                  "type": "string",
-                  "const": "max"
-                }
-              ]
+              "type": "string",
+              "const": "off"
             },
             {
               "type": "string",
-              "const": "ultra"
+              "const": "minimal"
+            },
+            {
+              "type": "string",
+              "const": "low"
+            },
+            {
+              "type": "string",
+              "const": "medium"
+            },
+            {
+              "type": "string",
+              "const": "high"
+            },
+            {
+              "type": "string",
+              "const": "xhigh"
+            },
+            {
+              "type": "string",
+              "const": "max"
             }
           ]
         },
@@ -101471,40 +101561,32 @@
           "items": {
             "anyOf": [
               {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "const": "off"
-                  },
-                  {
-                    "type": "string",
-                    "const": "minimal"
-                  },
-                  {
-                    "type": "string",
-                    "const": "low"
-                  },
-                  {
-                    "type": "string",
-                    "const": "medium"
-                  },
-                  {
-                    "type": "string",
-                    "const": "high"
-                  },
-                  {
-                    "type": "string",
-                    "const": "xhigh"
-                  },
-                  {
-                    "type": "string",
-                    "const": "max"
-                  }
-                ]
+                "type": "string",
+                "const": "off"
               },
               {
                 "type": "string",
-                "const": "ultra"
+                "const": "minimal"
+              },
+              {
+                "type": "string",
+                "const": "low"
+              },
+              {
+                "type": "string",
+                "const": "medium"
+              },
+              {
+                "type": "string",
+                "const": "high"
+              },
+              {
+                "type": "string",
+                "const": "xhigh"
+              },
+              {
+                "type": "string",
+                "const": "max"
               }
             ]
           },

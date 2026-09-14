@@ -2439,7 +2439,6 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 				services,
 				sessionManager: options.sessionManager,
 				sessionStartEvent: options.sessionStartEvent,
-				ultraAvailable: options.ultraAvailable,
 				backgroundOptionalMcpStartup: !child,
 				...(child
 					? {

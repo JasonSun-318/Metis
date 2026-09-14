@@ -234,8 +234,8 @@ class PausableRuntime implements OpenedSessionRuntime {
 	): Promise<ClientResult<"session/setThinkingSelection">> {
 		return {
 			thinkingSelection: input.selection,
-			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
-			availableThinkingSelections: ["off", "high", "ultra"],
+			actualThinkingLevel: input.selection,
+			availableThinkingSelections: ["off", "high", "max"],
 		};
 	}
 

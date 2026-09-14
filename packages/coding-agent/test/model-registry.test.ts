@@ -249,8 +249,8 @@ describe("ModelRegistry", () => {
 
 			const model = registry.find("openrouter", "fake-provider/fake-model");
 			expect(model).toBeDefined();
-			expect(model?.api).toBe("openai-completions");
-			expect(model?.baseUrl).toBe("https://openrouter.ai/api/v1");
+			expect(model?.api).toBe("anthropic-messages");
+			expect(model?.baseUrl).toBe("https://openrouter.ai/api");
 		});
 
 		test("non-built-in provider custom models still require baseUrl", () => {
@@ -647,6 +647,125 @@ describe("ModelRegistry", () => {
 			const anthropicModels = getModelsForProvider(registry, "anthropic");
 			expect(anthropicModels.some((m) => m.id === "claude-custom")).toBe(false);
 			expect(anthropicModels.some((m) => m.id.includes("claude"))).toBe(true);
+		});
+	});
+
+	describe("custom model reasoningMode", () => {
+		test("auto inherits catalog reasoning on exact id and api match", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/backend-api",
+					apiKey: "test-key",
+					api: "openai-codex-responses",
+					models: [{ id: "gpt-5.5", reasoningMode: "auto" }],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "gpt-5.5");
+			expect(model?.reasoning).toBe(true);
+			expect(model?.thinkingLevelMap).toEqual({ xhigh: "xhigh", minimal: "low" });
+			expect(model && getSupportedThinkingLevels(model)).toEqual([
+				"off",
+				"minimal",
+				"low",
+				"medium",
+				"high",
+				"xhigh",
+			]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "gpt-5.5")).toBe("catalog");
+		});
+
+		test("auto rejects catalog entries whose api differs", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [{ id: "gpt-5.5", reasoningMode: "auto" }],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "gpt-5.5");
+			expect(model?.reasoning).toBe(false);
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "gpt-5.5")).toBe("unrecognized");
+		});
+
+		test("auto marks unknown model ids as unrecognized", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [{ id: "not-in-catalog", reasoningMode: "auto" }],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "not-in-catalog");
+			expect(model?.reasoning).toBe(false);
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "not-in-catalog")).toBe("unrecognized");
+		});
+
+		test("generic enables the common thinking levels", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [{ id: "any-model", reasoningMode: "generic" }],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "any-model");
+			expect(model?.reasoning).toBe(true);
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "any-model")).toBe("generic");
+		});
+
+		test("off disables reasoning", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [{ id: "gpt-5.5", reasoningMode: "off" }],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "gpt-5.5");
+			expect(model?.reasoning).toBe(false);
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "gpt-5.5")).toBe("off");
+		});
+
+		test("hand-edited reasoning and thinkingLevelMap without reasoningMode stay authoritative", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [
+						{
+							id: "gpt-5.5",
+							reasoning: true,
+							thinkingLevelMap: { minimal: null, xhigh: "xhigh", max: "max" },
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "gpt-5.5");
+			expect(model?.reasoning).toBe(true);
+			expect(model?.thinkingLevelMap).toEqual({ minimal: null, xhigh: "xhigh", max: "max" });
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "gpt-5.5")).toBeUndefined();
 		});
 	});
 

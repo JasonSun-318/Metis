@@ -6,6 +6,7 @@ import {
 	clearMemoryHealth,
 	embedTexts,
 	FileAuthStorageBackend,
+	getSupportedThinkingLevels,
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	type ModelRegistry,
@@ -60,6 +61,23 @@ function configuredModelIds(config: ModelsConfigDocument): Map<string, Set<strin
 	return result;
 }
 
+type SavedReasoningMode = "auto" | "off" | "generic";
+
+function configuredModelReasoningModes(config: ModelsConfigDocument): Map<string, Map<string, SavedReasoningMode>> {
+	const result = new Map<string, Map<string, SavedReasoningMode>>();
+	for (const [provider, raw] of Object.entries(config.providers)) {
+		const models = Array.isArray(raw.models) ? raw.models : [];
+		const modes = new Map<string, SavedReasoningMode>();
+		for (const model of models) {
+			if (!isRecord(model) || typeof model.id !== "string") continue;
+			const mode = model.reasoningMode;
+			if (mode === "auto" || mode === "off" || mode === "generic") modes.set(model.id, mode);
+		}
+		result.set(provider, modes);
+	}
+	return result;
+}
+
 function normalizeBaseUrl(value: string | null): string | undefined {
 	if (value === null) return undefined;
 	const url = new URL(value);
@@ -108,6 +126,7 @@ export class ModelSettingsService {
 			readError = error instanceof Error ? error.message : String(error);
 		}
 		const customIds = configuredModelIds(config);
+		const customReasoningModes = configuredModelReasoningModes(config);
 		const grouped = new Map<string, ReturnType<ModelRegistry["getAll"]>>();
 		for (const model of this.modelRegistry.getAll()) {
 			const models = grouped.get(model.provider) ?? [];
@@ -144,16 +163,24 @@ export class ModelSettingsService {
 					...(status.label ? { label: status.label } : {}),
 				},
 				models: models
-					.map((model) => ({
-						provider,
-						modelId: model.id,
-						name: model.name,
-						contextWindow: Math.max(1, Math.trunc(model.contextWindow)),
-						maxOutputTokens: Math.max(1, Math.trunc(model.maxTokens)),
-						reasoning: model.reasoning,
-						imageInput: model.input.includes("image"),
-						custom: configuredIds.has(model.id),
-					}))
+					.map((model) => {
+						const isCustom = configuredIds.has(model.id);
+						return {
+							provider,
+							modelId: model.id,
+							name: model.name,
+							contextWindow: Math.max(1, Math.trunc(model.contextWindow)),
+							maxOutputTokens: Math.max(1, Math.trunc(model.maxTokens)),
+							reasoning: model.reasoning,
+							thinkingLevels: getSupportedThinkingLevels(model),
+							reasoningMode: isCustom ? (customReasoningModes.get(provider)?.get(model.id) ?? null) : null,
+							reasoningSource: isCustom
+								? (this.modelRegistry.getCustomModelReasoningSource(provider, model.id) ?? null)
+								: null,
+							imageInput: model.input.includes("image"),
+							custom: isCustom,
+						};
+					})
 					.sort((left, right) => left.name.localeCompare(right.name) || left.modelId.localeCompare(right.modelId)),
 			};
 		});
@@ -308,7 +335,7 @@ export class ModelSettingsService {
 						provider.models = mutation.models.map((model) => ({
 							id: model.modelId,
 							name: model.name,
-							reasoning: model.reasoning,
+							reasoningMode: model.reasoningMode,
 							input: model.imageInput ? ["text", "image"] : ["text"],
 							contextWindow: model.contextWindow,
 							maxTokens: model.maxOutputTokens,

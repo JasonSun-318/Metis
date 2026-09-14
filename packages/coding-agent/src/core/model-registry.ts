@@ -26,6 +26,7 @@ import { getAgentDir } from "../config.ts";
 import { stripJsonComments } from "../utils/json.ts";
 import { normalizePath } from "../utils/paths.ts";
 import type { AuthStatus, AuthStorage } from "./auth-storage.ts";
+import { type CustomModelReasoningSource, resolveCustomModelReasoning } from "./custom-model-reasoning.ts";
 import { BUILT_IN_PROVIDER_DISPLAY_NAMES } from "./provider-display-names.ts";
 import {
 	clearConfigValueCache,
@@ -186,6 +187,7 @@ const ModelDefinitionSchema = Type.Object({
 	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
 	reasoning: Type.Optional(Type.Boolean()),
 	thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
+	reasoningMode: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("off"), Type.Literal("generic")])),
 	input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
 	cost: Type.Optional(ModelCostSchema),
 	contextWindow: Type.Optional(Type.Number()),
@@ -374,6 +376,7 @@ export class ModelRegistry {
 	private registeredProviders: Map<string, ProviderConfigInput> = new Map();
 	private extensionProviders: Map<string, ProviderConfigInput> = new Map();
 	private providerStreams: Map<Api, ProviderConfigInput["streamSimple"]> = new Map();
+	private customReasoningSources: Map<string, CustomModelReasoningSource> = new Map();
 	private loadError: string | undefined = undefined;
 	readonly authStorage: AuthStorage;
 	private modelsJsonPath: string | undefined;
@@ -614,6 +617,10 @@ export class ModelRegistry {
 	private parseModels(config: ModelsConfig): Model<Api>[] {
 		const models: Model<Api>[] = [];
 		const builtInProviders = new Set<string>(getProviders());
+		this.customReasoningSources.clear();
+		const reasoningCatalog = getProviders().flatMap(
+			(provider) => getModels(provider as KnownProvider) as Model<Api>[],
+		);
 
 		// Cache built-in defaults (api, baseUrl) per provider, extracted from first model.
 		const builtInDefaultsCache = new Map<string, { api: string; baseUrl: string }>();
@@ -643,6 +650,22 @@ export class ModelRegistry {
 				const compat = mergeCompat(providerConfig.compat, modelDef.compat);
 				this.storeModelHeaders(providerName, modelDef.id, modelDef.headers);
 
+				let reasoning = modelDef.reasoning ?? false;
+				let thinkingLevelMap =
+					modelDef.thinkingLevelMap ??
+					(modelDef.reasoning && !builtInProviders.has(providerName) ? { minimal: null } : undefined);
+				if (modelDef.reasoningMode !== undefined) {
+					const resolved = resolveCustomModelReasoning({
+						mode: modelDef.reasoningMode,
+						modelId: modelDef.id,
+						api: api as Api,
+						catalog: reasoningCatalog,
+					});
+					reasoning = resolved.reasoning;
+					thinkingLevelMap = resolved.thinkingLevelMap;
+					this.customReasoningSources.set(`${providerName}\0${modelDef.id}`, resolved.source);
+				}
+
 				const defaultCost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 				models.push({
 					id: modelDef.id,
@@ -650,10 +673,8 @@ export class ModelRegistry {
 					api: api as Api,
 					provider: providerName,
 					baseUrl,
-					reasoning: modelDef.reasoning ?? false,
-					thinkingLevelMap:
-						modelDef.thinkingLevelMap ??
-						(modelDef.reasoning && !builtInProviders.has(providerName) ? { minimal: null } : undefined),
+					reasoning,
+					thinkingLevelMap,
 					input: (modelDef.input ?? ["text"]) as ("text" | "image")[],
 					cost: modelDef.cost ?? defaultCost,
 					contextWindow: modelDef.contextWindow ?? 128000,
@@ -673,6 +694,14 @@ export class ModelRegistry {
 	 */
 	getAll(): Model<Api>[] {
 		return this.models;
+	}
+
+	/**
+	 * Resolved reasoning source for a custom model saved with reasoningMode.
+	 * Returns undefined for built-in models and hand-edited reasoning configs.
+	 */
+	getCustomModelReasoningSource(provider: string, modelId: string): CustomModelReasoningSource | undefined {
+		return this.customReasoningSources.get(`${provider}\0${modelId}`);
 	}
 
 	/**

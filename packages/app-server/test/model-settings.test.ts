@@ -68,7 +68,7 @@ describe("ModelSettingsService", () => {
 					name: "Test Model",
 					contextWindow: 32_000,
 					maxOutputTokens: 4_096,
-					reasoning: false,
+					reasoningMode: "off",
 					imageInput: true,
 				},
 			],
@@ -344,7 +344,7 @@ describe("ModelSettingsService", () => {
 					name: "Claude Model",
 					contextWindow: 200_000,
 					maxOutputTokens: 64_000,
-					reasoning: true,
+					reasoningMode: "generic",
 					imageInput: true,
 				},
 			],
@@ -413,6 +413,93 @@ describe("ModelSettingsService", () => {
 		expect(authStorage.has("openai")).toBe(false);
 	});
 
+	it("resolves custom model reasoning modes through the generated catalog", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, join(agentDir, "models.json")),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+
+		const saved = await service.update({
+			type: "save_provider",
+			provider: "codex-proxy",
+			name: "Codex Proxy",
+			baseUrl: "https://proxy.example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "zai-org/GLM-5.3-Fast",
+					name: "GLM 5.3 Fast",
+					contextWindow: 128_000,
+					maxOutputTokens: 64_000,
+					reasoningMode: "auto",
+					imageInput: true,
+				},
+				{
+					modelId: "not-in-catalog",
+					name: "Mystery",
+					contextWindow: 32_000,
+					maxOutputTokens: 4_096,
+					reasoningMode: "auto",
+					imageInput: false,
+				},
+				{
+					modelId: "generic-model",
+					name: "Generic",
+					contextWindow: 32_000,
+					maxOutputTokens: 4_096,
+					reasoningMode: "generic",
+					imageInput: false,
+				},
+				{
+					modelId: "off-model",
+					name: "Off",
+					contextWindow: 32_000,
+					maxOutputTokens: 4_096,
+					reasoningMode: "off",
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "proxy-test-key" },
+		});
+
+		const provider = saved.providers.find((entry) => entry.provider === "codex-proxy");
+		const byId = new Map(provider?.models.map((model) => [model.modelId, model]));
+		expect(byId.get("zai-org/GLM-5.3-Fast")).toMatchObject({
+			reasoning: true,
+			thinkingLevels: ["off", "low", "high", "max"],
+			reasoningMode: "auto",
+			reasoningSource: "catalog",
+		});
+		expect(byId.get("not-in-catalog")).toMatchObject({
+			reasoning: false,
+			thinkingLevels: ["off"],
+			reasoningMode: "auto",
+			reasoningSource: "unrecognized",
+		});
+		expect(byId.get("generic-model")).toMatchObject({
+			reasoning: true,
+			thinkingLevels: ["off", "low", "medium", "high"],
+			reasoningMode: "generic",
+			reasoningSource: "generic",
+		});
+		expect(byId.get("off-model")).toMatchObject({
+			reasoning: false,
+			thinkingLevels: ["off"],
+			reasoningMode: "off",
+			reasoningSource: "off",
+		});
+
+		const persisted = JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8"));
+		const savedModels = persisted.providers["codex-proxy"].models;
+		const savedModel = savedModels.find((model: { id: string }) => model.id === "zai-org/GLM-5.3-Fast");
+		expect(savedModel).toMatchObject({ reasoningMode: "auto" });
+		expect(savedModel).not.toHaveProperty("reasoning");
+		expect(savedModel).not.toHaveProperty("thinkingLevelMap");
+	});
+
 	it("rejects invalid custom provider URLs without touching disk", async () => {
 		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
 		const service = new ModelSettingsService({
@@ -435,7 +522,7 @@ describe("ModelSettingsService", () => {
 						name: "Test Model",
 						contextWindow: 32_000,
 						maxOutputTokens: 4_096,
-						reasoning: false,
+						reasoningMode: "off",
 						imageInput: false,
 					},
 				],

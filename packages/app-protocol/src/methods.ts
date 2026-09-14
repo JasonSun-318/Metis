@@ -31,6 +31,7 @@ import {
 	CollaborationModeSchema,
 	ConnectionEventsParamsSchema,
 	CustomAgentTypeViewSchema,
+	CustomModelReasoningModeSchema,
 	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
 	HooksListViewSchema,
@@ -760,7 +761,7 @@ const EditableModelInputSchema = StrictObject({
 	name: NameSchema,
 	contextWindow: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
 	maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
-	reasoning: Type.Boolean(),
+	reasoningMode: CustomModelReasoningModeSchema,
 	imageInput: Type.Boolean(),
 });
 export const CredentialMutationSchema = Type.Union([

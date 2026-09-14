@@ -495,13 +495,12 @@
 			"jsonrpc": "2.0",
 			"id": "client-thinking",
 			"result": {
-				"thinkingSelection": "ultra",
+				"thinkingSelection": "max",
 				"actualThinkingLevel": "max",
 				"availableThinkingSelections": [
 					"off",
 					"high",
-					"max",
-					"ultra"
+					"max"
 				]
 			}
 		}
@@ -1105,8 +1104,7 @@
 					"thinkingSelection": "off",
 					"actualThinkingLevel": "off",
 					"availableThinkingSelections": [
-						"off",
-						"ultra"
+						"off"
 					],
 					"agents": [],
 					"serverEpoch": "33333333-3333-4333-8333-333333333333",

@@ -184,8 +184,8 @@ class FakeRuntime implements OpenedSessionRuntime {
 	): Promise<ClientResult<"session/setThinkingSelection">> {
 		return {
 			thinkingSelection: input.selection,
-			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
-			availableThinkingSelections: ["off", "high", "ultra"],
+			actualThinkingLevel: input.selection,
+			availableThinkingSelections: ["off", "high", "max"],
 		};
 	}
 
@@ -269,7 +269,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			goal: null,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
-			availableThinkingSelections: ["off", "high", "ultra"],
+			availableThinkingSelections: ["off", "high", "max"],
 			permissionPreset: "ask",
 			effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
 			constrainedByParent: false,

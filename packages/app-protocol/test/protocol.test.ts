@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Compile } from "typebox/compile";
 import { describe, expect, it } from "vitest";
 import {
 	assertEnvelopeByteLimit,
 	browserActionElementIds,
 	ClientRequestMethods,
+	CustomModelReasoningModeSchema,
 	createRpcError,
 	findBrowserStateElement,
 	formatBrowserStateNode,
@@ -28,6 +30,7 @@ import {
 	RPC_ERROR_CODES,
 	ServerNotificationMethods,
 	ServerRequestMethods,
+	ThinkingSelectionSchema,
 	validateClientRequest,
 	validateHostRequest,
 	validateResponseFor,
@@ -202,6 +205,9 @@ const scheduleCases = [
 							contextWindow: 200_000,
 							maxOutputTokens: 32_000,
 							reasoning: true,
+							thinkingLevels: ["off", "minimal", "low", "medium", "high"],
+							reasoningMode: null,
+							reasoningSource: null,
 							imageInput: true,
 							custom: false,
 						},
@@ -775,6 +781,23 @@ const scheduleEvents = [
 	},
 	{ type: "schedule/refreshed" },
 ] as const;
+
+describe("thinking selection schema", () => {
+	it("rejects the removed Ultra thinking selection", () => {
+		const validate = Compile(ThinkingSelectionSchema);
+		expect(validate.Check("max")).toBe(true);
+		expect(validate.Check("ultra")).toBe(false);
+	});
+
+	it("accepts only the three custom model reasoning modes", () => {
+		const validate = Compile(CustomModelReasoningModeSchema);
+		expect(validate.Check("auto")).toBe(true);
+		expect(validate.Check("off")).toBe(true);
+		expect(validate.Check("generic")).toBe(true);
+		expect(validate.Check("reasoning")).toBe(false);
+		expect(validate.Check("ultra")).toBe(false);
+	});
+});
 
 describe("golden protocol fixtures", () => {
 	it("covers and validates every client and host request method", () => {

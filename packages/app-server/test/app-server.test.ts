@@ -292,8 +292,8 @@ class FakeRuntime implements OpenedSessionRuntime {
 	): Promise<ClientResult<"session/setThinkingSelection">> {
 		return {
 			thinkingSelection: input.selection,
-			actualThinkingLevel: input.selection === "ultra" ? "max" : input.selection,
-			availableThinkingSelections: ["off", "high", "ultra"],
+			actualThinkingLevel: input.selection,
+			availableThinkingSelections: ["off", "high", "max"],
 		};
 	}
 
@@ -365,7 +365,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 			goal: this.goal,
 			thinkingSelection: "high",
 			actualThinkingLevel: "high",
-			availableThinkingSelections: ["off", "high", "ultra"],
+			availableThinkingSelections: ["off", "high", "max"],
 			agents: [],
 			serverEpoch,
 			cursor: currentCursor(),

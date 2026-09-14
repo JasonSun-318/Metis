@@ -679,7 +679,18 @@ export const InteractionViewSchema = Type.Union([
 	AskUserInteractionViewSchema,
 ]);
 
-export const ThinkingSelectionSchema = Type.Union([ActualThinkingLevelSchema, Type.Literal("ultra")]);
+export const ThinkingSelectionSchema = ActualThinkingLevelSchema;
+export const CustomModelReasoningModeSchema = Type.Union([
+	Type.Literal("auto"),
+	Type.Literal("off"),
+	Type.Literal("generic"),
+]);
+export const CustomModelReasoningSourceSchema = Type.Union([
+	Type.Literal("catalog"),
+	Type.Literal("generic"),
+	Type.Literal("off"),
+	Type.Literal("unrecognized"),
+]);
 export const ModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
 export const ModelOptionViewSchema = StrictObject({
 	provider: NameSchema,
@@ -693,6 +704,9 @@ export const ModelSettingsModelViewSchema = StrictObject({
 	contextWindow: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
 	maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
 	reasoning: Type.Boolean(),
+	thinkingLevels: Type.Array(ActualThinkingLevelSchema, { maxItems: 7, uniqueItems: true }),
+	reasoningMode: Type.Union([CustomModelReasoningModeSchema, Type.Null()]),
+	reasoningSource: Type.Union([CustomModelReasoningSourceSchema, Type.Null()]),
 	imageInput: Type.Boolean(),
 	custom: Type.Boolean(),
 });
