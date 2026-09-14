@@ -1045,7 +1045,6 @@ export type ReadonlySessionManager = Pick<
 	| "getCwdOrigin"
 	| "getPermissionPreset"
 	| "getPermissionSettings"
-	| "getUltraSelected"
 	| "getAdditionalDirectories"
 	| "getWorkspaceRoots"
 	| "getDurableJournalSnapshot"
@@ -1087,7 +1086,6 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionPreset: () => manager.getPermissionPreset(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
-		getUltraSelected: () => manager.getUltraSelected(),
 		getAdditionalDirectories: () => manager.getAdditionalDirectories(),
 		getWorkspaceRoots: () => manager.getWorkspaceRoots(),
 		getDurableJournalSnapshot: () => manager.getDurableJournalSnapshot(),
@@ -1357,9 +1355,6 @@ function validateSessionRecordVersion(type: string, version: number, filePath: s
 	}
 	if (isAgentControlEntryType(type) && version < 13) {
 		corruptSession(filePath, lineNumber, "Agent control entries require a v13 session header");
-	}
-	if (type === "session_ultra_selection" && version < 13) {
-		corruptSession(filePath, lineNumber, "Ultra selection controls require a v13 session header");
 	}
 	if (isPlanControlEntryType(type) && version < 12) {
 		corruptSession(filePath, lineNumber, "Plan control entries require a v12 session header");
@@ -2548,7 +2543,6 @@ interface ManagedSessionState {
 	sessionId: string;
 	cwdOrigin: CwdOrigin;
 	permissionPreset: PermissionPreset;
-	ultraSelected: boolean;
 	additionalDirectories: string[];
 	sessionFile: string | undefined;
 	/** Canonical path pinned when a persisted session is opened. */
@@ -2574,14 +2568,6 @@ function reducePermissionPreset(entries: readonly FileEntry[]): PermissionPreset
 		if (isPermissionPreset(entry.permissionPreset)) preset = entry.permissionPreset;
 	}
 	return preset;
-}
-
-function reduceUltraSelected(entries: readonly FileEntry[]): boolean {
-	let selected = false;
-	for (const entry of entries.slice(1)) {
-		if (entry.type === "session_ultra_selection") selected = entry.selected;
-	}
-	return selected;
 }
 
 function reduceAdditionalDirectories(entries: readonly FileEntry[]): string[] {
@@ -2615,7 +2601,6 @@ function buildManagedSessionState(
 	const labelTimestampsById = new Map<string, string>();
 	let leafId: string | null = null;
 	const permissionPreset = reducePermissionPreset(rawFileEntries);
-	const ultraSelected = reduceUltraSelected(rawFileEntries);
 	const primaryRoot = canonicalizePathForCreation(header.cwd);
 	const additionalDirectories = reduceAdditionalDirectories(rawFileEntries).filter((path) => path !== primaryRoot);
 	for (const rawEntry of rawFileEntries.slice(1)) {
@@ -2639,7 +2624,6 @@ function buildManagedSessionState(
 		sessionId: header.id,
 		cwdOrigin: header.cwdOrigin ?? "user-selected",
 		permissionPreset,
-		ultraSelected,
 		additionalDirectories,
 		sessionFile,
 		storagePath,
@@ -2929,7 +2913,6 @@ export class SessionManager {
 	private cwdOrigin: CwdOrigin = "user-selected";
 	private permissionPreset: PermissionPreset = DEFAULT_PERMISSION_PRESET;
 	private permissionPresetListeners = new Set<(next: PermissionPreset, previous: PermissionPreset) => void>();
-	private ultraSelected = false;
 	private additionalDirectories: string[] = [];
 	private sessionFile: string | undefined;
 	private storagePath: string | undefined;
@@ -3074,7 +3057,6 @@ export class SessionManager {
 		this.sessionId = state.sessionId;
 		this.cwdOrigin = state.cwdOrigin;
 		this.permissionPreset = state.permissionPreset;
-		this.ultraSelected = state.ultraSelected;
 		this.additionalDirectories = state.additionalDirectories.filter((path) => path !== this.primaryWorkspaceRoot);
 		this.sessionFile = state.sessionFile;
 		this.storagePath = state.storagePath;
@@ -3101,7 +3083,6 @@ export class SessionManager {
 			sessionId: this.sessionId,
 			cwdOrigin: this.cwdOrigin,
 			permissionPreset: this.permissionPreset,
-			ultraSelected: this.ultraSelected,
 			additionalDirectories: this.additionalDirectories,
 			sessionFile: this.sessionFile,
 			storagePath: this.storagePath,
@@ -3479,14 +3460,6 @@ export class SessionManager {
 		return this.getPlanState().plans.find((plan) => plan.entryId === current.entryId)!;
 	}
 
-	/** Persist whether the user selected the virtual Ultra thinking level. */
-	setUltraSelected(selected: boolean): string {
-		if (typeof selected !== "boolean") throw new TypeError("selected must be a boolean");
-		const id = this._appendSessionControl({ type: "session_ultra_selection", selected }).id;
-		this.ultraSelected = selected;
-		return id;
-	}
-
 	/** Raw journal-order snapshot for runtime reduction; callers cannot mutate manager state. */
 	getDurableJournalSnapshot(): readonly FileEntry[] {
 		this._assertOpen();
@@ -3763,11 +3736,6 @@ export class SessionManager {
 	/** Effective axes derived from the persisted preset. Parent ceilings are applied at runtime. */
 	getPermissionSettings(): PermissionSettings {
 		return settingsForPreset(this.permissionPreset);
-	}
-
-	/** Whether the user selected the virtual Ultra thinking level. */
-	getUltraSelected(): boolean {
-		return this.ultraSelected;
 	}
 
 	/**

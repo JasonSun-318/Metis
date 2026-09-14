@@ -32,7 +32,7 @@ Sessions have a version field in the header:
 - **Version 10**: Adds hidden scheduled-session ownership markers
 - **Version 11**: Reserved durable child mailbox delivery controls
 - **Version 12**: Adds durable Plan collaboration controls
-- **Version 13**: Adds canonical Agent headers, tasks, archive state, mailbox delivery, and Ultra selection
+- **Version 13**: Adds canonical Agent headers, tasks, archive state, and mailbox delivery
 
 Existing sessions are automatically migrated to the current version (v13) when loaded. A journal containing a newer control family under an older header is rejected rather than guessed.
 
@@ -262,7 +262,7 @@ A first-class child adds an immutable ownership marker to its normal session hea
 
 The immutable header records ownership and the runtime-resolved capability snapshot. Each initial or follow-up task has an immutable `taskId`; append-only `agent_task` records move it through queued, running, and terminal states. `agent_message` audits steering, and `agent_archived` records reversible terminal-history visibility.
 
-Ultra selection is stored independently as `session_ultra_selection` and never controls Agent availability. Child permission requests go directly to the active owning UI and remain audited in the child session. Full child transcripts and configuration never enter the parent journal.
+Child permission requests go directly to the active owning UI and remain audited in the child session. Full child transcripts and configuration never enter the parent journal.
 
 ### Agent mailbox controls (v13)
 

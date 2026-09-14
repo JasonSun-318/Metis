@@ -509,8 +509,7 @@ function buildSessionOptions(
 			// Allow "--model <pattern>:<thinking>" as a shorthand.
 			// Explicit --thinking still takes precedence (applied later).
 			if (!parsed.thinking && resolved.thinkingLevel) {
-				if (resolved.thinkingLevel === "ultra") options.thinkingSelection = "ultra";
-				else options.thinkingLevel = resolved.thinkingLevel;
+				options.thinkingLevel = resolved.thinkingLevel;
 				cliThinkingFromModel = true;
 			}
 		}
@@ -527,23 +526,20 @@ function buildSessionOptions(
 			options.model = savedInScope.model;
 			// Use thinking level from scoped model config if explicitly set
 			if (!parsed.thinking && savedInScope.thinkingLevel) {
-				if (savedInScope.thinkingLevel === "ultra") options.thinkingSelection = "ultra";
-				else options.thinkingLevel = savedInScope.thinkingLevel;
+				options.thinkingLevel = savedInScope.thinkingLevel;
 			}
 		} else {
 			options.model = scopedModels[0].model;
 			// Use thinking level from first scoped model if explicitly set
 			if (!parsed.thinking && scopedModels[0].thinkingLevel) {
-				if (scopedModels[0].thinkingLevel === "ultra") options.thinkingSelection = "ultra";
-				else options.thinkingLevel = scopedModels[0].thinkingLevel;
+				options.thinkingLevel = scopedModels[0].thinkingLevel;
 			}
 		}
 	}
 
 	// Thinking level from CLI (takes precedence over scoped model thinking levels set above)
 	if (parsed.thinking) {
-		if (parsed.thinking === "ultra") options.thinkingSelection = "ultra";
-		else options.thinkingLevel = parsed.thinking;
+		options.thinkingLevel = parsed.thinking;
 	}
 
 	// Scoped models for Ctrl+P cycling
@@ -810,7 +806,6 @@ export async function main(args: string[], options?: MainOptions) {
 			sessionManager,
 			sessionStartEvent,
 			projectTrustContext,
-			ultraAvailable,
 			childConfig,
 			permissionSettingsCeiling,
 		}) => {
@@ -948,7 +943,6 @@ export async function main(args: string[], options?: MainOptions) {
 						: sessionOptions.excludeTools,
 					noTools: childConfig ? undefined : sessionOptions.noTools,
 					customTools: childConfig ? [] : sessionOptions.customTools,
-					ultraAvailable,
 					...(childConfig
 						? {
 								additionalSystemPrompt: buildChildSystemPrompt(childConfig),
@@ -971,8 +965,7 @@ export async function main(args: string[], options?: MainOptions) {
 					}
 					const cliThinkingOverride = parsed.thinking !== undefined || cliThinkingFromModel;
 					if (created.session.model && cliThinkingOverride) {
-						if (sessionOptions.thinkingSelection === "ultra") created.session.setThinkingSelection("ultra");
-						else created.session.setThinkingLevel(created.session.thinkingLevel);
+						created.session.setThinkingLevel(created.session.thinkingLevel);
 					}
 
 					return {

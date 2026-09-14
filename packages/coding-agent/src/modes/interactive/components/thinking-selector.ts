@@ -1,5 +1,5 @@
+import type { ThinkingLevel } from "@metis/agent-core";
 import { Container, type SelectItem, SelectList, type SelectListLayoutOptions } from "@metis/tui";
-import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
 import { getSelectListTheme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 
@@ -8,7 +8,7 @@ const THINKING_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	maxPrimaryColumnWidth: 32,
 };
 
-const LEVEL_DESCRIPTIONS: Record<ThinkingSelection, string> = {
+const LEVEL_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
 	low: "Light reasoning (~2k tokens)",
@@ -16,7 +16,6 @@ const LEVEL_DESCRIPTIONS: Record<ThinkingSelection, string> = {
 	high: "Deep reasoning (~16k tokens)",
 	xhigh: "Extra-high reasoning (~32k tokens)",
 	max: "Maximum reasoning",
-	ultra: "Highest supported reasoning level",
 };
 
 /**
@@ -26,9 +25,9 @@ export class ThinkingSelectorComponent extends Container {
 	private selectList: SelectList;
 
 	constructor(
-		currentLevel: ThinkingSelection,
-		availableLevels: ThinkingSelection[],
-		onSelect: (level: ThinkingSelection) => void,
+		currentLevel: ThinkingLevel,
+		availableLevels: ThinkingLevel[],
+		onSelect: (level: ThinkingLevel) => void,
 		onCancel: () => void,
 	) {
 		super();
@@ -57,7 +56,7 @@ export class ThinkingSelectorComponent extends Container {
 		}
 
 		this.selectList.onSelect = (item) => {
-			onSelect(item.value as ThinkingSelection);
+			onSelect(item.value as ThinkingLevel);
 		};
 
 		this.selectList.onCancel = () => {

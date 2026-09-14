@@ -36,11 +36,6 @@ export interface SessionDirectoryRemovedEntry extends SessionControlEntryBase {
 	readonly path: string;
 }
 
-export interface SessionUltraSelectionEntry extends SessionControlEntryBase {
-	readonly type: "session_ultra_selection";
-	readonly selected: boolean;
-}
-
 export type SessionDirectoryControlEntry = SessionDirectoryAddedEntry | SessionDirectoryRemovedEntry;
 
 export type AgentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
@@ -115,7 +110,6 @@ export interface SessionPlanStatusEntry extends SessionControlEntryBase {
 export type SessionControlEntry =
 	| SessionPermissionPresetEntry
 	| SessionPermissionAuditEntry
-	| SessionUltraSelectionEntry
 	| SessionDirectoryControlEntry
 	| SessionCollaborationModeEntry
 	| SessionPlanProposalEntry
@@ -318,7 +312,6 @@ export function isSessionControlEntryType(type: unknown): type is SessionControl
 	return (
 		type === "session_permission_preset" ||
 		type === "session_permission_audit" ||
-		type === "session_ultra_selection" ||
 		isSessionDirectoryControlEntryType(type) ||
 		isPlanControlEntryType(type) ||
 		isAgentControlEntryType(type)
@@ -357,12 +350,6 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			decision,
 			reason: requiredString(fields, "reason"),
 		};
-	}
-	if (type === "session_ultra_selection") {
-		assertOnlyFields(fields, [...baseFields, "selected"]);
-		const selected = fields.get("selected");
-		if (typeof selected !== "boolean") invalid("Session control entry.selected must be a boolean");
-		return { type, ...parseBase(fields), selected };
 	}
 	if (isSessionDirectoryControlEntryType(type)) {
 		assertOnlyFields(fields, [...baseFields, "path"]);

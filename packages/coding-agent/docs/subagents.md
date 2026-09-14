@@ -1,6 +1,6 @@
 # Agents
 
-Persisted primary Code sessions have a first-class Agent system at every thinking level. Ultra is only a thinking selection: it resolves to the selected model's highest supported real reasoning level and does not enable, disable, or otherwise change Agent tools.
+Persisted primary Code sessions have a first-class Agent system at every thinking level.
 
 Chat, scheduled, in-memory, raw `AgentSession`, and child sessions that cannot delegate do not receive Agent control tools. A delegating depth-one child receives the same controls for its own descendants. The maximum depth is two.
 

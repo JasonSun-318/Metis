@@ -32,6 +32,12 @@ export {
 } from "./agent-session-services.ts";
 export { type BashExecutorOptions, type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 export type { CompactionResult } from "./compaction/index.ts";
+export {
+	type CustomModelReasoningMode,
+	type CustomModelReasoningSource,
+	type ResolvedCustomModelReasoning,
+	resolveCustomModelReasoning,
+} from "./custom-model-reasoning.ts";
 export { createEventBus, type EventBus, type EventBusController } from "./event-bus.ts";
 export { areExperimentalFeaturesEnabled } from "./experimental.ts";
 // Extensions system
@@ -145,6 +151,7 @@ export type {
 	TrashModeProjectDataInput,
 	TrashModeProjectDataResult,
 } from "./mode-project-delete.ts";
+export { getHighestSupportedThinkingLevel, getLowestSupportedThinkingLevel } from "./model-resolver.ts";
 export {
 	createPermissionAuditEvent,
 	type PermissionAuditEvent,
@@ -381,13 +388,6 @@ export {
 	type WaitAgentsResult,
 } from "./subagents/types.ts";
 export { createSubmitPlanToolDefinition, type SubmitPlanInput, SubmitPlanParams } from "./submit-plan.ts";
-export {
-	canUseUltra,
-	getHighestSupportedThinkingLevel,
-	getLowestSupportedThinkingLevel,
-	isThinkingSelection,
-	type ThinkingSelection,
-} from "./thinking-selection.ts";
 export {
 	exactNetworkEndpoint,
 	permissionClaim,

@@ -184,7 +184,7 @@ export class FooterComponent implements Component {
 		// Add thinking level indicator if model supports reasoning
 		let rightSideWithoutProvider = modelName;
 		const thinkingLevel = this.session.getThinkingSelection?.() ?? state.thinkingLevel ?? "off";
-		if (state.model?.reasoning || thinkingLevel === "ultra") {
+		if (state.model?.reasoning) {
 			rightSideWithoutProvider =
 				thinkingLevel === "off" ? `${modelName} • thinking off` : `${modelName} • ${thinkingLevel}`;
 		}

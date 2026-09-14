@@ -23,7 +23,6 @@ import { createSessionId } from "./session-id.ts";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.ts";
 import { removeOwnedManagedWorkspace, resolveNewSessionWorkspace } from "./session-workspace.ts";
 import { SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
-import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import { time } from "./timings.ts";
 import {
 	createBashTool,
@@ -70,10 +69,10 @@ export interface CreateAgentSessionOptions {
 	model?: Model<any>;
 	/** Thinking level. Default: from settings, else 'medium' (clamped to model capabilities) */
 	thinkingLevel?: ThinkingLevel;
-	/** User-facing composite selection; Ultra requires a persisted primary runtime host. */
-	thinkingSelection?: ThinkingSelection;
+	/** Initial thinking selection; identical to thinkingLevel. */
+	thinkingSelection?: ThinkingLevel;
 	/** Models available for cycling (Ctrl+P in interactive mode) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
 	/**
 	 * Optional default tool suppression mode when no explicit allowlist is provided.
@@ -102,8 +101,6 @@ export interface CreateAgentSessionOptions {
 
 	/** Session manager. Default: SessionManager.create(cwd) */
 	sessionManager?: SessionManager;
-	/** @internal Host-owned capability for a persisted primary runtime. */
-	ultraAvailable?: boolean;
 	/** @internal Host-owned prompt suffix for parent/child runtime profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
 	/** @internal Disable automatic memory context and dream writes for isolated runtimes. */
@@ -373,8 +370,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		const existingSession = sessionManager.buildSessionContext();
 		const hasExistingSession = existingSession.messages.length > 0;
 		const hasThinkingEntry = sessionManager.getBranch().some((entry) => entry.type === "thinking_level_change");
-		const savedThinkingSelection = settingsManager.getDefaultThinkingLevel();
-		const savedThinkingLevel = savedThinkingSelection === "ultra" ? undefined : savedThinkingSelection;
+		const savedThinkingLevel = settingsManager.getDefaultThinkingLevel();
 
 		let model = options.model;
 		let modelFallbackMessage: string | undefined;
@@ -408,37 +404,13 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			}
 		}
 
-		let thinkingLevel = options.thinkingLevel;
-		const unattendedUltra = options.unattendedExecution !== undefined && options.thinkingSelection === "ultra";
-		let thinkingSelection = unattendedUltra ? undefined : options.thinkingSelection;
-		if (
-			thinkingSelection === undefined &&
-			thinkingLevel === undefined &&
-			savedThinkingSelection === "ultra" &&
-			(!hasExistingSession || !hasThinkingEntry)
-		) {
-			const supportsSavedUltra = canUseUltra({
-				hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
-				persisted: sessionManager.isPersisted(),
-				mode: sessionManager.getMode(),
-				isAgent: sessionManager.getHeader()?.agent !== undefined,
-				model,
-			});
-			if (supportsSavedUltra) {
-				thinkingSelection = "ultra";
-			} else {
-				thinkingLevel = getHighestSupportedThinkingLevel(model);
-				const warning =
-					"Saved Ultra preference is unavailable in this host; using the model's highest normal thinking level.";
-				modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
-			}
-		}
+		let thinkingLevel = options.thinkingLevel ?? options.thinkingSelection;
 
 		// If session has data, restore thinking level from it
 		if (thinkingLevel === undefined && hasExistingSession) {
 			thinkingLevel = hasThinkingEntry
 				? (existingSession.thinkingLevel as ThinkingLevel)
-				: (savedThinkingLevel ?? thinkingLevel ?? DEFAULT_THINKING_LEVEL);
+				: (savedThinkingLevel ?? DEFAULT_THINKING_LEVEL);
 		}
 
 		// Fall back to settings default
@@ -446,38 +418,11 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			thinkingLevel = savedThinkingLevel ?? DEFAULT_THINKING_LEVEL;
 		}
 
-		if (unattendedUltra) {
-			thinkingLevel = getHighestSupportedThinkingLevel(model);
-			const warning =
-				"Ultra is unavailable for unattended execution; using the model's highest normal thinking level.";
-			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
-		} else if (thinkingSelection === "ultra") thinkingLevel = getHighestSupportedThinkingLevel(model);
-		else if (thinkingSelection !== undefined) thinkingLevel = thinkingSelection;
-
 		// Clamp to model capabilities
 		if (!model) {
 			thinkingLevel = "off";
 		} else {
 			thinkingLevel = clampThinkingLevel(model, thinkingLevel) as ThinkingLevel;
-		}
-
-		const ultraCapable = canUseUltra({
-			hostAllowsUltra: options.ultraAvailable === true && !options.unattendedExecution,
-			persisted: sessionManager.isPersisted(),
-			mode: sessionManager.getMode(),
-			isAgent: sessionManager.getHeader()?.agent !== undefined,
-			model,
-		});
-		if (sessionManager.getUltraSelected() && !ultraCapable) {
-			if (sessionManager.getHeader()?.agent) {
-				throw new Error("An agent session cannot restore Ultra");
-			}
-			sessionManager.setUltraSelected(false);
-			thinkingSelection = undefined;
-			thinkingLevel = getHighestSupportedThinkingLevel(model);
-			const warning =
-				"Saved Ultra is available only in persisted Code sessions; using the model's highest normal thinking level.";
-			modelFallbackMessage = modelFallbackMessage ? `${modelFallbackMessage}. ${warning}` : warning;
 		}
 
 		const defaultActiveToolNames = getDefaultToolNames({
@@ -628,7 +573,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			extensionRunnerRef,
 			sessionStartEvent: options.sessionStartEvent,
 			requestPermissionApproval: createActionPermissionRequester(options.onPermissionRequest),
-			ultraAvailable: options.ultraAvailable,
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
 			permissionSettingsCeiling: options.permissionSettingsCeiling,
@@ -637,7 +581,6 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			sandboxHealth: sandboxHealth.status,
 			sandboxHealthProbe: WorkspaceSandbox.health,
 		});
-		if (thinkingSelection === "ultra") session.setThinkingSelection("ultra");
 		completed = true;
 		return {
 			session,

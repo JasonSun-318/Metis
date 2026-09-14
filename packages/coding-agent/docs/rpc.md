@@ -17,7 +17,7 @@ Common options:
 - `--no-session`: Disable session persistence
 - `--session-dir <path>`: Custom session storage directory
 
-`set_thinking_level` accepts `"ultra"` only for persisted primary Code sessions. `get_state` continues to expose the actual provider thinking level; Agent creation and control happen through the six model tools described in [Agents](subagents.md).
+`set_thinking_level` accepts the selected model's native thinking levels. `get_state` exposes the actual provider thinking level; Agent creation and control happen through the six model tools described in [Agents](subagents.md).
 
 ## Protocol Overview
 
@@ -288,9 +288,9 @@ Set the reasoning/thinking level for models that support it.
 {"type": "set_thinking_level", "level": "high"}
 ```
 
-Selections: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"ultra"`
+Selections: `"off"`, `"minimal"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`
 
-`"xhigh"` and `"max"` are exposed only when supported by the selected model. `"ultra"` is exposed only for persisted primary Code runtime sessions and resolves to the model's highest real level without changing Agent capabilities.
+`"xhigh"` and `"max"` are exposed only when supported by the selected model.
 
 Response:
 ```json

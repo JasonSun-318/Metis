@@ -17,7 +17,6 @@ import {
 import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
-import type { ThinkingSelection } from "./thinking-selection.ts";
 import type { UnattendedExecutionProfile } from "./unattended-execution.ts";
 
 /**
@@ -66,8 +65,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	sessionStartEvent?: SessionStartEvent;
 	model?: Model<any>;
 	thinkingLevel?: ThinkingLevel;
-	thinkingSelection?: ThinkingSelection;
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
+	thinkingSelection?: ThinkingLevel;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	tools?: string[];
 	excludeTools?: CreateAgentSessionOptions["excludeTools"];
 	noTools?: CreateAgentSessionOptions["noTools"];
@@ -75,7 +74,6 @@ export interface CreateAgentSessionFromServicesOptions {
 	/** @internal Allow host UIs to render before optional MCP servers finish connecting. */
 	backgroundOptionalMcpStartup?: boolean;
 	onPermissionRequest?: CreateAgentSessionOptions["onPermissionRequest"];
-	ultraAvailable?: boolean;
 	additionalSystemPrompt?: string | (() => string | undefined);
 	includeAutoMemory?: boolean;
 	permissionSettingsCeiling?: CreateAgentSessionOptions["permissionSettingsCeiling"];
@@ -253,7 +251,6 @@ export async function createAgentSessionFromServices(
 		backgroundOptionalMcpStartup: options.backgroundOptionalMcpStartup,
 		mcpConfigurationCoordinator: options.services.mcpConfigurationCoordinator,
 		onPermissionRequest: options.onPermissionRequest,
-		ultraAvailable: options.ultraAvailable,
 		additionalSystemPrompt: options.additionalSystemPrompt,
 		includeAutoMemory: options.includeAutoMemory,
 		permissionSettingsCeiling: options.permissionSettingsCeiling,

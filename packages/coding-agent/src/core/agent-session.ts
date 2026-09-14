@@ -214,7 +214,6 @@ import {
 } from "./subagents/types.ts";
 import { createSubmitPlanToolDefinition } from "./submit-plan.ts";
 import { type BuildSystemPromptOptions, buildSystemPromptWithParts, type SystemPromptPart } from "./system-prompt.ts";
-import { canUseUltra, getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
 import {
 	assertToolPermissionDescriptor,
 	createToolIdentity,
@@ -252,9 +251,8 @@ export type AgentSessionEvent =
 	| { type: "thinking_level_changed"; level: ThinkingLevel }
 	| {
 			type: "thinking_selection_changed";
-			selection: ThinkingSelection;
+			selection: ThinkingLevel;
 			actualThinkingLevel: ThinkingLevel;
-			ultraSelected: boolean;
 	  }
 	| {
 			type: "compaction_end";
@@ -320,7 +318,7 @@ export interface AgentSessionConfig {
 	/** Metis agent directory used for global and project memory. */
 	agentDir?: string;
 	/** Models to cycle through with Ctrl+P (from --models flag) */
-	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
+	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 	/** Resource loader for extensions, skills, prompts, themes, context files, and system prompt */
 	resourceLoader: ResourceLoader;
 	/** SDK custom tools registered outside extensions */
@@ -350,8 +348,7 @@ export interface AgentSessionConfig {
 	sessionStartEvent?: SessionStartEvent;
 	/** Request a one-action approval from the active frontend. Missing UI fails closed. */
 	requestPermissionApproval?: RequestPermissionApproval;
-	/** Host capability: only persisted primary AgentSessionRuntime instances set this. */
-	ultraAvailable?: boolean;
+
 	/** Host-owned prompt suffix used for runtime coordination profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
 	/** Include automatic memory context and dream writes. Defaults to true. */
@@ -615,7 +612,7 @@ export class AgentSession {
 	private readonly _toolOutputDir: string;
 	private readonly _ephemeralToolOutputDir: string | undefined;
 
-	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>;
+	private _scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
 	// Event subscription state
 	private _unsubscribeAgent?: () => void;
@@ -733,7 +730,6 @@ export class AgentSession {
 	private readonly _sandboxHealthProbe?: () => Promise<WorkspaceSandboxHealthReport>;
 	private _sandboxHealthCheckedAt: number;
 	private _sandboxHealthRefresh?: Promise<WorkspaceSandboxHealthStatus>;
-	private readonly _ultraAvailable: boolean;
 	private readonly _includeAutoMemory: boolean;
 	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
 	private readonly _permissionSettingsCeiling?: () => NormalizedPermissionSettings;
@@ -806,13 +802,6 @@ export class AgentSession {
 				: undefined;
 		this._baseToolDefinitionsOverride = config.baseToolDefinitionsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
-		this._ultraAvailable = canUseUltra({
-			hostAllowsUltra: config.ultraAvailable === true,
-			persisted: this.sessionManager.isPersisted(),
-			mode: this.sessionManager.getMode(),
-			isAgent: this.sessionManager.getHeader()?.agent !== undefined,
-			model: this.model,
-		});
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
 		this._includeAutoMemory = config.includeAutoMemory !== false;
 		this._permissionSettingsCeiling = config.permissionSettingsCeiling;
@@ -821,9 +810,6 @@ export class AgentSession {
 		this._sandboxHealth = config.sandboxHealth ?? "healthy";
 		this._sandboxHealthProbe = config.sandboxHealthProbe;
 		this._sandboxHealthCheckedAt = Date.now();
-		if (this.sessionManager.getUltraSelected() && !this._ultraAvailable) {
-			throw new Error("Ultra sessions require AgentSessionRuntime");
-		}
 		this._interactiveBashBoundary = config.unattendedExecution
 			? undefined
 			: (config.interactiveBashBoundary ??
@@ -3036,12 +3022,12 @@ export class AgentSession {
 	}
 
 	/** Scoped models for cycling (from --models flag) */
-	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingSelection }> {
+	get scopedModels(): ReadonlyArray<{ model: Model<any>; thinkingLevel?: ThinkingLevel }> {
 		return this._scopedModels;
 	}
 
 	/** Update scoped models for cycling */
-	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingSelection }>): void {
+	setScopedModels(scopedModels: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>): void {
 		this._scopedModels = scopedModels;
 	}
 
@@ -4393,7 +4379,7 @@ export class AgentSession {
 
 		if (isChanging) {
 			this.sessionManager.appendThinkingLevelChange(effectiveLevel);
-			if (!this.sessionManager.getUltraSelected() && (this.supportsThinking() || effectiveLevel !== "off")) {
+			if (this.supportsThinking() || effectiveLevel !== "off") {
 				this.settingsManager.setDefaultThinkingLevel(effectiveLevel);
 			}
 			this._emit({ type: "thinking_level_changed", level: effectiveLevel });
@@ -4405,46 +4391,26 @@ export class AgentSession {
 		}
 	}
 
-	/** User-facing composite selection; provider requests continue to use thinkingLevel. */
-	getThinkingSelection(): ThinkingSelection {
-		return this.sessionManager.getUltraSelected() ? "ultra" : this.thinkingLevel;
+	/** Current thinking selection; identical to the effective thinking level. */
+	getThinkingSelection(): ThinkingLevel {
+		return this.thinkingLevel;
 	}
 
-	getAvailableThinkingSelections(): ThinkingSelection[] {
-		const selections: ThinkingSelection[] = this.getAvailableThinkingLevels();
-		if (this._ultraAvailable) selections.push("ultra");
-		return selections;
+	getAvailableThinkingSelections(): ThinkingLevel[] {
+		return this.getAvailableThinkingLevels();
 	}
 
-	setThinkingSelection(selection: ThinkingSelection): void {
-		if (selection !== "ultra") {
-			if (this.sessionManager.getUltraSelected()) this.sessionManager.setUltraSelected(false);
-			this.setThinkingLevel(selection);
-			this.settingsManager.setDefaultThinkingLevel(selection);
-			this._emit({
-				type: "thinking_selection_changed",
-				selection,
-				actualThinkingLevel: this.thinkingLevel,
-				ultraSelected: false,
-			});
-			return;
-		}
-		if (!this._ultraAvailable || !this.sessionManager.isPersisted() || this.sessionManager.getHeader()?.agent) {
-			throw new Error("Ultra requires a persisted primary Code AgentSessionRuntime");
-		}
-		if (!this.sessionManager.getUltraSelected()) this.sessionManager.setUltraSelected(true);
-		const actual = getHighestSupportedThinkingLevel(this.model);
-		this.setThinkingLevel(actual);
-		this.settingsManager.setDefaultThinkingLevel("ultra");
+	setThinkingSelection(selection: ThinkingLevel): void {
+		this.setThinkingLevel(selection);
+		this.settingsManager.setDefaultThinkingLevel(this.thinkingLevel);
 		this._emit({
 			type: "thinking_selection_changed",
-			selection: "ultra",
-			actualThinkingLevel: actual,
-			ultraSelected: true,
+			selection: this.thinkingLevel,
+			actualThinkingLevel: this.thinkingLevel,
 		});
 	}
 
-	cycleThinkingSelection(): ThinkingSelection | undefined {
+	cycleThinkingSelection(): ThinkingLevel | undefined {
 		const selections = this.getAvailableThinkingSelections();
 		if (selections.length === 0) return undefined;
 		const current = selections.indexOf(this.getThinkingSelection());

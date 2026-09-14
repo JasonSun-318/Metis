@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "@metis/agent-core";
 import type { Transport } from "@metis/ai";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, readFileSync } from "fs";
@@ -15,7 +16,6 @@ import {
 	validateRerankSettings,
 } from "./memory/memory-service-settings.ts";
 import { type AutoCommandRule, normalizeAutoCommandRules } from "./permissions/auto-command-rules.ts";
-import type { ThinkingSelection } from "./thinking-selection.ts";
 import { isWebSearchProvider, type WebSearchProvider } from "./web-search-config.ts";
 
 export interface CompactionSettings {
@@ -139,7 +139,7 @@ export interface Settings {
 	visionModel?: string;
 	/** User-configured vision-describer service for the describe_image tool. */
 	vision?: VisionSettings;
-	defaultThinkingLevel?: ThinkingSelection;
+	defaultThinkingLevel?: ThinkingLevel;
 	transport?: TransportSetting; // default: "auto"
 	steeringMode?: "all" | "one-at-a-time";
 	followUpMode?: "all" | "one-at-a-time";
@@ -987,7 +987,7 @@ export class SettingsManager {
 
 	setDefaultModelSettings(
 		model: { provider: string; modelId: string } | null,
-		thinkingSelection: ThinkingSelection,
+		thinkingSelection: ThinkingLevel,
 	): void {
 		if (model) {
 			this.globalSettings.defaultProvider = model.provider;
@@ -1084,11 +1084,11 @@ export class SettingsManager {
 		this.save();
 	}
 
-	getDefaultThinkingLevel(): ThinkingSelection | undefined {
+	getDefaultThinkingLevel(): ThinkingLevel | undefined {
 		return this.settings.defaultThinkingLevel;
 	}
 
-	setDefaultThinkingLevel(level: ThinkingSelection): void {
+	setDefaultThinkingLevel(level: ThinkingLevel): void {
 		this.globalSettings.defaultThinkingLevel = level;
 		this.markModified("defaultThinkingLevel");
 		this.save();

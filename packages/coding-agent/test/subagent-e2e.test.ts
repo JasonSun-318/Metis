@@ -204,7 +204,6 @@ describe("agent system e2e", () => {
 			sessionStartEvent,
 			childConfig,
 			permissionSettingsCeiling,
-			ultraAvailable,
 		}) => {
 			const authStorage = AuthStorage.inMemory();
 			authStorage.setRuntimeApiKey(faux.getModel().provider, "faux-key");
@@ -249,7 +248,6 @@ describe("agent system e2e", () => {
 				additionalSystemPrompt: childConfig ? buildChildSystemPrompt(childConfig) : undefined,
 				workspaceWritePolicy: childConfig?.writePolicy,
 				permissionSettingsCeiling,
-				ultraAvailable,
 			});
 			return { ...created, services, diagnostics: services.diagnostics };
 		};
@@ -277,7 +275,6 @@ describe("agent system e2e", () => {
 				]),
 			);
 		}
-		expect(runtime.session.getAvailableThinkingSelections()).toContain("ultra");
 
 		const run = (name: string, params: Record<string, unknown>) =>
 			runtime.session.getToolDefinition(name)!.execute("call", params, undefined, undefined, {} as never);

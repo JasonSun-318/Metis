@@ -113,12 +113,12 @@ interface AgentSession {
   // Model control
   setModel(model: Model): Promise<void>;
   setThinkingLevel(level: ThinkingLevel): void;
-  getThinkingSelection(): ThinkingLevel | "ultra";
-  getAvailableThinkingSelections(): Array<ThinkingLevel | "ultra">;
-  setThinkingSelection(selection: ThinkingLevel | "ultra"): void;
+  getThinkingSelection(): ThinkingLevel;
+  getAvailableThinkingSelections(): ThinkingLevel[];
+  setThinkingSelection(selection: ThinkingLevel): void;
   cycleModel(): Promise<ModelCycleResult | undefined>;
   cycleThinkingLevel(): ThinkingLevel | undefined;
-  cycleThinkingSelection(): ThinkingLevel | "ultra" | undefined;
+  cycleThinkingSelection(): ThinkingLevel | undefined;
 
   // State access
   agent: Agent;
@@ -368,8 +368,6 @@ const { session } = await createAgentSession({
   agentDir: "~/.metis/agent", // default (expands ~)
 });
 ```
-
-`thinkingSelection: "ultra"` is a runtime selection used only by persisted primary Code `AgentSessionRuntime` hosts. The session's `thinkingLevel` remains the resolved real provider value. Raw `createAgentSession`, Chat, child, and in-memory runtimes cannot select Ultra; Agent availability is independent of this selection. See [Agents](subagents.md).
 
 The effective session `cwd` is used by `DefaultResourceLoader` for:
 - Project extensions (`.metis/extensions/`)

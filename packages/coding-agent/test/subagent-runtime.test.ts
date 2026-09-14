@@ -455,7 +455,7 @@ describe("shared agent coordinator", () => {
 		).toBe(true);
 	});
 
-	it("exposes delegation tools on persisted code roots without Ultra activation", async () => {
+	it("exposes delegation tools on persisted code roots at an ordinary native thinking level", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-agent-runtime-root-"));
 		roots.push(root);
 		const cwd = join(root, "project");
@@ -498,6 +498,7 @@ describe("shared agent coordinator", () => {
 		};
 		const runtime = await createAgentSessionRuntime(createRuntime, { cwd, agentDir, sessionManager });
 		runtimes.push(runtime);
+		runtime.session.setThinkingSelection("medium");
 		expect(runtime.subagentManager).toBeDefined();
 		expect(runtime.session.getActiveToolNames()).toEqual(expect.arrayContaining([...AGENT_TOOL_NAMES]));
 	});

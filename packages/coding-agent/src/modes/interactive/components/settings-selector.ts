@@ -1,3 +1,4 @@
+import type { ThinkingLevel } from "@metis/agent-core";
 import type { Transport } from "@metis/ai";
 import {
 	type Component,
@@ -12,7 +13,6 @@ import {
 } from "@metis/tui";
 import { formatHttpIdleTimeoutMs, HTTP_IDLE_TIMEOUT_CHOICES } from "../../../core/http-dispatcher.ts";
 import type { DefaultProjectTrust } from "../../../core/settings-manager.ts";
-import type { ThinkingSelection } from "../../../core/thinking-selection.ts";
 import {
 	WEB_SEARCH_PROVIDER_INFO,
 	WEB_SEARCH_PROVIDERS,
@@ -33,7 +33,7 @@ const SETTINGS_SUBMENU_SELECT_LIST_LAYOUT: SelectListLayoutOptions = {
 	maxPrimaryColumnWidth: 32,
 };
 
-const THINKING_DESCRIPTIONS: Record<ThinkingSelection, string> = {
+const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 	off: "No reasoning",
 	minimal: "Very brief reasoning (~1k tokens)",
 	low: "Light reasoning (~2k tokens)",
@@ -41,7 +41,6 @@ const THINKING_DESCRIPTIONS: Record<ThinkingSelection, string> = {
 	high: "Deep reasoning (~16k tokens)",
 	xhigh: "Extra-high reasoning (~32k tokens)",
 	max: "Maximum reasoning",
-	ultra: "Highest supported reasoning level",
 };
 
 const DEFAULT_PROJECT_TRUST_LABELS: Record<DefaultProjectTrust, string> = {
@@ -61,8 +60,8 @@ export interface SettingsConfig {
 	followUpMode: "all" | "one-at-a-time";
 	transport: Transport;
 	httpIdleTimeoutMs: number;
-	thinkingSelection: ThinkingSelection;
-	availableThinkingSelections: ThinkingSelection[];
+	thinkingSelection: ThinkingLevel;
+	availableThinkingSelections: ThinkingLevel[];
 	currentTheme: string;
 	terminalTheme: TerminalTheme;
 	availableThemes: string[];
@@ -90,7 +89,7 @@ export interface SettingsCallbacks {
 	onFollowUpModeChange: (mode: "all" | "one-at-a-time") => void;
 	onTransportChange: (transport: Transport) => void;
 	onHttpIdleTimeoutMsChange: (timeoutMs: number) => void;
-	onThinkingSelectionChange: (selection: ThinkingSelection) => void;
+	onThinkingSelectionChange: (selection: ThinkingLevel) => void;
 	onThemeChange: (theme: string) => void;
 	onThemePreview?: (theme: string) => void;
 	onHideThinkingBlockChange: (hidden: boolean) => void;
@@ -531,7 +530,7 @@ export class SettingsSelectorComponent extends Container {
 						})),
 						currentValue,
 						(value) => {
-							callbacks.onThinkingSelectionChange(value as ThinkingSelection);
+							callbacks.onThinkingSelectionChange(value as ThinkingLevel);
 							done(value);
 						},
 						() => done(),

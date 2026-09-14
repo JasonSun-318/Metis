@@ -4094,7 +4094,7 @@ export class InteractiveMode {
 		if (this.isBashMode) {
 			this.editor.borderColor = theme.getBashModeBorderColor();
 		} else {
-			const level = this.session.getThinkingSelection() === "ultra" ? "max" : this.session.thinkingLevel || "off";
+			const level = this.session.thinkingLevel || "off";
 			this.editor.borderColor = theme.getThinkingBorderColor(level);
 		}
 		this.ui.requestRender();

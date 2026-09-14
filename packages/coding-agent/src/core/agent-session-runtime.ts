@@ -88,7 +88,6 @@ export type CreateAgentSessionRuntimeFactory = (options: {
 	sessionManager: SessionManager;
 	sessionStartEvent?: SessionStartEvent;
 	projectTrustContext?: ProjectTrustContext;
-	ultraAvailable?: boolean;
 	childConfig?: AgentConfig;
 	permissionSettingsCeiling?: () => PermissionSettings;
 }) => Promise<CreateAgentSessionRuntimeResult>;
@@ -274,7 +273,6 @@ export class AgentSessionRuntime {
 					cwd: config.cwd,
 					agentDir: this._services.agentDir,
 					sessionManager,
-					ultraAvailable: false,
 					childConfig: config,
 					permissionSettingsCeiling,
 					sessionStartEvent: { type: "session_start", reason: "resume" },
@@ -1087,7 +1085,6 @@ export class AgentSessionRuntime {
 				...getOptions(),
 				agentDir: this._services.agentDir,
 				sessionManager,
-				ultraAvailable: true,
 			});
 			return { result, recovered };
 		} catch (error) {
@@ -1576,13 +1573,12 @@ export async function createAgentSessionRuntime(
 		agentDir: string;
 		sessionManager: SessionManager;
 		sessionStartEvent?: SessionStartEvent;
-		ultraAvailable?: boolean;
 	},
 ): Promise<AgentSessionRuntime> {
 	try {
 		assertSessionCwdExists(options.sessionManager, options.cwd);
 		const recovered = recoverSessionManager(options.sessionManager);
-		const result = await createRuntime({ ...options, ultraAvailable: options.ultraAvailable ?? true });
+		const result = await createRuntime(options);
 		const runtime = new AgentSessionRuntime(
 			result.session,
 			result.services,

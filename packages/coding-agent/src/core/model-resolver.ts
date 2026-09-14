@@ -3,13 +3,23 @@
  */
 
 import type { ThinkingLevel } from "@metis/agent-core";
-import { type Api, type KnownProvider, type Model, modelsAreEqual } from "@metis/ai";
+import { type Api, getSupportedThinkingLevels, type KnownProvider, type Model, modelsAreEqual } from "@metis/ai";
 import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ModelRegistry } from "./model-registry.ts";
-import { getHighestSupportedThinkingLevel, type ThinkingSelection } from "./thinking-selection.ts";
+
+export function getHighestSupportedThinkingLevel(model: Model<any> | undefined): ThinkingLevel {
+	if (!model) return "off";
+	const levels = getSupportedThinkingLevels(model) as ThinkingLevel[];
+	return levels.at(-1) ?? "off";
+}
+
+export function getLowestSupportedThinkingLevel(model: Model<any> | undefined): ThinkingLevel {
+	if (!model) return "off";
+	return (getSupportedThinkingLevels(model) as ThinkingLevel[])[0] ?? "off";
+}
 
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider: Record<KnownProvider, string> = {
@@ -56,7 +66,7 @@ export const defaultModelPerProvider: Record<KnownProvider, string> = {
 export interface ScopedModel {
 	model: Model<Api>;
 	/** Thinking level if explicitly specified in pattern (e.g., "model:high"), undefined otherwise */
-	thinkingLevel?: ThinkingSelection;
+	thinkingLevel?: ThinkingLevel;
 }
 
 /**
@@ -160,7 +170,7 @@ function tryMatchModel(modelPattern: string, availableModels: Model<Api>[]): Mod
 export interface ParsedModelResult {
 	model: Model<Api> | undefined;
 	/** Thinking level if explicitly specified in pattern, undefined otherwise */
-	thinkingLevel?: ThinkingSelection;
+	thinkingLevel?: ThinkingLevel;
 	warning: string | undefined;
 }
 
@@ -284,7 +294,7 @@ export async function resolveModelScopeWithDiagnostics(
 			// Extract optional thinking level suffix (e.g., "provider/*:high")
 			const colonIdx = pattern.lastIndexOf(":");
 			let globPattern = pattern;
-			let thinkingLevel: ThinkingSelection | undefined;
+			let thinkingLevel: ThinkingLevel | undefined;
 
 			if (colonIdx !== -1) {
 				const suffix = pattern.substring(colonIdx + 1);
@@ -344,7 +354,7 @@ export async function resolveModelScope(patterns: string[], modelRegistry: Model
 
 export interface ResolveCliModelResult {
 	model: Model<Api> | undefined;
-	thinkingLevel?: ThinkingSelection;
+	thinkingLevel?: ThinkingLevel;
 	warning: string | undefined;
 	/**
 	 * Error message suitable for CLI display.
@@ -367,7 +377,7 @@ export interface ResolveCliModelResult {
 export function resolveCliModel(options: {
 	cliProvider?: string;
 	cliModel?: string;
-	cliThinking?: ThinkingSelection;
+	cliThinking?: ThinkingLevel;
 	modelRegistry: ModelRegistry;
 }): ResolveCliModelResult {
 	const { cliProvider, cliModel, cliThinking, modelRegistry } = options;
@@ -504,7 +514,7 @@ export function resolveCliModel(options: {
 		// but only when --thinking is not explicitly provided.
 		// e.g. "zai-org/GLM-5.1-FP8:high" → modelId="zai-org/GLM-5.1-FP8", fallbackThinking="high"
 		let fallbackPattern = pattern;
-		let fallbackThinking: ThinkingSelection | undefined;
+		let fallbackThinking: ThinkingLevel | undefined;
 		if (!cliThinking) {
 			const lastColon = pattern.lastIndexOf(":");
 			if (lastColon !== -1) {
@@ -596,10 +606,7 @@ export async function findInitialModel(options: {
 		const scopedThinking = scopedModels[0].thinkingLevel;
 		return {
 			model: scopedModels[0].model,
-			thinkingLevel:
-				scopedThinking === "ultra"
-					? getHighestSupportedThinkingLevel(scopedModels[0].model)
-					: (scopedThinking ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL),
+			thinkingLevel: scopedThinking ?? defaultThinkingLevel ?? DEFAULT_THINKING_LEVEL,
 			fallbackMessage: undefined,
 		};
 	}

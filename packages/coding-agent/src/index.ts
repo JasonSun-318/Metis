@@ -1,7 +1,7 @@
 // Core session management
 
+export { getSupportedThinkingLevels } from "@metis/ai/compat";
 export { type Args, parseArgs } from "./cli/args.ts";
-
 // Config paths
 export {
 	CONFIG_DIR_NAME,
@@ -90,6 +90,12 @@ export {
 	serializeConversation,
 	shouldCompact,
 } from "./core/compaction/index.ts";
+export {
+	type CustomModelReasoningMode,
+	type CustomModelReasoningSource,
+	type ResolvedCustomModelReasoning,
+	resolveCustomModelReasoning,
+} from "./core/custom-model-reasoning.ts";
 export {
 	type DeliverFileDetails,
 	type DeliverFileInput,
@@ -335,6 +341,8 @@ export type {
 } from "./core/mode-project-delete.ts";
 export { ModelRegistry } from "./core/model-registry.ts";
 export {
+	getHighestSupportedThinkingLevel,
+	getLowestSupportedThinkingLevel,
 	type ModelScopeDiagnostic,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
@@ -664,13 +672,6 @@ export {
 	type WaitAgentsInput,
 	type WaitAgentsResult,
 } from "./core/subagents/types.ts";
-export {
-	canUseUltra,
-	getHighestSupportedThinkingLevel,
-	getLowestSupportedThinkingLevel,
-	isThinkingSelection,
-	type ThinkingSelection,
-} from "./core/thinking-selection.ts";
 export { exactNetworkEndpoint, permissionClaim, permissionDescriptor } from "./core/tool-permission-adapter.ts";
 export { type EditDiffResult, generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.ts";
 // Tools
