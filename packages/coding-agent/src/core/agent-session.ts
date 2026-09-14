@@ -811,6 +811,7 @@ export class AgentSession {
 			persisted: this.sessionManager.isPersisted(),
 			mode: this.sessionManager.getMode(),
 			isAgent: this.sessionManager.getHeader()?.agent !== undefined,
+			model: this.model,
 		});
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
 		this._includeAutoMemory = config.includeAutoMemory !== false;
@@ -1017,7 +1018,9 @@ export class AgentSession {
 
 	async refreshSandboxHealth(force = false): Promise<WorkspaceSandboxHealthStatus> {
 		if (!this._sandboxHealthProbe) return this._sandboxHealth;
-		if (!force && Date.now() - this._sandboxHealthCheckedAt < 30_000) return this._sandboxHealth;
+		if (!force && this._sandboxHealth === "healthy" && Date.now() - this._sandboxHealthCheckedAt < 30_000) {
+			return this._sandboxHealth;
+		}
 		if (this._sandboxHealthRefresh) return await this._sandboxHealthRefresh;
 		const refresh = this._sandboxHealthProbe()
 			.then((report) => report.status)

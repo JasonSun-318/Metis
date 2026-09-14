@@ -179,7 +179,10 @@ export const workspaceSandboxHealth = createWorkspaceSandboxHealthProbe({
 		}
 		if (process.platform === "win32") {
 			if (!helperPath) throw new Error("Sandbox runtime helper is missing");
-			return runtime.checkWindowsDependenciesAsync({ srtWin: runtime.resolveSrtWin({ path: helperPath }) });
+			const srtWin = runtime.resolveSrtWin({ path: helperPath });
+			const checked = await runtime.checkWindowsDependenciesAsync({ srtWin });
+			if (checked.errors.length === 0) await runtime.verifyWindowsWfpEgress({ srtWin });
+			return checked;
 		}
 		return runtime.SandboxManager.checkDependenciesAsync();
 	},

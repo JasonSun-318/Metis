@@ -25,6 +25,7 @@ export async function loadDesktopChangelog(options: DesktopChangelogLoaderOption
 		cache: "no-store",
 		signal: AbortSignal.timeout(15_000),
 	});
+	if (response.status === 404) return { schemaVersion: 1, releases: [] };
 	if (!response.ok) throw new Error(`Changelog request failed with ${response.status}`);
 	return validateDesktopChangelog(await response.json());
 }

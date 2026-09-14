@@ -111,6 +111,6 @@ test("packaged sandbox health allows a workspace write and denies a protected-ro
 		await browser?.close().catch(() => undefined);
 		if (app) await stopProcess(app);
 		await provider.close();
-		await rm(tempRoot, { recursive: true, force: true });
+		await rm(tempRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 	}
 });

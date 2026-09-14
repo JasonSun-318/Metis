@@ -258,6 +258,14 @@ export class DesktopUpdater {
 				cache: "no-store",
 				signal: AbortSignal.timeout(15_000),
 			});
+			if (response.status === 404) {
+				if (this.state.status !== "ready") {
+					this.manifest = undefined;
+					this.downloadedPath = undefined;
+					this.setState({ status: "unavailable" });
+				}
+				return;
+			}
 			if (!response.ok) throw new Error(`Update manifest request failed with ${response.status}`);
 			const manifest = parseManifest(await response.json(), this.baseUrl!, this.target!);
 			if (this.downloadTask || this.state.status === "downloading") {

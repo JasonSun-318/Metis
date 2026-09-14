@@ -893,6 +893,9 @@ const zhCN = {
 	Models: "模型",
 	"Back to providers": "返回供应商列表",
 	"Back to app": "返回应用",
+	"Go back": "后退",
+	"Go forward": "前进",
+	"Window navigation": "窗口导航",
 	Ask: "询问",
 	Auto: "自动",
 	Full: "完全访问",
@@ -907,6 +910,13 @@ const zhCN = {
 	"A parent session limits the effective permissions for this task.": "父会话限制了此任务的有效权限。",
 	"Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.":
 		"工作区沙箱不可用。询问和自动保持停用，而不会改到主机上运行。",
+	"Set up Windows sandbox": "设置 Windows 沙箱",
+	"Setting up Windows sandbox…": "正在设置 Windows 沙箱…",
+	"Windows will ask for permission once to create an isolated account and network rules.":
+		"Windows 将请求一次权限，用于创建隔离账户和网络规则。",
+	"Windows sandbox setup was cancelled.": "已取消 Windows 沙箱设置。",
+	"Windows sandbox setup is not supported on this device.": "此设备不支持 Windows 沙箱设置。",
+	"Windows sandbox is ready.": "Windows 沙箱已就绪。",
 	"Workspace sandbox is unavailable. This action stays blocked instead of running on the host.":
 		"工作区沙箱不可用。此操作保持阻止，而不会改到主机上运行。",
 	"Sending your decision…": "正在提交你的决定…",

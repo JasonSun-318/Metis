@@ -422,6 +422,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 				persisted: sessionManager.isPersisted(),
 				mode: sessionManager.getMode(),
 				isAgent: sessionManager.getHeader()?.agent !== undefined,
+				model,
 			});
 			if (supportsSavedUltra) {
 				thinkingSelection = "ultra";
@@ -465,6 +466,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			persisted: sessionManager.isPersisted(),
 			mode: sessionManager.getMode(),
 			isAgent: sessionManager.getHeader()?.agent !== undefined,
+			model,
 		});
 		if (sessionManager.getUltraSelected() && !ultraCapable) {
 			if (sessionManager.getHeader()?.agent) {

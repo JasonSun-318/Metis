@@ -34,6 +34,7 @@ import { TerminalManager } from "./terminal-manager.ts";
 import { registerThemeHandlers } from "./theme-manager.ts";
 import { DesktopUpdater } from "./updater.ts";
 import { createMainWindow, loadMainWindow } from "./window.ts";
+import { createWindowsSandboxSetup, repairWindowsSandboxAccess } from "./windows-sandbox-setup.ts";
 import { resolveDesktopRipgrepPath, WorkspaceFileManager } from "./workspace-file-manager.ts";
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -118,6 +119,16 @@ async function launch(): Promise<void> {
 		maxBytes: 5 * 1024 * 1024,
 		backups: 2,
 	});
+	try {
+		await repairWindowsSandboxAccess({
+			appPath: app.getAppPath(),
+			architecture: process.arch,
+			isPackaged: app.isPackaged,
+			platform: process.platform,
+		});
+	} catch (cause) {
+		await diagnostics.append("supervisor", `Windows sandbox access repair failed: ${String(cause)}`);
+	}
 	const supervisor = new AppServerSupervisor({ spawn: spawnAppServer, diagnostics });
 	const terminalManager = new TerminalManager();
 	const browserManager = new BrowserManager();
@@ -139,6 +150,12 @@ async function launch(): Promise<void> {
 			if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(DESKTOP_UPDATE_EVENT_CHANNEL, state);
 		},
 		openPath: (path) => shell.openPath(path),
+		platform: process.platform,
+	});
+	const installWorkspaceSandbox = createWindowsSandboxSetup({
+		appPath: app.getAppPath(),
+		architecture: process.arch,
+		isPackaged: app.isPackaged,
 		platform: process.platform,
 	});
 	const deliveredNotifications = new Set<Notification>();
@@ -218,6 +235,7 @@ async function launch(): Promise<void> {
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
 		loadChangelog: () => loadDesktopChangelog({ baseUrl: METIS_UPDATE_BASE_URL, fetch: globalThis.fetch }),
 		updater,
+		installWorkspaceSandbox,
 		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),
 		onSessionUpdated: (session) => completionTracker.update(session),
 		onSessionDeleted: (sessionId) => completionTracker.forgetSession(sessionId),

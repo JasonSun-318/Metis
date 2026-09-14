@@ -85,7 +85,14 @@ describe("Composer visual states", () => {
 
 	it("uses a stationary composer over a full-screen New Task ray field", () => {
 		expect(rule(".new-task-home").overflow).toBe("hidden");
-		expect(rule(".new-task-home-scroll").overflowY).toBe("auto");
+		const scroll = rule(".new-task-home-scroll");
+		expect(scroll.overflowY).toBe("auto");
+		expect(scroll.scrollbarWidth).toBe("none");
+		expect(css).toMatch(/\.new-task-home-scroll\s*\{[^}]*-ms-overflow-style:\s*none/);
+		const hiddenScrollbar = rule(".new-task-home-scroll::-webkit-scrollbar");
+		expect(hiddenScrollbar.display).toBe("none");
+		expect(hiddenScrollbar.width).toBe("0px");
+		expect(hiddenScrollbar.height).toBe("0px");
 
 		const rays = rule(".new-task-side-rays");
 		expect(rays.position).toBe("absolute");
@@ -125,10 +132,10 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home .composer .composer-editable-input").minHeight).toBe("44px");
 		expect(rule(".new-task-home .composer .composer-editable-input").fontSize).toBe("var(--content-font-size)");
 		expect(rule(".new-task-home-project-control").minHeight).toBe("40px");
-		expect(rule(".new-task-home .home-project-picker-select .menu-select-trigger").justifyContent).toBe("flex-start");
-		expect(rule(".new-task-home .home-project-picker-select .menu-select-value").marginRight).toBe("auto");
-		expect(rule(".new-task-home .home-project-picker-select").maxWidth).toBe("280px");
-		expect(rule(".new-task-home .home-project-picker-browse").marginLeft).toBe("auto");
+		expect(css).not.toContain(".home-project-picker-select");
+		expect(
+			rule(".new-task-home .home-project-picker-browse, .new-task-home .home-project-picker-create").marginLeft,
+		).toBe("");
 		expect(css).not.toContain(".home-project-picker-hint");
 		expect(rule(".new-task-home-heading h1").whiteSpace).toBe("nowrap");
 		expect(rule(".new-task-starters").minHeight).toBe("");

@@ -65,6 +65,8 @@ export type DesktopUpdateState =
 			readonly progress: number;
 	  };
 
+export type DesktopSandboxSetupResult = "installed" | "cancelled" | "unsupported";
+
 export type DesktopApiEvent =
 	| {
 			readonly type: "app-server";
@@ -129,6 +131,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	getUpdateState: "metis:get-update-state",
 	checkForUpdate: "metis:check-for-update",
 	startUpdate: "metis:start-update",
+	installWorkspaceSandbox: "metis:install-workspace-sandbox",
 } as const;
 
 export const DESKTOP_EVENT_CHANNEL = "metis:event";
@@ -605,6 +608,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	getUpdateState(): Promise<DesktopUpdateState>;
 	checkForUpdate(): Promise<DesktopUpdateState>;
 	startUpdate(): Promise<void>;
+	installWorkspaceSandbox(): Promise<DesktopSandboxSetupResult>;
 	subscribeUpdate(listener: (state: DesktopUpdateState) => void): () => void;
 	subscribe(listener: (event: DesktopApiEvent) => void): () => void;
 	getServerState(): Promise<SupervisorView>;
@@ -613,6 +617,11 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	setThemePreference(theme: DesktopThemePreference): Promise<void>;
 	readonly isFullScreen?: () => Promise<boolean>;
 	readonly subscribeFullScreen?: (listener: (fullScreen: boolean) => void) => () => void;
+}
+
+export function validateDesktopSandboxSetupResult(value: unknown): DesktopSandboxSetupResult {
+	if (value === "installed" || value === "cancelled" || value === "unsupported") return value;
+	throw new TypeError("Invalid desktop sandbox setup result");
 }
 
 const interactionResponseValidator = compileSchema(InteractionResultSchema);
@@ -873,7 +882,6 @@ export function validateDesktopChangelog(value: unknown): DesktopChangelog {
 	if (
 		changelog.schemaVersion !== 1 ||
 		!Array.isArray(releaseValues) ||
-		releaseValues.length === 0 ||
 		releaseValues.length > DESKTOP_CHANGELOG_MAX_RELEASES
 	) {
 		throw new TypeError("Invalid desktop changelog");

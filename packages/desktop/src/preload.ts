@@ -34,6 +34,7 @@ import {
 	validateDesktopBrowserEvent,
 	validateDesktopChangelog,
 	validateDesktopClientParams,
+	validateDesktopSandboxSetupResult,
 	validateDesktopTerminalEvent,
 	validateDesktopUpdateState,
 	validateInteractionResponseInput,
@@ -226,6 +227,8 @@ const api = {
 	startUpdate: async () => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.startUpdate);
 	},
+	installWorkspaceSandbox: async () =>
+		validateDesktopSandboxSetupResult(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.installWorkspaceSandbox)),
 	subscribeUpdate: (listener: (state: DesktopUpdateState) => void) => {
 		if (typeof listener !== "function") throw new TypeError("Metis update listener must be a function");
 		const onEvent = (_event: IpcRendererEvent, value: unknown) => {

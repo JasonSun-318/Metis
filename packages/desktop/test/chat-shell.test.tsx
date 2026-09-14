@@ -1948,8 +1948,10 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		expect(container.querySelector('[aria-label="Show tools sidebar"]')).toBeNull();
 		expect(container.querySelector(".tool-sidebar:not([hidden])")).toBeNull();
+		expect(container.querySelector(".home-project-picker-select")).toBeNull();
+		expect(container.querySelectorAll<HTMLButtonElement>('.home-project-picker button[aria-label="Choose folder"]')).toHaveLength(1);
 
-		await act(async () => container.querySelector<HTMLButtonElement>(".folder-picker")!.click());
+		await act(async () => button(container, "Choose folder").click());
 		await flush();
 		expect(api.selectProjectFolder).toHaveBeenCalledTimes(1);
 		expect(api.createSession).not.toHaveBeenCalled();
@@ -2526,6 +2528,12 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 		expect(api.selectProjectFolder).not.toHaveBeenCalled();
 		expect(api.createSession).not.toHaveBeenCalled();
+		expect(container.querySelector(".home-project-picker-select")).toBeNull();
+		expect(
+			[...container.querySelectorAll<HTMLButtonElement>(".home-project-picker button")]
+				.slice(0, 2)
+				.map((candidate) => candidate.getAttribute("aria-label")),
+		).toEqual(["Choose folder", "Create a new project"]);
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "Keep this draft while choosing a project"));
@@ -2536,15 +2544,6 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("code-project");
 		expect(editor.value).toBe("Keep this draft while choosing a project");
 		expect(document.activeElement).toBe(editor);
-		expect(api.createSession).not.toHaveBeenCalled();
-
-		await act(async () => container.querySelector<HTMLButtonElement>(".home-project-picker-select .menu-select-trigger")!.click());
-		const recentProject = [...document.querySelectorAll<HTMLButtonElement>('.home-project-picker-menu [role="option"]')]
-			.find((candidate) => candidate.textContent?.includes("code-project"));
-		expect(recentProject).not.toBeUndefined();
-		await act(async () => recentProject!.click());
-		expect(container.textContent).toContain("code-project");
-		expect(editor.value).toBe("Keep this draft while choosing a project");
 		expect(api.createSession).not.toHaveBeenCalled();
 
 		await act(async () => button(container, "Choose folder").click());
@@ -4321,7 +4320,10 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("Test model");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide sessions sidebar"]')!.click());
+		const sidebarToggle = container.querySelector<HTMLButtonElement>('[aria-label="Hide sessions sidebar"]')!;
+		expect(sidebarToggle.classList.contains("sessions-sidebar-toggle-fixed")).toBe(true);
+		await act(async () => sidebarToggle.click());
+		expect(container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')).toBe(sidebarToggle);
 		expect(container.querySelector(".session-sidebar")).toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')!.click());
 		expect(container.querySelector(".session-sidebar")).not.toBeNull();
@@ -4355,6 +4357,40 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).not.toContain("Files");
 		expect(container.textContent).not.toContain("Agents");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("keeps Windows navigation in the compact title bar and supports back and forward", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const titlebar = container.querySelector<HTMLElement>(".windows-titlebar-navigation")!;
+		expect(titlebar).not.toBeNull();
+		expect(titlebar.querySelector(".sessions-sidebar-toggle-fixed")).not.toBeNull();
+		expect(titlebar.querySelector('[aria-label="Go back"]')).not.toBeNull();
+		expect(titlebar.querySelector('[aria-label="Go forward"]')).not.toBeNull();
+		expect(titlebar.querySelector(".mode-switch")).toBeNull();
+		expect(container.querySelector(".session-sidebar .mode-switch")).not.toBeNull();
+		expect(button(container, "Go back").disabled).toBe(true);
+		expect(button(container, "Go forward").disabled).toBe(true);
+
+		await act(async () => button(container, "Customize").click());
+		expect(container.querySelector(".plugins-catalog-page")).not.toBeNull();
+		expect(button(container, "Go back").disabled).toBe(false);
+
+		await act(async () => button(container, "Go back").click());
+		await flush();
+		expect(container.querySelector(".new-task-home")).not.toBeNull();
+		expect(button(container, "Go forward").disabled).toBe(false);
+
+		await act(async () => button(container, "Go forward").click());
+		await flush();
+		expect(container.querySelector(".plugins-catalog-page")).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 

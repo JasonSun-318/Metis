@@ -18,7 +18,7 @@ import {
 	type SkillSummaryView,
 	type ThinkingSelectionView,
 } from "@metis/app-protocol";
-import { Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -80,6 +80,12 @@ interface AppProps {
 	readonly api: MetisDesktopApi;
 	readonly store: AppStore;
 }
+
+type WindowsNavigationLocation =
+	| { readonly view: "settings" }
+	| { readonly view: "tasks"; readonly mode: AgentMode; readonly sessionId: string | null }
+	| { readonly view: "skills"; readonly mode: AgentMode; readonly section: "skills" | "mcp" }
+	| { readonly view: "schedules"; readonly mode: AgentMode; readonly taskId: string | null };
 
 const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
@@ -240,6 +246,9 @@ export function App({ api, store }: AppProps) {
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
 	const [mcpServers, setMcpServers] = useState<readonly McpServerSummaryView[]>([]);
 	const [pluginSection, setPluginSection] = useState<"skills" | "mcp">("skills");
+	const [navigationBack, setNavigationBack] = useState<WindowsNavigationLocation[]>([]);
+	const [navigationForward, setNavigationForward] = useState<WindowsNavigationLocation[]>([]);
+	const [navigationBusy, setNavigationBusy] = useState(false);
 	const [skillCatalogEpoch, setSkillCatalogEpoch] = useState(0);
 	const [message, setMessage] = useState("Starting Metis…");
 	const [error, setError] = useState<string | null>(null);
@@ -263,6 +272,22 @@ export function App({ api, store }: AppProps) {
 	const updateCheckTask = useRef<Promise<void> | null>(null);
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const [fullscreen, setFullscreen] = useState(false);
+	const currentNavigationLocation = useMemo<WindowsNavigationLocation>(() => {
+		if (settingsOpen) return { view: "settings" };
+		if (destination === "skills") return { view: "skills", mode, section: pluginSection };
+		if (destination === "schedules") return { view: "schedules", mode, taskId: selectedScheduleTaskId };
+		return { view: "tasks", mode, sessionId: newTaskDraft ? null : state.activeSessionId };
+	}, [destination, mode, newTaskDraft, pluginSection, selectedScheduleTaskId, settingsOpen, state.activeSessionId]);
+	const rememberCurrentNavigation = useCallback(() => {
+		if (api.platform !== "win32") return;
+		setNavigationBack((entries) => {
+			const previous = entries.at(-1);
+			return previous && JSON.stringify(previous) === JSON.stringify(currentNavigationLocation)
+				? entries
+				: [...entries.slice(-49), currentNavigationLocation];
+		});
+		setNavigationForward([]);
+	}, [api.platform, currentNavigationLocation]);
 	useEffect(() => {
 		let cancelled = false;
 		if (api.isFullScreen) {
@@ -505,6 +530,9 @@ export function App({ api, store }: AppProps) {
 
 	const activateBrowserSession = useCallback(
 		(sessionId: string) => {
+			if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== sessionId) {
+				rememberCurrentNavigation();
+			}
 			cancelHomeTransition();
 			setDestination("tasks");
 			setToolsSidebarOpen(true);
@@ -514,7 +542,7 @@ export function App({ api, store }: AppProps) {
 			}
 			void workspaceWorkflow.openVisibleSession(sessionId).catch(() => undefined);
 		},
-		[cancelHomeTransition, store, workspaceWorkflow],
+		[cancelHomeTransition, currentNavigationLocation, rememberCurrentNavigation, store, workspaceWorkflow],
 	);
 	const requestScheduleSnapshot = useCallback(
 		(replace = false): Promise<void> => {
@@ -595,7 +623,56 @@ export function App({ api, store }: AppProps) {
 		codeProjectSetupRequest.current = null;
 		setCodeProjectSetupOpen(false);
 	}, []);
+	const restoreWindowsNavigation = useCallback(async (target: WindowsNavigationLocation) => {
+		setNavigationBusy(true);
+		try {
+			cancelHomeTransition();
+			closeCodeProjectSetup();
+			setError(null);
+			if (target.view === "settings") {
+				setSettingsOpen(true);
+				return;
+			}
+			setSettingsOpen(false);
+			if (target.view === "tasks") {
+				setDestination("tasks");
+				if (target.sessionId && store.getSnapshot().sessionsById.has(target.sessionId)) {
+					await workspaceWorkflow.openVisibleSession(target.sessionId);
+				} else {
+					workspaceWorkflow.startNewTask(target.mode);
+				}
+				return;
+			}
+			if (workspaceWorkflow.getSnapshot().mode !== target.mode) {
+				await workspaceWorkflow.selectMode(target.mode);
+			}
+			if (target.view === "skills") {
+				setPluginSection(target.section);
+				setDestination("skills");
+				return;
+			}
+			setSelectedScheduleTaskId(target.taskId);
+			setDestination("schedules");
+		} finally {
+			setNavigationBusy(false);
+		}
+	}, [cancelHomeTransition, closeCodeProjectSetup, store, workspaceWorkflow]);
+	const navigateBack = useCallback(() => {
+		const target = navigationBack.at(-1);
+		if (!target || navigationBusy) return;
+		setNavigationBack((entries) => entries.slice(0, -1));
+		setNavigationForward((entries) => [...entries.slice(-49), currentNavigationLocation]);
+		void restoreWindowsNavigation(target).catch(reportError);
+	}, [currentNavigationLocation, navigationBack, navigationBusy, reportError, restoreWindowsNavigation]);
+	const navigateForward = useCallback(() => {
+		const target = navigationForward.at(-1);
+		if (!target || navigationBusy) return;
+		setNavigationForward((entries) => entries.slice(0, -1));
+		setNavigationBack((entries) => [...entries.slice(-49), currentNavigationLocation]);
+		void restoreWindowsNavigation(target).catch(reportError);
+	}, [currentNavigationLocation, navigationBusy, navigationForward, reportError, restoreWindowsNavigation]);
 	const createEmptySessionInProject = useCallback(async (projectMode: AgentMode, cwd: string): Promise<void> => {
+		rememberCurrentNavigation();
 		if (projectMode === "code") {
 			cancelHomeTransition();
 			setDestination("tasks");
@@ -606,7 +683,7 @@ export function App({ api, store }: AppProps) {
 		}
 		setDestination("tasks");
 		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
-	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, rememberCurrentNavigation, workspaceWorkflow]);
 	const createEmptyProjectSession = useCallback(
 		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
 		[createEmptySessionInProject],
@@ -626,6 +703,9 @@ export function App({ api, store }: AppProps) {
 	);
 
 	const openVisibleSession = useCallback(async (sessionId: string) => {
+		if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== sessionId) {
+			rememberCurrentNavigation();
+		}
 		cancelHomeTransition();
 		setDestination("tasks");
 		closeCodeProjectSetup();
@@ -634,7 +714,7 @@ export function App({ api, store }: AppProps) {
 		} catch {
 			// The workflow reports the error while preserving the current projection.
 		}
-	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, workspaceWorkflow]);
 	const forkFromReply = async (entryId: string) => {
 		try {
 			await workspaceWorkflow.forkSession(entryId);
@@ -692,12 +772,15 @@ export function App({ api, store }: AppProps) {
 	}, [selectCodeProject]);
 
 	const startNewTask = useCallback(() => {
+		if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== null) {
+			rememberCurrentNavigation();
+		}
 		cancelHomeTransition();
 		setDestination("tasks");
 		closeCodeProjectSetup();
 		setError(null);
 		workspaceWorkflow.startNewTask();
-	}, [cancelHomeTransition, closeCodeProjectSetup, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, workspaceWorkflow]);
 	const cancelNewTask = () => {
 		cancelHomeTransition();
 		closeCodeProjectSetup();
@@ -707,12 +790,13 @@ export function App({ api, store }: AppProps) {
 
 	const changeMode = useCallback((nextMode: AgentMode) => {
 		if (nextMode === mode) return;
+		rememberCurrentNavigation();
 		cancelHomeTransition();
 		setDestination("tasks");
 		closeCodeProjectSetup();
 		setError(null);
 		void workspaceWorkflow.selectMode(nextMode);
-	}, [cancelHomeTransition, closeCodeProjectSetup, mode, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, mode, rememberCurrentNavigation, workspaceWorkflow]);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 	const homeProjects = useMemo(
@@ -743,6 +827,7 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const createScheduleWithMetis = async (cwd: string | null) => {
+		rememberCurrentNavigation();
 		setDestination("tasks");
 		workspaceWorkflow.startNewTask("chat");
 		workspaceWorkflow.setDraftFolder(cwd);
@@ -753,6 +838,7 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const createSkillWithMetis = async (target: SkillCreationTarget) => {
+		rememberCurrentNavigation();
 		const prompt = target.source === "project"
 			? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
 			: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
@@ -1136,6 +1222,24 @@ export function App({ api, store }: AppProps) {
 			throw cause;
 		}
 	};
+	const setupWindowsSandbox = async () => {
+		try {
+			const result = await api.installWorkspaceSandbox();
+			if (result === "cancelled") {
+				setNotice(t("Windows sandbox setup was cancelled."));
+				return;
+			}
+			if (result === "unsupported") {
+				setNotice(t("Windows sandbox setup is not supported on this device."));
+				return;
+			}
+			const activeSessionId = store.getSnapshot().activeSessionId;
+			if (activeSessionId) await workspaceWorkflow.resnapshotSession(activeSessionId);
+			setNotice(t("Windows sandbox is ready."));
+		} catch (cause) {
+			reportError(cause);
+		}
+	};
 
 	const configurationSession = visibleActiveSession ?? (
 		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
@@ -1412,6 +1516,7 @@ export function App({ api, store }: AppProps) {
 			onChange={(permissionPreset) => permissionSessionId
 				? changePermissionPreset(permissionSessionId, permissionPreset)
 				: workspaceWorkflow.setDraftPermission(permissionPreset)}
+			onSetupSandbox={api.platform === "win32" ? setupWindowsSandbox : undefined}
 			sandboxHealth={permissionView.sandboxHealth}
 			value={permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset}
 		/>
@@ -1421,6 +1526,7 @@ export function App({ api, store }: AppProps) {
 			constrainedByParent={state.constrainedByParent}
 			disabled={!serverReady || running || visibleInteraction !== undefined}
 			onChange={(permissionPreset) => changePermissionPreset(visibleActiveSession.sessionId, permissionPreset)}
+			onSetupSandbox={api.platform === "win32" ? setupWindowsSandbox : undefined}
 			sandboxHealth={state.sandboxHealth}
 			value={state.permissionPreset}
 		/>
@@ -1466,6 +1572,7 @@ export function App({ api, store }: AppProps) {
 			? "connecting" as const
 			: undefined;
 	const openMcpManagement = () => {
+		rememberCurrentNavigation();
 		setPluginSection("mcp");
 		setDestination("skills");
 	};
@@ -1479,12 +1586,17 @@ export function App({ api, store }: AppProps) {
 	};
 	const openSettings = useCallback(() => {
 		settingsReturnFocusRef.current = document.querySelector<HTMLElement>(".account-menu-trigger") ?? document.activeElement as HTMLElement | null;
+		rememberCurrentNavigation();
 		setSettingsOpen(true);
-	}, []);
+	}, [rememberCurrentNavigation]);
 	const closeSettings = useCallback(() => {
 		setSettingsOpen(false);
+		if (api.platform === "win32") {
+			setNavigationBack((entries) => entries.slice(0, -1));
+			setNavigationForward([]);
+		}
 		requestAnimationFrame(() => settingsReturnFocusRef.current?.focus());
-	}, []);
+	}, [api.platform]);
 	const deleteScheduledTask = useCallback(async (input: Parameters<MetisDesktopApi["deleteSchedule"]>[0]) => {
 		const result = await api.deleteSchedule(input);
 		scheduleStore.removeTask(result.taskId);
@@ -1498,17 +1610,26 @@ export function App({ api, store }: AppProps) {
 		[scheduleState.taskOrder, scheduleState.tasksById],
 	);
 	const openSkillsDestination = useCallback(() => {
+		if (currentNavigationLocation.view !== "skills" || currentNavigationLocation.section !== "skills") {
+			rememberCurrentNavigation();
+		}
 		setPluginSection("skills");
 		setDestination("skills");
-	}, []);
+	}, [currentNavigationLocation, rememberCurrentNavigation]);
 	const openSchedulesDestination = useCallback(() => {
+		if (currentNavigationLocation.view !== "schedules" || currentNavigationLocation.taskId !== null) {
+			rememberCurrentNavigation();
+		}
 		setDestination("schedules");
 		setSelectedScheduleTaskId(null);
-	}, []);
+	}, [currentNavigationLocation, rememberCurrentNavigation]);
 	const openSchedule = useCallback((taskId: string) => {
+		if (currentNavigationLocation.view !== "schedules" || currentNavigationLocation.taskId !== taskId) {
+			rememberCurrentNavigation();
+		}
 		setDestination("schedules");
 		setSelectedScheduleTaskId(taskId);
-	}, []);
+	}, [currentNavigationLocation, rememberCurrentNavigation]);
 	const [sidebarClosing, setSidebarClosing] = useState(false);
 	const sidebarClosingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1587,8 +1708,11 @@ export function App({ api, store }: AppProps) {
 		startNewTask,
 	]);
 
-	const isMacWindowed = api.platform === "darwin" && !fullscreen;
 	const isCollapsed = !sessionsSidebarOpen || sidebarClosing;
+	const toggleSessionsSidebar = () => {
+		if (sessionsSidebarOpen && !sidebarClosing) hideSessionSidebar();
+		else showSessionSidebar();
+	};
 
 	return (
 		<FileSelectionProvider
@@ -1599,6 +1723,35 @@ export function App({ api, store }: AppProps) {
 			)}
 			onSubmit={submit}
 		>
+		{api.platform === "win32" && (
+			<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
+				<button
+					aria-label={t(sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar")}
+					aria-pressed={sessionsSidebarOpen && !sidebarClosing}
+					className="sessions-sidebar-toggle-fixed"
+					onClick={toggleSessionsSidebar}
+					type="button"
+				>
+					<SidebarSimple aria-hidden="true" size={16} />
+				</button>
+				<button
+					aria-label={t("Go back")}
+					disabled={navigationBusy || navigationBack.length === 0}
+					onClick={navigateBack}
+					type="button"
+				>
+					<ArrowLeft aria-hidden="true" size={16} />
+				</button>
+				<button
+					aria-label={t("Go forward")}
+					disabled={navigationBusy || navigationForward.length === 0}
+					onClick={navigateForward}
+					type="button"
+				>
+					<ArrowRight aria-hidden="true" size={16} />
+				</button>
+			</nav>
+		)}
 		<div
 			aria-hidden={settingsOpen || undefined}
 			className={`app-shell${isCollapsed ? " sessions-sidebar-collapsed" : ""}`}
@@ -1608,9 +1761,7 @@ export function App({ api, store }: AppProps) {
 		>
 			{sessionsSidebarOpen && <SessionSidebar
 				destination={destination}
-				fullscreen={fullscreen}
 				isClosing={sidebarClosing}
-				platform={api.platform}
 				onDeleteSchedule={deleteScheduledTask}
 				onSettings={openSettings}
 				onUpdate={startDesktopUpdate}
@@ -1619,7 +1770,6 @@ export function App({ api, store }: AppProps) {
 				onSkills={openSkillsDestination}
 				onSchedules={openSchedulesDestination}
 				onOpenSchedule={openSchedule}
-				onToggle={hideSessionSidebar}
 				onWidthChange={updateSessionSidebarWidth}
 				scheduleTasks={sidebarScheduleTasks}
 				selectedScheduleTaskId={selectedScheduleTaskId}
@@ -1633,25 +1783,16 @@ export function App({ api, store }: AppProps) {
 				style={{ "--tool-sidebar-width": `${toolsSidebarWidth}px` } as CSSProperties}
 			>
 				<div className="workspace-titlebar-actions">
-					{isMacWindowed ? (
+					{api.platform !== "win32" && (
 						<button
 							aria-label={t(sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar")}
 							aria-pressed={sessionsSidebarOpen && !sidebarClosing}
 							className="sessions-sidebar-toggle-fixed"
-							onClick={() => {
-								if (sessionsSidebarOpen && !sidebarClosing) hideSessionSidebar();
-								else showSessionSidebar();
-							}}
+							onClick={toggleSessionsSidebar}
 							type="button"
 						>
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
-					) : (
-						isCollapsed && (
-							<button aria-label={t("Show sessions sidebar")} onClick={showSessionSidebar} type="button">
-								<SidebarSimple aria-hidden="true" size={17} />
-							</button>
-						)
 					)}
 					{toolsSidebarAvailable && (
 						<div className="workspace-titlebar-end">
@@ -1740,12 +1881,10 @@ export function App({ api, store }: AppProps) {
 									onChooseFolder={chooseNewTaskFolder}
 									onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
 									onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
-									onSelectProject={(cwd) => selectHomeProject(mode, cwd)}
-									projects={homeProjects}
 								/>
 							}
 							onManageMcp={openMcpManagement}
-							onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
+							onManageSkills={openSkillsDestination}
 							onPickFiles={pickAttachmentFiles}
 							onResolveDroppedFiles={api.resolveDroppedFiles}
 							onSelectRecentProject={(cwd) => selectHomeProject("code", cwd)}
@@ -1832,7 +1971,7 @@ export function App({ api, store }: AppProps) {
 								onGoalCommand={handleGoalCommand}
 								onInterrupt={interrupt}
 								onManageMcp={openMcpManagement}
-								onManageSkills={() => { setPluginSection("skills"); setDestination("skills"); }}
+								onManageSkills={openSkillsDestination}
 								onPickFiles={pickAttachmentFiles}
 								onResolveDroppedFiles={api.resolveDroppedFiles}
 								onSlashCommand={handleSlashCommand}

@@ -35,6 +35,7 @@ import {
 	type DesktopChangelog,
 	type DesktopCreateProjectFolderInput,
 	type DesktopRpcOutcome,
+	type DesktopSandboxSetupResult,
 	type DesktopTerminalEvent,
 	type DesktopUpdateState,
 	type DesktopWorkspaceEditState,
@@ -95,6 +96,7 @@ interface ClientBrokerOptions {
 	readonly openPath?: (path: string) => Promise<string>;
 	readonly loadChangelog?: () => Promise<DesktopChangelog>;
 	readonly updater?: BrokerUpdater;
+	readonly installWorkspaceSandbox?: () => Promise<DesktopSandboxSetupResult>;
 	readonly terminalManager?: Pick<TerminalManager, "create" | "write" | "resize" | "close" | "closeAll" | "onEvent">;
 	readonly browserManager?: Pick<
 		BrowserManager,
@@ -256,6 +258,7 @@ export class ClientBroker {
 	private readonly openPath: (path: string) => Promise<string>;
 	private readonly loadChangelog: () => Promise<DesktopChangelog>;
 	private readonly updater: BrokerUpdater;
+	private readonly installWorkspaceSandbox: () => Promise<DesktopSandboxSetupResult>;
 	private readonly terminalManager: Pick<
 		TerminalManager,
 		"create" | "write" | "resize" | "close" | "closeAll" | "onEvent"
@@ -352,6 +355,7 @@ export class ClientBroker {
 				throw new Error("Desktop updates are unavailable");
 			},
 		};
+		this.installWorkspaceSandbox = options.installWorkspaceSandbox ?? (async () => "unsupported");
 		this.terminalManager = options.terminalManager ?? {
 			create: async () => {
 				throw new Error("Terminal is unavailable");
@@ -697,6 +701,7 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.startUpdate, 0, async () => {
 			await this.updater.downloadAndOpen();
 		});
+		this.register(DESKTOP_IPC_CHANNELS.installWorkspaceSandbox, 0, async () => this.installWorkspaceSandbox());
 		this.register(DESKTOP_IPC_CHANNELS.subscribe, 0, async () => {
 			this.ownerSubscribed = true;
 			this.sendEvent({ type: "supervisor", view: this.supervisor.view() });

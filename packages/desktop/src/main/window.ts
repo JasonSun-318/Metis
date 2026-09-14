@@ -1,7 +1,7 @@
 import { BrowserWindow, nativeTheme, shell } from "electron";
 import { APP_ORIGIN } from "./app-protocol-scheme.ts";
 import { isSafeExternalUrl } from "./external-url.ts";
-import { readStoredTheme, windowBackgroundFor } from "./theme-manager.ts";
+import { readStoredTheme, windowBackgroundFor, windowsTitleBarOverlayFor } from "./theme-manager.ts";
 
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
@@ -20,7 +20,12 @@ export function createMainWindow(): BrowserWindow {
 					titleBarStyle: "hiddenInset" as const,
 					trafficLightPosition: { x: 13, y: 16 },
 				}
-			: {}),
+			: process.platform === "win32"
+				? {
+						titleBarStyle: "hidden" as const,
+						titleBarOverlay: windowsTitleBarOverlayFor(theme),
+					}
+				: {}),
 		webPreferences: {
 			preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
 			contextIsolation: true,

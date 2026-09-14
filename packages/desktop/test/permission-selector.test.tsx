@@ -100,6 +100,18 @@ describe("PermissionSelector", () => {
 		expect(onChange).not.toHaveBeenCalled();
 	});
 
+	it("offers explicit Windows sandbox setup when the capability is provided", async () => {
+		const onSetupSandbox = vi.fn().mockResolvedValue(undefined);
+		const { container } = mount({ onSetupSandbox, sandboxHealth: "unavailable", value: "full" });
+		await openMenu(container);
+		const setup = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(candidate) => candidate.textContent?.includes("Set up Windows sandbox"),
+		);
+		expect(setup).toBeDefined();
+		await act(async () => setup!.click());
+		expect(onSetupSandbox).toHaveBeenCalledOnce();
+	});
+
 	it("announces model review without exposing hidden reasoning", async () => {
 		const { container } = mount({
 			activeReview: { actionId: "action-9", reviewer: "model", riskLevel: "critical" },

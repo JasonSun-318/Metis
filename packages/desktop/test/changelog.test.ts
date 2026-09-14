@@ -31,19 +31,32 @@ describe("loadDesktopChangelog", () => {
 		},
 	);
 
-	it("reports HTTP and schema failures", async () => {
+	it("treats a missing published changelog as an empty history", async () => {
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
 				fetch: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
 			}),
-		).rejects.toThrow("Changelog request failed with 404");
+		).resolves.toEqual({ schemaVersion: 1, releases: [] });
+	});
+
+	it("reports other HTTP and schema failures", async () => {
+		await expect(
+			loadDesktopChangelog({
+				baseUrl: BASE_URL,
+				fetch: vi.fn().mockResolvedValue(new Response("unavailable", { status: 500 })),
+			}),
+		).rejects.toThrow("Changelog request failed with 500");
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
 				fetch: vi
 					.fn()
-					.mockResolvedValue(new Response(JSON.stringify({ schemaVersion: 1, releases: [] }), { status: 200 })),
+					.mockResolvedValue(
+						new Response(JSON.stringify({ schemaVersion: 1, releases: [{ version: "0.1.0", notes: "  " }] }), {
+							status: 200,
+						}),
+					),
 			}),
 		).rejects.toThrow("Invalid desktop changelog");
 	});

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, delimiter, dirname, isAbsolute } from "node:path";
+import { basename, delimiter, isAbsolute, win32 } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -105,15 +105,18 @@ function runtimeReadPaths(): string[] {
 	return [...readable];
 }
 
-function deniedReadRoots(callerHome: string): string[] {
-	if (process.platform !== "win32") return ["/"];
-	const roots = new Set<string>();
-	for (let code = "A".charCodeAt(0); code <= "Z".charCodeAt(0); code += 1) {
-		const root = `${String.fromCharCode(code)}:\\`;
-		if (existsSync(root)) roots.add(root);
-	}
-	if (roots.size === 0) roots.add(dirname(callerHome));
-	return [...roots];
+function deniedReadRoots(platform: NodeJS.Platform): string[] {
+	// Windows runs commands as a separate local account. That account already
+	// cannot read the caller's private files, while stamping a drive root would
+	// require administrator rights and would override narrower workspace grants.
+	return platform === "win32" ? [] : ["/"];
+}
+
+function isInsideWindowsHome(callerHome: string, candidate: string): boolean {
+	const relative = win32.relative(win32.resolve(callerHome), win32.resolve(candidate));
+	return (
+		relative === "" || (!relative.startsWith(`..${win32.sep}`) && relative !== ".." && !win32.isAbsolute(relative))
+	);
 }
 
 export interface SandboxRuntimeConfigInput {
@@ -153,20 +156,25 @@ export function exactNetworkGrantAllows(
 	);
 }
 
-export function createSandboxRuntimeConfig(input: SandboxRuntimeConfigInput): SandboxRuntimeConfig {
-	const callerHome = homedir();
-	const denyRead = deniedReadRoots(callerHome);
+export function createSandboxRuntimeConfig(
+	input: SandboxRuntimeConfigInput,
+	platform: NodeJS.Platform = process.platform,
+	callerHome: string = homedir(),
+): SandboxRuntimeConfig {
+	const denyRead = deniedReadRoots(platform);
+	const runtimeReads =
+		platform === "win32"
+			? input.runtimeReads.filter((path) => isInsideWindowsHome(callerHome, path))
+			: input.runtimeReads;
+	const shellRead =
+		input.shellPath && (platform !== "win32" || isInsideWindowsHome(callerHome, input.shellPath))
+			? [input.shellPath]
+			: [];
 	const allowedWrite = [
 		...new Set([...(input.workspaceReadOnly ? [] : input.workspaceRoots), ...input.writeRoots, input.temporaryDir]),
 	];
 	const allowedRead = [
-		...new Set([
-			...input.workspaceRoots,
-			...allowedWrite,
-			...input.readOnlyRoots,
-			...input.runtimeReads,
-			...(input.shellPath ? [input.shellPath] : []),
-		]),
+		...new Set([...input.workspaceRoots, ...allowedWrite, ...input.readOnlyRoots, ...runtimeReads, ...shellRead]),
 	];
 	const denyWrite = [
 		...new Set([

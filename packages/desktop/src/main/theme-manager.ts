@@ -7,6 +7,9 @@ const THEME_FILE_NAME = "theme.json";
 
 export const DARK_WINDOW_BACKGROUND = "#1f201e";
 export const LIGHT_WINDOW_BACKGROUND = "#ffffff";
+export const WINDOWS_TITLE_BAR_HEIGHT = 32;
+const WINDOWS_DARK_TITLE_BAR = "#121212";
+const WINDOWS_LIGHT_TITLE_BAR = "#fcfcfb";
 
 export function isDesktopThemePreference(value: unknown): value is DesktopThemePreference {
 	return value === "dark" || value === "light" || value === "system";
@@ -20,6 +23,18 @@ export function resolveTheme(theme: DesktopThemePreference): "dark" | "light" {
 
 export function windowBackgroundFor(theme: DesktopThemePreference): string {
 	return resolveTheme(theme) === "dark" ? DARK_WINDOW_BACKGROUND : LIGHT_WINDOW_BACKGROUND;
+}
+
+export function windowsTitleBarOverlayFor(theme: DesktopThemePreference): {
+	readonly color: string;
+	readonly symbolColor: string;
+	readonly height: number;
+} {
+	return {
+		color: resolveTheme(theme) === "dark" ? WINDOWS_DARK_TITLE_BAR : WINDOWS_LIGHT_TITLE_BAR,
+		symbolColor: resolveTheme(theme) === "dark" ? "#e8e8e8" : "#202020",
+		height: WINDOWS_TITLE_BAR_HEIGHT,
+	};
 }
 
 function themeFilePath(): string {
@@ -51,7 +66,9 @@ export function storeTheme(theme: DesktopThemePreference): void {
 /** Apply the preference to native chrome (macOS titlebar, scrollbars) and the window background. */
 export function applyThemeToWindow(window: BrowserWindow, theme: DesktopThemePreference): void {
 	nativeTheme.themeSource = theme;
-	if (!window.isDestroyed()) window.setBackgroundColor(windowBackgroundFor(theme));
+	if (window.isDestroyed()) return;
+	window.setBackgroundColor(windowBackgroundFor(theme));
+	if (process.platform === "win32") window.setTitleBarOverlay(windowsTitleBarOverlayFor(theme));
 }
 
 /**

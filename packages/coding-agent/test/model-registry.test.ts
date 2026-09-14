@@ -214,6 +214,20 @@ describe("ModelRegistry", () => {
 	});
 
 	describe("custom models merge behavior", () => {
+		test("non-built-in reasoning models default to the common thinking levels", () => {
+			writeRawModelsJson({
+				"my-custom-provider": {
+					baseUrl: "https://example.com/v1",
+					apiKey: "test-key",
+					api: "openai-responses",
+					models: [{ id: "my-model", reasoning: true, input: ["text"] }],
+				},
+			});
+
+			const model = ModelRegistry.create(authStorage, modelsJsonPath).find("my-custom-provider", "my-model");
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high"]);
+		});
+
 		test("built-in provider custom models inherit api and baseUrl without explicit fields", () => {
 			// Built-in providers already have api/baseUrl on every model, and auth
 			// comes from env vars / auth storage. No need to specify them.

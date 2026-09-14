@@ -10,6 +10,35 @@ interface ReleaseNotesPopoverProps {
 	readonly loadChangelog: () => Promise<DesktopChangelog>;
 }
 
+type ChangelogLoader = ReleaseNotesPopoverProps["loadChangelog"];
+
+const changelogCache = new WeakMap<ChangelogLoader, DesktopChangelog>();
+const changelogLoads = new WeakMap<ChangelogLoader, Promise<DesktopChangelog>>();
+
+function loadReleaseNotes(loadChangelog: ChangelogLoader, force: boolean): Promise<DesktopChangelog> {
+	if (!force) {
+		const cached = changelogCache.get(loadChangelog);
+		if (cached) return Promise.resolve(cached);
+		const pending = changelogLoads.get(loadChangelog);
+		if (pending) return pending;
+	}
+	const task = loadChangelog().then(
+		(changelog) => {
+			if (changelogLoads.get(loadChangelog) === task) {
+				changelogCache.set(loadChangelog, changelog);
+				changelogLoads.delete(loadChangelog);
+			}
+			return changelog;
+		},
+		(error: unknown) => {
+			if (changelogLoads.get(loadChangelog) === task) changelogLoads.delete(loadChangelog);
+			throw error;
+		},
+	);
+	changelogLoads.set(loadChangelog, task);
+	return task;
+}
+
 function ReleaseNotesEntry({
 	latest,
 	notes,
@@ -55,22 +84,22 @@ export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps)
 	const mountedRef = useRef(true);
 	const loadTaskRef = useRef<Promise<void> | null>(null);
 
-	const refresh = useCallback(() => {
-		if (loadTaskRef.current) return loadTaskRef.current;
+	const refresh = useCallback((force = false) => {
+		if (!force && loadTaskRef.current) return loadTaskRef.current;
 		if (mountedRef.current) {
 			setLoading(true);
 			setFailed(false);
 		}
-		const task = loadChangelog()
+		const task = loadReleaseNotes(loadChangelog, force)
 			.then((next) => {
-				if (mountedRef.current) setChangelog(next);
+				if (mountedRef.current && loadTaskRef.current === task) setChangelog(next);
 			})
 			.catch(() => {
-				if (mountedRef.current) setFailed(true);
+				if (mountedRef.current && loadTaskRef.current === task) setFailed(true);
 			})
 			.finally(() => {
 				if (loadTaskRef.current === task) loadTaskRef.current = null;
-				if (mountedRef.current) setLoading(false);
+				if (mountedRef.current && loadTaskRef.current === null) setLoading(false);
 			});
 		loadTaskRef.current = task;
 		return task;
@@ -125,7 +154,7 @@ export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps)
 			return;
 		}
 		setOpen(true);
-		void refresh();
+		void refresh(true);
 	};
 
 	return (

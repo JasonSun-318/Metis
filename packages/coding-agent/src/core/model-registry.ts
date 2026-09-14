@@ -651,7 +651,9 @@ export class ModelRegistry {
 					provider: providerName,
 					baseUrl,
 					reasoning: modelDef.reasoning ?? false,
-					thinkingLevelMap: modelDef.thinkingLevelMap,
+					thinkingLevelMap:
+						modelDef.thinkingLevelMap ??
+						(modelDef.reasoning && !builtInProviders.has(providerName) ? { minimal: null } : undefined),
 					input: (modelDef.input ?? ["text"]) as ("text" | "image")[],
 					cost: modelDef.cost ?? defaultCost,
 					contextWindow: modelDef.contextWindow ?? 128000,

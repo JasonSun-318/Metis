@@ -20,6 +20,18 @@ function rule(selector: string): CSSStyleDeclaration {
 }
 
 describe("Settings visual states", () => {
+	it("uses compact Windows title spacing without changing the macOS traffic-light area", () => {
+		expect(rule(':root[data-platform="win32"] .settings-backdrop').top).toBe("32px");
+		const windowsNavigationTop = rule(':root[data-platform="win32"] .settings-navigation-top');
+		expect(windowsNavigationTop.height).toBe("0px");
+		expect(windowsNavigationTop.marginBottom).toBe("0px");
+		expect(rule(':root[data-platform="win32"] .settings-main').gridTemplateRows).toBe("40px minmax(0, 1fr)");
+		expect(rule(':root[data-platform="win32"] .settings-main-header').height).toBe("40px");
+		expect(rule(".settings-navigation-top").height).toBe("52px");
+		expect(rule(".settings-back-button").height).toBe("36px");
+		expect(rule(".settings-nav-divider").marginTop).toBe("3px");
+	});
+
 	it("uses restrained overlays and a flatter content hierarchy", () => {
 		expect(rule(".settings-backdrop").background).toBe("var(--app-bg)");
 		expect(rule(".settings-backdrop").padding).toBe("0px");

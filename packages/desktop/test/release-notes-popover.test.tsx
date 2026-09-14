@@ -73,7 +73,10 @@ describe("ReleaseNotesPopover", () => {
 		await act(async () => root.unmount());
 		const restoredRoot = createRoot(container);
 		await view(restoredRoot, loadChangelog);
+		expect(loadChangelog).toHaveBeenCalledTimes(2);
 		expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+		await act(async () => findButton(container, "Open release notes").click());
+		expect(loadChangelog).toHaveBeenCalledTimes(3);
 		await act(async () => restoredRoot.unmount());
 	});
 

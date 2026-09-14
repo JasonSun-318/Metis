@@ -1,5 +1,5 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, Code, SidebarSimple } from "@phosphor-icons/react";
+import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, Code } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -50,8 +50,6 @@ export type SessionSidebarState = Pick<
 
 interface SessionSidebarProps {
 	readonly state: SessionSidebarState;
-	readonly platform: string;
-	readonly fullscreen?: boolean;
 	readonly isClosing?: boolean;
 	readonly destination: SidebarDestination;
 	readonly onSettings: () => void;
@@ -62,7 +60,6 @@ interface SessionSidebarProps {
 	readonly onSchedules: () => void;
 	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
-	readonly onToggle: () => void;
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
@@ -148,19 +145,6 @@ export function buildSessionTree(
 export function taskTitle(session: SessionSummary, locale: Intl.LocalesArgument = "en-US", taskLabel = "Task"): string {
 	if (session.name) return session.name;
 	return `${taskLabel} · ${new Date(session.createdAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}`;
-}
-
-interface RendererWindowView {
-	readonly innerWidth?: number;
-	readonly innerHeight?: number;
-	readonly screen?: { readonly width: number; readonly height: number };
-	addEventListener?(type: "resize", listener: () => void): void;
-	removeEventListener?(type: "resize", listener: () => void): void;
-}
-
-function windowIsFullscreen(): boolean {
-	const runtime = globalThis as RendererWindowView;
-	return runtime.screen !== undefined && runtime.innerWidth === runtime.screen.width && runtime.innerHeight === runtime.screen.height;
 }
 
 function SessionButton({ busy, deleteDisabled, onDelete, onPin, onRename, pinned, selected, session, onOpen }: {
@@ -301,8 +285,6 @@ function ProjectGroup({
 
 export const SessionSidebar = memo(function SessionSidebar({
 	state,
-	platform,
-	fullscreen: fullscreenProp,
 	isClosing,
 	destination,
 	onSettings,
@@ -313,7 +295,6 @@ export const SessionSidebar = memo(function SessionSidebar({
 	onSchedules,
 	onOpenSchedule,
 	onDeleteSchedule,
-	onToggle,
 	onWidthChange,
 	scheduleTasks,
 	selectedScheduleTaskId,
@@ -350,7 +331,6 @@ export const SessionSidebar = memo(function SessionSidebar({
 		() => buildSessionTree(state, mode, preferences, pinnedSessionIds),
 		[mode, pinnedSessionIds, preferences, state],
 	);
-	const [fullscreen, setFullscreen] = useState(() => fullscreenProp ?? windowIsFullscreen());
 	const resizeRef = useRef<{ readonly pointerId: number; readonly x: number; readonly width: number } | null>(null);
 	const [activeProjectActions, setActiveProjectActions] = useState<string | null>(null);
 	const [groupingByMode, setGroupingByMode] = useState(() => {
@@ -374,18 +354,6 @@ export const SessionSidebar = memo(function SessionSidebar({
 		[allSessions, pinnedSessionIds],
 	);
 	const hasSessions = allSessions.length > 0;
-	useEffect(() => {
-		if (fullscreenProp !== undefined) {
-			setFullscreen(fullscreenProp);
-		}
-	}, [fullscreenProp]);
-	useEffect(() => {
-		if (fullscreenProp !== undefined) return;
-		const runtime = globalThis as RendererWindowView;
-		const updateFullscreen = () => setFullscreen(windowIsFullscreen());
-		runtime.addEventListener?.("resize", updateFullscreen);
-		return () => runtime.removeEventListener?.("resize", updateFullscreen);
-	}, [fullscreenProp]);
 	useEffect(() => setActiveProjectActions(null), [destination, mode]);
 	const isDeleteDisabled = (session: SessionSummary) =>
 		session.state === "running" ||
@@ -416,20 +384,9 @@ export const SessionSidebar = memo(function SessionSidebar({
 		/>
 	);
 
-	const isFullscreen = fullscreenProp ?? fullscreen;
-	const isMacWindowed = platform === "darwin" && !isFullscreen;
-
 	return (
-		<aside className={`session-sidebar${isClosing ? " is-closing" : ""}`} aria-label={t("Tasks")} data-fullscreen={isFullscreen || undefined} data-platform={platform}>
-			<div className="window-drag-region">
-				{!isMacWindowed && (
-					<div className="sidebar-titlebar-controls">
-						<button aria-label={t("Hide sessions sidebar")} onClick={onToggle} type="button">
-							<SidebarSimple aria-hidden="true" size={17} />
-						</button>
-					</div>
-				)}
-			</div>
+		<aside className={`session-sidebar${isClosing ? " is-closing" : ""}`} aria-label={t("Tasks")}>
+			<div className="window-drag-region" />
 			<div className="mode-switch" data-mode={mode} aria-label={t("Workspace mode")} role="group">
 				<span aria-hidden="true" className="mode-switch-indicator" />
 				<button aria-pressed={mode === "chat"} className={mode === "chat" ? "active" : ""} disabled={busy} onClick={() => onModeChange("chat")} type="button">

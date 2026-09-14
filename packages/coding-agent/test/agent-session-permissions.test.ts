@@ -497,6 +497,19 @@ describe("AgentSession permission enforcement", () => {
 		expect(harness.session.permissionGrantCount).toBe(0);
 	});
 
+	it("rechecks an unhealthy sandbox immediately after Windows setup", async () => {
+		const sandboxHealthProbe = vi
+			.fn()
+			.mockResolvedValueOnce({ status: "unavailable", code: "dependencies-unavailable", details: [] })
+			.mockResolvedValueOnce({ status: "healthy", code: "ready", details: [] });
+		const harness = await createHarness({ sandboxHealth: "unavailable", sandboxHealthProbe });
+		harnesses.push(harness);
+
+		await expect(harness.session.refreshSandboxHealth()).resolves.toBe("unavailable");
+		await expect(harness.session.refreshSandboxHealth()).resolves.toBe("healthy");
+		expect(sandboxHealthProbe).toHaveBeenCalledTimes(2);
+	});
+
 	it("executes in Full without approval or decision audit", async () => {
 		const { tool, execute } = customTool();
 		const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));

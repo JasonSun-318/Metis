@@ -74,6 +74,20 @@ describe("Ultra composite thinking selection", () => {
 		created.session.dispose();
 	});
 
+	it("keeps custom providers on the common thinking levels", async () => {
+		const { cwd, agentDir } = setup();
+		const model = {
+			...getModel("anthropic", "claude-sonnet-4-5")!,
+			provider: "my-custom-provider",
+			thinkingLevelMap: { minimal: null },
+		};
+		const created = await createAgentSession({ cwd, agentDir, model, ultraAvailable: true });
+
+		expect(created.session.getAvailableThinkingSelections()).toEqual(["off", "low", "medium", "high"]);
+		expect(() => created.session.setThinkingSelection("ultra")).toThrow("persisted primary Code AgentSessionRuntime");
+		created.session.dispose();
+	});
+
 	it("restores Ultra from a reopened persisted session without storing it as a provider level", async () => {
 		const { cwd, agentDir } = setup();
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;

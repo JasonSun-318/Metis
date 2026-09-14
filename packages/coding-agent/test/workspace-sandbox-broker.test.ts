@@ -40,4 +40,25 @@ describe("workspace sandbox broker policy", () => {
 		}
 		expect(config.network).toMatchObject({ allowedDomains: [], deniedDomains: [], strictAllowlist: false });
 	});
+
+	it("relies on the isolated Windows account for system reads and grants only user-owned runtime paths", () => {
+		const config = createSandboxRuntimeConfig(
+			{
+				workspaceRoots: ["C:\\Users\\jason\\project"],
+				readOnlyRoots: [],
+				writeRoots: [],
+				protectedRoots: [],
+				writeProtectedRoots: [],
+				temporaryDir: "C:\\Users\\jason\\AppData\\Local\\Temp\\metis-sandbox",
+				runtimeReads: ["C:\\Windows", "C:\\Program Files", "C:\\Users\\jason\\AppData\\Local\\Metis\\native-tools"],
+			},
+			"win32",
+			"C:\\Users\\jason",
+		);
+
+		expect(config.filesystem.denyRead).toEqual([]);
+		expect(config.filesystem.allowRead).toContain("C:\\Users\\jason\\AppData\\Local\\Metis\\native-tools");
+		expect(config.filesystem.allowRead).not.toContain("C:\\Windows");
+		expect(config.filesystem.allowRead).not.toContain("C:\\Program Files");
+	});
 });

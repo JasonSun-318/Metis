@@ -409,7 +409,7 @@ describe("DesktopUpdater", () => {
 		expect(fetch).toHaveBeenCalledTimes(2);
 	});
 
-	it("returns unavailable when up-to-date, but rejects on network/HTTP/manifest error", async () => {
+	it("returns unavailable when up-to-date or unpublished, but rejects on network/HTTP/manifest error", async () => {
 		const dmg = new TextEncoder().encode("up-to-date");
 		const fetchUpToDate = vi.fn().mockResolvedValue(
 			new Response(JSON.stringify(manifest(VERSION, dmg)), {
@@ -419,6 +419,10 @@ describe("DesktopUpdater", () => {
 		);
 		const { updater: upToDateUpdater } = await harness({ dmg, fetch: fetchUpToDate });
 		await expect(upToDateUpdater.checkForUpdate()).resolves.toEqual({ status: "unavailable" });
+
+		const fetchUnpublished = vi.fn().mockResolvedValue(new Response("Not Found", { status: 404 }));
+		const { updater: unpublishedUpdater } = await harness({ fetch: fetchUnpublished });
+		await expect(unpublishedUpdater.checkForUpdate()).resolves.toEqual({ status: "unavailable" });
 
 		const fetchNetworkError = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
 		const { updater: networkUpdater } = await harness({ fetch: fetchNetworkError });

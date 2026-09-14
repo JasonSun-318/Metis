@@ -53,6 +53,8 @@ interface CustomModelDraft {
 	readonly name: string;
 	readonly contextWindow: number;
 	readonly maxOutputTokens: number;
+	/** 模型是否支持可调节的思考等级。 */
+	readonly reasoning: boolean;
 	/** 模型是否支持图片输入；保存时映射为 input: ["text", "image"]。 */
 	readonly imageInput: boolean;
 }
@@ -96,6 +98,7 @@ function customProviderDraft(
 				name: model.name,
 				contextWindow: model.contextWindow,
 				maxOutputTokens: model.maxOutputTokens,
+				reasoning: model.reasoning,
 				imageInput: model.imageInput,
 			})),
 		};
@@ -107,7 +110,7 @@ function customProviderDraft(
 		api: "openai-responses",
 		apiKey: "",
 		testModelId: "",
-		models: [{ modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, imageInput: false }],
+		models: [{ modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, reasoning: false, imageInput: false }],
 	};
 }
 
@@ -199,6 +202,17 @@ function RerankServiceFields({ draft, busy, onChange }: {
 }
 
 const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+const CUSTOM_THINKING_LEVELS = new Set<ThinkingSelectionView>(["off", "low", "medium", "high"]);
+
+function normalizeCustomThinkingSelection(
+	selection: ThinkingSelectionView,
+	reasoning: boolean,
+): ThinkingSelectionView {
+	if (!reasoning || selection === "off") return "off";
+	if (selection === "minimal" || selection === "low") return "low";
+	if (selection === "medium") return "medium";
+	return "high";
+}
 
 export function ModelSettingsPanel({ api, serverReady }: {
 	readonly api: Pick<MetisDesktopApi, "getModelSettings" | "updateModelSettings" | "testModelConnection">;
@@ -240,6 +254,11 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	const selectedProvider = draft
 		? settings?.providers.find((provider) => provider.provider === draft.provider)
 		: undefined;
+	const selectedCustomModel = customDraft?.models.find((model) => model.modelId === customDraft.testModelId);
+	const customDefaultThinking = normalizeCustomThinkingSelection(
+		defaultThinking,
+		selectedCustomModel?.reasoning ?? false,
+	);
 	const providers = useMemo(
 		() => [...(settings?.providers ?? [])].sort((left, right) =>
 			Number(right.auth.configured) - Number(left.auth.configured) || left.name.localeCompare(right.name)),
@@ -657,7 +676,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				name: model.name,
 				contextWindow: clampTokenCount(model.contextWindow, DEFAULT_CONTEXT_WINDOW),
 				maxOutputTokens: clampTokenCount(model.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
-				reasoning: false,
+				reasoning: model.reasoning,
 				imageInput: model.imageInput,
 			})),
 			credential,
@@ -679,7 +698,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		void runUpdate({
 			type: "set_defaults",
 			model: { provider: customDraft.provider, modelId: customDraft.testModelId },
-			thinkingSelection: defaultThinking,
+			thinkingSelection: customDefaultThinking,
 		}, t("Defaults saved"));
 	};
 
@@ -729,6 +748,9 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		value: level,
 		label: t(level === "off" ? "Off" : level === "xhigh" ? "XHigh" : level[0]!.toUpperCase() + level.slice(1)),
 	}));
+	const customThinkingOptions = thinkingOptions.filter(({ value }) =>
+		selectedCustomModel?.reasoning ? CUSTOM_THINKING_LEVELS.has(value) : value === "off",
+	);
 	return (
 		<section className="settings-page model-settings-page">
 			<div className="settings-section">
@@ -890,14 +912,15 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						</div>
 
 						<div className="model-custom-models">
-							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, { modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, imageInput: false }] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
+							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, { modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, reasoning: false, imageInput: false }] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
 							{customDraft.models.map((model, index) => (
 								<div className="model-custom-model-row" key={index}>
 									<label><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, modelId: event.target.value })} placeholder="gpt-5" type="text" value={model.modelId} /></label>
 									<label><span>{t("Name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, name: event.target.value })} placeholder={model.modelId || t("Model name")} type="text" value={model.name} /></label>
 									<label><span>{t("Context window")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, contextWindow: Number(event.target.value) })} type="number" value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""} /></label>
 									<label><span>{t("Max output tokens")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, maxOutputTokens: Number(event.target.value) })} type="number" value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""} /></label>
-									<label className="model-custom-model-image"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
+									<label className="model-custom-model-capability"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
+									<label className="model-custom-model-capability"><input aria-label={t("Reasoning")} checked={model.reasoning} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, reasoning: event.target.checked })} type="checkbox" /><span>{t("Reasoning")}</span></label>
 									<button aria-label={t("Remove model")} className="model-custom-model-remove" disabled={busy || customDraft.models.length === 1} onClick={() => removeCustomModel(index)} type="button"><Trash aria-hidden="true" size={15} /></button>
 								</div>
 							))}
@@ -912,7 +935,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 							<div><h2>{t("Default model")}</h2><p>{t("Choose the model and reasoning effort used for new tasks.")}</p></div>
 							<div className="model-use-row">
 								<label><span>{t("Model")}</span><MenuSelect ariaLabel={t("Default model")} disabled={busy} onChange={(testModelId) => setCustomDraft({ ...customDraft, testModelId })} options={customDraft.models.filter((model) => model.modelId.trim() !== "").map((model) => ({ value: model.modelId, label: model.name || model.modelId }))} value={customDraft.testModelId || customDraft.models[0]?.modelId} /></label>
-								<label><span>{t("Default reasoning")}</span><MenuSelect ariaLabel={t("Default reasoning")} disabled={busy} onChange={setDefaultThinking} options={thinkingOptions} value={defaultThinking} /></label>
+								<label><span>{t("Default reasoning")}</span><MenuSelect ariaLabel={t("Default reasoning")} disabled={busy} onChange={setDefaultThinking} options={customThinkingOptions} value={customDefaultThinking} /></label>
 								<button className="settings-primary-button" disabled={busy || !customDraft.testModelId} onClick={saveCustomDefaults} type="button">{t("Use this model")}</button>
 							</div>
 						</div> : null}

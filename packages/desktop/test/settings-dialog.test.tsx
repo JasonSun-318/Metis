@@ -628,6 +628,7 @@ describe("ModelSettingsPanel", () => {
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[1]!, "My Model A");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[2]!, "200000");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[3]!, "32000");
+			firstRow.querySelector<HTMLInputElement>('input[aria-label="Reasoning"]')!.click();
 		});
 		// 添加第二行
 		await act(async () => button(container, "Add model").click());
@@ -657,7 +658,7 @@ describe("ModelSettingsPanel", () => {
 				baseUrl: "https://api.mycorp.dev/v1",
 				api: "anthropic-messages",
 				models: [
-					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: false, imageInput: false },
+					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, imageInput: false },
 					{ modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false },
 				],
 				credential: { action: "set", value: "sk-custom-key" },
@@ -670,6 +671,7 @@ describe("ModelSettingsPanel", () => {
 		const customSettings: ModelSettingsView = {
 			...modelSettings,
 			defaultModel: { provider: "my-custom", modelId: "my-model-a" },
+			defaultThinkingSelection: "ultra",
 			providers: [{
 				provider: "my-custom",
 				name: "My Custom",
@@ -678,7 +680,7 @@ describe("ModelSettingsPanel", () => {
 				api: "anthropic-messages",
 				auth: { configured: true, source: "stored", label: "••••1234" },
 				models: [
-					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: false, imageInput: false, custom: true },
+					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, imageInput: false, custom: true },
 					{ provider: "my-custom", modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false, custom: true },
 				],
 			}],
@@ -700,6 +702,20 @@ describe("ModelSettingsPanel", () => {
 		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
 		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
 		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
+		expect(editor.querySelector<HTMLInputElement>('input[aria-label="Reasoning"]')?.checked).toBe(true);
+		expect(editor.querySelectorAll(".model-use-row .menu-select-value")[1]?.textContent).toBe("High");
+		await act(async () => button(editor, "Default reasoning").click());
+		expect([...editor.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent?.trim()))
+			.toEqual(["Off", "Low", "Medium", "High"]);
+		await act(async () => editor.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click());
+		await act(async () => button(editor, "Use this model").click());
+		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
+			mutation: {
+				type: "set_defaults",
+				model: { provider: "my-custom", modelId: "my-model-a" },
+				thinkingSelection: "high",
+			},
+		}));
 
 		// 改名后保存：显示名更新，provider id 与已有凭据保持不变；保存成功后 dialog 关闭
 		const nameInput = editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!;

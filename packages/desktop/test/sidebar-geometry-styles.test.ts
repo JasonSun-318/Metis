@@ -25,19 +25,33 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(rule(".session-sidebar").gridColumn).toBe("1");
 	});
 
-	it("positions left sidebar toggle buttons at top 7px to align with traffic lights centerline (y=22px)", () => {
-		const fixedButton = rule(
-			':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar-actions .sessions-sidebar-toggle-fixed',
-		);
+	it("keeps one fixed left sidebar toggle aligned with the platform title controls", () => {
+		const fixedButton = rule(".workspace-titlebar-actions .sessions-sidebar-toggle-fixed");
 		expect(fixedButton.top).toBe("7px");
-		expect(fixedButton.left).toBe("76px");
-
+		expect(fixedButton.left).toBe("18px");
+		expect(
+			rule(
+				':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar-actions .sessions-sidebar-toggle-fixed',
+			).left,
+		).toBe("76px");
 		const actionButton = rule(".workspace-titlebar-actions button");
 		expect(actionButton.width).toBe("30px");
 		expect(actionButton.height).toBe("30px");
 
-		const controls = rule(".sidebar-titlebar-controls");
-		expect(controls.top).toBe("0px");
+		expect(css).not.toContain("sidebar-titlebar-controls");
+	});
+
+	it("uses a compact Windows navigation bar and moves the mode switch to the sidebar top", () => {
+		expect(rule(':root[data-platform="win32"] #root').paddingTop).toBe("32px");
+		expect(rule(':root[data-platform="win32"] body::before').height).toBe("32px");
+		expect(rule(".windows-titlebar-navigation").top).toBe("0px");
+		expect(rule(".windows-titlebar-navigation").height).toBe("32px");
+		expect(rule(".windows-titlebar-navigation button").width).toBe("28px");
+		expect(rule(".windows-titlebar-navigation button").height).toBe("28px");
+		expect(rule(':root[data-platform="win32"] .window-drag-region').height).toBe("6px");
+		const sidebar = rule(':root[data-platform="win32"] .session-sidebar');
+		expect(sidebar.marginTop).toBe("0px");
+		expect(sidebar.borderRadius).toBe("0 0 9px 9px");
 	});
 
 	it("unifies titlebar actions and right sidebar toggle to top 7px and right 20px", () => {

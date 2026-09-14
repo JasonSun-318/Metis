@@ -8,6 +8,7 @@ interface PermissionSelectorProps {
 	readonly constrainedByParent?: boolean;
 	readonly disabled: boolean;
 	readonly onChange: (mode: PermissionPresetView) => void | Promise<void>;
+	readonly onSetupSandbox?: () => void | Promise<void>;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
 	readonly value: PermissionPresetView;
 }
@@ -43,12 +44,14 @@ export function PermissionSelector({
 	constrainedByParent = false,
 	disabled,
 	onChange,
+	onSetupSandbox,
 	sandboxHealth = "healthy",
 	value,
 }: PermissionSelectorProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [pending, setPending] = useState(false);
+	const [setupPending, setSetupPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -80,6 +83,15 @@ export function PermissionSelector({
 		},
 		[onChange, value],
 	);
+	const setupSandbox = useCallback(async () => {
+		if (!onSetupSandbox || setupPending) return;
+		setSetupPending(true);
+		try {
+			await onSetupSandbox();
+		} finally {
+			setSetupPending(false);
+		}
+	}, [onSetupSandbox, setupPending]);
 
 	useEffect(() => {
 		if (disabled) close();
@@ -180,6 +192,20 @@ export function PermissionSelector({
 						<p className="permission-selector-note" role="alert">
 							{t("Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.")}
 						</p>
+					)}
+					{!sandboxReady && onSetupSandbox && (
+						<button
+							className="permission-sandbox-setup"
+							disabled={setupPending}
+							onClick={() => void setupSandbox()}
+							role="menuitem"
+							type="button"
+						>
+							<span>
+								<strong>{t(setupPending ? "Setting up Windows sandbox…" : "Set up Windows sandbox")}</strong>
+								<small>{t("Windows will ask for permission once to create an isolated account and network rules.")}</small>
+							</span>
+						</button>
 					)}
 				</div>
 			)}

@@ -360,9 +360,9 @@ describe("desktop trust boundaries", () => {
 			],
 		};
 		expect(validateDesktopChangelog(valid)).toEqual(valid);
+		expect(validateDesktopChangelog({ schemaVersion: 1, releases: [] })).toEqual({ schemaVersion: 1, releases: [] });
 		for (const invalid of [
 			{ ...valid, extra: true },
-			{ schemaVersion: 1, releases: [] },
 			{ schemaVersion: 1, releases: [{ version: "v0.82.0", notes: "notes" }] },
 			{ schemaVersion: 1, releases: [{ version: "0.82.0", notes: "  " }] },
 			{ schemaVersion: 1, releases: [{ version: "0.82.0", notes: " notes " }] },
@@ -524,6 +524,10 @@ describe("desktop trust boundaries", () => {
 		expect(windowSource).toContain("webviewTag: false");
 		expect(windowSource).toContain('process.platform === "darwin"');
 		expect(windowSource).toContain('titleBarStyle: "hiddenInset"');
+		expect(windowSource).toContain('process.platform === "win32"');
+		expect(windowSource).toContain('titleBarStyle: "hidden"');
+		expect(windowSource).toContain("titleBarOverlay:");
+		expect(source("src/main/theme-manager.ts")).toContain("setTitleBarOverlay");
 		expect(windowSource).not.toMatch(/enableRemoteModule|@electron\/remote/u);
 		expect(windowSource).toContain("setWindowOpenHandler");
 		expect(windowSource).toContain("isSafeExternalUrl");
@@ -1410,6 +1414,7 @@ describe("desktop trust boundaries", () => {
 			checkForUpdate: vi.fn(async () => ({ status: "unavailable" as const })),
 			downloadAndOpen: vi.fn(async () => undefined),
 		};
+		const installWorkspaceSandbox = vi.fn(async () => "cancelled" as const);
 		const broker = new ClientBroker({
 			ipcMain: ipcMain as never,
 			supervisor,
@@ -1418,6 +1423,7 @@ describe("desktop trust boundaries", () => {
 			openPath,
 			loadChangelog,
 			updater,
+			installWorkspaceSandbox,
 		});
 		const webContents = new FakeWebContents();
 		broker.attach({ webContents: webContents as never });
@@ -1455,6 +1461,7 @@ describe("desktop trust boundaries", () => {
 		const copyText = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.writeClipboardText)!;
 		const reportEditState = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.setWorkspaceEditState)!;
 		const getChangelog = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.getChangelog)!;
+		const setupSandbox = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.installWorkspaceSandbox)!;
 
 		await expect(copyText(event, { text: "copied" })).resolves.toBeUndefined();
 		expect(writeClipboardText).toHaveBeenCalledWith("copied");
@@ -1478,6 +1485,9 @@ describe("desktop trust boundaries", () => {
 		await expect(checkForUpdate(event, { extra: true })).rejects.toThrow("Invalid desktop IPC arguments");
 		await expect(checkForUpdate(event)).resolves.toEqual({ status: "unavailable" });
 		expect(updater.checkForUpdate).toHaveBeenCalledOnce();
+		await expect(setupSandbox(event, { extra: true })).rejects.toThrow("Invalid desktop IPC arguments");
+		await expect(setupSandbox(event)).resolves.toBe("cancelled");
+		expect(installWorkspaceSandbox).toHaveBeenCalledOnce();
 
 		await expect(listSessions(event, { limit: 0 })).rejects.toThrow("Invalid session/list params");
 		expect(supervisor.request).not.toHaveBeenCalled();
