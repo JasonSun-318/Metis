@@ -47,7 +47,7 @@ export interface MutableProjectionState {
 	sandboxHealth: SessionSnapshot["sandboxHealth"];
 	activeReview: SessionSnapshot["activeReview"];
 	thinkingSelection: ThinkingSelectionView;
-	actualThinkingLevel: Exclude<ThinkingSelectionView, "ultra">;
+	actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
 	availableThinkingSelections: ThinkingSelectionView[];
 	model: SessionSnapshot["model"];
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;

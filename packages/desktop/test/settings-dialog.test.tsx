@@ -37,7 +37,7 @@ const modelSettings: ModelSettingsView = {
 		baseUrl: null,
 		api: null,
 		auth: { configured: true, source: "stored", label: "••••1234" },
-		models: [{ provider: "openai", modelId: "gpt-5", name: "GPT-5", contextWindow: 400_000, maxOutputTokens: 128_000, reasoning: true, imageInput: true, custom: false }],
+		models: [{ provider: "openai", modelId: "gpt-5", name: "GPT-5", contextWindow: 400_000, maxOutputTokens: 128_000, reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"], reasoningMode: null, reasoningSource: null, imageInput: true, custom: false }],
 	}],
 	loadError: null,
 };
@@ -628,7 +628,15 @@ describe("ModelSettingsPanel", () => {
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[1]!, "My Model A");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[2]!, "200000");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[3]!, "32000");
-			firstRow.querySelector<HTMLInputElement>('input[aria-label="Reasoning"]')!.click();
+		});
+		// 第一行默认是 Automatic，这里切到 Low, medium, high
+		const reasoningSelect = firstRow.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')!;
+		expect(reasoningSelect.textContent).toContain("Automatic");
+		await act(async () => reasoningSelect.click());
+		await flush();
+		await act(async () => {
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((item) => item.textContent?.includes("Low, medium, high"))?.click();
 		});
 		// 添加第二行
 		await act(async () => button(container, "Add model").click());
@@ -658,8 +666,8 @@ describe("ModelSettingsPanel", () => {
 				baseUrl: "https://api.mycorp.dev/v1",
 				api: "anthropic-messages",
 				models: [
-					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, imageInput: false },
-					{ modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false },
+					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoningMode: "generic", imageInput: false },
+					{ modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoningMode: "auto", imageInput: false },
 				],
 				credential: { action: "set", value: "sk-custom-key" },
 			},
@@ -671,7 +679,7 @@ describe("ModelSettingsPanel", () => {
 		const customSettings: ModelSettingsView = {
 			...modelSettings,
 			defaultModel: { provider: "my-custom", modelId: "my-model-a" },
-			defaultThinkingSelection: "ultra",
+			defaultThinkingSelection: "high",
 			providers: [{
 				provider: "my-custom",
 				name: "My Custom",
@@ -680,8 +688,8 @@ describe("ModelSettingsPanel", () => {
 				api: "anthropic-messages",
 				auth: { configured: true, source: "stored", label: "••••1234" },
 				models: [
-					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, imageInput: false, custom: true },
-					{ provider: "my-custom", modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: false, custom: true },
+					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], reasoningMode: "generic", reasoningSource: "generic", imageInput: false, custom: true },
+					{ provider: "my-custom", modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, thinkingLevels: ["off"], reasoningMode: "auto", reasoningSource: "unrecognized", imageInput: false, custom: true },
 				],
 			}],
 		};
@@ -702,7 +710,8 @@ describe("ModelSettingsPanel", () => {
 		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
 		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
 		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
-		expect(editor.querySelector<HTMLInputElement>('input[aria-label="Reasoning"]')?.checked).toBe(true);
+		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain("Low, medium, high");
+		expect(editor.textContent).toContain("not found for the selected API format");
 		expect(editor.querySelectorAll(".model-use-row .menu-select-value")[1]?.textContent).toBe("High");
 		await act(async () => button(editor, "Default reasoning").click());
 		expect([...editor.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent?.trim()))
@@ -783,7 +792,7 @@ describe("ModelSettingsPanel", () => {
 				api: "openai-responses",
 				auth: { configured: true, source: "stored", label: "••••1234" },
 				models: [
-					{ provider: "vision-provider", modelId: "vision-model", name: "Vision Model", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, imageInput: true, custom: true },
+					{ provider: "vision-provider", modelId: "vision-model", name: "Vision Model", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, thinkingLevels: ["off"], reasoningMode: "off", reasoningSource: "off", imageInput: true, custom: true },
 				],
 			}],
 		};

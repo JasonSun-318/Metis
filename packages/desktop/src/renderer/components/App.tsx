@@ -1208,10 +1208,10 @@ export function App({ api, store }: AppProps) {
 			);
 	}, [modelSettings]);
 	const globalThinkingSelection = modelSettings?.defaultThinkingSelection ?? "off";
-	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(() => {
-		const base: ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-		return globalThinkingSelection === "ultra" ? [...base, "ultra"] : base;
-	}, [globalThinkingSelection]);
+	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(
+		() => ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
+		[],
+	);
 
 	const changePermissionPreset = async (sessionId: string, permissionPreset: PermissionPresetView) => {
 		try {
@@ -1475,7 +1475,7 @@ export function App({ api, store }: AppProps) {
 		/>
 	) : newTaskOpen ? (
 		<ThinkingSelector
-			actualThinkingLevel={globalThinkingSelection === "ultra" ? "max" : globalThinkingSelection}
+			actualThinkingLevel={globalThinkingSelection}
 			available={globalThinkingAvailable}
 			commandRequest={{ id: composerControl.id, open: composerControl.target === "thinking" }}
 			disabled={!serverReady}

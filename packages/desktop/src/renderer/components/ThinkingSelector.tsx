@@ -21,7 +21,13 @@ const smoothstep = (minimum: number, maximum: number, value: number) => {
 };
 const hash = (x: number, y: number, seed = 0) => Math.abs(Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453) % 1;
 
-function UltraEffortField({ reducedMotion }: { readonly reducedMotion: boolean }) {
+export function highestThinkingSelection(
+	available: SessionSnapshot["availableThinkingSelections"],
+): SessionSnapshot["thinkingSelection"] | undefined {
+	return available.filter((selection) => selection !== "off").at(-1);
+}
+
+function HighestEffortField({ reducedMotion }: { readonly reducedMotion: boolean }) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
 
 	useEffect(() => {
@@ -107,7 +113,7 @@ function UltraEffortField({ reducedMotion }: { readonly reducedMotion: boolean }
 		return () => cancelAnimationFrame(frame);
 	}, [reducedMotion]);
 
-	return <canvas aria-hidden="true" className="effort-ultra-field" ref={canvasRef} />;
+	return <canvas aria-hidden="true" className="effort-highest-field" ref={canvasRef} />;
 }
 
 export function ThinkingSelector({ actualThinkingLevel, available, commandRequest, disabled, onChange, reducedMotion, value }: ThinkingSelectorProps) {
@@ -129,7 +135,9 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 	const previewSelection = available[Math.round(previewIndex)] ?? value;
 	const previewLabel = selectionLabel(previewSelection);
 	const fill = maximumIndex === 0 ? 0 : (previewIndex / maximumIndex) * 100;
-	const ultraActive = previewSelection === "ultra";
+	const highest = highestThinkingSelection(available);
+	const highestActive = highest !== undefined && previewSelection === highest;
+	const triggerHighestActive = highest !== undefined && value === highest;
 	const commit = (index: number) => {
 		const selection = available[index];
 		if (selection && selection !== value) onChange(selection);
@@ -241,7 +249,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 	};
 
 	return (
-		<div className={`composer-selector thinking-control${(open ? ultraActive : value === "ultra") ? " thinking-ultra" : ""}`} ref={rootRef}>
+		<div className={`composer-selector thinking-control${(open ? highestActive : triggerHighestActive) ? " thinking-highest" : ""}`} ref={rootRef}>
 			<button
 				aria-describedby="thinking-selection-detail"
 				aria-expanded={open}
@@ -259,17 +267,17 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			{open && (
 				<div aria-label={t("Effort")} className="effort-popover" role="dialog">
 					<div className="effort-title">
-						<span>{t("Effort")} <strong className={ultraActive ? "is-ultra" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
+						<span>{t("Effort")} <strong className={highestActive ? "is-highest" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
 						<span title={t("Higher effort can improve difficult answers but may take longer.")}>
 							<Question aria-hidden="true" size={16} />
 						</span>
 					</div>
 					<div className="effort-axis"><span>{t("Faster")}</span><span>{t("Smarter")}</span></div>
-					<div className={`effort-slider-shell${ultraActive ? " is-ultra" : ""}`}>
+					<div className={`effort-slider-shell${highestActive ? " is-highest" : ""}`}>
 						<span aria-hidden="true" className="effort-slider-fill" style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }} />
-						{ultraActive && <UltraEffortField reducedMotion={reducedMotion} />}
+						{highestActive && <HighestEffortField reducedMotion={reducedMotion} />}
 						<div aria-hidden="true" className="effort-ticks">
-							{available.map((selection) => <span className={selection === "ultra" ? "is-ultra" : undefined} key={selection} />)}
+							{available.map((selection) => <span className={selection === highest ? "is-highest" : undefined} key={selection} />)}
 						</div>
 						<input
 							aria-label={t("Effort")}
@@ -333,7 +341,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 				</div>
 			)}
 			<span className="sr-only" id="thinking-selection-detail">
-				{value === "ultra"
+				{triggerHighestActive
 					? t("Uses the highest supported reasoning level ({{level}}).", { level: selectionLabel(actualThinkingLevel) })
 					: t("Provider thinking level {{level}}.", { level: selectionLabel(actualThinkingLevel) })}
 			</span>

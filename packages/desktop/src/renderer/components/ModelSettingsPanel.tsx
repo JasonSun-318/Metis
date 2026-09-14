@@ -53,8 +53,12 @@ interface CustomModelDraft {
 	readonly name: string;
 	readonly contextWindow: number;
 	readonly maxOutputTokens: number;
-	/** 模型是否支持可调节的思考等级。 */
-	readonly reasoning: boolean;
+	/** 推理能力来源：自动匹配内置目录、关闭，或按通用 low/medium/high 处理。 */
+	readonly reasoningMode: "auto" | "off" | "generic";
+	/** 服务端解析结果；未保存的新模型为 null。 */
+	readonly reasoningSource: "catalog" | "generic" | "off" | "unrecognized" | null;
+	/** 当前模型可用的思考等级；未保存的草稿按所选模式预览。 */
+	readonly thinkingLevels: readonly ThinkingSelectionView[];
 	/** 模型是否支持图片输入；保存时映射为 input: ["text", "image"]。 */
 	readonly imageInput: boolean;
 }
@@ -98,7 +102,9 @@ function customProviderDraft(
 				name: model.name,
 				contextWindow: model.contextWindow,
 				maxOutputTokens: model.maxOutputTokens,
-				reasoning: model.reasoning,
+				reasoningMode: model.reasoningMode ?? "auto",
+				reasoningSource: model.reasoningSource,
+				thinkingLevels: model.thinkingLevels,
 				imageInput: model.imageInput,
 			})),
 		};
@@ -110,8 +116,28 @@ function customProviderDraft(
 		api: "openai-responses",
 		apiKey: "",
 		testModelId: "",
-		models: [{ modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, reasoning: false, imageInput: false }],
+		models: [newCustomModelDraft()],
 	};
+}
+
+function newCustomModelDraft(): CustomModelDraft {
+	return {
+		modelId: "",
+		name: "",
+		contextWindow: DEFAULT_CONTEXT_WINDOW,
+		maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
+		reasoningMode: "auto",
+		reasoningSource: null,
+		thinkingLevels: ["off"],
+		imageInput: false,
+	};
+}
+
+const GENERIC_REASONING_LEVELS: readonly ThinkingSelectionView[] = ["off", "low", "medium", "high"];
+
+/** Draft-time preview of the levels a reasoning mode offers; the server is authoritative after save. */
+function previewThinkingLevels(mode: CustomModelDraft["reasoningMode"]): readonly ThinkingSelectionView[] {
+	return mode === "generic" ? GENERIC_REASONING_LEVELS : ["off"];
 }
 
 function clampTokenCount(value: number, fallback: number): number {
@@ -201,17 +227,16 @@ function RerankServiceFields({ draft, busy, onChange }: {
 	return <label className="model-api-key-field"><span>{t("Endpoint URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => onChange({ ...draft, endpointUrl: event.target.value })} placeholder="https://api.cohere.com/v2/rerank" type="text" value={draft.endpointUrl} /></label>;
 }
 
-const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
-const CUSTOM_THINKING_LEVELS = new Set<ThinkingSelectionView>(["off", "low", "medium", "high"]);
+const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-function normalizeCustomThinkingSelection(
-	selection: ThinkingSelectionView,
-	reasoning: boolean,
-): ThinkingSelectionView {
-	if (!reasoning || selection === "off") return "off";
-	if (selection === "minimal" || selection === "low") return "low";
-	if (selection === "medium") return "medium";
-	return "high";
+const CUSTOM_REASONING_OPTIONS = [
+	{ value: "auto", labelKey: "Automatic (recommended)" },
+	{ value: "off", labelKey: "Off" },
+	{ value: "generic", labelKey: "Low, medium, high" },
+] as const;
+
+function thinkingLevelLabel(level: ThinkingSelectionView): string {
+	return level === "off" ? "Off" : level === "xhigh" ? "XHigh" : `${level.charAt(0).toUpperCase()}${level.slice(1)}`;
 }
 
 export function ModelSettingsPanel({ api, serverReady }: {
@@ -255,10 +280,17 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		? settings?.providers.find((provider) => provider.provider === draft.provider)
 		: undefined;
 	const selectedCustomModel = customDraft?.models.find((model) => model.modelId === customDraft.testModelId);
-	const customDefaultThinking = normalizeCustomThinkingSelection(
-		defaultThinking,
-		selectedCustomModel?.reasoning ?? false,
-	);
+	const selectedDefaultModel = draft
+		? (selectedProvider?.models.find((model) => model.modelId === draft.testModelId) ?? selectedProvider?.models[0])
+		: undefined;
+	const defaultModelLevels: readonly ThinkingSelectionView[] = selectedDefaultModel?.thinkingLevels ?? THINKING_LEVELS;
+	const providerDefaultThinking: ThinkingSelectionView = defaultModelLevels.includes(defaultThinking)
+		? defaultThinking
+		: (defaultModelLevels.at(-1) ?? "off");
+	const customModelLevels = selectedCustomModel?.thinkingLevels ?? ["off"];
+	const customDefaultThinking: ThinkingSelectionView = customModelLevels.includes(defaultThinking)
+		? defaultThinking
+		: (customModelLevels.at(-1) ?? "off");
 	const providers = useMemo(
 		() => [...(settings?.providers ?? [])].sort((left, right) =>
 			Number(right.auth.configured) - Number(left.auth.configured) || left.name.localeCompare(right.name)),
@@ -439,7 +471,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		void runUpdate({
 			type: "set_defaults",
 			model: { provider: draft.provider, modelId: draft.testModelId },
-			thinkingSelection: defaultThinking,
+			thinkingSelection: providerDefaultThinking,
 		}, t("Defaults saved"));
 	};
 
@@ -676,7 +708,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 				name: model.name,
 				contextWindow: clampTokenCount(model.contextWindow, DEFAULT_CONTEXT_WINDOW),
 				maxOutputTokens: clampTokenCount(model.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
-				reasoning: model.reasoning,
+				reasoningMode: model.reasoningMode,
 				imageInput: model.imageInput,
 			})),
 			credential,
@@ -746,11 +778,10 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	if (!settings && !error) return <div aria-label={t("Loading model settings")} className="settings-loading" role="status" />;
 	const thinkingOptions = THINKING_LEVELS.map((level) => ({
 		value: level,
-		label: t(level === "off" ? "Off" : level === "xhigh" ? "XHigh" : level[0]!.toUpperCase() + level.slice(1)),
+		label: t(thinkingLevelLabel(level)),
 	}));
-	const customThinkingOptions = thinkingOptions.filter(({ value }) =>
-		selectedCustomModel?.reasoning ? CUSTOM_THINKING_LEVELS.has(value) : value === "off",
-	);
+	const customThinkingOptions = thinkingOptions.filter(({ value }) => customModelLevels.includes(value));
+	const defaultThinkingOptions = thinkingOptions.filter(({ value }) => defaultModelLevels.includes(value));
 	return (
 		<section className="settings-page model-settings-page">
 			<div className="settings-section">
@@ -879,7 +910,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 							<div><h2>{t("Default model")}</h2><p>{t("Choose the model and reasoning effort used for new tasks.")}</p></div>
 							<div className="model-use-row">
 								<label><span>{t("Model")}</span><MenuSelect ariaLabel={t("Default model")} disabled={busy} onChange={(testModelId) => setDraft({ ...draft, testModelId })} options={selectedProvider.models.map((model) => ({ value: model.modelId, label: model.name }))} value={draft.testModelId} /></label>
-								<label><span>{t("Default reasoning")}</span><MenuSelect ariaLabel={t("Default reasoning")} disabled={busy} onChange={setDefaultThinking} options={thinkingOptions} value={defaultThinking} /></label>
+								<label><span>{t("Default reasoning")}</span><MenuSelect ariaLabel={t("Default reasoning")} disabled={busy} onChange={setDefaultThinking} options={defaultThinkingOptions} value={providerDefaultThinking} /></label>
 								<button className="settings-primary-button" disabled={busy || !draft.testModelId} onClick={saveDefaults} type="button">{t("Use this model")}</button>
 							</div>
 						</div> : null}
@@ -912,7 +943,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						</div>
 
 						<div className="model-custom-models">
-							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, { modelId: "", name: "", contextWindow: DEFAULT_CONTEXT_WINDOW, maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS, reasoning: false, imageInput: false }] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
+							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, newCustomModelDraft()] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
 							{customDraft.models.map((model, index) => (
 								<div className="model-custom-model-row" key={index}>
 									<label><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, modelId: event.target.value })} placeholder="gpt-5" type="text" value={model.modelId} /></label>
@@ -920,8 +951,13 @@ export function ModelSettingsPanel({ api, serverReady }: {
 									<label><span>{t("Context window")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, contextWindow: Number(event.target.value) })} type="number" value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""} /></label>
 									<label><span>{t("Max output tokens")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, maxOutputTokens: Number(event.target.value) })} type="number" value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""} /></label>
 									<label className="model-custom-model-capability"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
-									<label className="model-custom-model-capability"><input aria-label={t("Reasoning")} checked={model.reasoning} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, reasoning: event.target.checked })} type="checkbox" /><span>{t("Reasoning")}</span></label>
+									<label className="model-custom-model-reasoning"><span>{t("Reasoning support")}</span><MenuSelect ariaLabel={t("Reasoning support")} disabled={busy} onChange={(reasoningMode) => updateCustomModel(index, { ...model, reasoningMode, reasoningSource: null, thinkingLevels: previewThinkingLevels(reasoningMode) })} options={CUSTOM_REASONING_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} value={model.reasoningMode} /></label>
 									<button aria-label={t("Remove model")} className="model-custom-model-remove" disabled={busy || customDraft.models.length === 1} onClick={() => removeCustomModel(index)} type="button"><Trash aria-hidden="true" size={15} /></button>
+									{model.reasoningMode === "auto" && model.reasoningSource === "unrecognized" ? (
+										<p className="model-custom-model-hint">{t("This model was not found for the selected API format. Reasoning stays off unless you choose Low, medium, high.")}</p>
+									) : model.reasoningSource === "catalog" ? (
+										<p className="model-custom-model-hint">{t("Reasoning levels: {{levels}}", { levels: model.thinkingLevels.map((level) => t(thinkingLevelLabel(level))).join(", ") })}</p>
+									) : null}
 								</div>
 							))}
 						</div>

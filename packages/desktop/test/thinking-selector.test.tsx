@@ -67,17 +67,17 @@ describe("ThinkingSelector", () => {
 			root.render(
 				<ThinkingSelector
 					actualThinkingLevel="max"
-					available={["off", "high", "max", "ultra"]}
+					available={["off", "high", "max"]}
 					disabled={false}
 					onChange={onChange}
 					reducedMotion={false}
-					value="ultra"
+					value="max"
 				/>,
 			);
 		});
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')!.click());
-		expect(container.querySelector(".effort-title")?.textContent).toContain("Effort Ultra");
-		expect(container.querySelectorAll(".effort-ticks > span")).toHaveLength(4);
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Max"]')!.click());
+		expect(container.querySelector(".effort-title")?.textContent).toContain("Effort Max");
+		expect(container.querySelectorAll(".effort-ticks > span")).toHaveLength(3);
 		expect(container.textContent).toContain("highest supported reasoning level");
 		const range = container.querySelector<HTMLInputElement>('input[type="range"]')!;
 		await act(async () => {
@@ -86,7 +86,7 @@ describe("ThinkingSelector", () => {
 			range.dispatchEvent(new Event("input", { bubbles: true }));
 		});
 		expect(onChange).not.toHaveBeenCalled();
-		expect(container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')?.textContent).toContain("High");
+		expect(container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Max"]')?.textContent).toContain("High");
 		expect(container.querySelector('[role="dialog"]')).not.toBeNull();
 		await act(async () => range.dispatchEvent(new Event("pointerup", { bubbles: true })));
 		expect(onChange).not.toHaveBeenCalled();
@@ -94,12 +94,12 @@ describe("ThinkingSelector", () => {
 		expect(onChange).toHaveBeenCalledWith("high");
 		expect(onChange).toHaveBeenCalledTimes(1);
 		expect(container.querySelector('[role="dialog"]')).not.toBeNull();
-		expect(container.querySelector(".effort-ultra-field")).toBeNull();
+		expect(container.querySelector(".effort-highest-field")).toBeNull();
 		await act(async () => {
 			root.render(
 				<ThinkingSelector
 					actualThinkingLevel="high"
-					available={["off", "high", "max", "ultra"]}
+					available={["off", "high", "max"]}
 					disabled={false}
 					onChange={onChange}
 					reducedMotion={false}
@@ -113,29 +113,57 @@ describe("ThinkingSelector", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("renders the animated ultra trail only at the actual ultra stop", async () => {
+	it("renders the highest-effort treatment at each model's native maximum", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		for (const testCase of [
+			{ available: ["off", "low", "medium", "high"] as const, value: "high" as const },
+			{ available: ["off", "low", "medium", "high", "xhigh"] as const, value: "xhigh" as const },
+			{ available: ["off", "low", "medium", "high", "xhigh", "max"] as const, value: "max" as const },
+		]) {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			await act(async () => root.render(
+				<ThinkingSelector
+					actualThinkingLevel={testCase.value}
+					available={testCase.available}
+					disabled={false}
+					onChange={() => undefined}
+					reducedMotion={false}
+					value={testCase.value}
+				/>,
+			));
+			expect(container.querySelector(".thinking-highest")).not.toBeNull();
+			await act(async () => container.querySelector<HTMLButtonElement>(".composer-selector-trigger")!.click());
+			expect(container.querySelector(".effort-highest-field")).not.toBeNull();
+			await act(async () => root.unmount());
+			container.remove();
+		}
+	});
+
+	it("renders no highest-effort treatment for a non-reasoning model", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => {
-			root.render(
-				<ThinkingSelector
-					actualThinkingLevel="max"
-					available={["off", "high", "max", "ultra"]}
-					disabled={false}
-					onChange={() => undefined}
-					reducedMotion={false}
-					value="ultra"
-				/>,
-			);
-		});
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')!.click());
-		expect(container.querySelector(".effort-ultra-field")).not.toBeNull();
+		await act(async () => root.render(
+			<ThinkingSelector
+				actualThinkingLevel="off"
+				available={["off"]}
+				disabled={false}
+				onChange={() => undefined}
+				reducedMotion={false}
+				value="off"
+			/>,
+		));
+		expect(container.querySelector(".thinking-highest")).toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>(".composer-selector-trigger")!.click());
+		expect(container.querySelector(".effort-highest-field")).toBeNull();
+		expect(container.querySelector("canvas")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
-	it("renders one static ultra frame without scheduling animation when motion is reduced", async () => {
+	it("renders one static highest frame without scheduling animation when motion is reduced", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
 			beginPath: vi.fn(),
@@ -153,14 +181,14 @@ describe("ThinkingSelector", () => {
 		await act(async () => root.render(
 			<ThinkingSelector
 				actualThinkingLevel="max"
-				available={["off", "high", "max", "ultra"]}
+				available={["off", "high", "max"]}
 				disabled={false}
 				onChange={() => undefined}
 				reducedMotion
-				value="ultra"
+				value="max"
 			/>,
 		));
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Ultra"]')!.click());
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select effort, current Max"]')!.click());
 		expect(requestAnimationFrame).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
@@ -175,7 +203,7 @@ describe("ThinkingSelector", () => {
 			root.render(
 				<ThinkingSelector
 					actualThinkingLevel="low"
-					available={["off", "low", "ultra"]}
+					available={["off", "low", "max"]}
 					disabled={false}
 					onChange={onChange}
 					reducedMotion
@@ -192,7 +220,7 @@ describe("ThinkingSelector", () => {
 			range.dispatchEvent(new Event("pointerup", { bubbles: true }));
 		});
 		expect(onChange).toHaveBeenCalledOnce();
-		expect(onChange).toHaveBeenCalledWith("ultra");
+		expect(onChange).toHaveBeenCalledWith("max");
 		expect(container.querySelector('[role="dialog"]')).not.toBeNull();
 		await act(async () => range.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" })));
 		expect(onChange).toHaveBeenNthCalledWith(2, "low");
@@ -203,7 +231,7 @@ describe("ThinkingSelector", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		for (const testCase of [
 			{ available: ["off", "low", "medium", "high"] as const, current: "medium" as const, expected: "high" as const },
-			{ available: ["off", "low", "medium", "high", "ultra"] as const, current: "high" as const, expected: "ultra" as const },
+			{ available: ["off", "low", "medium", "high", "xhigh"] as const, current: "high" as const, expected: "xhigh" as const },
 		]) {
 			const container = document.createElement("div");
 			document.body.append(container);

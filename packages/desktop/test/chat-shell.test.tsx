@@ -3786,7 +3786,7 @@ describe("Chat desktop shell", () => {
 			...snapshot(session("code-existing", "code", "/work/code-project", "Code project task")),
 			thinkingSelection: "high" as const,
 			actualThinkingLevel: "high" as const,
-			availableThinkingSelections: ["off", "low", "medium", "high", "ultra"] as const,
+			availableThinkingSelections: ["off", "low", "medium", "high", "max"] as const,
 		};
 		vi.mocked(api.openSession).mockResolvedValue(codeSnapshot);
 		let rejectChange!: (reason: Error) => void;
@@ -3812,8 +3812,8 @@ describe("Chat desktop shell", () => {
 			trigger.click();
 		});
 
-		expect(api.setThinkingSelection).toHaveBeenCalledWith(expect.objectContaining({ selection: "ultra" }));
-		expect(trigger.textContent).toContain("Ultra");
+		expect(api.setThinkingSelection).toHaveBeenCalledWith(expect.objectContaining({ selection: "max" }));
+		expect(trigger.textContent).toContain("Max");
 		await act(async () => rejectChange(new Error("selection failed")));
 		await flush();
 		await flush();
