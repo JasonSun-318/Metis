@@ -381,7 +381,7 @@ describe("deferred tools", () => {
 	it("uses tool search only for supported Codex models", async () => {
 		const context = makeContext([makeTool("base_tool"), makeTool("late_tool")]);
 		const supported = await capturePayload<OpenAIPayload>(
-			getModel("openai-codex", "gpt-5.4"),
+			getModel("openai-codex", "gpt-5.5"),
 			context,
 			makeCodexToken(),
 		);

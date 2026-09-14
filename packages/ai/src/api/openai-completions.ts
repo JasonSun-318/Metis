@@ -27,7 +27,9 @@ import type {
 	StreamFunction,
 	StreamOptions,
 	TextContent,
+	ThinkingBudgets,
 	ThinkingContent,
+	ThinkingTokenBudgetField,
 	Tool,
 	ToolCall,
 	ToolResultMessage,
@@ -40,7 +42,12 @@ import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
-import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
+import {
+	buildBaseOptions,
+	clampThinkingBudgetToAnswerRoom,
+	mapSimpleToolChoice,
+	thinkingBudgetForLevel,
+} from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
 /**
@@ -110,6 +117,8 @@ function isEncryptedReasoningDetail(detail: unknown): detail is OpenAIEncryptedR
 export interface OpenAICompletionsOptions extends StreamOptions {
 	toolChoice?: "auto" | "none" | "required" | { type: "function"; function: { name: string } };
 	reasoningEffort?: "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+	/** Token budgets per thinking level. Used when `compat.thinkingTokenBudgetField` or `compat.supportsThinkingTokenBudget` is set, or by `{ "$var": "thinking.budget" }`. */
+	thinkingBudgets?: ThinkingBudgets;
 }
 
 interface OpenAICompatCacheControl {
@@ -117,11 +126,42 @@ interface OpenAICompatCacheControl {
 	ttl?: string;
 }
 
-type ResolvedOpenAICompletionsCompat = Omit<Required<OpenAICompletionsCompat>, "cacheControlFormat"> & {
+type ResolvedOpenAICompletionsCompat = Omit<
+	Required<OpenAICompletionsCompat>,
+	"cacheControlFormat" | "deferredToolsMode" | "thinkingTokenBudgetField" | "vllmPriority"
+> & {
 	cacheControlFormat?: OpenAICompletionsCompat["cacheControlFormat"];
+	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
+	thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
+	vllmPriority?: OpenAICompletionsCompat["vllmPriority"];
 };
 
 type ResolvedChatTemplateKwargValue = string | number | boolean | null;
+
+type KimiToolSystemMessageParam = {
+	role: "system";
+	tools: OpenAI.Chat.Completions.ChatCompletionTool[];
+};
+
+function getDeferredToolNames(messages: Message[]): Set<string> {
+	const names = new Set<string>();
+	for (const message of messages) {
+		if (message.role === "toolResult") {
+			for (const name of message.addedToolNames ?? []) {
+				names.add(name);
+			}
+		}
+	}
+	return names;
+}
+
+function getToolsByName(tools: Tool[] | undefined, names: Iterable<string>): Tool[] {
+	if (!tools) return [];
+	const toolsByName = new Map(tools.map((tool) => [tool.name, tool]));
+	return Array.from(names)
+		.map((name) => toolsByName.get(name))
+		.filter((tool): tool is Tool => tool !== undefined);
+}
 
 type ChatCompletionInstructionMessageParam = ChatCompletionDeveloperMessageParam | ChatCompletionSystemMessageParam;
 
@@ -584,8 +624,11 @@ function buildParams(
 		params.temperature = options.temperature;
 	}
 
-	if (context.tools && context.tools.length > 0) {
-		params.tools = convertTools(context.tools, compat);
+	const deferredToolNames =
+		compat.deferredToolsMode === "kimi" ? getDeferredToolNames(context.messages) : new Set<string>();
+	const activeTools = context.tools?.filter((tool) => !deferredToolNames.has(tool.name));
+	if (activeTools && activeTools.length > 0) {
+		params.tools = convertTools(activeTools, compat);
 		if (compat.zaiToolStream) {
 			(params as any).tool_stream = true;
 		}
@@ -602,6 +645,13 @@ function buildParams(
 		params.tool_choice = options.toolChoice;
 	}
 
+	if (compat.vllmPriority !== undefined) {
+		(params as any).priority = compat.vllmPriority;
+	}
+
+	const thinkingTokenBudgetField = resolveThinkingTokenBudgetField(compat);
+	const thinkingBudget = resolveClampedThinkingBudget(model, options, params);
+
 	if (compat.thinkingFormat === "zai" && model.reasoning) {
 		const zaiParams = params as Omit<typeof params, "reasoning_effort"> & {
 			thinking?: { type: "enabled" | "disabled"; clear_thinking?: boolean };
@@ -617,15 +667,38 @@ function buildParams(
 		}
 	} else if (compat.thinkingFormat === "qwen" && model.reasoning) {
 		(params as any).enable_thinking = !!options?.reasoningEffort;
+		if (options?.reasoningEffort && compat.supportsReasoningEffort) {
+			const effort = model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort;
+			if (typeof effort === "string") {
+				(params as any).reasoning_effort = effort;
+			}
+		}
 	} else if (compat.thinkingFormat === "qwen-chat-template" && model.reasoning) {
 		(params as any).chat_template_kwargs = {
 			enable_thinking: !!options?.reasoningEffort,
 			preserve_thinking: true,
 		};
 	} else if (compat.thinkingFormat === "chat-template" && model.reasoning) {
-		const chatTemplateKwargs = buildChatTemplateKwargs(model, options, compat);
+		const chatTemplateKwargs = buildChatTemplateValues(model, options, compat.chatTemplateKwargs, thinkingBudget);
 		if (chatTemplateKwargs) {
 			(params as any).chat_template_kwargs = chatTemplateKwargs;
+		}
+	} else if (compat.thinkingFormat === "baseten" && model.reasoning) {
+		const basetenParams = params as Omit<typeof params, "reasoning_effort"> & {
+			chat_template_args?: Record<string, ResolvedChatTemplateKwargValue>;
+			reasoning_effort?: string;
+		};
+		const chatTemplateArgs = buildChatTemplateValues(model, options, compat.chatTemplateArgs, thinkingBudget);
+		if (chatTemplateArgs) {
+			basetenParams.chat_template_args = chatTemplateArgs;
+		}
+		if (compat.supportsReasoningEffort) {
+			const requestedEffort = options?.reasoningEffort;
+			const mappedEffort = requestedEffort ? model.thinkingLevelMap?.[requestedEffort] : model.thinkingLevelMap?.off;
+			const effort = mappedEffort === undefined ? requestedEffort : mappedEffort;
+			if (typeof effort === "string") {
+				basetenParams.reasoning_effort = effort;
+			}
 		}
 	} else if (compat.thinkingFormat === "deepseek" && model.reasoning) {
 		if (options?.reasoningEffort) {
@@ -678,6 +751,14 @@ function buildParams(
 		}
 	}
 
+	// Cap reasoning with a top-level budget field. Independent of thinkingFormat: the
+	// same server can serve zai, qwen or chat-template models. Reasoning and the answer
+	// share max_tokens here, so an uncapped reasoning phase can consume the whole
+	// response and leave no answer and no tool call.
+	if (thinkingTokenBudgetField && thinkingBudget !== undefined) {
+		Object.assign(params, { [thinkingTokenBudgetField]: thinkingBudget });
+	}
+
 	// OpenRouter provider routing preferences
 	if (model.compat?.openRouterRouting) {
 		(params as any).provider = model.compat.openRouterRouting;
@@ -697,27 +778,51 @@ function buildParams(
 	return params;
 }
 
-function buildChatTemplateKwargs(
+function resolveThinkingTokenBudgetField(
+	compat: Pick<OpenAICompletionsCompat, "thinkingTokenBudgetField" | "supportsThinkingTokenBudget">,
+): ThinkingTokenBudgetField | undefined {
+	if (compat.thinkingTokenBudgetField) return compat.thinkingTokenBudgetField;
+	if (compat.supportsThinkingTokenBudget) return "thinking_token_budget";
+	return undefined;
+}
+
+function resolveClampedThinkingBudget(
 	model: Model<"openai-completions">,
 	options: OpenAICompletionsOptions | undefined,
-	compat: ResolvedOpenAICompletionsCompat,
-): Record<string, ResolvedChatTemplateKwargValue> | undefined {
-	const kwargs: Record<string, ResolvedChatTemplateKwargValue> = {};
+	params: { max_tokens?: number | null; max_completion_tokens?: number | null },
+): number | undefined {
+	if (!options?.reasoningEffort || !model.reasoning) return undefined;
+	const ceiling = params.max_tokens ?? params.max_completion_tokens ?? model.maxTokens;
+	const budget = clampThinkingBudgetToAnswerRoom(
+		thinkingBudgetForLevel(options.reasoningEffort, options.thinkingBudgets),
+		ceiling,
+	);
+	return budget > 0 ? budget : undefined;
+}
 
-	for (const [key, value] of Object.entries(compat.chatTemplateKwargs)) {
-		const resolved = resolveChatTemplateKwargValue(model, options, value);
+function buildChatTemplateValues(
+	model: Model<"openai-completions">,
+	options: OpenAICompletionsOptions | undefined,
+	values: Record<string, ChatTemplateKwargValue>,
+	thinkingBudget?: number,
+): Record<string, ResolvedChatTemplateKwargValue> | undefined {
+	const resolvedValues: Record<string, ResolvedChatTemplateKwargValue> = {};
+
+	for (const [key, value] of Object.entries(values)) {
+		const resolved = resolveChatTemplateKwargValue(model, options, value, thinkingBudget);
 		if (resolved !== undefined) {
-			kwargs[key] = resolved;
+			resolvedValues[key] = resolved;
 		}
 	}
 
-	return Object.keys(kwargs).length > 0 ? kwargs : undefined;
+	return Object.keys(resolvedValues).length > 0 ? resolvedValues : undefined;
 }
 
 function resolveChatTemplateKwargValue(
 	model: Model<"openai-completions">,
 	options: OpenAICompletionsOptions | undefined,
 	value: ChatTemplateKwargValue,
+	thinkingBudget?: number,
 ): ResolvedChatTemplateKwargValue | undefined {
 	if (typeof value !== "object" || value === null) {
 		return value;
@@ -729,6 +834,9 @@ function resolveChatTemplateKwargValue(
 	}
 	if (value.$var === "thinking.enabled") {
 		return !!reasoningEffort;
+	}
+	if (value.$var === "thinking.budget") {
+		return thinkingBudget;
 	}
 
 	const mappedValue = reasoningEffort ? model.thinkingLevelMap?.[reasoningEffort] : model.thinkingLevelMap?.off;
@@ -1024,6 +1132,7 @@ export function convertMessages(
 			params.push(assistantMsg);
 		} else if (msg.role === "toolResult") {
 			const imageBlocks: Array<{ type: "image_url"; image_url: { url: string } }> = [];
+			const deferredToolNames = new Set<string>();
 			let j = i;
 
 			for (; j < transformedMessages.length && transformedMessages[j].role === "toolResult"; j++) {
@@ -1049,6 +1158,12 @@ export function convertMessages(
 					(toolResultMsg as any).name = toolMsg.toolName;
 				}
 				params.push(toolResultMsg);
+
+				if (compat.deferredToolsMode === "kimi") {
+					for (const name of toolMsg.addedToolNames ?? []) {
+						deferredToolNames.add(name);
+					}
+				}
 
 				if (hasImages && model.input.includes("image")) {
 					for (const block of toolMsg.content) {
@@ -1087,6 +1202,18 @@ export function convertMessages(
 				lastRole = "user";
 			} else {
 				lastRole = "toolResult";
+			}
+
+			if (deferredToolNames.size > 0) {
+				const deferredTools = getToolsByName(context.tools, deferredToolNames);
+				if (deferredTools.length > 0) {
+					const kimiToolMessage: KimiToolSystemMessageParam = {
+						role: "system",
+						tools: convertTools(deferredTools, compat),
+					};
+					// Kimi accepts a system message with tools but omits the standard content field.
+					params.push(kimiToolMessage as unknown as ChatCompletionMessageParam);
+				}
 			}
 			continue;
 		}
@@ -1217,11 +1344,19 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		isCloudflareAiGateway ||
 		isAntLing;
 
-	const useMaxTokens =
-		baseUrl.includes("chutes.ai") || isMoonshot || isCloudflareAiGateway || isTogether || isNvidia || isAntLing;
-
 	const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");
 	const isDeepSeek = provider === "deepseek" || baseUrl.includes("deepseek.com");
+
+	const useMaxTokens =
+		baseUrl.includes("chutes.ai") ||
+		isDeepSeek ||
+		isMoonshot ||
+		isCloudflareAiGateway ||
+		isTogether ||
+		isNvidia ||
+		isAntLing ||
+		isZai;
+
 	const isOpenRouterDeveloperRoleModel =
 		isOpenRouter && (model.id.startsWith("anthropic/") || model.id.startsWith("openai/"));
 	const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;
@@ -1232,6 +1367,7 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		supportsReasoningEffort:
 			!isGrok && !isZai && !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia && !isAntLing,
 		supportsUsageInStreaming: true,
+		supportsFinishReason: true,
 		maxTokensField: useMaxTokens ? "max_tokens" : "max_completion_tokens",
 		requiresToolResultName: false,
 		requiresAssistantAfterToolResult: false,
@@ -1251,10 +1387,15 @@ function detectCompat(model: Model<"openai-completions">): ResolvedOpenAIComplet
 		openRouterRouting: {},
 		vercelGatewayRouting: {},
 		chatTemplateKwargs: {},
+		chatTemplateArgs: {},
 		zaiToolStream: false,
+		supportsThinkingTokenBudget: false,
+		thinkingTokenBudgetField: undefined,
 		supportsStrictMode: !isMoonshot && !isTogether && !isCloudflareAiGateway && !isNvidia,
+		supportsOpenAIGrammarTools: false,
 		cacheControlFormat,
-		sendSessionAffinityHeaders: false,
+		sendSessionAffinityHeaders: isOpenRouter,
+		deferredToolsMode: undefined,
 		sessionAffinityFormat: isOpenRouter ? "openrouter" : "openai",
 		supportsLongCacheRetention: !(
 			isTogether ||
@@ -1279,6 +1420,7 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		supportsDeveloperRole: model.compat.supportsDeveloperRole ?? detected.supportsDeveloperRole,
 		supportsReasoningEffort: model.compat.supportsReasoningEffort ?? detected.supportsReasoningEffort,
 		supportsUsageInStreaming: model.compat.supportsUsageInStreaming ?? detected.supportsUsageInStreaming,
+		supportsFinishReason: model.compat.supportsFinishReason ?? detected.supportsFinishReason,
 		maxTokensField: model.compat.maxTokensField ?? detected.maxTokensField,
 		requiresToolResultName: model.compat.requiresToolResultName ?? detected.requiresToolResultName,
 		requiresAssistantAfterToolResult:
@@ -1291,11 +1433,17 @@ function getCompat(model: Model<"openai-completions">): ResolvedOpenAICompletion
 		openRouterRouting: model.compat.openRouterRouting ?? {},
 		vercelGatewayRouting: model.compat.vercelGatewayRouting ?? detected.vercelGatewayRouting,
 		chatTemplateKwargs: model.compat.chatTemplateKwargs ?? detected.chatTemplateKwargs,
+		chatTemplateArgs: model.compat.chatTemplateArgs ?? detected.chatTemplateArgs,
 		zaiToolStream: model.compat.zaiToolStream ?? detected.zaiToolStream,
+		supportsThinkingTokenBudget: model.compat.supportsThinkingTokenBudget ?? detected.supportsThinkingTokenBudget,
+		thinkingTokenBudgetField: model.compat.thinkingTokenBudgetField ?? detected.thinkingTokenBudgetField,
 		supportsStrictMode: model.compat.supportsStrictMode ?? detected.supportsStrictMode,
+		supportsOpenAIGrammarTools: model.compat.supportsOpenAIGrammarTools ?? detected.supportsOpenAIGrammarTools,
 		cacheControlFormat: model.compat.cacheControlFormat ?? detected.cacheControlFormat,
 		sendSessionAffinityHeaders: model.compat.sendSessionAffinityHeaders ?? detected.sendSessionAffinityHeaders,
+		deferredToolsMode: model.compat.deferredToolsMode ?? detected.deferredToolsMode,
 		sessionAffinityFormat: model.compat.sessionAffinityFormat ?? detected.sessionAffinityFormat,
 		supportsLongCacheRetention: model.compat.supportsLongCacheRetention ?? detected.supportsLongCacheRetention,
+		vllmPriority: model.compat.vllmPriority,
 	};
 }

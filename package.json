@@ -33,6 +33,8 @@
 		"release:local": "node scripts/local-release.mjs",
 		"shrinkwrap:coding-agent": "node scripts/generate-coding-agent-shrinkwrap.mjs",
 		"install-lock:coding-agent": "node scripts/generate-coding-agent-install-lock.mjs",
+		"generate:model-catalog": "npm --prefix packages/ai run generate-model-catalog",
+		"diff:model-catalog": "node scripts/diff-model-catalog.mjs",
 		"prepare": "husky"
 	},
 	"devDependencies": {

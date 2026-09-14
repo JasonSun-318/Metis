@@ -50,13 +50,11 @@ describe("loadDesktopChangelog", () => {
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
-				fetch: vi
-					.fn()
-					.mockResolvedValue(
-						new Response(JSON.stringify({ schemaVersion: 1, releases: [{ version: "0.1.0", notes: "  " }] }), {
-							status: 200,
-						}),
-					),
+				fetch: vi.fn().mockResolvedValue(
+					new Response(JSON.stringify({ schemaVersion: 1, releases: [{ version: "0.1.0", notes: "  " }] }), {
+						status: 200,
+					}),
+				),
 			}),
 		).rejects.toThrow("Invalid desktop changelog");
 	});

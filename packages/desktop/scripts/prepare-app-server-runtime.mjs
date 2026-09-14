@@ -68,7 +68,7 @@ async function copyWorkspacePackage(packageRoot, destination) {
 
 const buildSteps = [
 	["run", "build", "--workspace", "@metis/tui"],
-	["exec", "--workspace", "@metis/ai", "--", "tsgo", "-p", "tsconfig.build.json"],
+	["run", "build:offline", "--workspace", "@metis/ai"],
 	["run", "build", "--workspace", "@metis/agent-core"],
 	["run", "build", "--workspace", "@metis/app-protocol"],
 	["run", "build", "--workspace", "@metis/coding-agent"],

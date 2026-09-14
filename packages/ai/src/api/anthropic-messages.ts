@@ -173,14 +173,22 @@ const INTERLEAVED_THINKING_BETA = "interleaved-thinking-2025-05-14";
 
 function getAnthropicCompat(
 	model: Model<"anthropic-messages">,
-): Required<Omit<AnthropicMessagesCompat, "forceAdaptiveThinking">> {
+): Required<
+	Omit<
+		AnthropicMessagesCompat,
+		"forceAdaptiveThinking" | "supportsMidConvoEffort" | "allowedFallbackModels" | "sessionAffinityFormat"
+	>
+> & { sessionAffinityFormat?: AnthropicMessagesCompat["sessionAffinityFormat"] } {
+	const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");
 	return {
 		supportsEagerToolInputStreaming: model.compat?.supportsEagerToolInputStreaming ?? true,
 		supportsLongCacheRetention: model.compat?.supportsLongCacheRetention ?? true,
-		sendSessionAffinityHeaders: model.compat?.sendSessionAffinityHeaders ?? false,
+		sendSessionAffinityHeaders: model.compat?.sendSessionAffinityHeaders ?? isOpenRouter,
+		sessionAffinityFormat: model.compat?.sessionAffinityFormat ?? (isOpenRouter ? "openrouter" : undefined),
 		supportsCacheControlOnTools: model.compat?.supportsCacheControlOnTools ?? true,
 		supportsTemperature: model.compat?.supportsTemperature ?? true,
 		allowEmptySignature: model.compat?.allowEmptySignature ?? false,
+		supportsStrictTools: model.compat?.supportsStrictTools ?? false,
 		supportsToolReferences: model.compat?.supportsToolReferences ?? defaultSupportsToolReferences(model),
 	};
 }
@@ -900,8 +908,14 @@ function createClient(
 	}
 
 	// API key or header-owned auth.
+	const anthropicCompat = getAnthropicCompat(model);
 	const sessionAffinityHeaders: ProviderHeaders =
-		sessionId && getAnthropicCompat(model).sendSessionAffinityHeaders ? { "x-session-affinity": sessionId } : {};
+		sessionId && anthropicCompat.sendSessionAffinityHeaders
+			? {
+					[anthropicCompat.sessionAffinityFormat === "openrouter" ? "x-session-id" : "x-session-affinity"]:
+						sessionId,
+				}
+			: {};
 	const defaultHeaders = mergeHeaders(
 		{
 			accept: "application/json",

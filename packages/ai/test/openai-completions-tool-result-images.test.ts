@@ -19,7 +19,13 @@ const emptyUsage: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-const compat: Required<OpenAICompletionsCompat> = {
+const compat: Omit<
+	Required<OpenAICompletionsCompat>,
+	"deferredToolsMode" | "thinkingTokenBudgetField" | "vllmPriority"
+> & {
+	deferredToolsMode?: OpenAICompletionsCompat["deferredToolsMode"];
+	thinkingTokenBudgetField?: OpenAICompletionsCompat["thinkingTokenBudgetField"];
+} = {
 	supportsStore: true,
 	supportsDeveloperRole: true,
 	supportsReasoningEffort: true,
@@ -33,7 +39,12 @@ const compat: Required<OpenAICompletionsCompat> = {
 	openRouterRouting: {},
 	vercelGatewayRouting: {},
 	chatTemplateKwargs: {},
+	chatTemplateArgs: {},
 	zaiToolStream: false,
+	supportsFinishReason: true,
+	supportsThinkingTokenBudget: false,
+	thinkingTokenBudgetField: undefined,
+	supportsOpenAIGrammarTools: false,
 	supportsStrictMode: true,
 	cacheControlFormat: "anthropic",
 	sendSessionAffinityHeaders: false,

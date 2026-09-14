@@ -3,6 +3,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	"amazon-bedrock": "Amazon Bedrock",
 	"ant-ling": "Ant Ling",
 	"azure-openai-responses": "Azure OpenAI Responses",
+	baseten: "Baseten",
 	cerebras: "Cerebras",
 	"cloudflare-ai-gateway": "Cloudflare AI Gateway",
 	"cloudflare-workers-ai": "Cloudflare Workers AI",
@@ -32,4 +33,7 @@ export const BUILT_IN_PROVIDER_DISPLAY_NAMES: Record<string, string> = {
 	"xiaomi-token-plan-cn": "Xiaomi MiMo Token Plan (China)",
 	"xiaomi-token-plan-ams": "Xiaomi MiMo Token Plan (Amsterdam)",
 	"xiaomi-token-plan-sgp": "Xiaomi MiMo Token Plan (Singapore)",
+	"qwen-token-plan": "Qwen Token Plan",
+	"qwen-token-plan-cn": "Qwen Token Plan (China)",
+	"qwen-token-plan-individual": "Qwen Token Plan (Individual)",
 };
