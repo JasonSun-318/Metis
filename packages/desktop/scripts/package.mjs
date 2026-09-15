@@ -1,8 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 function nativeArch() {
 	const machine = process.platform === "darwin"
@@ -21,6 +21,14 @@ if (!args.some((argument) => argument === "--arch" || argument.startsWith("--arc
 	args.push(`--arch=${nativeArch()}`);
 }
 const require = createRequire(import.meta.url);
+if (command === "make" && process.platform === "win32") {
+	// Repository setup skips lifecycle scripts, so electron-winstaller does not
+	// create the architecture-selected names that Squirrel invokes.
+	const vendor = join(dirname(require.resolve("electron-winstaller/package.json")), "vendor");
+	for (const extension of ["exe", "dll"]) {
+		copyFileSync(join(vendor, `7z-${nativeArch()}.${extension}`), join(vendor, `7z.${extension}`));
+	}
+}
 if (command === "make" && process.platform === "darwin") {
 	// Repository setup skips lifecycle scripts; Forge's DMG maker still needs
 	// these two locked native transitive dependencies before it can run.
