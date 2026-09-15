@@ -139,19 +139,32 @@ function runCaptured(
 	});
 }
 
-async function grantHelperRead(helperPath: string): Promise<void> {
-	const status = await runCaptured(helperPath, ["user", "status"]);
-	if (status.exitCode !== 0) throw new Error("Windows sandbox account could not be inspected");
-	const parsed: unknown = JSON.parse(status.stdout);
+async function tryGrantHelperRead(
+	helperPath: string,
+	runCommand: typeof runCaptured,
+): Promise<"granted" | "status-unavailable" | "invalid-sid" | "grant-failed"> {
+	const status = await runCommand(helperPath, ["user", "status"]);
+	if (status.exitCode !== 0) return "status-unavailable";
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(status.stdout);
+	} catch {
+		return "invalid-sid";
+	}
 	const sid =
 		typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
 			? (parsed as { user?: { sid?: unknown } }).user?.sid
 			: undefined;
-	if (typeof sid !== "string" || !/^S-1-5-(?:\d+-)+\d+$/u.test(sid)) {
-		throw new Error("Windows sandbox account identifier is invalid");
-	}
-	const granted = await runCaptured("icacls.exe", [helperPath, "/grant", `*${sid}:(RX)`]);
-	if (granted.exitCode !== 0) throw new Error("Windows sandbox helper permissions could not be configured");
+	if (typeof sid !== "string" || !/^S-1-5-(?:\d+-)+\d+$/u.test(sid)) return "invalid-sid";
+	const granted = await runCommand("icacls.exe", [helperPath, "/grant", `*${sid}:(RX)`]);
+	return granted.exitCode === 0 ? "granted" : "grant-failed";
+}
+
+async function grantHelperRead(helperPath: string): Promise<void> {
+	const result = await tryGrantHelperRead(helperPath, runCaptured);
+	if (result === "status-unavailable") throw new Error("Windows sandbox account could not be inspected");
+	if (result === "invalid-sid") throw new Error("Windows sandbox account identifier is invalid");
+	if (result === "grant-failed") throw new Error("Windows sandbox helper permissions could not be configured");
 }
 
 export async function repairWindowsSandboxAccess(options: WindowsSandboxSetupOptions): Promise<boolean> {
@@ -160,16 +173,9 @@ export async function repairWindowsSandboxAccess(options: WindowsSandboxSetupOpt
 	}
 	const helperPath = await verifiedHelper(options);
 	const runCommand = options.runCommand ?? runCaptured;
-	const status = await runCommand(helperPath, ["user", "status"]);
-	if (status.exitCode !== 0) return false;
-	const parsed: unknown = JSON.parse(status.stdout);
-	const sid =
-		typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-			? (parsed as { user?: { sid?: unknown } }).user?.sid
-			: undefined;
-	if (typeof sid !== "string" || !/^S-1-5-(?:\d+-)+\d+$/u.test(sid)) return false;
-	const granted = await runCommand("icacls.exe", [helperPath, "/grant", `*${sid}:(RX)`]);
-	if (granted.exitCode !== 0) throw new Error("Windows sandbox helper permissions could not be repaired");
+	const result = await tryGrantHelperRead(helperPath, runCommand);
+	if (result === "status-unavailable" || result === "invalid-sid") return false;
+	if (result === "grant-failed") throw new Error("Windows sandbox helper permissions could not be repaired");
 	await verifiedHelper(options);
 	return true;
 }
