@@ -1,6 +1,6 @@
 import { lstatSync } from "node:fs";
 import type { ClientResult } from "@metis/app-protocol";
-import { DEFAULT_AGENT_MODE, type FileEntry, parseSkillUsageRecord, SessionManager } from "@metis/coding-agent";
+import { DEFAULT_AGENT_MODE, type FileEntry, parseSkillUsageRecord, SessionManager } from "@metis/coding-agent/host";
 import type { SessionRef } from "./session-runtime-host.ts";
 
 const DAY_MS = 86_400_000;

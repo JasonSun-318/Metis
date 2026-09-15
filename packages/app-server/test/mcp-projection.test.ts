@@ -9,7 +9,7 @@ import {
 	ProjectTrustStore,
 	resolveMcpServerSettings,
 	SettingsManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AgentSessionRuntimeHost } from "../src/agent-session-runtime-host.ts";
 import { CredentialCoordinator } from "../src/credential-coordinator.ts";

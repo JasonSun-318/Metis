@@ -1,5 +1,5 @@
 import type { ClientParams, ClientResult, WebSearchProvider } from "@metis/app-protocol";
-import type { AuthStorage, SettingsManager } from "@metis/coding-agent";
+import type { AuthStorage, SettingsManager } from "@metis/coding-agent/host";
 
 const WEB_SEARCH_PROVIDERS = ["brave", "tavily", "serpapi"] as const;
 

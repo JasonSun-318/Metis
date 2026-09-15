@@ -19,7 +19,7 @@ import {
 	pluginMcpCredentialKeys,
 	readPluginRegistry,
 	withPluginRegistryLock,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { type FetchImplementation, validArchivePath } from "./github-archive.ts";
 import { type ParsedPluginComponent, parsePluginManifest } from "./plugin-manifests.ts";
 import {

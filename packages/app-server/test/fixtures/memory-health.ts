@@ -1,5 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
-import { getLatestMemoryError, getMemorySqlitePath } from "@metis/coding-agent";
+import { getLatestMemoryError, getMemorySqlitePath } from "@metis/coding-agent/host";
 
 interface TestMemoryHealthRow {
 	operation: "extract" | "embedding" | "rerank" | "backfill" | "projection" | "migration";

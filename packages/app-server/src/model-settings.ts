@@ -15,7 +15,7 @@ import {
 	validateEmbeddingSettings,
 	validateRerankSettings,
 	validateServiceCredential,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 
 interface ModelsConfigDocument {
 	providers: Record<string, Record<string, unknown>>;

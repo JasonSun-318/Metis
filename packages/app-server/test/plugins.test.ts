@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readPluginSnapshot } from "@metis/coding-agent";
+import { readPluginSnapshot } from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PluginService } from "../src/plugins.ts";
 

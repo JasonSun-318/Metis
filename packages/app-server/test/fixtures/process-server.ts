@@ -1,4 +1,4 @@
-import { getAgentDir, SessionManager } from "@metis/coding-agent";
+import { getAgentDir, SessionManager } from "@metis/coding-agent/host";
 import { AppServer } from "../../src/app-server.ts";
 import { StdioTransport } from "../../src/transport/stdio-transport.ts";
 import { bindAppServerTransport } from "../../src/transport/transport.ts";

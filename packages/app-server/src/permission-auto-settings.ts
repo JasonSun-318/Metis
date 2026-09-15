@@ -1,5 +1,5 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { DEFAULT_AUTO_COMMAND_SUGGESTIONS, type SettingsManager } from "@metis/coding-agent";
+import { DEFAULT_AUTO_COMMAND_SUGGESTIONS, type SettingsManager } from "@metis/coding-agent/host";
 import { AppServerError } from "./session-runtime-host.ts";
 
 export class PermissionAutoSettingsService {

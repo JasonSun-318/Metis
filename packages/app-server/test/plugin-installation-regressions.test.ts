@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { AuthStorage, mcpCredentialKey, readPluginSnapshot } from "@metis/coding-agent";
+import { AuthStorage, mcpCredentialKey, readPluginSnapshot } from "@metis/coding-agent/host";
 import { afterEach, expect, it } from "vitest";
 import { PluginService } from "../src/plugins.ts";
 import { createZip } from "./helpers/plugin-zip-fixture.ts";

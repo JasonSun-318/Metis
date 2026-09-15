@@ -4,7 +4,7 @@ import {
 	loadDeclarativeHooks,
 	readPluginSnapshot,
 	saveDeclarativeHooks,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { AppServerError } from "./session-runtime-host.ts";
 
 /**

@@ -1,4 +1,4 @@
-import { configureHttpDispatcher, getAgentDir } from "@metis/coding-agent";
+import { configureHttpDispatcher, getAgentDir } from "@metis/coding-agent/host";
 import { AppServer } from "./app-server.ts";
 import { bindAppServerTransport } from "./transport/transport.ts";
 import {

@@ -1,7 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, relative, resolve, sep, win32 } from "node:path";
 import type { ClientParams } from "@metis/app-protocol";
-import { assertSessionFileSelections, type SessionFileSelection } from "@metis/coding-agent";
+import { assertSessionFileSelections, type SessionFileSelection } from "@metis/coding-agent/host";
 
 type FileSelectionInput = NonNullable<ClientParams<"turn/start">["fileSelections"]>[number];
 

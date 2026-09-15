@@ -26,7 +26,7 @@ import {
 	resolveNewSessionWorkspace,
 	type ScheduleRun,
 	SessionManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import {
 	completeSessionMutation,
 	type DurableSessionMutation,

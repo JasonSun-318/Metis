@@ -8,7 +8,7 @@ import {
 	ScheduleManager,
 	type ScheduleRunClaim,
 	SessionManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { trashScheduledTaskData } from "../../coding-agent/src/core/schedules/delete.ts";
 import { AppServer } from "../src/app-server.ts";

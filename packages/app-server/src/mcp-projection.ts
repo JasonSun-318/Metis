@@ -13,7 +13,7 @@ import {
 	type ResolvedMcpServerConfig,
 	resolveMcpServerSettings,
 	type SettingsManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 
 type McpServerInput = ClientParams<"mcp/upsert">["server"];
 const ENVIRONMENT_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;

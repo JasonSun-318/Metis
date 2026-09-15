@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ClientParams } from "@metis/app-protocol";
-import { loadSkills, type Skill } from "@metis/coding-agent";
+import { loadSkills, type Skill } from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	importSkills,

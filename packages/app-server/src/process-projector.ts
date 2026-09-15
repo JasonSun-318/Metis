@@ -1,5 +1,5 @@
 import type { SessionProcessView } from "@metis/app-protocol";
-import type { AgentSessionEvent } from "@metis/coding-agent";
+import type { AgentSessionEvent } from "@metis/coding-agent/host";
 import { opaqueId } from "./item-projection.ts";
 
 const MAX_OUTPUT_BYTES = 64 * 1024;

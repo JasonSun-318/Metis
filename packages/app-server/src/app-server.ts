@@ -19,7 +19,7 @@ import {
 	SessionManager,
 	SettingsManager,
 	VERSION,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { AgentSessionRuntimeHost } from "./agent-session-runtime-host.ts";
 import { AppServerConnection } from "./connection.ts";
 import { CredentialCoordinator } from "./credential-coordinator.ts";

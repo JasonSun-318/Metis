@@ -1,5 +1,5 @@
 import type { BrowserToolResult } from "@metis/app-protocol";
-import type { PermissionAuditEvent } from "@metis/coding-agent";
+import type { PermissionAuditEvent } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import {
 	type BrowserPermissionAudit,

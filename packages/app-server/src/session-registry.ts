@@ -1,5 +1,5 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { assertValidSessionId } from "@metis/coding-agent";
+import { assertValidSessionId } from "@metis/coding-agent/host";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,

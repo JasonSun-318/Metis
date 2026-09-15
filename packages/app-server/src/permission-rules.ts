@@ -5,7 +5,7 @@ import {
 	MAX_PERMISSION_OPERATION_ROWS,
 	type ProjectPermissionRuleView,
 } from "@metis/app-protocol";
-import { type ProjectPermissionRule, ProjectPermissionRuleStore } from "@metis/coding-agent";
+import { type ProjectPermissionRule, ProjectPermissionRuleStore } from "@metis/coding-agent/host";
 import type { SessionCatalog } from "./session-catalog.ts";
 import { AppServerError } from "./session-runtime-host.ts";
 

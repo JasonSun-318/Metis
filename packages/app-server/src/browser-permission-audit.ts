@@ -5,7 +5,7 @@ import {
 	digestCanonical,
 	type PermissionAuditEvent,
 	type PermissionAuditSink,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 
 export type BrowserPermissionAuditRequest = BrowserToolCall & { readonly toolCallId: string };
 

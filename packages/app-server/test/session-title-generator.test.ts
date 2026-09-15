@@ -1,4 +1,4 @@
-import type { ModelRegistry, SettingsManager } from "@metis/coding-agent";
+import type { ModelRegistry, SettingsManager } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import { DefaultSessionTitleGenerator } from "../src/session-title-generator.ts";
 

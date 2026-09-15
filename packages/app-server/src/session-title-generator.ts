@@ -1,4 +1,4 @@
-import { getLowestSupportedThinkingLevel, type ModelRegistry, type SettingsManager } from "@metis/coding-agent";
+import { getLowestSupportedThinkingLevel, type ModelRegistry, type SettingsManager } from "@metis/coding-agent/host";
 
 const TITLE_PROMPT = `You are a conversation title generator. Generate a concise title from the user's first message in the same language. Use no more than 10 characters for Chinese, Japanese, or Korean; otherwise use no more than 6 words. Output only the title. Do not answer the user.
 Examples:

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { AuthStorage, SettingsManager } from "@metis/coding-agent";
+import { AuthStorage, SettingsManager } from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSearchService } from "../src/web-search.ts";
 

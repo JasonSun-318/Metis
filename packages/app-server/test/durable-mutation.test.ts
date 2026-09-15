@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { identifyRuntimeRequest, SessionManager } from "@metis/coding-agent";
+import { identifyRuntimeRequest, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	completeSessionMutation,

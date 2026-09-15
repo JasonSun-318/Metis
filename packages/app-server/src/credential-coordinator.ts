@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { type AuthStatus, AuthStorage, FileAuthStorageBackend } from "@metis/coding-agent";
+import { type AuthStatus, AuthStorage, FileAuthStorageBackend } from "@metis/coding-agent/host";
 
 export interface CredentialCoordinatorOptions {
 	readonly agentDir: string;

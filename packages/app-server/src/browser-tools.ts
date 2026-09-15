@@ -8,7 +8,7 @@ import {
 	BrowserTabsInputSchema as BrowserTabsParams,
 	type BrowserToolCall,
 } from "@metis/app-protocol";
-import type { ToolDefinition } from "@metis/coding-agent";
+import type { ToolDefinition } from "@metis/coding-agent/host";
 import {
 	type BrowserPermissionAudit,
 	BrowserPermissionDecisionUnavailableError,

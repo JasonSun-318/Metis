@@ -9,7 +9,7 @@ import {
 	MEMORY_RERANK_CREDENTIAL_ID,
 	ModelRegistry,
 	SettingsManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelSettingsService } from "../src/model-settings.ts";
 import { recordMemoryHealth } from "./fixtures/memory-health.ts";
