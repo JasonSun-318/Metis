@@ -485,6 +485,43 @@ describe("ModelRegistry", () => {
 			});
 		});
 
+		test("compat schema accepts Baseten thinking configuration", () => {
+			writeRawModelsJson({
+				demo: {
+					baseUrl: "https://example.com/v1",
+					apiKey: "DEMO_KEY",
+					api: "openai-completions",
+					models: [
+						{
+							id: "demo-model",
+							reasoning: true,
+							input: ["text"],
+							cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+							contextWindow: 1000,
+							maxTokens: 100,
+							compat: {
+								thinkingFormat: "baseten",
+								chatTemplateArgs: {
+									enable_thinking: { $var: "thinking.enabled" },
+									thinking_budget: { $var: "thinking.budget", omitWhenOff: true },
+								},
+							},
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const compat = registry.find("demo", "demo-model")?.compat as OpenAICompletionsCompat | undefined;
+
+			expect(registry.getError()).toBeUndefined();
+			expect(compat?.thinkingFormat).toBe("baseten");
+			expect(compat?.chatTemplateArgs).toEqual({
+				enable_thinking: { $var: "thinking.enabled" },
+				thinking_budget: { $var: "thinking.budget", omitWhenOff: true },
+			});
+		});
+
 		test("compat schema accepts Anthropic eager tool input streaming flag", () => {
 			writeRawModelsJson({
 				demo: {
