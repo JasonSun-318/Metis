@@ -3729,6 +3729,41 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("uses the default model's native effort levels on the new-task page", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+		const { api } = createHarness();
+		const settings: ModelSettingsView = {
+			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
+			defaultThinkingSelection: "max",
+			vision: null,
+			embedding: null,
+			rerank: null,
+			providers: [{
+				provider: "glm",
+				name: "GLM",
+				builtin: false,
+				baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+				api: "openai-completions",
+				auth: { configured: true, source: "stored" },
+				models: [{ provider: "glm", modelId: "glm-5.3-flash", name: "GLM 5.3 Flash", contextWindow: 128_000, maxOutputTokens: 16_384, reasoning: true, thinkingLevels: ["low", "high", "max"], reasoningMode: "auto", reasoningSource: "catalog", imageInput: false, custom: true }],
+			}],
+			loadError: null,
+		};
+		vi.mocked(api.getModelSettings).mockResolvedValue(settings);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const effort = button(container, "Select effort, current Max");
+		await act(async () => effort.click());
+		expect(container.querySelectorAll(".effort-ticks > span")).toHaveLength(3);
+		expect(container.querySelector<HTMLInputElement>('.thinking-control input[type="range"]')?.max).toBe("2");
+		await act(async () => root.unmount());
+	});
+
 	it("retains additions after a failed active send and changes replay identity with the file", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");

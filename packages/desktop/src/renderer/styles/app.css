@@ -2537,18 +2537,21 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .model-custom-models { display: grid; gap: 9px; border-top: 1px solid var(--border-weak); padding-top: 16px; }
 .model-custom-models-heading { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .model-custom-models-heading > span { color: var(--text-26); font-size: 13px; font-weight: 580; }
-.model-custom-model-row { display: grid; align-items: end; gap: 8px; border: 1px solid var(--border-weak); border-radius: 9px; padding: 10px; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.1fr) minmax(110px, .6fr) minmax(110px, .6fr) auto auto auto; }
-.model-custom-model-row > label { display: grid; min-width: 0; gap: 4px; }
-.model-custom-model-row > label > span { color: var(--text-14); font-size: 11px; }
+.model-custom-model-row { position: relative; display: grid; gap: 14px; border: 1px solid var(--border-weak); border-radius: 10px; background: var(--surface-02); padding: 14px 52px 14px 14px; }
+.model-custom-model-fields { display: grid; min-width: 0; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.model-custom-model-row label { display: grid; min-width: 0; gap: 5px; }
+.model-custom-model-row label > span { color: var(--text-14); font-size: 11px; }
 .model-custom-model-row input { min-width: 0; height: 30px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-02); color: var(--text-26); padding: 0 8px; font-size: 12px; }
 .model-custom-model-row input:focus { border-color: var(--accent); outline: none; }
+.model-custom-model-options { display: grid; min-width: 0; align-items: end; gap: 12px; border-top: 1px solid var(--border-weak); padding-top: 12px; grid-template-columns: minmax(120px, .65fr) minmax(190px, 1fr); }
 .model-custom-model-row .model-custom-model-capability { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
 .model-custom-model-row .model-custom-model-capability input { width: 15px; height: 15px; accent-color: var(--accent); padding: 0; }
-.model-custom-model-row .model-custom-model-reasoning { min-width: 132px; }
-.model-custom-model-row .model-custom-model-hint { grid-column: 1 / -1; margin: 0; color: var(--text-14); font-size: 11px; }
-.model-custom-model-remove { display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--text-14); }
+.model-custom-model-row .model-custom-model-reasoning { min-width: 0; }
+.model-custom-model-row .model-custom-model-hint { margin: -4px 0 0; color: var(--text-14); font-size: 11px; }
+.model-custom-model-remove { position: absolute; top: 12px; right: 12px; display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--text-14); }
 .model-custom-model-remove:hover:not(:disabled) { background: var(--danger-soft-bg); color: var(--danger); }
 .model-provider-dialog { width: min(590px, calc(100vw - 48px)); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-05); box-shadow: var(--overlay-shadow); color: var(--text-26); padding: 0; scrollbar-color: var(--scrollbar-thumb) transparent; -webkit-app-region: no-drag; }
+.model-custom-provider-dialog { width: min(700px, calc(100vw - 48px)); }
 .model-provider-dialog::backdrop { background: rgb(0 0 0 / 52%); backdrop-filter: blur(3px); -webkit-app-region: no-drag; }
 .model-provider-dialog-content { padding: 22px 24px 24px; -webkit-app-region: no-drag; }
 .model-provider-editor { display: grid; gap: 20px; -webkit-app-region: no-drag; }
@@ -2894,6 +2897,7 @@ classes so their inline layout wins the cascade. */
 	.model-provider-grid { overflow: visible; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.model-provider-dialog { width: calc(100vw - 28px); max-height: calc(100vh - 28px); }
 	.model-provider-dialog-content { padding: 19px; }
+	.model-custom-model-fields, .model-custom-model-options { grid-template-columns: minmax(0, 1fr); }
 	.usage-toolbar { align-items: stretch; flex-direction: column; }
 	.settings-segmented { align-self: flex-start; }
 	.usage-summary-cards { gap: 10px; }

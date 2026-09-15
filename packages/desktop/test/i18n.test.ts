@@ -71,6 +71,10 @@ describe("Desktop locale preference", () => {
 			"更新日志加载失败，请检查网络后重试。",
 		);
 		expect(i18n.t("Latest")).toBe("最新");
+		expect(i18n.t("Minimal")).toBe("最小");
+		expect(i18n.t("Automatic detection (recommended)")).toBe("自动识别（推荐）");
+		expect(i18n.t("No reasoning")).toBe("不支持推理");
+		expect(i18n.t("Generic reasoning: Low, medium, high")).toBe("通用推理：低、中、高");
 		expect(
 			i18n.t(
 				"On Windows, Metis currently imports browsing history only. Cookies and sign-in state are not imported.",

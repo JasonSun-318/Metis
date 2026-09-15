@@ -230,9 +230,9 @@ function RerankServiceFields({ draft, busy, onChange }: {
 const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 const CUSTOM_REASONING_OPTIONS = [
-	{ value: "auto", labelKey: "Automatic (recommended)" },
-	{ value: "off", labelKey: "Off" },
-	{ value: "generic", labelKey: "Low, medium, high" },
+	{ value: "auto", labelKey: "Automatic detection (recommended)" },
+	{ value: "off", labelKey: "No reasoning" },
+	{ value: "generic", labelKey: "Generic reasoning: Low, medium, high" },
 ] as const;
 
 function thinkingLevelLabel(level: ThinkingSelectionView): string {
@@ -935,8 +935,8 @@ export function ModelSettingsPanel({ api, serverReady }: {
 							</div>
 						</header>
 
-							<div className="model-custom-provider-fields">
-								<label className="model-api-key-field"><span>{t("Provider name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setCustomDraft({ ...customDraft, name: event.target.value })} placeholder="my-provider" type="text" value={customDraft.name} /></label>
+						<div className="model-custom-provider-fields">
+							<label className="model-api-key-field"><span>{t("Provider name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setCustomDraft({ ...customDraft, name: event.target.value })} placeholder="my-provider" type="text" value={customDraft.name} /></label>
 							<label className="model-api-key-field"><span>{t("Base URL")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setCustomDraft({ ...customDraft, baseUrl: event.target.value })} placeholder="https://api.example.com/v1" type="text" value={customDraft.baseUrl} /></label>
 							<label className="model-api-key-field"><span>{t("API format")}</span><MenuSelect ariaLabel={t("API format")} disabled={busy} onChange={(api) => setCustomDraft({ ...customDraft, api })} options={API_FORMATS.map((format) => ({ value: format.value, label: t(format.label) }))} value={customDraft.api} /></label>
 							<label className="model-api-key-field"><span>{t("API key")}</span><input autoComplete="off" disabled={busy} onChange={(event) => setCustomDraft({ ...customDraft, apiKey: event.target.value })} placeholder="sk-…" type="password" value={customDraft.apiKey} /></label>
@@ -946,17 +946,23 @@ export function ModelSettingsPanel({ api, serverReady }: {
 							<div className="model-custom-models-heading"><span>{t("Models")}</span><button className="settings-secondary-button" disabled={busy} onClick={() => setCustomDraft({ ...customDraft, models: [...customDraft.models, newCustomModelDraft()] })} type="button"><Plus aria-hidden="true" size={14} />{t("Add model")}</button></div>
 							{customDraft.models.map((model, index) => (
 								<div className="model-custom-model-row" key={index}>
-									<label><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, modelId: event.target.value })} placeholder="gpt-5" type="text" value={model.modelId} /></label>
-									<label><span>{t("Name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, name: event.target.value })} placeholder={model.modelId || t("Model name")} type="text" value={model.name} /></label>
-									<label><span>{t("Context window")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, contextWindow: Number(event.target.value) })} type="number" value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""} /></label>
-									<label><span>{t("Max output tokens")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, maxOutputTokens: Number(event.target.value) })} type="number" value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""} /></label>
-									<label className="model-custom-model-capability"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
-									<label className="model-custom-model-reasoning"><span>{t("Reasoning support")}</span><MenuSelect ariaLabel={t("Reasoning support")} disabled={busy} onChange={(reasoningMode) => updateCustomModel(index, { ...model, reasoningMode, reasoningSource: null, thinkingLevels: previewThinkingLevels(reasoningMode) })} options={CUSTOM_REASONING_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} value={model.reasoningMode} /></label>
 									<button aria-label={t("Remove model")} className="model-custom-model-remove" disabled={busy || customDraft.models.length === 1} onClick={() => removeCustomModel(index)} type="button"><Trash aria-hidden="true" size={15} /></button>
+									<div className="model-custom-model-fields model-custom-model-identity">
+										<label><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, modelId: event.target.value })} placeholder="gpt-5" type="text" value={model.modelId} /></label>
+										<label><span>{t("Display name")}</span><input autoComplete="off" disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, name: event.target.value })} placeholder={model.modelId || t("Model name")} type="text" value={model.name} /></label>
+									</div>
+									<div className="model-custom-model-fields model-custom-model-limits">
+										<label><span>{t("Context window")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, contextWindow: Number(event.target.value) })} type="number" value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""} /></label>
+										<label><span>{t("Max output tokens")}</span><input disabled={busy} min={1} onChange={(event) => updateCustomModel(index, { ...model, maxOutputTokens: Number(event.target.value) })} type="number" value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""} /></label>
+									</div>
+									<div className="model-custom-model-options">
+										<label className="model-custom-model-capability"><input aria-label={t("Image input")} checked={model.imageInput} disabled={busy} onChange={(event) => updateCustomModel(index, { ...model, imageInput: event.target.checked })} type="checkbox" /><span>{t("Image input")}</span></label>
+										<label className="model-custom-model-reasoning"><span>{t("Reasoning support")}</span><MenuSelect ariaLabel={t("Reasoning support")} disabled={busy} onChange={(reasoningMode) => updateCustomModel(index, { ...model, reasoningMode, reasoningSource: null, thinkingLevels: previewThinkingLevels(reasoningMode) })} options={CUSTOM_REASONING_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))} value={model.reasoningMode} /></label>
+									</div>
 									{model.reasoningMode === "auto" && model.reasoningSource === "unrecognized" ? (
-										<p className="model-custom-model-hint">{t("This model was not found for the selected API format. Reasoning stays off unless you choose Low, medium, high.")}</p>
+										<p className="model-custom-model-hint">{t("This model was not found for the selected API format. Reasoning stays off unless you choose Generic reasoning: Low, medium, high.")}</p>
 									) : model.reasoningSource === "catalog" ? (
-										<p className="model-custom-model-hint">{t("Reasoning levels: {{levels}}", { levels: model.thinkingLevels.map((level) => t(thinkingLevelLabel(level))).join(", ") })}</p>
+										<p className="model-custom-model-hint">{t("Supported reasoning levels: {{levels}}", { levels: model.thinkingLevels.map((level) => t(thinkingLevelLabel(level))).join(", ") })}</p>
 									) : null}
 								</div>
 							))}

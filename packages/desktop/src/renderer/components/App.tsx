@@ -1209,8 +1209,15 @@ export function App({ api, store }: AppProps) {
 	}, [modelSettings]);
 	const globalThinkingSelection = modelSettings?.defaultThinkingSelection ?? "off";
 	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(
-		() => ["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-		[],
+		() => {
+			const selected = modelSettings?.defaultModel;
+			if (!selected) return ["off"];
+			const model = modelSettings.providers
+				.find((provider) => provider.provider === selected.provider)
+				?.models.find((candidate) => candidate.modelId === selected.modelId);
+			return model ? [...model.thinkingLevels] : ["off"];
+		},
+		[modelSettings],
 	);
 
 	const changePermissionPreset = async (sessionId: string, permissionPreset: PermissionPresetView) => {

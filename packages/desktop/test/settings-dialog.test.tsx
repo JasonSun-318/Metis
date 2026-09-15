@@ -623,20 +623,23 @@ describe("ModelSettingsPanel", () => {
 		});
 		// 第一行模型（默认已有）
 		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
+		expect(firstRow.querySelectorAll(".model-custom-model-fields")).toHaveLength(2);
+		expect(firstRow.querySelector(".model-custom-model-identity")?.textContent).toContain("Display name");
+		expect(firstRow.querySelector(".model-custom-model-options")).not.toBeNull();
 		await act(async () => {
 			setValue(firstRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "my-model-a");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[1]!, "My Model A");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[2]!, "200000");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[3]!, "32000");
 		});
-		// 第一行默认是 Automatic，这里切到 Low, medium, high
+		// 第一行默认是 Automatic detection，这里切到 Generic reasoning
 		const reasoningSelect = firstRow.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')!;
 		expect(reasoningSelect.textContent).toContain("Automatic");
 		await act(async () => reasoningSelect.click());
 		await flush();
 		await act(async () => {
 			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Low, medium, high"))?.click();
+				.find((item) => item.textContent?.includes("Generic reasoning: Low, medium, high"))?.click();
 		});
 		// 添加第二行
 		await act(async () => button(container, "Add model").click());
@@ -710,7 +713,7 @@ describe("ModelSettingsPanel", () => {
 		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
 		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
 		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
-		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain("Low, medium, high");
+		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain("Generic reasoning: Low, medium, high");
 		expect(editor.textContent).toContain("not found for the selected API format");
 		expect(editor.querySelectorAll(".model-use-row .menu-select-value")[1]?.textContent).toBe("High");
 		await act(async () => button(editor, "Default reasoning").click());
