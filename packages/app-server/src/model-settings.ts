@@ -29,6 +29,24 @@ interface ModelSettingsServiceOptions {
 	readonly settingsManager: SettingsManager;
 }
 
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
+function clampThinkingSelection(
+	model: Parameters<typeof getSupportedThinkingLevels>[0],
+	selection: (typeof THINKING_LEVELS)[number],
+): (typeof THINKING_LEVELS)[number] {
+	const available = getSupportedThinkingLevels(model);
+	if (available.includes(selection)) return selection;
+	const requested = THINKING_LEVELS.indexOf(selection);
+	return (
+		THINKING_LEVELS.slice(requested + 1).find((level) => available.includes(level)) ??
+		THINKING_LEVELS.slice(0, requested)
+			.reverse()
+			.find((level) => available.includes(level)) ??
+		"off"
+	);
+}
+
 function stripJsonComments(input: string): string {
 	return input
 		.replace(/"(?:\\.|[^"\\])*"|\/\/[^\n]*/g, (match) => (match[0] === '"' ? match : ""))
@@ -189,6 +207,9 @@ export class ModelSettingsService {
 		);
 		const defaultProvider = this.settingsManager.getDefaultProvider();
 		const defaultModelId = this.settingsManager.getDefaultModel();
+		const defaultModel =
+			defaultProvider && defaultModelId ? this.modelRegistry.find(defaultProvider, defaultModelId) : undefined;
+		const savedThinkingSelection = this.settingsManager.getDefaultThinkingLevel() ?? "medium";
 		const vision = this.settingsManager.getVisionSettings();
 		const embedding = this.settingsManager.getEmbeddingSettings();
 		const rerank = this.settingsManager.getRerankSettings();
@@ -205,7 +226,9 @@ export class ModelSettingsService {
 			rerank: rerank
 				? { ...rerank, authConfigured: this.authStorage.get(MEMORY_RERANK_CREDENTIAL_ID)?.type === "api_key" }
 				: null,
-			defaultThinkingSelection: this.settingsManager.getDefaultThinkingLevel() ?? "medium",
+			defaultThinkingSelection: defaultModel
+				? clampThinkingSelection(defaultModel, savedThinkingSelection)
+				: savedThinkingSelection,
 			providers,
 			loadError: readError ?? this.modelRegistry.getError() ?? null,
 		};
@@ -265,7 +288,7 @@ export class ModelSettingsService {
 					throw new Error("The default model is unavailable");
 				this.settingsManager.setDefaultModelSettings(
 					{ provider: model.provider, modelId: model.id },
-					mutation.thinkingSelection,
+					clampThinkingSelection(model, mutation.thinkingSelection),
 				);
 			} else {
 				this.settingsManager.setDefaultModelSettings(null, mutation.thinkingSelection);
@@ -332,14 +355,33 @@ export class ModelSettingsService {
 					if (mutation.api) provider.api = mutation.api;
 					else delete provider.api;
 					if (mutation.models.length > 0) {
-						provider.models = mutation.models.map((model) => ({
-							id: model.modelId,
-							name: model.name,
-							reasoningMode: model.reasoningMode,
-							input: model.imageInput ? ["text", "image"] : ["text"],
-							contextWindow: model.contextWindow,
-							maxTokens: model.maxOutputTokens,
-						}));
+						const previousModels = new Map(
+							(Array.isArray(provider.models) ? provider.models : []).flatMap((model) =>
+								isRecord(model) && typeof model.id === "string" ? [[model.id, model] as const] : [],
+							),
+						);
+						provider.models = mutation.models.map((model) => {
+							const previousModel = previousModels.get(model.modelId);
+							const next = previousModel ? structuredClone(previousModel) : {};
+							const preserveExplicitReasoning =
+								model.reasoningMode === "auto" &&
+								previousModel !== undefined &&
+								previousModel.reasoningMode === undefined &&
+								("reasoning" in previousModel || "thinkingLevelMap" in previousModel);
+							next.id = model.modelId;
+							next.name = model.name;
+							if (preserveExplicitReasoning) {
+								delete next.reasoningMode;
+							} else {
+								next.reasoningMode = model.reasoningMode;
+								delete next.reasoning;
+								delete next.thinkingLevelMap;
+							}
+							next.input = model.imageInput ? ["text", "image"] : ["text"];
+							next.contextWindow = model.contextWindow;
+							next.maxTokens = model.maxOutputTokens;
+							return next;
+						});
 					} else {
 						delete provider.models;
 					}

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
@@ -93,7 +93,7 @@ describe("ModelSettingsService", () => {
 		});
 		expect(service.view()).toMatchObject({
 			defaultModel: { provider: "local-test", modelId: "test-model" },
-			defaultThinkingSelection: "high",
+			defaultThinkingSelection: "off",
 		});
 
 		const removed = await service.update({ type: "remove_provider", provider: "local-test" });
@@ -492,12 +492,86 @@ describe("ModelSettingsService", () => {
 			reasoningSource: "off",
 		});
 
+		const defaults = await service.update({
+			type: "set_defaults",
+			model: { provider: "codex-proxy", modelId: "zai-org/GLM-5.3-Fast" },
+			thinkingSelection: "medium",
+		});
+		expect(defaults.defaultThinkingSelection).toBe("high");
+
 		const persisted = JSON.parse(readFileSync(join(agentDir, "models.json"), "utf8"));
 		const savedModels = persisted.providers["codex-proxy"].models;
 		const savedModel = savedModels.find((model: { id: string }) => model.id === "zai-org/GLM-5.3-Fast");
 		expect(savedModel).toMatchObject({ reasoningMode: "auto" });
 		expect(savedModel).not.toHaveProperty("reasoning");
 		expect(savedModel).not.toHaveProperty("thinkingLevelMap");
+	});
+
+	it("preserves hand-edited model capabilities when saving unrelated provider fields", async () => {
+		const modelsPath = join(agentDir, "models.json");
+		writeFileSync(
+			modelsPath,
+			`${JSON.stringify(
+				{
+					providers: {
+						custom: {
+							name: "Custom",
+							baseUrl: "https://example.test/v1",
+							api: "openai-completions",
+							models: [
+								{
+									id: "special-model",
+									name: "Special",
+									reasoning: true,
+									thinkingLevelMap: { off: null, low: "low", high: "high" },
+									compat: { supportsReasoningEffort: true },
+									input: ["text"],
+									contextWindow: 32_000,
+									maxTokens: 4_096,
+								},
+							],
+						},
+					},
+				},
+				null,
+				2,
+			)}\n`,
+		);
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const service = new ModelSettingsService({
+			agentDir,
+			authStorage,
+			modelRegistry: ModelRegistry.create(authStorage, modelsPath),
+			settingsManager: SettingsManager.create(agentDir, agentDir),
+		});
+
+		await service.update({
+			type: "save_provider",
+			provider: "custom",
+			name: "Custom renamed",
+			baseUrl: "https://example.test/v1",
+			api: "openai-completions",
+			models: [
+				{
+					modelId: "special-model",
+					name: "Special",
+					contextWindow: 32_000,
+					maxOutputTokens: 4_096,
+					reasoningMode: "auto",
+					imageInput: false,
+				},
+			],
+			credential: { action: "keep" },
+		});
+
+		const persisted = JSON.parse(readFileSync(modelsPath, "utf8"));
+		const savedModel = persisted.providers.custom.models[0];
+		expect(savedModel).toMatchObject({
+			reasoning: true,
+			thinkingLevelMap: { off: null, low: "low", high: "high" },
+			compat: { supportsReasoningEffort: true },
+		});
+		expect(savedModel).not.toHaveProperty("reasoningMode");
 	});
 
 	it("rejects invalid custom provider URLs without touching disk", async () => {
