@@ -1,4 +1,5 @@
 import { CheckCircle, Info, Warning, X, XCircle } from "@phosphor-icons/react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 export type SystemNoticeTone = "info" | "success" | "warning" | "error";
@@ -97,6 +98,13 @@ export function systemErrorNoticeForCode(code: string): SystemNoticeCopy {
 export function SystemNotice({ action, message, onDismiss, title, tone }: SystemNoticeProps) {
 	const { t } = useTranslation();
 	const Icon = icons[tone];
+	const onDismissRef = useRef(onDismiss);
+	onDismissRef.current = onDismiss;
+	useEffect(() => {
+		if (!onDismiss) return;
+		const timer = setTimeout(() => onDismissRef.current?.(), 5_000);
+		return () => clearTimeout(timer);
+	}, [message, onDismiss !== undefined, title, tone]);
 	return (
 		<div className="system-notice" data-tone={tone} role={tone === "error" || tone === "warning" ? "alert" : "status"}>
 			<Icon aria-hidden="true" className="system-notice-icon" size={18} weight="regular" />

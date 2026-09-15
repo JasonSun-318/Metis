@@ -417,16 +417,6 @@ export function App({ api, store }: AppProps) {
 		setError(workspaceState.failure?.reason ?? null);
 	}, [workspaceState.failure]);
 	useEffect(() => setMessage(workspaceState.message), [workspaceState.message]);
-	useEffect(() => {
-		if (notice === null) return;
-		const timer = setTimeout(() => setNotice(null), 4000);
-		return () => clearTimeout(timer);
-	}, [notice]);
-	useEffect(() => {
-		if (updateNotice === null) return;
-		const timer = setTimeout(() => setUpdateNotice(null), 4000);
-		return () => clearTimeout(timer);
-	}, [updateNotice]);
 	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
 		setComposerControl((current) => ({ id: current.id + 1, target }));
 	}, []);

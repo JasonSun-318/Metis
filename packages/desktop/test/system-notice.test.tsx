@@ -10,6 +10,7 @@ import {
 } from "../src/renderer/components/SystemNotice.tsx";
 
 afterEach(() => {
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 	document.body.replaceChildren();
 });
@@ -39,6 +40,22 @@ describe("SystemNotice", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>(".system-notice-action")!.click());
 		await act(async () => container.querySelector<HTMLButtonElement>(".system-notice-dismiss")!.click());
 		expect(onAction).toHaveBeenCalledOnce();
+		expect(onDismiss).toHaveBeenCalledOnce();
+		await act(async () => root.unmount());
+	});
+
+	it("automatically dismisses transient notices after five seconds", async () => {
+		vi.useFakeTimers();
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onDismiss = vi.fn();
+
+		await act(async () => root.render(<SystemNotice onDismiss={onDismiss} title="Request failed" tone="error" />));
+		await act(async () => vi.advanceTimersByTime(4_999));
+		expect(onDismiss).not.toHaveBeenCalled();
+		await act(async () => vi.advanceTimersByTime(1));
 		expect(onDismiss).toHaveBeenCalledOnce();
 		await act(async () => root.unmount());
 	});
