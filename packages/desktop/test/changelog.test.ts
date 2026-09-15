@@ -11,11 +11,20 @@ const CHANGELOG = {
 };
 
 describe("loadDesktopChangelog", () => {
-	it("loads and validates the architecture-independent changelog", async () => {
+	it("loads and validates the macOS changelog", async () => {
 		const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(CHANGELOG), { status: 200 }));
-		await expect(loadDesktopChangelog({ baseUrl: BASE_URL, fetch })).resolves.toEqual(CHANGELOG);
+		await expect(loadDesktopChangelog({ baseUrl: BASE_URL, platform: "darwin", fetch })).resolves.toEqual(CHANGELOG);
 		expect(fetch).toHaveBeenCalledWith(
-			`${BASE_URL}/changelog.json`,
+			`${BASE_URL}/darwin/changelog.json`,
+			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
+		);
+	});
+
+	it("loads the Windows changelog from its own platform path", async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(CHANGELOG), { status: 200 }));
+		await expect(loadDesktopChangelog({ baseUrl: BASE_URL, platform: "win32", fetch })).resolves.toEqual(CHANGELOG);
+		expect(fetch).toHaveBeenCalledWith(
+			`${BASE_URL}/win32/changelog.json`,
 			expect.objectContaining({ cache: "no-store", signal: expect.any(AbortSignal) }),
 		);
 	});
@@ -24,17 +33,26 @@ describe("loadDesktopChangelog", () => {
 		"rejects an unsafe release base: %s",
 		async (baseUrl) => {
 			const fetch = vi.fn();
-			await expect(loadDesktopChangelog({ baseUrl, fetch })).rejects.toThrow(
+			await expect(loadDesktopChangelog({ baseUrl, platform: "darwin", fetch })).rejects.toThrow(
 				"Release notes are unavailable in this build",
 			);
 			expect(fetch).not.toHaveBeenCalled();
 		},
 	);
 
+	it("rejects unsupported desktop platforms without making a request", async () => {
+		const fetch = vi.fn();
+		await expect(loadDesktopChangelog({ baseUrl: BASE_URL, platform: "linux", fetch })).rejects.toThrow(
+			"Release notes are unavailable in this build",
+		);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
 	it("treats a missing published changelog as an empty history", async () => {
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
+				platform: "darwin",
 				fetch: vi.fn().mockResolvedValue(new Response("missing", { status: 404 })),
 			}),
 		).resolves.toEqual({ schemaVersion: 1, releases: [] });
@@ -44,12 +62,14 @@ describe("loadDesktopChangelog", () => {
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
+				platform: "darwin",
 				fetch: vi.fn().mockResolvedValue(new Response("unavailable", { status: 500 })),
 			}),
 		).rejects.toThrow("Changelog request failed with 500");
 		await expect(
 			loadDesktopChangelog({
 				baseUrl: BASE_URL,
+				platform: "darwin",
 				fetch: vi.fn().mockResolvedValue(
 					new Response(JSON.stringify({ schemaVersion: 1, releases: [{ version: "0.1.0", notes: "  " }] }), {
 						status: 200,

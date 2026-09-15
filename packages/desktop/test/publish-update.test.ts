@@ -52,13 +52,15 @@ describe("publish-update", () => {
 		expect(baseUrl?.href).toBe(`${BASE}/`);
 		expect(objectPrefix(baseUrl!)).toBe("metis/");
 		const keys = releaseKeys(baseUrl!, "darwin", "arm64", "0.0.5");
-		expect(keys.changelogKey).toBe("metis/changelog.json");
-		expect(keys.changelogUrl).toBe(`${BASE}/changelog.json`);
+		expect(keys.changelogKey).toBe("metis/darwin/changelog.json");
+		expect(keys.changelogUrl).toBe(`${BASE}/darwin/changelog.json`);
 		expect(keys.assetObjectKey).toBe("metis/darwin/arm64/releases/0.0.5/Metis-0.0.5-darwin-arm64.dmg");
 		expect(keys.manifestKey).toBe("metis/darwin/arm64/latest.json");
 		expect(keys.manifestUrl).toBe(`${BASE}/darwin/arm64/latest.json`);
 		const sha256 = createHash("sha256").update("dmg").digest("hex");
 		const windowsKeys = releaseKeys(baseUrl!, "win32", "x64", "0.0.5");
+		expect(windowsKeys.changelogKey).toBe("metis/win32/changelog.json");
+		expect(windowsKeys.changelogUrl).toBe(`${BASE}/win32/changelog.json`);
 		expect(windowsKeys.assetObjectKey).toBe("metis/win32/x64/releases/0.0.5/Metis-0.0.5-win32-x64-Setup.exe");
 		expect(windowsKeys.manifestKey).toBe("metis/win32/x64/latest.json");
 		expect(windowsKeys.manifestUrl).toBe(`${BASE}/win32/x64/latest.json`);
@@ -89,13 +91,76 @@ describe("publish-update", () => {
 		expect(normalizeChangelog(CHANGELOG)).toEqual(CHANGELOG);
 	});
 
-	it("keeps a valid tracked changelog whose latest entry matches the desktop version", () => {
+	it("keeps valid tracked platform changelogs whose latest entries match the desktop version", () => {
 		const desktopRoot = process.cwd().endsWith(`${path.sep}packages${path.sep}desktop`)
 			? process.cwd()
 			: path.join(process.cwd(), "packages", "desktop");
-		const changelog = normalizeChangelog(JSON.parse(readFileSync(path.join(desktopRoot, "changelog.json"), "utf8")));
 		const desktopVersion = JSON.parse(readFileSync(path.join(desktopRoot, "package.json"), "utf8")).version;
-		expect(changelog.releases[0]?.version).toBe(desktopVersion);
+		for (const platform of ["darwin", "win32"]) {
+			const changelog = normalizeChangelog(
+				JSON.parse(readFileSync(path.join(desktopRoot, `changelog.${platform}.json`), "utf8")),
+			);
+			expect(changelog.releases[0]?.version).toBe(desktopVersion);
+		}
+	});
+
+	it("selects the tracked changelog for the requested platform by default", () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "metis-platform-changelog-test-"));
+		try {
+			const desktopRoot = process.cwd().endsWith(`${path.sep}packages${path.sep}desktop`)
+				? process.cwd()
+				: path.join(process.cwd(), "packages", "desktop");
+			const script = path.join(desktopRoot, "scripts", "publish-update.mjs");
+			const version = JSON.parse(readFileSync(path.join(desktopRoot, "package.json"), "utf8")).version;
+			const dmg = path.join(directory, "Metis.dmg");
+			const installer = path.join(directory, "Metis Setup.exe");
+			writeFileSync(dmg, "dmg");
+			writeFileSync(installer, "installer");
+
+			const mac = spawnSync(
+				process.execPath,
+				[
+					script,
+					"publish",
+					"--platform",
+					"darwin",
+					"--arch",
+					"arm64",
+					"--version",
+					version,
+					"--dmg",
+					dmg,
+					"--dry-run",
+				],
+				{ encoding: "utf8" },
+			);
+			expect(mac.status).toBe(0);
+			expect(mac.stdout).toContain('"changelogKey": "metis/darwin/changelog.json"');
+			expect(mac.stdout).not.toContain("Windows 用户可在应用内完成工作区沙箱的一次性设置");
+
+			const windows = spawnSync(
+				process.execPath,
+				[
+					script,
+					"publish",
+					"--platform",
+					"win32",
+					"--arch",
+					"x64",
+					"--version",
+					version,
+					"--installer",
+					installer,
+					"--dry-run",
+				],
+				{ encoding: "utf8" },
+			);
+			expect(windows.status).toBe(0);
+			expect(windows.stdout).toContain('"changelogKey": "metis/win32/changelog.json"');
+			expect(windows.stdout).toContain("Windows 用户可在应用内完成工作区沙箱的一次性设置");
+		} finally {
+			rmSync(directory, { force: true, recursive: true });
+		}
 	});
 
 	it("rejects signed or cross-origin DMG URLs", () => {
@@ -184,7 +249,7 @@ describe("publish-update", () => {
 				{ encoding: "utf8" },
 			);
 			expect(dryRun.status).toBe(0);
-			expect(dryRun.stdout).toContain('"changelogKey": "metis/changelog.json"');
+			expect(dryRun.stdout).toContain('"changelogKey": "metis/darwin/changelog.json"');
 			expect(dryRun.stdout).toContain('"latest":');
 			expect(dryRun.stdout).toContain('"changelog":');
 			expect(dryRun.stdout).toContain('"notes": "## Highlights\\n\\n- Added release history."');
@@ -212,6 +277,7 @@ describe("publish-update", () => {
 				{ encoding: "utf8" },
 			);
 			expect(windowsDryRun.status).toBe(0);
+			expect(windowsDryRun.stdout).toContain('"changelogKey": "metis/win32/changelog.json"');
 			expect(windowsDryRun.stdout).toContain('"manifestKey": "metis/win32/x64/latest.json"');
 			expect(windowsDryRun.stdout).toContain('"exe":');
 			expect(windowsDryRun.stdout).toContain("Metis-0.0.5-win32-x64-Setup.exe");

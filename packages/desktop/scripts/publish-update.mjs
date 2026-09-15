@@ -114,7 +114,7 @@ export function releaseKeys(baseUrl, platform, arch, version) {
 	const target = releaseTarget(platform);
 	const assetRelative = target.assetRelative(arch, version);
 	const manifestRelative = `${platform}/${arch}/latest.json`;
-	const changelogRelative = "changelog.json";
+	const changelogRelative = `${platform}/changelog.json`;
 	return {
 		changelogKey: `${prefix}${changelogRelative}`,
 		changelogUrl: new URL(changelogRelative, baseUrl).href,
@@ -259,7 +259,7 @@ function parseArgs(argv) {
 		dmg: undefined,
 		installer: undefined,
 		dryRun: false,
-		changelogFile: path.join(desktopRoot, "changelog.json"),
+		changelogFile: undefined,
 		version: undefined,
 	};
 	while (rest.length > 0) {
@@ -276,6 +276,7 @@ function parseArgs(argv) {
 		else throw new Error(`Unknown argument: ${flag}`);
 	}
 	if (!options.arch) throw new Error("Missing --arch");
+	options.changelogFile ??= path.join(desktopRoot, `changelog.${options.platform}.json`);
 	return { command, options };
 }
 
@@ -285,9 +286,9 @@ function usage() {
   node scripts/publish-update.mjs publish --platform darwin [--arch arm64|x64] [--dmg path] [--changelog-file path] [--version x.y.z] [--dry-run]
   node scripts/publish-update.mjs publish --platform win32 --arch x64 [--installer path] [--changelog-file path] [--version x.y.z] [--dry-run]
 
-Uploads changelog.json, <platform>/<arch>/latest.json, and the release artifact to oss://metis-release with public-read.
-The changelog defaults to packages/desktop/changelog.json and must contain the complete newest-first
-history. Its first version must match the version being published. latest.json contains updater/download metadata only.
+Uploads <platform>/changelog.json, <platform>/<arch>/latest.json, and the release artifact to oss://metis-release with public-read.
+The changelog defaults to packages/desktop/changelog.<platform>.json and must contain that platform's complete
+newest-first history. Its first version must match the version being published. latest.json contains updater/download metadata only.
 Requires ossutil on PATH or in OSSUTIL (credentials via \`ossutil config\`, never committed).
 Packaged builds must set METIS_UPDATE_BASE_URL at make time (same HTTPS origin as --base-url).
 `;
@@ -354,7 +355,7 @@ async function publish(options) {
 		return;
 	}
 	const manifestFile = path.join(tmpdir(), `metis-latest-${version}.json`);
-	const changelogFile = path.join(tmpdir(), `metis-changelog-${version}.json`);
+	const changelogFile = path.join(tmpdir(), `metis-changelog-${options.platform}-${version}.json`);
 	await Promise.all([writeFile(manifestFile, manifestText), writeFile(changelogFile, changelogText)]);
 	runOssutil(["cp", assetPath, `oss://${options.bucket}/${assetObjectKey}`, "--acl", "public-read", "-f"]);
 	uploadJsonNoCache(changelogFile, `oss://${options.bucket}/${changelogKey}`);

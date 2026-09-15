@@ -233,7 +233,8 @@ async function launch(): Promise<void> {
 		getDefaultProjectLocation: async () => join(app.getPath("home"), "Metis Projects"),
 		createProjectFolder,
 		setScheduleKeepAwake: (enabled) => scheduleKeepAwake.set(enabled),
-		loadChangelog: () => loadDesktopChangelog({ baseUrl: METIS_UPDATE_BASE_URL, fetch: globalThis.fetch }),
+		loadChangelog: () =>
+			loadDesktopChangelog({ baseUrl: METIS_UPDATE_BASE_URL, platform: process.platform, fetch: globalThis.fetch }),
 		updater,
 		installWorkspaceSandbox,
 		onDiagnostic: (message) => void diagnostics.append("supervisor", `Client broker: ${message}\n`),

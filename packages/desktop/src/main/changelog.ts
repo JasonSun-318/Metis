@@ -2,6 +2,7 @@ import { type DesktopChangelog, validateDesktopChangelog } from "../shared/deskt
 
 export interface DesktopChangelogLoaderOptions {
 	readonly baseUrl?: string | null;
+	readonly platform: NodeJS.Platform;
 	readonly fetch: (input: string, init?: RequestInit) => Promise<Response>;
 }
 
@@ -20,8 +21,10 @@ function trustedBaseUrl(value: string | null | undefined): URL | undefined {
 /** Loads the public release history without invoking or depending on the updater. */
 export async function loadDesktopChangelog(options: DesktopChangelogLoaderOptions): Promise<DesktopChangelog> {
 	const baseUrl = trustedBaseUrl(options.baseUrl);
-	if (!baseUrl) throw new Error("Release notes are unavailable in this build");
-	const response = await options.fetch(new URL("changelog.json", baseUrl).href, {
+	if (!baseUrl || (options.platform !== "darwin" && options.platform !== "win32")) {
+		throw new Error("Release notes are unavailable in this build");
+	}
+	const response = await options.fetch(new URL(`${options.platform}/changelog.json`, baseUrl).href, {
 		cache: "no-store",
 		signal: AbortSignal.timeout(15_000),
 	});
