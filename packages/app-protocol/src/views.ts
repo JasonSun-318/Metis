@@ -1044,7 +1044,7 @@ export const SessionSnapshotSchema = StrictObject({
 	goal: Type.Union([SessionGoalViewSchema, Type.Null()]),
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
-	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 7, uniqueItems: true }),
 	agents: Type.Array(AgentSummaryViewSchema, { maxItems: 100 }),
 	nextAgentAfterId: Type.Optional(Type.Union([SessionIdSchema, Type.Null()])),
 	serverEpoch: UuidSchema,
@@ -1056,7 +1056,7 @@ export const ThinkingSelectionChangedEventSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
-	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 7, uniqueItems: true }),
 });
 
 export const PermissionPresetChangedEventSchema = StrictObject({
@@ -1097,7 +1097,7 @@ export const ModelChangedEventSchema = StrictObject({
 	model: ModelRefSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
-	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 7, uniqueItems: true }),
 });
 
 export const TasksChangedEventSchema = StrictObject({

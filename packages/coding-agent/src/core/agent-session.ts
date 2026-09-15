@@ -502,7 +502,7 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 // ============================================================================
 
 /** Standard thinking levels */
-const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high"];
+const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
 
 export function classifyRuntimeFailure(
@@ -4402,7 +4402,7 @@ export class AgentSession {
 
 	setThinkingSelection(selection: ThinkingLevel): void {
 		this.setThinkingLevel(selection);
-		this.settingsManager.setDefaultThinkingLevel(this.thinkingLevel);
+		this.settingsManager.setDefaultThinkingLevel(selection);
 		this._emit({
 			type: "thinking_selection_changed",
 			selection: this.thinkingLevel,

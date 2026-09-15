@@ -90,4 +90,25 @@ describe("native thinking levels", () => {
 		).toBe(false);
 		reopened.session.dispose();
 	});
+
+	it("keeps the saved default level when a model switch clamps the selection to off", async () => {
+		const { cwd, agentDir } = setup();
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		authStorage.set("openai-codex", { type: "api_key", key: "test-codex-key" });
+		authStorage.set("openai", { type: "api_key", key: "test-openai-key" });
+
+		const created = await createAgentSession({
+			cwd,
+			agentDir,
+			model: getModel("openai-codex", "gpt-6-astra")!,
+			authStorage,
+		});
+		created.session.setThinkingSelection("high");
+		expect(created.session.settingsManager.getDefaultThinkingLevel()).toBe("high");
+
+		await created.session.setModel(getModel("openai", "gpt-4")!);
+		expect(created.session.getThinkingSelection()).toBe("off");
+		expect(created.session.settingsManager.getDefaultThinkingLevel()).toBe("high");
+		created.session.dispose();
+	});
 });

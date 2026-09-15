@@ -521,7 +521,7 @@ export const SessionSetThinkingSelectionParamsSchema = StrictObject({
 export const SessionThinkingSelectionResultSchema = StrictObject({
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
-	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 7, uniqueItems: true }),
 });
 
 export const SessionSetPermissionPresetParamsSchema = StrictObject({
@@ -594,7 +594,7 @@ export const SessionModelResultSchema = StrictObject({
 	model: ModelRefSchema,
 	thinkingSelection: ThinkingSelectionSchema,
 	actualThinkingLevel: ActualThinkingLevelSchema,
-	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 8, uniqueItems: true }),
+	availableThinkingSelections: Type.Array(ThinkingSelectionSchema, { minItems: 1, maxItems: 7, uniqueItems: true }),
 });
 
 export const AgentReadItemsParamsSchema = StrictObject({
