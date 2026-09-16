@@ -8,9 +8,9 @@ import {
 	ScheduleManager,
 	type ScheduleRunClaim,
 	SessionManager,
+	trashScheduledTaskData,
 } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { trashScheduledTaskData } from "../../coding-agent/src/core/schedules/delete.ts";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";
 import type { OutboundEnvelope } from "../src/outbound-queue.ts";

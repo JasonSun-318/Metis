@@ -1,8 +1,12 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 import ts from "typescript";
 
 const root = process.cwd();
+if (!existsSync(join(root, "packages"))) {
+	console.error("check:boundaries must run from the repository root (packages/ not found)");
+	process.exit(1);
+}
 const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules"]);
 const files = [];
 
@@ -22,8 +26,21 @@ function isMetisSpecifier(specifier, packageName) {
 	return specifier === `@metis/${packageName}` || specifier.startsWith(`@metis/${packageName}/`);
 }
 
+function packageRoot(path) {
+	const match = /^packages\/[^/]+\//.exec(path);
+	return match?.[0];
+}
+
 function violates(file, specifier) {
 	const path = relative(root, file).replaceAll("\\", "/");
+	// Relative imports may not reach into a different package; that bypasses
+	// package export boundaries entirely (e.g. the curated /host surface).
+	if (specifier.startsWith(".")) {
+		const pkg = packageRoot(path);
+		if (!pkg) return false;
+		const resolved = relative(join(root, pkg), resolve(dirname(file), specifier)).replaceAll("\\", "/");
+		return resolved.startsWith("..");
+	}
 	const hasForbiddenMetisImport = (allowed) =>
 		specifier.startsWith("@metis/") && !allowed.some((name) => isMetisSpecifier(specifier, name));
 
@@ -66,9 +83,12 @@ for (const file of files.sort()) {
 	const sourceText = readFileSync(file, "utf8");
 	const sourceFile = ts.createSourceFile(file, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 
+	const sourceLines = sourceText.split("\n");
+
 	function checkSpecifier(node) {
 		if (!violates(file, node.text)) return;
 		const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+		if (sourceLines[line]?.includes("boundary-allow")) return;
 		failures.push(`${file}:${line + 1}:${character + 1}: ${node.text}`);
 	}
 

@@ -4,6 +4,8 @@
  * additions belong in the package root unless a host runtime consumes them.
  */
 
+// Schedule data trash seam for hosts that need to inject a non-OS trash implementation.
+export { trashScheduledTaskData } from "./core/schedules/delete.ts";
 export type {
 	AgentSessionEvent,
 	AgentSessionRuntime,
