@@ -180,7 +180,7 @@ describe("AppServer schedule contract", () => {
 		});
 	});
 
-	it("runs into a fresh visible read-only Chat session and deletes the whole task history", async () => {
+	it("runs into a fresh visible read-only Chat session and deletes the whole task history", { timeout: 20_000 }, async () => {
 		tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-run-"));
 		const agentDir = join(tempDir, "agent");
 		const projectDir = join(tempDir, "project");

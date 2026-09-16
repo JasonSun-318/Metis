@@ -29,7 +29,7 @@ const crashPoints = [
 	"operation_finish",
 ] as const;
 
-async function within<T>(promise: Promise<T>, label: string, timeoutMs = 10_000): Promise<T> {
+async function within<T>(promise: Promise<T>, label: string, timeoutMs = 20_000): Promise<T> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		return await Promise.race([

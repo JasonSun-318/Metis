@@ -206,7 +206,7 @@ const config: ForgeConfig = {
 		// otherwise derive the binary path from the scoped package name
 		// (@metis/desktop), which does not exist inside the packaged app.
 		new MakerDeb({ options: { bin: "Metis" } }),
-		new MakerRpm({ options: { bin: "Metis" } }),
+		new MakerRpm({ options: { bin: "Metis", license: "MIT" } }),
 	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),
