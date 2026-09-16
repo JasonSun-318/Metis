@@ -216,7 +216,11 @@ test("packaged browser control releases every pending state across cancel, close
 
 		await sendFixturePrompt(app.page, "debugger-detach");
 		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate");
-		const detachPage = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
+		let detachPage: Page | undefined;
+		await expect.poll(() => {
+			detachPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
+			return detachPage !== undefined;
+		}).toBe(true);
 		if (!detachPage) throw new Error(`Debugger detach fixture target was not exposed for ${detachBrowserId}`);
 		await detachPage.bringToFront();
 		await detachPage.keyboard.press(process.platform === "darwin" ? "Meta+Alt+I" : "Control+Shift+I");

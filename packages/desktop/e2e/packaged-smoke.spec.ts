@@ -23,6 +23,11 @@ import {
 	waitForServerReady,
 } from "./packaged-app-harness.ts";
 
+async function appServerLogTail(userDataDir: string): Promise<string> {
+	const log = await readFile(path.join(userDataDir, "logs", "app-server.log"), "utf8").catch(() => "");
+	return log ? `\napp-server.log tail:\n${log.slice(-4_000)}` : "";
+}
+
 const TINY_PNG =
 	"iVBORw0KGgoAAAANSUhEUgAAAAIAAAACAQMAAABIeJ9nAAAAIGNIUk0AAHomAACAhAAA+gAAAIDoAAB1MAAA6mAAADqYAAAXcJy6UTwAAAAGUExURf8AAP///0EdNBEAAAABYktHRAH/Ai3eAAAAB3RJTUUH6gEOADM5Ddoh/wAAAAxJREFUCNdjYGBgAAAABAABJzQnCgAAACV0RVh0ZGF0ZTpjcmVhdGUAMjAyNi0wMS0xNFQwMDo1MTo1NyswMDowMOnKzHgAAAAldEVYdGRhdGU6bW9kaWZ5ADIwMjYtMDEtMTRUMDA6NTE6NTcrMDA6MDCYl3TEAAAAKHRFWHRkYXRlOnRpbWVzdGFtcAAyMDI2LTAxLTE0VDAwOjUxOjU3KzAwOjAwz4JVGwAAAABJRU5ErkJggg==";
 
@@ -660,7 +665,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -866,7 +871,7 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${requestMarkers.join(",")}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${requestMarkers.join(",")}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -1129,7 +1134,7 @@ test("packaged permission sandbox keeps Auto bounded and project rules revocable
 		await expect(page!.locator(".permission-approval-panel")).toHaveCount(0);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`);
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`);
 	} finally {
 		await browser?.close().catch(() => undefined);
 		if (app) await stopProcess(app);
@@ -2090,7 +2095,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${providerRequests}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase} requests=${providerRequests}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -2385,7 +2390,7 @@ test("packaged personal profile renders cached Token and Skill activity", async 
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -2608,7 +2613,7 @@ test("packaged MCP creation matrix connects URL, custom, and JSON transports", a
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -3018,7 +3023,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -3129,7 +3134,7 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -3360,7 +3365,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -3557,7 +3562,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\nrenderer errors:\n${consoleErrors.join("\n").slice(-8_000)}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -3842,7 +3847,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -4079,7 +4084,7 @@ test("packaged General settings and Personalization persist across restart", asy
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -4224,7 +4229,7 @@ test("packaged Browser settings manage existing profiles, history, imports, and 
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`);
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`);
 	} finally {
 		await browser?.close().catch(() => undefined);
 		await stopProcess(app);
@@ -4306,7 +4311,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -4610,7 +4615,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -4729,7 +4734,7 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		await browser?.close().catch(() => undefined);
@@ -4796,7 +4801,7 @@ test("packaged project delete fails closed for a held session lease and retries"
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}`,
+			`${error instanceof Error ? error.message : String(error)}\nphase=${phase}\nrenderer body:\n${bodyText ?? "unavailable"}\n${diagnostics.join("").slice(-8_000)}${await appServerLogTail(userDataDir)}`,
 		);
 	} finally {
 		if (!leaseReleased) held.close();

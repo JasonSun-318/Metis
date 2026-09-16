@@ -421,6 +421,7 @@ export class Dispatcher {
 										}
 										if (result.code === "SESSION_IN_USE") throw new AppServerError("SESSION_IN_USE");
 										if (result.code === "SESSION_CORRUPT") throw new AppServerError("SESSION_CORRUPT");
+										console.error(`project/delete failed for ${snapshot.cwd}: ${result.error}`);
 										throw new AppServerError("OPERATION_FAILED");
 									}
 									for (const ref of snapshot.refs) {

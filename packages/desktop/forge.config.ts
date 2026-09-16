@@ -202,8 +202,11 @@ const config: ForgeConfig = {
 		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
 		// an x64 Node process runs under Rosetta on Apple Silicon.
 		new MakerDMG(apfsDmgConfig),
-		new MakerDeb({}),
-		new MakerRpm({}),
+		// `bin` must match packagerConfig.executableName: the deb/rpm makers
+		// otherwise derive the binary path from the scoped package name
+		// (@metis/desktop), which does not exist inside the packaged app.
+		new MakerDeb({ options: { bin: "Metis" } }),
+		new MakerRpm({ options: { bin: "Metis" } }),
 	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),
