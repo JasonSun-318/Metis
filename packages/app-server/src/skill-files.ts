@@ -3,7 +3,7 @@ import { type BigIntStats, constants, type Dirent } from "node:fs";
 import { lstat, mkdir, open, readdir, rename, rm, unlink } from "node:fs/promises";
 import { basename, dirname, extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import type { ClientParams, ClientResult, SkillSourceView } from "@metis/app-protocol";
-import { CONFIG_DIR_NAME, getSkillsDir, parseFrontmatter, type Skill } from "@metis/coding-agent";
+import { CONFIG_DIR_NAME, getSkillsDir, parseFrontmatter, type Skill } from "@metis/coding-agent/host";
 import {
 	archiveEntries,
 	type FetchImplementation,

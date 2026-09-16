@@ -1,4 +1,4 @@
-import type { FileEntry } from "@metis/coding-agent";
+import type { FileEntry } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import {
 	buildProfileSummary,

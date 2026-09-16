@@ -3,7 +3,7 @@
  * CLI entry point for the refactored coding agent.
  * Uses main.ts with AgentSession and new mode modules.
  *
- * Test with: npx tsx src/cli-new.ts [args...]
+ * Test with: npx tsx src/cli.ts [args...]
  */
 import { APP_NAME } from "./config.ts";
 

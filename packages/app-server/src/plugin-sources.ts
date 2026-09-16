@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { posix } from "node:path";
-import type { PluginFormat, PluginRecord } from "@metis/coding-agent";
+import type { PluginFormat, PluginRecord } from "@metis/coding-agent/host";
 import {
 	archiveEntries,
 	type FetchImplementation,

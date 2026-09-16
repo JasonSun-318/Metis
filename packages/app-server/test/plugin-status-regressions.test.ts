@@ -7,7 +7,7 @@ import {
 	type PluginRecord,
 	readPluginSnapshot,
 	withPluginRegistryLock,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, expect, it } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { OpenedSessionRuntime, SessionRuntimeHost } from "../src/session-runtime-host.ts";

@@ -1,5 +1,5 @@
 import type { DomainEvent } from "@metis/app-protocol";
-import type { AgentVisibleActivity } from "@metis/coding-agent";
+import type { AgentVisibleActivity } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import { AgentLiveProjector } from "../src/agent-live-projector.ts";
 import { MAX_PROJECTED_VISIBLE_TEXT_BYTES } from "../src/item-projection.ts";

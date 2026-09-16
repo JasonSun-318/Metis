@@ -6,7 +6,7 @@ import type {
 	ScheduleSpec,
 	ScheduleTarget,
 	ScheduleTask,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 
 function scheduleView(schedule: ScheduleSpec): ScheduleTaskView["schedule"] {
 	return schedule.kind === "weekly" ? { ...schedule, weekdays: [...schedule.weekdays] } : schedule;

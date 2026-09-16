@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { extname } from "node:path";
-import type { ResolvedSessionDeliveredArtifact } from "@metis/coding-agent";
+import type { ResolvedSessionDeliveredArtifact } from "@metis/coding-agent/host";
 
 const MIME_MAP: Record<string, string> = {
 	pdf: "application/pdf",

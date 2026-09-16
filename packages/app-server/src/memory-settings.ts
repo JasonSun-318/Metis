@@ -1,5 +1,5 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { type AuthStorage, MemorySettingsTransaction, type SettingsManager } from "@metis/coding-agent";
+import { type AuthStorage, MemorySettingsTransaction, type SettingsManager } from "@metis/coding-agent/host";
 
 /** Exposes global long-term memory engine settings to the desktop. */
 export class MemorySettingsService {

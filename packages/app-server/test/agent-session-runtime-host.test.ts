@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ServerRequestMethod, ServerResult, ServerRpcRequest } from "@metis/app-protocol";
-import { AgentSession, SessionManager } from "@metis/coding-agent";
+import { AgentSession, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSessionRuntimeHost } from "../src/agent-session-runtime-host.ts";
 import { BROWSER_TOOL_NAMES } from "../src/browser-tools.ts";

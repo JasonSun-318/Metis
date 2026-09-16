@@ -36,7 +36,7 @@ import {
 	ProjectTrustStore,
 	SessionManager,
 	SettingsManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import {

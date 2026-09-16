@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { DomainEvent, ItemView } from "@metis/app-protocol";
-import type { AgentVisibleActivity } from "@metis/coding-agent";
+import type { AgentVisibleActivity } from "@metis/coding-agent/host";
 import { appendProjectedDelta, opaqueId, projectLiveMessage } from "./item-projection.ts";
 
 interface ChildLiveState {

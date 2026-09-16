@@ -1,4 +1,4 @@
-import { createBashTool } from "@metis/coding-agent";
+import { createBashTool } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import { ProcessProjector } from "../src/process-projector.ts";
 import { SessionProjection } from "../src/projection/session-projection.ts";

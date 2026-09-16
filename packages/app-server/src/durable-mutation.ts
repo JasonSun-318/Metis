@@ -4,7 +4,7 @@ import {
 	type RuntimeRequestIdentity,
 	reduceRuntimeJournal,
 	type SessionManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { AppServerError } from "./session-runtime-host.ts";
 
 const RESULT_ENTRY_TYPE = "metis.app-server.mutation-result.v1";

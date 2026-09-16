@@ -70,7 +70,7 @@ import {
 	splitSessionAttachmentPrompt,
 	storePluginMcpCredential,
 	upsertCustomAgentType,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
 import { createBrowserPermissionAudit } from "./browser-permission-audit.ts";
 import { BROWSER_TOOL_NAMES, browserToolCall, createBrowserToolDefinitions } from "./browser-tools.ts";

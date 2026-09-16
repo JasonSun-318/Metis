@@ -10,7 +10,7 @@ import {
 	PROTOCOL_VERSION,
 	type SessionSnapshot,
 } from "@metis/app-protocol";
-import { identifySubmitPromptRequest } from "@metis/coding-agent";
+import { identifySubmitPromptRequest } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it } from "vitest";
 
 const SESSION_ID = "00000000-0000-4000-8000-000000000201";

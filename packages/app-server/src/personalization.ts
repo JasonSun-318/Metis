@@ -1,7 +1,7 @@
 import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { type ClientParams, type ClientResult, MAX_PUBLIC_TEXT_UTF8_BYTES } from "@metis/app-protocol";
-import { readSingleLinkTextFileSync, replaceFileAtomicallySync } from "@metis/coding-agent";
+import { readSingleLinkTextFileSync, replaceFileAtomicallySync } from "@metis/coding-agent/host";
 
 export class PersonalizationService {
 	private readonly instructionsPath: string;

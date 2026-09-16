@@ -1,7 +1,7 @@
 import { createAssistantMessageEventStream, Type } from "@metis/ai";
 import { complete, getModel, getProviders } from "@metis/ai/compat";
+import { Agent, streamProxy } from "@metis/agent-core";
 import {
-	Agent,
 	bashExecutionToText,
 	convertToLlm,
 	createCustomMessage,
@@ -13,10 +13,9 @@ import {
 	InMemorySessionRepo,
 	ok,
 	parseCommandArgs,
-	streamProxy,
 	toError,
 	truncateHead,
-} from "@metis/agent-core";
+} from "@metis/agent-core/harness";
 
 // Keep this entry browser-safe. It is bundled by scripts/check-browser-smoke.mjs
 // to catch accidental Node-only runtime imports in browser-facing package exports.

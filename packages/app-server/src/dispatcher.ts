@@ -9,7 +9,7 @@ import {
 	ScheduleError,
 	type ScheduleManager,
 	SessionManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";

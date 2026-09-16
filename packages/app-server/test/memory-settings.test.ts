@@ -7,7 +7,7 @@ import {
 	MEMORY_EMBEDDING_CREDENTIAL_ID,
 	MEMORY_RERANK_CREDENTIAL_ID,
 	SettingsManager,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MemorySettingsService } from "../src/memory-settings.ts";
 import { recordMemoryHealth } from "./fixtures/memory-health.ts";

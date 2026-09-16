@@ -1,4 +1,4 @@
-import { SettingsManager } from "@metis/coding-agent";
+import { SettingsManager } from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import { PermissionAutoSettingsService } from "../src/permission-auto-settings.ts";
 

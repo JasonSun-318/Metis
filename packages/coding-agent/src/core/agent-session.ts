@@ -18,7 +18,6 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import type {
 	Agent,
 	AgentEvent,
@@ -26,7 +25,6 @@ import type {
 	AgentQueueIdentity,
 	AgentState,
 	AgentTool,
-	BeforeProviderRequestContext,
 	BeforeQueueCommitContext,
 	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
@@ -36,7 +34,6 @@ import type { AssistantMessage, ImageContent, Message, Model, TextContent, Tool 
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
-	estimateMessageTokens,
 	getSupportedThinkingLevels,
 	isContextOverflow,
 	isRetryableAssistantError,
@@ -49,6 +46,13 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
+import { AgentSessionContextUsage } from "./agent-session-context-usage.ts";
+import {
+	buildSessionStats,
+	extractUserMessageText,
+	listUserMessagesForForking,
+	type SessionStats,
+} from "./agent-session-transcript.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import {
 	type AutoMemorySnapshot,
@@ -71,18 +75,10 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
-import {
-	estimateContextUsageBreakdown,
-	FIXED_CONTEXT_USAGE_CATEGORIES,
-	mergeContextUsageBreakdown,
-	reconcileContextUsageBreakdown,
-	reconcileContextUsageBreakdownWithFixed,
-} from "./context-usage-breakdown.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
 	type ContextUsage,
-	type ContextUsageBreakdownItem,
 	type ExtensionCommandContextActions,
 	type ExtensionErrorListener,
 	type ExtensionMode,
@@ -198,7 +194,6 @@ import { SessionDeliveredArtifacts } from "./session-delivered-artifacts.ts";
 import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionManager } from "./session-manager.ts";
-import type { CwdOrigin } from "./session-workspace.ts";
 import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -206,7 +201,6 @@ import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { buildAgentMailboxContent } from "./subagents/prompts.ts";
 import { utf8Length, utf8Prefix } from "./subagents/trace.ts";
 import {
-	AGENT_TOOL_NAMES,
 	type AgentMailboxTerminalEvent,
 	MAX_AGENT_MAILBOX_DELIVERY_EVENTS,
 	MAX_AGENT_MAILBOX_DELIVERY_UTF8_BYTES,
@@ -230,6 +224,7 @@ import { resolveWebSearchApiKey, type WebSearchProvider } from "./web-search-con
 import type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "./workspace-sandbox.ts";
 
 export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
+export type { SessionStats };
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -292,23 +287,6 @@ function referencesManagedWorkEnvironment(command: string): boolean {
 // ============================================================================
 // Types
 // ============================================================================
-
-interface PreparedContextUsageSnapshot {
-	readonly configurationFingerprint: string;
-	readonly breakdown: readonly ContextUsageBreakdownItem[];
-}
-
-interface ReportedContextUsageSnapshot extends PreparedContextUsageSnapshot {
-	readonly assistant: AssistantMessage;
-	readonly tokens: number;
-}
-
-interface ContextUsageCalibration {
-	readonly configurationFingerprint: string;
-	readonly fixedBreakdown: readonly ContextUsageBreakdownItem[];
-}
-
-const AGENT_CONTEXT_TOOL_NAMES = new Set<string>(AGENT_TOOL_NAMES);
 
 export interface AgentSessionConfig {
 	agent: Agent;
@@ -412,30 +390,6 @@ export interface ModelCycleResult {
 	thinkingLevel: ThinkingLevel;
 	/** Whether cycling through scoped models (--models flag) or all available */
 	isScoped: boolean;
-}
-
-/** Session statistics for /session command */
-export interface SessionStats {
-	mode: AgentMode;
-	cwd: string;
-	cwdOrigin: CwdOrigin;
-	permissionPreset: PermissionPreset;
-	sessionFile: string | undefined;
-	sessionId: string;
-	userMessages: number;
-	assistantMessages: number;
-	toolCalls: number;
-	toolResults: number;
-	totalMessages: number;
-	tokens: {
-		input: number;
-		output: number;
-		cacheRead: number;
-		cacheWrite: number;
-		total: number;
-	};
-	cost: number;
-	contextUsage?: ContextUsage;
 }
 
 interface ToolDefinitionEntry {
@@ -736,9 +690,14 @@ export class AgentSession {
 	private readonly _workspaceWritePolicy: "inherit" | "deny";
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
 	private _additionalSystemPrompt?: string | (() => string | undefined);
-	private _preparedContextUsage: PreparedContextUsageSnapshot | undefined;
-	private _reportedContextUsage: ReportedContextUsageSnapshot | undefined;
-	private _contextUsageCalibration: ContextUsageCalibration | undefined;
+	private readonly _contextUsage = new AgentSessionContextUsage({
+		getMcpToolNames: () => this._mcpToolNames,
+		getBaseSystemPromptParts: () => this._baseSystemPromptParts,
+		getMessages: () => this.messages,
+		getModel: () => this.model,
+		getSystemPrompt: () => this.systemPrompt,
+		getTools: () => this.agent.state.tools as readonly Tool[],
+	});
 	private readonly _trustedControlTools = new Map<string, ToolDefinition>();
 	private readonly _hostTools = new Map<string, ToolDefinition>();
 	private readonly _delegatableHostTools = new Map<string, ToolDefinition>();
@@ -1659,7 +1618,7 @@ export class AgentSession {
 			beforeProviderRequest: async (prepared) => {
 				this._commitStagedAgentMailboxDelivery();
 				this._markDurableProviderEpoch();
-				this._capturePreparedContextUsage(prepared);
+				this._contextUsage.capturePrepared(prepared);
 			},
 			beforeToolExecute: async (context) => {
 				let started = false;
@@ -2100,7 +2059,7 @@ export class AgentSession {
 			// Track assistant message for auto-compaction (checked on agent_end)
 			if (event.message.role === "assistant") {
 				this._lastAssistantMessage = event.message;
-				this._captureReportedContextUsage(event.message);
+				this._contextUsage.captureReported(event.message);
 
 				const assistantMsg = event.message as AssistantMessage;
 				if (assistantMsg.stopReason !== "error") {
@@ -4490,7 +4449,7 @@ export class AgentSession {
 		for (let i = this.agent.state.messages.length - 1; i >= 0; i--) {
 			const message = this.agent.state.messages[i];
 			if (message?.role === "user") {
-				return this._extractUserMessageText(message.content);
+				return extractUserMessageText(message.content);
 			}
 		}
 		return "";
@@ -5890,17 +5849,11 @@ export class AgentSession {
 			if (targetEntry.type === "message" && targetEntry.message.role === "user") {
 				// User message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText = this._extractUserMessageText(targetEntry.message.content);
+				editorText = extractUserMessageText(targetEntry.message.content);
 			} else if (targetEntry.type === "custom_message") {
 				// Custom message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText =
-					typeof targetEntry.content === "string"
-						? targetEntry.content
-						: targetEntry.content
-								.filter((c): c is { type: "text"; text: string } => c.type === "text")
-								.map((c) => c.text)
-								.join("");
+				editorText = extractUserMessageText(targetEntry.content);
 			} else {
 				// Non-user message: leaf = selected node
 				newLeafId = targetId;
@@ -5961,31 +5914,7 @@ export class AgentSession {
 	 * Get all user messages from session for fork selector.
 	 */
 	getUserMessagesForForking(): Array<{ entryId: string; text: string }> {
-		const entries = this.sessionManager.getEntries();
-		const result: Array<{ entryId: string; text: string }> = [];
-
-		for (const entry of entries) {
-			if (entry.type !== "message") continue;
-			if (entry.message.role !== "user") continue;
-
-			const text = this._extractUserMessageText(entry.message.content);
-			if (text) {
-				result.push({ entryId: entry.id, text });
-			}
-		}
-
-		return result;
-	}
-
-	private _extractUserMessageText(content: string | Array<{ type: string; text?: string }>): string {
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("");
-		}
-		return "";
+		return listUserMessagesForForking(this.sessionManager.getEntries());
 	}
 
 	/**
@@ -5994,207 +5923,20 @@ export class AgentSession {
 	 * actually billed across the session.
 	 */
 	getSessionStats(): SessionStats {
-		let userMessages = 0;
-		let assistantMessages = 0;
-		let toolResults = 0;
-		let totalMessages = 0;
-		let toolCalls = 0;
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalCost = 0;
-
-		for (const entry of this.sessionManager.getEntries()) {
-			if (entry.type !== "message") continue;
-			totalMessages++;
-			const message = entry.message;
-			if (message.role === "user") {
-				userMessages++;
-			} else if (message.role === "toolResult") {
-				toolResults++;
-			} else if (message.role === "assistant") {
-				assistantMessages++;
-				const assistantMsg = message as AssistantMessage;
-				if (Array.isArray(assistantMsg.content)) {
-					toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-				}
-				const usage = assistantMsg.usage;
-				totalInput += usage.input;
-				totalOutput += usage.output;
-				totalCacheRead += usage.cacheRead;
-				totalCacheWrite += usage.cacheWrite;
-				totalCost += usage.cost.total;
-			}
-		}
-
-		return {
+		return buildSessionStats({
+			entries: this.sessionManager.getEntries(),
 			mode: this.mode,
 			cwd: this.sessionManager.getCwd(),
 			cwdOrigin: this.sessionManager.getCwdOrigin(),
 			permissionPreset: this.sessionManager.getPermissionPreset(),
 			sessionFile: this.sessionFile,
 			sessionId: this.sessionId,
-			userMessages,
-			assistantMessages,
-			toolCalls,
-			toolResults,
-			totalMessages,
-			tokens: {
-				input: totalInput,
-				output: totalOutput,
-				cacheRead: totalCacheRead,
-				cacheWrite: totalCacheWrite,
-				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
-			},
-			cost: totalCost,
 			contextUsage: this.getContextUsage(),
-		};
-	}
-
-	private _contextUsageFingerprint(model: Model<any>, systemPrompt: string, tools: readonly Tool[]): string {
-		let serializedTools = "[unserializable]";
-		try {
-			serializedTools = JSON.stringify(tools) ?? "[]";
-		} catch {}
-		return createHash("sha256")
-			.update(model.provider)
-			.update("\0")
-			.update(model.id)
-			.update("\0")
-			.update(String(model.contextWindow ?? 0))
-			.update("\0")
-			.update(systemPrompt)
-			.update("\0")
-			.update(serializedTools)
-			.digest("hex");
-	}
-
-	private _contextUsageToolCategories(
-		tools: readonly Tool[],
-	): ReadonlyMap<string, "tool_definitions" | "mcp_dynamic_tools" | "agent_definitions"> {
-		return new Map(
-			tools.map(
-				(tool) =>
-					[
-						tool.name,
-						AGENT_CONTEXT_TOOL_NAMES.has(tool.name)
-							? "agent_definitions"
-							: this._mcpToolNames.has(tool.name)
-								? "mcp_dynamic_tools"
-								: "tool_definitions",
-					] as const,
-			),
-		);
-	}
-
-	private _contextUsageSystemPromptParts(systemPrompt: string): readonly SystemPromptPart[] {
-		if (this._baseSystemPromptParts.map((part) => part.content).join("") === systemPrompt) {
-			return this._baseSystemPromptParts;
-		}
-		return systemPrompt ? [{ category: "system_prompt", content: systemPrompt }] : [];
-	}
-
-	private _estimateContextUsageBreakdown(
-		systemPrompt: string,
-		messages: readonly AgentMessage[],
-		tools: readonly Tool[],
-	): ContextUsageBreakdownItem[] {
-		return estimateContextUsageBreakdown({
-			systemPromptParts: this._contextUsageSystemPromptParts(systemPrompt),
-			messages,
-			tools,
-			toolCategories: this._contextUsageToolCategories(tools),
 		});
 	}
 
-	private _capturePreparedContextUsage(prepared: BeforeProviderRequestContext): void {
-		const systemPrompt = prepared.llmContext.systemPrompt ?? "";
-		const tools = prepared.llmContext.tools ?? [];
-		this._preparedContextUsage = {
-			configurationFingerprint: this._contextUsageFingerprint(prepared.model, systemPrompt, tools),
-			breakdown: this._estimateContextUsageBreakdown(systemPrompt, prepared.agentMessages, tools),
-		};
-	}
-
-	private _captureReportedContextUsage(message: AssistantMessage): void {
-		const prepared = this._preparedContextUsage;
-		this._preparedContextUsage = undefined;
-		const reportedTokens = calculateContextTokens(message.usage);
-		if (!prepared || message.stopReason === "error" || message.stopReason === "aborted" || reportedTokens <= 0) {
-			return;
-		}
-		const rawBreakdown = mergeContextUsageBreakdown(prepared.breakdown, [
-			{ category: "conversation", tokens: estimateMessageTokens(message) },
-		]);
-		const calibration = this._contextUsageCalibration;
-		const breakdown =
-			calibration?.configurationFingerprint === prepared.configurationFingerprint
-				? reconcileContextUsageBreakdownWithFixed(rawBreakdown, reportedTokens, calibration.fixedBreakdown)
-				: reconcileContextUsageBreakdown(rawBreakdown, reportedTokens);
-		if (calibration?.configurationFingerprint !== prepared.configurationFingerprint) {
-			this._contextUsageCalibration = {
-				configurationFingerprint: prepared.configurationFingerprint,
-				fixedBreakdown: breakdown.filter((item) => FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
-			};
-		}
-		let stateAssistant = message;
-		for (let index = this.messages.length - 1; index >= 0; index--) {
-			const candidate = this.messages[index];
-			if (candidate.role === "assistant" && (candidate === message || isDeepStrictEqual(candidate, message))) {
-				stateAssistant = candidate;
-				break;
-			}
-		}
-		this._reportedContextUsage = {
-			assistant: stateAssistant,
-			configurationFingerprint: prepared.configurationFingerprint,
-			breakdown,
-			tokens: reportedTokens,
-		};
-	}
-
 	getContextUsage(): ContextUsage | undefined {
-		const model = this.model;
-		if (!model) return undefined;
-		const contextWindow = model.contextWindow ?? 0;
-		if (contextWindow <= 0) return undefined;
-
-		const systemPrompt = this.systemPrompt;
-		const tools = this.agent.state.tools as readonly Tool[];
-		const fingerprint = this._contextUsageFingerprint(model, systemPrompt, tools);
-		const reported = this._reportedContextUsage;
-		const assistantIndex = reported ? this.messages.indexOf(reported.assistant) : -1;
-		if (reported && reported.configurationFingerprint === fingerprint && assistantIndex >= 0) {
-			const tail = this._estimateContextUsageBreakdown("", this.messages.slice(assistantIndex + 1), []);
-			const breakdown = mergeContextUsageBreakdown(reported.breakdown, tail);
-			const tokens = reported.tokens + tail.reduce((sum, item) => sum + item.tokens, 0);
-			return {
-				tokens,
-				contextWindow,
-				percent: (tokens / contextWindow) * 100,
-				basis: "reported_total",
-				breakdown: breakdown.reduce((sum, item) => sum + item.tokens, 0) === tokens ? breakdown : null,
-			};
-		}
-
-		const estimatedBreakdown = this._estimateContextUsageBreakdown(systemPrompt, this.messages, tools);
-		const calibration = this._contextUsageCalibration;
-		const breakdown =
-			calibration?.configurationFingerprint === fingerprint
-				? mergeContextUsageBreakdown(
-						calibration.fixedBreakdown,
-						estimatedBreakdown.filter((item) => !FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
-					)
-				: estimatedBreakdown;
-		const tokens = breakdown.reduce((sum, item) => sum + item.tokens, 0);
-		return {
-			tokens,
-			contextWindow,
-			percent: (tokens / contextWindow) * 100,
-			basis: "estimated_total",
-			breakdown,
-		};
+		return this._contextUsage.getUsage();
 	}
 
 	/**

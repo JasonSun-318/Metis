@@ -14,7 +14,7 @@ import {
 	parseDeliverFileDetails,
 	type StoredPlan,
 	type ThreadGoal,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;

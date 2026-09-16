@@ -6,8 +6,8 @@ import type {
 	McpServerSettings,
 	PluginFormat,
 	PluginIssue,
-} from "@metis/coding-agent";
-import { HOOK_EVENT_NAMES, parseFrontmatter } from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
+import { HOOK_EVENT_NAMES, parseFrontmatter } from "@metis/coding-agent/host";
 
 export interface ParsedSkillComponent {
 	readonly kind: "skill";

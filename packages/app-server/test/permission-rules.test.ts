@@ -1,7 +1,7 @@
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ProjectPermissionRuleStore } from "@metis/coding-agent";
+import { ProjectPermissionRuleStore } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { PermissionRulesService } from "../src/permission-rules.ts";
 import type { SessionCatalog } from "../src/session-catalog.ts";

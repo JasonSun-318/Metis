@@ -4,7 +4,7 @@ import { createServer, type Server, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PROTOCOL_VERSION } from "@metis/app-protocol";
-import { AuthStorage, mcpCredentialKey, OFFICIAL_MARKET_ID, readPluginRegistry } from "@metis/coding-agent";
+import { AuthStorage, mcpCredentialKey, OFFICIAL_MARKET_ID, readPluginRegistry } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AppServer } from "../src/app-server.ts";
 import type { ConnectionOutboundEnvelope } from "../src/connection.ts";

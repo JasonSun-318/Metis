@@ -27,7 +27,7 @@ import {
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { BrowserPermissionDecisionUnavailableError, BrowserPermissionDeniedError } from "./browser-permission-audit.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;

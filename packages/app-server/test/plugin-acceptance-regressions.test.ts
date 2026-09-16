@@ -6,7 +6,7 @@ import {
 	resolveMcpServerDefinitions,
 	resolveMcpServerSettings,
 	withPluginRegistryLock,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it } from "vitest";
 import { parsePluginManifest } from "../src/plugin-manifests.ts";
 import { fetchPluginFiles, inspectRepositorySource } from "../src/plugin-sources.ts";

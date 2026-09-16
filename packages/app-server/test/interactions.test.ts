@@ -17,7 +17,7 @@ import {
 	type AskUserRequest,
 	createAskUserToolDefinition,
 	type PermissionApprovalRequest,
-} from "@metis/coding-agent";
+} from "@metis/coding-agent/host";
 import { describe, expect, it, vi } from "vitest";
 import { AppServerConnection } from "../src/connection.ts";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
