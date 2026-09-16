@@ -3,6 +3,41 @@ import { spawnProcess, spawnProcessSync, waitForChildProcess } from "./child-pro
 const TRASH_TIMEOUT_MS = 30_000;
 
 /**
+ * JXA driver for -[NSFileManager trashItemAtURL:resultingItemURL:error:].
+ * Paths arrive through osascript run-args, never inside the script source.
+ * The script prints the first failure's localized description; empty stdout
+ * means every path was trashed. Works on every macOS release, unlike the
+ * `trash` CLI which only ships with macOS 26+.
+ */
+const MACOS_TRASH_SCRIPT = `
+ObjC.import("Foundation");
+function run(argv) {
+	const fm = $.NSFileManager.defaultManager;
+	for (const raw of argv) {
+		const error = $();
+		const ok = fm.trashItemAtURLResultingItemURLError($.NSURL.fileURLWithPath(ObjC.unwrap(raw)), null, error);
+		if (!ok) return ObjC.unwrap(error.localizedDescription) || "trashItemAtURL failed";
+	}
+	return "";
+}`;
+
+function trashViaMacOSFileManager(paths: readonly string[]): string | undefined {
+	const result = spawnProcessSync("osascript", ["-l", "JavaScript", "-e", MACOS_TRASH_SCRIPT, "--", ...paths], {
+		encoding: "utf8",
+		timeout: TRASH_TIMEOUT_MS,
+		windowsHide: true,
+	});
+	if (result.error || result.status !== 0) {
+		return (
+			result.error?.message ??
+			result.stderr?.trim().split("\n")[0] ??
+			`osascript exited with status ${result.status ?? "unknown"}`
+		);
+	}
+	return result.stdout?.trim() || undefined;
+}
+
+/**
  * Build a PowerShell script that moves each path to the Windows Recycle Bin via
  * Microsoft.VisualBasic.FileIO. Paths are embedded as single-quoted literals
  * (embedded quotes doubled), so no `--` separator or shell quoting applies.
@@ -47,6 +82,9 @@ export function trashPathsSync(paths: readonly string[]): string | undefined {
 	if (process.platform === "win32") {
 		return trashViaWindowsRecycleBin(paths);
 	}
+	if (process.platform === "darwin") {
+		return trashViaMacOSFileManager(paths);
+	}
 	const trashArgs = paths.some((path) => path.startsWith("-")) ? ["--", ...paths] : [...paths];
 	const result = spawnProcessSync("trash", trashArgs, { encoding: "utf8" });
 	if (result.error || result.status !== 0) {
@@ -61,6 +99,11 @@ export function trashPathsSync(paths: readonly string[]): string | undefined {
 export async function trashPath(path: string): Promise<void> {
 	if (process.platform === "win32") {
 		const detail = trashViaWindowsRecycleBin([path]);
+		if (detail) throw new Error(`Trash failed: ${detail}`);
+		return;
+	}
+	if (process.platform === "darwin") {
+		const detail = trashViaMacOSFileManager([path]);
 		if (detail) throw new Error(`Trash failed: ${detail}`);
 		return;
 	}

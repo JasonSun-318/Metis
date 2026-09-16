@@ -273,7 +273,14 @@ export function elementId(state: unknown, accessibleName: string): string {
 }
 
 export function observationInput(result: string) {
-	const observation = parseToolJson(result);
+	const parsed = parseToolJson(result);
+	// A stale envelope still carries the freshest observation; unwrap it so
+	// follow-up actions bind to the newest document revision.
+	const observation = (
+		parsed.status === "stale" && typeof parsed.observation === "object" && parsed.observation !== null
+			? parsed.observation
+			: parsed
+	) as Record<string, unknown>;
 	if (
 		typeof observation.browserId !== "string" ||
 		typeof observation.documentId !== "string" ||

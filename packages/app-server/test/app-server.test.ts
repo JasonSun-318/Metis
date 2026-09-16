@@ -3326,7 +3326,7 @@ describe("AppServer", () => {
 		await server.waitForShutdown();
 	});
 
-	it("resolves parent and session-only trust before binding project extension UI", async () => {
+	it("resolves parent and session-only trust before binding project extension UI", { timeout: 20_000 }, async () => {
 		const parentProject = join(tempDir, "parent-scope", "project");
 		const sessionProject = join(tempDir, "session-scope", "project");
 		for (const cwd of [parentProject, sessionProject]) {

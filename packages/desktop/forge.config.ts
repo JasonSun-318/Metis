@@ -126,7 +126,8 @@ async function stageNodePtyRuntime(buildPath: string, platform: string, arch: st
 		cp(path.join(source, "LICENSE"), path.join(target, "LICENSE")),
 		cp(nativeSource, nativeTarget, { recursive: true, filter: (entry) => !entry.endsWith(".pdb") }),
 	]);
-	if (platformTag !== "win32") await chmod(path.join(nativeTarget, "spawn-helper"), 0o755);
+	// spawn-helper is only built for macOS (binding.gyp OS=="mac"); Linux ships pty.node alone.
+	if (platformTag === "darwin") await chmod(path.join(nativeTarget, "spawn-helper"), 0o755);
 }
 
 async function stageRipgrepRuntime(buildPath: string, platform: string, arch: string): Promise<void> {
@@ -201,8 +202,11 @@ const config: ForgeConfig = {
 		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
 		// an x64 Node process runs under Rosetta on Apple Silicon.
 		new MakerDMG(apfsDmgConfig),
-		new MakerDeb({}),
-		new MakerRpm({}),
+		// `bin` must match packagerConfig.executableName: the deb/rpm makers
+		// otherwise derive the binary path from the scoped package name
+		// (@metis/desktop), which does not exist inside the packaged app.
+		new MakerDeb({ options: { bin: "Metis" } }),
+		new MakerRpm({ options: { bin: "Metis", license: "MIT" } }),
 	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),

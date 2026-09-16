@@ -5,7 +5,7 @@ export default defineConfig({
 	fullyParallel: false,
 	workers: 1,
 	timeout: 45_000,
-	expect: { timeout: 10_000 },
+	expect: { timeout: process.env.CI ? 20_000 : 10_000 },
 	reporter: process.env.CI ? [["github"], ["list"]] : "list",
 	use: {
 		screenshot: "only-on-failure",

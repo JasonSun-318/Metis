@@ -122,7 +122,7 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 			}
 			if (step === 18) {
 				const input = observationInput(lastResult);
-				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Use bottom fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(parseToolJson(controlState).state, "Bottom action") } } } };
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Use bottom fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(observationInput(controlState).observation.state, "Bottom action") } } } };
 			}
 			if (step === 19) return { tool: "browser_observe", arguments: { browserId: mainBrowserId, mode: "state" } };
 			if (step === 20) {
@@ -140,7 +140,7 @@ test("packaged agent controls accessible pages, frames, screenshots, popups, sta
 			if (step < PERFORMANCE_OBSERVATIONS + PERFORMANCE_ACTIONS) {
 				if (step === PERFORMANCE_OBSERVATIONS) performanceState = lastResult;
 				const input = observationInput(lastResult);
-				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Measure local fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(parseToolJson(performanceState).state, "Increment") } } } };
+				return { tool: "browser_act", arguments: { ...input, observation: undefined, intent: "Measure local fixture action", risk: "ordinary", action: { type: "click", target: { elementId: elementId(observationInput(performanceState).observation.state, "Increment") } } } };
 			}
 			return { text: "done:performance-cycle" };
 		});

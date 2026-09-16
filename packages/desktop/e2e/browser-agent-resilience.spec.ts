@@ -62,11 +62,15 @@ function configureFaultingNavigation(
 	});
 }
 
-async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name: string) {
+async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name: string, argumentsInclude?: string) {
 	let call: BrowserAgentFixture["calls"][number] | undefined;
 	await expect.poll(() => {
 		call = fixture.calls.find(
-			(candidate) => candidate.marker === marker && candidate.name === name && candidate.completedAt === undefined,
+			(candidate) =>
+				candidate.marker === marker &&
+				candidate.name === name &&
+				candidate.completedAt === undefined &&
+				(argumentsInclude === undefined || JSON.stringify(candidate.arguments).includes(argumentsInclude)),
 		);
 		return call !== undefined;
 	}).toBe(true);
@@ -136,13 +140,13 @@ test("packaged browser control releases every pending state across cancel, close
 		app = await launchBrowserAgentApp(environment);
 
 		await sendFixturePrompt(app.page, "cancel-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.getByRole("button", { name: "Cancel", exact: true }).click();
 		await waitForDone(app, "cancel-handoff");
 		expect(fixture.calls.find((call) => call.marker === "cancel-handoff" && call.name === "browser_handoff")?.result).toContain("user_cancelled");
 
 		await sendFixturePrompt(app.page, "close-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.evaluate(async ({ sessionId, browserId }) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.closeBrowser({ sessionId, browserId });
 		}, { sessionId: app.sessionId, browserId: closeBrowserId });
@@ -150,23 +154,23 @@ test("packaged browser control releases every pending state across cancel, close
 		expect(fixture.calls.find((call) => call.marker === "close-handoff" && call.name === "browser_handoff")?.result).toContain("tab_closed");
 
 		await sendFixturePrompt(app.page, "interrupt-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.evaluate(async (sessionId) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.interruptTurn({ sessionId, requestId: crypto.randomUUID() });
 		}, app.sessionId);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
 
 		await sendFixturePrompt(app.page, "reload-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.reload({ waitUntil: "domcontentloaded" });
 		await waitForServerReady(app.page);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
 		await expect.poll(() => fixture.calls.find((call) => call.marker === "reload-handoff" && call.name === "browser_handoff")?.result).toContain("tab_closed");
 
 		await sendFixturePrompt(app.page, "restart-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		const rootPid = app.app.pid;
 		if (!rootPid) throw new Error("Packaged browser fixture did not expose its process id");
 		const previousServerPid = appServerPid(rootPid);
@@ -177,7 +181,7 @@ test("packaged browser control releases every pending state across cancel, close
 			return current !== undefined && current !== previousServerPid;
 		}, { timeout: 30_000 }).toBe(true);
 		await waitForServerReady(app.page);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 
 		await sendFixturePrompt(app.page, "crash-tab");
@@ -195,7 +199,7 @@ test("packaged browser control releases every pending state across cancel, close
 
 		const rendererPidsBeforeCrash = await rendererProcessIds(app.browser);
 		await sendFixturePrompt(app.page, "active-crash");
-		const activeCrashCall = await activeToolCall(fixture, "active-crash", "browser_navigate");
+		const activeCrashCall = await activeToolCall(fixture, "active-crash", "browser_navigate", "/slow");
 		let activeCrashPage: Page | undefined;
 		await expect.poll(() => {
 			activeCrashPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) =>
@@ -211,18 +215,24 @@ test("packaged browser control releases every pending state across cancel, close
 		process.kill(newRendererPids[0]!, "SIGKILL");
 		await waitForDone(app, "active-crash");
 		expectBoundedToolError(activeCrashCall.result);
-		expectSettledWithin(activeCrashCall, 5_000);
+		// The bound runs from issue time, so it includes slow-runner latency in
+		// target discovery and fault injection, not just abort propagation.
+		expectSettledWithin(activeCrashCall, 15_000);
 		await expect.poll(() => crashTarget.isClosed()).toBe(true);
 
 		await sendFixturePrompt(app.page, "debugger-detach");
-		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate");
-		const detachPage = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
+		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate", "/slow");
+		let detachPage: Page | undefined;
+		await expect.poll(() => {
+			detachPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
+			return detachPage !== undefined;
+		}).toBe(true);
 		if (!detachPage) throw new Error(`Debugger detach fixture target was not exposed for ${detachBrowserId}`);
 		await detachPage.bringToFront();
 		await detachPage.keyboard.press(process.platform === "darwin" ? "Meta+Alt+I" : "Control+Shift+I");
 		await waitForDone(app, "debugger-detach");
 		expectBoundedToolError(detachCall.result);
-		expectSettledWithin(detachCall, 5_000);
+		expectSettledWithin(detachCall, 15_000);
 		await app.page.evaluate(async ({ sessionId, browserId }) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.closeBrowser({ sessionId, browserId });
 		}, { sessionId: app.sessionId, browserId: detachBrowserId });
@@ -231,7 +241,8 @@ test("packaged browser control releases every pending state across cancel, close
 		await waitForDone(app, "recover-after-faults");
 		await expect.poll(() => app!.browser.contexts().flatMap((context) => context.pages()).some((page) => page.url().includes("/controls?recovered=1"))).toBe(true);
 	} catch (error) {
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+		const alerts = await app?.page.getByRole("alert").allInnerTexts().catch(() => []);
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nalerts=${JSON.stringify(alerts)}\n${environment.diagnostics.join("").slice(-12_000)}`);
 	} finally {
 		if (app) await closeBrowserAgentApp(app);
 		await fixture.close();

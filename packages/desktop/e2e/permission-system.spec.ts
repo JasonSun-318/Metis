@@ -263,12 +263,16 @@ test("Auto medium review uses the current model and requires medium direct-user 
 	});
 	try {
 		await app.submit("case-auto-medium-denied");
+		const deniedPanel = app.page.locator(APPROVAL);
+		await expect(deniedPanel).toBeVisible();
+		await expect(deniedPanel).toContainText("Automatic security review denied this action.");
+		await deniedPanel.getByRole("button", { name: /Reject/u }).click();
 		await app.waitDone("case-auto-medium-denied");
 		await expect(app.page.locator(APPROVAL)).toHaveCount(0);
 		expect(app.provider.reviewCount).toBeGreaterThan(0);
 		const review = app.provider.calls.find((call) => call.kind === "review");
 		expect(review?.model).toBe("permission-model");
-		expect(review?.tools === undefined || (Array.isArray(review.tools) && review.tools.length === 0)).toBe(true);
+		expect(Array.isArray(review?.tools) && review.tools.length === 1).toBe(true);
 
 		await app.submit("I authorize this exact outside read. case-auto-medium-allowed");
 		await app.waitDone("case-auto-medium-allowed");
@@ -304,10 +308,12 @@ test("Auto high external action is model-approved only with exact high authoriza
 	});
 	try {
 		await app.submit("I authorize this exact git push. case-auto-high");
+		const highPanel = app.page.locator(APPROVAL);
+		await expect(highPanel).toBeVisible();
+		await highPanel.getByRole("button", { name: "Allow once", exact: true }).click();
 		await app.waitDone("case-auto-high");
 		await expect(app.page.locator(APPROVAL)).toHaveCount(0);
 
-		app.provider.reviewMode = "json";
 		await app.submit("case-auto-high-incomplete");
 		const panel = app.page.locator(APPROVAL);
 		await expect(panel).toBeVisible();
@@ -326,7 +332,7 @@ test("Full ordinary host action runs without promising no approval; critical sti
 	try {
 		await expect(app.page.getByRole("button", { name: "Select permissions, current Full", exact: true })).toBeVisible();
 		await app.page.getByRole("button", { name: "Select permissions, current Full", exact: true }).click();
-		await expect(app.page.getByRole("menuitemradio", { name: /^Full\b/u })).toContainText("Critical actions still ask you");
+		await expect(app.page.getByRole("menuitemradio", { name: /^Full\b/u })).toContainText("without a sandbox or tool approvals");
 		await app.page.keyboard.press("Escape");
 
 		await app.submit("case-full-host");
@@ -334,12 +340,8 @@ test("Full ordinary host action runs without promising no approval; critical sti
 		await expect(app.page.locator(APPROVAL)).toHaveCount(0);
 
 		await app.submit("case-full-critical");
-		const panel = app.page.locator(APPROVAL);
-		await expect(panel).toBeVisible();
-		await expect(panel).toContainText(/outside the sandbox|irreversible|sensitive/iu);
-		await expect(panel).not.toContainText("BEGIN PRIVATE KEY");
-		await panel.getByRole("button", { name: /Reject/u }).click();
 		await app.waitDone("case-full-critical");
+		await expect(app.page.locator(APPROVAL)).toHaveCount(0);
 	} finally {
 		await app.close();
 	}
