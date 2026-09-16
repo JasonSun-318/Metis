@@ -126,7 +126,8 @@ async function stageNodePtyRuntime(buildPath: string, platform: string, arch: st
 		cp(path.join(source, "LICENSE"), path.join(target, "LICENSE")),
 		cp(nativeSource, nativeTarget, { recursive: true, filter: (entry) => !entry.endsWith(".pdb") }),
 	]);
-	if (platformTag !== "win32") await chmod(path.join(nativeTarget, "spawn-helper"), 0o755);
+	// spawn-helper is only built for macOS (binding.gyp OS=="mac"); Linux ships pty.node alone.
+	if (platformTag === "darwin") await chmod(path.join(nativeTarget, "spawn-helper"), 0o755);
 }
 
 async function stageRipgrepRuntime(buildPath: string, platform: string, arch: string): Promise<void> {
