@@ -10,13 +10,13 @@ import {
 	createAgentSessionServices,
 } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import { runHookProcess } from "../src/core/hooks/hook-bridge.ts";
 import {
 	type DeclarativeHook,
 	loadEffectiveHooks,
 	saveDeclarativeHooks,
 	validateDeclarativeHook,
-} from "../src/core/index.ts";
+} from "../src/core/hooks/declarative-hooks.ts";
+import { runHookProcess } from "../src/core/hooks/hook-bridge.ts";
 import {
 	getPluginPackageDir,
 	getPluginsDir,
