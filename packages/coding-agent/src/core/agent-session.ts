@@ -49,6 +49,12 @@ import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
+import {
+	buildSessionStats,
+	extractUserMessageText,
+	listUserMessagesForForking,
+	type SessionStats,
+} from "./agent-session-transcript.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import {
 	type AutoMemorySnapshot,
@@ -198,7 +204,6 @@ import { SessionDeliveredArtifacts } from "./session-delivered-artifacts.ts";
 import { createSessionId } from "./session-id.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionEntry, SessionHeader } from "./session-manager.ts";
 import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionManager } from "./session-manager.ts";
-import type { CwdOrigin } from "./session-workspace.ts";
 import { type SettingsManager, VISION_PROVIDER_ID } from "./settings-manager.ts";
 import { SKILL_USAGE_CUSTOM_TYPE, type SkillUsageRecord } from "./skills.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
@@ -230,6 +235,7 @@ import { resolveWebSearchApiKey, type WebSearchProvider } from "./web-search-con
 import type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "./workspace-sandbox.ts";
 
 export { type ParsedSkillBlock, parseSkillBlock } from "./skills.ts";
+export type { SessionStats };
 
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent =
@@ -412,30 +418,6 @@ export interface ModelCycleResult {
 	thinkingLevel: ThinkingLevel;
 	/** Whether cycling through scoped models (--models flag) or all available */
 	isScoped: boolean;
-}
-
-/** Session statistics for /session command */
-export interface SessionStats {
-	mode: AgentMode;
-	cwd: string;
-	cwdOrigin: CwdOrigin;
-	permissionPreset: PermissionPreset;
-	sessionFile: string | undefined;
-	sessionId: string;
-	userMessages: number;
-	assistantMessages: number;
-	toolCalls: number;
-	toolResults: number;
-	totalMessages: number;
-	tokens: {
-		input: number;
-		output: number;
-		cacheRead: number;
-		cacheWrite: number;
-		total: number;
-	};
-	cost: number;
-	contextUsage?: ContextUsage;
 }
 
 interface ToolDefinitionEntry {
@@ -4490,7 +4472,7 @@ export class AgentSession {
 		for (let i = this.agent.state.messages.length - 1; i >= 0; i--) {
 			const message = this.agent.state.messages[i];
 			if (message?.role === "user") {
-				return this._extractUserMessageText(message.content);
+				return extractUserMessageText(message.content);
 			}
 		}
 		return "";
@@ -5890,17 +5872,11 @@ export class AgentSession {
 			if (targetEntry.type === "message" && targetEntry.message.role === "user") {
 				// User message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText = this._extractUserMessageText(targetEntry.message.content);
+				editorText = extractUserMessageText(targetEntry.message.content);
 			} else if (targetEntry.type === "custom_message") {
 				// Custom message: leaf = parent (null if root), text goes to editor
 				newLeafId = targetEntry.parentId;
-				editorText =
-					typeof targetEntry.content === "string"
-						? targetEntry.content
-						: targetEntry.content
-								.filter((c): c is { type: "text"; text: string } => c.type === "text")
-								.map((c) => c.text)
-								.join("");
+				editorText = extractUserMessageText(targetEntry.content);
 			} else {
 				// Non-user message: leaf = selected node
 				newLeafId = targetId;
@@ -5961,31 +5937,7 @@ export class AgentSession {
 	 * Get all user messages from session for fork selector.
 	 */
 	getUserMessagesForForking(): Array<{ entryId: string; text: string }> {
-		const entries = this.sessionManager.getEntries();
-		const result: Array<{ entryId: string; text: string }> = [];
-
-		for (const entry of entries) {
-			if (entry.type !== "message") continue;
-			if (entry.message.role !== "user") continue;
-
-			const text = this._extractUserMessageText(entry.message.content);
-			if (text) {
-				result.push({ entryId: entry.id, text });
-			}
-		}
-
-		return result;
-	}
-
-	private _extractUserMessageText(content: string | Array<{ type: string; text?: string }>): string {
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content
-				.filter((c): c is { type: "text"; text: string } => c.type === "text")
-				.map((c) => c.text)
-				.join("");
-		}
-		return "";
+		return listUserMessagesForForking(this.sessionManager.getEntries());
 	}
 
 	/**
@@ -5994,62 +5946,16 @@ export class AgentSession {
 	 * actually billed across the session.
 	 */
 	getSessionStats(): SessionStats {
-		let userMessages = 0;
-		let assistantMessages = 0;
-		let toolResults = 0;
-		let totalMessages = 0;
-		let toolCalls = 0;
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalCost = 0;
-
-		for (const entry of this.sessionManager.getEntries()) {
-			if (entry.type !== "message") continue;
-			totalMessages++;
-			const message = entry.message;
-			if (message.role === "user") {
-				userMessages++;
-			} else if (message.role === "toolResult") {
-				toolResults++;
-			} else if (message.role === "assistant") {
-				assistantMessages++;
-				const assistantMsg = message as AssistantMessage;
-				if (Array.isArray(assistantMsg.content)) {
-					toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-				}
-				const usage = assistantMsg.usage;
-				totalInput += usage.input;
-				totalOutput += usage.output;
-				totalCacheRead += usage.cacheRead;
-				totalCacheWrite += usage.cacheWrite;
-				totalCost += usage.cost.total;
-			}
-		}
-
-		return {
+		return buildSessionStats({
+			entries: this.sessionManager.getEntries(),
 			mode: this.mode,
 			cwd: this.sessionManager.getCwd(),
 			cwdOrigin: this.sessionManager.getCwdOrigin(),
 			permissionPreset: this.sessionManager.getPermissionPreset(),
 			sessionFile: this.sessionFile,
 			sessionId: this.sessionId,
-			userMessages,
-			assistantMessages,
-			toolCalls,
-			toolResults,
-			totalMessages,
-			tokens: {
-				input: totalInput,
-				output: totalOutput,
-				cacheRead: totalCacheRead,
-				cacheWrite: totalCacheWrite,
-				total: totalInput + totalOutput + totalCacheRead + totalCacheWrite,
-			},
-			cost: totalCost,
 			contextUsage: this.getContextUsage(),
-		};
+		});
 	}
 
 	private _contextUsageFingerprint(model: Model<any>, systemPrompt: string, tools: readonly Tool[]): string {
