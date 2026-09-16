@@ -53,6 +53,11 @@ export function launchPackagedDesktop(options: PackagedDesktopLaunchOptions): Ch
 	const child = spawn(options.executable, [
 		`--remote-debugging-port=${options.debuggingPort}`,
 		`--user-data-dir=${options.userDataDir}`,
+		// The packaged directory's chrome-sandbox helper is not setuid root and
+		// Ubuntu runners restrict unprivileged user namespaces via AppArmor, so
+		// Chromium cannot sandbox itself here. The probe covers Metis's own
+		// permission sandbox, not Chromium's.
+		...(process.platform === "linux" ? ["--no-sandbox"] : []),
 		...(options.extraArguments ?? []),
 	], {
 		cwd: options.projectDir,
@@ -247,10 +252,19 @@ export function appServerPid(rootPid: number): number | undefined {
 	)?.pid;
 }
 
-export async function connectToApp(port: number): Promise<{ browser: Browser; page: Page }> {
+export async function connectToApp(
+	port: number,
+	app?: ChildProcess,
+	diagnostics?: readonly string[],
+): Promise<{ browser: Browser; page: Page }> {
 	await expect
 		.poll(
 			async () => {
+				if (app && (app.exitCode !== null || app.signalCode !== null)) {
+					throw new Error(
+						`Packaged app exited (code=${app.exitCode} signal=${app.signalCode}) before exposing CDP\n${(diagnostics ?? []).join("").slice(-8_000)}`,
+					);
+				}
 				try {
 					const response = await fetch(`http://127.0.0.1:${port}/json/list`);
 					if (!response.ok) return false;
@@ -310,7 +324,12 @@ export async function stopProcess(child: ChildProcess): Promise<void> {
 	}
 	child.kill("SIGTERM");
 	await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
-	if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+	if (child.exitCode === null && child.signalCode === null) {
+		child.kill("SIGKILL");
+		// SIGKILL delivery is asynchronous; without this wait a relaunch on the
+		// same user-data dir can race the dying process and lose profile state.
+		await Promise.race([once(child, "exit"), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+	}
 }
 
 export function processIsAlive(pid: number): boolean {

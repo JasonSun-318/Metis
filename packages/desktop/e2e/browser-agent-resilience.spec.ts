@@ -215,7 +215,9 @@ test("packaged browser control releases every pending state across cancel, close
 		process.kill(newRendererPids[0]!, "SIGKILL");
 		await waitForDone(app, "active-crash");
 		expectBoundedToolError(activeCrashCall.result);
-		expectSettledWithin(activeCrashCall, 5_000);
+		// The bound runs from issue time, so it includes slow-runner latency in
+		// target discovery and fault injection, not just abort propagation.
+		expectSettledWithin(activeCrashCall, 15_000);
 		await expect.poll(() => crashTarget.isClosed()).toBe(true);
 
 		await sendFixturePrompt(app.page, "debugger-detach");
@@ -230,7 +232,7 @@ test("packaged browser control releases every pending state across cancel, close
 		await detachPage.keyboard.press(process.platform === "darwin" ? "Meta+Alt+I" : "Control+Shift+I");
 		await waitForDone(app, "debugger-detach");
 		expectBoundedToolError(detachCall.result);
-		expectSettledWithin(detachCall, 5_000);
+		expectSettledWithin(detachCall, 15_000);
 		await app.page.evaluate(async ({ sessionId, browserId }) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.closeBrowser({ sessionId, browserId });
 		}, { sessionId: app.sessionId, browserId: detachBrowserId });

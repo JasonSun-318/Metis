@@ -71,7 +71,7 @@ test("packaged sandbox health allows a workspace write and denies a protected-ro
 			homeDir,
 			diagnostics,
 		});
-		({ browser, page } = await connectToApp(debuggingPort));
+		({ browser, page } = await connectToApp(debuggingPort, app, diagnostics));
 		page.setDefaultTimeout(20_000);
 		await waitForServerReady(page);
 		const sessionId = await page.evaluate(async (cwd) => {
