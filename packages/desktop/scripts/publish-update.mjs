@@ -187,7 +187,7 @@ function nativeArch() {
 	) {
 		return "arm64";
 	}
-	const machine = spawnSync("uname", ["-m"], { encoding: "utf8" }).stdout.trim();
+	const machine = (spawnSync("uname", ["-m"], { encoding: "utf8" }).stdout ?? "").trim();
 	return /^(arm64|aarch64)$/iu.test(machine) ? "arm64" : /^(x64|x86_64|amd64)$/iu.test(machine) ? "x64" : process.arch;
 }
 

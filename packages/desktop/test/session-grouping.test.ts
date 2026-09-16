@@ -10,6 +10,10 @@ import {
 	sessionsForMode,
 } from "../src/renderer/store/session-grouping.ts";
 
+// Local-time constructor keeps grouping assertions deterministic in any timezone.
+const local = (year: number, month: number, day: number, hour: number) =>
+	new Date(year, month - 1, day, hour).toISOString();
+
 function session(sessionId: string, mode: "chat" | "code", updatedAt: string, unread = false): SessionSummary {
 	return {
 		sessionId,
@@ -28,18 +32,18 @@ describe("session grouping", () => {
 	it("sorts one mode deterministically into local date and unread sections", () => {
 		const store = new AppStore();
 		const sessions = [
-			session("b", "chat", "2026-07-31T01:00:00+08:00", true),
-			session("a", "chat", "2026-07-31T01:00:00+08:00"),
-			session("yesterday", "chat", "2026-07-30T12:00:00+08:00"),
-			session("older", "chat", "2026-07-29T12:00:00+08:00"),
-			session("previous-year", "chat", "2025-07-31T12:00:00+08:00"),
-			session("code", "code", "2026-07-31T23:00:00+08:00", true),
+			session("b", "chat", local(2026, 7, 31, 1), true),
+			session("a", "chat", local(2026, 7, 31, 1)),
+			session("yesterday", "chat", local(2026, 7, 30, 12)),
+			session("older", "chat", local(2026, 7, 29, 12)),
+			session("previous-year", "chat", local(2025, 7, 31, 12)),
+			session("code", "code", local(2026, 7, 31, 23), true),
 		];
 		store.setSessions({ sessions: sessions.reverse(), nextAfterSessionId: null });
 		const chat = sessionsForMode(store.getSnapshot(), "chat");
 
 		expect(chat.map(({ sessionId }) => sessionId)).toEqual(["a", "b", "yesterday", "older", "previous-year"]);
-		expect(groupSessionsByDate(chat, new Date("2026-07-31T12:00:00+08:00")).map(({ label }) => label)).toEqual([
+		expect(groupSessionsByDate(chat, new Date(2026, 6, 31, 12)).map(({ label }) => label)).toEqual([
 			"Today",
 			"Yesterday",
 			"Jul 29",
