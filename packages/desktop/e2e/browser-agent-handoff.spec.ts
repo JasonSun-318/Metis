@@ -70,6 +70,7 @@ async function captureHandoffQa(app: RunningBrowserAgentApp, testInfo: TestInfo)
 	await app.page.getByRole("button", { name: "Metis User", exact: true }).click();
 	await app.page.getByRole("menuitem", { name: "Settings", exact: true }).click();
 	const settings = app.page.getByRole("dialog", { name: "Settings", exact: true });
+	await settings.getByRole("button", { name: "General", exact: true }).click();
 	await settings.getByRole("group", { name: "Appearance", exact: true }).getByRole("button", { name: "Light", exact: true }).click();
 	await expect(app.page.locator("html")).toHaveAttribute("data-theme", "light");
 	await settings.getByRole("button", { name: "Back to app", exact: true }).click();

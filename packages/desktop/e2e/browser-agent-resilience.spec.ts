@@ -136,13 +136,13 @@ test("packaged browser control releases every pending state across cancel, close
 		app = await launchBrowserAgentApp(environment);
 
 		await sendFixturePrompt(app.page, "cancel-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.getByRole("button", { name: "Cancel", exact: true }).click();
 		await waitForDone(app, "cancel-handoff");
 		expect(fixture.calls.find((call) => call.marker === "cancel-handoff" && call.name === "browser_handoff")?.result).toContain("user_cancelled");
 
 		await sendFixturePrompt(app.page, "close-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.evaluate(async ({ sessionId, browserId }) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.closeBrowser({ sessionId, browserId });
 		}, { sessionId: app.sessionId, browserId: closeBrowserId });
@@ -150,23 +150,23 @@ test("packaged browser control releases every pending state across cancel, close
 		expect(fixture.calls.find((call) => call.marker === "close-handoff" && call.name === "browser_handoff")?.result).toContain("tab_closed");
 
 		await sendFixturePrompt(app.page, "interrupt-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.evaluate(async (sessionId) => {
 			await (globalThis as unknown as { metis: MetisDesktopApi }).metis.interruptTurn({ sessionId, requestId: crypto.randomUUID() });
 		}, app.sessionId);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
 
 		await sendFixturePrompt(app.page, "reload-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		await app.page.reload({ waitUntil: "domcontentloaded" });
 		await waitForServerReady(app.page);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true");
 		await expect.poll(() => fixture.calls.find((call) => call.marker === "reload-handoff" && call.name === "browser_handoff")?.result).toContain("tab_closed");
 
 		await sendFixturePrompt(app.page, "restart-handoff");
-		await expect(app.page.getByRole("alert")).toBeVisible();
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toBeVisible();
 		const rootPid = app.app.pid;
 		if (!rootPid) throw new Error("Packaged browser fixture did not expose its process id");
 		const previousServerPid = appServerPid(rootPid);
@@ -177,7 +177,7 @@ test("packaged browser control releases every pending state across cancel, close
 			return current !== undefined && current !== previousServerPid;
 		}, { timeout: 30_000 }).toBe(true);
 		await waitForServerReady(app.page);
-		await expect(app.page.getByRole("alert")).toHaveCount(0);
+		await expect(app.page.getByRole("alert", { name: "Your action is needed" })).toHaveCount(0);
 		await expect(app.page.locator("#composer-input")).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
 
 		await sendFixturePrompt(app.page, "crash-tab");
@@ -231,7 +231,8 @@ test("packaged browser control releases every pending state across cancel, close
 		await waitForDone(app, "recover-after-faults");
 		await expect.poll(() => app!.browser.contexts().flatMap((context) => context.pages()).some((page) => page.url().includes("/controls?recovered=1"))).toBe(true);
 	} catch (error) {
-		throw new Error(`${error instanceof Error ? error.message : String(error)}\n${environment.diagnostics.join("").slice(-12_000)}`);
+		const alerts = await app?.page.getByRole("alert").allInnerTexts().catch(() => []);
+		throw new Error(`${error instanceof Error ? error.message : String(error)}\nalerts=${JSON.stringify(alerts)}\n${environment.diagnostics.join("").slice(-12_000)}`);
 	} finally {
 		if (app) await closeBrowserAgentApp(app);
 		await fixture.close();

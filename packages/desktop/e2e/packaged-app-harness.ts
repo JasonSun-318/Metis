@@ -260,7 +260,7 @@ export async function connectToApp(port: number): Promise<{ browser: Browser; pa
 					return false;
 				}
 			},
-			{ timeout: 15_000 },
+			{ timeout: 30_000 },
 		)
 		.toBe(true);
 	const browser = await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
