@@ -62,11 +62,15 @@ function configureFaultingNavigation(
 	});
 }
 
-async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name: string) {
+async function activeToolCall(fixture: BrowserAgentFixture, marker: string, name: string, argumentsInclude?: string) {
 	let call: BrowserAgentFixture["calls"][number] | undefined;
 	await expect.poll(() => {
 		call = fixture.calls.find(
-			(candidate) => candidate.marker === marker && candidate.name === name && candidate.completedAt === undefined,
+			(candidate) =>
+				candidate.marker === marker &&
+				candidate.name === name &&
+				candidate.completedAt === undefined &&
+				(argumentsInclude === undefined || JSON.stringify(candidate.arguments).includes(argumentsInclude)),
 		);
 		return call !== undefined;
 	}).toBe(true);
@@ -195,7 +199,7 @@ test("packaged browser control releases every pending state across cancel, close
 
 		const rendererPidsBeforeCrash = await rendererProcessIds(app.browser);
 		await sendFixturePrompt(app.page, "active-crash");
-		const activeCrashCall = await activeToolCall(fixture, "active-crash", "browser_navigate");
+		const activeCrashCall = await activeToolCall(fixture, "active-crash", "browser_navigate", "/slow");
 		let activeCrashPage: Page | undefined;
 		await expect.poll(() => {
 			activeCrashPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) =>
@@ -215,7 +219,7 @@ test("packaged browser control releases every pending state across cancel, close
 		await expect.poll(() => crashTarget.isClosed()).toBe(true);
 
 		await sendFixturePrompt(app.page, "debugger-detach");
-		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate");
+		const detachCall = await activeToolCall(fixture, "debugger-detach", "browser_navigate", "/slow");
 		let detachPage: Page | undefined;
 		await expect.poll(() => {
 			detachPage = app!.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url().includes("/controls?case=debugger-detach"));
