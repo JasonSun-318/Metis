@@ -5,6 +5,7 @@ import type {
 	MemoryNoteSummaryView,
 	MemoryNoteView,
 	MemorySettingsView,
+	ModelSettingsView,
 } from "@metis/app-protocol";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
@@ -27,6 +28,24 @@ function button(container: HTMLElement, name: string): HTMLButtonElement {
 	const match = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(name));
 	if (!match) throw new Error(`Missing button: ${name}`);
 	return match as HTMLButtonElement;
+}
+
+async function fillNumber(container: HTMLElement, label: string, value: string) {
+	const input = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
+	expect(input).not.toBeNull();
+	await act(async () => {
+		Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, value);
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	});
+}
+
+async function selectOption(container: HTMLElement, label: string, value: string) {
+	const select = container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+	expect(select).not.toBeNull();
+	await act(async () => {
+		Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(select, value);
+		select.dispatchEvent(new Event("change", { bubbles: true }));
+	});
 }
 
 function toggle(container: HTMLElement, label: string): HTMLInputElement {
@@ -94,6 +113,13 @@ function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 		undoMemoryRun: vi.fn().mockResolvedValue({ undone: [UUID], skipped: [] }),
 		runMemoryDream: vi.fn().mockResolvedValue({ ok: true, runId: "run-1" }),
 		setSessionMemoryFlags: vi.fn().mockResolvedValue({ useMemory: true, contributeMemory: false }),
+		getModelSettings: vi.fn().mockResolvedValue({
+			defaultModel: null,
+			vision: null,
+			defaultThinkingSelection: "off",
+			providers: [],
+			loadError: null,
+		} satisfies ModelSettingsView),
 		...overrides,
 	} as unknown as MetisDesktopApi;
 }
@@ -143,7 +169,7 @@ describe("MemorySettingsPanel", () => {
 		expect(api.updateMemorySettings).toHaveBeenCalledWith({
 			enabled: false,
 			activeContext: true,
-			dream: { enabled: true },
+			dream: { enabled: true, model: null, minHours: 24, minSessions: 5, maxUnusedDays: 90 },
 		});
 		expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toContain("Saved");
 		await act(async () => root.unmount());
@@ -388,5 +414,206 @@ describe("MemorySettingsPanel", () => {
 
 		expect(api.undoMemoryRun).toHaveBeenCalledWith({ runId: "run-9" });
 		await act(async () => root.unmount());
+	});
+
+	it("saves all Dream parameters together", async () => {
+		const api = makeApi();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			await fillNumber(container, "Minimum interval (hours)", "48");
+			await fillNumber(container, "Minimum eligible sessions", "9");
+			await fillNumber(container, "Unused-note age (days)", "120");
+			await act(async () => button(container, "Save").click());
+			await flush();
+			expect(api.updateMemorySettings).toHaveBeenCalledWith(
+				expect.objectContaining({
+					dream: { enabled: false, model: null, minHours: 48, minSessions: 9, maxUnusedDays: 120 },
+				}),
+			);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it.each(["", "0", "1.5"])("rejects invalid Dream number %s without calling the RPC", async (value) => {
+		const api = makeApi();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			await fillNumber(container, "Minimum interval (hours)", value);
+			expect(button(container, "Save").disabled).toBe(true);
+			expect(container.textContent).toContain("Minimum interval must be an integer");
+			await act(async () => button(container, "Save").click());
+			await flush();
+			expect(api.updateMemorySettings).not.toHaveBeenCalled();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("sends model:null after choosing Automatic over a saved override", async () => {
+		const withOverride: MemorySettingsView = {
+			...memorySettings,
+			dream: { ...memorySettings.dream, model: { provider: "openai", modelId: "gpt-5" } },
+		};
+		const api = makeApi({
+			getMemorySettings: vi.fn().mockResolvedValue(withOverride),
+			getModelSettings: vi.fn().mockResolvedValue({
+				defaultModel: null,
+				vision: null,
+				defaultThinkingSelection: "off",
+				loadError: null,
+				providers: [
+					{
+						provider: "openai",
+						name: "OpenAI",
+						builtin: true,
+						baseUrl: null,
+						api: null,
+						auth: { configured: true, source: "stored", label: "••••1234" },
+						models: [
+							{
+								provider: "openai",
+								modelId: "gpt-5",
+								name: "GPT-5",
+								contextWindow: 400_000,
+								maxOutputTokens: 128_000,
+								reasoning: true,
+								thinkingLevels: ["high"],
+								reasoningMode: null,
+								reasoningSource: null,
+								imageInput: true,
+								custom: false,
+							},
+						],
+					},
+				],
+			} satisfies ModelSettingsView),
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			const select = container.querySelector<HTMLSelectElement>('select[aria-label="Memory model"]')!;
+			expect(select.value).toBe(JSON.stringify(["openai", "gpt-5"]));
+			await selectOption(container, "Memory model", "");
+			await act(async () => button(container, "Save").click());
+			await flush();
+			expect(api.updateMemorySettings).toHaveBeenCalledWith(
+				expect.objectContaining({ dream: expect.objectContaining({ model: null }) }),
+			);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("keeps a saved but currently unavailable model override", async () => {
+		const withOverride: MemorySettingsView = {
+			...memorySettings,
+			dream: { ...memorySettings.dream, model: { provider: "acme", modelId: "gone-model" } },
+		};
+		const api = makeApi({ getMemorySettings: vi.fn().mockResolvedValue(withOverride) });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			const select = container.querySelector<HTMLSelectElement>('select[aria-label="Memory model"]')!;
+			expect(select.value).toBe(JSON.stringify(["acme", "gone-model"]));
+			const savedOption = [...select.options].find((o) => o.value === select.value)!;
+			expect(savedOption.textContent).toContain("Saved model (currently unavailable)");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("undoes a failed dream run by its runId", async () => {
+		const api = makeApi({
+			runMemoryDream: vi.fn().mockResolvedValue({ ok: false, runId: "run-fail", error: "aborted" }),
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			await act(async () => button(container, "Run now").click());
+			await flush();
+			expect(container.textContent).toContain("Consolidation did not finish");
+			await act(async () => button(container, "Undo changes from failed run").click());
+			await flush();
+			expect(api.undoMemoryRun).toHaveBeenCalledWith({ runId: "run-fail" });
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("hides the failed-run undo button when the failure has no runId", async () => {
+		const api = makeApi({
+			runMemoryDream: vi.fn().mockResolvedValue({ ok: false, error: "gated" }),
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			await act(async () => button(container, "Run now").click());
+			await flush();
+			expect(container.textContent).toContain("gated");
+			expect([...container.querySelectorAll("button")].some((b) => b.textContent?.includes("failed run"))).toBe(false);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("keeps unsaved Dream numbers after a run reload", async () => {
+		const api = makeApi();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			await fillNumber(container, "Minimum interval (hours)", "48");
+			await act(async () => button(container, "Run now").click());
+			await flush();
+			expect(api.getMemorySettings).toHaveBeenCalledTimes(2);
+			expect(container.querySelector<HTMLInputElement>('input[aria-label="Minimum interval (hours)"]')!.value).toBe(
+				"48",
+			);
+			expect(container.textContent).toContain("Save changes to use them for the next run.");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("labels the history diff as before-to-current", async () => {
+		const api = makeApi();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
+			await flush();
+			const historyRow = [...container.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((item) =>
+				item.textContent?.includes("prefers-concise-replies"),
+			)!;
+			await act(async () => historyRow.click());
+			await flush();
+			expect(container.textContent).toContain("Before this change → current version");
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 });

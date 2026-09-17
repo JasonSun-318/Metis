@@ -237,6 +237,17 @@ describe("MemoryService", () => {
 		const afterUndo = svc.historyRead({ changeId: replaced.changeId! });
 		expect(afterUndo.entry.id).toBe(replaced.changeId);
 
+		// A change followed by a later edit diffs its snapshot against the current file.
+		await svc.writeNote({
+			sessionId: SESSION_ID,
+			op: "append",
+			scope: "project",
+			target: { slug: "deploy-freeze" },
+			content: "\nApplies to hotfixes too.",
+		});
+		const laterView = svc.historyRead({ changeId: replaced.changeId! });
+		expect(laterView.patch).toContain("+Applies to hotfixes too.");
+
 		expect(() => svc.historyRead({ changeId: "44444444-4444-4444-8444-444444444444" })).toThrow();
 	});
 

@@ -3,6 +3,7 @@ import type {
 	MemoryNoteSummaryView,
 	MemoryNoteTypeView,
 	MemorySettingsView,
+	ModelSettingsView,
 } from "@metis/app-protocol";
 import { PatchDiff, WorkerPoolContextProvider, type WorkerInitializationRenderOptions } from "@pierre/diffs/react";
 import {
@@ -19,6 +20,8 @@ import {
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { type DreamSettingsDraft, parseDreamDraft, toDreamDraft } from "./memory-dream-settings.ts";
+import { MemoryDreamSettings } from "./MemoryDreamSettings.tsx";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 const HISTORY_LIMIT = 20;
@@ -122,6 +125,7 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 		| "undoMemoryRun"
 		| "runMemoryDream"
 		| "setSessionMemoryFlags"
+		| "getModelSettings"
 	>;
 	readonly onDirtyChange?: (dirty: boolean) => void;
 	readonly serverReady: boolean;
@@ -147,6 +151,11 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 	const [noteBusy, setNoteBusy] = useState<"load" | "save" | "delete" | null>(null);
 	const [expandedChange, setExpandedChange] = useState<string | null>(null);
 	const [diffs, setDiffs] = useState<Record<string, DiffState>>({});
+	const [dreamDraft, setDreamDraft] = useState<DreamSettingsDraft | null>(null);
+	const [savedDreamDraft, setSavedDreamDraft] = useState<DreamSettingsDraft | null>(null);
+	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
+	const [modelChoicesError, setModelChoicesError] = useState(false);
+	const [failedRunId, setFailedRunId] = useState<string | null>(null);
 
 	useEffect(() => {
 		if (!serverReady) return;
@@ -161,6 +170,8 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 				setSettings(view);
 				setSavedSettings(view);
 				setHistory([...recent.entries]);
+				setDreamDraft((currentDraft) => currentDraft ?? toDreamDraft(view.dream));
+				setSavedDreamDraft((currentDraft) => currentDraft ?? toDreamDraft(view.dream));
 			},
 			(cause) => {
 				if (current) setError(cause instanceof Error ? cause.message : t("Couldn’t load memory settings."));
@@ -170,6 +181,26 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 			current = false;
 		};
 	}, [api, serverReady, sessionId, t]);
+
+	// Model choices load independently: a failure must not take down the rest of the panel.
+	useEffect(() => {
+		if (!serverReady) return;
+		let current = true;
+		void api.getModelSettings().then(
+			(view) => {
+				if (current) {
+					setModelSettings(view);
+					setModelChoicesError(false);
+				}
+			},
+			() => {
+				if (current) setModelChoicesError(true);
+			},
+		);
+		return () => {
+			current = false;
+		};
+	}, [api, serverReady]);
 
 	useEffect(() => {
 		if (!serverReady) return;
@@ -204,12 +235,21 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 		return () => clearTimeout(timer);
 	}, [notice]);
 
+	const dreamDraftDirty = Boolean(
+		dreamDraft &&
+			savedDreamDraft &&
+			(dreamDraft.enabled !== savedDreamDraft.enabled ||
+				dreamDraft.modelKey !== savedDreamDraft.modelKey ||
+				dreamDraft.minHours !== savedDreamDraft.minHours ||
+				dreamDraft.minSessions !== savedDreamDraft.minSessions ||
+				dreamDraft.maxUnusedDays !== savedDreamDraft.maxUnusedDays),
+	);
+	const dreamParse = dreamDraft ? parseDreamDraft(dreamDraft) : null;
 	const settingsDirty = Boolean(
-		savedSettings &&
+		(savedSettings &&
 			settings &&
-			(settings.enabled !== savedSettings.enabled ||
-				settings.activeContext !== savedSettings.activeContext ||
-				settings.dream.enabled !== savedSettings.dream.enabled),
+			(settings.enabled !== savedSettings.enabled || settings.activeContext !== savedSettings.activeContext)) ||
+			dreamDraftDirty,
 	);
 	const noteDirty = draftDirty(draft, savedDraft);
 	const dirty = settingsDirty || noteDirty;
@@ -232,7 +272,7 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 		setNotes([...result.notes]);
 	};
 
-	/** Refresh the view + history after a dream run; in-progress toggle edits survive. */
+	/** Refresh run state/history/notes after a dream run; unsaved Dream drafts survive. */
 	const reloadAfterDream = async () => {
 		const [view, recent] = await Promise.all([
 			api.getMemorySettings(sessionId === undefined ? undefined : { sessionId }),
@@ -247,9 +287,13 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 						...view,
 						enabled: current.enabled,
 						activeContext: current.activeContext,
-						dream: { ...view.dream, enabled: current.dream.enabled },
 					},
 		);
+		if (!dreamDraftDirty) {
+			const next = toDreamDraft(view.dream);
+			setDreamDraft(next);
+			setSavedDreamDraft(next);
+		}
 		void reloadNotes().catch(() => undefined);
 	};
 
@@ -260,9 +304,17 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 		try {
 			const result = await api.runMemoryDream();
 			if (!result.ok) {
-				setError(result.error ?? t("Couldn’t run memory consolidation."));
+				if (result.runId) {
+					// Partial writes are committed under this runId and can be reverted.
+					setFailedRunId(result.runId);
+					setError(t("Consolidation did not finish. Saved changes are still available to undo."));
+					await reloadAfterDream();
+				} else {
+					setError(result.error ?? t("Couldn’t run memory consolidation."));
+				}
 				return;
 			}
+			setFailedRunId(null);
 			setNotice(t("Dream finished"));
 			await reloadAfterDream();
 		} catch (cause) {
@@ -282,11 +334,20 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 				setError(t("Nothing left to undo for the last dream."));
 				return;
 			}
-			setNotice(
-				result.skipped.length > 0
-					? t("Undid the last dream; {{count}} change(s) were already modified", { count: result.skipped.length })
-					: t("Undid the last dream"),
-			);
+			if (result.undone.length > 0) {
+				setNotice(
+					result.skipped.length > 0
+						? t("{{undone}} change(s) undone; {{skipped}} skipped.", {
+								undone: result.undone.length,
+								skipped: result.skipped.length,
+							})
+						: t("Undid the last dream"),
+				);
+			}
+			if (result.skipped.length > 0) {
+				setError(result.skipped.map((item) => `${item.changeId}: ${item.reason}`).join("; "));
+			}
+			setFailedRunId((current) => (current === runId ? null : current));
 			await reloadAfterDream();
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Couldn’t undo the last dream."));
@@ -302,7 +363,7 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 	};
 
 	const toggleDream = (enabled: boolean) => {
-		setSettings((current) => (current ? { ...current, dream: { ...current.dream, enabled } } : current));
+		setDreamDraft((current) => (current ? { ...current, enabled } : current));
 		setNotice(null);
 		setError(null);
 	};
@@ -325,6 +386,12 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 
 	const save = async () => {
 		if (!settings) return;
+		const parsed = dreamDraft ? parseDreamDraft(dreamDraft) : null;
+		if (parsed && !parsed.ok) {
+			setError(t(parsed.message));
+			return;
+		}
+		const submittedDream = dreamDraft;
 		setBusy(true);
 		setError(null);
 		setNotice(null);
@@ -332,10 +399,13 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 			const next = await api.updateMemorySettings({
 				enabled: settings.enabled,
 				activeContext: settings.activeContext,
-				dream: { enabled: settings.dream.enabled },
+				...(parsed ? { dream: parsed.value } : {}),
 			});
 			setSettings(next);
 			setSavedSettings(next);
+			// Only the submitted draft version becomes the new baseline; edits made
+			// while the save was in flight stay dirty.
+			if (submittedDream) setSavedDreamDraft(submittedDream);
 			setNotice(t("Saved"));
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Couldn’t save memory settings."));
@@ -519,6 +589,22 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 	const dreamLastRun = settings?.dream.lastRun;
 	const sessionFlags = settings?.session;
 	const projectScopeAvailable = settings?.vault.projectDir !== undefined;
+	const dreamModelOptions = (() => {
+		const options = (modelSettings?.providers ?? [])
+			.filter((provider) => provider.auth.configured)
+			.flatMap((provider) =>
+				provider.models.map((model) => ({
+					value: JSON.stringify([model.provider, model.modelId]),
+					label: `${provider.name} / ${model.name}`,
+				})),
+			);
+		const savedKey = savedDreamDraft?.modelKey ?? "";
+		if (savedKey !== "" && !options.some((option) => option.value === savedKey)) {
+			options.push({ value: savedKey, label: t("Saved model (currently unavailable)") });
+		}
+		return options;
+	})();
+	const dreamFieldError = dreamDraftDirty && dreamParse && !dreamParse.ok ? dreamParse.message : null;
 
 	return (
 		<div className="settings-page memory-page">
@@ -811,7 +897,7 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 								<span className="sr-only">{t("Consolidate memory while idle")}</span>
 								<input
 									aria-label={t("Consolidate memory while idle")}
-									checked={settings?.dream.enabled ?? false}
+									checked={dreamDraft?.enabled ?? settings?.dream.enabled ?? false}
 									disabled={!serverReady || busy}
 									onChange={(event) => toggleDream(event.target.checked)}
 									role="switch"
@@ -821,6 +907,22 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 							</label>
 						</div>
 					</div>
+					{modelChoicesError ? (
+						<div className="memory-info-banner" role="alert">
+							<XCircle aria-hidden="true" size={15} />
+							<span>{t("Couldn't load memory model choices.")}</span>
+						</div>
+					) : null}
+					{ dreamDraft ? (
+						<div className="memory-note-editor-grid">
+							<MemoryDreamSettings
+								disabled={!serverReady || busy}
+								draft={dreamDraft}
+								modelOptions={dreamModelOptions}
+								onChange={setDreamDraft}
+							/>
+						</div>
+					) : null}
 					{dreamLastRun ? (
 						<div className="memory-info-banner">
 							<Moon aria-hidden="true" size={15} />
@@ -851,6 +953,21 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 							<Moon aria-hidden="true" size={13} />
 							{dreamBusy === "run" ? t("Running…") : t("Run now")}
 						</button>
+						{dreamDraftDirty ? (
+							<span className="memory-history-meta">{t("Save changes to use them for the next run.")}</span>
+						) : null}
+						{failedRunId !== null ? (
+							<button
+								aria-label={t("Undo changes from failed run")}
+								className="settings-secondary-button"
+								disabled={!serverReady || dreamBusy !== null}
+								onClick={() => void undoDreamRun(failedRunId)}
+								type="button"
+							>
+								<ArrowCounterClockwise aria-hidden="true" size={13} />
+								{dreamBusy === "undo" ? t("Undoing…") : t("Undo changes from failed run")}
+							</button>
+						) : null}
 						{dreamLastRun ? (
 							<button
 								aria-label={t("Undo the last dream run")}
@@ -923,13 +1040,16 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 												) : diff.patch === undefined ? (
 													<p className="memory-history-meta">{t("No content changes remain for this entry.")}</p>
 												) : (
-													<WorkerPoolContextProvider
-														highlighterOptions={DIFF_HIGHLIGHTER[theme]}
-														key={theme}
-														poolOptions={DIFF_WORKER_POOL}
-													>
-														<PatchDiff options={DIFF_OPTIONS} patch={diff.patch} />
-													</WorkerPoolContextProvider>
+													<>
+														<p className="memory-history-meta">{t("Before this change → current version")}</p>
+														<WorkerPoolContextProvider
+															highlighterOptions={DIFF_HIGHLIGHTER[theme]}
+															key={theme}
+															poolOptions={DIFF_WORKER_POOL}
+														>
+															<PatchDiff options={DIFF_OPTIONS} patch={diff.patch} />
+														</WorkerPoolContextProvider>
+													</>
 												)}
 											</div>
 										) : null}
@@ -949,9 +1069,15 @@ export function MemorySettingsPanel({ api, onDirtyChange, serverReady, sessionId
 						{error}
 					</p>
 				) : null}
+				{dreamFieldError ? (
+					<p className="settings-action-message error web-search-message" role="alert">
+						<XCircle aria-hidden="true" size={15} />
+						{t(dreamFieldError)}
+					</p>
+				) : null}
 				<button
 					className="settings-primary-button"
-					disabled={!serverReady || busy || !settingsDirty}
+					disabled={!serverReady || busy || !settingsDirty || dreamFieldError !== null}
 					onClick={() => void save()}
 					type="button"
 				>
