@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { getPinnedPath, getScopeDir } from "../src/core/memory/vault-paths.ts";
 import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { buildMemoryPromptSnapshot, formatMemorySnapshot } from "../src/core/memory/vault-snapshot.ts";
 import { MEMORY_LIMITS, type MemoryActor } from "../src/core/memory/vault-types.ts";
+import { withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const AGENT: MemoryActor = { kind: "agent", sessionId: "sess-1" };
 
@@ -89,5 +90,26 @@ describe("memory prompt snapshot", () => {
 		const text = formatMemorySnapshot(buildMemoryPromptSnapshot(vault));
 		expect(text).toContain("&lt;tags&gt;");
 		expect(text).not.toContain("has <tags>");
+	});
+
+	it("emits the activeContext maintenance protocol only for project scope", async () => {
+		await withMemoryFixture(async (f) => {
+			const projectVault = f.vault("a");
+			const off = buildMemoryPromptSnapshot(projectVault, { activeContextEnabled: false });
+			expect(off.protocol).not.toContain('"block":"active"');
+			expect(off.project?.pinned ?? "").not.toContain("active");
+			const on = buildMemoryPromptSnapshot(projectVault, { activeContextEnabled: true });
+			expect(on.protocol).toContain('"block":"active"');
+			expect(on.protocol).toContain("memory_write");
+			expect(on.project?.pinned ?? "").not.toContain("active");
+			const globalVault = new MemoryVault({ agentDir: join(f.root, "global-agent") });
+			globalVault.ensureLayout();
+			const globalOn = buildMemoryPromptSnapshot(globalVault, { activeContextEnabled: true });
+			expect(globalOn.protocol).not.toContain('"block":"active"');
+			expect(globalOn.project).toBeUndefined();
+			expect(
+				existsSync(join(projectVault.root, "projects", projectVault.project!.projectKey, "_pinned", "active.md")),
+			).toBe(false);
+		});
 	});
 });

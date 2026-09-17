@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolResult } from "@metis/agent-core";
@@ -7,7 +7,7 @@ import { createDreamToolset, DREAM_MAX_WRITES, runDreamPhase2 } from "../src/cor
 import type { DreamCandidate } from "../src/core/memory/dream/types.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { readChangelog } from "../src/core/memory/vault-history.ts";
-import { getNotesDir, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { getNotesDir, getPinnedPath, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
 import { readUsage, recordUsage } from "../src/core/memory/vault-usage.ts";
 import { putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
@@ -285,5 +285,92 @@ describe("dream phase 2", () => {
 		expect((result.details as { ok: boolean }).ok).toBe(false);
 		const errText = result.content[0]!;
 		expect(errText.type === "text" && errText.text).toContain("project");
+	});
+
+	it("keeps the active block out of prompts and writes when disabled", async () => {
+		await withMemoryFixture(async (f) => {
+			const projectVault = f.vault("a");
+			writeFileSync(
+				getPinnedPath(getScopeDir(getVaultRoot(f.agentDir), "project", projectVault.project!.projectKey), "active"),
+				"active-private-marker",
+				{ mode: 0o600 },
+			);
+			let captured: { system?: string; user?: string } = {};
+			const run = async (enabled: () => boolean) =>
+				runDreamPhase2({
+					agentDir: f.agentDir,
+					runId: `active-${String(enabled())}`,
+					candidates: [],
+					projects: [projectVault.project!],
+					activeContextEnabled: enabled,
+					promptAgent: async (ctx) => {
+						captured = { system: ctx.system, user: ctx.user };
+						const writeResult = await ctx.callTool("memory_write", {
+							op: "replace",
+							scope: "project",
+							project: projectVault.project!.root,
+							target: { block: "active" },
+							content: "stage summary",
+						});
+						ctxToolResults.push(writeResult);
+						await ctx.callTool("finish_dream", {});
+					},
+				});
+
+			const off = await run(() => false);
+			expect(off.finished).toBe(true);
+			expect(captured.system!).not.toContain('"block":"active"');
+			expect(captured.user!).not.toContain("active-private-marker");
+			const rejected = ctxToolResults.pop()!;
+			expect((rejected.details as { ok: boolean }).ok).toBe(false);
+			expect(
+				readFileSync(
+					getPinnedPath(
+						getScopeDir(getVaultRoot(f.agentDir), "project", projectVault.project!.projectKey),
+						"active",
+					),
+					"utf8",
+				),
+			).toBe("active-private-marker");
+
+			await run(() => true);
+			expect(captured.system!).toContain('"block":"active"');
+			expect(captured.user!).toContain("active-private-marker");
+			const accepted = ctxToolResults.pop()!;
+			expect((accepted.details as { ok: boolean }).ok).toBe(true);
+			expect(
+				readFileSync(
+					getPinnedPath(
+						getScopeDir(getVaultRoot(f.agentDir), "project", projectVault.project!.projectKey),
+						"active",
+					),
+					"utf8",
+				).trim(),
+			).toBe("stage summary");
+			const undo = await undoMemoryRun({ agentDir: f.agentDir, runId: "active-true", actor: { kind: "user" } });
+			expect(undo.skipped).toEqual([]);
+			expect(
+				readFileSync(
+					getPinnedPath(
+						getScopeDir(getVaultRoot(f.agentDir), "project", projectVault.project!.projectKey),
+						"active",
+					),
+					"utf8",
+				),
+			).toBe("active-private-marker");
+
+			// A disabled re-run must not re-inject the retained file into prompts.
+			await run(() => false);
+			expect(captured.user!).not.toContain("active-private-marker");
+			expect(
+				readFileSync(
+					getPinnedPath(
+						getScopeDir(getVaultRoot(f.agentDir), "project", projectVault.project!.projectKey),
+						"active",
+					),
+					"utf8",
+				),
+			).toBe("active-private-marker");
+		});
 	});
 });

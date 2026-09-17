@@ -17,6 +17,13 @@ const MEMORY_PROTOCOL = `Long-term memory protocol:
 - Never touch the memory directory with write, edit, or bash; use only the memory tools.
 - Pinned blocks hold high-frequency standing context; keep details in notes.`;
 
+const ACTIVE_CONTEXT_PROTOCOL = `- Active-context maintenance (project scope only): when you complete a task stage, call memory_write with scope "project" and target {"block":"active"} to replace the pinned active block with a concise summary of the current stage and next steps (max 2048 bytes). Remove obsolete stage details; never store secrets or raw tool output.`;
+
+/** Active-block maintenance applies only to project-scoped vaults with the feature enabled. */
+export function buildMemoryProtocol(activeContext: boolean, hasProject: boolean): string {
+	return activeContext && hasProject ? `${MEMORY_PROTOCOL}\n${ACTIVE_CONTEXT_PROTOCOL}` : MEMORY_PROTOCOL;
+}
+
 function escapeMemoryPromptText(text: string): string {
 	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;");
 }
@@ -93,7 +100,12 @@ export function buildMemoryPromptSnapshot(
 		};
 	}
 
-	return { protocol: MEMORY_PROTOCOL, global: { ...global, dir: globalDir }, project, truncated };
+	return {
+		protocol: buildMemoryProtocol(activeContext, vault.project !== undefined),
+		global: { ...global, dir: globalDir },
+		project,
+		truncated,
+	};
 }
 
 function formatScopeBlock(

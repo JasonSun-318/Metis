@@ -373,7 +373,7 @@ function clipTail(text: string, maxChars: number): { text: string; truncated: bo
 		: { text: chars.slice(chars.length - maxChars).join(""), truncated: true };
 }
 
-function buildSystemPrompt(maxUnusedDays: number): string {
+function buildSystemPrompt(maxUnusedDays: number, activeContext: boolean): string {
 	return [
 		"You are consolidating long-term memory for an AI coding assistant. You only have the tools memory_search, memory_read, memory_write, and finish_dream.",
 		"Input below: memory candidates mined from recent sessions, the current memory index (MEMORY.md) per scope, pinned block contents, and usage stats.",
@@ -387,6 +387,11 @@ function buildSystemPrompt(maxUnusedDays: number): string {
 		"- Keep pinned blocks within their byte limits (append/replace/str_replace on {block} targets); the index is maintained automatically but must stay within 200 lines.",
 		"- Never store secrets, tokens, or raw command output.",
 		`You may call memory_write at most ${DREAM_MAX_WRITES} times; the tool refuses further calls and tells you to finish.`,
+		...(activeContext
+			? [
+					'Active-context maintenance (project scope only): keep each project vault\'s pinned {"block":"active"} block current — replace it with a concise summary of the project\'s current stage and next steps (max 2048 bytes), remove obsolete stage details, and never store secrets or raw tool output.',
+				]
+			: []),
 		"When finished, call finish_dream.",
 	].join("\n");
 }
@@ -397,6 +402,7 @@ function buildUserPayload(options: {
 	projects: Map<string, VaultProjectIdentity>;
 	usage: Record<string, unknown>;
 	today: string;
+	activeContext: boolean;
 }): string {
 	const sections: string[] = [];
 	sections.push(`Today: ${options.today}`);
@@ -429,6 +435,7 @@ function buildUserPayload(options: {
 		const index = entry.vault.readIndex(scope);
 		sections.push(`# MEMORY.md — ${label}\n${index.length > 0 ? index : "(empty)"}`);
 		for (const block of scope === "global" ? (["user", "feedback"] as const) : (["project", "active"] as const)) {
+			if (block === "active" && !options.activeContext) continue;
 			const pinned = entry.vault.readPinned(scope, block);
 			if (pinned.length > 0) sections.push(`# Pinned — ${label}/_pinned/${block}.md\n${pinned}`);
 		}
@@ -488,14 +495,18 @@ export async function runDreamPhase2(options: {
 	// Eagerly create entries so the prompt reflects the real index/pinned content.
 	const toolsetEntries = toolset.materialize();
 	const usage = readUsage(getVaultRoot(options.agentDir));
+	// Snapshot once for prompt/payload consistency; the toolset keeps checking
+	// the live callback so mid-run disables still reject new active writes.
+	const activeContext = options.activeContextEnabled?.() ?? false;
 	const user = buildUserPayload({
 		candidates: options.candidates,
 		toolsetEntries,
 		projects,
 		usage,
 		today: new Date().toISOString().slice(0, 10),
+		activeContext,
 	});
-	const system = buildSystemPrompt(options.maxUnusedDays ?? DREAM_SETTING_DEFAULTS.maxUnusedDays);
+	const system = buildSystemPrompt(options.maxUnusedDays ?? DREAM_SETTING_DEFAULTS.maxUnusedDays, activeContext);
 
 	await new Promise<void>((resolve, reject) => {
 		if (signal.aborted) {
