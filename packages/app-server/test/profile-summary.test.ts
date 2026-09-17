@@ -94,6 +94,8 @@ function ref(path: string, state: SessionRef["summary"]["state"] = "idle"): Sess
 			state,
 			archived: false,
 			unread: false,
+			useMemory: true,
+			contributeMemory: true,
 		},
 	};
 }

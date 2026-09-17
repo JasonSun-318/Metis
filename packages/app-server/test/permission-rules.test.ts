@@ -105,6 +105,8 @@ function sessionRef(sessionId: string, cwd: string, scheduled = false): SessionR
 			state: "idle",
 			archived: false,
 			unread: false,
+			useMemory: true,
+			contributeMemory: true,
 		},
 		...(scheduled ? { scheduled: { taskId: "task-1", runId: "run-1" } } : {}),
 	};

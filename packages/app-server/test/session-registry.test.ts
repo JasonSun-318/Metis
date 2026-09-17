@@ -20,6 +20,8 @@ function summary(sessionId: string): SessionSummary {
 		state: "idle",
 		archived: false,
 		unread: false,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 
@@ -202,6 +204,15 @@ class FakeRuntime implements OpenedSessionRuntime {
 						: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
 			constrainedByParent: false,
 			sandboxHealth: "healthy",
+		};
+	}
+
+	async setMemoryFlags(
+		input: ClientParams<"session/setMemoryFlags">,
+	): Promise<ClientResult<"session/setMemoryFlags">> {
+		return {
+			useMemory: input.useMemory ?? true,
+			contributeMemory: input.contributeMemory ?? true,
 		};
 	}
 

@@ -73,6 +73,7 @@ export interface OpenedSessionRuntime {
 	setCollaborationMode(
 		input: ClientParams<"session/setCollaborationMode">,
 	): Promise<ClientResult<"session/setCollaborationMode">>;
+	setMemoryFlags(input: ClientParams<"session/setMemoryFlags">): Promise<ClientResult<"session/setMemoryFlags">>;
 	startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">>;
 	cancelPlan(input: ClientParams<"plan/cancel">): Promise<ClientResult<"plan/cancel">>;
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;

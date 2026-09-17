@@ -50,6 +50,8 @@ interface ScannedSession {
 	readonly archived: boolean;
 	readonly name?: string;
 	readonly unread: boolean;
+	readonly useMemory: boolean;
+	readonly contributeMemory: boolean;
 	readonly header?: {
 		readonly id: string;
 		readonly timestamp: string;
@@ -205,6 +207,8 @@ function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSumm
 		archived: scanned.archived,
 		unread: false,
 		recoveryNotice: "Session journal could not be opened safely.",
+		useMemory: scanned.useMemory,
+		contributeMemory: scanned.contributeMemory,
 	};
 }
 
@@ -470,7 +474,10 @@ export class SessionCatalog {
 			const cachedName = this.sessionNames.get(path);
 			const sameIdentity = cachedName?.dev === stats.dev && cachedName.ino === stats.ino;
 			const canContinueNameScan = sameIdentity && stats.size > cachedName.scannedBytes;
-			let persistedName = cachedName ? undefined : readSessionDisplayMetadata(path);
+			// The sidecar is tiny; read it every scan so flag-only updates (which do
+			// not dirty the journal fingerprint) still reach the summary.
+			const displayMetadata = readSessionDisplayMetadata(path);
+			let persistedName = cachedName ? undefined : displayMetadata;
 			const nameStart =
 				cachedName?.fingerprint === fingerprint
 					? false
@@ -528,6 +535,8 @@ export class SessionCatalog {
 				relativePath,
 				archived,
 				unread: readSessionUnreadState(path, header.id),
+				useMemory: displayMetadata?.useMemory !== false,
+				contributeMemory: displayMetadata?.contributeMemory !== false,
 				header,
 				...(name ? { name } : {}),
 				updatedAt,
@@ -541,7 +550,17 @@ export class SessionCatalog {
 			} catch {
 				// Keep the deterministic epoch fallback for a disappearing file.
 			}
-			return { key, path, relativePath, archived, unread: false, updatedAt: storageUpdatedAt, storageUpdatedAt };
+			return {
+				key,
+				path,
+				relativePath,
+				archived,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+				updatedAt: storageUpdatedAt,
+				storageUpdatedAt,
+			};
 		}
 	}
 
@@ -604,6 +623,8 @@ export class SessionCatalog {
 							...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
 							archived: item.archived,
 							unread: item.unread,
+							useMemory: item.useMemory,
+							contributeMemory: item.contributeMemory,
 							...(item.name ? { name: item.name } : {}),
 							...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 						}
@@ -672,6 +693,8 @@ export class SessionCatalog {
 								...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
 								archived: item.archived,
 								unread: item.unread,
+								useMemory: item.useMemory,
+								contributeMemory: item.contributeMemory,
 								...(item.name ? { name: item.name } : {}),
 								...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
 							}
@@ -717,6 +740,7 @@ export class SessionCatalog {
 				const existing = this.sessions.get(sessionId);
 				if (existing && existing.path !== path) throw new Error("Session id is already claimed");
 				const storageUpdatedAt = new Date((await lstat(path)).mtimeMs).toISOString();
+				const metadata = readSessionDisplayMetadata(path);
 				const summary: SessionSummary = {
 					sessionId,
 					mode: header.mode,
@@ -728,6 +752,8 @@ export class SessionCatalog {
 					...(header.lastTurnOutcome ? { lastTurnOutcome: header.lastTurnOutcome } : {}),
 					archived: false,
 					unread: run.unread,
+					useMemory: metadata?.useMemory !== false,
+					contributeMemory: metadata?.contributeMemory !== false,
 					scheduled: header.scheduled,
 				};
 				const changed = JSON.stringify(existing?.summary) !== JSON.stringify(summary);
@@ -996,6 +1022,8 @@ export class SessionCatalog {
 			}
 			const requestedName = normalizedSessionName(input.name);
 			const requestedPermissionPreset = input.permissionPreset ?? "auto";
+			const requestedUseMemory = input.useMemory !== false;
+			const requestedContributeMemory = input.contributeMemory !== false;
 			const mutation: DurableSessionMutation = {
 				method: "session/create",
 				kind: "session_create",
@@ -1005,6 +1033,8 @@ export class SessionCatalog {
 					...(input.cwd === undefined ? {} : { cwd: input.cwd }),
 					...(input.name === undefined ? {} : { name: input.name }),
 					...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
+					...(input.useMemory === undefined ? {} : { useMemory: input.useMemory }),
+					...(input.contributeMemory === undefined ? {} : { contributeMemory: input.contributeMemory }),
 				},
 			};
 			const existing = this.sessions.get(input.requestId);
@@ -1035,7 +1065,9 @@ export class SessionCatalog {
 						manager.getMode() !== mode ||
 						!workspaceMatches ||
 						name !== requestedName ||
-						manager.getPermissionPreset() !== requestedPermissionPreset
+						manager.getPermissionPreset() !== requestedPermissionPreset ||
+						manager.getUseMemory() !== requestedUseMemory ||
+						manager.getContributeMemory() !== requestedContributeMemory
 					) {
 						throw new AppServerError("REQUEST_ID_REUSED", {
 							requestId: input.requestId,
@@ -1074,6 +1106,8 @@ export class SessionCatalog {
 						mode,
 						cwdOrigin: workspace.cwdOrigin,
 						...(input.permissionPreset === undefined ? {} : { permissionPreset: input.permissionPreset }),
+						...(input.useMemory === undefined ? {} : { useMemory: input.useMemory }),
+						...(input.contributeMemory === undefined ? {} : { contributeMemory: input.contributeMemory }),
 					});
 				} catch (error) {
 					if (workspace.cwdOrigin === "managed") {

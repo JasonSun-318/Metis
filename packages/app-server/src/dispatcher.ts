@@ -13,7 +13,7 @@ import {
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
-import type { MemorySettingsService } from "./memory-settings.ts";
+import type { MemoryService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
@@ -124,7 +124,7 @@ export class Dispatcher {
 	private readonly permissionRules: PermissionRulesService;
 	private readonly permissionAutoSettings: PermissionAutoSettingsService;
 	private readonly webSearch: WebSearchService;
-	private readonly memorySettings: MemorySettingsService;
+	private readonly memorySettings: MemoryService;
 	private readonly hooks: HooksService;
 	private readonly plugins: PluginService;
 	private readonly titleGenerator: SessionTitleGenerator;
@@ -143,7 +143,7 @@ export class Dispatcher {
 		permissionRules: PermissionRulesService,
 		permissionAutoSettings: PermissionAutoSettingsService,
 		webSearch: WebSearchService,
-		memorySettings: MemorySettingsService,
+		memorySettings: MemoryService,
 		hooks: HooksService,
 		plugins: PluginService,
 		titleGenerator: SessionTitleGenerator,
@@ -614,11 +614,25 @@ export class Dispatcher {
 					return result;
 				});
 			case "memory/get":
-				return this.memorySettings.view();
+				return this.memorySettings.view(request.params);
 			case "memory/update":
-				return await this.replayMutation(request, () =>
-					this.mutateModelServiceSettings(() => this.memorySettings.update(request.params)),
-				);
+				return await this.replayMutation(request, () => this.memorySettings.update(request.params));
+			case "memory/notes/list":
+				return this.memorySettings.listNotes(request.params);
+			case "memory/notes/read":
+				return this.memorySettings.readNote(request.params);
+			case "memory/notes/write":
+				return await this.replayMutation(request, () => this.memorySettings.writeNote(request.params));
+			case "memory/history/list":
+				return this.memorySettings.history(request.params);
+			case "memory/history/read":
+				return this.memorySettings.historyRead(request.params);
+			case "memory/undo":
+				return await this.replayMutation(request, () => this.memorySettings.undo(request.params));
+			case "memory/undoRun":
+				return await this.replayMutation(request, () => this.memorySettings.undoRun(request.params));
+			case "memory/dream/run":
+				return await this.memorySettings.dreamRun(request.params);
 			case "hooks/list":
 				return this.hooks.view();
 			case "hooks/upsert":
@@ -849,6 +863,11 @@ export class Dispatcher {
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => runtime.setCollaborationMode(request.params));
+				});
+			case "session/setMemoryFlags":
+				return await this.replayMutation(request, async () => {
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => runtime.setMemoryFlags(request.params));
 				});
 			case "plan/startExecution":
 				return await this.replayMutation(request, async () => {

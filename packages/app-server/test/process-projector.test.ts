@@ -36,6 +36,8 @@ describe("Process projection", () => {
 			state: "idle" as const,
 			archived: false,
 			unread: false,
+			useMemory: true,
+			contributeMemory: true,
 		};
 		const projection = new SessionProjection({ session });
 		const projector = new ProcessProjector();

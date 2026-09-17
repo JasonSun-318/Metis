@@ -42,6 +42,7 @@ import {
 	McpConfigurationCoordinator,
 	type McpCredentialChange,
 	type McpServerSettings,
+	type MemoryEvents,
 	mcpCredentialState,
 	mcpCredentialStatus,
 	type PluginSnapshot,
@@ -178,6 +179,8 @@ export interface AgentSessionRuntimeHostOptions {
 	readonly interactions?: InteractionBroker;
 	readonly credentials?: CredentialCoordinator;
 	readonly scheduleManager?: ScheduleManager;
+	/** Shared vault emitter owned by the memory service; session vault writes broadcast through it. */
+	readonly memoryEvents?: MemoryEvents;
 }
 
 function name(value: unknown, fallback: string): string {
@@ -1435,6 +1438,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			...(lastTurnOutcome ? { lastTurnOutcome } : {}),
 			attentionRequired: this.hasPendingInteractions(),
 			unread: this.unread,
+			useMemory: manager.getUseMemory(),
+			contributeMemory: manager.getContributeMemory(),
 			...(recoveryNotice === undefined ? {} : { recoveryNotice }),
 		};
 	}
@@ -1727,6 +1732,30 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			});
 		}
 		return { collaborationMode: this.session.sessionManager.getCollaborationMode() };
+	}
+
+	async setMemoryFlags(
+		input: ClientParams<"session/setMemoryFlags">,
+	): Promise<ClientResult<"session/setMemoryFlags">> {
+		if (this.ref.scheduled) {
+			throw new AppServerError("READ_ONLY_SESSION", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
+		try {
+			const next = await this.session.setMemoryFlags({
+				...(input.useMemory === undefined ? {} : { useMemory: input.useMemory }),
+				...(input.contributeMemory === undefined ? {} : { contributeMemory: input.contributeMemory }),
+			});
+			this.refreshLifecycleProjection();
+			return next;
+		} catch {
+			throw new AppServerError("OPERATION_FAILED", {
+				sessionId: input.sessionId,
+				requestId: input.requestId,
+			});
+		}
 	}
 
 	async startPlanExecution(input: ClientParams<"plan/startExecution">): Promise<ClientResult<"plan/startExecution">> {
@@ -2286,6 +2315,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
+	async setMemoryFlags(): Promise<ClientResult<"session/setMemoryFlags">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
 	async startPlanExecution(): Promise<ClientResult<"plan/startExecution">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
@@ -2440,6 +2473,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 				sessionManager: options.sessionManager,
 				sessionStartEvent: options.sessionStartEvent,
 				backgroundOptionalMcpStartup: !child,
+				memoryEvents: this.options.memoryEvents,
 				...(child
 					? {
 							model: childModel!,

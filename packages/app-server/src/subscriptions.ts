@@ -110,6 +110,11 @@ export class SessionSubscriptions {
 		this.publishToConnections(event);
 	}
 
+	/** Broadcast a connection-level event (e.g. `memory/changed`) to every connection. */
+	publishConnectionEvent(event: DomainEvent): void {
+		this.publishToConnections(event);
+	}
+
 	subscribeSchedule(
 		outbound: OutboundQueue,
 		invalidate: () => void,

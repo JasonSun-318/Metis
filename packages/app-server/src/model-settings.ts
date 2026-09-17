@@ -3,18 +3,10 @@ import { join } from "node:path";
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
 import {
 	type AuthStorage,
-	clearMemoryHealth,
-	embedTexts,
 	FileAuthStorageBackend,
 	getSupportedThinkingLevels,
-	MEMORY_EMBEDDING_CREDENTIAL_ID,
-	MEMORY_RERANK_CREDENTIAL_ID,
 	type ModelRegistry,
-	rerankDocuments,
 	type SettingsManager,
-	validateEmbeddingSettings,
-	validateRerankSettings,
-	validateServiceCredential,
 } from "@metis/coding-agent/host";
 
 interface ModelsConfigDocument {
@@ -211,21 +203,10 @@ export class ModelSettingsService {
 			defaultProvider && defaultModelId ? this.modelRegistry.find(defaultProvider, defaultModelId) : undefined;
 		const savedThinkingSelection = this.settingsManager.getDefaultThinkingLevel() ?? "medium";
 		const vision = this.settingsManager.getVisionSettings();
-		const embedding = this.settingsManager.getEmbeddingSettings();
-		const rerank = this.settingsManager.getRerankSettings();
 		return {
 			defaultModel:
 				defaultProvider && defaultModelId ? { provider: defaultProvider, modelId: defaultModelId } : null,
 			vision: vision ? { ...vision, authConfigured: this.authStorage.has("vision") } : null,
-			embedding: embedding
-				? {
-						...embedding,
-						authConfigured: this.authStorage.get(MEMORY_EMBEDDING_CREDENTIAL_ID)?.type === "api_key",
-					}
-				: null,
-			rerank: rerank
-				? { ...rerank, authConfigured: this.authStorage.get(MEMORY_RERANK_CREDENTIAL_ID)?.type === "api_key" }
-				: null,
 			defaultThinkingSelection: defaultModel
 				? clampThinkingSelection(defaultModel, savedThinkingSelection)
 				: savedThinkingSelection,
@@ -238,48 +219,6 @@ export class ModelSettingsService {
 		mutation: ClientParams<"model/settings/update">["mutation"],
 	): Promise<ClientResult<"model/settings/get">> {
 		await this.settingsManager.throwPendingWriteError();
-		if (mutation.type === "set_embedding" || mutation.type === "set_rerank") {
-			const embedding = mutation.type === "set_embedding";
-			const credentialId = embedding ? MEMORY_EMBEDDING_CREDENTIAL_ID : MEMORY_RERANK_CREDENTIAL_ID;
-			if (mutation.settings === null) {
-				if (mutation.credential.action !== "remove") {
-					throw new Error("Removing specialized model settings requires removing its credential");
-				}
-				if (embedding) this.settingsManager.clearEmbeddingSettings();
-				else this.settingsManager.clearRerankSettings();
-				await this.settingsManager.flushOrThrow();
-				this.authStorage.remove(credentialId);
-				this.clearMemoryHealth(embedding ? ["embedding", "backfill"] : ["rerank"]);
-				return this.view();
-			}
-			if (mutation.credential.action === "remove") {
-				throw new Error("Credential mutation must be set or keep while retaining specialized model settings");
-			}
-			const settings = embedding
-				? validateEmbeddingSettings(mutation.settings)
-				: validateRerankSettings(mutation.settings);
-			if (mutation.credential.action === "keep" && this.authStorage.get(credentialId)?.type !== "api_key") {
-				throw new Error("A stored dedicated credential is required for keep");
-			}
-			const previous = this.authStorage.get(credentialId);
-			try {
-				if (mutation.credential.action === "set") {
-					this.authStorage.set(credentialId, {
-						type: "api_key",
-						key: validateServiceCredential(mutation.credential.value),
-					});
-				}
-				if (embedding) {
-					this.settingsManager.setEmbeddingSettings(validateEmbeddingSettings(settings));
-				} else this.settingsManager.setRerankSettings(validateRerankSettings(settings));
-				await this.settingsManager.flushOrThrow();
-			} catch (error) {
-				if (mutation.credential.action === "set") this.restoreCredential(credentialId, previous, error);
-				throw error;
-			}
-			this.clearMemoryHealth(embedding ? ["embedding", "backfill"] : ["rerank"]);
-			return this.view();
-		}
 		if (mutation.type === "set_defaults") {
 			if (mutation.model) {
 				this.modelRegistry.refresh();
@@ -428,38 +367,6 @@ export class ModelSettingsService {
 	}
 
 	async testConnection(params: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">> {
-		if (params.kind === "embedding" || params.kind === "rerank") {
-			const embedding = params.kind === "embedding";
-			const credentialId = embedding ? MEMORY_EMBEDDING_CREDENTIAL_ID : MEMORY_RERANK_CREDENTIAL_ID;
-			const startedAt = Date.now();
-			let apiKey: string | undefined;
-			try {
-				apiKey =
-					params.credential.action === "set"
-						? validateServiceCredential(params.credential.value)
-						: await this.authStorage.getApiKey(credentialId, { includeFallback: false });
-				if (!apiKey) throw new Error("A stored dedicated credential is required for keep");
-				if (embedding) {
-					await embedTexts(["Metis connection test A", "Metis connection test B"], {
-						settings: validateEmbeddingSettings(params.settings),
-						apiKey,
-					});
-				} else {
-					await rerankDocuments({
-						settings: validateRerankSettings(params.settings),
-						apiKey,
-						query: "Metis connection test",
-						documents: [
-							{ id: "a", text: "Metis connection test A" },
-							{ id: "b", text: "Metis connection test B" },
-						],
-					});
-				}
-				return { ok: true, message: "Connection succeeded", latencyMs: Date.now() - startedAt };
-			} catch (error) {
-				return { ok: false, message: publicError(error, [apiKey]), latencyMs: Date.now() - startedAt };
-			}
-		}
 		this.modelRegistry.refresh();
 		const model = this.modelRegistry.find(params.provider, params.modelId);
 		if (!model) return { ok: false, message: "Model not found", latencyMs: 0 };
@@ -500,14 +407,6 @@ export class ModelSettingsService {
 			else this.authStorage.remove(id);
 		} catch (recoveryError) {
 			if (original instanceof Error) (original as Error & { cause?: unknown }).cause ??= recoveryError;
-		}
-	}
-
-	private clearMemoryHealth(operations: Array<"embedding" | "rerank" | "backfill">): void {
-		try {
-			clearMemoryHealth(this.agentDir, ...operations);
-		} catch {
-			// Health is derived state; settings and credentials are already durable.
 		}
 	}
 }

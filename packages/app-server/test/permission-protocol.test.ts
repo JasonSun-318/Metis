@@ -71,6 +71,8 @@ describe("permission protocol", () => {
 				state: "idle",
 				archived: false,
 				unread: false,
+				useMemory: true,
+				contributeMemory: true,
 			},
 		});
 		for (const preset of ["ask", "auto", "full"] as const) {
@@ -118,6 +120,8 @@ describe("permission protocol", () => {
 				state: "idle",
 				archived: false,
 				unread: false,
+				useMemory: true,
+				contributeMemory: true,
 			},
 		});
 		const events: DomainEvent[] = [

@@ -30,7 +30,6 @@ import type {
 import { PROTOCOL_VERSION, RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
 	getDefaultSessionDir,
-	getLatestMemoryError,
 	getManagedWorkspaceDir,
 	getSessionDisplayMetadataPath,
 	ProjectTrustStore,
@@ -50,7 +49,6 @@ import type {
 	SessionRef,
 	SessionRuntimeHost,
 } from "../src/session-runtime-host.ts";
-import { recordMemoryHealth } from "./fixtures/memory-health.ts";
 
 const REQUEST_A = "00000000-0000-4000-8000-000000000001";
 const REQUEST_B = "00000000-0000-4000-8000-000000000002";
@@ -310,6 +308,15 @@ class FakeRuntime implements OpenedSessionRuntime {
 						: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
 			constrainedByParent: false,
 			sandboxHealth: "healthy",
+		};
+	}
+
+	async setMemoryFlags(
+		input: ClientParams<"session/setMemoryFlags">,
+	): Promise<ClientResult<"session/setMemoryFlags">> {
+		return {
+			useMemory: input.useMemory ?? true,
+			contributeMemory: input.contributeMemory ?? true,
 		};
 	}
 
@@ -587,18 +594,6 @@ describe("AppServer", () => {
 		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
 
 		expect(existsSync(stale)).toBe(false);
-	});
-
-	it("recovers interrupted memory health before serving sessions", async () => {
-		recordMemoryHealth(agentDir, {
-			operation: "backfill",
-			status: "running",
-			updatedAt: "2026-08-20T00:00:00.000Z",
-			reason: null,
-		});
-
-		await createTestServer({ agentDir, sessionsRoot, runtimeHost: new FakeHost() });
-		expect(getLatestMemoryError(agentDir)).toBe("Interrupted before completion");
 	});
 
 	it("restores persisted session names and caches unchanged journal metadata", async () => {

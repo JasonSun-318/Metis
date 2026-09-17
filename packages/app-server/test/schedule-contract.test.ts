@@ -180,292 +180,304 @@ describe("AppServer schedule contract", () => {
 		});
 	});
 
-	it("runs into a fresh visible read-only Chat session and deletes the whole task history", { timeout: 20_000 }, async () => {
-		tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-run-"));
-		const agentDir = join(tempDir, "agent");
-		const projectDir = join(tempDir, "project");
-		mkdirSync(projectDir, { recursive: true });
-		configureModel(agentDir);
-		const execute = async (claim: ScheduleRunClaim) => {
-			const sessionId = createSessionId();
-			const manager = SessionManager.create(
-				claim.snapshot.target.cwd,
-				getDefaultSessionDir(claim.snapshot.target.cwd, agentDir),
+	it(
+		"runs into a fresh visible read-only Chat session and deletes the whole task history",
+		{ timeout: 20_000 },
+		async () => {
+			tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-run-"));
+			const agentDir = join(tempDir, "agent");
+			const projectDir = join(tempDir, "project");
+			mkdirSync(projectDir, { recursive: true });
+			configureModel(agentDir);
+			const execute = async (claim: ScheduleRunClaim) => {
+				const sessionId = createSessionId();
+				const manager = SessionManager.create(
+					claim.snapshot.target.cwd,
+					getDefaultSessionDir(claim.snapshot.target.cwd, agentDir),
+					{
+						id: sessionId,
+						mode: "chat" as const,
+						cwdOrigin: "user-selected" as const,
+						scheduled: { taskId: claim.taskId, runId: claim.runId },
+					},
+				);
+				manager.appendMessage({
+					role: "assistant",
+					content: [{ type: "text", text: "日报已生成" }],
+					api: "openai-completions",
+					provider: "openai",
+					model: "test",
+					usage: {
+						input: 1,
+						output: 1,
+						cacheRead: 0,
+						cacheWrite: 0,
+						totalTokens: 2,
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+					},
+					stopReason: "stop",
+					timestamp: Date.now(),
+				});
+				const sessionFile = manager.getSessionFile()!;
+				manager.close();
+				return { runId: claim.runId, sessionId, sessionFile, result: "日报已生成" };
+			};
+			server = await AppServer.create({
+				agentDir,
+				scheduleManager: managerWithTestTrash(agentDir, execute),
+			});
+			let connection = server.connect();
+			const events: OutboundEnvelope[] = [];
+			const recordEvent = (message: ConnectionOutboundEnvelope) => {
+				if ("method" in message && message.method === "connection/events") events.push(message);
+			};
+			connection.onMessage(recordEvent);
+			await connection.handle(initialize());
+			await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "chat", cwd: projectDir }));
+			await connection.handle(
+				request("schedule/create", {
+					requestId: TASK_ID,
+					sourceSessionId: SOURCE_ID,
+					name: "每日简报",
+					description: "工作日摘要",
+					instruction: "生成日报",
+					model: MODEL,
+					schedule: { kind: "daily", time: "09:00" },
+				}),
+			);
+			await connection.handle(request("schedule/subscribe", {}));
+			const refresh = vi.spyOn(server.catalog, "refresh");
+			await connection.handle(request("schedule/run-now", { requestId: RUN_ID, taskId: TASK_ID }));
+			const run = await waitForRun(connection, TASK_ID, RUN_ID);
+			expect(run).toMatchObject({ status: "succeeded", resultPreview: "日报已生成", unread: true });
+			expect(run).not.toHaveProperty("sessionFile");
+			for (let attempt = 0; attempt < 100; attempt += 1) {
+				try {
+					if (server.catalog.get(run.sessionId!).scheduled) break;
+				} catch {
+					await new Promise((resolve) => setTimeout(resolve, 10));
+				}
+			}
+
+			const listed = await connection.handle(request("session/list", {}));
+			expect(listed).toMatchObject({
+				result: {
+					sessions: expect.arrayContaining([
+						expect.objectContaining({
+							sessionId: run.sessionId!,
+							mode: "chat",
+							scheduled: { taskId: TASK_ID, runId: RUN_ID },
+						}),
+					]),
+				},
+			});
+			expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
+				result: { session: { sessionId: run.sessionId! } },
+			});
+			const subscribed = await connection.handle(request("session/subscribe", { sessionId: run.sessionId! }));
+			const snapshot = (subscribed as ClientRpcSuccessResponse<"session/subscribe">).result.snapshot;
+			const turnId = snapshot.recentItems[0]?.turnId;
+			expect(turnId).toBeTruthy();
+			expect(snapshot.recentItems.every((item) => item.turnId === turnId)).toBe(true);
+			expect(snapshot.turns).toEqual([expect.objectContaining({ turnId, state: "completed" })]);
+			const items = await connection.handle(
+				request("session/readItems", { sessionId: run.sessionId!, beforeItemId: null, limit: 20 }),
+			);
+			expect(JSON.stringify(items)).toContain("日报已生成");
+			expect(
+				await connection.handle(
+					request("turn/start", {
+						sessionId: run.sessionId!,
+						requestId: "50000000-0000-4000-8000-000000000001",
+						text: "继续",
+					}),
+				),
+			).toMatchObject({ error: { code: RPC_ERROR_CODES.READ_ONLY_SESSION } });
+			expect(
+				await connection.handle(
+					request("session/close", {
+						sessionId: run.sessionId!,
+						requestId: "50000000-0000-4000-8000-000000000004",
+					}),
+				),
+			).toMatchObject({ result: { sessionId: run.sessionId!, closed: true } });
+			expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
+				result: { session: { sessionId: run.sessionId! } },
+			});
+			await vi.waitFor(() =>
+				expect(
+					events
+						.flatMap((event) =>
+							"method" in event && event.method === "connection/events" ? event.params.events : [],
+						)
+						.some(
+							(event) =>
+								event.type === "schedule/runUpdated" &&
+								event.run.id === RUN_ID &&
+								event.run.status === "succeeded",
+						),
+				).toBe(true),
+			);
+			expect(refresh).not.toHaveBeenCalled();
+			const visibleFile = server.catalog.get(run.sessionId!).path;
+			await connection.handle(
+				request("schedule/create", {
+					requestId: RETAIN_TASK_ID,
+					sourceSessionId: SOURCE_ID,
+					name: "保留历史",
+					instruction: "生成保留结果",
+					model: MODEL,
+					schedule: { kind: "daily", time: "09:30" },
+				}),
+			);
+			await connection.handle(request("schedule/run-now", { requestId: RETAIN_RUN_ID, taskId: RETAIN_TASK_ID }));
+			const retainedRun = await waitForRun(connection, RETAIN_TASK_ID, RETAIN_RUN_ID);
+			await vi.waitFor(() => expect(server!.catalog.get(retainedRun.sessionId!).scheduled).toBeDefined());
+			const retainedFile = server.catalog.get(retainedRun.sessionId!).path;
+			expect(
+				await connection.handle(
+					request("schedule/delete", {
+						requestId: "50000000-0000-4000-8000-000000000006",
+						taskId: RETAIN_TASK_ID,
+						deleteSessions: false,
+					}),
+				),
+			).toMatchObject({
+				result: { deleted: true, deletedSessionCount: 0, retainedSessionCount: 1 },
+			});
+			expect(existsSync(retainedFile)).toBe(true);
+			expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(retainedRun.sessionId!);
+			expect(JSON.stringify(await connection.handle(request("schedule/list", {})))).not.toContain(RETAIN_TASK_ID);
+
+			server.beginShutdown();
+			await server.waitForShutdown();
+			server = await AppServer.create({
+				agentDir,
+				scheduleManager: managerWithTestTrash(agentDir, async () => Promise.reject(new Error("unused"))),
+			});
+			connection = server.connect();
+			connection.onMessage(recordEvent);
+			await connection.handle(initialize());
+			expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(run.sessionId!);
+			expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(retainedRun.sessionId!);
+			expect(await connection.handle(request("session/open", { sessionId: retainedRun.sessionId! }))).toMatchObject({
+				result: {
+					session: {
+						sessionId: retainedRun.sessionId!,
+						scheduled: { taskId: RETAIN_TASK_ID, runId: RETAIN_RUN_ID },
+					},
+				},
+			});
+			expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
+				result: { session: { sessionId: run.sessionId!, scheduled: { taskId: TASK_ID, runId: RUN_ID } } },
+			});
+			vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
+				rmSync(path, { force: true });
+				return { ok: true, method: "trash" };
+			});
+			expect(
+				await connection.handle(
+					request("session/delete", {
+						sessionId: run.sessionId!,
+						requestId: "60000000-0000-4000-8000-000000000001",
+					}),
+				),
+			).toMatchObject({ error: { code: RPC_ERROR_CODES.READ_ONLY_SESSION } });
+			expect(
+				await connection.handle(
+					request("session/delete", {
+						sessionId: retainedRun.sessionId!,
+						requestId: "60000000-0000-4000-8000-000000000002",
+					}),
+				),
+			).toMatchObject({ result: { sessionId: retainedRun.sessionId!, deleted: true } });
+			expect(existsSync(retainedFile)).toBe(false);
+			expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(
+				retainedRun.sessionId!,
+			);
+			const originalJournal = readFileSync(visibleFile, "utf8");
+			const wrongModeJournal = originalJournal.replace('"mode":"chat"', '"mode":"code"');
+			expect(wrongModeJournal).not.toBe(originalJournal);
+			writeFileSync(visibleFile, wrongModeJournal);
+			expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject(
 				{
-					id: sessionId,
-					mode: "chat" as const,
-					cwdOrigin: "user-selected" as const,
-					scheduled: { taskId: claim.taskId, runId: claim.runId },
+					error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
 				},
 			);
-			manager.appendMessage({
-				role: "assistant",
-				content: [{ type: "text", text: "日报已生成" }],
-				api: "openai-completions",
-				provider: "openai",
-				model: "test",
-				usage: {
-					input: 1,
-					output: 1,
-					cacheRead: 0,
-					cacheWrite: 0,
-					totalTokens: 2,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			writeFileSync(visibleFile, originalJournal);
+			const forgedJournal = originalJournal.replace(RUN_ID, FIXED_TASK_ID);
+			writeFileSync(visibleFile, forgedJournal);
+			expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject(
+				{
+					error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
 				},
-				stopReason: "stop",
-				timestamp: Date.now(),
-			});
-			const sessionFile = manager.getSessionFile()!;
-			manager.close();
-			return { runId: claim.runId, sessionId, sessionFile, result: "日报已生成" };
-		};
-		server = await AppServer.create({
-			agentDir,
-			scheduleManager: managerWithTestTrash(agentDir, execute),
-		});
-		let connection = server.connect();
-		const events: OutboundEnvelope[] = [];
-		const recordEvent = (message: ConnectionOutboundEnvelope) => {
-			if ("method" in message && message.method === "connection/events") events.push(message);
-		};
-		connection.onMessage(recordEvent);
-		await connection.handle(initialize());
-		await connection.handle(request("session/create", { requestId: SOURCE_ID, mode: "chat", cwd: projectDir }));
-		await connection.handle(
-			request("schedule/create", {
-				requestId: TASK_ID,
-				sourceSessionId: SOURCE_ID,
-				name: "每日简报",
-				description: "工作日摘要",
-				instruction: "生成日报",
-				model: MODEL,
-				schedule: { kind: "daily", time: "09:00" },
-			}),
-		);
-		await connection.handle(request("schedule/subscribe", {}));
-		const refresh = vi.spyOn(server.catalog, "refresh");
-		await connection.handle(request("schedule/run-now", { requestId: RUN_ID, taskId: TASK_ID }));
-		const run = await waitForRun(connection, TASK_ID, RUN_ID);
-		expect(run).toMatchObject({ status: "succeeded", resultPreview: "日报已生成", unread: true });
-		expect(run).not.toHaveProperty("sessionFile");
-		for (let attempt = 0; attempt < 100; attempt += 1) {
-			try {
-				if (server.catalog.get(run.sessionId!).scheduled) break;
-			} catch {
-				await new Promise((resolve) => setTimeout(resolve, 10));
-			}
-		}
-
-		const listed = await connection.handle(request("session/list", {}));
-		expect(listed).toMatchObject({
-			result: {
-				sessions: expect.arrayContaining([
-					expect.objectContaining({
-						sessionId: run.sessionId!,
-						mode: "chat",
-						scheduled: { taskId: TASK_ID, runId: RUN_ID },
-					}),
-				]),
-			},
-		});
-		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			result: { session: { sessionId: run.sessionId! } },
-		});
-		const subscribed = await connection.handle(request("session/subscribe", { sessionId: run.sessionId! }));
-		const snapshot = (subscribed as ClientRpcSuccessResponse<"session/subscribe">).result.snapshot;
-		const turnId = snapshot.recentItems[0]?.turnId;
-		expect(turnId).toBeTruthy();
-		expect(snapshot.recentItems.every((item) => item.turnId === turnId)).toBe(true);
-		expect(snapshot.turns).toEqual([expect.objectContaining({ turnId, state: "completed" })]);
-		const items = await connection.handle(
-			request("session/readItems", { sessionId: run.sessionId!, beforeItemId: null, limit: 20 }),
-		);
-		expect(JSON.stringify(items)).toContain("日报已生成");
-		expect(
-			await connection.handle(
-				request("turn/start", {
-					sessionId: run.sessionId!,
-					requestId: "50000000-0000-4000-8000-000000000001",
-					text: "继续",
-				}),
-			),
-		).toMatchObject({ error: { code: RPC_ERROR_CODES.READ_ONLY_SESSION } });
-		expect(
+			);
+			writeFileSync(visibleFile, originalJournal);
+			expect(
+				await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID })),
+			).toHaveProperty("result.run.sessionId", run.sessionId);
 			await connection.handle(
 				request("session/close", {
 					sessionId: run.sessionId!,
-					requestId: "50000000-0000-4000-8000-000000000004",
+					requestId: "50000000-0000-4000-8000-000000000005",
 				}),
-			),
-		).toMatchObject({ result: { sessionId: run.sessionId!, closed: true } });
-		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			result: { session: { sessionId: run.sessionId! } },
-		});
-		await vi.waitFor(() =>
-			expect(
-				events
-					.flatMap((event) =>
-						"method" in event && event.method === "connection/events" ? event.params.events : [],
-					)
-					.some(
-						(event) =>
-							event.type === "schedule/runUpdated" &&
-							event.run.id === RUN_ID &&
-							event.run.status === "succeeded",
-					),
-			).toBe(true),
-		);
-		expect(refresh).not.toHaveBeenCalled();
-		const visibleFile = server.catalog.get(run.sessionId!).path;
-		await connection.handle(
-			request("schedule/create", {
-				requestId: RETAIN_TASK_ID,
-				sourceSessionId: SOURCE_ID,
-				name: "保留历史",
-				instruction: "生成保留结果",
-				model: MODEL,
-				schedule: { kind: "daily", time: "09:30" },
-			}),
-		);
-		await connection.handle(request("schedule/run-now", { requestId: RETAIN_RUN_ID, taskId: RETAIN_TASK_ID }));
-		const retainedRun = await waitForRun(connection, RETAIN_TASK_ID, RETAIN_RUN_ID);
-		await vi.waitFor(() => expect(server!.catalog.get(retainedRun.sessionId!).scheduled).toBeDefined());
-		const retainedFile = server.catalog.get(retainedRun.sessionId!).path;
-		expect(
-			await connection.handle(
+			);
+			writeFileSync(visibleFile, forgedJournal);
+			expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
+				error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
+			});
+			writeFileSync(visibleFile, originalJournal);
+			await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }));
+			expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
+				result: { session: { sessionId: run.sessionId! } },
+			});
+			expect(await connection.handle(request("session/markRead", { sessionId: run.sessionId! }))).toMatchObject({
+				result: { session: { sessionId: run.sessionId!, unread: false } },
+			});
+			expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject(
+				{
+					result: { run: { unread: false } },
+				},
+			);
+
+			const marked = await connection.handle(
+				request("schedule/run/mark-read", {
+					requestId: "50000000-0000-4000-8000-000000000002",
+					taskId: TASK_ID,
+					runId: RUN_ID,
+				}),
+			);
+			expect(marked).toMatchObject({ result: { run: { unread: false }, unreadCount: 0 } });
+			const listRuns = vi.spyOn(server.scheduleManager, "listRuns");
+			const deleted = await connection.handle(
 				request("schedule/delete", {
-					requestId: "50000000-0000-4000-8000-000000000006",
-					taskId: RETAIN_TASK_ID,
-					deleteSessions: false,
+					requestId: "50000000-0000-4000-8000-000000000003",
+					taskId: TASK_ID,
+					deleteSessions: true,
 				}),
-			),
-		).toMatchObject({
-			result: { deleted: true, deletedSessionCount: 0, retainedSessionCount: 1 },
-		});
-		expect(existsSync(retainedFile)).toBe(true);
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(retainedRun.sessionId!);
-		expect(JSON.stringify(await connection.handle(request("schedule/list", {})))).not.toContain(RETAIN_TASK_ID);
-
-		server.beginShutdown();
-		await server.waitForShutdown();
-		server = await AppServer.create({
-			agentDir,
-			scheduleManager: managerWithTestTrash(agentDir, async () => Promise.reject(new Error("unused"))),
-		});
-		connection = server.connect();
-		connection.onMessage(recordEvent);
-		await connection.handle(initialize());
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(run.sessionId!);
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).toContain(retainedRun.sessionId!);
-		expect(await connection.handle(request("session/open", { sessionId: retainedRun.sessionId! }))).toMatchObject({
-			result: {
-				session: { sessionId: retainedRun.sessionId!, scheduled: { taskId: RETAIN_TASK_ID, runId: RETAIN_RUN_ID } },
-			},
-		});
-		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			result: { session: { sessionId: run.sessionId!, scheduled: { taskId: TASK_ID, runId: RUN_ID } } },
-		});
-		vi.spyOn(SessionManager, "deleteSession").mockImplementation(async (path) => {
-			rmSync(path, { force: true });
-			return { ok: true, method: "trash" };
-		});
-		expect(
-			await connection.handle(
-				request("session/delete", {
-					sessionId: run.sessionId!,
-					requestId: "60000000-0000-4000-8000-000000000001",
-				}),
-			),
-		).toMatchObject({ error: { code: RPC_ERROR_CODES.READ_ONLY_SESSION } });
-		expect(
-			await connection.handle(
-				request("session/delete", {
-					sessionId: retainedRun.sessionId!,
-					requestId: "60000000-0000-4000-8000-000000000002",
-				}),
-			),
-		).toMatchObject({ result: { sessionId: retainedRun.sessionId!, deleted: true } });
-		expect(existsSync(retainedFile)).toBe(false);
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(
-			retainedRun.sessionId!,
-		);
-		const originalJournal = readFileSync(visibleFile, "utf8");
-		const wrongModeJournal = originalJournal.replace('"mode":"chat"', '"mode":"code"');
-		expect(wrongModeJournal).not.toBe(originalJournal);
-		writeFileSync(visibleFile, wrongModeJournal);
-		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject({
-			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
-		});
-		writeFileSync(visibleFile, originalJournal);
-		const forgedJournal = originalJournal.replace(RUN_ID, FIXED_TASK_ID);
-		writeFileSync(visibleFile, forgedJournal);
-		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject({
-			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
-		});
-		writeFileSync(visibleFile, originalJournal);
-		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toHaveProperty(
-			"result.run.sessionId",
-			run.sessionId,
-		);
-		await connection.handle(
-			request("session/close", {
-				sessionId: run.sessionId!,
-				requestId: "50000000-0000-4000-8000-000000000005",
-			}),
-		);
-		writeFileSync(visibleFile, forgedJournal);
-		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			error: { code: RPC_ERROR_CODES.SESSION_CORRUPT },
-		});
-		writeFileSync(visibleFile, originalJournal);
-		await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }));
-		expect(await connection.handle(request("session/open", { sessionId: run.sessionId! }))).toMatchObject({
-			result: { session: { sessionId: run.sessionId! } },
-		});
-		expect(await connection.handle(request("session/markRead", { sessionId: run.sessionId! }))).toMatchObject({
-			result: { session: { sessionId: run.sessionId!, unread: false } },
-		});
-		expect(await connection.handle(request("schedule/run/get", { taskId: TASK_ID, runId: RUN_ID }))).toMatchObject({
-			result: { run: { unread: false } },
-		});
-
-		const marked = await connection.handle(
-			request("schedule/run/mark-read", {
-				requestId: "50000000-0000-4000-8000-000000000002",
-				taskId: TASK_ID,
-				runId: RUN_ID,
-			}),
-		);
-		expect(marked).toMatchObject({ result: { run: { unread: false }, unreadCount: 0 } });
-		const listRuns = vi.spyOn(server.scheduleManager, "listRuns");
-		const deleted = await connection.handle(
-			request("schedule/delete", {
-				requestId: "50000000-0000-4000-8000-000000000003",
-				taskId: TASK_ID,
-				deleteSessions: true,
-			}),
-		);
-		expect(deleted).toMatchObject({ result: { taskId: TASK_ID, deleted: true } });
-		expect(listRuns).not.toHaveBeenCalled();
-		expect(server.registry.has(run.sessionId!)).toBe(false);
-		expect(existsSync(visibleFile)).toBe(false);
-		expect(existsSync(projectDir)).toBe(true);
-		expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(run.sessionId!);
-		await vi.waitFor(() =>
-			expect(
-				events
-					.flatMap((event) =>
-						"method" in event && event.method === "connection/events" ? event.params.events : [],
-					)
-					.some(
-						(event) =>
-							event.type === "session/invalidated" &&
-							event.sessionId === run.sessionId &&
-							event.reason === "deleted",
-					),
-			).toBe(true),
-		);
-	});
+			);
+			expect(deleted).toMatchObject({ result: { taskId: TASK_ID, deleted: true } });
+			expect(listRuns).not.toHaveBeenCalled();
+			expect(server.registry.has(run.sessionId!)).toBe(false);
+			expect(existsSync(visibleFile)).toBe(false);
+			expect(existsSync(projectDir)).toBe(true);
+			expect(JSON.stringify(await connection.handle(request("session/list", {})))).not.toContain(run.sessionId!);
+			await vi.waitFor(() =>
+				expect(
+					events
+						.flatMap((event) =>
+							"method" in event && event.method === "connection/events" ? event.params.events : [],
+						)
+						.some(
+							(event) =>
+								event.type === "session/invalidated" &&
+								event.sessionId === run.sessionId &&
+								event.reason === "deleted",
+						),
+				).toBe(true),
+			);
+		},
+	);
 
 	it("reports a corrupt schedule store explicitly while ordinary sessions remain available", async () => {
 		tempDir = mkdtempSync(join(tmpdir(), "app-server-schedule-corrupt-"));

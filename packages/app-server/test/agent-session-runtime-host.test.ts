@@ -88,6 +88,8 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 				state: "idle",
 				archived: false,
 				unread: false,
+				useMemory: true,
+				contributeMemory: true,
 			},
 		};
 

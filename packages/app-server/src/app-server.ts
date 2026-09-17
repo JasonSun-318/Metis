@@ -11,7 +11,7 @@ import {
 } from "@metis/app-protocol";
 import {
 	createScheduledRunExecutor,
-	initializeAutoMemory,
+	ensureVaultLayout,
 	ModelRegistry,
 	pruneStaleSessionWorkDirs,
 	ScheduleManager,
@@ -26,7 +26,7 @@ import { CredentialCoordinator } from "./credential-coordinator.ts";
 import { Dispatcher } from "./dispatcher.ts";
 import { HooksService } from "./hooks.ts";
 import { InteractionBroker } from "./interactions.ts";
-import { MemorySettingsService } from "./memory-settings.ts";
+import { MemoryService } from "./memory-settings.ts";
 import { ModelSettingsService } from "./model-settings.ts";
 import type { OutboundQueueLimits } from "./outbound-queue.ts";
 import { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
@@ -69,6 +69,8 @@ export class AppServer {
 	private shutdownPromise?: Promise<void>;
 	private scheduleUnsubscribe?: () => void;
 	private scheduleEventTail: Promise<void> = Promise.resolve();
+	private readonly memory: MemoryService;
+	private dreamSchedulerStop?: () => void;
 
 	private constructor(options: AppServerOptions) {
 		this.serverVersion = options.serverVersion ?? VERSION;
@@ -110,7 +112,14 @@ export class AppServer {
 		const permissionRules = new PermissionRulesService(options.agentDir, this.catalog);
 		const permissionAutoSettings = new PermissionAutoSettingsService(settingsManager);
 		const webSearch = new WebSearchService({ settingsManager, authStorage });
-		const memorySettings = new MemorySettingsService({ agentDir: options.agentDir, authStorage, settingsManager });
+		const memorySettings = new MemoryService({
+			agentDir: options.agentDir,
+			settingsManager,
+			catalog: this.catalog,
+			subscriptions: this.subscriptions,
+			modelRegistry,
+		});
+		this.memory = memorySettings;
 		const hooks = new HooksService(options.agentDir);
 		const plugins = options.plugins ?? new PluginService(options.agentDir, options.fetchImpl, authStorage);
 		this.plugins = plugins;
@@ -121,6 +130,7 @@ export class AppServer {
 					interactions: this.interactions,
 					credentials,
 					scheduleManager: this.scheduleManager,
+					memoryEvents: memorySettings.events,
 				}),
 			{
 				maxQueuedOperationsPerSession: options.maxQueuedOperationsPerSession,
@@ -152,7 +162,7 @@ export class AppServer {
 
 	static async create(options: AppServerOptions): Promise<AppServer> {
 		SessionManager.recoverInterruptedProjectTrash(options.agentDir);
-		await initializeAutoMemory(options.agentDir);
+		ensureVaultLayout(options.agentDir);
 		pruneStaleSessionWorkDirs(options.agentDir);
 		const server = new AppServer(options);
 		await server.catalog.refresh();
@@ -175,6 +185,8 @@ export class AppServer {
 		} catch {
 			// Schedule RPCs report SCHEDULE_STORE_CORRUPT; ordinary sessions remain available.
 		}
+		// Dream host: a gated check now and every 6h; each tick is fire-and-forget.
+		server.dreamSchedulerStop = server.memory.startDreamScheduler();
 		return server;
 	}
 
@@ -197,6 +209,8 @@ export class AppServer {
 
 	beginShutdown(): void {
 		if (this.shutdownPromise) return;
+		this.dreamSchedulerStop?.();
+		this.dreamSchedulerStop = undefined;
 		for (const connection of this.connections) connection.close();
 		this.connections.clear();
 		this.subscriptions.close();
