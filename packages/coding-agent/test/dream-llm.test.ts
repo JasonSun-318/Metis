@@ -9,7 +9,12 @@ import {
 	type SimpleStreamOptions,
 } from "@metis/ai";
 import { describe, expect, it } from "vitest";
-import { createDreamPromptAgent, createDreamPromptFn, resolveDreamModel } from "../src/core/memory/dream/llm.ts";
+import {
+	createDreamPromptAgent,
+	createDreamPromptFn,
+	DREAM_MAX_TURNS,
+	resolveDreamModel,
+} from "../src/core/memory/dream/llm.ts";
 import { PROPOSE_MEMORIES_TOOL } from "../src/core/memory/dream/phase1.ts";
 
 const model = (id: string, input: number, provider = "test"): Model<never> =>
@@ -132,5 +137,45 @@ describe("dream llm", () => {
 		});
 		expect(calls.map((c) => c[0])).toEqual(["memory_search", "finish_dream"]);
 		expect(streams.every((call) => call.options?.cacheRetention === "none")).toBe(true);
+	});
+
+	it("clamps maxTurns overrides to the hard cap", async () => {
+		let round = 0;
+		const { calls, streamFn } = captureStream(() =>
+			fauxAssistantMessage(
+				[
+					{
+						type: "toolCall",
+						id: `call-${++round}`,
+						name: "memory_search",
+						arguments: { query: "pnpm" },
+					},
+				],
+				{ stopReason: "toolUse" },
+			),
+		);
+		const promptAgent = createDreamPromptAgent({ model: model("cheap", 0.1), streamFn, maxTurns: 99 });
+		const searchTool: AgentTool = {
+			name: "memory_search",
+			label: "Memory search",
+			description: "search",
+			parameters: { type: "object" } as never,
+			async execute() {
+				return { content: [{ type: "text", text: "no hits" }], details: { ok: true } };
+			},
+		};
+		try {
+			await promptAgent({
+				system: "sys",
+				user: "payload",
+				tools: [searchTool],
+				callTool: async () => ({ content: [], details: undefined }),
+				signal: new AbortController().signal,
+			});
+		} catch {
+			// The run is aborted once the turn cap trips; the agent may surface it as an error.
+		}
+		expect(calls.length).toBeLessThanOrEqual(DREAM_MAX_TURNS);
+		expect(calls.length).toBeGreaterThan(2);
 	});
 });

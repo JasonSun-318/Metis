@@ -166,7 +166,11 @@ export async function runDreamPhase1(options: {
 	signal?: AbortSignal;
 }): Promise<DreamPhase1Result> {
 	const { sessions, promptFn, stagingDir, signal } = options;
-	const concurrency = Math.max(1, options.concurrency ?? 4);
+	// Caller overrides may only tighten the cap, never raise it.
+	const requestedConcurrency = options.concurrency ?? 4;
+	const concurrency = Number.isFinite(requestedConcurrency)
+		? Math.min(4, Math.max(1, Math.trunc(requestedConcurrency)))
+		: 4;
 	ensureDirectoryDurablySync(stagingDir);
 
 	const results: DreamPhase1SessionResult[] = new Array(sessions.length);

@@ -83,7 +83,11 @@ export function createDreamToolset(options: {
 	maxWrites?: number;
 	activeContextEnabled?: () => boolean;
 }): DreamToolset {
-	const maxWrites = options.maxWrites ?? DREAM_MAX_WRITES;
+	// Caller overrides may only tighten the cap, never raise it.
+	const requestedWrites = options.maxWrites ?? DREAM_MAX_WRITES;
+	const maxWrites = Number.isFinite(requestedWrites)
+		? Math.min(DREAM_MAX_WRITES, Math.max(0, Math.trunc(requestedWrites)))
+		: DREAM_MAX_WRITES;
 	const state = { done: false, writes: 0 };
 	const entries = new Map<string, DreamEntry>();
 	const projects = new Map<string, VaultProjectIdentity>();
@@ -457,7 +461,12 @@ export async function runDreamPhase2(options: {
 	maxWrites?: number;
 	activeContextEnabled?: () => boolean;
 }): Promise<{ writes: number; finished: boolean }> {
-	const timeout = AbortSignal.timeout(options.timeoutMs ?? DREAM_PHASE2_TIMEOUT_MS);
+	// Caller overrides may only tighten the cap, never raise it.
+	const requestedTimeout = options.timeoutMs ?? DREAM_PHASE2_TIMEOUT_MS;
+	const timeoutMs = Number.isFinite(requestedTimeout)
+		? Math.min(DREAM_PHASE2_TIMEOUT_MS, Math.max(1, Math.trunc(requestedTimeout)))
+		: DREAM_PHASE2_TIMEOUT_MS;
+	const timeout = AbortSignal.timeout(timeoutMs);
 	const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 	const projects = new Map<string, VaultProjectIdentity>();
 	for (const candidate of options.candidates) {

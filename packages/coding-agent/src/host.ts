@@ -116,6 +116,7 @@ export {
 	ensureVaultLayout,
 	enumerateSessions,
 	FileAuthStorageBackend,
+	filterDreamSessionPaths,
 	formatSessionAttachmentDisplayText,
 	formatSessionAttachments,
 	formatSessionFileSelections,

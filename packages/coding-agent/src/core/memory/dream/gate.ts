@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolvePath } from "../../../utils/paths.ts";
 import { inspectSessionLease } from "../../session-lease.ts";
@@ -29,63 +29,89 @@ export interface EnumeratedSessions {
 	existingIds: Set<string>;
 }
 
+/** Recursive *.jsonl collector; never follows symlinked directories. */
+function collectSessionPaths(dir: string, into: string[]): void {
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(dir, { withFileTypes: true });
+	} catch {
+		return;
+	}
+	for (const entry of entries) {
+		const path = join(dir, entry.name);
+		if (entry.isDirectory()) {
+			if (!entry.name.startsWith(".")) collectSessionPaths(path, into);
+		} else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+			into.push(path);
+		}
+	}
+}
+
 /**
- * Cross-project session enumerator: scans `<agentDir>/sessions/<dir>/*.jsonl`,
- * reads only each file's header line, and filters out scheduled/child sessions,
- * sessions held by a live lease, sessions active within the last `minIdleMs`,
- * sessions opted out via `contributeMemory: false`, and `excludeIds`.
+ * Per-file dream eligibility shared by on-disk enumeration and host-provided
+ * session paths: safe header read → record in existingIds → excludeIds →
+ * scheduled/child → cwd → contributeMemory sidecar → mtime idle → lease.
+ * Corrupt files never become eligible; their valid ids still land in
+ * existingIds so state pruning sees them.
  */
-export function enumerateSessions(agentDir: string, options: EnumerateSessionsOptions = {}): EnumeratedSessions {
+export function filterDreamSessionPaths(
+	paths: readonly string[],
+	options: EnumerateSessionsOptions = {},
+): EnumeratedSessions {
 	const now = options.now ?? Date.now();
 	const minIdleMs = options.minIdleMs ?? DREAM_SESSION_MIN_IDLE_MS;
-	const sessionsRoot = join(resolvePath(agentDir), "sessions");
 	const sessions: EligibleSession[] = [];
 	const existingIds = new Set<string>();
 
-	let projectDirs: string[];
-	try {
-		projectDirs = readdirSync(sessionsRoot, { withFileTypes: true })
-			.filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
-			.map((entry) => join(sessionsRoot, entry.name));
-	} catch {
-		return { sessions, existingIds };
-	}
-
-	for (const dir of projectDirs) {
-		let files: string[];
-		try {
-			files = readdirSync(dir)
-				.filter((name) => name.endsWith(".jsonl"))
-				.map((name) => join(dir, name));
-		} catch {
-			continue;
-		}
-		for (const path of files) {
-			const info = readSessionHeaderInfo(path);
-			if (!info) continue;
-			const { header, mtimeMs } = info;
-			if (typeof header.id !== "string" || header.id.length === 0) continue;
-			existingIds.add(header.id);
-			if (options.excludeIds?.has(header.id)) continue;
-			if (header.scheduled !== undefined) continue;
-			if (header.agent !== undefined) continue;
-			if (typeof header.cwd !== "string" || header.cwd.length === 0) continue;
-			// Sessions opt out of dream mining through their display-metadata sidecar.
-			if (readSessionDisplayMetadata(path)?.contributeMemory === false) continue;
-			if (now - mtimeMs < minIdleMs) continue;
-			const lease = inspectSessionLease(path);
-			if (lease !== "free" && lease !== "stale") continue;
-			sessions.push({
-				path,
-				sessionId: header.id,
-				cwd: header.cwd,
-				...(header.cwdOrigin !== undefined ? { cwdOrigin: header.cwdOrigin } : {}),
-				updatedAt: mtimeMs,
-			});
-		}
+	for (const path of new Set(paths)) {
+		const info = readSessionHeaderInfo(path);
+		if (!info) continue;
+		const { header, mtimeMs } = info;
+		if (typeof header.id !== "string" || header.id.length === 0) continue;
+		existingIds.add(header.id);
+		if (options.excludeIds?.has(header.id)) continue;
+		if (header.scheduled !== undefined) continue;
+		if (header.agent !== undefined) continue;
+		if (typeof header.cwd !== "string" || header.cwd.length === 0) continue;
+		// Sessions opt out of dream mining through their display-metadata sidecar.
+		if (readSessionDisplayMetadata(path)?.contributeMemory === false) continue;
+		if (now - mtimeMs < minIdleMs) continue;
+		const lease = inspectSessionLease(path);
+		if (lease !== "free" && lease !== "stale") continue;
+		sessions.push({
+			path,
+			sessionId: header.id,
+			cwd: header.cwd,
+			...(header.cwdOrigin !== undefined ? { cwdOrigin: header.cwdOrigin } : {}),
+			updatedAt: mtimeMs,
+		});
 	}
 	sessions.sort((left, right) => left.updatedAt - right.updatedAt);
 	return { sessions, existingIds };
+}
+
+/**
+ * Cross-project session enumerator: scans `<agentDir>/sessions/<dir>/` and the
+ * real `.archive` layout for `*.jsonl` journals (other dot-directories such as
+ * `.dream`/`.meta` are never scanned), then applies
+ * {@link filterDreamSessionPaths}.
+ */
+export function enumerateSessions(agentDir: string, options: EnumerateSessionsOptions = {}): EnumeratedSessions {
+	const sessionsRoot = join(resolvePath(agentDir), "sessions");
+	const paths: string[] = [];
+
+	let topLevel: Dirent[];
+	try {
+		topLevel = readdirSync(sessionsRoot, { withFileTypes: true });
+	} catch {
+		return { sessions: [], existingIds: new Set() };
+	}
+	for (const entry of topLevel) {
+		if (!entry.isDirectory()) continue;
+		if (entry.name !== ".archive" && entry.name.startsWith(".")) continue;
+		collectSessionPaths(join(sessionsRoot, entry.name), paths);
+	}
+	return filterDreamSessionPaths(paths, options);
 }
 
 /** Probe that both the vault root and the dream directory are lockable right now. */

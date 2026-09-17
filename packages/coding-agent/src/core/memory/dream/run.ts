@@ -11,7 +11,7 @@ import { getDreamDir, getVaultRoot } from "../vault-paths.ts";
 import { listStoredVaultProjects } from "../vault-project.ts";
 import { MEMORY_LIMITS } from "../vault-types.ts";
 import { removeUsage } from "../vault-usage.ts";
-import { checkDreamGate, enumerateSessions } from "./gate.ts";
+import { checkDreamGate, enumerateSessions, filterDreamSessionPaths } from "./gate.ts";
 import { type DreamPromptFn, runDreamPhase1 } from "./phase1.ts";
 import { type DreamPromptAgent, runDreamPhase2 } from "./phase2.ts";
 import { readDreamState, writeDreamState } from "./state.ts";
@@ -128,10 +128,21 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 			const runId = randomUUID();
 			attemptedRunId = runId;
 			cleanStaging(); // drop leftovers from a crashed run
-			const runSignal = AbortSignal.timeout(options.timeoutMs ?? DREAM_RUN_TIMEOUT_MS);
+			// Caller overrides may only tighten the cap, never raise it.
+			const requestedTimeout = options.timeoutMs ?? DREAM_RUN_TIMEOUT_MS;
+			const timeoutMs = Number.isFinite(requestedTimeout)
+				? Math.min(DREAM_RUN_TIMEOUT_MS, Math.max(1, Math.trunc(requestedTimeout)))
+				: DREAM_RUN_TIMEOUT_MS;
+			const runSignal = AbortSignal.timeout(timeoutMs);
 			try {
+				// Sessions may have been leased or processed between the caller's scan
+				// and this lock acquisition; re-filter before mining.
+				const rechecked = filterDreamSessionPaths(
+					gate.sessions.map((session) => session.path),
+					{ now, excludeIds: new Set(readDreamState(agentDir).processedSessionIds) },
+				);
 				const phase1 = await runDreamPhase1({
-					sessions: gate.sessions,
+					sessions: rechecked.sessions,
 					promptFn,
 					stagingDir,
 					signal: runSignal,

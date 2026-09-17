@@ -184,4 +184,25 @@ describe("dream phase 1", () => {
 		const staged = new Set(result.candidates.map((candidate: DreamCandidate) => candidate.sessionId));
 		expect(staged.size).toBe(4);
 	});
+
+	it("clamps the concurrency override to the hard cap", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const stagingDir = join(makeTemp(), "staging");
+		const sessions = Array.from({ length: 8 }, (_, i) => eligible(agentDir, `s${i}`));
+		let active = 0;
+		let maxActive = 0;
+		await runDreamPhase1({
+			sessions,
+			stagingDir,
+			concurrency: 99,
+			promptFn: async () => {
+				active += 1;
+				maxActive = Math.max(maxActive, active);
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				active -= 1;
+				return { candidates: [] };
+			},
+		});
+		expect(maxActive).toBeLessThanOrEqual(4);
+	});
 });

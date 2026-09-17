@@ -17,7 +17,7 @@ import {
 	type DreamPromptFn,
 	type DreamRunResult,
 	type DreamSettings,
-	enumerateSessions,
+	filterDreamSessionPaths,
 	generateUnifiedPatch,
 	getNotePath,
 	getPinnedPath,
@@ -231,7 +231,7 @@ export class MemoryService {
 				await checkDreamGate({
 					agentDir: this.agentDir,
 					settings: dreamSettings,
-					sessions: enumerateSessions(this.agentDir).sessions,
+					sessions: filterDreamSessionPaths(this.catalog.getMemorySessionPaths()).sessions,
 					modelAvailable: true,
 				})
 			).eligible;
@@ -454,12 +454,18 @@ export class MemoryService {
 		const settings = resolveDreamSettings(memory, this.settingsManager.getAutoMemoryEnabled());
 		const deps = this.resolveDreamDeps(settings);
 		if (!deps) return { ran: false, reason: "no-model" };
+		if (!ignoreGate && !settings.enabled) return { ran: false, reason: "disabled" };
+		// Enumerate from the catalog so a run and the UI agree on the session set.
+		await this.catalog.refresh();
+		const enumerated = filterDreamSessionPaths(this.catalog.getMemorySessionPaths());
 		return await runDream({
 			agentDir: this.agentDir,
 			settings,
 			model: deps.model,
 			promptFn: deps.promptFn,
 			promptAgent: deps.promptAgent,
+			sessions: enumerated.sessions,
+			existingIds: enumerated.existingIds,
 			events: this.events,
 			ignoreGate,
 			activeContextEnabled: () => this.settingsManager.getMemorySettings().activeContext === true,

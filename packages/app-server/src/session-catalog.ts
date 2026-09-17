@@ -977,6 +977,11 @@ export class SessionCatalog {
 		return result;
 	}
 
+	/** Every persisted session journal path the catalog knows, active and archived. */
+	getMemorySessionPaths(): readonly string[] {
+		return [...new Set([...this.sessions.values()].map((ref) => ref.path))];
+	}
+
 	get(sessionId: string): SessionRef {
 		const ref = this.sessions.get(sessionId);
 		if (!ref) throw new AppServerError("NOT_FOUND", { sessionId });

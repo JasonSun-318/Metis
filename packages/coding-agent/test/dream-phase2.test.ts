@@ -125,6 +125,32 @@ describe("dream phase 2", () => {
 		expect(toolset.writes).toBe(DREAM_MAX_WRITES);
 	});
 
+	it("clamps maxWrites overrides to the hard cap", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		new MemoryVault({ agentDir }).ensureLayout();
+		let batch = 0;
+		const attempt51 = async (maxWrites: number) => {
+			const tag = `b${batch++}`;
+			const toolset = createDreamToolset({ agentDir, actor: { kind: "dream", runId: RUN_ID }, maxWrites });
+			let succeeded = 0;
+			for (let i = 0; i < DREAM_MAX_WRITES + 1; i++) {
+				const result = await toolset.call("memory_write", {
+					op: "create",
+					scope: "global",
+					target: { slug: `note-${tag}-${i}` },
+					frontmatter: { type: "reference", description: `n${i}` },
+					content: "x",
+				});
+				if ((result.details as { ok: boolean }).ok) succeeded += 1;
+			}
+			expect(succeeded).toBe(DREAM_MAX_WRITES);
+			expect(toolset.writes).toBe(DREAM_MAX_WRITES);
+		};
+		await attempt51(99);
+		await attempt51(Number.NaN);
+		await attempt51(Number.POSITIVE_INFINITY);
+	});
+
 	it("memory_search never records usage", async () => {
 		const agentDir = join(makeTemp(), "agent");
 		const vault = new MemoryVault({ agentDir });

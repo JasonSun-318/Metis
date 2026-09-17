@@ -96,7 +96,11 @@ export function createDreamPromptFn(deps: DreamLlmDeps): DreamPromptFn {
  * tools. Aborts on the phase signal or after `maxTurns` completed turns.
  */
 export function createDreamPromptAgent(deps: DreamLlmDeps & { maxTurns?: number }): DreamPromptAgent {
-	const maxTurns = deps.maxTurns ?? DREAM_MAX_TURNS;
+	// Caller overrides may only tighten the cap, never raise it.
+	const requestedTurns = deps.maxTurns ?? DREAM_MAX_TURNS;
+	const maxTurns = Number.isFinite(requestedTurns)
+		? Math.min(DREAM_MAX_TURNS, Math.max(1, Math.trunc(requestedTurns)))
+		: DREAM_MAX_TURNS;
 	return async (ctx: DreamPhase2Context) => {
 		const agent = new Agent({
 			initialState: { systemPrompt: ctx.system, tools: ctx.tools, model: deps.model },

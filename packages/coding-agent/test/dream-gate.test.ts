@@ -1,13 +1,14 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { checkDreamGate, enumerateSessions } from "../src/core/memory/dream/gate.ts";
+import { checkDreamGate, enumerateSessions, filterDreamSessionPaths } from "../src/core/memory/dream/gate.ts";
 import { writeDreamState } from "../src/core/memory/dream/state.ts";
 import { resolveDreamSettings } from "../src/core/memory/dream/types.ts";
 import { withMemoryRootLock } from "../src/core/memory/memory-lock.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { getDreamDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { SessionLease } from "../src/core/session-lease.ts";
 import { encodePathForStorage } from "../src/utils/paths.ts";
 
 describe("dream gate", () => {
@@ -236,5 +237,30 @@ describe("dream gate", () => {
 			}),
 		);
 		expect(locked).toEqual({ eligible: false, reason: "locked" });
+	});
+
+	it("filters active and archived paths with the same eligibility rules", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const path = writeSession(agentDir, { id: "old-archived" });
+		const archiveDir = join(agentDir, "sessions", ".archive", encodePathForStorage(agentDir));
+		mkdirSync(archiveDir, { recursive: true });
+		const archived = join(archiveDir, "old-archived.jsonl");
+		renameSync(path, archived);
+		const fromPaths = filterDreamSessionPaths([archived]);
+		expect(fromPaths.sessions.map((s) => s.path)).toEqual([archived]);
+		expect(enumerateSessions(agentDir).sessions.map((s) => s.path)).toContain(archived);
+	});
+
+	it("excludes leased sessions from path-based filtering but keeps their ids", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const path = writeSession(agentDir, { id: "leased" });
+		const lease = SessionLease.acquireTransient(path);
+		try {
+			const filtered = filterDreamSessionPaths([path]);
+			expect(filtered.sessions).toEqual([]);
+			expect(filtered.existingIds.has("leased")).toBe(true);
+		} finally {
+			lease.close();
+		}
 	});
 });

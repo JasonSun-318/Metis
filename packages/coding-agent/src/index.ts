@@ -311,6 +311,7 @@ export {
 	DREAM_SESSION_MIN_IDLE_MS,
 	type EnumeratedSessions,
 	enumerateSessions,
+	filterDreamSessionPaths,
 } from "./core/memory/dream/gate.ts";
 export {
 	createDreamPromptAgent,

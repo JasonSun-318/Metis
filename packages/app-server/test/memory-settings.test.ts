@@ -51,8 +51,8 @@ describe("MemoryService", () => {
 		};
 	}
 
-	/** An idle (>2h), unleased session file that dream enumeration picks up. */
-	function writeIdleSession(id: string): void {
+	/** An idle (>2h) session file that dream enumeration picks up; keeping the manager open holds its lease. */
+	function writeIdleSession(id: string, keepOpen = false): SessionManager | undefined {
 		// Session files must live under sessions/<encoded-cwd>/ for enumerateSessions to see them.
 		const manager = SessionManager.create(projectDir, getDefaultSessionDir(projectDir, agentDir), {
 			id,
@@ -66,10 +66,11 @@ describe("MemoryService", () => {
 			timestamp: Date.now(),
 		});
 		const file = manager.getSessionFile();
-		manager.close();
+		if (!keepOpen) manager.close();
 		if (!file) throw new Error("session file missing");
 		const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
 		utimesSync(file, old, old);
+		return keepOpen ? manager : undefined;
 	}
 
 	async function withSession(cwdOrigin: "user-selected" | "managed" = "user-selected") {
@@ -317,6 +318,51 @@ describe("MemoryService", () => {
 		expect(undone.undone.length).toBeGreaterThan(0);
 		expect(undone.skipped).toEqual([]);
 		expect(svc.listNotes({}).notes).toEqual([]);
+	});
+
+	it("enumerates dream sessions through the session catalog", async () => {
+		writeIdleSession(SESSION_ID);
+		const promptFn = vi.fn(async () => ({ candidates: [] as unknown[] }));
+		const { service: svc, catalog } = service({
+			dreamDeps: () => ({
+				model: { provider: "test", modelId: "cheap" },
+				promptFn,
+				promptAgent: async (ctx) => {
+					await ctx.callTool("finish_dream", {});
+				},
+			}),
+		});
+		const pathSpy = vi.spyOn(catalog, "getMemorySessionPaths");
+		const first = await svc.dreamRun({});
+		expect(first.ok).toBe(true);
+		expect(pathSpy).toHaveBeenCalled();
+		expect(promptFn).toHaveBeenCalledTimes(1);
+
+		// Already-processed ids are never re-mined.
+		const second = await svc.dreamRun({});
+		expect(second.ok).toBe(true);
+		expect(promptFn).toHaveBeenCalledTimes(1);
+	});
+
+	it("never mines a session held by a lease", async () => {
+		const manager = writeIdleSession(SESSION_ID, true);
+		const promptFn = vi.fn(async () => ({ candidates: [] as unknown[] }));
+		const { service: svc } = service({
+			dreamDeps: () => ({
+				model: { provider: "test", modelId: "cheap" },
+				promptFn,
+				promptAgent: async (ctx) => {
+					await ctx.callTool("finish_dream", {});
+				},
+			}),
+		});
+		try {
+			const result = await svc.dreamRun({});
+			expect(result.ok).toBe(true);
+			expect(promptFn).not.toHaveBeenCalled();
+		} finally {
+			manager?.close();
+		}
 	});
 
 	it("undoRun reverts all projects and global scope", async () => {

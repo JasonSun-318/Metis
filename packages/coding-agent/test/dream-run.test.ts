@@ -10,7 +10,8 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { enumerateSessions } from "../src/core/memory/dream/gate.ts";
 import { runDream } from "../src/core/memory/dream/run.ts";
 import { readDreamState } from "../src/core/memory/dream/state.ts";
 import { resolveDreamSettings } from "../src/core/memory/dream/types.ts";
@@ -18,6 +19,7 @@ import { MemoryVault } from "../src/core/memory/vault.ts";
 import { MemoryEvents } from "../src/core/memory/vault-events.ts";
 import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
+import { SessionLease } from "../src/core/session-lease.ts";
 import { encodePathForStorage } from "../src/utils/paths.ts";
 
 describe("dream run", () => {
@@ -281,6 +283,64 @@ describe("dream run", () => {
 		});
 		expect(result.ran).toBe(true);
 		expect(readDreamState(agentDir).processedSessionIds).toEqual(["good"]);
+	});
+
+	it("clamps timeout overrides to the hard cap", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "t1", "remember pnpm");
+		const spy = vi.spyOn(AbortSignal, "timeout");
+		try {
+			const result = await runDream({
+				agentDir,
+				settings,
+				ignoreGate: true,
+				timeoutMs: 60 * 60 * 1000,
+				phase2TimeoutMs: 60 * 60 * 1000,
+				model: { provider: "test", modelId: "cheap" },
+				promptFn: async () => ({ candidates: [] }),
+				promptAgent: async (ctx) => {
+					await ctx.callTool("finish_dream", {});
+				},
+			});
+			expect(result.ran).toBe(true);
+			for (const call of spy.mock.calls) expect(call[0]).toBeLessThanOrEqual(600_000);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("re-filters sessions after acquiring the dream lock", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "s-free", "remember pnpm");
+		writeSession(agentDir, "s-leased", "remember npm");
+		// Enumerate while free, then take the lease — simulates a session leased
+		// between the caller's scan and the run's lock acquisition.
+		const enumerated = enumerateSessions(agentDir);
+		const leased = join(agentDir, "sessions", encodePathForStorage(agentDir), "s-leased.jsonl");
+		const lease = SessionLease.acquireTransient(leased);
+		let calls = 0;
+		try {
+			const result = await runDream({
+				agentDir,
+				settings,
+				ignoreGate: true,
+				sessions: enumerated.sessions,
+				existingIds: enumerated.existingIds,
+				model: { provider: "test", modelId: "cheap" },
+				promptFn: async () => {
+					calls += 1;
+					return { candidates: [] };
+				},
+				promptAgent: async (ctx) => {
+					await ctx.callTool("finish_dream", {});
+				},
+			});
+			expect(result.ran).toBe(true);
+			expect(calls).toBe(1);
+			expect(readDreamState(agentDir).processedSessionIds).toEqual(["s-free"]);
+		} finally {
+			lease.close();
+		}
 	});
 
 	it("gate failures make zero model calls", async () => {
