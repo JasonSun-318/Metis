@@ -1,12 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import {
-	ensureDirectoryDurablySync,
-	readSingleLinkTextFileSync,
-	replaceFileAtomicallySync,
-	writeFileDurablySync,
-} from "../durable-file.ts";
+import { ensureDirectoryDurablySync, readSingleLinkTextFileSync, writeFileDurablySync } from "../durable-file.ts";
 import { getChangelogPath, getHistoryDir, getSnapshotDir } from "./vault-paths.ts";
 import type { MemoryActor, MemoryScope, MemoryTarget } from "./vault-types.ts";
 
@@ -24,6 +19,10 @@ export interface ChangelogEntry {
 	newSlug?: string;
 	/** Snapshot path relative to the vault root. */
 	snapshot?: string;
+	/** Whether the target file existed before this change; recorded on new entries. */
+	beforeExists?: boolean;
+	/** Shared id linking every entry produced by one rename operation. */
+	operationId?: string;
 	undoes?: string;
 	undoneBy?: string;
 }
@@ -34,8 +33,7 @@ export function appendChangelog(root: string, entry: ChangelogEntry): void {
 	appendFileSync(getChangelogPath(root), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
 }
 
-function readChangelogFile(root: string): ChangelogEntry[] {
-	const raw = readSingleLinkTextFileSync(getChangelogPath(root), { maxBytes: 8 * 1024 * 1024 });
+function parseChangelog(raw: string | undefined): ChangelogEntry[] {
 	if (!raw) return [];
 	const entries: ChangelogEntry[] = [];
 	for (const line of raw.split("\n")) {
@@ -50,20 +48,32 @@ function readChangelogFile(root: string): ChangelogEntry[] {
 	return entries;
 }
 
+function readChangelogFile(root: string): ChangelogEntry[] {
+	return parseChangelog(readSingleLinkTextFileSync(getChangelogPath(root), { maxBytes: 8 * 1024 * 1024 }));
+}
+
 /** Newest first. */
 export function readChangelog(root: string, limit?: number): ChangelogEntry[] {
 	const entries = readChangelogFile(root).reverse();
 	return limit === undefined ? entries : entries.slice(0, limit);
 }
 
-/** Rewrite the log with `undoneBy` set on the matching entry. Callers hold the vault lock. */
-export function markUndone(root: string, id: string, undoneBy: string): void {
-	const entries = readChangelogFile(root);
-	const entry = entries.find((candidate) => candidate.id === id);
-	if (!entry) return;
-	entry.undoneBy = undoneBy;
-	const content = `${entries.map((candidate) => JSON.stringify(candidate)).join("\n")}\n`;
-	replaceFileAtomicallySync(getChangelogPath(root), content, { mode: 0o600 });
+/**
+ * Serialize the changelog state after an undo: mark every entry in `undoneIds`
+ * and append the undo entry. `raw` is the current log content read under the
+ * vault lock; the result replaces the file in one atomic write.
+ */
+export function serializeUndoCommit(
+	raw: string | undefined,
+	undoEntry: ChangelogEntry,
+	undoneIds: readonly string[],
+): string {
+	const entries = parseChangelog(raw);
+	for (const entry of entries) {
+		if (undoneIds.includes(entry.id)) entry.undoneBy = undoEntry.id;
+	}
+	entries.push(undoEntry);
+	return `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
 }
 
 /**

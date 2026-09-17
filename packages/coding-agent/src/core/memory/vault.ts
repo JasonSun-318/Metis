@@ -12,16 +12,18 @@ import {
 import { withMemoryRootLock } from "./memory-lock.ts";
 import { looksLikeSecret } from "./memory-secrets.ts";
 import { MemoryEvents } from "./vault-events.ts";
+import { applyVaultFileChanges, type VaultFileChange } from "./vault-file-changes.ts";
 import {
 	appendChangelog,
 	type ChangelogEntry,
 	type ChangelogOp,
-	markUndone,
 	readChangelog,
 	readSnapshot,
 	saveSnapshot,
+	serializeUndoCommit,
 } from "./vault-history.ts";
 import {
+	getChangelogPath,
 	getDreamDir,
 	getHistoryDir,
 	getIndexPath,
@@ -179,6 +181,23 @@ interface IndexReport {
 
 function compareNotesForIndex(left: Note, right: Note): number {
 	return right.frontmatter.updated.localeCompare(left.frontmatter.updated) || left.slug.localeCompare(right.slug);
+}
+
+/** Whether the target did not exist before this change (undo removes the file). */
+function wasAbsentBefore(entry: ChangelogEntry): boolean {
+	if (entry.beforeExists !== undefined) return !entry.beforeExists;
+	if (entry.op === "create" && entry.snapshot === undefined) return true;
+	// Legacy first pinned append/replace writes carried no snapshot field.
+	return "block" in entry.target && entry.snapshot === undefined && (entry.op === "append" || entry.op === "replace");
+}
+
+function requireSnapshot(root: string, entry: ChangelogEntry): string {
+	if (!entry.snapshot) throw new Error(`change ${entry.id} has no snapshot`);
+	const content = readSnapshot(root, entry.snapshot);
+	if (content === undefined) {
+		throw new Error(`snapshot ${entry.snapshot} for change ${entry.id} is unavailable`);
+	}
+	return content;
 }
 
 export class MemoryVault {
@@ -339,12 +358,16 @@ export class MemoryVault {
 	}
 
 	private buildIndex(scope: MemoryScope): IndexReport {
-		const notes = this.listNotes(scope).sort(compareNotesForIndex);
+		return this.buildIndexFromNotes(this.listNotes(scope));
+	}
+
+	private buildIndexFromNotes(notes: readonly Note[]): IndexReport {
+		const sorted = [...notes].sort(compareNotesForIndex);
 		const lines: string[] = [];
 		const slugs = new Set<string>();
 		let bytes = 0;
 		let truncated = false;
-		for (const note of notes) {
+		for (const note of sorted) {
 			const description = sanitizeIndexText(note.frontmatter.description || note.frontmatter.name);
 			const line = `- [${note.frontmatter.type}] [${note.slug}](notes/${note.slug}.md) — ${description}`;
 			const lineBytes = Buffer.byteLength(line, "utf8") + 1;
@@ -525,7 +548,7 @@ export class MemoryVault {
 				const serialized = serializeNote(frontmatter, req.content ?? "");
 				createFileAtomicallySync(path, serialized, { mode: 0o600 });
 				bytes = Buffer.byteLength(serialized, "utf8");
-				primary = this.newEntry("create", req.scope, { slug }, actor);
+				primary = this.newEntry("create", req.scope, { slug }, actor, { beforeExists: false });
 				break;
 			}
 			case "append":
@@ -558,7 +581,7 @@ export class MemoryVault {
 				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw);
 				replaceFileAtomicallySync(path, serializeNote(merged, body), { mode: 0o600 });
 				bytes = Buffer.byteLength(serializeNote(merged, body), "utf8");
-				primary = this.newEntry(req.op, req.scope, { slug }, actor, { snapshot });
+				primary = this.newEntry(req.op, req.scope, { slug }, actor, { snapshot, beforeExists: true });
 				break;
 			}
 			case "rename": {
@@ -578,9 +601,13 @@ export class MemoryVault {
 				createFileAtomicallySync(newPath, serialized, { mode: 0o600 });
 				rmSync(path, { force: true });
 				bytes = Buffer.byteLength(serialized, "utf8");
-				primary = this.newEntry("rename", req.scope, { slug }, actor, { newSlug, snapshot });
+				primary = this.newEntry("rename", req.scope, { slug }, actor, {
+					newSlug,
+					snapshot,
+					beforeExists: true,
+				});
 				// Second leg: the new note appears as a create sharing the same snapshot.
-				extra.push(this.newEntry("create", req.scope, { slug: newSlug }, actor, { snapshot }));
+				extra.push(this.newEntry("create", req.scope, { slug: newSlug }, actor, { snapshot, beforeExists: false }));
 				extra.push(...this.rewriteLinks(req.scope, slug, newSlug, actor));
 				break;
 			}
@@ -588,7 +615,7 @@ export class MemoryVault {
 				if (existingRaw === undefined) return { ok: false, error: `note "${slug}" not found` };
 				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw);
 				rmSync(path, { force: true });
-				primary = this.newEntry("delete", req.scope, { slug }, actor, { snapshot });
+				primary = this.newEntry("delete", req.scope, { slug }, actor, { snapshot, beforeExists: true });
 				break;
 			}
 		}
@@ -625,7 +652,9 @@ export class MemoryVault {
 				const snapshot = saveSnapshot(this.root, scanScope, { slug: note.slug }, raw);
 				const frontmatter: NoteFrontmatter = { ...note.frontmatter, updated: todayString() };
 				replaceFileAtomicallySync(note.path, serializeNote(frontmatter, body), { mode: 0o600 });
-				entries.push(this.newEntry("replace", scanScope, { slug: note.slug }, actor, { snapshot }));
+				entries.push(
+					this.newEntry("replace", scanScope, { slug: note.slug }, actor, { snapshot, beforeExists: true }),
+				);
 			}
 		}
 		return entries;
@@ -666,7 +695,10 @@ export class MemoryVault {
 		}
 		const snapshot = saveSnapshot(this.root, req.scope, { block }, existingRaw);
 		replaceFileAtomicallySync(path, content.endsWith("\n") ? content : `${content}\n`, { mode: 0o600 });
-		const entry = this.newEntry(req.op, req.scope, { block }, actor, { snapshot });
+		const entry = this.newEntry(req.op, req.scope, { block }, actor, {
+			snapshot,
+			beforeExists: existingRaw !== undefined,
+		});
 		this.record(entry);
 		return {
 			ok: true,
@@ -748,58 +780,113 @@ export class MemoryVault {
 		return "slug" in target ? getNotePath(dir, target.slug) : getPinnedPath(dir, target.block);
 	}
 
-	private restoreSnapshot(entry: ChangelogEntry, path: string): UndoResult {
-		if (!entry.snapshot) return { ok: false, error: `change ${entry.id} has no snapshot` };
-		const content = readSnapshot(this.root, entry.snapshot);
-		if (content === undefined) {
-			return { ok: false, error: `snapshot ${entry.snapshot} for change ${entry.id} is unavailable` };
+	/** Read current file content for `before`: absent files read as undefined, unreadable ones throw. */
+	private readCurrentStrict(path: string): string | undefined {
+		return readSingleLinkTextFileSync(path, { maxBytes: 1024 * 1024 });
+	}
+
+	/**
+	 * Resolve every file change an undo needs before touching disk: snapshots
+	 * are loaded, current contents captured for rollback, and the projected
+	 * index plus the changelog commit appended as trailing changes.
+	 */
+	private prepareUndoChanges(
+		entry: ChangelogEntry,
+		pair: ChangelogEntry | undefined,
+		actor: MemoryActor,
+	): { changes: VaultFileChange[]; undoEntry: ChangelogEntry } {
+		// Order the rename leg first so the old path is restored before the new
+		// path is removed.
+		const group = pair ? (entry.op === "create" ? [pair, entry] : [entry, pair]) : [entry];
+		const restores = new Map<string, string | undefined>();
+		const setRestore = (path: string, after: string | undefined): void => {
+			if (restores.has(path) && restores.get(path) !== after) {
+				throw new Error(`conflicting restore contents for ${path}`);
+			}
+			restores.set(path, after);
+		};
+		for (const item of group) {
+			const path = this.targetPath(item.scope, item.target);
+			if (!path) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+			if (item.op === "create" && (pair !== undefined || wasAbsentBefore(item))) {
+				// A rename leg or a plain create: the file did not exist before.
+				setRestore(path, undefined);
+				continue;
+			}
+			if (item.op === "rename") {
+				if (!item.newSlug) throw new Error(`rename change ${item.id} is missing newSlug`);
+				setRestore(path, requireSnapshot(this.root, item));
+				const dir = this.scopeDir(item.scope)!;
+				setRestore(getNotePath(dir, item.newSlug), undefined);
+				continue;
+			}
+			setRestore(path, wasAbsentBefore(item) ? undefined : requireSnapshot(this.root, item));
 		}
-		replaceFileAtomicallySync(path, content, { mode: 0o600 });
-		return { ok: true };
+
+		const changes: VaultFileChange[] = [];
+		const byPath = new Map<string, VaultFileChange>();
+		for (const [path, after] of restores) {
+			const change: VaultFileChange = { path, before: this.readCurrentStrict(path), after };
+			changes.push(change);
+			byPath.set(path, change);
+		}
+
+		// Project the post-undo index per affected scope from current notes plus
+		// planned changes, without reading stale files mid-transaction.
+		const slugChanges = new Map<MemoryScope, Map<string, VaultFileChange>>();
+		for (const item of group) {
+			if (!("slug" in item.target)) continue;
+			let scopeMap = slugChanges.get(item.scope);
+			if (!scopeMap) {
+				scopeMap = new Map();
+				slugChanges.set(item.scope, scopeMap);
+			}
+			const change = byPath.get(this.targetPath(item.scope, item.target)!);
+			if (change) scopeMap.set(item.target.slug, change);
+			if (item.op === "rename" && item.newSlug) {
+				const dir = this.scopeDir(item.scope)!;
+				const renamed = byPath.get(getNotePath(dir, item.newSlug));
+				if (renamed) scopeMap.set(item.newSlug, renamed);
+			}
+		}
+		for (const [scope, map] of slugChanges) {
+			const projected = new Map(this.listNotes(scope).map((note) => [note.slug, note]));
+			for (const [slug, change] of map) {
+				if (change.after === undefined) projected.delete(slug);
+				else projected.set(slug, this.parseNote(scope, slug, change.path, change.after));
+			}
+			const report = this.buildIndexFromNotes([...projected.values()]);
+			const dir = this.scopeDir(scope);
+			if (!dir) throw new Error(`scope ${scope} is unavailable in this workspace`);
+			const indexPath = getIndexPath(dir);
+			changes.push({ path: indexPath, before: this.readCurrentStrict(indexPath), after: report.content });
+		}
+
+		const undoEntry = this.newEntry("undo", entry.scope, entry.target, actor, { undoes: entry.id });
+		const logPath = getChangelogPath(this.root);
+		const logBefore = readSingleLinkTextFileSync(logPath, { maxBytes: 8 * 1024 * 1024 });
+		changes.push({
+			path: logPath,
+			before: logBefore,
+			after: serializeUndoCommit(
+				logBefore,
+				undoEntry,
+				group.map((item) => item.id),
+			),
+		});
+		return { changes, undoEntry };
 	}
 
 	private performUndo(entry: ChangelogEntry, actor: MemoryActor, pair?: ChangelogEntry): UndoResult {
-		const path = this.targetPath(entry.scope, entry.target);
-		if (!path) return { ok: false, error: `scope ${entry.scope} is unavailable in this workspace` };
-		let result: UndoResult;
-
-		switch (entry.op) {
-			case "create": {
-				rmSync(path, { force: true });
-				if (pair) {
-					// Rename leg: restore the old slug from the shared snapshot.
-					const oldPath = this.targetPath(pair.scope, pair.target);
-					if (!oldPath) return { ok: false, error: `scope ${pair.scope} is unavailable` };
-					result = this.restoreSnapshot(pair, oldPath);
-				} else {
-					result = { ok: true };
-				}
-				break;
-			}
-			case "delete":
-			case "append":
-			case "replace":
-			case "str_replace":
-				result = this.restoreSnapshot(entry, path);
-				break;
-			case "rename": {
-				if (!entry.newSlug) return { ok: false, error: `rename change ${entry.id} is missing newSlug` };
-				const dir = this.scopeDir(entry.scope);
-				if (!dir) return { ok: false, error: `scope ${entry.scope} is unavailable` };
-				rmSync(getNotePath(dir, entry.newSlug), { force: true });
-				result = this.restoreSnapshot(entry, path);
-				break;
-			}
-			default:
-				return { ok: false, error: `change ${entry.id} is not undoable` };
+		let undoEntry: ChangelogEntry;
+		try {
+			const prepared = this.prepareUndoChanges(entry, pair, actor);
+			applyVaultFileChanges(prepared.changes);
+			undoEntry = prepared.undoEntry;
+		} catch (error) {
+			return { ok: false, error: errorMessage(error) };
 		}
-		if (!result.ok) return result;
-
-		if ("slug" in entry.target) this.rebuildIndex(entry.scope);
-		const undoEntry = this.newEntry("undo", entry.scope, entry.target, actor, { undoes: entry.id });
-		this.record(undoEntry);
-		markUndone(this.root, entry.id, undoEntry.id);
-		if (pair) markUndone(this.root, pair.id, undoEntry.id);
+		this.events.emit("changed", { entry: undoEntry });
 		return { ok: true };
 	}
 
