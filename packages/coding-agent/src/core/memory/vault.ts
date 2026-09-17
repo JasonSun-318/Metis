@@ -454,6 +454,51 @@ export class MemoryVault {
 		return entry.scope !== "project" || entry.projectKey === this.project?.projectKey;
 	}
 
+	/**
+	 * Whether this vault may revert `member` as part of `primary`'s operation
+	 * group. A project-bound vault only reverts entries it owns outright — a
+	 * session must never mutate another project's files, even through a group
+	 * member a corrupt changelog claims. A project-less (host-level) vault may
+	 * additionally apply a rename's foreign referrer legs — but only legs
+	 * provably written by that rename: a `replace` on a stored project note
+	 * whose recorded snapshot still contains the old `[[slug]]` link.
+	 */
+	private ownsGroupLeg(member: ChangelogEntry, primary: ChangelogEntry): boolean {
+		if (this.ownsEntry(member)) return true;
+		if (this.project !== undefined || primary.op !== "rename") return false;
+		const oldSlug =
+			typeof primary.target === "object" && primary.target !== null && "slug" in primary.target
+				? primary.target.slug
+				: undefined;
+		if (
+			member.op !== "replace" ||
+			member.scope !== "project" ||
+			member.beforeExists !== true ||
+			typeof member.snapshot !== "string" ||
+			typeof member.target !== "object" ||
+			member.target === null ||
+			!("slug" in member.target) ||
+			typeof member.target.slug !== "string" ||
+			!isSafeSlug(member.target.slug) ||
+			!isSafeProjectKey(member.projectKey) ||
+			oldSlug === undefined ||
+			!isSafeSlug(oldSlug) ||
+			!listStoredVaultProjects(this.root).some((stored) => stored.projectKey === member.projectKey)
+		) {
+			return false;
+		}
+		return readSnapshot(this.root, member.snapshot)?.includes(`[[${oldSlug}]]`) === true;
+	}
+
+	/** Ownership gate for reverting a whole operation group; see `ownsGroupLeg`. */
+	private undoOwnershipError(entry: ChangelogEntry, group: ChangelogEntry[]): string | undefined {
+		const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
+		if (!this.ownsEntry(primary) || group.some((member) => !this.ownsGroupLeg(member, primary))) {
+			return "change belongs to a different project";
+		}
+		return undefined;
+	}
+
 	private validateWrite(req: WriteRequest): string | undefined {
 		if (req.scope !== "global" && req.scope !== "project") return `invalid scope ${String(req.scope)}`;
 		if (req.scope === "project" && !this.project) {
@@ -877,9 +922,8 @@ export class MemoryVault {
 			return { ok: false, error: `change ${changeId} was already undone` };
 		}
 		// A crafted group member must not pull the undo into another project's scope.
-		if (group.some((member) => !this.ownsEntry(member))) {
-			return { ok: false, error: "change belongs to a different project" };
-		}
+		const ownershipError = this.undoOwnershipError(entry, group);
+		if (ownershipError) return { ok: false, error: ownershipError };
 		// A change on any member target outside the group conflicts the whole undo.
 		const groupIds = new Set(group.map((c) => c.id));
 		for (const member of group) {
@@ -1103,14 +1147,17 @@ export class MemoryVault {
 					// Already rolled back as part of a group (e.g. a rename leg).
 					if (!entry || entry.undoneBy) continue;
 					const group = this.operationEntries(entry, fresh);
-					if (group.some((member) => !this.ownsEntry(member))) {
-						skipped.push({ changeId: entry.id, reason: "change belongs to a different project" });
+					const ownershipError = this.undoOwnershipError(entry, group);
+					if (ownershipError) {
+						skipped.push({ changeId: entry.id, reason: ownershipError });
 						continue;
 					}
 					const groupIds = new Set(group.map((c) => c.id));
 					const position = fresh.findIndex((candidate) => candidate.id === entry.id);
 					let conflict: ChangelogEntry | undefined;
 					for (const member of group) {
+						// A newer same-run entry that was skipped still counts: reverting
+						// past it would silently drop changes it kept applied.
 						conflict = fresh
 							.slice(0, position)
 							.find(
@@ -1120,7 +1167,6 @@ export class MemoryVault {
 									(member.scope === "global" || candidate.projectKey === member.projectKey) &&
 									targetsEqual(candidate.target, member.target) &&
 									UNDOABLE_OPS.has(candidate.op) &&
-									!inRun(candidate) &&
 									!candidate.undoneBy,
 							);
 						if (conflict) break;
@@ -1128,7 +1174,7 @@ export class MemoryVault {
 					if (conflict) {
 						skipped.push({
 							changeId: entry.id,
-							reason: `target has a newer change ${conflict.id} outside this run`,
+							reason: `target has a newer change ${conflict.id} that is not undone`,
 						});
 						continue;
 					}

@@ -260,7 +260,13 @@ export class MemoryService {
 		if (cached?.vault.project) return cached.vault.project;
 		const metaPath = getProjectMetaPath(getScopeDir(getVaultRoot(this.agentDir), "project", entry.projectKey));
 		const raw = readSingleLinkTextFileSync(metaPath, { maxBytes: 4_096 });
-		const root = raw ? (JSON.parse(raw) as { root?: unknown }).root : undefined;
+		let parsed: { root?: unknown } | undefined;
+		try {
+			parsed = raw === undefined ? undefined : (JSON.parse(raw) as { root?: unknown });
+		} catch {
+			throw new AppServerError("NOT_FOUND");
+		}
+		const root = parsed?.root;
 		if (typeof root !== "string" || root.length === 0) throw new AppServerError("NOT_FOUND");
 		return { root, projectKey: entry.projectKey, source: "git" };
 	}
@@ -476,9 +482,13 @@ export class MemoryService {
 	}
 
 	async undo(params: ClientParams<"memory/undo">): Promise<ClientResult<"memory/undo">> {
-		const entry = readChangelog(getVaultRoot(this.agentDir)).find((candidate) => candidate.id === params.changeId);
+		const entries = readChangelog(getVaultRoot(this.agentDir));
+		const entry = entries.find((candidate) => candidate.id === params.changeId);
 		if (!entry) return { ok: false, error: `unknown change ${params.changeId}` };
-		const { vault } = this.entryFor(this.projectForEntry(entry));
+		// Route by the operation's primary entry: a rename group's members can be
+		// project-scoped legs owned by a different vault than the rename itself.
+		const primary = entries.find((candidate) => candidate.id === (entry.operationId ?? entry.id)) ?? entry;
+		const { vault } = this.entryFor(this.projectForEntry(primary));
 		const result = await vault.undo(params.changeId, USER_ACTOR);
 		return result.ok ? { ok: true } : { ok: false, error: result.error };
 	}

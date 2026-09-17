@@ -15,7 +15,7 @@ import { MemoryVault } from "../src/core/memory/vault.ts";
 import { applyVaultFileChanges } from "../src/core/memory/vault-file-changes.ts";
 import { appendChangelog, pruneSnapshots, readChangelog, saveSnapshot } from "../src/core/memory/vault-history.ts";
 import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
-import { mustWrite, putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
+import { type MemoryFixture, mustWrite, putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const durableMock = vi.hoisted(() => ({ failOnce: new Set<string>() }));
 vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
@@ -480,8 +480,10 @@ describe("memory history and undo", () => {
 				),
 			);
 			const result = await v.undoRun("run-rename", { kind: "user" });
-			expect(result.undone).toHaveLength(1);
-			expect(result.skipped).toHaveLength(4);
+			// The rename group stays applied (a referrer was edited outside the run),
+			// and its still-applied entries block the run's earlier creates.
+			expect(result.undone).toHaveLength(0);
+			expect(result.skipped).toHaveLength(5);
 			expect(v.readNote("global", "ref")!.body).toContain("[[after]]");
 			expect(v.readNote("global", "ref")!.body).toContain("human edit");
 			expect(v.readNote("global", "after")).toBeDefined();
@@ -510,6 +512,121 @@ describe("memory history and undo", () => {
 			// A second pass rolls nothing back again.
 			const again = await undoMemoryRun({ agentDir: f.agentDir, runId: actor.runId, actor: { kind: "user" } });
 			expect(again.undone).toEqual([]);
+		});
+	});
+
+	describe("cross-project rename groups", () => {
+		const setup = async (f: MemoryFixture, actor: MemoryActor) => {
+			const globalVault = f.vault();
+			const vaultA = f.vault("a");
+			const vaultB = f.vault("b");
+			await putNote(globalVault, "global", "before", "target");
+			await putNote(vaultA, "project", "ref-a", "See [[before]]");
+			await putNote(vaultB, "project", "ref-b", "See [[before]]");
+			const renamed = mustWrite(
+				await globalVault.write(
+					{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+					actor,
+				),
+			);
+			expect(vaultA.readNote("project", "ref-a")!.body).toContain("[[after]]");
+			expect(vaultB.readNote("project", "ref-b")!.body).toContain("[[after]]");
+			return { globalVault, vaultA, vaultB, renamed };
+		};
+
+		it("the host-level vault undoes a global rename spanning several projects", async () => {
+			await withMemoryFixture(async (f) => {
+				const { globalVault, vaultA, vaultB, renamed } = await setup(f, { kind: "user" });
+				expect((await globalVault.undo(renamed.changeId, { kind: "user" })).ok).toBe(true);
+				expect(globalVault.readNote("global", "before")).toBeDefined();
+				expect(globalVault.readNote("global", "after")).toBeUndefined();
+				expect(vaultA.readNote("project", "ref-a")!.body).toContain("[[before]]");
+				expect(vaultB.readNote("project", "ref-b")!.body).toContain("[[before]]");
+			});
+		});
+
+		it("undoMemoryRun reverts a rename group spanning several projects", async () => {
+			await withMemoryFixture(async (f) => {
+				const { globalVault, vaultA, vaultB } = await setup(f, DREAM("run-links"));
+				const result = await undoMemoryRun({ agentDir: f.agentDir, runId: "run-links", actor: { kind: "user" } });
+				expect(result.skipped).toEqual([]);
+				expect(result.undone).not.toHaveLength(0);
+				expect(globalVault.readNote("global", "before")).toBeDefined();
+				expect(globalVault.readNote("global", "after")).toBeUndefined();
+				expect(vaultA.readNote("project", "ref-a")!.body).toContain("[[before]]");
+				expect(vaultB.readNote("project", "ref-b")!.body).toContain("[[before]]");
+			});
+		});
+
+		it("a project-bound vault still refuses a group that touches another project", async () => {
+			await withMemoryFixture(async (f) => {
+				const { globalVault, vaultA, vaultB, renamed } = await setup(f, { kind: "user" });
+				const refused = await vaultA.undo(renamed.changeId, { kind: "user" });
+				expect(refused.ok).toBe(false);
+				expect(refused.error).toContain("different project");
+				expect(vaultA.readNote("project", "ref-a")!.body).toContain("[[after]]");
+				expect(vaultB.readNote("project", "ref-b")!.body).toContain("[[after]]");
+				expect(globalVault.readNote("global", "after")).toBeDefined();
+			});
+		});
+
+		it("refuses a foreign group member whose snapshot was never a referrer", async () => {
+			await withMemoryFixture(async (f) => {
+				const globalVault = f.vault();
+				const vaultA = f.vault("a");
+				await putNote(globalVault, "global", "before", "target");
+				await putNote(vaultA, "project", "keep", "unrelated");
+				const renamed = mustWrite(
+					await globalVault.write(
+						{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+						{ kind: "user" },
+					),
+				);
+				const operationId = readChangelog(globalVault.root).find(
+					(entry) => entry.id === renamed.changeId,
+				)!.operationId;
+				// Well-formed replace leg into a stored project — but its snapshot does
+				// not contain [[before]], so it was never rewritten by this rename.
+				const projectKey = f.project("a").projectKey;
+				const snapshot = saveSnapshot(globalVault.root, "project", { slug: "keep" }, "unrelated", projectKey);
+				appendChangelog(globalVault.root, {
+					id: "crafted-leg",
+					ts: new Date().toISOString(),
+					actor: AGENT,
+					op: "replace",
+					scope: "project",
+					projectKey,
+					target: { slug: "keep" },
+					beforeExists: true,
+					...(snapshot !== undefined ? { snapshot } : {}),
+					...(operationId !== undefined ? { operationId } : {}),
+				});
+
+				const refused = await globalVault.undo(renamed.changeId, { kind: "user" });
+				expect(refused.ok).toBe(false);
+				expect(refused.error).toContain("different project");
+				expect(vaultA.readNote("project", "keep")!.body).toBe("unrelated");
+				expect(globalVault.readNote("global", "after")).toBeDefined();
+			});
+		});
+	});
+
+	it("undoRun keeps an older change when a newer same-run change cannot be undone", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			const run = DREAM("run-partial");
+			await putNote(v, "global", "x", "v1", run);
+			const appended = mustWrite(
+				await v.write({ op: "append", scope: "global", target: { slug: "x" }, content: "v2" }, run),
+			);
+			// Destroy the append's snapshot so it stays applied but un-undoable.
+			const snapEntry = readChangelog(v.root).find((e) => e.id === appended.changeId)!;
+			rmSync(join(v.root, snapEntry.snapshot!), { force: true });
+
+			const result = await v.undoRun("run-partial", AGENT);
+			expect(result.undone).toEqual([]);
+			expect(result.skipped).toHaveLength(2);
+			expect(v.readNote("global", "x")!.body).toContain("v2");
 		});
 	});
 
