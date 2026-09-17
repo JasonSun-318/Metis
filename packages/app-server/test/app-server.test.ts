@@ -72,6 +72,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	agentInterruptCalls = 0;
 	webSearchRefreshCalls = 0;
 	permissionAutoRefreshCalls = 0;
+	memoryRefreshCalls = 0;
 	sessionName: string | undefined;
 
 	constructor(ref: SessionRef) {
@@ -431,6 +432,10 @@ class FakeRuntime implements OpenedSessionRuntime {
 
 	async refreshPermissionAutoSettings(): Promise<void> {
 		this.permissionAutoRefreshCalls += 1;
+	}
+
+	async refreshMemorySettings(): Promise<void> {
+		this.memoryRefreshCalls += 1;
 	}
 
 	async prepareMutation(_input: DurableSessionMutation): Promise<PreparedSessionMutation> {
@@ -1552,6 +1557,30 @@ describe("AppServer", () => {
 			RPC_ERROR_CODES.INVALID_REQUEST,
 		);
 		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
+	});
+
+	it("refreshes open runtimes after memory settings change", async () => {
+		writeSession(sessionsRoot, "memory-session", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "memory-subscribe",
+			method: "session/subscribe",
+			params: { sessionId: "memory-session" },
+		});
+		expect(host.runtimes.get("memory-session")?.memoryRefreshCalls).toBe(0);
+		expect(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "memory-update",
+				method: "memory/update",
+				params: { enabled: false },
+			}),
+		).toMatchObject({ result: { enabled: false } });
+		expect(host.runtimes.get("memory-session")?.memoryRefreshCalls).toBe(1);
 	});
 
 	it("waits for a runtime settings refresh gate before persisting Auto command rules", async () => {

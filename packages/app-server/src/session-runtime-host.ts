@@ -79,6 +79,7 @@ export interface OpenedSessionRuntime {
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	refreshWebSearchSettings?(): Promise<void>;
 	refreshPermissionAutoSettings?(): Promise<void>;
+	refreshMemorySettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;
 	ensurePluginsCurrent?(): Promise<void>;
 	getPluginRuntimeStatus?(): PluginRuntimeStatus;

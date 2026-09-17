@@ -216,6 +216,11 @@ export class SessionRegistry {
 		return await this.refreshOpenRuntimeSettings("refreshPermissionAutoSettings");
 	}
 
+	/** Refresh memory settings on every open runtime; returns sessionIds that failed and were closed. */
+	async refreshOpenMemorySettings(): Promise<string[]> {
+		return await this.refreshOpenRuntimeSettings("refreshMemorySettings");
+	}
+
 	async notifyOpenPermissionRulesChanged(): Promise<void> {
 		if (this.modelServiceRefreshActive) return;
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
@@ -265,7 +270,8 @@ export class SessionRegistry {
 		method:
 			| "prepareModelServiceSettingsRefresh"
 			| "applyModelServiceSettingsRefresh"
-			| "refreshPermissionAutoSettings",
+			| "refreshPermissionAutoSettings"
+			| "refreshMemorySettings",
 	): Promise<string[]> {
 		const slots = [...this.slots.values()].filter((slot) => slot.accepting);
 		const results = await Promise.allSettled(

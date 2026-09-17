@@ -35,6 +35,7 @@ class FakeRuntime implements OpenedSessionRuntime {
 	pendingInteractions = false;
 	closed = false;
 	readonly calls: string[] = [];
+	refreshMemorySettings?: () => Promise<void>;
 
 	constructor(sessionId: string) {
 		this.sessionId = sessionId;
@@ -649,6 +650,24 @@ describe("SessionRegistry", () => {
 		expect(registry.has("session-a")).toBe(false);
 		expect(runtime.closed).toBe(true);
 		secondRelease();
+	});
+
+	it("closes only runtimes that fail a memory settings refresh", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const failing = (await registry.open(ref("session-a"))) as FakeRuntime;
+		const healthy = (await registry.open(ref("session-b"))) as FakeRuntime;
+		const release = await registry.beginModelServiceSettingsRefresh();
+		failing.refreshMemorySettings = vi.fn(async () => {
+			throw new Error("refresh failed");
+		});
+
+		expect(await registry.refreshOpenMemorySettings()).toEqual(["session-a"]);
+		expect(registry.has("session-a")).toBe(false);
+		expect(failing.closed).toBe(true);
+		expect(registry.has("session-b")).toBe(true);
+		expect(healthy.closed).toBe(false);
+		release();
 	});
 
 	it("removes a runtime that fails an Auto permission settings refresh", async () => {

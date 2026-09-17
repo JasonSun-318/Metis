@@ -615,6 +615,8 @@ export class AgentSession {
 	private _unsubscribeMemoryEvents?: () => void;
 	/** Frozen prompt snapshot; undefined forces a re-read at the next rebuild. */
 	private _memorySnapshot?: MemoryPromptSnapshot;
+	/** Settings identity the snapshot was captured under; a change re-reads the vault. */
+	private _memorySnapshotSettingsKey?: string;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -2529,12 +2531,28 @@ export class AgentSession {
 			: this._memoryToolDefinitions.filter((definition) => definition.name !== "memory_write");
 	}
 
+	/** Identity of every setting that influences the snapshot or memory tool set. */
+	private _currentMemorySnapshotSettingsKey(): string {
+		return JSON.stringify([
+			this.settingsManager.getAutoMemoryEnabled(),
+			this.settingsManager.getMemorySettings().activeContext === true,
+			this.sessionManager.getUseMemory(),
+			this.sessionManager.getContributeMemory(),
+		]);
+	}
+
 	/**
 	 * The frozen in-session memory snapshot. Captured once at session start and
-	 * only re-read after `_invalidateMemorySnapshot()` (compaction, /reload,
-	 * enable toggles). `_rebuildSystemPrompt` callers never re-read the vault.
+	 * re-read only after `_invalidateMemorySnapshot()` (compaction, /reload) or
+	 * when a memory-affecting setting actually changed. `_rebuildSystemPrompt`
+	 * callers never re-read the vault.
 	 */
 	private _memorySnapshotForPrompt(): MemoryPromptSnapshot | undefined {
+		const key = this._currentMemorySnapshotSettingsKey();
+		if (key !== this._memorySnapshotSettingsKey) {
+			this._memorySnapshot = undefined;
+			this._memorySnapshotSettingsKey = key;
+		}
 		const vault = this._ensureMemoryVault();
 		if (!vault) return undefined;
 		this._memorySnapshot ??= buildMemoryPromptSnapshot(vault, {
@@ -2732,7 +2750,17 @@ export class AgentSession {
 		this._modelRegistry.refresh();
 		this._refreshCurrentModelFromRegistry();
 		this._applyImageToolSettings();
-		this._invalidateMemorySnapshot();
+		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
+		this.refreshSystemPrompt();
+	}
+
+	/**
+	 * Re-read persisted memory settings and rebuild the tool registry and
+	 * prompt. The frozen snapshot only re-reads the vault when a
+	 * memory-affecting setting actually changed.
+	 */
+	async refreshMemorySettings(): Promise<void> {
+		await this.settingsManager.reload();
 		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		this.refreshSystemPrompt();
 	}
@@ -2740,7 +2768,6 @@ export class AgentSession {
 	/** Toggle long-term memory; refreshes the tool registry and prompt snapshot. */
 	async setAutoMemoryEnabled(enabled: boolean): Promise<void> {
 		this.settingsManager.setAutoMemoryEnabled(enabled);
-		this._invalidateMemorySnapshot();
 		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		this.refreshSystemPrompt();
 	}
@@ -2755,7 +2782,6 @@ export class AgentSession {
 		contributeMemory: boolean;
 	}> {
 		const next = this.sessionManager.setMemoryFlags(flags);
-		this._invalidateMemorySnapshot();
 		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		this.refreshSystemPrompt();
 		return next;

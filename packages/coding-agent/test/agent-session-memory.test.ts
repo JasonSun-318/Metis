@@ -399,4 +399,131 @@ describe("AgentSession memory vault", () => {
 			session.dispose();
 		}
 	});
+
+	it("model refresh preserves the frozen memory section", async () => {
+		const { agentDir, cwd } = layout();
+		await seedNote(agentDir, cwd, { scope: "global", slug: "before", description: "before-marker" });
+		const { session } = createSession({ agentDir, cwd });
+		try {
+			const section = (s: string) => s.match(/<auto_memory>[\s\S]*<\/auto_memory>/)?.[0];
+			const frozen = section(session.systemPrompt);
+			expect(frozen).toBeDefined();
+			await seedNote(agentDir, cwd, { scope: "global", slug: "after", description: "after-marker" });
+			await session.applyModelServiceSettingsRefresh();
+			expect(section(session.systemPrompt)).toBe(frozen);
+			expect(session.systemPrompt).not.toContain("after-marker");
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("saving unchanged memory flags does not refresh the snapshot", async () => {
+		const { agentDir, cwd } = layout();
+		const { session } = createSession({ agentDir, cwd });
+		try {
+			const before = session.getMemorySnapshot();
+			await seedNote(agentDir, cwd, { scope: "global", slug: "later", description: "later-marker" });
+			await session.setAutoMemoryEnabled(true);
+			await session.setMemoryFlags({ useMemory: true, contributeMemory: true });
+			expect(session.getMemorySnapshot()).toBe(before);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("Dream-only settings refresh leaves the captured memory object unchanged", async () => {
+		const { agentDir, cwd } = layout();
+		const { session } = createSession({ agentDir, cwd });
+		try {
+			const before = session.getMemorySnapshot();
+			session.settingsManager.setMemorySettings({ dream: { minHours: 48 } });
+			await session.refreshMemorySettings();
+			expect(session.getMemorySnapshot()).toBe(before);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("drops and restores memory tools and the section through refreshMemorySettings", async () => {
+		const { agentDir, cwd } = layout();
+		await seedNote(agentDir, cwd, { scope: "global", slug: "prefs", description: "toggle-marker" });
+		const { session } = createSession({ agentDir, cwd });
+		try {
+			session.settingsManager.setAutoMemoryEnabled(false);
+			await session.refreshMemorySettings();
+			expect(session.getActiveToolNames()).not.toContain("memory_search");
+			expect(session.getActiveToolNames()).not.toContain("memory_read");
+			expect(session.getActiveToolNames()).not.toContain("memory_write");
+			expect(session.systemPrompt).not.toContain("<auto_memory>");
+
+			session.settingsManager.setAutoMemoryEnabled(true);
+			await session.refreshMemorySettings();
+			expect(session.getActiveToolNames()).toEqual(
+				expect.arrayContaining(["memory_search", "memory_read", "memory_write"]),
+			);
+			expect(session.systemPrompt).toContain("toggle-marker");
+
+			await session.setMemoryFlags({ contributeMemory: false });
+			expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["memory_search", "memory_read"]));
+			expect(session.getActiveToolNames()).not.toContain("memory_write");
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it("keeps full provider prompts stable across three turns and a real memory tool call", async () => {
+		const { agentDir, cwd } = layout();
+		const { session } = createSession({ agentDir, cwd, preset: "ask" });
+		const prompts: string[] = [];
+		session.agent.streamFn = (model, context) => {
+			prompts.push(context.systemPrompt ?? "");
+			const stream = createAssistantMessageEventStream();
+			const call = prompts.length === 2;
+			queueMicrotask(() =>
+				stream.push({
+					type: "done",
+					reason: call ? "toolUse" : "stop",
+					message: {
+						...fauxAssistantMessage("acknowledged"),
+						api: model.api,
+						provider: model.provider,
+						model: model.id,
+						...(call
+							? {
+									stopReason: "toolUse" as const,
+									content: [
+										{
+											type: "toolCall" as const,
+											id: "test-memory-write",
+											name: "memory_write",
+											arguments: {
+												op: "create",
+												scope: "global",
+												target: { slug: "provider-flow" },
+												frontmatter: { type: "reference", description: "new-persisted-marker" },
+												content: "remembered",
+											},
+										},
+									],
+								}
+							: {}),
+					},
+				}),
+			);
+			return stream;
+		};
+		try {
+			await session.prompt("first turn");
+			await session.prompt("remember this convention");
+			await session.prompt("third turn");
+			expect(prompts).toHaveLength(4);
+			expect(new Set(prompts).size).toBe(1);
+			expect(prompts[0]).not.toContain("new-persisted-marker");
+			expect(new MemoryVault({ agentDir }).readNote("global", "provider-flow")?.body).toBe("remembered");
+			await session.reload();
+			expect(session.systemPrompt).toContain("new-persisted-marker");
+		} finally {
+			session.dispose();
+		}
+	});
 });

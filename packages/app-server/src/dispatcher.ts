@@ -616,7 +616,18 @@ export class Dispatcher {
 			case "memory/get":
 				return this.memorySettings.view(request.params);
 			case "memory/update":
-				return await this.replayMutation(request, () => this.memorySettings.update(request.params));
+				return await this.replayMutation(request, async () => {
+					// Share the settings mutation lock so open sessions cannot run with
+					// a half-applied tool set; failed refreshes close the session.
+					const release = await this.registry.beginModelServiceSettingsRefresh();
+					try {
+						const result = await this.memorySettings.update(request.params);
+						this.dropRuntimeSubscriptions(await this.registry.refreshOpenMemorySettings());
+						return result;
+					} finally {
+						release();
+					}
+				});
 			case "memory/notes/list":
 				return this.memorySettings.listNotes(request.params);
 			case "memory/notes/read":
