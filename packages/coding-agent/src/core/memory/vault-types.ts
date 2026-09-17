@@ -97,6 +97,8 @@ export function targetKey(target: MemoryTarget): string {
 }
 
 export function targetsEqual(left: MemoryTarget, right: MemoryTarget): boolean {
+	// Changelog targets are persisted input; malformed shapes never match.
+	if (typeof left !== "object" || left === null || typeof right !== "object" || right === null) return false;
 	if ("slug" in left && "slug" in right) return left.slug === right.slug;
 	if ("block" in left && "block" in right) return left.block === right.block;
 	return false;

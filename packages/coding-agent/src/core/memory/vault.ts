@@ -22,6 +22,7 @@ import {
 	saveSnapshot,
 	serializeUndoCommit,
 } from "./vault-history.ts";
+import { isSafeProjectKey } from "./vault-identity.ts";
 import {
 	getChangelogPath,
 	getDreamDir,
@@ -198,7 +199,13 @@ function wasAbsentBefore(entry: ChangelogEntry): boolean {
 	if (entry.beforeExists !== undefined) return !entry.beforeExists;
 	if (entry.op === "create" && entry.snapshot === undefined) return true;
 	// Legacy first pinned append/replace writes carried no snapshot field.
-	return "block" in entry.target && entry.snapshot === undefined && (entry.op === "append" || entry.op === "replace");
+	return (
+		typeof entry.target === "object" &&
+		entry.target !== null &&
+		"block" in entry.target &&
+		entry.snapshot === undefined &&
+		(entry.op === "append" || entry.op === "replace")
+	);
 }
 
 function requireSnapshot(root: string, entry: ChangelogEntry): string {
@@ -866,11 +873,13 @@ export class MemoryVault {
 		if (!entry) return { ok: false, error: `unknown change ${changeId}` };
 		if (!UNDOABLE_OPS.has(entry.op)) return { ok: false, error: `change ${changeId} is not undoable` };
 		const group = this.operationEntries(entry, entries);
-		const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
 		if (group.some((c) => c.undoneBy)) {
 			return { ok: false, error: `change ${changeId} was already undone` };
 		}
-		if (!this.ownsEntry(primary)) return { ok: false, error: "change belongs to a different project" };
+		// A crafted group member must not pull the undo into another project's scope.
+		if (group.some((member) => !this.ownsEntry(member))) {
+			return { ok: false, error: "change belongs to a different project" };
+		}
 		// A change on any member target outside the group conflicts the whole undo.
 		const groupIds = new Set(group.map((c) => c.id));
 		for (const member of group) {
@@ -911,6 +920,8 @@ export class MemoryVault {
 			return entries.find(
 				(candidate) =>
 					candidate.op === "create" &&
+					typeof candidate.target === "object" &&
+					candidate.target !== null &&
 					"slug" in candidate.target &&
 					candidate.target.slug === entry.newSlug &&
 					candidate.scope === entry.scope &&
@@ -918,7 +929,13 @@ export class MemoryVault {
 					!candidate.undoneBy,
 			);
 		}
-		if (entry.op === "create" && "slug" in entry.target && entry.snapshot !== undefined) {
+		if (
+			entry.op === "create" &&
+			typeof entry.target === "object" &&
+			entry.target !== null &&
+			"slug" in entry.target &&
+			entry.snapshot !== undefined
+		) {
 			return entries.find(
 				(candidate) =>
 					candidate.op === "rename" &&
@@ -931,17 +948,26 @@ export class MemoryVault {
 		return undefined;
 	}
 
-	/** Scope dir for a changelog entry; project entries resolve by their recorded projectKey. */
+	/**
+	 * Scope dir for a changelog entry; project entries resolve by their recorded
+	 * projectKey. Changelog fields are persisted input: only safe segment keys may
+	 * form paths, so a tampered entry resolves to undefined instead of escaping
+	 * the vault.
+	 */
 	private entryScopeDir(entry: ChangelogEntry): string | undefined {
 		if (entry.scope === "global") return getScopeDir(this.root, "global");
 		const projectKey = entry.projectKey ?? this.project?.projectKey;
-		return projectKey ? getScopeDir(this.root, "project", projectKey) : undefined;
+		if (projectKey === undefined || !isSafeProjectKey(projectKey)) return undefined;
+		return getScopeDir(this.root, "project", projectKey);
 	}
 
 	private entryTargetPath(entry: ChangelogEntry, target: MemoryTarget = entry.target): string | undefined {
 		const dir = this.entryScopeDir(entry);
-		if (!dir) return undefined;
-		return "slug" in target ? getNotePath(dir, target.slug) : getPinnedPath(dir, target.block);
+		if (!dir || typeof target !== "object" || target === null) return undefined;
+		if ("slug" in target) {
+			return typeof target.slug === "string" && isSafeSlug(target.slug) ? getNotePath(dir, target.slug) : undefined;
+		}
+		return isPinnedBlock(target.block) ? getPinnedPath(dir, target.block) : undefined;
 	}
 
 	/** Read current file content for `before`: absent files read as undefined, unreadable ones throw. */
@@ -977,7 +1003,7 @@ export class MemoryVault {
 		};
 		for (const item of ordered) {
 			const path = this.entryTargetPath(item);
-			if (!path) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+			if (!path) throw new Error(`change ${item.id} is malformed or out of scope for this workspace`);
 			const isRenameLeg = "slug" in item.target && renamedTo.has(`${item.scope}:${item.target.slug}`);
 			if (item.op === "create" && (wasAbsentBefore(item) || isRenameLeg)) {
 				// A rename leg or a plain create: the file did not exist before.
@@ -988,7 +1014,7 @@ export class MemoryVault {
 				if (!item.newSlug) throw new Error(`rename change ${item.id} is missing newSlug`);
 				setRestore(path, requireSnapshot(this.root, item));
 				const newPath = this.entryTargetPath(item, { slug: item.newSlug });
-				if (!newPath) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+				if (!newPath) throw new Error(`change ${item.id} is malformed or out of scope for this workspace`);
 				setRestore(newPath, undefined);
 				continue;
 			}
@@ -1009,7 +1035,7 @@ export class MemoryVault {
 		for (const item of ordered) {
 			if (!("slug" in item.target)) continue;
 			const dir = this.entryScopeDir(item);
-			if (!dir) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+			if (!dir) throw new Error(`change ${item.id} is malformed or out of scope for this workspace`);
 			let bucket = slugChanges.get(dir);
 			if (!bucket) {
 				bucket = { scope: item.scope, dir, map: new Map() };
@@ -1065,7 +1091,7 @@ export class MemoryVault {
 	async undoRun(runId: string, actor: MemoryActor): Promise<UndoRunResult> {
 		try {
 			return await withMemoryRootLock(this.root, () => {
-				const inRun = (entry: ChangelogEntry) => entry.actor.kind === "dream" && entry.actor.runId === runId;
+				const inRun = (entry: ChangelogEntry) => entry.actor?.kind === "dream" && entry.actor.runId === runId;
 				const runIds = readChangelog(this.root)
 					.filter((entry) => inRun(entry) && UNDOABLE_OPS.has(entry.op))
 					.map((entry) => entry.id); // newest first
@@ -1077,8 +1103,7 @@ export class MemoryVault {
 					// Already rolled back as part of a group (e.g. a rename leg).
 					if (!entry || entry.undoneBy) continue;
 					const group = this.operationEntries(entry, fresh);
-					const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
-					if (!this.ownsEntry(primary)) {
+					if (group.some((member) => !this.ownsEntry(member))) {
 						skipped.push({ changeId: entry.id, reason: "change belongs to a different project" });
 						continue;
 					}

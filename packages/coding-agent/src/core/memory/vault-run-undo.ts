@@ -1,6 +1,7 @@
 import { MemoryVault, type UndoRunResult } from "./vault.ts";
 import type { MemoryEvents } from "./vault-events.ts";
 import { readChangelog } from "./vault-history.ts";
+import { isSafeProjectKey } from "./vault-identity.ts";
 import { getVaultRoot } from "./vault-paths.ts";
 import { listStoredVaultProjects } from "./vault-project.ts";
 import type { MemoryActor } from "./vault-types.ts";
@@ -22,7 +23,7 @@ export async function undoMemoryRun(options: {
 	const root = getVaultRoot(options.agentDir);
 	const initial = readChangelog(root).filter(
 		(entry) =>
-			entry.actor.kind === "dream" &&
+			entry.actor?.kind === "dream" &&
 			entry.actor.runId === options.runId &&
 			entry.op !== "undo" &&
 			entry.op !== "migrate",
@@ -37,8 +38,11 @@ export async function undoMemoryRun(options: {
 		const fresh = readChangelog(root);
 		const entry = fresh.find((item) => item.id === groupId) ?? fresh.find((item) => item.id === original.id);
 		if (!entry || entry.undoneBy) continue;
-		if (entry.scope === "project" && !entry.projectKey) {
-			skipped.push({ changeId: entry.id, reason: "project identity is missing from this historical change" });
+		if (entry.scope === "project" && (!entry.projectKey || !isSafeProjectKey(entry.projectKey))) {
+			skipped.push({
+				changeId: entry.id,
+				reason: "project identity is missing or invalid on this historical change",
+			});
 			continue;
 		}
 		const project =

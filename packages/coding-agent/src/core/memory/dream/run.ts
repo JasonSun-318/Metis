@@ -28,13 +28,18 @@ interface RunCounts {
 function countRunChanges(root: string, runId: string): RunCounts {
 	const counts: RunCounts = { added: 0, updated: 0, deleted: 0, deletedKeys: [] };
 	for (const entry of readChangelog(root)) {
-		if (entry.actor.kind !== "dream" || entry.actor.runId !== runId) continue;
+		if (entry.actor?.kind !== "dream" || entry.actor.runId !== runId) continue;
 		if (entry.op === "create" && entry.snapshot === undefined) {
 			counts.added++;
 		} else if (entry.op === "delete") {
 			counts.deleted++;
-			if ("slug" in entry.target) {
-				counts.deletedKeys.push(memoryUsageKey(entry.scope, entry.target.slug, entry.projectKey));
+			const target = entry.target;
+			if (typeof target === "object" && target !== null && "slug" in target) {
+				try {
+					counts.deletedKeys.push(memoryUsageKey(entry.scope, target.slug, entry.projectKey));
+				} catch {
+					// Malformed persisted entry; skip its usage cleanup key.
+				}
 			}
 		} else if (entry.op !== "undo" && entry.op !== "migrate") {
 			// append/replace/str_replace/rename and the create leg of a rename.

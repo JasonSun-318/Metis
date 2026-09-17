@@ -115,10 +115,17 @@ function snapshotGroups(root: string): Map<string, Set<string>> {
 	const groups = new Map<string, Set<string>>();
 	for (const entry of readChangelogFile(root)) {
 		if (!entry.snapshot) continue;
-		const owner =
-			entry.scope === "project" && !entry.projectKey
-				? `legacy-unknown/${entry.id}`
-				: memoryTargetId(entry.scope, entry.target, entry.projectKey);
+		let owner: string;
+		try {
+			owner =
+				entry.scope === "project" && !entry.projectKey
+					? `legacy-unknown/${entry.id}`
+					: memoryTargetId(entry.scope, entry.target, entry.projectKey);
+		} catch {
+			// Malformed persisted fields (e.g. an unsafe projectKey): isolate the
+			// entry so its snapshot is only ever age-pruned.
+			owner = `legacy-unknown/${entry.id}`;
+		}
 		let group = groups.get(owner);
 		if (!group) {
 			group = new Set();

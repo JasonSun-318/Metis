@@ -1,9 +1,10 @@
-import { existsSync, mkdirSync, realpathSync, rmSync, utimesSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
 import {
 	getDefaultSessionDir,
+	getScopeDir,
 	getVaultRoot,
 	MemoryVault,
 	resolveVaultProject,
@@ -249,6 +250,61 @@ describe("MemoryService", () => {
 		expect(laterView.patch).toContain("+Applies to hotfixes too.");
 
 		expect(() => svc.historyRead({ changeId: "44444444-4444-4444-8444-444444444444" })).toThrow();
+	});
+
+	it("crafted changelog entries cannot escape the vault or poison history", async () => {
+		const { service: svc } = service();
+		const vault = new MemoryVault({ agentDir });
+		vault.ensureLayout();
+		const root = getVaultRoot(agentDir);
+		const victim = join(agentDir, "outside", "keep.md");
+		mkdirSync(dirname(victim), { recursive: true });
+		writeFileSync(victim, "precious");
+		const notesDir = join(getScopeDir(root, "global"), "notes");
+		const projectsDir = dirname(getScopeDir(root, "project", "x"));
+		// Valid-uuid ids so the entries are reachable through historyRead/undo.
+		const crafted = [
+			{
+				id: "55555555-5555-4555-8555-555555555551",
+				ts: new Date().toISOString(),
+				actor: { kind: "user" },
+				op: "create",
+				scope: "global",
+				target: { slug: relative(notesDir, victim).replace(/\.md$/, "") },
+				beforeExists: false,
+			},
+			{
+				id: "55555555-5555-4555-8555-555555555552",
+				ts: new Date().toISOString(),
+				actor: { kind: "user" },
+				op: "create",
+				scope: "project",
+				projectKey: relative(projectsDir, join(agentDir, "outside")),
+				target: { slug: "keep" },
+				beforeExists: false,
+			},
+		];
+		appendFileSync(
+			join(root, ".history", "changelog.jsonl"),
+			`${crafted.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+		);
+
+		// Undo of a traversal entry fails closed; the outside file survives.
+		const undone = await svc.undo({ changeId: crafted[0]!.id });
+		expect(undone.ok).toBe(false);
+		expect(existsSync(victim)).toBe(true);
+		const undoneProject = await svc.undo({ changeId: crafted[1]!.id });
+		expect(undoneProject.ok).toBe(false);
+
+		// historyRead cannot form a schema-valid view of a malformed target.
+		expect(() => svc.historyRead({ changeId: crafted[0]!.id })).toThrow();
+
+		// Entries that cannot satisfy the wire schema are dropped from history;
+		// the traversal projectKey is stripped from the surviving entry's view.
+		const history = svc.history({});
+		expect(history.entries.some((entry) => entry.id === crafted[0]!.id)).toBe(false);
+		const projectEntry = history.entries.find((entry) => entry.id === crafted[1]!.id);
+		expect(projectEntry?.projectKey).toBeUndefined();
 	});
 
 	it("produces protocol-valid responses for every memory method", async () => {

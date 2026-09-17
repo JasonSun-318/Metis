@@ -371,6 +371,7 @@ export {
 } from "./core/memory/vault-events.ts";
 export { type ChangelogEntry, readChangelog, readSnapshot } from "./core/memory/vault-history.ts";
 export {
+	isSafeProjectKey,
 	memoryScopeKey,
 	memoryTargetId,
 	memoryUsageKey,
@@ -414,6 +415,7 @@ export type {
 	NoteType,
 	PinnedBlock,
 } from "./core/memory/vault-types.ts";
+export { isPinnedBlock, isSafeSlug } from "./core/memory/vault-types.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,

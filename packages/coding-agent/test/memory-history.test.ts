@@ -1,6 +1,15 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { applyVaultFileChanges } from "../src/core/memory/vault-file-changes.ts";
@@ -20,7 +29,7 @@ vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
 	};
 });
 
-import { getSnapshotDir } from "../src/core/memory/vault-paths.ts";
+import { getScopeDir, getSnapshotDir } from "../src/core/memory/vault-paths.ts";
 import type { VaultProjectIdentity } from "../src/core/memory/vault-project.ts";
 import { MEMORY_LIMITS, type MemoryActor } from "../src/core/memory/vault-types.ts";
 
@@ -603,5 +612,204 @@ describe("memory history and undo", () => {
 		const undone = await vault.undo(second.ok ? second.changeId : "", AGENT);
 		expect(undone.ok).toBe(true);
 		expect(vault.readPinned("global", "user")).toBe("v1\n");
+	});
+
+	describe("crafted changelog entries", () => {
+		it("undo refuses a traversal slug and leaves outside files intact", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				const victim = join(f.root, "outside", "keep.md");
+				mkdirSync(dirname(victim), { recursive: true });
+				writeFileSync(victim, "precious");
+				const notesDir = join(getScopeDir(v.root, "global"), "notes");
+				const slug = relative(notesDir, victim).replace(/\.md$/, "");
+				expect(slug).toContain("..");
+				appendChangelog(v.root, {
+					id: "evil-traversal",
+					ts: new Date().toISOString(),
+					actor: AGENT,
+					op: "create",
+					scope: "global",
+					target: { slug },
+					beforeExists: false,
+				});
+
+				const undone = await v.undo("evil-traversal", AGENT);
+				expect(undone.ok).toBe(false);
+				expect(existsSync(victim)).toBe(true);
+				expect(readChangelog(v.root).some((entry) => entry.op === "undo")).toBe(false);
+			});
+		});
+
+		it("undo refuses a group member pointing at another project", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				await putNote(v, "global", "before", "x");
+				const renamed = mustWrite(
+					await v.write({ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" }, AGENT),
+				);
+				const operationId = readChangelog(v.root).find((entry) => entry.id === renamed.changeId)?.operationId;
+				// A foreign-but-well-formed project key: inside the vault root, outside this vault's scope.
+				const foreignKey = "a".repeat(64);
+				const foreignNotes = join(getScopeDir(v.root, "project", foreignKey), "notes");
+				mkdirSync(foreignNotes, { recursive: true });
+				writeFileSync(join(foreignNotes, "keep.md"), "other project's note");
+				appendChangelog(v.root, {
+					id: "evil-member",
+					ts: new Date().toISOString(),
+					actor: AGENT,
+					op: "create",
+					scope: "project",
+					projectKey: foreignKey,
+					target: { slug: "keep" },
+					beforeExists: false,
+					...(operationId !== undefined ? { operationId } : {}),
+				});
+
+				const undone = await v.undo(renamed.changeId, AGENT);
+				expect(undone.ok).toBe(false);
+				expect(existsSync(join(foreignNotes, "keep.md"))).toBe(true);
+				expect(v.readNote("global", "after")).toBeDefined();
+			});
+		});
+
+		it("undo refuses a group member with a traversal project key", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				await putNote(v, "global", "before", "x");
+				const renamed = mustWrite(
+					await v.write({ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" }, AGENT),
+				);
+				const operationId = readChangelog(v.root).find((entry) => entry.id === renamed.changeId)?.operationId;
+				const projectsDir = dirname(getScopeDir(v.root, "project", "x"));
+				const victim = join(f.root, "escape", "notes", "keep.md");
+				mkdirSync(dirname(victim), { recursive: true });
+				writeFileSync(victim, "precious");
+				appendChangelog(v.root, {
+					id: "evil-member-traversal",
+					ts: new Date().toISOString(),
+					actor: AGENT,
+					op: "create",
+					scope: "project",
+					projectKey: relative(projectsDir, join(f.root, "escape")),
+					target: { slug: "keep" },
+					beforeExists: false,
+					...(operationId !== undefined ? { operationId } : {}),
+				});
+
+				const undone = await v.undo(renamed.changeId, AGENT);
+				expect(undone.ok).toBe(false);
+				expect(existsSync(victim)).toBe(true);
+				expect(v.readNote("global", "after")).toBeDefined();
+			});
+		});
+
+		it("undoRun skips a traversal target instead of deleting outside files", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				const victim = join(f.root, "outside-run", "keep.md");
+				mkdirSync(dirname(victim), { recursive: true });
+				writeFileSync(victim, "precious");
+				const notesDir = join(getScopeDir(v.root, "global"), "notes");
+				const slug = relative(notesDir, victim).replace(/\.md$/, "");
+				appendChangelog(v.root, {
+					id: "evil-run-entry",
+					ts: new Date().toISOString(),
+					actor: DREAM("evil-run"),
+					op: "create",
+					scope: "global",
+					target: { slug },
+					beforeExists: false,
+				});
+
+				const result = await v.undoRun("evil-run", AGENT);
+				expect(result.undone).toHaveLength(0);
+				expect(result.skipped).toHaveLength(1);
+				expect(existsSync(victim)).toBe(true);
+			});
+		});
+
+		it("undoMemoryRun skips malformed project identities and actors", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				const projectsDir = dirname(getScopeDir(v.root, "project", "x"));
+				const victim = join(f.root, "escape2", "notes", "keep.md");
+				mkdirSync(dirname(victim), { recursive: true });
+				writeFileSync(victim, "precious");
+				appendChangelog(v.root, {
+					id: "evil-run-project",
+					ts: new Date().toISOString(),
+					actor: DREAM("run-bad"),
+					op: "create",
+					scope: "project",
+					projectKey: relative(projectsDir, join(f.root, "escape2")),
+					target: { slug: "keep" },
+					beforeExists: false,
+				});
+				// A run entry with no actor must not crash the run filter.
+				appendChangelog(v.root, {
+					id: "evil-run-noactor",
+					ts: new Date().toISOString(),
+					actor: null,
+					op: "create",
+					scope: "global",
+					target: { slug: "irrelevant" },
+					beforeExists: false,
+				} as unknown as Parameters<typeof appendChangelog>[1]);
+
+				const result = await undoMemoryRun({ agentDir: f.agentDir, runId: "run-bad", actor: AGENT });
+				expect(result.undone).toHaveLength(0);
+				expect(result.skipped).toHaveLength(1);
+				expect(result.skipped[0]!.reason).toContain("project identity");
+				expect(existsSync(victim)).toBe(true);
+			});
+		});
+
+		it("undo reports a clean error for a malformed target", async () => {
+			await withMemoryFixture(async (f) => {
+				const v = f.vault();
+				appendChangelog(v.root, {
+					id: "evil-target",
+					ts: new Date().toISOString(),
+					actor: AGENT,
+					op: "delete",
+					scope: "global",
+					target: 42,
+				} as unknown as Parameters<typeof appendChangelog>[1]);
+
+				const undone = await v.undo("evil-target", AGENT);
+				expect(undone.ok).toBe(false);
+				expect(undone.error).toContain("malformed");
+			});
+		});
+
+		it("snapshot pruning survives malformed entries", () => {
+			const vault = makeVault();
+			appendChangelog(vault.root, {
+				id: "bad-snap-project",
+				ts: new Date().toISOString(),
+				actor: AGENT,
+				op: "create",
+				scope: "project",
+				projectKey: "../../outside",
+				target: { slug: "y" },
+				snapshot: "x",
+			});
+			appendChangelog(vault.root, {
+				id: "bad-snap-target",
+				ts: new Date().toISOString(),
+				actor: AGENT,
+				op: "create",
+				scope: "global",
+				target: 42,
+				snapshot: "z",
+			} as unknown as Parameters<typeof appendChangelog>[1]);
+			expect(() =>
+				pruneSnapshots(vault.root, {
+					snapshotsPerTarget: MEMORY_LIMITS.snapshotsPerTarget,
+					snapshotMaxAgeDays: 90,
+				}),
+			).not.toThrow();
+		});
 	});
 });

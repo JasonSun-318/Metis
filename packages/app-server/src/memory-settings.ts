@@ -24,6 +24,9 @@ import {
 	getProjectMetaPath,
 	getScopeDir,
 	getVaultRoot,
+	isPinnedBlock,
+	isSafeProjectKey,
+	isSafeSlug,
 	MemoryEvents,
 	MemorySearchIndex,
 	MemoryVault,
@@ -50,20 +53,76 @@ const DREAM_DEFAULTS = { enabled: true, minHours: 24, minSessions: 5, maxUnusedD
 const DREAM_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const USER_ACTOR = { kind: "user" } as const;
 
-/** Wire changelog view: the internal snapshot path stays server-side. */
-function changelogEntryView(entry: ChangelogEntry): MemoryChangelogEntryView {
+const UUID_LIKE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+const SESSION_ID_LIKE = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/u;
+const SHA256_LIKE = /^[a-f0-9]{64}$/u;
+const ISO_LIKE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/u;
+const HISTORY_OPS: ReadonlySet<string> = new Set([
+	"create",
+	"append",
+	"replace",
+	"str_replace",
+	"rename",
+	"delete",
+	"undo",
+	"migrate",
+]);
+
+/**
+ * Wire view of a vault changelog entry; the internal snapshot path stays
+ * server-side. Changelog lines are persisted input: fields are re-validated
+ * against the wire contract, and an entry that cannot produce a schema-valid
+ * view is dropped rather than poisoning the whole response.
+ */
+function changelogEntryView(entry: ChangelogEntry): MemoryChangelogEntryView | undefined {
+	if (typeof entry.id !== "string" || !UUID_LIKE.test(entry.id)) return undefined;
+	if (typeof entry.ts !== "string" || entry.ts.length > 40 || !ISO_LIKE.test(entry.ts)) return undefined;
+	const actor = viewActor(entry.actor);
+	const target = viewTarget(entry.target);
+	if (!actor || !target || !HISTORY_OPS.has(entry.op)) return undefined;
+	if (entry.scope !== "global" && entry.scope !== "project") return undefined;
 	return {
 		id: entry.id,
 		ts: entry.ts,
-		actor: entry.actor,
-		op: entry.op,
+		actor,
+		op: entry.op as MemoryChangelogEntryView["op"],
 		scope: entry.scope,
-		target: entry.target,
-		...(entry.projectKey !== undefined ? { projectKey: entry.projectKey } : {}),
-		...(entry.newSlug !== undefined ? { newSlug: entry.newSlug } : {}),
-		...(entry.undoes !== undefined ? { undoes: entry.undoes } : {}),
-		...(entry.undoneBy !== undefined ? { undoneBy: entry.undoneBy } : {}),
+		target,
+		...(typeof entry.projectKey === "string" && SHA256_LIKE.test(entry.projectKey)
+			? { projectKey: entry.projectKey }
+			: {}),
+		...(typeof entry.newSlug === "string" && isSafeSlug(entry.newSlug) ? { newSlug: entry.newSlug } : {}),
+		...(typeof entry.undoes === "string" && UUID_LIKE.test(entry.undoes) ? { undoes: entry.undoes } : {}),
+		...(typeof entry.undoneBy === "string" && UUID_LIKE.test(entry.undoneBy) ? { undoneBy: entry.undoneBy } : {}),
 	};
+}
+
+function viewActor(actor: ChangelogEntry["actor"]): MemoryChangelogEntryView["actor"] | undefined {
+	if (typeof actor !== "object" || actor === null) return undefined;
+	switch (actor.kind) {
+		case "user":
+		case "migrate":
+			return { kind: actor.kind };
+		case "agent":
+			return typeof actor.sessionId === "string" && SESSION_ID_LIKE.test(actor.sessionId)
+				? { kind: "agent", sessionId: actor.sessionId }
+				: undefined;
+		case "dream":
+			return typeof actor.runId === "string" && actor.runId.length >= 1 && actor.runId.length <= 64
+				? { kind: "dream", runId: actor.runId }
+				: undefined;
+		default:
+			return undefined;
+	}
+}
+
+function viewTarget(target: ChangelogEntry["target"]): MemoryChangelogEntryView["target"] | undefined {
+	if (typeof target !== "object" || target === null) return undefined;
+	if ("slug" in target && typeof target.slug === "string" && isSafeSlug(target.slug)) {
+		return { slug: target.slug };
+	}
+	if ("block" in target && isPinnedBlock(target.block)) return { block: target.block };
+	return undefined;
 }
 
 function noteView(note: Note, backlinks: readonly string[]): ClientResult<"memory/notes/read">["note"] {
@@ -148,10 +207,9 @@ export class MemoryService {
 		this.modelRegistry = options.modelRegistry;
 		this.dreamDeps = options.dreamDeps;
 		this.events.on("changed", (event) => {
-			options.subscriptions.publishConnectionEvent({
-				type: "memory/changed",
-				entry: changelogEntryView(event.entry),
-			});
+			const entry = changelogEntryView(event.entry);
+			if (!entry) return;
+			options.subscriptions.publishConnectionEvent({ type: "memory/changed", entry });
 		});
 		this.events.on("dreamCompleted", (event) => {
 			options.subscriptions.publishConnectionEvent({ type: "memory/dreamCompleted", ...event });
@@ -195,7 +253,9 @@ export class MemoryService {
 
 	/** Project identity for a project-scope changelog entry, resolved from its recorded root. */
 	private projectForEntry(entry: ChangelogEntry): VaultProjectIdentity | undefined {
-		if (entry.scope !== "project" || entry.projectKey === undefined) return undefined;
+		if (entry.scope !== "project" || !isSafeProjectKey(entry.projectKey)) {
+			return undefined;
+		}
 		const cached = this.vaults.get(entry.projectKey);
 		if (cached?.vault.project) return cached.vault.project;
 		const metaPath = getProjectMetaPath(getScopeDir(getVaultRoot(this.agentDir), "project", entry.projectKey));
@@ -356,7 +416,9 @@ export class MemoryService {
 
 	history(params: ClientParams<"memory/history/list">): ClientResult<"memory/history/list"> {
 		return {
-			entries: readChangelog(getVaultRoot(this.agentDir), params.limit ?? 50).map(changelogEntryView),
+			entries: readChangelog(getVaultRoot(this.agentDir), params.limit ?? 50)
+				.map(changelogEntryView)
+				.filter((entry): entry is MemoryChangelogEntryView => entry !== undefined),
 		};
 	}
 
@@ -369,30 +431,48 @@ export class MemoryService {
 		const root = getVaultRoot(this.agentDir);
 		const entry = readChangelog(root).find((candidate) => candidate.id === params.changeId);
 		if (!entry) throw new AppServerError("NOT_FOUND");
-		const before = entry.snapshot === undefined ? undefined : readSnapshot(root, entry.snapshot);
+		const before = typeof entry.snapshot === "string" ? readSnapshot(root, entry.snapshot) : undefined;
 		// "after" is the target's current file; a rename's post-change slug wins.
-		const target = entry.newSlug !== undefined && "slug" in entry.target ? { slug: entry.newSlug } : entry.target;
+		const target =
+			entry.newSlug !== undefined &&
+			typeof entry.target === "object" &&
+			entry.target !== null &&
+			"slug" in entry.target
+				? { slug: entry.newSlug }
+				: entry.target;
 		const scopeDir =
 			entry.scope === "project"
-				? entry.projectKey === undefined
-					? undefined
-					: getScopeDir(root, "project", entry.projectKey)
+				? isSafeProjectKey(entry.projectKey)
+					? getScopeDir(root, "project", entry.projectKey)
+					: undefined
 				: getScopeDir(root, "global");
-		const after =
-			scopeDir === undefined
-				? undefined
-				: readSingleLinkTextFileSync(
-						"slug" in target ? getNotePath(scopeDir, target.slug) : getPinnedPath(scopeDir, target.block),
-					);
+		// Persisted changelog fields only reach the filesystem after validation.
+		const targetPath = (() => {
+			if (scopeDir === undefined || typeof target !== "object" || target === null) return undefined;
+			if ("slug" in target) {
+				return typeof target.slug === "string" && isSafeSlug(target.slug)
+					? getNotePath(scopeDir, target.slug)
+					: undefined;
+			}
+			if ("block" in target) {
+				return isPinnedBlock(target.block) ? getPinnedPath(scopeDir, target.block) : undefined;
+			}
+			return undefined;
+		})();
+		const after = targetPath === undefined ? undefined : readSingleLinkTextFileSync(targetPath);
+		const label =
+			typeof target === "object" && target !== null
+				? "slug" in target
+					? `notes/${String(target.slug)}`
+					: `_pinned/${String(target.block)}`
+				: "unknown";
 		const patch =
 			before === after || (before === undefined && after === undefined)
 				? undefined
-				: generateUnifiedPatch(
-						`${entry.scope}/${"slug" in target ? `notes/${target.slug}` : `_pinned/${target.block}`}.md`,
-						before ?? "",
-						after ?? "",
-					);
-		return { entry: changelogEntryView(entry), ...(patch === undefined ? {} : { patch }) };
+				: generateUnifiedPatch(`${entry.scope}/${label}.md`, before ?? "", after ?? "");
+		const view = changelogEntryView(entry);
+		if (!view) throw new AppServerError("NOT_FOUND");
+		return { entry: view, ...(patch === undefined ? {} : { patch }) };
 	}
 
 	async undo(params: ClientParams<"memory/undo">): Promise<ClientResult<"memory/undo">> {

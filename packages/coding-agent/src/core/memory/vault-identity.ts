@@ -1,9 +1,14 @@
 import { isSafeSlug, type MemoryScope, type MemoryTarget, targetKey } from "./vault-types.ts";
 
+/** Project keys must be single safe path segments: no separators, dots, or escapes. */
+export function isSafeProjectKey(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/u.test(value);
+}
+
 /** Durable identity of a scope: `global` or `projects/<projectKey>`. */
 export function memoryScopeKey(scope: MemoryScope, projectKey?: string): string {
 	if (scope === "global") return "global";
-	if (!projectKey || !/^[A-Za-z0-9_-]{1,128}$/u.test(projectKey)) {
+	if (!projectKey || !isSafeProjectKey(projectKey)) {
 		throw new TypeError("valid projectKey required");
 	}
 	return `projects/${projectKey}`;
