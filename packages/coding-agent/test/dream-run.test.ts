@@ -220,6 +220,25 @@ describe("dream run", () => {
 		expect(new MemoryVault({ agentDir }).readNote("global", "partial")).toBeUndefined();
 	});
 
+	it("runs maintenance with no new candidates", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "empty", "nothing durable");
+		let called = false;
+		const result = await runDream({
+			agentDir,
+			settings,
+			ignoreGate: true,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async () => ({ candidates: [] }),
+			promptAgent: async (ctx) => {
+				called = true;
+				await ctx.callTool("finish_dream", {});
+			},
+		});
+		expect(result.ran).toBe(true);
+		expect(called).toBe(true);
+	});
+
 	it("fails the run when every phase 1 prompt fails", async () => {
 		const agentDir = join(makeTemp(), "agent");
 		writeSession(agentDir, "s1", "remember pnpm");

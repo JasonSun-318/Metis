@@ -5,6 +5,7 @@ import { resolvePath } from "../../../utils/paths.ts";
 import { wrapToolDefinition } from "../../tools/tool-definition-wrapper.ts";
 import { MemoryVault } from "../vault.ts";
 import type { MemoryEvents } from "../vault-events.ts";
+import { memoryUsageKey } from "../vault-identity.ts";
 import { getVaultRoot } from "../vault-paths.ts";
 import type { VaultProjectIdentity } from "../vault-project.ts";
 import { MemorySearchIndex, type SearchHit } from "../vault-search.ts";
@@ -39,6 +40,12 @@ interface DreamEntry {
 }
 
 const EMPTY_RESULT: AgentToolResult<unknown> = { content: [{ type: "text", text: "" }], details: undefined };
+
+/** A SearchHit tagged with the project vault it came from (absent for global hits). */
+export interface DreamSearchHit extends SearchHit {
+	projectKey?: string;
+	projectRoot?: string;
+}
 
 export interface DreamToolset {
 	/** AgentTool list for the real Agent path. */
@@ -106,21 +113,30 @@ export function createDreamToolset(options: {
 		return entry;
 	};
 
-	/** Resolve the project argument (a known projectKey or project root) to its entry. */
-	const projectEntry = (ref: string | undefined): DreamEntry | undefined => {
+	/** Resolve the project argument (a known projectKey or project root) to its map key. */
+	const projectKeyFor = (ref: string | undefined): string | undefined => {
 		if (ref === undefined) {
-			return projects.size === 1 ? entryFor([...projects.keys()][0]!) : undefined;
+			return projects.size === 1 ? [...projects.keys()][0] : undefined;
 		}
 		for (const [key, project] of projects) {
-			if (ref === key || ref === project.root || resolvePath(ref) === resolvePath(project.root)) {
-				return entryFor(key);
+			if (
+				ref === key ||
+				(project.root.length > 0 && (ref === project.root || resolvePath(ref) === resolvePath(project.root)))
+			) {
+				return key;
 			}
 		}
 		return undefined;
 	};
+	const projectEntry = (ref: string | undefined): DreamEntry | undefined => {
+		const key = projectKeyFor(ref);
+		return key === undefined ? undefined : entryFor(key);
+	};
 
 	const knownProjectsText = () =>
-		[...projects.values()].map((project) => `${project.root} (key ${project.projectKey})`).join(", ") || "none";
+		[...projects.values()]
+			.map((project) => (project.root ? `${project.root} (key ${project.projectKey})` : `key ${project.projectKey}`))
+			.join(", ") || "none";
 
 	const searchTool: AgentTool = {
 		name: "memory_search",
@@ -153,13 +169,23 @@ export function createDreamToolset(options: {
 					.tools.get("memory_search")!
 					.execute(_toolCallId, { ...rest, scope: "global" });
 			}
-			// "all": merge global hits with every known project's hits.
+			// "all": merge global hits with project hits. With a project ref, only that project joins.
 			const limit = typeof rest.limit === "number" ? rest.limit : 8;
+			let poolKeys: string[];
+			if (ref !== undefined) {
+				const key = projectKeyFor(ref);
+				if (key === undefined) {
+					return errorResult(`unknown project "${ref}"; known: ${knownProjectsText()}`);
+				}
+				poolKeys = [key];
+			} else {
+				poolKeys = [...projects.keys()];
+			}
 			const seen = new Set<string>();
-			const hits: SearchHit[] = [];
-			const pools: Array<{ entry: DreamEntry; scope: MemoryScope }> = [
+			const hits: DreamSearchHit[] = [];
+			const pools: Array<{ entry: DreamEntry; scope: MemoryScope; key?: string }> = [
 				{ entry: entryFor(""), scope: "global" },
-				...[...projects.keys()].map((key) => ({ entry: entryFor(key), scope: "project" as MemoryScope })),
+				...poolKeys.map((key) => ({ entry: entryFor(key), scope: "project" as MemoryScope, key })),
 			];
 			for (const pool of pools) {
 				for (const hit of pool.entry.search.search(String(rest.query ?? ""), {
@@ -168,10 +194,16 @@ export function createDreamToolset(options: {
 					limit,
 					recordUsage: false,
 				})) {
-					const key = `${hit.scope}/${hit.slug}`;
+					const key = memoryUsageKey(hit.scope, hit.slug, pool.key);
 					if (seen.has(key)) continue;
 					seen.add(key);
-					hits.push(hit);
+					const tagged: DreamSearchHit = { ...hit };
+					if (pool.key !== undefined) {
+						tagged.projectKey = pool.key;
+						const root = projects.get(pool.key)?.root;
+						if (root !== undefined) tagged.projectRoot = root;
+					}
+					hits.push(tagged);
 				}
 			}
 			hits.sort((left, right) => right.score - left.score || left.slug.localeCompare(right.slug));
@@ -180,10 +212,10 @@ export function createDreamToolset(options: {
 				top.length === 0
 					? "No memory notes matched."
 					: `${top.length} memory note(s) matched:\n${top
-							.map(
-								(hit) =>
-									`- [${hit.scope}/${hit.type}] ${hit.slug} — ${hit.description || hit.name} (score ${hit.score.toFixed(2)}, updated ${hit.updated})`,
-							)
+							.map((hit) => {
+								const scopeLabel = hit.projectKey !== undefined ? `project ${hit.projectKey}` : hit.scope;
+								return `- [${scopeLabel}/${hit.type}] ${hit.slug} — ${hit.description || hit.name} (score ${hit.score.toFixed(2)}, updated ${hit.updated})`;
+							})
 							.join("\n")}`;
 			return { content: [{ type: "text", text }], details: { ok: true, hits: top } };
 		},
@@ -220,13 +252,17 @@ export function createDreamToolset(options: {
 			if (scope === "global") {
 				return entryFor("").tools.get("memory_read")!.execute(_toolCallId, { slug, scope: "global" });
 			}
-			// No scope: every known project first, then global (mirrors the session tool order).
-			for (const key of projects.keys()) {
-				try {
-					return await entryFor(key).tools.get("memory_read")!.execute(_toolCallId, { slug, scope: "project" });
-				} catch {
-					// Not in this project; try the next.
-				}
+			// No scope: a slug present in several projects is ambiguous without a project ref.
+			const matches = [...projects.keys()].filter(
+				(key) => entryFor(key).vault.readNote("project", slug) !== undefined,
+			);
+			if (matches.length > 1) {
+				return errorResult(
+					`ambiguous slug "${slug}" — present in projects ${matches.join(", ")}; pass a project argument`,
+				);
+			}
+			if (matches.length === 1) {
+				return entryFor(matches[0]!).tools.get("memory_read")!.execute(_toolCallId, { slug, scope: "project" });
 			}
 			return entryFor("").tools.get("memory_read")!.execute(_toolCallId, { slug, scope: "global" });
 		},
@@ -368,23 +404,24 @@ function buildUserPayload(options: {
 		text: candidate.text,
 		...(candidate.evidence !== undefined ? { evidence: candidate.evidence } : {}),
 		...(candidate.polluted ? { polluted: true } : {}),
-		...(candidate.project !== undefined ? { project: candidate.project.root } : {}),
+		...(candidate.project !== undefined ? { project: candidate.project.root || candidate.project.projectKey } : {}),
 	}));
 	const clipped = clipTail(JSON.stringify(candidateLines, null, "\t"), MAX_CANDIDATES_PAYLOAD_CHARS);
 	sections.push(`# Memory candidates\n${clipped.truncated ? "[Oldest candidates truncated]\n" : ""}${clipped.text}`);
 	if (options.projects.size > 0) {
 		sections.push(
 			`# Projects in scope\n${[...options.projects.values()]
-				.map(
-					(project) =>
-						`- ${project.root} (projectKey ${project.projectKey}) — pass "${project.root}" as the project argument`,
+				.map((project) =>
+					project.root
+						? `- ${project.root} (projectKey ${project.projectKey}) — pass "${project.root}" as the project argument`
+						: `- projectKey ${project.projectKey} (root unknown) — pass "${project.projectKey}" as the project argument`,
 				)
 				.join("\n")}`,
 		);
 	}
 	for (const [key, entry] of options.toolsetEntries) {
 		const scope: MemoryScope = key === "" ? "global" : "project";
-		const label = key === "" ? "global" : `project ${entry.vault.project?.root ?? key}`;
+		const label = key === "" ? "global" : `project ${entry.vault.project?.root || key}`;
 		const index = entry.vault.readIndex(scope);
 		sections.push(`# MEMORY.md — ${label}\n${index.length > 0 ? index : "(empty)"}`);
 		for (const block of scope === "global" ? (["user", "feedback"] as const) : (["project", "active"] as const)) {
@@ -412,6 +449,8 @@ export async function runDreamPhase2(options: {
 	events?: MemoryEvents;
 	/** Extra project identity to expose even without candidates (e.g. the host's current project). */
 	project?: VaultProjectIdentity;
+	/** All project identities to expose (e.g. every project vault on disk); merged with `project`. */
+	projects?: readonly VaultProjectIdentity[];
 	maxUnusedDays?: number;
 	signal?: AbortSignal;
 	timeoutMs?: number;
@@ -425,6 +464,7 @@ export async function runDreamPhase2(options: {
 		if (candidate.project) projects.set(candidate.project.projectKey, candidate.project);
 	}
 	if (options.project) projects.set(options.project.projectKey, options.project);
+	for (const project of options.projects ?? []) projects.set(project.projectKey, project);
 
 	const toolset = createDreamToolset({
 		agentDir: options.agentDir,

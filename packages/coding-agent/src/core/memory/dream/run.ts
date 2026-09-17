@@ -8,6 +8,7 @@ import type { MemoryEvents } from "../vault-events.ts";
 import { pruneSnapshots, readChangelog } from "../vault-history.ts";
 import { memoryUsageKey } from "../vault-identity.ts";
 import { getDreamDir, getVaultRoot } from "../vault-paths.ts";
+import { listStoredVaultProjects } from "../vault-project.ts";
 import { MEMORY_LIMITS } from "../vault-types.ts";
 import { removeUsage } from "../vault-usage.ts";
 import { checkDreamGate, enumerateSessions } from "./gate.ts";
@@ -141,23 +142,22 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 				if (failed.length > 0 && failed.length === phase1.sessions.length) {
 					throw new Error(`all ${failed.length} session extractions failed`);
 				}
-				if (phase1.candidates.length > 0) {
-					const phase2 = await runDreamPhase2({
-						agentDir,
-						runId,
-						candidates: phase1.candidates,
-						promptAgent,
-						signal: runSignal,
-						...(events ? { events } : {}),
-						maxUnusedDays: settings.maxUnusedDays,
-						...(options.phase2TimeoutMs !== undefined ? { timeoutMs: options.phase2TimeoutMs } : {}),
-						...(options.maxWrites !== undefined ? { maxWrites: options.maxWrites } : {}),
-						...(options.activeContextEnabled ? { activeContextEnabled: options.activeContextEnabled } : {}),
-					});
-					if (runSignal.aborted) throw new Error("dream run timed out during phase 2");
-					if (!phase2.finished) {
-						throw new Error("dream consolidation ended without finish_dream");
-					}
+				const phase2 = await runDreamPhase2({
+					agentDir,
+					runId,
+					candidates: phase1.candidates,
+					promptAgent,
+					signal: runSignal,
+					...(events ? { events } : {}),
+					maxUnusedDays: settings.maxUnusedDays,
+					projects: listStoredVaultProjects(root),
+					...(options.phase2TimeoutMs !== undefined ? { timeoutMs: options.phase2TimeoutMs } : {}),
+					...(options.maxWrites !== undefined ? { maxWrites: options.maxWrites } : {}),
+					...(options.activeContextEnabled ? { activeContextEnabled: options.activeContextEnabled } : {}),
+				});
+				if (runSignal.aborted) throw new Error("dream run timed out during phase 2");
+				if (!phase2.finished) {
+					throw new Error("dream consolidation ended without finish_dream");
 				}
 				const counts = countRunChanges(root, runId);
 				await removeUsage(root, counts.deletedKeys);

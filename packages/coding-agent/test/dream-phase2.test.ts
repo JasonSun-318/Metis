@@ -8,7 +8,9 @@ import type { DreamCandidate } from "../src/core/memory/dream/types.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { readChangelog } from "../src/core/memory/vault-history.ts";
 import { getNotesDir, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
 import { readUsage, recordUsage } from "../src/core/memory/vault-usage.ts";
+import { putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const RUN_ID = "run-test-1";
 
@@ -176,6 +178,72 @@ describe("dream phase 2", () => {
 		expect(result.finished).toBe(true);
 		const notePath = join(getNotesDir(getScopeDir(getVaultRoot(agentDir), "project", "abc123")), "convention.md");
 		expect(readFileSync(notePath, "utf8")).toContain("use tabs");
+	});
+
+	it("keeps same-slug results from two projects distinct", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			await putNote(a, "project", "shared", "needle alpha");
+			await putNote(b, "project", "shared", "needle beta");
+			const tools = createDreamToolset({
+				agentDir: f.agentDir,
+				actor: { kind: "dream", runId: RUN_ID },
+				projects: [f.project("a"), f.project("b")],
+			});
+			const result = await tools.call("memory_search", { query: "needle", scope: "all" });
+			const hits = (result.details as { hits: Array<{ projectKey?: string }> }).hits;
+			expect(new Set(hits.map((hit) => hit.projectKey))).toEqual(
+				new Set([f.project("a").projectKey, f.project("b").projectKey]),
+			);
+			const read = await tools.call("memory_read", {
+				slug: "shared",
+				scope: "project",
+				project: f.project("b").projectKey,
+			});
+			expect((read.details as { body: string }).body).toContain("beta");
+			expect(readUsage(a.root)).toEqual({});
+		});
+	});
+
+	it("reports ambiguity when a slug exists in multiple projects without a project ref", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			await putNote(a, "project", "shared", "alpha body");
+			await putNote(b, "project", "shared", "beta body");
+			const tools = createDreamToolset({
+				agentDir: f.agentDir,
+				actor: { kind: "dream", runId: RUN_ID },
+				projects: [f.project("a"), f.project("b")],
+			});
+			const read = await tools.call("memory_read", { slug: "shared" });
+			expect((read.details as { ok: boolean }).ok).toBe(false);
+			const errText = read.content[0]!;
+			expect(errText.type === "text" && errText.text).toContain("ambiguous");
+		});
+	});
+
+	it("exposes stale notes for maintenance with empty candidates", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			await putNote(v, "global", "stale-note", "stale body");
+			const run = await runDreamPhase2({
+				agentDir: f.agentDir,
+				runId: "maint",
+				candidates: [],
+				promptAgent: async (ctx) => {
+					expect(ctx.user).toContain("stale-note");
+					await ctx.callTool("memory_write", { op: "delete", scope: "global", target: { slug: "stale-note" } });
+					await ctx.callTool("finish_dream", {});
+				},
+			});
+			expect(run.finished).toBe(true);
+			expect(v.readNote("global", "stale-note")).toBeUndefined();
+			const undo = await undoMemoryRun({ agentDir: f.agentDir, runId: "maint", actor: { kind: "user" } });
+			expect(undo.skipped).toEqual([]);
+			expect(v.readNote("global", "stale-note")?.body).toBe("stale body");
+		});
 	});
 
 	it("errors when project scope has no resolvable project", async () => {
