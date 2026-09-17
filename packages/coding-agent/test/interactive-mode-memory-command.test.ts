@@ -13,6 +13,7 @@ type MemoryCommandContext = {
 	session: {
 		setAutoMemoryEnabled: (enabled: boolean) => Promise<void>;
 		undoMemoryChange: (prefix?: string) => Promise<{ ok: boolean; error?: string }>;
+		undoMemoryRun: (runId: string) => Promise<{ undone: string[]; skipped: { changeId: string; reason: string }[] }>;
 		getMemorySnapshot: () => MemoryPromptSnapshot | undefined;
 		getMemoryChanges: (limit?: number) => ChangelogEntry[];
 	};
@@ -23,12 +24,20 @@ type MemoryCommandContext = {
 	showWarning: (message: string) => void;
 };
 
+type MemoryEventContext = {
+	isInitialized: boolean;
+	footer: { invalidate: () => void };
+	session: { sessionId: string };
+	showStatus: (message: string) => void;
+};
+
 type InteractiveModePrototype = {
 	handleMemoryCommand(this: MemoryCommandContext, action: string): Promise<void>;
+	handleEvent(this: MemoryEventContext, event: unknown): Promise<void>;
 };
 
 const prototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
-const USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|dream]";
+const USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|undo-run <runId>|dream]";
 
 const snapshot: MemoryPromptSnapshot = {
 	protocol: "protocol",
@@ -62,6 +71,7 @@ function context(
 		session: {
 			setAutoMemoryEnabled: vi.fn(async () => undefined),
 			undoMemoryChange: vi.fn(async () => ({ ok: true })),
+			undoMemoryRun: vi.fn(async () => ({ undone: [], skipped: [] })),
 			getMemorySnapshot: () => snapshot,
 			getMemoryChanges: vi.fn(() => [change]),
 			...overrides,
@@ -173,5 +183,56 @@ describe("InteractiveMode /memory", () => {
 		const ctx = context({}, true, { ran: false, reason: "error", error: "model blew up" });
 		await prototype.handleMemoryCommand.call(ctx, "dream");
 		expect(ctx.showWarning).toHaveBeenCalledWith("Dream failed: model blew up");
+	});
+
+	it("undoes an entire Dream run with an explicit run ID", async () => {
+		const undoMemoryRun = vi.fn(async () => ({ undone: [change.id], skipped: [] }));
+		const ctx = context({ undoMemoryRun });
+		await prototype.handleMemoryCommand.call(ctx, "undo-run run-123");
+		expect(undoMemoryRun).toHaveBeenCalledWith("run-123");
+		expect(ctx.showStatus).toHaveBeenCalledWith(expect.stringContaining("1 change(s) undone"));
+	});
+
+	it("lists skipped reasons and warns on a missing run ID", async () => {
+		const undoMemoryRun = vi.fn(async () => ({
+			undone: [],
+			skipped: [{ changeId: "abc", reason: "file modified after the run" }],
+		}));
+		const ctx = context({ undoMemoryRun });
+		await prototype.handleMemoryCommand.call(ctx, "undo-run run-7");
+		expect(undoMemoryRun).toHaveBeenCalledWith("run-7");
+		expect(ctx.showWarning).toHaveBeenCalledWith("abc: file modified after the run");
+
+		const empty = context();
+		await prototype.handleMemoryCommand.call(empty, "undo-run");
+		expect(empty.showWarning).toHaveBeenCalledWith(USAGE);
+		expect(empty.session.undoMemoryRun).not.toHaveBeenCalled();
+
+		const none = context({ undoMemoryRun: vi.fn(async () => ({ undone: [], skipped: [] })) });
+		await prototype.handleMemoryCommand.call(none, "undo-run run-none");
+		expect(none.showWarning).toHaveBeenCalledWith("No changes found for that Dream run");
+	});
+
+	it("announces external memory writes and skips self, dream, and group noise", async () => {
+		const ctx: MemoryEventContext = {
+			isInitialized: true,
+			footer: { invalidate: vi.fn() },
+			session: { sessionId: "session" },
+			showStatus: vi.fn((_message: string) => undefined),
+		};
+		const emit = (entry: ChangelogEntry) => prototype.handleEvent.call(ctx, { type: "memory_changed", entry });
+
+		const showStatus = vi.mocked(ctx.showStatus);
+		await emit({ ...change, actor: { kind: "user" } });
+		expect(showStatus).toHaveBeenCalledWith("Saved memory: project/architecture · /memory undo 12345678");
+		showStatus.mockClear();
+
+		await emit({ ...change, actor: { kind: "agent", sessionId: "session" } });
+		await emit({ ...change, actor: { kind: "dream", runId: "run-1" } });
+		await emit({ ...change, id: "ffffffff-0000-4000-8000-000000000000", operationId: change.id });
+		expect(showStatus).not.toHaveBeenCalled();
+
+		await emit({ ...change, actor: { kind: "user" }, op: "undo" });
+		expect(showStatus).toHaveBeenCalledWith("Reverted memory: project/architecture");
 	});
 });

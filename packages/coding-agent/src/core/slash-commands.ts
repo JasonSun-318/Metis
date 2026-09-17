@@ -54,7 +54,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{
 		name: "memory",
 		description: "Show or toggle long-term memory",
-		argumentHint: "[on|off|use on|off|contribute on|off|undo [id]|dream]",
+		argumentHint: "[on|off|use on|off|contribute on|off|undo [id]|undo-run <runId>|dream]",
 	},
 	{ name: "schedule", description: "Manage scheduled tasks", modes: ["chat"] },
 	{ name: "mcp", description: "Open MCP server manager" },

@@ -7,7 +7,7 @@ import { AuthStorage } from "./auth-storage.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
 import type { McpConfigurationCoordinator } from "./mcp/configuration.ts";
-import type { MemoryEvents } from "./memory/vault-events.ts";
+import { MemoryEvents } from "./memory/vault-events.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import {
 	DefaultResourceLoader,
@@ -50,6 +50,8 @@ export interface CreateAgentSessionServicesOptions {
 	mcpConfigurationCoordinator?: McpConfigurationCoordinator;
 	modelRegistry?: ModelRegistry;
 	extensionFlagValues?: Map<string, boolean | string>;
+	/** Host-shared vault emitter; sessions and Dream runs in this runtime publish to it. */
+	memoryEvents?: MemoryEvents;
 	resourceLoaderOptions?: Omit<DefaultResourceLoaderOptions, "cwd" | "agentDir" | "settingsManager">;
 	resourceLoaderReloadOptions?: ResourceLoaderReloadOptions;
 }
@@ -99,6 +101,7 @@ export interface AgentSessionServices {
 	modelRegistry: ModelRegistry;
 	resourceLoader: ResourceLoader;
 	diagnostics: AgentSessionRuntimeDiagnostic[];
+	memoryEvents: MemoryEvents;
 	mcpConfigurationCoordinator?: McpConfigurationCoordinator;
 }
 
@@ -216,6 +219,7 @@ export async function createAgentSessionServices(
 			modelRegistry,
 			resourceLoader,
 			diagnostics,
+			memoryEvents: options.memoryEvents ?? new MemoryEvents(),
 			mcpConfigurationCoordinator: options.mcpConfigurationCoordinator,
 		};
 		completed = true;
@@ -256,7 +260,7 @@ export async function createAgentSessionFromServices(
 		onPermissionRequest: options.onPermissionRequest,
 		additionalSystemPrompt: options.additionalSystemPrompt,
 		includeAutoMemory: options.includeAutoMemory,
-		memoryEvents: options.memoryEvents,
+		memoryEvents: options.memoryEvents ?? options.services.memoryEvents,
 		permissionSettingsCeiling: options.permissionSettingsCeiling,
 		workspaceWritePolicy: options.workspaceWritePolicy,
 		unattendedExecution: options.unattendedExecution,

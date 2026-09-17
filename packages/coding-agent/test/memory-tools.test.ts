@@ -90,6 +90,33 @@ describe("memory tools", () => {
 		expect(readDetails.backlinks).toEqual([]);
 	});
 
+	it("labels recalled hits and keeps details.hits intact", async () => {
+		const { byName } = makeCtx();
+		const write = byName.get("memory_write")!;
+		await write.execute(
+			"call-1",
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "vim-pref" },
+				frontmatter: { type: "user", description: "prefers vim" },
+				content: "Uses vim keybindings.",
+			},
+			undefined,
+			undefined,
+			{} as never,
+		);
+		const search = byName.get("memory_search")!;
+		const result = await search.execute("call-2", { query: "vim" }, undefined, undefined, {} as never);
+		expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("Recalled memory") });
+		const details = result.details as MemorySearchDetails;
+		expect(details.ok).toBe(true);
+		expect(details.hits.map((hit) => hit.slug)).toContain("vim-pref");
+
+		const empty = await search.execute("call-3", { query: "zzzznomatch" }, undefined, undefined, {} as never);
+		expect(empty.content[0]).toMatchObject({ type: "text", text: expect.not.stringContaining("Recalled") });
+	});
+
 	it("rejects invalid arguments", async () => {
 		const { byName } = makeCtx();
 		const write = byName.get("memory_write")!;

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
+import { MemoryEvents } from "../src/core/memory/vault-events.ts";
 import { getNotePath, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -70,6 +71,7 @@ describe("AgentSession memory vault", () => {
 		managedCwd?: boolean;
 		useMemory?: boolean;
 		contributeMemory?: boolean;
+		memoryEvents?: MemoryEvents;
 	}) {
 		const model = getModel("anthropic", "claude-sonnet-4-5")!;
 		const agent = new Agent({
@@ -94,6 +96,7 @@ describe("AgentSession memory vault", () => {
 			modelRegistry: ModelRegistry.inMemory(authStorage),
 			resourceLoader: createTestResourceLoader(),
 			...(input.includeAutoMemory !== undefined ? { includeAutoMemory: input.includeAutoMemory } : {}),
+			...(input.memoryEvents ? { memoryEvents: input.memoryEvents } : {}),
 			...(input.unattended
 				? {
 						unattendedExecution: createUnattendedExecutionProfile({
@@ -247,6 +250,64 @@ describe("AgentSession memory vault", () => {
 		} finally {
 			session.dispose();
 		}
+	});
+
+	it("surfaces shared-emitter writes, scopes project events, and unsubscribes on dispose", async () => {
+		const { agentDir, cwd } = layout();
+		const events = new MemoryEvents();
+		const { session, events: sessionEvents } = createSession({ agentDir, cwd, memoryEvents: events });
+		const external = new MemoryVault({
+			agentDir,
+			project: resolveVaultProject(cwd, "user-selected"),
+			events,
+		});
+		external.ensureLayout();
+		try {
+			const before = session.systemPrompt;
+			await external.write(
+				{
+					op: "create",
+					scope: "global",
+					target: { slug: "external-write" },
+					frontmatter: { type: "reference", name: "external-write", description: "outside the session" },
+					content: "body",
+				},
+				{ kind: "user" },
+			);
+			const changed = sessionEvents.filter((event) => event.type === "memory_changed");
+			expect(changed).toHaveLength(1);
+			expect(changed[0]).toMatchObject({ entry: { scope: "global", target: { slug: "external-write" } } });
+			expect(session.systemPrompt).toBe(before);
+
+			mkdirSync(join(cwd, "sibling"), { recursive: true });
+			const otherProject = resolveVaultProject(join(cwd, "sibling"), "user-selected");
+			const otherVault = new MemoryVault({ agentDir, project: otherProject, events });
+			otherVault.ensureLayout();
+			await otherVault.write(
+				{
+					op: "create",
+					scope: "project",
+					target: { slug: "other-project-note" },
+					frontmatter: { type: "project", name: "other-project-note", description: "another project" },
+					content: "body",
+				},
+				{ kind: "user" },
+			);
+			expect(sessionEvents.filter((event) => event.type === "memory_changed")).toHaveLength(1);
+		} finally {
+			session.dispose();
+		}
+		await external.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "after-dispose" },
+				frontmatter: { type: "reference", name: "after-dispose", description: "after dispose" },
+				content: "body",
+			},
+			{ kind: "user" },
+		);
+		expect(sessionEvents.filter((event) => event.type === "memory_changed")).toHaveLength(1);
 	});
 
 	it("approves memory_write under the ask preset without a user prompt", async () => {

@@ -214,7 +214,7 @@ function isExpandable(obj: unknown): obj is Expandable {
 const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dirs", "quit", "debug"]);
 const COMPACTION_WARNING =
 	"Compaction is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
-const MEMORY_COMMAND_USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|dream]";
+const MEMORY_COMMAND_USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|undo-run <runId>|dream]";
 const DREAM_REMOVED_MESSAGE = "Dream was removed. Use /memory.";
 
 /** Human-readable gate outcomes for `/memory dream` and the startup check. */
@@ -1027,7 +1027,7 @@ export class InteractiveMode {
 			(result) => {
 				if (result.ran) {
 					this.showStatus(
-						`Memory consolidated: ${result.added} added, ${result.updated} updated, ${result.deleted} deleted`,
+						`Memory consolidated: ${result.added} added, ${result.updated} updated, ${result.deleted} deleted · /memory undo-run ${result.runId}`,
 					);
 				}
 			},
@@ -3240,6 +3240,22 @@ export class InteractiveMode {
 		}
 
 		this.footer.invalidate();
+
+		if (event.type === "memory_changed") {
+			const entry = event.entry;
+			// Agent's own writes already have tool results; a Dream run ends with its summary.
+			if (
+				entry.actor.kind === "dream" ||
+				(entry.actor.kind === "agent" && entry.actor.sessionId === this.session.sessionId)
+			)
+				return;
+			if (entry.operationId && entry.operationId !== entry.id) return;
+			const target = "slug" in entry.target ? entry.target.slug : `_pinned/${entry.target.block}`;
+			const label = entry.op === "undo" ? "Reverted memory" : "Saved memory";
+			const action = entry.op === "undo" ? "" : ` · /memory undo ${entry.id.slice(0, 8)}`;
+			this.showStatus(`${label}: ${entry.scope}/${target}${action}`);
+			return;
+		}
 
 		switch (event.type) {
 			case "agent_start":
@@ -5668,6 +5684,18 @@ export class InteractiveMode {
 			return;
 		}
 
+		const undoRunMatch = /^undo-run\s+(\S+)$/.exec(action);
+		if (undoRunMatch) {
+			const result = await this.session.undoMemoryRun(undoRunMatch[1]!);
+			if (result.undone.length === 0 && result.skipped.length === 0) {
+				this.showWarning("No changes found for that Dream run");
+				return;
+			}
+			this.showStatus(`${result.undone.length} change(s) undone; ${result.skipped.length} skipped`);
+			for (const item of result.skipped) this.showWarning(`${item.changeId}: ${item.reason}`);
+			return;
+		}
+
 		const undoMatch = /^undo(?:\s+(\S+))?$/.exec(action);
 		if (undoMatch) {
 			const result = await this.session.undoMemoryChange(undoMatch[1]);
@@ -5682,12 +5710,14 @@ export class InteractiveMode {
 				const result = await this.runMemoryDream(true);
 				if (result.ran) {
 					this.showStatus(
-						`Dream complete (run ${result.runId.slice(0, 8)}): ${result.added} added, ${result.updated} updated, ${result.deleted} deleted across ${result.sessions} session(s)`,
+						`Dream complete (run ${result.runId.slice(0, 8)}): ${result.added} added, ${result.updated} updated, ${result.deleted} deleted across ${result.sessions} session(s) · /memory undo-run ${result.runId}`,
 					);
 				} else {
 					this.showWarning(
 						result.reason === "error"
-							? `Dream failed: ${result.error ?? "unknown error"}`
+							? result.runId
+								? `Dream did not finish (run ${result.runId}); saved changes can be undone with /memory undo-run ${result.runId}`
+								: `Dream failed: ${result.error ?? "unknown error"}`
 							: `Dream did not run: ${DREAM_GATE_TEXT[result.reason]}`,
 					);
 				}
@@ -5760,6 +5790,7 @@ export class InteractiveMode {
 			promptAgent: createDreamPromptAgent(llm),
 			ignoreGate,
 			activeContextEnabled: () => settingsManager.getMemorySettings().activeContext === true,
+			events: services.memoryEvents,
 		});
 	}
 

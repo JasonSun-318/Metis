@@ -115,11 +115,12 @@ import {
 } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import { createMcpToolDefinitions, type McpManager } from "./mcp/index.ts";
-import { MemoryVault } from "./memory/vault.ts";
+import { MemoryVault, type UndoRunResult } from "./memory/vault.ts";
 import type { MemoryEvents } from "./memory/vault-events.ts";
 import { type ChangelogEntry, readChangelog } from "./memory/vault-history.ts";
 import { getScopeDir, getVaultRoot } from "./memory/vault-paths.ts";
 import { resolveVaultProject, type VaultProjectIdentity } from "./memory/vault-project.ts";
+import { undoMemoryRun as undoVaultMemoryRun } from "./memory/vault-run-undo.ts";
 import { MemorySearchIndex } from "./memory/vault-search.ts";
 import { buildMemoryPromptSnapshot, type MemoryPromptSnapshot } from "./memory/vault-snapshot.ts";
 import { createMemoryToolDefinitions, MEMORY_TOOL_NAMES } from "./memory/vault-tools.ts";
@@ -2477,6 +2478,17 @@ export class AgentSession {
 			return { ok: false, error: prefix ? `no change matching "${prefix}"` : "no changes to undo" };
 		}
 		return vault.undo(entry.id, this._memoryActor());
+	}
+
+	/** Roll back an entire Dream run by id across every scope it touched. */
+	async undoMemoryRun(runId: string): Promise<UndoRunResult> {
+		if (!this._agentDir) return { undone: [], skipped: [] };
+		return undoVaultMemoryRun({
+			agentDir: this._agentDir,
+			runId,
+			actor: { kind: "user" },
+			events: this._memoryEvents,
+		});
 	}
 
 	private _memoryActor(): MemoryActor {

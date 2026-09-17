@@ -136,7 +136,7 @@ function createSearchTool(ctx: MemoryToolContext): ToolDefinition {
 			const text =
 				hits.length === 0
 					? "No memory notes matched."
-					: `${hits.length} memory note(s) matched:\n${hits.map(formatHit).join("\n")}`;
+					: `Recalled memory: ${hits.length} note(s) matched:\n${hits.map(formatHit).join("\n")}`;
 			return toolText<MemorySearchDetails>(text, { ok: true, hits });
 		},
 	});

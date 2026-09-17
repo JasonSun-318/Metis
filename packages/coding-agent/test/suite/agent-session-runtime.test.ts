@@ -23,6 +23,7 @@ import {
 	QueuedTurnBusyError,
 } from "../../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../../src/core/auth-storage.ts";
+import { MemoryEvents } from "../../src/core/memory/vault-events.ts";
 import { QueuedTurnConflictError } from "../../src/core/queued-turn-queue.ts";
 import {
 	identifySubmitPromptRequest,
@@ -3145,5 +3146,33 @@ describe("AgentSessionRuntime characterization", () => {
 
 		expect(runtime.session.model?.id).toBe("faux-2");
 		expect(runtime.session.thinkingLevel).toBe("off");
+	});
+
+	it("wires the shared memory emitter into sessions by default and honors an override", async () => {
+		const tempDir = join(tmpdir(), `metis-runtime-suite-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		mkdirSync(tempDir, { recursive: true });
+		cleanups.push(() => rmSync(tempDir, { recursive: true, force: true }));
+		const services = await createAgentSessionServices({
+			cwd: tempDir,
+			agentDir: join(tempDir, "agent"),
+			resourceLoaderOptions: { noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true },
+		});
+		expect(services.memoryEvents).toBeInstanceOf(MemoryEvents);
+		const session = (
+			await createAgentSessionFromServices({ services, sessionManager: SessionManager.inMemory(tempDir) })
+		).session;
+		expect((session as unknown as { _memoryEvents?: MemoryEvents })._memoryEvents).toBe(services.memoryEvents);
+		session.dispose();
+
+		const override = new MemoryEvents();
+		const explicit = (
+			await createAgentSessionFromServices({
+				services,
+				sessionManager: SessionManager.inMemory(tempDir),
+				memoryEvents: override,
+			})
+		).session;
+		expect((explicit as unknown as { _memoryEvents?: MemoryEvents })._memoryEvents).toBe(override);
+		explicit.dispose();
 	});
 });
