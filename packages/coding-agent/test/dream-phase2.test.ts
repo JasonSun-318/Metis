@@ -1,0 +1,195 @@
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AgentToolResult } from "@metis/agent-core";
+import { afterEach, describe, expect, it } from "vitest";
+import { createDreamToolset, DREAM_MAX_WRITES, runDreamPhase2 } from "../src/core/memory/dream/phase2.ts";
+import type { DreamCandidate } from "../src/core/memory/dream/types.ts";
+import { MemoryVault } from "../src/core/memory/vault.ts";
+import { readChangelog } from "../src/core/memory/vault-history.ts";
+import { getNotesDir, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { readUsage, recordUsage } from "../src/core/memory/vault-usage.ts";
+
+const RUN_ID = "run-test-1";
+
+describe("dream phase 2", () => {
+	const tempDirs: string[] = [];
+	const makeTemp = (): string => {
+		const dir = mkdtempSync(join(tmpdir(), "metis-dream-p2-"));
+		tempDirs.push(dir);
+		return dir;
+	};
+
+	const ctxToolResults: AgentToolResult<unknown>[] = [];
+
+	afterEach(() => {
+		ctxToolResults.splice(0);
+		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	function dreamRun(agentDir: string, candidates: DreamCandidate[], script: string[]) {
+		return runDreamPhase2({
+			agentDir,
+			runId: RUN_ID,
+			candidates,
+			promptAgent: async (ctx) => {
+				for (const line of script) {
+					const { name, args } = JSON.parse(line) as { name: string; args: unknown };
+					const result = await ctx.callTool(name, args);
+					ctxToolResults.push(result);
+				}
+			},
+		});
+	}
+
+	const call = (name: string, args: unknown) => JSON.stringify({ name, args });
+
+	it("creates, edits pinned, and deletes notes with the run's dream actor", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const vault = new MemoryVault({ agentDir });
+		vault.ensureLayout();
+		await vault.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "stale-note" },
+				frontmatter: { type: "reference", description: "old" },
+				content: "old content",
+			},
+			{ kind: "user" },
+		);
+
+		const result = await dreamRun(
+			agentDir,
+			[],
+			[
+				call("memory_write", {
+					op: "create",
+					scope: "global",
+					target: { slug: "pnpm-only" },
+					frontmatter: { type: "feedback", description: "only pnpm" },
+					content: "**Why:** lockfile\n**How to apply:** use pnpm",
+				}),
+				call("memory_write", {
+					op: "append",
+					scope: "global",
+					target: { block: "user" },
+					content: "Prefers pnpm.",
+				}),
+				call("memory_write", { op: "delete", scope: "global", target: { slug: "stale-note" } }),
+				call("finish_dream", {}),
+			],
+		);
+		expect(result.finished).toBe(true);
+		expect(result.writes).toBe(3);
+
+		const global = join(getNotesDir(getScopeDir(getVaultRoot(agentDir), "global")), "pnpm-only.md");
+		expect(readFileSync(global, "utf8")).toContain("pnpm");
+		expect(vault.readPinned("global", "user")).toContain("Prefers pnpm.");
+
+		const entries = readChangelog(getVaultRoot(agentDir)).filter((entry) => entry.actor.kind === "dream");
+		expect(entries.length).toBeGreaterThanOrEqual(3);
+		for (const entry of entries) {
+			expect(entry.actor).toEqual({ kind: "dream", runId: RUN_ID });
+		}
+		expect(entries.some((entry) => entry.op === "create")).toBe(true);
+		expect(entries.some((entry) => entry.op === "delete")).toBe(true);
+	});
+
+	it("refuses writes beyond the per-run budget", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		new MemoryVault({ agentDir }).ensureLayout();
+		const toolset = createDreamToolset({ agentDir, actor: { kind: "dream", runId: RUN_ID } });
+		for (let i = 0; i < DREAM_MAX_WRITES; i++) {
+			const result = await toolset.call("memory_write", {
+				op: "create",
+				scope: "global",
+				target: { slug: `note-${i}` },
+				frontmatter: { type: "reference", description: `n${i}` },
+				content: "x",
+			});
+			expect((result.details as { ok: boolean }).ok).toBe(true);
+		}
+		const over = await toolset.call("memory_write", {
+			op: "create",
+			scope: "global",
+			target: { slug: "note-over" },
+			frontmatter: { type: "reference", description: "n" },
+			content: "x",
+		});
+		expect((over.details as { ok: boolean }).ok).toBe(false);
+		const overText = over.content[0]!;
+		expect(overText.type === "text" && overText.text).toContain("finish_dream");
+		expect(toolset.writes).toBe(DREAM_MAX_WRITES);
+	});
+
+	it("memory_search never records usage", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const vault = new MemoryVault({ agentDir });
+		vault.ensureLayout();
+		await vault.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "pnpm-only" },
+				frontmatter: { type: "feedback", description: "only pnpm" },
+				content: "use pnpm",
+			},
+			{ kind: "user" },
+		);
+		const toolset = createDreamToolset({ agentDir, actor: { kind: "dream", runId: RUN_ID } });
+		// Seed an unrelated usage row; a search that recorded usage would grow the map.
+		await recordUsage(getVaultRoot(agentDir), ["global/other"]);
+		const before = readUsage(getVaultRoot(agentDir));
+		const result = await toolset.call("memory_search", { query: "pnpm" });
+		expect((result.details as { ok: boolean }).ok).toBe(true);
+		// Usage writes are fire-and-forget; give any stray write a chance to land.
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		expect(readUsage(getVaultRoot(agentDir))).toEqual(before);
+	});
+
+	it("routes project scope to the candidate's project vault", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const projectRoot = makeTemp();
+		const candidate: DreamCandidate = {
+			sessionId: "s1",
+			scope: "project",
+			text: "Repo convention",
+			polluted: false,
+			project: { root: projectRoot, projectKey: "abc123", source: "cwd" },
+		};
+		const result = await dreamRun(
+			agentDir,
+			[candidate],
+			[
+				call("memory_write", {
+					op: "create",
+					scope: "project",
+					project: projectRoot,
+					target: { slug: "convention" },
+					frontmatter: { type: "project", description: "conv" },
+					content: "use tabs",
+				}),
+				call("finish_dream", {}),
+			],
+		);
+		expect(result.finished).toBe(true);
+		const notePath = join(getNotesDir(getScopeDir(getVaultRoot(agentDir), "project", "abc123")), "convention.md");
+		expect(readFileSync(notePath, "utf8")).toContain("use tabs");
+	});
+
+	it("errors when project scope has no resolvable project", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const toolset = createDreamToolset({ agentDir, actor: { kind: "dream", runId: RUN_ID } });
+		const result = await toolset.call("memory_write", {
+			op: "create",
+			scope: "project",
+			target: { slug: "x" },
+			frontmatter: { type: "project", description: "x" },
+			content: "x",
+		});
+		expect((result.details as { ok: boolean }).ok).toBe(false);
+		const errText = result.content[0]!;
+		expect(errText.type === "text" && errText.text).toContain("project");
+	});
+});

@@ -166,6 +166,14 @@ const MAX_SESSION_UNREAD_STATE_BYTES = 1024;
 export interface SessionDisplayMetadata {
 	readonly sessionId: string;
 	readonly name?: string;
+	/**
+	 * Per-session memory controls persisted next to the journal rather than in
+	 * it: catalog scans, the dream gate, and session open all read this file
+	 * cheaply, and a flag flip must not dirty the journal fingerprint. Flags are
+	 * per-installation; forked/imported sessions revert to the enabled default.
+	 */
+	readonly useMemory?: boolean;
+	readonly contributeMemory?: boolean;
 }
 
 export function getSessionDisplayMetadataPath(sessionFile: string): string {
@@ -202,7 +210,12 @@ export function readSessionDisplayMetadata(sessionFile: string): SessionDisplayM
 		if (value.name !== null && typeof value.name !== "string") return undefined;
 		const name = typeof value.name === "string" ? value.name.trim() : "";
 		if (Buffer.byteLength(name, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES / 2) return undefined;
-		return { sessionId: value.sessionId, ...(name ? { name } : {}) };
+		return {
+			sessionId: value.sessionId,
+			...(name ? { name } : {}),
+			...(value.useMemory === false ? { useMemory: false } : {}),
+			...(value.contributeMemory === false ? { contributeMemory: false } : {}),
+		};
 	} catch {
 		return undefined;
 	}
@@ -245,7 +258,13 @@ function removeSessionDisplayMetadata(sessionFile: string): void {
 function writeSessionDisplayMetadata(sessionFile: string, metadata: SessionDisplayMetadata): void {
 	assertValidSessionId(metadata.sessionId);
 	const name = metadata.name?.replace(/[\r\n]+/g, " ").trim();
-	const contents = `${JSON.stringify({ version: 1, sessionId: metadata.sessionId, name: name || null })}\n`;
+	const contents = `${JSON.stringify({
+		version: 1,
+		sessionId: metadata.sessionId,
+		name: name || null,
+		...(metadata.useMemory === false ? { useMemory: false } : {}),
+		...(metadata.contributeMemory === false ? { contributeMemory: false } : {}),
+	})}\n`;
 	if (Buffer.byteLength(contents, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES) {
 		throw new Error("Session display metadata exceeds its size limit");
 	}
@@ -830,6 +849,10 @@ export interface NewSessionOptions {
 	permissionPreset?: PermissionPreset;
 	agent?: SessionHeader["agent"];
 	scheduled?: SessionHeader["scheduled"];
+	/** Opt the session out of the memory snapshot and memory tools. Defaults to true. */
+	useMemory?: boolean;
+	/** Opt the session out of memory writes and dream mining. Defaults to true. */
+	contributeMemory?: boolean;
 }
 
 export interface ImportSessionOptions {
@@ -1045,6 +1068,8 @@ export type ReadonlySessionManager = Pick<
 	| "getCwdOrigin"
 	| "getPermissionPreset"
 	| "getPermissionSettings"
+	| "getUseMemory"
+	| "getContributeMemory"
 	| "getAdditionalDirectories"
 	| "getWorkspaceRoots"
 	| "getDurableJournalSnapshot"
@@ -1086,6 +1111,8 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getCwdOrigin: () => manager.getCwdOrigin(),
 		getPermissionPreset: () => manager.getPermissionPreset(),
 		getPermissionSettings: () => manager.getPermissionSettings(),
+		getUseMemory: () => manager.getUseMemory(),
+		getContributeMemory: () => manager.getContributeMemory(),
 		getAdditionalDirectories: () => manager.getAdditionalDirectories(),
 		getWorkspaceRoots: () => manager.getWorkspaceRoots(),
 		getDurableJournalSnapshot: () => manager.getDurableJournalSnapshot(),
@@ -2059,7 +2086,11 @@ export function loadEntriesFromFile(filePath: string): FileEntry[] {
 const SESSION_READ_BUFFER_BYTES = 64 * 1024;
 export const MAX_SESSION_RECORD_BYTES = 64 * 1024 * 1024;
 
-function readSessionHeaderInfo(filePath: string): { header: SessionHeader; mtimeMs: number } | null {
+/**
+ * Read only the first line (session header) plus mtime of a session file.
+ * Cheap enough for cross-project enumeration of thousands of sessions.
+ */
+export function readSessionHeaderInfo(filePath: string): { header: SessionHeader; mtimeMs: number } | null {
 	try {
 		const before = lstatSync(filePath);
 		if (!before.isFile() || before.nlink !== 1) return null;
@@ -2934,6 +2965,8 @@ export class SessionManager {
 	private journal?: SessionJournal<FileEntry>;
 	private lease?: SessionLease;
 	private closed = false;
+	private useMemory = true;
+	private contributeMemory = true;
 
 	private constructor(
 		cwd: string,
@@ -3046,6 +3079,9 @@ export class SessionManager {
 			state = buildManagedSessionState([header]);
 		}
 		this._replaceManagedState(state);
+		if (options?.useMemory === false || options?.contributeMemory === false) {
+			this.setMemoryFlags({ useMemory: options.useMemory, contributeMemory: options.contributeMemory });
+		}
 		return this.sessionFile;
 	}
 
@@ -3076,6 +3112,9 @@ export class SessionManager {
 		this.leafId = state.leafId;
 		this.journal = state.journal;
 		this.lease = state.lease;
+		const metadata = state.storagePath ? readSessionDisplayMetadata(state.storagePath) : undefined;
+		this.useMemory = metadata?.useMemory !== false;
+		this.contributeMemory = metadata?.contributeMemory !== false;
 	}
 
 	private _detachManagedState(): ManagedSessionState {
@@ -3545,15 +3584,57 @@ export class SessionManager {
 		this._appendEntry(entry);
 		if (this.persist && this.storagePath) {
 			try {
-				writeSessionDisplayMetadata(this.storagePath, {
-					sessionId: this.sessionId,
-					...(sanitizedName ? { name: sanitizedName } : {}),
-				});
+				writeSessionDisplayMetadata(this.storagePath, this._sessionDisplayMetadata(sanitizedName || undefined));
 			} catch {
 				// The journal is authoritative; a missing derived cache is rebuilt on the next safe catalog scan.
 			}
 		}
 		return entry.id;
+	}
+
+	/** Sidecar contents carrying the session name plus the memory flag state. */
+	private _sessionDisplayMetadata(name = this.getSessionName()): SessionDisplayMetadata {
+		return {
+			sessionId: this.sessionId,
+			...(name ? { name } : {}),
+			...(this.useMemory === false ? { useMemory: false } : {}),
+			...(this.contributeMemory === false ? { contributeMemory: false } : {}),
+		};
+	}
+
+	getUseMemory(): boolean {
+		return this.useMemory;
+	}
+
+	getContributeMemory(): boolean {
+		return this.contributeMemory;
+	}
+
+	/**
+	 * Persist per-session memory controls in the display-metadata sidecar. The
+	 * journal stays untouched so catalog fingerprints do not churn; the write is
+	 * atomic and a failure leaves the in-memory state unchanged.
+	 */
+	setMemoryFlags(flags: { useMemory?: boolean; contributeMemory?: boolean }): {
+		useMemory: boolean;
+		contributeMemory: boolean;
+	} {
+		this._assertOpen();
+		const useMemory = flags.useMemory ?? this.useMemory;
+		const contributeMemory = flags.contributeMemory ?? this.contributeMemory;
+		const previous = { useMemory: this.useMemory, contributeMemory: this.contributeMemory };
+		this.useMemory = useMemory;
+		this.contributeMemory = contributeMemory;
+		try {
+			if (this.persist && this.storagePath) {
+				writeSessionDisplayMetadata(this.storagePath, this._sessionDisplayMetadata());
+			}
+		} catch (error) {
+			this.useMemory = previous.useMemory;
+			this.contributeMemory = previous.contributeMemory;
+			throw error;
+		}
+		return { useMemory, contributeMemory };
 	}
 
 	/** Get the current session name from the latest session_info entry, if any. */

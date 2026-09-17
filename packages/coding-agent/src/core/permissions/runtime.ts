@@ -75,6 +75,8 @@ export interface ToolAuthorizationRuntimeOptions {
 	readonly policy?: PermissionPolicy;
 	readonly projectRules?: ProjectPermissionRuleMatcher;
 	readonly projectPath?: string;
+	/** Engine-managed roots (e.g. the memory vault) builtin memory tools may write under. */
+	readonly managedMemoryRoots?: readonly string[];
 	readonly reviewerFactory?: () => PermissionReviewer;
 	readonly grants?: ExecutionGrantStore;
 	readonly audit?: PermissionAuditWriter;
@@ -163,6 +165,7 @@ export class ToolAuthorizationRuntime {
 	private readonly now: () => number;
 	private readonly createEventId: () => string;
 	private readonly projectPath: string | undefined;
+	private readonly managedMemoryRoots: readonly string[];
 	private reviewTail: Promise<void> = Promise.resolve();
 	private reviewer: PermissionReviewer | undefined;
 	private epoch = 0;
@@ -180,6 +183,12 @@ export class ToolAuthorizationRuntime {
 		this.projectPath = options.projectPath
 			? canonicalizeActionPath(options.projectPath, options.projectPath)
 			: undefined;
+		// Action paths are canonicalized during normalization; keep the managed
+		// roots on the same footing or containment checks break under symlinked
+		// prefixes (e.g. macOS /var -> /private/var).
+		this.managedMemoryRoots = Object.freeze(
+			(options.managedMemoryRoots ?? []).map((root) => canonicalizeActionPath(root, root)),
+		);
 	}
 
 	get activeReview():
@@ -231,6 +240,7 @@ export class ToolAuthorizationRuntime {
 			action: snapshot.action,
 			settings: snapshot.settings,
 			autoCommandRules: snapshot.autoCommandRules,
+			managedMemoryRoots: this.managedMemoryRoots,
 		} satisfies PermissionPolicyInput);
 		if (
 			decision.kind !== "deny" &&

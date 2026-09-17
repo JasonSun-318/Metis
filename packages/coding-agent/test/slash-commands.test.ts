@@ -11,9 +11,9 @@ describe("mode-scoped built-in slash commands", () => {
 		}
 	});
 
-	it("exposes /memory engine hint and drops /dream", () => {
+	it("exposes /memory undo hint and drops /dream", () => {
 		const memory = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "memory");
-		expect(memory?.argumentHint).toBe("[on|off|engine …]");
+		expect(memory?.argumentHint).toBe("[on|off|use on|off|contribute on|off|undo [id]|dream]");
 		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === "dream")).toBe(false);
 	});
 });

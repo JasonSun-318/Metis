@@ -1023,11 +1023,6 @@ export class AgentSessionRuntime {
 			errors.push(error);
 		}
 		try {
-			await session.disposeMemoryRuntime();
-		} catch (error) {
-			errors.push(error);
-		}
-		try {
 			await emitSessionShutdownEvent(session.extensionRunner, {
 				type: "session_shutdown",
 				reason,
@@ -1497,11 +1492,6 @@ export class AgentSessionRuntime {
 		}
 		if (!this.shutdownAttempted) {
 			this.shutdownAttempted = true;
-			try {
-				await session.disposeMemoryRuntime();
-			} catch (error) {
-				errors.push(error);
-			}
 			try {
 				await emitSessionShutdownEvent(session.extensionRunner, {
 					type: "session_shutdown",

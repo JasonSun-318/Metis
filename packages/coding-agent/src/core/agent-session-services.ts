@@ -7,6 +7,7 @@ import { AuthStorage } from "./auth-storage.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
 import type { McpConfigurationCoordinator } from "./mcp/configuration.ts";
+import type { MemoryEvents } from "./memory/vault-events.ts";
 import { ModelRegistry } from "./model-registry.ts";
 import {
 	DefaultResourceLoader,
@@ -76,6 +77,8 @@ export interface CreateAgentSessionFromServicesOptions {
 	onPermissionRequest?: CreateAgentSessionOptions["onPermissionRequest"];
 	additionalSystemPrompt?: string | (() => string | undefined);
 	includeAutoMemory?: boolean;
+	/** Host-shared vault emitter so host-side memory services observe every write. */
+	memoryEvents?: MemoryEvents;
 	permissionSettingsCeiling?: CreateAgentSessionOptions["permissionSettingsCeiling"];
 	workspaceWritePolicy?: CreateAgentSessionOptions["workspaceWritePolicy"];
 	/** Host-only fail-closed profile for unattended runs. */
@@ -253,6 +256,7 @@ export async function createAgentSessionFromServices(
 		onPermissionRequest: options.onPermissionRequest,
 		additionalSystemPrompt: options.additionalSystemPrompt,
 		includeAutoMemory: options.includeAutoMemory,
+		memoryEvents: options.memoryEvents,
 		permissionSettingsCeiling: options.permissionSettingsCeiling,
 		workspaceWritePolicy: options.workspaceWritePolicy,
 		unattendedExecution: options.unattendedExecution,

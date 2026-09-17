@@ -2,8 +2,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getAutoMemoryRoot } from "../src/core/auto-memory.ts";
 import { isAutoMemoryFsPath } from "../src/core/memory/memory-path-guard.ts";
+import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { createEditTool, createWriteTool } from "../src/core/tools/index.ts";
 
 describe("memory path guard", () => {
@@ -20,7 +20,7 @@ describe("memory path guard", () => {
 
 	it("detects paths under the auto-memory root after resolving ..", () => {
 		const agentDir = join(makeTemp(), "agent");
-		const memoryRoot = getAutoMemoryRoot(agentDir);
+		const memoryRoot = getVaultRoot(agentDir);
 		const outside = join(makeTemp(), "outside.txt");
 
 		expect(isAutoMemoryFsPath(agentDir, outside)).toBe(false);
@@ -35,7 +35,7 @@ describe("memory path guard", () => {
 		const root = makeTemp();
 		const agentDir = join(root, "agent");
 		const cwd = join(root, "workspace");
-		const memoryRoot = getAutoMemoryRoot(agentDir);
+		const memoryRoot = getVaultRoot(agentDir);
 		mkdirSync(memoryRoot, { recursive: true });
 		mkdirSync(cwd, { recursive: true });
 		const memoryFile = join(memoryRoot, "MEMORY.md");

@@ -7,7 +7,7 @@ import { type AgentMode, DEFAULT_AGENT_MODE } from "./agent-mode.ts";
 import { AgentSession, type AgentSessionConfig } from "./agent-session.ts";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.ts";
 import { AuthStorage } from "./auth-storage.ts";
-import { prepareAutoMemoryWorkspace } from "./auto-memory.ts";
+import { ensureVaultLayout } from "./auto-memory.ts";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.ts";
 import type { ExtensionRunner, LoadExtensionsResult, SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { type McpConfigurationCoordinator, McpManager } from "./mcp/index.ts";
@@ -103,8 +103,10 @@ export interface CreateAgentSessionOptions {
 	sessionManager?: SessionManager;
 	/** @internal Host-owned prompt suffix for parent/child runtime profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
-	/** @internal Disable automatic memory context and dream writes for isolated runtimes. */
+	/** @internal Disable the memory vault snapshot and memory tools for isolated runtimes. */
 	includeAutoMemory?: boolean;
+	/** @internal Host-shared vault emitter; session vault writes broadcast through it. */
+	memoryEvents?: AgentSessionConfig["memoryEvents"];
 	/** @internal Host-owned monotonic permission ceiling for a child runtime. */
 	permissionSettingsCeiling?: AgentSessionConfig["permissionSettingsCeiling"];
 	/** @internal Host-owned workspace write ceiling for a child runtime. */
@@ -339,7 +341,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 	let completed = false;
 
 	try {
-		await prepareAutoMemoryWorkspace(agentDir, cwd);
+		ensureVaultLayout(agentDir);
 		if (!mcpDisabled) {
 			mcpManager ??= await McpManager.create({
 				settingsManager,
@@ -575,6 +577,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			requestPermissionApproval: createActionPermissionRequester(options.onPermissionRequest),
 			additionalSystemPrompt: options.additionalSystemPrompt,
 			includeAutoMemory: options.includeAutoMemory,
+			memoryEvents: options.memoryEvents,
 			permissionSettingsCeiling: options.permissionSettingsCeiling,
 			workspaceWritePolicy: options.workspaceWritePolicy,
 			unattendedExecution: options.unattendedExecution,

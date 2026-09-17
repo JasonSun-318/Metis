@@ -82,7 +82,15 @@ import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/htt
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import type { McpCredentialChange } from "../../core/mcp/configuration.ts";
 import type { McpManager, McpServerStatus } from "../../core/mcp/manager.ts";
-import type { MemoryExtractRun } from "../../core/memory/memory-types.ts";
+import {
+	createDreamPromptAgent,
+	createDreamPromptFn,
+	type DreamLlmDeps,
+	resolveDreamModel,
+} from "../../core/memory/dream/llm.ts";
+import { runDream } from "../../core/memory/dream/run.ts";
+import { type DreamGateReason, type DreamRunResult, resolveDreamSettings } from "../../core/memory/dream/types.ts";
+import type { ChangelogEntry } from "../../core/memory/vault-history.ts";
 import { createCompactionSummaryMessage } from "../../core/messages.ts";
 import { defaultModelPerProvider, findExactModelReferenceMatch, resolveModelScope } from "../../core/model-resolver.ts";
 import { DefaultPackageManager } from "../../core/package-manager.ts";
@@ -205,18 +213,24 @@ function isExpandable(obj: unknown): obj is Expandable {
 
 const COMPACTION_SAFE_COMMANDS = new Set(["copy", "session", "hotkeys", "dirs", "quit", "debug"]);
 const COMPACTION_WARNING =
-	"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
-const MEMORY_COMMAND_USAGE = "Usage: /memory [on|off|engine …]";
+	"Compaction is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
+const MEMORY_COMMAND_USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|dream]";
 const DREAM_REMOVED_MESSAGE = "Dream was removed. Use /memory.";
 
-function formatMemoryExtractDuration(durationMs: number): string {
-	return durationMs < 1000 ? `${durationMs}ms` : `${(durationMs / 1000).toFixed(1)}s`;
-}
+/** Human-readable gate outcomes for `/memory dream` and the startup check. */
+const DREAM_GATE_TEXT: Record<DreamGateReason | "error", string> = {
+	disabled: "memory consolidation is disabled",
+	"too-soon": "the last dream ran too recently",
+	"insufficient-sessions": "not enough unprocessed sessions",
+	"no-model": "no credentialed model is available",
+	locked: "the vault is locked by another memory operation",
+	error: "the run failed",
+};
 
-function formatMemoryExtractHistoryLine(record: MemoryExtractRun): string {
-	const symbol = record.status === "success" ? "✓" : record.status === "failed" ? "✗" : "–";
-	const reason = record.reason ? ` · ${record.reason.slice(0, 160)}` : "";
-	return `${record.startedAt} · ${record.trigger} · ${symbol} ${record.status}${reason}`;
+function formatMemoryChangeLine(entry: ChangelogEntry): string {
+	const target = "slug" in entry.target ? entry.target.slug : `pinned:${entry.target.block}`;
+	const undone = entry.undoneBy ? " · undone" : "";
+	return `${entry.id.slice(0, 8)} · ${entry.ts} · ${entry.op} · ${entry.scope} · ${target}${undone}`;
 }
 
 const SCHEDULE_WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -1007,6 +1021,18 @@ export class InteractiveMode {
 				this.showWarning(warning);
 			}
 		});
+
+		// One gated dream check in the background; silent unless it actually runs.
+		void this.runMemoryDream(false).then(
+			(result) => {
+				if (result.ran) {
+					this.showStatus(
+						`Memory consolidated: ${result.added} added, ${result.updated} updated, ${result.deleted} deleted`,
+					);
+				}
+			},
+			() => {},
+		);
 
 		// Show startup warnings
 		const { migratedProviders, modelFallbackMessage, initialMessage, initialImages, initialMessages } = this.options;
@@ -5614,7 +5640,7 @@ export class InteractiveMode {
 		if (action === "on" || action === "off") {
 			const enabled = action === "on";
 			try {
-				await this.session.updateMemorySettings({ autoMemoryEnabled: enabled });
+				await this.session.setAutoMemoryEnabled(enabled);
 			} catch (error) {
 				this.showWarning(error instanceof Error ? error.message : String(error));
 				return;
@@ -5623,20 +5649,51 @@ export class InteractiveMode {
 			return;
 		}
 
-		const engineMatch = /^engine(?:\s+(\S+))?$/.exec(action);
-		if (engineMatch) {
-			const engine = engineMatch[1];
-			if (engine !== "index" && engine !== "extract") {
-				this.showWarning(MEMORY_COMMAND_USAGE);
-				return;
-			}
+		const flagMatch = /^(use|contribute)\s+(on|off)$/.exec(action);
+		if (flagMatch) {
+			const enabled = flagMatch[2] === "on";
 			try {
-				await this.session.updateMemorySettings({ memoryEngine: engine });
+				await this.session.setMemoryFlags(
+					flagMatch[1] === "use" ? { useMemory: enabled } : { contributeMemory: enabled },
+				);
 			} catch (error) {
 				this.showWarning(error instanceof Error ? error.message : String(error));
 				return;
 			}
-			this.showStatus(`Memory engine set to ${engine}`);
+			this.showStatus(
+				flagMatch[1] === "use"
+					? `Session memory use ${enabled ? "enabled" : "disabled"}`
+					: `Session memory contribution ${enabled ? "enabled" : "disabled"}`,
+			);
+			return;
+		}
+
+		const undoMatch = /^undo(?:\s+(\S+))?$/.exec(action);
+		if (undoMatch) {
+			const result = await this.session.undoMemoryChange(undoMatch[1]);
+			if (result.ok) this.showStatus("Undid the memory change");
+			else this.showWarning(result.error ?? "Nothing to undo");
+			return;
+		}
+
+		if (action === "dream") {
+			this.showStatus("Dreaming over recent sessions…");
+			try {
+				const result = await this.runMemoryDream(true);
+				if (result.ran) {
+					this.showStatus(
+						`Dream complete (run ${result.runId.slice(0, 8)}): ${result.added} added, ${result.updated} updated, ${result.deleted} deleted across ${result.sessions} session(s)`,
+					);
+				} else {
+					this.showWarning(
+						result.reason === "error"
+							? `Dream failed: ${result.error ?? "unknown error"}`
+							: `Dream did not run: ${DREAM_GATE_TEXT[result.reason]}`,
+					);
+				}
+			} catch (error) {
+				this.showWarning(`Dream failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
 			return;
 		}
 
@@ -5645,51 +5702,65 @@ export class InteractiveMode {
 			return;
 		}
 
-		const snapshot = this.session.getAutoMemorySnapshot();
+		const snapshot = this.session.getMemorySnapshot();
 		if (!snapshot) {
-			this.showWarning("Long-term memory is unavailable because the agent directory is not configured.");
+			this.showWarning("Long-term memory is unavailable or disabled for this session.");
 			return;
 		}
 
-		const extract = this.session.getMemoryExtractStatus(10);
-		const health = this.session.getMemoryHealth();
-		const state = (index: (typeof snapshot)["global"]): string => {
-			if (index.error) return theme.fg("warning", `unavailable: ${index.error}`);
-			if (!index.exists) return theme.fg("muted", "not created");
-			return index.truncated ? theme.fg("warning", "loaded (truncated)") : theme.fg("success", "loaded");
-		};
 		const lines = [
 			`${theme.bold("Long-term memory")} ${
 				this.settingsManager.getAutoMemoryEnabled() ? theme.fg("success", "on") : theme.fg("muted", "off")
 			}`,
-			`${theme.fg("dim", "Engine:")} ${this.settingsManager.getMemoryEngine()}`,
-			`${theme.fg("dim", "Global:")} ${snapshot.global.indexPath} ${state(snapshot.global)}`,
-			`${theme.fg("dim", "Project:")} ${snapshot.project.indexPath} ${state(snapshot.project)}`,
-			"",
-			`${theme.bold("Memory extract")} ${extract.enabled ? theme.fg("success", "on") : theme.fg("muted", "off")}`,
+			`${theme.fg("dim", "Global:")} ${snapshot.global.dir}`,
+			...(snapshot.project
+				? [
+						`${theme.fg("dim", "Project:")} ${snapshot.project.dir} ${theme.fg("dim", `(root ${snapshot.project.root})`)}`,
+					]
+				: [theme.fg("dim", "Project: none (managed workspace)")]),
 		];
-		if (extract.active) {
-			const elapsed = Math.max(0, Date.now() - new Date(extract.active.startedAt).getTime());
-			lines.push(
-				`${theme.fg("warning", "running")} · ${extract.active.extractMode} · ${extract.active.trigger} · ${formatMemoryExtractDuration(elapsed)} · ${extract.active.cwd}`,
-			);
-		} else {
-			lines.push(theme.fg("dim", "idle"));
+		if (snapshot.truncated) {
+			lines.push(theme.fg("warning", "Snapshot truncated; use memory_search for the complete vault."));
 		}
-		lines.push("", theme.bold("Recent runs"));
-		if (extract.recent.length === 0) lines.push(theme.fg("dim", "No extract history yet"));
-		else for (const record of extract.recent) lines.push(formatMemoryExtractHistoryLine(record));
-		lines.push("", theme.bold("Operation health"));
-		if (health.length === 0) lines.push(theme.fg("dim", "No operation health yet"));
-		else {
-			for (const row of health) {
-				lines.push(`${row.operation} · ${row.status} · ${row.updatedAt}${row.reason ? ` · ${row.reason}` : ""}`);
-			}
-		}
-		lines.push("", theme.fg("dim", "Use /reload after editing an index outside Metis."));
+		const changes = this.session.getMemoryChanges(10);
+		lines.push("", theme.bold("Recent changes"));
+		if (changes.length === 0) lines.push(theme.fg("dim", "No memory changes yet"));
+		else for (const entry of changes) lines.push(formatMemoryChangeLine(entry));
+		lines.push("", theme.fg("dim", "Use /memory undo [id] to revert, or /reload to re-read the vault."));
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(lines.join("\n"), 1, 0));
 		this.ui.requestRender();
+	}
+
+	/**
+	 * One dream pass over idle sessions in this agent dir. `ignoreGate` is set for
+	 * the manual `/memory dream` trigger; the startup check leaves it off so the
+	 * timing/count thresholds still apply.
+	 */
+	private async runMemoryDream(ignoreGate: boolean): Promise<DreamRunResult> {
+		const services = this.runtimeHost.services;
+		const settingsManager = services.settingsManager;
+		const settings = resolveDreamSettings(
+			settingsManager.getMemorySettings(),
+			settingsManager.getAutoMemoryEnabled(),
+		);
+		const model = resolveDreamModel(services.modelRegistry, settings.model);
+		if (!model) return { ran: false, reason: "no-model" };
+		const llm: DreamLlmDeps = {
+			model,
+			streamFn: (m, context, options) => services.modelRegistry.streamSimple(m, context, options),
+			getApiKey: (provider) => services.modelRegistry.getApiKeyForProvider(provider),
+			sessionId: `dream-${randomUUID()}`,
+		};
+		return await runDream({
+			agentDir: services.agentDir,
+			settings,
+			model: { provider: model.provider, modelId: model.id },
+			promptFn: createDreamPromptFn(llm),
+			promptAgent: createDreamPromptAgent(llm),
+			ignoreGate,
+			activeContextEnabled: () => settingsManager.getMemorySettings().activeContext === true,
+		});
 	}
 
 	private getMcpDefinition(name: string): { scope: SettingsScope; server: McpServerSettings } | undefined {

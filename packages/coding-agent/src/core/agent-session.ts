@@ -54,17 +54,9 @@ import {
 	type SessionStats,
 } from "./agent-session-transcript.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
-import {
-	type AutoMemorySnapshot,
-	getAutoMemoryRoot,
-	getGlobalMemoryDirectory,
-	getProjectMemoryDirectory,
-	loadAutoMemory,
-} from "./auto-memory.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
 import {
-	type CompactionPreparation,
 	type CompactionResult,
 	calculateContextTokens,
 	collectEntriesForBranchSummary,
@@ -123,18 +115,15 @@ import {
 } from "./interactive-bash-boundary.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import { createMcpToolDefinitions, type McpManager } from "./mcp/index.ts";
-import { embeddingConfigKey, embedTexts as embedMemoryTexts } from "./memory/memory-embedder.ts";
-import { collectMemoryEvidenceBatch, serializeExtractEvidence } from "./memory/memory-evidence.ts";
-import {
-	awaitWithAbort,
-	type MemoryExtractStatusSnapshot,
-	type RunMemoryExtractOptions,
-} from "./memory/memory-extract.ts";
-import { memoryProjectIdentity } from "./memory/memory-project.ts";
-import { MEMORY_EMBEDDING_CREDENTIAL_ID } from "./memory/memory-service-settings.ts";
-import { MemorySettingsTransaction } from "./memory/memory-settings-transaction.ts";
-import type { MemoryHealth } from "./memory/memory-types.ts";
-import { type SessionMemoryExtractInput, SessionMemoryRuntime } from "./memory/session-memory-runtime.ts";
+import { MemoryVault } from "./memory/vault.ts";
+import type { MemoryEvents } from "./memory/vault-events.ts";
+import { type ChangelogEntry, readChangelog } from "./memory/vault-history.ts";
+import { getScopeDir, getVaultRoot } from "./memory/vault-paths.ts";
+import { resolveVaultProject, type VaultProjectIdentity } from "./memory/vault-project.ts";
+import { MemorySearchIndex } from "./memory/vault-search.ts";
+import { buildMemoryPromptSnapshot, type MemoryPromptSnapshot } from "./memory/vault-snapshot.ts";
+import { createMemoryToolDefinitions, MEMORY_TOOL_NAMES } from "./memory/vault-tools.ts";
+import type { MemoryActor } from "./memory/vault-types.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import type { RequestPermissionApproval } from "./permissions/approval.ts";
@@ -260,6 +249,7 @@ export type AgentSessionEvent =
 	| { type: "auto_retry_start"; attempt: number; maxAttempts: number; delayMs: number; errorMessage: string }
 	| { type: "auto_retry_end"; success: boolean; attempt: number; finalError?: string }
 	| { type: "goal_changed"; goal: ThreadGoal | null }
+	| { type: "memory_changed"; entry: ChangelogEntry }
 	| { type: "plan_changed"; entryIds: readonly string[] }
 	| { type: "collaboration_mode_changed"; collaborationMode: CollaborationMode }
 	| { type: "sandbox_health_changed"; sandboxHealth: WorkspaceSandboxHealthStatus }
@@ -329,8 +319,14 @@ export interface AgentSessionConfig {
 
 	/** Host-owned prompt suffix used for runtime coordination profiles. */
 	additionalSystemPrompt?: string | (() => string | undefined);
-	/** Include automatic memory context and dream writes. Defaults to true. */
+	/** Include the memory vault snapshot and memory tools. Defaults to true. */
 	includeAutoMemory?: boolean;
+	/**
+	 * Host-shared vault emitter. Sessions pass it to their MemoryVault so a
+	 * host-side memory service can broadcast every vault change, not just this
+	 * session's writes.
+	 */
+	memoryEvents?: MemoryEvents;
 	/** Host-owned monotonic upper bound for a child session. */
 	permissionSettingsCeiling?: () => NormalizedPermissionSettings;
 	/** Host-owned workspace write ceiling independent of permission mode. */
@@ -608,8 +604,17 @@ export class AgentSession {
 	private _compactionAbortController: AbortController | undefined = undefined;
 	private _autoCompactionAbortController: AbortController | undefined = undefined;
 	private _overflowRecoveryAttempted = false;
-	private readonly _memoryRuntime: SessionMemoryRuntime;
-	private readonly _memorySettingsTransaction: MemorySettingsTransaction;
+
+	// Long-term memory vault (markdown is the source of truth; created lazily
+	// when includeAutoMemory && autoMemoryEnabled && agentDir are all present).
+	private _memoryVault?: MemoryVault;
+	private readonly _memoryEvents?: MemoryEvents;
+	private readonly _memoryProject?: VaultProjectIdentity;
+	private _memorySearchIndex?: MemorySearchIndex;
+	private _memoryToolDefinitions?: ToolDefinition[];
+	private _unsubscribeMemoryEvents?: () => void;
+	/** Frozen prompt snapshot; undefined forces a re-read at the next rebuild. */
+	private _memorySnapshot?: MemoryPromptSnapshot;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -685,7 +690,6 @@ export class AgentSession {
 	private _sandboxHealthCheckedAt: number;
 	private _sandboxHealthRefresh?: Promise<WorkspaceSandboxHealthStatus>;
 	private readonly _includeAutoMemory: boolean;
-	private _autoMemoryRetrieved: Array<{ scope: "global" | "project"; text: string }> = [];
 	private readonly _permissionSettingsCeiling?: () => NormalizedPermissionSettings;
 	private readonly _workspaceWritePolicy: "inherit" | "deny";
 	private readonly _unattendedExecution?: UnattendedExecutionProfile;
@@ -763,6 +767,7 @@ export class AgentSession {
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 		this._additionalSystemPrompt = config.additionalSystemPrompt;
 		this._includeAutoMemory = config.includeAutoMemory !== false;
+		this._memoryEvents = config.memoryEvents;
 		this._permissionSettingsCeiling = config.permissionSettingsCeiling;
 		this._workspaceWritePolicy = config.workspaceWritePolicy ?? "inherit";
 		this._unattendedExecution = config.unattendedExecution;
@@ -789,14 +794,13 @@ export class AgentSession {
 						const workDirs = this._agentDir ? getOwnedSessionWorkDirs(this._agentDir, sessionId) : [];
 						const activeWorkDir =
 							this._activeWorkDir && workDirs.includes(this._activeWorkDir) ? this._activeWorkDir : undefined;
-						const memoryRoot = this._agentDir ? getAutoMemoryRoot(this._agentDir) : undefined;
+						const memoryRoot = this._agentDir ? getVaultRoot(this._agentDir) : undefined;
 						const memoryReadRoots = this._agentDir
 							? [
-									getGlobalMemoryDirectory(this._agentDir),
-									getProjectMemoryDirectory(
-										this._agentDir,
-										memoryProjectIdentity(this.sessionManager.getCwd()).projectKey,
-									),
+									getScopeDir(memoryRoot!, "global"),
+									...(this._memoryProject
+										? [getScopeDir(memoryRoot!, "project", this._memoryProject.projectKey)]
+										: []),
 								]
 							: [];
 						return {
@@ -846,6 +850,7 @@ export class AgentSession {
 			sessionId: this.sessionManager.getSessionId(),
 			projectPath: this._cwd,
 			projectRules,
+			managedMemoryRoots: this._agentDir ? [getVaultRoot(this._agentDir)] : [],
 			audit: this._permissionAudit,
 			onReview: (event) => this._emitPermissionReview(event),
 			reviewerFactory: () =>
@@ -873,33 +878,7 @@ export class AgentSession {
 					}),
 				}),
 		});
-		this._memorySettingsTransaction = new MemorySettingsTransaction({
-			...(this._agentDir ? { agentDir: this._agentDir } : {}),
-			authStorage: this._modelRegistry.authStorage,
-			settingsManager: this.settingsManager,
-		});
-		this._memoryRuntime = new SessionMemoryRuntime({
-			agentDir: this._agentDir,
-			cwd: () => this._cwd,
-			sessionId: () => this.sessionId,
-			mode: () => this.mode,
-			enabled: () => this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled(),
-			engine: () => this.settingsManager.getMemoryEngine(),
-			hasModel: () => this.model !== undefined,
-			lastUserText: () => this._lastUserMessageText(),
-			collectEvidence: (cursorEntryId) => collectMemoryEvidenceBatch(this.sessionManager.getBranch(), cursorEntryId),
-			createExtractOptions: (input) => this._createMemoryExtractOptions(input),
-			refreshPrompt: () => this.refreshSystemPrompt(),
-			applyRetrieved: (memories) => {
-				this._autoMemoryRetrieved = [...memories];
-			},
-			getEmbeddingSettings: () => this.settingsManager.getEmbeddingSettings(),
-			getRerankSettings: () => this.settingsManager.getRerankSettings(),
-			getCredential: (id) =>
-				this._modelRegistry.authStorage.getApiKey(id, {
-					includeFallback: false,
-				}),
-		});
+		this._memoryProject = resolveVaultProject(this._cwd, this.sessionManager.getCwdOrigin());
 
 		// Always subscribe to agent events for internal handling
 		// (session persistence, extensions, auto-compaction, retry logic)
@@ -2355,7 +2334,7 @@ export class AgentSession {
 				"Cannot dispose an active agent session; await abortAndDrainAgentEventPersistence() before disposing",
 			);
 		}
-		void this._memoryRuntime.dispose();
+		this._unsubscribeMemoryEvents?.();
 		this._interactiveBashBoundary?.forceDispose();
 		const errors: unknown[] = [];
 		if (!this._disposeCoreComplete) {
@@ -2466,29 +2445,106 @@ export class AgentSession {
 		return this.agent.state.systemPrompt;
 	}
 
-	getAutoMemorySnapshot(): AutoMemorySnapshot | undefined {
-		return this._agentDir ? loadAutoMemory(this._agentDir, this._cwd) : undefined;
+	/** Frozen memory prompt snapshot; rebuilt after compaction or /reload. */
+	getMemorySnapshot(): MemoryPromptSnapshot | undefined {
+		return this._memorySnapshotForPrompt();
 	}
 
-	getMemoryExtractStatus(limit = 10): MemoryExtractStatusSnapshot {
-		const snapshot = this._memoryRuntime.snapshot(limit);
-		return {
-			enabled: snapshot.enabled,
-			...(snapshot.active ? { active: snapshot.active } : {}),
-			recent: snapshot.recent,
-		};
+	/** Vault changelog tail visible to this session (global scope + this project). */
+	getMemoryChanges(limit = 10): ChangelogEntry[] {
+		const vault = this._memoryVault;
+		if (!vault) return [];
+		return readChangelog(vault.root, limit).filter(
+			(entry) => entry.scope !== "project" || entry.projectKey === vault.project?.projectKey,
+		);
 	}
 
-	getMemoryHealth(): MemoryHealth[] {
-		return [...this._memoryRuntime.snapshot().health];
+	/** Undo the latest vault change, or the newest change whose id starts with `prefix`. */
+	async undoMemoryChange(prefix?: string): Promise<{ ok: boolean; error?: string }> {
+		const vault = this._memoryVault;
+		if (!vault) return { ok: false, error: "long-term memory is not enabled for this session" };
+		const candidates = readChangelog(vault.root).filter(
+			(entry) =>
+				!entry.undoneBy &&
+				entry.op !== "undo" &&
+				entry.op !== "migrate" &&
+				(entry.scope !== "project" || entry.projectKey === vault.project?.projectKey),
+		);
+		const entry = prefix ? candidates.find((candidate) => candidate.id.startsWith(prefix)) : candidates[0];
+		if (!entry) {
+			return { ok: false, error: prefix ? `no change matching "${prefix}"` : "no changes to undo" };
+		}
+		return vault.undo(entry.id, this._memoryActor());
 	}
 
-	async waitForMemoryExtract(): Promise<void> {
-		await this._memoryRuntime.waitForExtract();
+	private _memoryActor(): MemoryActor {
+		return { kind: "agent", sessionId: this.sessionId };
 	}
 
-	async disposeMemoryRuntime(): Promise<void> {
-		await this._memoryRuntime.dispose();
+	/** Memory tools exist only for interactive sessions with an agent dir and memory enabled. */
+	private _memoryToolsEnabled(): boolean {
+		return (
+			this._includeAutoMemory &&
+			this._unattendedExecution === undefined &&
+			this._agentDir !== undefined &&
+			this.settingsManager.getAutoMemoryEnabled() &&
+			this.sessionManager.getUseMemory()
+		);
+	}
+
+	private _ensureMemoryVault(): MemoryVault | undefined {
+		if (!this._memoryToolsEnabled() || !this._agentDir) return undefined;
+		if (!this._memoryVault) {
+			this._memoryVault = new MemoryVault({
+				agentDir: this._agentDir,
+				project: this._memoryProject,
+				activeContextEnabled: () => this.settingsManager.getMemorySettings().activeContext === true,
+				events: this._memoryEvents,
+			});
+			this._memoryVault.ensureLayout();
+			this._memorySearchIndex = new MemorySearchIndex(this._memoryVault);
+			// The emitter may be host-shared; only surface changes this vault owns.
+			this._unsubscribeMemoryEvents = this._memoryVault.events.on("changed", (event) => {
+				const entry = event.entry;
+				if (entry.scope === "project" && entry.projectKey !== this._memoryProject?.projectKey) return;
+				this._emit({ type: "memory_changed", entry });
+			});
+		}
+		return this._memoryVault;
+	}
+
+	private _memoryToolDefinitionEntries(): ToolDefinition[] {
+		const vault = this._ensureMemoryVault();
+		if (!vault || !this._memorySearchIndex) return [];
+		if (!this._memoryToolDefinitions) {
+			this._memoryToolDefinitions = createMemoryToolDefinitions({
+				vault,
+				search: this._memorySearchIndex,
+				actor: () => this._memoryActor(),
+			});
+		}
+		// Opted-out sessions still read/search memory but cannot write to it.
+		return this.sessionManager.getContributeMemory()
+			? this._memoryToolDefinitions
+			: this._memoryToolDefinitions.filter((definition) => definition.name !== "memory_write");
+	}
+
+	/**
+	 * The frozen in-session memory snapshot. Captured once at session start and
+	 * only re-read after `_invalidateMemorySnapshot()` (compaction, /reload,
+	 * enable toggles). `_rebuildSystemPrompt` callers never re-read the vault.
+	 */
+	private _memorySnapshotForPrompt(): MemoryPromptSnapshot | undefined {
+		const vault = this._ensureMemoryVault();
+		if (!vault) return undefined;
+		this._memorySnapshot ??= buildMemoryPromptSnapshot(vault, {
+			activeContextEnabled: this.settingsManager.getMemorySettings().activeContext === true,
+		});
+		return this._memorySnapshot;
+	}
+
+	private _invalidateMemorySnapshot(): void {
+		this._memorySnapshot = undefined;
 	}
 
 	/** Current retry attempt (0 if not retrying) */
@@ -2507,6 +2563,9 @@ export class AgentSession {
 	/** Active tools that a persisted child runtime can reconstruct from project resources. */
 	getDelegatableToolNames(writePolicy: "inherit" | "deny" = "inherit"): string[] {
 		return this.getActiveToolNames().filter((name) => {
+			// Memory tools are per-session builtins; children are created with
+			// includeAutoMemory: false and can never satisfy them.
+			if (MEMORY_TOOL_NAMES.has(name)) return false;
 			const entry = this._toolDefinitions.get(name);
 			const source = entry?.sourceInfo.source;
 			if (source === "sdk") return false;
@@ -2665,7 +2724,7 @@ export class AgentSession {
 	}
 
 	async prepareModelServiceSettingsRefresh(): Promise<void> {
-		await this._memoryRuntime.quiesce("settings-refresh");
+		// No memory runtime remains to quiesce; retained for host lifecycle symmetry.
 	}
 
 	async applyModelServiceSettingsRefresh(): Promise<void> {
@@ -2673,28 +2732,33 @@ export class AgentSession {
 		this._modelRegistry.refresh();
 		this._refreshCurrentModelFromRegistry();
 		this._applyImageToolSettings();
+		this._invalidateMemorySnapshot();
+		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
 		this.refreshSystemPrompt();
-		this._memoryRuntime.resume();
 	}
 
-	async updateMemorySettings(update: {
-		autoMemoryEnabled?: boolean;
-		memoryEngine?: "index" | "extract";
-	}): Promise<void> {
-		await this.prepareModelServiceSettingsRefresh();
-		let original: unknown;
-		try {
-			await this._memorySettingsTransaction.update(update);
-		} catch (error) {
-			original = error;
-		}
-		try {
-			await this.applyModelServiceSettingsRefresh();
-		} catch (recoveryError) {
-			if (!original) throw recoveryError;
-			if (original instanceof Error) (original as Error & { cause?: unknown }).cause ??= recoveryError;
-		}
-		if (original) throw original;
+	/** Toggle long-term memory; refreshes the tool registry and prompt snapshot. */
+	async setAutoMemoryEnabled(enabled: boolean): Promise<void> {
+		this.settingsManager.setAutoMemoryEnabled(enabled);
+		this._invalidateMemorySnapshot();
+		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
+		this.refreshSystemPrompt();
+	}
+
+	/**
+	 * Per-session memory controls. `useMemory` drops the snapshot and all memory
+	 * tools; `contributeMemory` keeps reads but removes `memory_write` and dream
+	 * eligibility. Both persist through the session's display-metadata sidecar.
+	 */
+	async setMemoryFlags(flags: { useMemory?: boolean; contributeMemory?: boolean }): Promise<{
+		useMemory: boolean;
+		contributeMemory: boolean;
+	}> {
+		const next = this.sessionManager.setMemoryFlags(flags);
+		this._invalidateMemorySnapshot();
+		this._refreshToolRegistry({ activeToolNames: this.getConfiguredActiveToolNames() });
+		this.refreshSystemPrompt();
+		return next;
 	}
 
 	setWebSearchProvider(provider: WebSearchProvider): void {
@@ -2832,60 +2896,6 @@ export class AgentSession {
 	refreshSystemPrompt(): void {
 		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getConfiguredActiveToolNames());
 		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
-	}
-
-	private async _createMemoryExtractOptions(
-		options: SessionMemoryExtractInput,
-	): Promise<RunMemoryExtractOptions | undefined> {
-		const agentDir = this._agentDir;
-		const model = this.model;
-		if (!agentDir || !model) return undefined;
-		const extractArgs: RunMemoryExtractOptions = {
-			mode: options.mode,
-			agentDir,
-			cwd: this._cwd,
-			agentMode: this.mode,
-			projectKey: memoryProjectIdentity(this._cwd).projectKey,
-			sessionId: this.sessionId,
-			evidence: options.evidence,
-			cursorEntryId: options.cursorEntryId,
-			trigger: options.trigger,
-			signal: options.signal,
-			model,
-			thinkingLevel: "off",
-			streamFn: this.agent.streamFn,
-			...(this.agent.getApiKey ? { getApiKey: this.agent.getApiKey } : {}),
-			transport: this.agent.transport,
-			...(this.agent.thinkingBudgets ? { thinkingBudgets: this.agent.thinkingBudgets } : {}),
-			...(this.agent.maxRetryDelayMs !== undefined ? { maxRetryDelayMs: this.agent.maxRetryDelayMs } : {}),
-		};
-		if (this.settingsManager.getMemoryEngine() === "extract") {
-			const embedder = await awaitWithAbort(this._createMemoryEmbedder(), options.signal);
-			if (embedder) {
-				extractArgs.embeddingKey = embedder.key;
-				extractArgs.embedTexts = embedder.embed;
-			}
-		}
-		return extractArgs;
-	}
-
-	private async _createMemoryEmbedder(): Promise<
-		| {
-				key: string;
-				embed: (texts: string[], signal?: AbortSignal) => Promise<Float32Array[]>;
-		  }
-		| undefined
-	> {
-		const settings = this.settingsManager.getEmbeddingSettings();
-		if (!settings) return undefined;
-		const apiKey = await this._modelRegistry.authStorage.getApiKey(MEMORY_EMBEDDING_CREDENTIAL_ID, {
-			includeFallback: false,
-		});
-		if (!apiKey) return undefined;
-		return {
-			key: embeddingConfigKey(settings),
-			embed: (texts, signal) => embedMemoryTexts(texts, { settings, apiKey, signal }),
-		};
 	}
 
 	/** Reload Skills and expose their latest metadata to the current session. */
@@ -3041,12 +3051,7 @@ export class AgentSession {
 			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
-		const autoMemory =
-			this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()
-				? this.getAutoMemorySnapshot()
-				: undefined;
-		const autoMemoryEngine = autoMemory ? this.settingsManager.getMemoryEngine() : undefined;
-		const autoMemoryRetrieved = autoMemory && autoMemoryEngine === "extract" ? this._autoMemoryRetrieved : undefined;
+		const memorySnapshot = this._memorySnapshotForPrompt();
 
 		this._baseSystemPromptOptions = {
 			cwd: this._cwd,
@@ -3058,9 +3063,7 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
-			autoMemory,
-			autoMemoryEngine,
-			autoMemoryRetrieved,
+			memorySnapshot,
 		};
 		const built = buildSystemPromptWithParts(this._baseSystemPromptOptions);
 		const parts = [...built.parts];
@@ -3540,9 +3543,6 @@ export class AgentSession {
 					hasQueuedMessages = true;
 				}
 			}
-			if (!hasQueuedMessages) {
-				this._scheduleThrottledMemoryExtract();
-			}
 		}
 		return hasQueuedMessages;
 	}
@@ -3673,11 +3673,6 @@ export class AgentSession {
 			const lastAssistant = this._findLastAssistantMessage();
 			if (lastAssistant) {
 				await this._checkCompaction(lastAssistant, false);
-			}
-
-			// Extract-engine retrieval: embed the user message and inject top hits (never fall back to catalog).
-			if (this._includeAutoMemory && this.settingsManager.getAutoMemoryEnabled()) {
-				await this._memoryRuntime.prepareTurn(expandedText);
 			}
 
 			// Build messages array (custom message if any, then user message)
@@ -4445,33 +4440,6 @@ export class AgentSession {
 	// Compaction
 	// =========================================================================
 
-	private _lastUserMessageText(): string {
-		for (let i = this.agent.state.messages.length - 1; i >= 0; i--) {
-			const message = this.agent.state.messages[i];
-			if (message?.role === "user") {
-				return extractUserMessageText(message.content);
-			}
-		}
-		return "";
-	}
-
-	private _scheduleThrottledMemoryExtract(): void {
-		this._memoryRuntime.afterTurn();
-	}
-
-	private async _compactWithMemoryExtract<T>(
-		preparation: CompactionPreparation,
-		reason: "manual" | "threshold" | "overflow",
-		signal: AbortSignal,
-		compactWork: () => Promise<T>,
-	): Promise<T> {
-		const evidence = serializeExtractEvidence([
-			...preparation.messagesToSummarize,
-			...preparation.turnPrefixMessages,
-		]);
-		return this._memoryRuntime.withCompaction({ evidence, reason, signal }, compactWork);
-	}
-
 	/**
 	 * Manually compact the session context.
 	 * Aborts current agent operation first.
@@ -4528,13 +4496,9 @@ export class AgentSession {
 				}
 			}
 
-			const generated = await this._compactWithMemoryExtract(
-				preparation,
-				"manual",
-				this._compactionAbortController.signal,
-				async () => {
-					if (extensionCompaction) return extensionCompaction;
-					return compact(
+			const generated = extensionCompaction
+				? extensionCompaction
+				: await compact(
 						preparation,
 						this.model!,
 						apiKey,
@@ -4545,8 +4509,6 @@ export class AgentSession {
 						this.agent.streamFn,
 						env,
 					);
-				},
-			);
 			const { summary, firstKeptEntryId, tokensBefore, details } = generated;
 
 			if (this._compactionAbortController.signal.aborted) {
@@ -4558,6 +4520,10 @@ export class AgentSession {
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+
+			// Compaction is a snapshot boundary: re-read the vault and rebuild the prompt.
+			this._invalidateMemorySnapshot();
+			this.refreshSystemPrompt();
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
@@ -4793,13 +4759,9 @@ export class AgentSession {
 				}
 			}
 
-			const generated = await this._compactWithMemoryExtract(
-				preparation,
-				reason,
-				this._autoCompactionAbortController.signal,
-				async () => {
-					if (extensionCompaction) return extensionCompaction;
-					return compact(
+			const generated = extensionCompaction
+				? extensionCompaction
+				: await compact(
 						preparation,
 						this.model!,
 						apiKey,
@@ -4810,8 +4772,6 @@ export class AgentSession {
 						this.agent.streamFn,
 						env,
 					);
-				},
-			);
 			const { summary, firstKeptEntryId, tokensBefore, details } = generated;
 
 			if (this._autoCompactionAbortController.signal.aborted) {
@@ -4830,6 +4790,10 @@ export class AgentSession {
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+
+			// Compaction is a snapshot boundary: re-read the vault and rebuild the prompt.
+			this._invalidateMemorySnapshot();
+			this.refreshSystemPrompt();
 
 			// Get the saved compaction entry for the extension event
 			const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary) as
@@ -5144,6 +5108,16 @@ export class AgentSession {
 
 		const registeredTools = this._extensionRunner.getAllRegisteredTools();
 		const baseToolSource = this._baseToolDefinitionsOverride ? "sdk" : "builtin";
+		const memoryToolDefinitions =
+			baseToolSource === "builtin"
+				? this._memoryToolDefinitionEntries().filter((definition) => isAllowedTool(definition.name))
+				: [];
+		const memoryToolSourceInfo = (name: string): SourceInfo =>
+			createSyntheticSourceInfo(`<builtin:${name}>`, {
+				source: "builtin",
+				sourceIdentity: "@metis/coding-agent:builtin",
+				implementationVersion: VERSION,
+			});
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => {
@@ -5187,6 +5161,12 @@ export class AgentSession {
 		);
 		for (const tool of allCustomTools) {
 			definitionRegistry.set(tool.definition.name, createToolDefinitionEntry(tool.definition, tool.sourceInfo));
+		}
+		for (const definition of memoryToolDefinitions) {
+			definitionRegistry.set(
+				definition.name,
+				createToolDefinitionEntry(definition, memoryToolSourceInfo(definition.name)),
+			);
 		}
 		for (const { definition, sourceIdentity, implementationVersion } of directMcpTools) {
 			const sourceInfo = createSyntheticSourceInfo(`<mcp:${definition.name}>`, {
@@ -5271,6 +5251,18 @@ export class AgentSession {
 			const guarded = this._authorizeTool(tool, entry);
 			toolRegistry.set(guarded.name, guarded);
 		}
+		const wrappedMemoryTools = wrapRegisteredTools(
+			memoryToolDefinitions.map((definition) => ({
+				definition,
+				sourceInfo: memoryToolSourceInfo(definition.name),
+			})),
+			runner,
+		);
+		for (const tool of wrappedMemoryTools as AgentTool[]) {
+			const entry = definitionRegistry.get(tool.name);
+			if (!entry) throw new Error(`Tool definition is unavailable: ${tool.name}`);
+			toolRegistry.set(tool.name, this._authorizeTool(tool, entry));
+		}
 		for (const tool of [...wrappedDirectMcpTools, ...wrappedDeferredMcpTools]) {
 			const entry = definitionRegistry.get(tool.name);
 			if (!entry) throw new Error(`Tool definition is unavailable: ${tool.name}`);
@@ -5316,6 +5308,13 @@ export class AgentSession {
 			}
 		}
 		for (const tool of wrappedDirectMcpTools) nextActiveToolNames.push(tool.name);
+		// Memory tools are globally enabled for the session; toggling happens via the
+		// autoMemoryEnabled setting, which drops them from the registry entirely.
+		// They still follow the builtin gate: under noTools they stay registered but
+		// inactive; with an explicit allowlist the loop above already activated them.
+		if (this._defaultBuiltinToolsEnabled) {
+			for (const definition of memoryToolDefinitions) nextActiveToolNames.push(definition.name);
+		}
 
 		this._configuredActiveToolNames = [...new Set(nextActiveToolNames)];
 		this._applyEffectiveTools();
@@ -5328,12 +5327,13 @@ export class AgentSession {
 	}): void {
 		const shellCommandPrefix = this._unattendedExecution ? undefined : this.settingsManager.getShellCommandPrefix();
 		const shellPath = this._unattendedExecution ? undefined : this.settingsManager.getShellPath();
-		const memoryReadBoundary = this._agentDir
+		const memoryRoot = this._agentDir ? getVaultRoot(this._agentDir) : undefined;
+		const memoryReadBoundary = memoryRoot
 			? {
-					memoryRoot: getAutoMemoryRoot(this._agentDir),
+					memoryRoot,
 					allowedRoots: [
-						getGlobalMemoryDirectory(this._agentDir),
-						getProjectMemoryDirectory(this._agentDir, memoryProjectIdentity(this._cwd).projectKey),
+						getScopeDir(memoryRoot, "global"),
+						...(this._memoryProject ? [getScopeDir(memoryRoot, "project", this._memoryProject.projectKey)] : []),
 					],
 				}
 			: undefined;
@@ -5387,8 +5387,8 @@ export class AgentSession {
 								}
 							: {}),
 					},
-					write: this._agentDir ? { restrictedRoots: [getAutoMemoryRoot(this._agentDir)] } : undefined,
-					edit: this._agentDir ? { restrictedRoots: [getAutoMemoryRoot(this._agentDir)] } : undefined,
+					write: memoryRoot ? { restrictedRoots: [memoryRoot] } : undefined,
+					edit: memoryRoot ? { restrictedRoots: [memoryRoot] } : undefined,
 					webSearch: {
 						getSettings: () => this.settingsManager.getWebSearchSettings(),
 						getApiKey: (provider) => resolveWebSearchApiKey(this._modelRegistry.authStorage, provider),
@@ -5466,6 +5466,7 @@ export class AgentSession {
 		const previousFlagValues = this._extensionRunner.getFlagValues();
 		await emitSessionShutdownEvent(this._extensionRunner, { type: "session_shutdown", reason: "reload" });
 		await this.settingsManager.reload();
+		this._invalidateMemorySnapshot();
 		await this._mcpManager?.reload(options?.pluginSnapshot?.mcp);
 		this.syncQueueModesFromSettings();
 		this._modelRegistry.resetExtensionProviders();

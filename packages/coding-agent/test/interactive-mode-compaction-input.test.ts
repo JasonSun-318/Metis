@@ -29,9 +29,9 @@ const route = Reflect.get(InteractiveMode.prototype, "routeCompactionInput") as 
 ) => RouteResult;
 
 const COMPACTION_WARNING =
-	"Compact/Memory extract is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
+	"Compaction is running. Wait for it to finish, then run the command again. Press Esc to cancel.";
 
-describe("Compact/Memory extract input routing", () => {
+describe("Compaction input routing", () => {
 	it.each(["/copy", "/session", "/hotkeys", "/memory", "/quit", "/debug"])(
 		"dispatches safe command %s immediately",
 		(text) => {
@@ -61,8 +61,7 @@ describe("Compact/Memory extract input routing", () => {
 		"/resume",
 		"/memory on",
 		"/memory off",
-		"/memory engine index",
-		"/memory engine extract",
+		"/memory undo",
 		"/reload",
 		"/extension-command",
 	])("blocks unsafe command %s without clearing the editor", (text) => {

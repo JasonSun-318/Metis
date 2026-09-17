@@ -1,9 +1,9 @@
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../../utils/paths.ts";
-import { getAutoMemoryRoot } from "../auto-memory.ts";
+import { getVaultRoot } from "./vault-paths.ts";
 
-/** True when `path` resolves under the agent's long-term memory directory. */
+/** True when `path` resolves under the agent's long-term memory vault. */
 export function isAutoMemoryFsPath(agentDir: string, path: string): boolean {
-	return isPathInside(getAutoMemoryRoot(agentDir), resolvePath(path));
+	return isPathInside(getVaultRoot(agentDir), resolvePath(path));
 }
 
 /**

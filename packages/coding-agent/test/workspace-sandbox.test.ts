@@ -269,9 +269,9 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 		writeFileSync(join(globalPath, "global.md"), "global-marker");
 		writeFileSync(join(currentPath, "current.md"), "current-marker");
 		writeFileSync(join(siblingPath, "sibling.md"), "sibling-marker");
-		writeFileSync(join(memoryPath, "memory.sqlite"), "database-marker");
+		writeFileSync(join(memoryPath, ".meta", "usage.json"), "database-marker");
 		symlinkSync(siblingPath, join(currentPath, "sibling-alias"));
-		symlinkSync(join(memoryPath, "memory.sqlite"), join(currentPath, "sqlite-alias"));
+		symlinkSync(join(memoryPath, ".meta", "usage.json"), join(currentPath, "meta-alias"));
 		const sandbox = await createWorkspaceSandbox({
 			cwd,
 			workspaceRoots: [cwd],
@@ -294,9 +294,9 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 			});
 			for (const denied of [
 				join(siblingPath, "sibling.md"),
-				join(memoryPath, "memory.sqlite"),
+				join(memoryPath, ".meta", "usage.json"),
 				join(currentPath, "sibling-alias", "sibling.md"),
-				join(currentPath, "sqlite-alias"),
+				join(currentPath, "meta-alias"),
 			]) {
 				await expect(output(`cat ${JSON.stringify(denied)}`)).resolves.not.toMatchObject({ exitCode: 0 });
 			}

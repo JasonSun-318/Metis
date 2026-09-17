@@ -1,50 +1,22 @@
 import type { Component } from "@metis/tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import type { DreamRunResult } from "../src/core/memory/dream/types.ts";
+import type { ChangelogEntry } from "../src/core/memory/vault-history.ts";
+import type { MemoryPromptSnapshot } from "../src/core/memory/vault-snapshot.ts";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
 
 type MemoryCommandContext = {
 	settingsManager: {
 		getAutoMemoryEnabled: () => boolean;
-		getMemoryEngine: () => "index" | "extract";
 	};
 	session: {
-		updateMemorySettings: (update: {
-			autoMemoryEnabled?: boolean;
-			memoryEngine?: "index" | "extract";
-		}) => Promise<void>;
-		getAutoMemorySnapshot: () =>
-			| {
-					global: { indexPath: string; exists: boolean; truncated: boolean; error?: string };
-					project: { indexPath: string; exists: boolean; truncated: boolean; error?: string };
-			  }
-			| undefined;
-		getMemoryExtractStatus: (limit?: number) => {
-			enabled: boolean;
-			active?: {
-				id: string;
-				sessionId: string;
-				mode: "chat" | "code";
-				extractMode: "commit" | "reconcile";
-				cwd: string;
-				trigger: string;
-				startedAt: string;
-			};
-			recent: Array<{
-				id: string;
-				startedAt: string;
-				trigger: string;
-				status: "success" | "failed" | "skipped";
-				reason: string | null;
-			}>;
-		};
-		getMemoryHealth?: () => Array<{
-			operation: "extract" | "embedding" | "rerank" | "backfill" | "projection" | "migration";
-			status: "running" | "ok" | "error";
-			updatedAt: string;
-			reason: string | null;
-		}>;
+		setAutoMemoryEnabled: (enabled: boolean) => Promise<void>;
+		undoMemoryChange: (prefix?: string) => Promise<{ ok: boolean; error?: string }>;
+		getMemorySnapshot: () => MemoryPromptSnapshot | undefined;
+		getMemoryChanges: (limit?: number) => ChangelogEntry[];
 	};
+	runMemoryDream: (ignoreGate: boolean) => Promise<DreamRunResult>;
 	chatContainer: { addChild: (component: unknown) => void };
 	ui: { requestRender: () => void };
 	showStatus: (message: string) => void;
@@ -56,7 +28,51 @@ type InteractiveModePrototype = {
 };
 
 const prototype = InteractiveMode.prototype as unknown as InteractiveModePrototype;
-const USAGE = "Usage: /memory [on|off|engine …]";
+const USAGE = "Usage: /memory [on|off|use on|off|contribute on|off|undo [id]|dream]";
+
+const snapshot: MemoryPromptSnapshot = {
+	protocol: "protocol",
+	global: { pinned: "", index: "", dir: "/agent/memory/global" },
+	project: {
+		pinned: "",
+		index: "",
+		dir: "/agent/memory/projects/abc",
+		root: "/workspace",
+	},
+	truncated: false,
+};
+
+const change: ChangelogEntry = {
+	id: "12345678-90ab-cdef-0123-4567890abcde",
+	ts: "2026-09-16T00:00:00.000Z",
+	actor: { kind: "agent", sessionId: "session" },
+	op: "create",
+	scope: "project",
+	projectKey: "abc",
+	target: { slug: "architecture" },
+};
+
+function context(
+	overrides: Partial<MemoryCommandContext["session"]> = {},
+	enabled = true,
+	dream: DreamRunResult = { ran: false, reason: "insufficient-sessions" },
+) {
+	return {
+		settingsManager: { getAutoMemoryEnabled: () => enabled },
+		session: {
+			setAutoMemoryEnabled: vi.fn(async () => undefined),
+			undoMemoryChange: vi.fn(async () => ({ ok: true })),
+			getMemorySnapshot: () => snapshot,
+			getMemoryChanges: vi.fn(() => [change]),
+			...overrides,
+		},
+		runMemoryDream: vi.fn(async () => dream),
+		chatContainer: { addChild: vi.fn() },
+		ui: { requestRender: vi.fn() },
+		showStatus: vi.fn(),
+		showWarning: vi.fn(),
+	} satisfies MemoryCommandContext;
+}
 
 describe("InteractiveMode /memory", () => {
 	beforeAll(() => initTheme("dark"));
@@ -65,208 +81,97 @@ describe("InteractiveMode /memory", () => {
 		["on", true, "Long-term memory enabled"],
 		["off", false, "Long-term memory disabled"],
 	] as const)("applies /memory %s immediately", async (action, enabled, message) => {
-		const updateMemorySettings = vi.fn(async () => undefined);
-		const showStatus = vi.fn();
-		const showWarning = vi.fn();
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "index" as const,
-			},
-			session: {
-				updateMemorySettings,
-				getAutoMemorySnapshot: vi.fn(),
-				getMemoryExtractStatus: vi.fn(),
-			},
-			chatContainer: { addChild: vi.fn() },
-			ui: { requestRender: vi.fn() },
-			showStatus,
-			showWarning,
-		};
-
-		await prototype.handleMemoryCommand.call(context, action);
-
-		expect(updateMemorySettings).toHaveBeenCalledWith({ autoMemoryEnabled: enabled });
-		expect(showStatus).toHaveBeenCalledWith(message);
-		expect(showWarning).not.toHaveBeenCalled();
+		const ctx = context();
+		await prototype.handleMemoryCommand.call(ctx, action);
+		expect(ctx.session.setAutoMemoryEnabled).toHaveBeenCalledWith(enabled);
+		expect(ctx.showStatus).toHaveBeenCalledWith(message);
+		expect(ctx.showWarning).not.toHaveBeenCalled();
 	});
 
-	it.each(["index", "extract"] as const)("applies /memory engine %s", async (engine) => {
-		const updateMemorySettings = vi.fn(async () => undefined);
-		const showStatus = vi.fn();
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "index" as const,
-			},
-			session: {
-				updateMemorySettings,
-				getAutoMemorySnapshot: vi.fn(),
-				getMemoryExtractStatus: vi.fn(),
-			},
-			chatContainer: { addChild: vi.fn() },
-			ui: { requestRender: vi.fn() },
-			showStatus,
-			showWarning: vi.fn(),
-		};
-
-		await prototype.handleMemoryCommand.call(context, `engine ${engine}`);
-
-		expect(updateMemorySettings).toHaveBeenCalledWith({ memoryEngine: engine });
-		expect(showStatus).toHaveBeenCalledWith(expect.stringMatching(new RegExp(engine, "i")));
-	});
-
-	it("warns and does not switch when extract lacks an embedding model", async () => {
-		const updateMemorySettings = vi.fn(async () => {
-			throw new Error('Cannot enable memory engine "extract" without configured Embedding settings and credential.');
+	it("warns when the toggle fails", async () => {
+		const ctx = context({
+			setAutoMemoryEnabled: vi.fn(async () => {
+				throw new Error("read-only settings");
+			}),
 		});
-		const showWarning = vi.fn();
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "index" as const,
-			},
-			session: {
-				updateMemorySettings,
-				getAutoMemorySnapshot: vi.fn(),
-				getMemoryExtractStatus: vi.fn(),
-			},
-			chatContainer: { addChild: vi.fn() },
-			ui: { requestRender: vi.fn() },
-			showStatus: vi.fn(),
-			showWarning,
-		};
-
-		await prototype.handleMemoryCommand.call(context, "engine extract");
-
-		expect(updateMemorySettings).toHaveBeenCalledWith({ memoryEngine: "extract" });
-		expect(showWarning).toHaveBeenCalledWith(expect.stringMatching(/Embedding settings|embedding model/i));
+		await prototype.handleMemoryCommand.call(ctx, "off");
+		expect(ctx.showWarning).toHaveBeenCalledWith("read-only settings");
 	});
 
-	it("rejects unknown arguments without changing state", () => {
-		const updateMemorySettings = vi.fn(async () => undefined);
-		const showWarning = vi.fn();
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "index" as const,
-			},
-			session: {
-				updateMemorySettings,
-				getAutoMemorySnapshot: vi.fn(),
-				getMemoryExtractStatus: vi.fn(),
-			},
-			chatContainer: { addChild: vi.fn() },
-			ui: { requestRender: vi.fn() },
-			showStatus: vi.fn(),
-			showWarning,
-		};
+	it("undoes the latest change and a prefixed change", async () => {
+		const ctx = context();
+		await prototype.handleMemoryCommand.call(ctx, "undo");
+		expect(ctx.session.undoMemoryChange).toHaveBeenCalledWith(undefined);
+		expect(ctx.showStatus).toHaveBeenCalledWith("Undid the memory change");
 
-		prototype.handleMemoryCommand.call(context, "maybe");
-
-		expect(showWarning).toHaveBeenCalledWith(USAGE);
-		expect(updateMemorySettings).not.toHaveBeenCalled();
+		await prototype.handleMemoryCommand.call(ctx, "undo 12345678");
+		expect(ctx.session.undoMemoryChange).toHaveBeenCalledWith("12345678");
 	});
 
-	it("rejects incomplete engine arguments", () => {
-		const updateMemorySettings = vi.fn(async () => undefined);
-		const showWarning = vi.fn();
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "index" as const,
-			},
-			session: {
-				updateMemorySettings,
-				getAutoMemorySnapshot: vi.fn(),
-				getMemoryExtractStatus: vi.fn(),
-			},
-			chatContainer: { addChild: vi.fn() },
-			ui: { requestRender: vi.fn() },
-			showStatus: vi.fn(),
-			showWarning,
-		};
-
-		prototype.handleMemoryCommand.call(context, "engine");
-		prototype.handleMemoryCommand.call(context, "engine foo");
-
-		expect(showWarning).toHaveBeenCalledWith(USAGE);
-		expect(updateMemorySettings).not.toHaveBeenCalled();
+	it("warns when undo finds nothing", async () => {
+		const ctx = context({
+			undoMemoryChange: vi.fn(async () => ({ ok: false, error: "no changes to undo" })),
+		});
+		await prototype.handleMemoryCommand.call(ctx, "undo");
+		expect(ctx.showWarning).toHaveBeenCalledWith("no changes to undo");
 	});
 
-	it("shows on/off, engine, catalog paths, extract status, and recent runs", () => {
-		const addChild = vi.fn();
-		const requestRender = vi.fn();
-		const getMemoryExtractStatus = vi.fn(() => ({
-			enabled: true,
-			active: {
-				id: "active",
-				sessionId: "session",
-				mode: "chat" as const,
-				extractMode: "reconcile" as const,
-				cwd: "/Users/ent/Metis",
-				trigger: "manual",
-				startedAt: "2026-07-15T06:00:00.000Z",
-			},
-			recent: Array.from({ length: 10 }, (_, index) => ({
-				id: `run-${index}`,
-				startedAt: "2026-07-15T05:00:00.000Z",
-				trigger: "threshold",
-				status: "success" as const,
-				reason: null,
-			})),
-		}));
-		const context = {
-			settingsManager: {
-				getAutoMemoryEnabled: () => true,
-				getMemoryEngine: () => "extract" as const,
-			},
-			session: {
-				updateMemorySettings: vi.fn(async () => undefined),
-				getAutoMemorySnapshot: () => ({
-					global: {
-						indexPath: "/agent/memory/MEMORY.md",
-						exists: true,
-						truncated: false,
-					},
-					project: {
-						indexPath: "/agent/memory/projects/--workspace--/chat/project.md",
-						exists: true,
-						truncated: false,
-					},
-				}),
-				getMemoryExtractStatus,
-				getMemoryHealth: () => [
-					{
-						operation: "embedding" as const,
-						status: "error" as const,
-						updatedAt: "2026-07-15T05:30:00.000Z",
-						reason: "Embedding request failed",
-					},
-				],
-			},
-			chatContainer: { addChild },
-			ui: { requestRender },
-			showStatus: vi.fn(),
-			showWarning: vi.fn(),
-		};
+	it("rejects unknown arguments without changing state", async () => {
+		const ctx = context();
+		await prototype.handleMemoryCommand.call(ctx, "maybe");
+		expect(ctx.showWarning).toHaveBeenCalledWith(USAGE);
+		expect(ctx.session.setAutoMemoryEnabled).not.toHaveBeenCalled();
+	});
 
-		prototype.handleMemoryCommand.call(context, "");
+	it("warns when memory is unavailable", async () => {
+		const ctx = context({ getMemorySnapshot: () => undefined });
+		await prototype.handleMemoryCommand.call(ctx, "");
+		expect(ctx.showWarning).toHaveBeenCalledWith("Long-term memory is unavailable or disabled for this session.");
+	});
 
-		expect(getMemoryExtractStatus).toHaveBeenCalledWith(10);
-		expect(addChild).toHaveBeenCalled();
-		const rendered = addChild.mock.calls
+	it("shows on/off state, scope dirs, and recent changes", async () => {
+		const ctx = context();
+		await prototype.handleMemoryCommand.call(ctx, "");
+
+		expect(ctx.session.getMemoryChanges).toHaveBeenCalledWith(10);
+		const rendered = ctx.chatContainer.addChild.mock.calls
 			.map(([component]) => component as Component)
 			.flatMap((component) => component.render(1000))
 			.join("\n");
 		expect(rendered).toMatch(/on/i);
-		expect(rendered).toMatch(/extract/i);
-		expect(rendered).toContain("/agent/memory/MEMORY.md");
-		expect(rendered).toContain("/agent/memory/projects/--workspace--/chat/project.md");
-		expect(rendered).toContain("running");
-		expect(rendered).toContain("success");
-		expect(rendered).toContain("Embedding request failed");
-		expect(rendered).toContain("/Users/ent/Metis");
-		expect(requestRender).toHaveBeenCalled();
+		expect(rendered).toContain("/agent/memory/global");
+		expect(rendered).toContain("/agent/memory/projects/abc");
+		expect(rendered).toContain("create");
+		expect(rendered).toContain("architecture");
+		expect(rendered).toContain("12345678");
+		expect(ctx.ui.requestRender).toHaveBeenCalled();
+	});
+
+	it("runs a manual dream and reports the summary", async () => {
+		const ctx = context({}, true, {
+			ran: true,
+			runId: "12345678-90ab-cdef-0123-4567890abcde",
+			added: 2,
+			updated: 1,
+			deleted: 0,
+			sessions: 4,
+			candidates: 6,
+		});
+		await prototype.handleMemoryCommand.call(ctx, "dream");
+		expect(ctx.runMemoryDream).toHaveBeenCalledWith(true);
+		expect(ctx.showStatus).toHaveBeenLastCalledWith(expect.stringContaining("2 added"));
+		expect(ctx.showWarning).not.toHaveBeenCalled();
+	});
+
+	it("reports the gate reason when the dream does not run", async () => {
+		const ctx = context({}, true, { ran: false, reason: "insufficient-sessions" });
+		await prototype.handleMemoryCommand.call(ctx, "dream");
+		expect(ctx.showWarning).toHaveBeenCalledWith("Dream did not run: not enough unprocessed sessions");
+	});
+
+	it("reports a dream run error", async () => {
+		const ctx = context({}, true, { ran: false, reason: "error", error: "model blew up" });
+		await prototype.handleMemoryCommand.call(ctx, "dream");
+		expect(ctx.showWarning).toHaveBeenCalledWith("Dream failed: model blew up");
 	});
 });

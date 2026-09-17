@@ -51,7 +51,11 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "dirs", description: "List this Code session's working directories", modes: ["code"] },
 	{ name: "compact", description: "Manually compact the session context" },
 	{ name: "resume", description: "Resume a different session" },
-	{ name: "memory", description: "Show or toggle long-term memory", argumentHint: "[on|off|engine …]" },
+	{
+		name: "memory",
+		description: "Show or toggle long-term memory",
+		argumentHint: "[on|off|use on|off|contribute on|off|undo [id]|dream]",
+	},
 	{ name: "schedule", description: "Manage scheduled tasks", modes: ["chat"] },
 	{ name: "mcp", description: "Open MCP server manager" },
 	{ name: "reload", description: "Reload resources, context files, and memory" },

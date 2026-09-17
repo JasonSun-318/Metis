@@ -1,6 +1,6 @@
 import lockfile from "proper-lockfile";
 
-const MEMORY_LOCK_OPTIONS = {
+export const MEMORY_LOCK_OPTIONS = {
 	realpath: false,
 	stale: 15_000,
 	retries: { retries: 8, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true },

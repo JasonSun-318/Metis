@@ -60,12 +60,7 @@ export {
 	mcpVersionedCredentialPrefix,
 	type OAuthCredential,
 } from "./core/auth-storage.ts";
-export {
-	ensureAutoMemoryLayout,
-	ensureModeScopedMemoryLayout,
-	getMemorySqlitePath,
-	initializeAutoMemory,
-} from "./core/auto-memory.ts";
+export { ensureVaultLayout, getAutoMemoryRoot } from "./core/auto-memory.ts";
 export { getLatestCacheHitPercent } from "./core/cache-stats.ts";
 // Compaction
 export {
@@ -311,28 +306,103 @@ export {
 	resolvePluginTemplateVariables,
 	storePluginMcpCredential,
 } from "./core/mcp/index.ts";
-export { embedTexts } from "./core/memory/memory-embedder.ts";
-export { clearMemoryHealth, getLatestMemoryError } from "./core/memory/memory-health.ts";
+export {
+	checkDreamGate,
+	DREAM_SESSION_MIN_IDLE_MS,
+	type EnumeratedSessions,
+	enumerateSessions,
+} from "./core/memory/dream/gate.ts";
+export {
+	createDreamPromptAgent,
+	createDreamPromptFn,
+	type DreamLlmDeps,
+	resolveDreamModel,
+} from "./core/memory/dream/llm.ts";
+export {
+	type DreamPhase1Result,
+	type DreamPromptFn,
+	type DreamPromptRequest,
+	PROPOSE_MEMORIES_TOOL,
+	parseDreamCandidates,
+	runDreamPhase1,
+} from "./core/memory/dream/phase1.ts";
+export {
+	createDreamToolset,
+	type DreamPhase2Context,
+	type DreamPromptAgent,
+	type DreamToolset,
+	runDreamPhase2,
+} from "./core/memory/dream/phase2.ts";
+export { DREAM_RUN_TIMEOUT_MS, type RunDreamOptions, runDream } from "./core/memory/dream/run.ts";
+export { readDreamState, writeDreamState } from "./core/memory/dream/state.ts";
+export {
+	DREAM_TOOL_RESULT_MAX_CHARS,
+	DREAM_TRANSCRIPT_MAX_CHARS,
+	serializeSessionForDream,
+} from "./core/memory/dream/transcript.ts";
+export {
+	type DreamCandidate,
+	type DreamGateReason,
+	type DreamGateResult,
+	type DreamModelRef,
+	type DreamRunResult,
+	type DreamSettings,
+	type DreamState,
+	type EligibleSession,
+	emptyDreamState,
+	resolveDreamSettings,
+} from "./core/memory/dream/types.ts";
 export {
 	assertMemoryReadAllowed,
 	type MemoryReadBoundary,
 } from "./core/memory/memory-path-guard.ts";
-export { type MemoryProjectIdentity, memoryProjectIdentity } from "./core/memory/memory-project.ts";
-export { rerankDocuments } from "./core/memory/memory-rerank.ts";
 export {
-	type EmbeddingSettings,
-	MEMORY_EMBEDDING_CREDENTIAL_ID,
-	MEMORY_RERANK_CREDENTIAL_ID,
-	type RerankSettings,
-	validateEmbeddingSettings,
-	validateRerankSettings,
-	validateServiceCredential,
-} from "./core/memory/memory-service-settings.ts";
+	MemoryVault,
+	type UndoResult,
+	type UndoRunResult,
+	type WriteRequest,
+	type WriteResult,
+} from "./core/memory/vault.ts";
 export {
-	MemorySettingsTransaction,
-	type MemorySettingsUpdate,
-	type MemorySettingsView,
-} from "./core/memory/memory-settings-transaction.ts";
+	type MemoryChangedEvent,
+	type MemoryDreamCompletedEvent,
+	MemoryEvents,
+} from "./core/memory/vault-events.ts";
+export { type ChangelogEntry, readChangelog, readSnapshot } from "./core/memory/vault-history.ts";
+export {
+	getNotePath,
+	getPinnedPath,
+	getProjectMetaPath,
+	getScopeDir,
+	getVaultRoot,
+} from "./core/memory/vault-paths.ts";
+export { resolveVaultProject, type VaultProjectIdentity } from "./core/memory/vault-project.ts";
+export {
+	BM25Ranker,
+	type IndexedNote,
+	MemorySearchIndex,
+	type Ranker,
+	type SearchHit,
+} from "./core/memory/vault-search.ts";
+export {
+	buildMemoryPromptSnapshot,
+	formatMemorySnapshot,
+	type MemoryPromptSnapshot,
+} from "./core/memory/vault-snapshot.ts";
+export {
+	createMemoryToolDefinitions,
+	type MemoryToolContext,
+} from "./core/memory/vault-tools.ts";
+export type {
+	ConfidenceLevel,
+	MemoryActor,
+	MemoryScope,
+	MemoryTarget,
+	Note,
+	NoteFrontmatter,
+	NoteType,
+	PinnedBlock,
+} from "./core/memory/vault-types.ts";
 export { convertToLlm } from "./core/messages.ts";
 export type {
 	ModeProjectSessionTarget,
@@ -627,6 +697,7 @@ export {
 	type McpHttpServerSettings,
 	type McpServerSettings,
 	type McpStdioServerSettings,
+	type MemorySettings,
 	type PackageSource,
 	type RetrySettings,
 	SettingsManager,

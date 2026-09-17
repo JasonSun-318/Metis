@@ -16,7 +16,8 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, parse, relative, sep } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { getAutoMemoryPaths } from "../src/core/auto-memory.ts";
+import { getIndexPath, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import {
 	type ModeProjectDeleteHooks,
 	type ModeProjectSessionTarget,
@@ -204,12 +205,18 @@ describe("mode project Trash", () => {
 			decoys.push(write(join(recoveryDirectory, `${parse(session.path).name}-not-owned.partial`)));
 		}
 
-		const sharedMemory = getAutoMemoryPaths(layout.agentDir, layout.cwd).project;
+		const sharedMemoryIndexPath = getIndexPath(
+			getScopeDir(
+				getVaultRoot(layout.agentDir),
+				"project",
+				resolveVaultProject(layout.cwd, "user-selected")!.projectKey,
+			),
+		);
 		const preservedPaths = [
 			code.path,
 			child.path,
 			scheduled.path,
-			write(sharedMemory.indexPath, "shared memory"),
+			write(sharedMemoryIndexPath, "shared memory"),
 			write(join(layout.agentDir, "memory", "global", "MEMORY.md"), "global memory"),
 			write(join(layout.agentDir, "skills", "sample", "SKILL.md"), "user skill"),
 			write(join(layout.cwd, ".agents", "skills", "sample", "SKILL.md"), "project skill"),

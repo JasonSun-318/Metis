@@ -23,6 +23,12 @@ export interface PermissionPolicyInput {
 	readonly settings: PermissionSettings;
 	readonly action: NormalizedPermissionAction;
 	readonly autoCommandRules?: readonly AutoCommandRule[];
+	/**
+	 * Engine-managed roots (e.g. the memory vault) outside the workspace. Builtin
+	 * memory tools may write under them without review; every other tool that
+	 * declares a write path inside them is denied as a protected write.
+	 */
+	readonly managedMemoryRoots?: readonly string[];
 }
 
 const CRITICAL_EFFECTS = new Set([
@@ -34,17 +40,40 @@ const CRITICAL_EFFECTS = new Set([
 ]);
 const HIGH_EFFECTS = new Set(["external-side-effect", "destructive", "unknown"]);
 
+const MEMORY_TOOL_NAMES: ReadonlySet<string> = new Set(["memory_search", "memory_read", "memory_write"]);
+
 function isPathInsideNormalized(parent: string, target: string): boolean {
 	const child = relative(parent, target);
 	return child === "" || (child !== ".." && !child.startsWith(`..${sep}`) && !isAbsolute(child));
 }
 
-function isOutsideWorkspace(action: NormalizedPermissionAction): boolean {
-	const scopedPaths = [...action.readPaths, ...action.writePaths, ...(action.command ? [action.cwd] : [])];
-	return scopedPaths.some((path) => !action.workspaceRoots.some((root) => isPathInsideNormalized(root, path)));
+/**
+ * Builtin memory tools manage the vault directly. The action qualifies only when
+ * every declared write path stays inside a managed memory root and the claim
+ * carries no command, network, or side effects.
+ */
+function isManagedMemoryAction(action: NormalizedPermissionAction, managedMemoryRoots: readonly string[]): boolean {
+	return (
+		action.provenance === "builtin" &&
+		MEMORY_TOOL_NAMES.has(action.toolName) &&
+		managedMemoryRoots.length > 0 &&
+		action.writePaths.every((path) => managedMemoryRoots.some((root) => isPathInsideNormalized(root, path))) &&
+		action.command === undefined &&
+		action.networkEndpoints.length === 0 &&
+		action.effects.length === 0
+	);
 }
 
-function protectedRootsFor(action: NormalizedPermissionAction): readonly string[] {
+function isOutsideWorkspace(action: NormalizedPermissionAction, managedMemoryRoots: readonly string[]): boolean {
+	const roots = [...action.workspaceRoots, ...managedMemoryRoots];
+	const scopedPaths = [...action.readPaths, ...action.writePaths, ...(action.command ? [action.cwd] : [])];
+	return scopedPaths.some((path) => !roots.some((root) => isPathInsideNormalized(root, path)));
+}
+
+function protectedRootsFor(
+	action: NormalizedPermissionAction,
+	managedMemoryRoots: readonly string[],
+): readonly string[] {
 	return Object.freeze(
 		[
 			...new Set(
@@ -52,11 +81,16 @@ function protectedRootsFor(action: NormalizedPermissionAction): readonly string[
 					[".git", ".metis", ".codex", ".agents"].map((name) => join(root, name)),
 				),
 			),
+			...managedMemoryRoots,
 		].sort(),
 	);
 }
 
-function grantRequestFor(settings: PermissionSettings, action: NormalizedPermissionAction): GrantRequest {
+function grantRequestFor(
+	settings: PermissionSettings,
+	action: NormalizedPermissionAction,
+	managedMemoryRoots: readonly string[],
+): GrantRequest {
 	const executionTarget =
 		action.provenance === "mcp" || settings.sandboxPolicy === "external-sandbox"
 			? "external"
@@ -70,7 +104,7 @@ function grantRequestFor(settings: PermissionSettings, action: NormalizedPermiss
 		executionTarget,
 		readRoots: action.readPaths,
 		writeRoots: action.writePaths,
-		protectedRoots: isFullAccess(settings) ? Object.freeze([]) : protectedRootsFor(action),
+		protectedRoots: isFullAccess(settings) ? Object.freeze([]) : protectedRootsFor(action, managedMemoryRoots),
 		networkEndpoints: action.networkEndpoints,
 	});
 }
@@ -117,8 +151,13 @@ function hardDenyReason(action: NormalizedPermissionAction): string | undefined 
 	return undefined;
 }
 
-function protectedWriteReason(action: NormalizedPermissionAction): string | undefined {
-	const protectedRoots = protectedRootsFor(action);
+function protectedWriteReason(
+	action: NormalizedPermissionAction,
+	managedMemoryRoots: readonly string[],
+): string | undefined {
+	// The builtin memory tools own the managed roots; everyone else is denied.
+	if (isManagedMemoryAction(action, managedMemoryRoots)) return undefined;
+	const protectedRoots = protectedRootsFor(action, managedMemoryRoots);
 	for (const target of action.writePaths) {
 		if (protectedRoots.some((root) => target === root || isPathInsideNormalized(root, target))) {
 			return "Writes to protected workspace metadata are forbidden";
@@ -141,10 +180,14 @@ function ceilingDenyReason(settings: PermissionSettings, action: NormalizedPermi
 	return undefined;
 }
 
-export function riskLevelFor(action: NormalizedPermissionAction, grant: GrantRequest): RiskLevel {
+export function riskLevelFor(
+	action: NormalizedPermissionAction,
+	grant: GrantRequest,
+	managedMemoryRoots: readonly string[] = [],
+): RiskLevel {
 	if (action.effects.some((effect) => CRITICAL_EFFECTS.has(effect))) return "critical";
 	if (action.effects.some((effect) => HIGH_EFFECTS.has(effect))) return "high";
-	if (grant.networkEndpoints.length > 0 || isOutsideWorkspace(action)) return "medium";
+	if (grant.networkEndpoints.length > 0 || isOutsideWorkspace(action, managedMemoryRoots)) return "medium";
 	return "low";
 }
 
@@ -238,32 +281,51 @@ export class PermissionPolicy {
 			return deny("critical", "Permission settings or action are invalid");
 		}
 		if (isFullAccess(input.settings)) {
-			const grant = grantRequestFor(input.settings, input.action);
+			const grant = grantRequestFor(input.settings, input.action, input.managedMemoryRoots ?? []);
 			return Object.freeze({
 				kind: "allow",
-				riskLevel: riskLevelFor(input.action, grant),
+				riskLevel: riskLevelFor(input.action, grant, input.managedMemoryRoots ?? []),
 				reason: "Allowed by Full access",
 				grant,
 			});
 		}
+		const managedMemoryRoots = input.managedMemoryRoots ?? [];
 		const invariant = hardDenyReason(input.action);
 		if (invariant) return deny("critical", invariant);
-		const protectedWrite = protectedWriteReason(input.action);
+		const protectedWrite = protectedWriteReason(input.action, managedMemoryRoots);
 		if (protectedWrite) return deny("critical", protectedWrite);
 		if (input.settings.approvalPolicy === "auto-review" && isRecursiveDeletionCommand(input.action.command)) {
 			return deny("high", "Recursive deletion is not allowed in Auto mode");
 		}
 
 		const ceiling = ceilingDenyReason(input.settings, input.action);
-		if (ceiling) return deny(riskLevelFor(input.action, grantRequestFor(input.settings, input.action)), ceiling);
+		if (ceiling) {
+			return deny(
+				riskLevelFor(
+					input.action,
+					grantRequestFor(input.settings, input.action, managedMemoryRoots),
+					managedMemoryRoots,
+				),
+				ceiling,
+			);
+		}
 
-		const grant = grantRequestFor(input.settings, input.action);
-		const riskLevel = riskLevelFor(input.action, grant);
+		const grant = grantRequestFor(input.settings, input.action, managedMemoryRoots);
+		const riskLevel = riskLevelFor(input.action, grant, managedMemoryRoots);
 		if (isDeterministicRead(input.action, riskLevel, input.settings) || isReadOnlyMcp(input.action)) {
 			return Object.freeze({
 				kind: "allow",
 				riskLevel,
 				reason: "Allowed by deterministic read policy",
+				grant,
+			});
+		}
+
+		if (isManagedMemoryAction(input.action, managedMemoryRoots)) {
+			return Object.freeze({
+				kind: "allow",
+				riskLevel,
+				reason: "Allowed by managed memory root policy",
 				grant,
 			});
 		}
