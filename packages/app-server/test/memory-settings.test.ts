@@ -2,7 +2,14 @@ import { existsSync, mkdirSync, realpathSync, rmSync, utimesSync } from "node:fs
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { validateResponseFor } from "@metis/app-protocol";
-import { getDefaultSessionDir, getVaultRoot, SessionManager, SettingsManager } from "@metis/coding-agent/host";
+import {
+	getDefaultSessionDir,
+	getVaultRoot,
+	MemoryVault,
+	resolveVaultProject,
+	SessionManager,
+	SettingsManager,
+} from "@metis/coding-agent/host";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type DreamDepsFactory, MemoryService } from "../src/memory-settings.ts";
 import { SessionCatalog } from "../src/session-catalog.ts";
@@ -310,5 +317,49 @@ describe("MemoryService", () => {
 		expect(undone.undone.length).toBeGreaterThan(0);
 		expect(undone.skipped).toEqual([]);
 		expect(svc.listNotes({}).notes).toEqual([]);
+	});
+
+	it("undoRun reverts all projects and global scope", async () => {
+		const { service: svc } = service();
+		const actor = { kind: "dream", runId: "11111111-1111-4111-8111-111111111119" } as const;
+		const vaults = ["a", "b"].map(
+			(name) => new MemoryVault({ agentDir, project: resolveVaultProject(join(agentDir, name), "user-selected") }),
+		);
+		for (const vault of vaults) {
+			vault.ensureLayout();
+			expect(
+				(
+					await vault.write(
+						{
+							op: "create",
+							scope: "project",
+							target: { slug: "shared" },
+							frontmatter: { type: "project" },
+							content: "from dream",
+						},
+						actor,
+					)
+				).ok,
+			).toBe(true);
+		}
+		expect(
+			(
+				await vaults[0]!.write(
+					{
+						op: "create",
+						scope: "global",
+						target: { slug: "global-note" },
+						frontmatter: { type: "user" },
+						content: "global",
+					},
+					actor,
+				)
+			).ok,
+		).toBe(true);
+		const result = await svc.undoRun({ runId: actor.runId });
+		expect(result.skipped).toEqual([]);
+		expect(result.undone).toHaveLength(3);
+		for (const vault of vaults) expect(vault.readNote("project", "shared")).toBeUndefined();
+		expect(vaults[0]!.readNote("global", "global-note")).toBeUndefined();
 	});
 });

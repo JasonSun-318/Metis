@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { applyVaultFileChanges } from "../src/core/memory/vault-file-changes.ts";
 import { appendChangelog, pruneSnapshots, readChangelog, saveSnapshot } from "../src/core/memory/vault-history.ts";
+import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
 import { mustWrite, putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const durableMock = vi.hoisted(() => ({ failOnce: new Set<string>() }));
@@ -476,6 +477,30 @@ describe("memory history and undo", () => {
 			expect(v.readNote("global", "ref")!.body).toContain("human edit");
 			expect(v.readNote("global", "after")).toBeDefined();
 			expect(v.readNote("global", "before")).toBeUndefined();
+		});
+	});
+
+	it("whole-run undo preserves a later human edit in one project", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			const actor = { kind: "dream", runId: "run-conflict" } as const;
+			await putNote(a, "project", "shared", "a", actor);
+			await putNote(b, "project", "shared", "b", actor);
+			mustWrite(
+				await a.write(
+					{ op: "append", scope: "project", target: { slug: "shared" }, content: "human edit" },
+					{ kind: "user" },
+				),
+			);
+			const result = await undoMemoryRun({ agentDir: f.agentDir, runId: actor.runId, actor: { kind: "user" } });
+			expect(result.skipped).toHaveLength(1);
+			expect(result.undone).toHaveLength(1);
+			expect(a.readNote("project", "shared")!.body).toContain("human edit");
+			expect(b.readNote("project", "shared")).toBeUndefined();
+			// A second pass rolls nothing back again.
+			const again = await undoMemoryRun({ agentDir: f.agentDir, runId: actor.runId, actor: { kind: "user" } });
+			expect(again.undone).toEqual([]);
 		});
 	});
 

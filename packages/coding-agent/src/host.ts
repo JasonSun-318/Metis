@@ -215,6 +215,7 @@ export {
 	saveDeclarativeHooks,
 	splitSessionAttachmentPrompt,
 	storePluginMcpCredential,
+	undoMemoryRun,
 	upsertCustomAgentType,
 	VERSION,
 	withPluginRegistryLock,

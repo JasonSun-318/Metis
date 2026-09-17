@@ -38,6 +38,7 @@ import {
 	resolveVaultProject,
 	runDream,
 	type SettingsManager,
+	undoMemoryRun,
 	type VaultProjectIdentity,
 } from "@metis/coding-agent/host";
 import type { SessionCatalog } from "./session-catalog.ts";
@@ -403,19 +404,12 @@ export class MemoryService {
 	}
 
 	async undoRun(params: ClientParams<"memory/undoRun">): Promise<ClientResult<"memory/undoRun">> {
-		// Dream runs may touch global + one project; resolve the run's project so
-		// its entries aren't skipped as belonging to a different project. Prefer a
-		// project entry: a global entry resolves no project and would orphan them.
-		const entries = readChangelog(getVaultRoot(this.agentDir));
-		const entry =
-			entries.find(
-				(candidate) =>
-					candidate.actor.kind === "dream" &&
-					candidate.actor.runId === params.runId &&
-					candidate.projectKey !== undefined,
-			) ?? entries.find((candidate) => candidate.actor.kind === "dream" && candidate.actor.runId === params.runId);
-		const { vault } = this.entryFor(entry ? this.projectForEntry(entry) : undefined);
-		return await vault.undoRun(params.runId, USER_ACTOR);
+		return await undoMemoryRun({
+			agentDir: this.agentDir,
+			runId: params.runId,
+			actor: USER_ACTOR,
+			events: this.events,
+		});
 	}
 
 	/** Manual `memory/dream/run` trigger: ignores timing/count thresholds, still needs a model and the lock. */

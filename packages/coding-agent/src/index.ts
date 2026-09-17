@@ -386,6 +386,7 @@ export {
 	resolveVaultProject,
 	type VaultProjectIdentity,
 } from "./core/memory/vault-project.ts";
+export { undoMemoryRun } from "./core/memory/vault-run-undo.ts";
 export {
 	BM25Ranker,
 	type IndexedNote,
