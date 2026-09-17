@@ -56,8 +56,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML or JSONL |
 | `/import <file>` | Import and resume a session from a JSONL file |
-| `/memory [on\|off]` | Show or toggle long-term memory |
-| `/dream` | Show Dream status and the latest 10 memory-maintenance runs |
+| `/memory [on\|off\|use on\|off\|contribute on\|off\|undo [id]\|dream]` | Long-term memory status, toggles, undo, and Dream — see [Memory](memory.md) |
 | `/reload` | Reload resources, context files, and memory |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Quit metis |
@@ -100,33 +99,32 @@ See [Sessions](sessions.md) and [Compaction](compaction.md) for details.
 
 ## Long-Term Memory
 
-Long-term memory is separate from session JSONL and compaction summaries. SQLite is authoritative; Markdown is a generated, bounded projection:
+Long-term memory is separate from session JSONL and compaction summaries. Markdown files in the vault are the source of truth; search indexes are in-memory derivatives:
 
 ```text
 ~/.metis/agent/memory/
-├── memory.sqlite
 ├── global/
+│   ├── MEMORY.md           # link-only index
+│   ├── _pinned/            # high-frequency standing context (user, feedback)
+│   └── notes/              # one file per note
+├── projects/<projectKey>/
 │   ├── MEMORY.md
-│   └── preferences.md
-└── projects/
-    └── <sha256-canonical-cwd>/
-        ├── project.md
-        ├── architecture.md
-        └── debugging.md
+│   ├── _pinned/            # project, active
+│   ├── notes/
+│   └── .project.json
+├── .history/               # per-write snapshots for undo
+├── .dream/
+└── .meta/
 ```
 
-- Configure Embedding and optional Rerank under **Settings → Model → Specialized models**. Embedding uses an OpenAI-compatible API root; Rerank uses the complete configured text-Rerank endpoint. Supplier labels do not select a protocol.
-- Index injects only `global/MEMORY.md` and the current exact project's `project.md`; linked topics are read on demand. Extract sends a bounded query and durable fact text to Embedding, optionally reranks up to 50 candidates, and injects only positive hits.
-- Chat and Code share project memory only for the same canonical primary cwd. Child directories do not inherit parent memory. Additional workspace roots do not change memory identity.
-- Deleting sessions or one mode-specific project does not delete the shared exact-cwd ledger. Export and import do not copy it.
-- Topic files use lowercase flat basenames. `memory.md` and `project.md` are reserved; the 31st new ordinary category is written to `overflow.md`.
-- Memory is untrusted reference data. Default file tools and sandbox Bash can read only global plus current-project projections. A workspace that overlaps the memory directory makes sandbox Bash fail closed; approved host Bash and Full mode retain current-user authority.
-- Extract runs with thinking off and a 60-second timeout. It advances its cursor only after facts and projections succeed, does not block Bash or extension commands, and exposes bounded operation health. Vector backfill is single-owner and processes sequential batches of 32.
-- Retrieval streams SQLite, keeps 50 candidates, returns at most 8 facts/2,048 characters, and falls back to keyword ranking when Embedding fails or fused local order when Rerank fails.
+- The project scope key derives from the nearest git root (worktrees included) or the canonical cwd when no `.git` exists. Chat and Code share the same project scope.
+- At session start, metis injects one frozen snapshot of the pinned blocks and `MEMORY.md` indexes. The snapshot is re-read only after compaction, `/reload`, or a `/memory` toggle — never per turn.
+- The agent reaches the rest of the vault through the `memory_search`, `memory_read`, and `memory_write` tools; results arrive as ordinary tool results. `memory_search` uses in-memory BM25 — no embedding or rerank models are configured or required.
+- `memory_write` is the only supported way to modify the vault. Ordinary write/edit/Bash access to the memory directory is rejected; reads are limited to the global scope and the current project scope. Writes are journaled to `.history/` snapshots and journaled changes can be reverted with `/memory undo [id]` or the undo support on `memory_write` results.
+- Deleting sessions or a mode-specific project does not delete the vault. Export and import do not copy it.
+- Memory is untrusted reference data; secrets, transient state, and raw tool output are never recorded.
 
-Use `/memory` for state, operation health, active projection paths, and recent extract runs. `/memory on|off` toggles injection, `/memory engine index|extract` selects the engine, and `/reload` re-reads external projection edits.
-
-Legacy guessed model references fall back to Index and display a reconfiguration notice. Old lossy project Markdown directories remain untouched but are not injected. A separate vector store is unnecessary until one visible global-plus-project scope reaches 50,000 active facts or measured p95 local ranking exceeds 250 ms.
+Use `/memory` for on/off state, scope directories, and recent changes. `/memory on|off` toggles memory for new work immediately. See [Memory](memory.md) for the vault layout, note format, tools, undo, and Dream consolidation.
 
 ## Context Files
 

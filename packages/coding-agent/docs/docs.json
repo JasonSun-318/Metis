@@ -16,6 +16,10 @@
           "path": "usage.md"
         },
         {
+          "title": "Long-Term Memory",
+          "path": "memory.md"
+        },
+        {
           "title": "Providers",
           "path": "providers.md"
         },

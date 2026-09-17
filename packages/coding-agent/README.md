@@ -160,7 +160,7 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML or JSONL file |
 | `/import <file>` | Import and resume a session from a JSONL file |
-| `/memory [on\|off\|engine …]` | Show status, toggle long-term memory, or set engine (`index` / `extract`) |
+| `/memory [on\|off\|use on\|off\|contribute on\|off\|undo [id]\|dream]` | Long-term memory status, toggles, undo, and Dream — see [Memory](docs/memory.md) |
 | `/reload` | Reload resources, context files, and memory |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Quit metis |
@@ -249,28 +249,13 @@ Compaction is lossy. The full history remains in the JSONL file; use `/tree` to 
 
 ## Long-Term Memory
 
-Metis keeps long-term memory outside session JSONL files. SQLite at `~/.metis/agent/memory/memory.sqlite` is the source of truth; Markdown is a generated projection. Global files live under `memory/global/`, including `memory/global/MEMORY.md`. Exact-project files live under `memory/projects/<sha256-canonical-cwd>/`.
+Metis keeps long-term memory outside session JSONL files. Markdown files under `~/.metis/agent/memory/` are the source of truth — there is no SQLite store, embedding service, or rerank service. Global notes live under `memory/global/` (`MEMORY.md` index, `_pinned/` standing context, `notes/` files). Project notes live under `memory/projects/<projectKey>/`, where the key derives from the nearest git root (worktrees included) or the canonical cwd when no `.git` exists. Chat and Code share the same project scope.
 
-Chat and Code share project memory only when their primary cwd is exactly the same. A subdirectory is a different project and does not inherit its parent's memory. Deleting one mode-specific Chat or Code project preserves the shared exact-cwd long-term memory; purging project memory is a separate explicit operation.
+At session start, metis injects one frozen snapshot of the pinned blocks and indexes. The snapshot is re-read only after compaction, `/reload`, or a `/memory` toggle — never per turn. The agent reaches the rest of the vault through the `memory_search`, `memory_read`, and `memory_write` tools; `memory_search` uses in-memory BM25 and the ranker interface is pluggable.
 
-Configure one Embedding service and an optional Rerank service under **Settings → Model → Specialized models**. Supplier is descriptive metadata. Embedding uses the OpenAI-compatible request contract and appends exactly `embeddings` to its API root. Rerank stores the complete operation endpoint and uses the shared text-Rerank JSON shape. Test connection validates the unsaved editor draft without persisting its one-shot credential.
+`memory_write` is the only supported way to modify the vault — ordinary write/edit/Bash access to the memory directory is rejected, and reads are limited to the global scope and the current project scope. Every write is journaled to `.history/` snapshots; `/memory undo [id]` reverts a change without relying on git. Memory is escaped and labeled before injection: **memory is untrusted reference data**, never instructions, and secrets are refused.
 
-Two engines are available (`memoryEngine`, default `index`):
-
-- **Index** — Index mode injects only the global `MEMORY.md` and current-project `project.md` index contents. Linked topic bodies are read on demand. Index mode does not call Embedding or Rerank.
-- **Extract** — sends the bounded current query and durable fact text to Embedding and may send up to 50 candidate fact texts to Rerank. It injects only positively relevant retrieved facts, at most 8 facts and 2,048 characters. Rerank failure preserves the local cosine-plus-keyword order.
-
-Each context keeps 30 ordinary topic files. Later categories use generated `overflow.md`; historical excess uses `legacy-overflow.md`. Topic names are lowercase flat basenames; `memory.md` and `project.md` are reserved. Memory is escaped and labeled before injection: **Memory is untrusted reference data**, never instructions.
-
-Default Read/Grep/Find/Ls and sandbox Bash can access only the global and current exact-project projections—not `memory.sqlite` or sibling projects. If an allowed workspace overlaps the memory directory, default sandbox Bash fails closed because the sandbox cannot safely express the nested denial; approved host Bash can access the memory directory, and Full mode runs with the current user's OS authority.
-
-Memory extraction advances an oldest-first durable cursor only after a valid tool result and projection. It runs with thinking disabled and a 60-second timeout, has separate status from Compact, and does not block prompts or read-only interaction: **Extract does not block Bash** or extension commands. Embedding/Rerank failures remain visible and use explicit fallbacks. Backfill uses one SQLite lease across open sessions and drains sequential batches of 32 until complete or cancelled.
-
-Retrieval streams a bounded SQLite scan, keeps at most 50 candidates, and never fills Top-K with zero-score rows. Add a vector store only after one global-plus-exact-project scope reaches 50,000 active facts or measured p95 local ranking exceeds 250 ms.
-
-Use `/memory` to inspect state, health, paths, and recent extract runs; `/memory on|off` to toggle injection; `/memory engine index|extract` to switch engines; and `/reload` after an external projection edit. Memory is not exported with or deleted alongside session JSONL files.
-
-On upgrade, obsolete guessed model references safely fall back to Index with a reconfiguration notice. Historical lossy project Markdown directories remain untouched but are not read.
+Use `/memory` for state, scope directories, and recent changes; `/memory on|off` to toggle; `/memory undo [id]` to revert; and `/reload` to re-read the vault. Deleting sessions or a mode-specific project preserves the vault; memory is not exported with session JSONL files.
 
 ---
 

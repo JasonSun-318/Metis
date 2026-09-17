@@ -227,9 +227,10 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
-| `autoMemoryEnabled` | boolean | `true` | Inject global and exact-cwd project memory indexes; global setting only |
+| `autoMemoryEnabled` | boolean | `true` | Inject the frozen memory snapshot and expose `memory_search`/`memory_read`/`memory_write`; global setting only |
+| `memory` | object | — | Optional vault settings: `activeContext` and `dream` (`enabled`, `model`, `minHours`, `minSessions`, `maxUnusedDays`); global setting only |
 
-Use `/memory on` or `/memory off` to update this setting. See [Usage](usage.md#long-term-memory) for the directory layout and scope.
+Use `/memory on` or `/memory off` to update this setting. See [Memory](memory.md) for the vault layout, scopes, tools, and Dream settings.
 
 ### Resources
 
