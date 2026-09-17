@@ -17,6 +17,8 @@ function session(sessionId = "session-1"): SessionSummary {
 		state: "running",
 		archived: false,
 		unread: false,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 
@@ -830,6 +832,35 @@ describe("renderer projection reducer", () => {
 		expect(state.itemsById.has("old-item")).toBe(false);
 		expect(state.notifications).toEqual([]);
 		expect(state.syncStatus).toBe("ready");
+	});
+
+	it("surfaces connection-level memory changes as notifications", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 1,
+				toCursor: 1,
+				events: [
+					{
+						type: "memory/changed",
+						entry: {
+							id: "44444444-4444-4444-8444-444444444444",
+							ts: "2026-07-16T01:00:00.000Z",
+							actor: { kind: "agent", sessionId: "session-1" },
+							op: "create",
+							scope: "global",
+							target: { slug: "prefers-concise-replies" },
+						},
+					},
+				],
+			}),
+		).toBe("applied");
+		const notifications = store.getSnapshot().notifications;
+		expect(notifications).toHaveLength(1);
+		expect(notifications[0]!.message).toBe('Saved memory: note "prefers-concise-replies"');
+		expect(notifications[0]!.sessionId).toBeUndefined();
 	});
 
 	it("updates only the addressed item for a streaming delta", () => {

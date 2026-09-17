@@ -25,8 +25,8 @@ const zhCN = {
 		"用于 Code 回复、欢迎语和问答内容的字体，代码和工具输出保持等宽字体。",
 	"Font used for Chat replies, greetings, and questions.": "用于 Chat 回复、欢迎语和问答内容的字体。",
 	"Review your profile and token usage.": "查看个人资料、活跃情况和用量。",
-	"Optional services for images and long-term memory. Your chat model works independently.":
-		"用于图片理解和长期记忆的可选服务，聊天模型可以独立使用。",
+	"Optional services for images. Your chat model works independently.":
+		"用于图片理解的可选服务，聊天模型可以独立使用。",
 	"No providers configured. Browse the catalog to connect one.": "尚未配置提供商，从目录中选择一个开始连接。",
 	"Manage your connected providers and add more when you need them.": "管理已连接的提供商，也可以添加新的提供商。",
 	"No providers match your search.": "没有匹配的提供商。",
@@ -230,44 +230,38 @@ const zhCN = {
 	"Settings pages": "设置页面",
 	"Close settings": "关闭设置",
 	Memory: "记忆",
-	"Configure long-term memory and the index or extract engine.": "配置长期记忆以及 Index 或 Extract 引擎。",
+	"Configure long-term memory and review recent changes.": "配置长期记忆并查看最近的变更。",
 	"Memory settings": "记忆设置",
 	"Long-term memory": "长期记忆",
 	"Enable long-term memory": "启用长期记忆",
-	"Keep facts outside session history and inject them into new turns.": "将事实保存在会话历史之外，并在新回合中注入。",
-	"Memory engine": "记忆引擎",
-	"Index injects the memory catalog. Extract retrieves relevant facts for the current message.":
-		"Index 会注入记忆目录；Extract 会为当前消息检索相关事实。",
-	"Index (catalog)": "Index（目录注入）",
-	"Extract (retrieve)": "Extract（检索）",
-	"Embedding model": "嵌入模型",
-	"Configured in Model settings.": "已在模型设置中配置。",
-	"Required for Extract and not configured.": "Extract 必需，当前尚未配置。",
-	"Extract requires a configured Embedding model and credential before it can be enabled.":
-		"启用 Extract 前必须配置嵌入模型和专用凭据。",
-	"Configure an Embedding model before choosing Extract. Index injects the memory catalog.":
-		"选择 Extract 前请先配置嵌入模型；Index 会注入记忆目录。",
-	"Required for Extract. Use provider/model, for example openai/text-embedding-3-small.":
-		"Extract 必需。使用 provider/model，例如 openai/text-embedding-3-small。",
-	"Rerank model": "重排模型",
-	"Optional. Reranks up to 50 candidate facts when configured.": "可选。配置后最多重排 50 条候选事实。",
-	"Extract sends the bounded query and stored facts to your Embedding service, and candidates to optional Rerank.":
-		"Extract 会把受限长度的查询和已存事实发送到嵌入服务，并可将候选事实发送到可选的重排服务。",
-	"Configure in Models": "前往模型设置",
-	"Optional. Improves Extract ranking when configured.": "可选。配置后可改善 Extract 的排序结果。",
-	"Set an embedding model before choosing Extract. Extract retrieves relevant facts; Index injects the memory catalog.":
-		"选择 Extract 前请先填写嵌入模型。Extract 检索相关事实；Index 注入记忆目录。",
-	"Active engine": "当前启用的引擎",
-	"Model dependencies": "关联模型依赖",
-	"Zero-config": "零配置开箱即用",
-	Ready: "已就绪",
-	"Embedding needed": "需嵌入模型",
-	"Injects memory catalog outlines directly into prompt context. Lightweight, deterministic, and works without embedding models.":
-		"将记忆目录大纲直接注入 Prompt 上下文中。轻量直观，无需配置任何向量模型即可生效。",
-	"Performs semantic vector search over memory items. Retrieves only targeted, highly relevant facts for each user query.":
-		"对记忆条目执行向量语义检索。针对每次用户提问精准提取高度相关的事实碎片并动态注入。",
-	"Configure embedding and rerank models in Model settings to power Extract mode.":
-		"在「模型」设置中配置嵌入与重排模型，以启用高级 Extract 模式。",
+	"Keep durable notes outside session history; Metis searches and updates them with local tools.":
+		"将会话历史之外的持久笔记保存为 Markdown；Metis 使用本地工具检索和更新它们。",
+	"Active context": "活跃上下文",
+	"Let Metis pin a short active-context note while working in this project.":
+		"允许 Metis 在此项目中工作时固定一条简短的活跃上下文笔记。",
+	Dream: "Dream",
+	"Consolidate memory while idle": "空闲时整理记忆",
+	"Periodically reviews recent sessions and curates long-term memory notes.": "定期回顾最近的会话并整理长期记忆笔记。",
+	"Last dream: {{added}} added, {{updated}} updated, {{deleted}} deleted":
+		"上次整理：新增 {{added}} 条，更新 {{updated}} 条，删除 {{deleted}} 条",
+	"Running…": "正在运行…",
+	"Run memory consolidation now": "立即运行记忆整理",
+	"Undo last run": "撤销上次整理",
+	"Undo the last dream run": "撤销上次记忆整理",
+	"Dream finished": "记忆整理完成",
+	"Undid the last dream": "已撤销上次整理",
+	"Undid the last dream; {{count}} change(s) were already modified":
+		"已撤销上次整理；{{count}} 条变更已被其他修改覆盖",
+	"Nothing left to undo for the last dream.": "上次整理已无可撤销的变更。",
+	"No credentialed model is available for dreaming.": "没有可用于整理的已授权模型。",
+	"Couldn’t run memory consolidation.": "无法运行记忆整理。",
+	"Couldn’t undo the last dream.": "无法撤销上次整理。",
+	"Recent changes": "最近变更",
+	"No memory changes yet.": "暂无记忆变更。",
+	Undo: "撤销",
+	"Undoing…": "正在撤销…",
+	"Undo memory change": "撤销此记忆变更",
+	"Couldn’t undo the memory change.": "无法撤销该记忆变更。",
 	"Couldn’t load memory settings.": "无法加载记忆设置。",
 	"Couldn’t save memory settings.": "无法保存记忆设置。",
 	"Model defaults": "模型默认值",
@@ -347,21 +341,6 @@ const zhCN = {
 	"Image input": "支持图片输入",
 	"Vision model": "视觉理解模型",
 	"Specialized models": "专用模型",
-	"Extract sends bounded text to your Embedding service and up to 50 candidate facts to optional Rerank.":
-		"Extract 会把受限长度的文本发送到嵌入服务，并可将最多 50 条候选事实发送到重排服务。",
-	"Required for Extract; supports OpenAI-compatible providers such as OpenAI and Qwen.":
-		"Extract 必需；支持 OpenAI、千问等 OpenAI-compatible 提供商。",
-	"Optional; enter the provider's complete rerank endpoint URL.": "可选；请填写提供商完整的重排端点 URL。",
-	Supplier: "供应商",
-	"OpenAI-compatible embeddings endpoint.": "OpenAI-compatible 嵌入端点。",
-	"Cohere-compatible and Qwen-compatible services use different paths, so enter the complete endpoint URL.":
-		"Cohere-compatible 与 Qwen-compatible 服务使用不同路径，请填写完整端点 URL。",
-	Dimensions: "向量维度",
-	"Endpoint URL": "端点 URL",
-	"Fill in all required fields and an API key.": "请填写所有必填项和 API Key。",
-	"Embedding model saved": "嵌入模型已保存",
-	"Rerank model saved": "重排模型已保存",
-	"Model removed": "模型已移除",
 	"Configure a dedicated vision API with your own base URL, API format, model ID, and key.":
 		"单独配置视觉理解 API：填写 Base URL、API 格式、模型 ID 和密钥。",
 	"Pick the chat API format and endpoint describe_image talks to.":

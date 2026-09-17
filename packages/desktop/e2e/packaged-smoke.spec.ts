@@ -67,24 +67,6 @@ interface FixtureSessionManager {
 	getSessionFile(): string | undefined;
 }
 
-interface FixtureMemoryStore {
-	resolveProject(identity: { canonicalCwd: string; projectKey: string; legacyKey: string }): unknown;
-	insertFact(fact: {
-		id: string;
-		scope: "global" | "project";
-		cwdKey: string | null;
-		mode: null;
-		topicFile: string;
-		text: string;
-		status: "active";
-		createdAt: string;
-		sourceTurn: null;
-		embedding: null;
-		embeddingModel: null;
-	}): boolean;
-	close(): void;
-}
-
 function assistantMessage(timestamp: number, totalTokens: number) {
 	return {
 		role: "assistant" as const,
@@ -107,19 +89,10 @@ function assistantMessage(timestamp: number, totalTokens: number) {
 
 interface CodingFixtures {
 	readonly createSessionWorkDir: (agentDir: string, sessionId: string) => string;
-	readonly ensureModeScopedMemoryLayout: (agentDir: string) => Promise<void>;
-	readonly getAutoMemoryPaths: (
-		agentDir: string,
-		cwd: string,
-	) => { readonly project: { readonly directory: string; readonly indexPath: string } };
-	readonly getMemorySqlitePath: (agentDir: string) => string;
-	readonly memoryProjectIdentity: (cwd: string) => { canonicalCwd: string; projectKey: string; legacyKey: string };
-	readonly openMemoryStore: (path: string) => FixtureMemoryStore;
-	readonly writeMemoryProjection: (
-		agentDir: string,
-		projectKey: string,
-		store: FixtureMemoryStore,
-	) => Promise<void>;
+	readonly ensureVaultLayout: (agentDir: string) => void;
+	readonly getVaultRoot: (agentDir: string) => string;
+	readonly getScopeDir: (root: string, scope: "global" | "project", projectKey?: string) => string;
+	readonly resolveVaultProject: (cwd: string, cwdOrigin: string) => { projectKey: string } | undefined;
 	readonly getDefaultSessionDir: (cwd: string, agentDir: string) => string;
 	readonly getSessionAttachmentDir: (agentDir: string, sessionId: string) => string;
 	readonly getSessionImageDir: (sessionFile: string) => string;
@@ -171,11 +144,10 @@ interface CodingFixtures {
 async function loadCodingFixtures(): Promise<CodingFixtures> {
 	const coreRoot = path.resolve(desktopRoot, "../coding-agent/dist/core");
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
-	const [memory, memoryProject, memoryProjection, memoryStore, attachments, sessions, schedules, trust] = await Promise.all([
+	const [memory, vaultPaths, vaultProject, attachments, sessions, schedules, trust] = await Promise.all([
 		importEsm(pathToFileURL(path.join(coreRoot, "auto-memory.js")).href),
-		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-project.js")).href),
-		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-projection.js")).href),
-		importEsm(pathToFileURL(path.join(coreRoot, "memory", "memory-store.js")).href),
+		importEsm(pathToFileURL(path.join(coreRoot, "memory", "vault-paths.js")).href),
+		importEsm(pathToFileURL(path.join(coreRoot, "memory", "vault-project.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "session-attachments.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href),
 		importEsm(pathToFileURL(path.join(coreRoot, "schedules", "manager.js")).href),
@@ -183,12 +155,10 @@ async function loadCodingFixtures(): Promise<CodingFixtures> {
 	]);
 	return {
 		createSessionWorkDir: attachments.createSessionWorkDir,
-		ensureModeScopedMemoryLayout: memory.ensureModeScopedMemoryLayout,
-		getAutoMemoryPaths: memory.getAutoMemoryPaths,
-		getMemorySqlitePath: memory.getMemorySqlitePath,
-		memoryProjectIdentity: memoryProject.memoryProjectIdentity,
-		openMemoryStore: memoryStore.openMemoryStore,
-		writeMemoryProjection: memoryProjection.writeProjection,
+		ensureVaultLayout: memory.ensureVaultLayout,
+		getVaultRoot: vaultPaths.getVaultRoot,
+		getScopeDir: vaultPaths.getScopeDir,
+		resolveVaultProject: vaultProject.resolveVaultProject,
 		getDefaultSessionDir: sessions.getDefaultSessionDir,
 		getSessionAttachmentDir: attachments.getSessionAttachmentDir,
 		getSessionImageDir: sessions.getSessionImageDir,
@@ -1212,7 +1182,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			);
 			return;
 		}
-		if (toolNames.includes("commit_facts")) {
+		if (toolNames.includes("memory_write")) {
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			const toolAlreadyCalled = providerTranscript.includes("call-packaged-memory");
 			response.end(
@@ -1231,7 +1201,11 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 									index: 0,
 									id: "call-packaged-memory",
 									type: "function",
-									function: { name: "commit_facts", arguments: '{"facts":[]}' },
+									function: {
+										name: "memory_write",
+										arguments:
+											'{"op":"create","scope":"global","target":{"slug":"packaged-smoke"},"frontmatter":{"name":"Packaged smoke","type":"reference"},"content":"packaged smoke note"}',
+									},
 								}],
 							},
 						finish_reason: toolAlreadyCalled ? "stop" : "tool_calls",
@@ -4001,13 +3975,11 @@ test("packaged General settings and Personalization persist across restart", asy
 		await instructions.focus();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1280x840.png") });
 
-		phase = "checking flat Memory engine choices";
+		phase = "checking the Memory vault settings page";
 		await page.getByRole("button", { name: "记忆", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "记忆", exact: true })).toBeVisible();
-		const memoryGrid = page.locator(".memory-engine-grid");
-		await expect(memoryGrid).toHaveCSS("gap", "0px");
-		await expect(memoryGrid.locator(".memory-engine-card").first()).toHaveCSS("border-radius", "0px");
-		await expect(memoryGrid.locator(".memory-engine-card").nth(1)).toHaveCSS("border-left-width", "1px");
+		await expect(page.locator(".memory-vault-path")).toBeVisible();
+		await expect(page.locator(".memory-history-list, .memory-info-banner").first()).toBeVisible();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-dark-1280x840.png") });
 
 		phase = "capturing matched light settings";
@@ -4345,7 +4317,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	await fixtures.ensureModeScopedMemoryLayout(agentDir);
+	fixtures.ensureVaultLayout(agentDir);
 
 	const chatActivePath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat");
 	const chatArchivedPath = createStoredSession(fixtures, agentDir, projectDir, CHAT_ARCHIVED_ID, "chat", true);
@@ -4642,49 +4614,22 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	const userDataDir = path.join(tempRoot, "electron");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 	const canonicalProjectDir = await realpath(projectDir);
-	await fixtures.ensureModeScopedMemoryLayout(agentDir);
+	fixtures.ensureVaultLayout(agentDir);
 
 	const chatPath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CHAT_ACTIVE_ID, "chat");
 	const codePath = createStoredSession(fixtures, agentDir, canonicalProjectDir, CODE_ID, "code");
-	const sharedMemory = fixtures.getAutoMemoryPaths(agentDir, canonicalProjectDir).project;
-	const globalMemoryPath = path.join(agentDir, "memory", "global", "MEMORY.md");
-	const globalMemoryTopicPath = path.join(path.dirname(globalMemoryPath), "global-sentinel.md");
-	const projectMemoryTopicPath = path.join(sharedMemory.directory, "project-sentinel.md");
-	const memoryIdentity = fixtures.memoryProjectIdentity(canonicalProjectDir);
-	const memoryStore = fixtures.openMemoryStore(fixtures.getMemorySqlitePath(agentDir));
-	try {
-		memoryStore.resolveProject(memoryIdentity);
-		const createdAt = "2026-01-01T00:00:00.000Z";
-		memoryStore.insertFact({
-			id: "global-sentinel",
-			scope: "global",
-			cwdKey: null,
-			mode: null,
-			topicFile: "global-sentinel.md",
-			text: "shared global memory",
-			status: "active",
-			createdAt,
-			sourceTurn: null,
-			embedding: null,
-			embeddingModel: null,
-		});
-		memoryStore.insertFact({
-			id: "project-sentinel",
-			scope: "project",
-			cwdKey: memoryIdentity.projectKey,
-			mode: null,
-			topicFile: "project-sentinel.md",
-			text: "shared project memory",
-			status: "active",
-			createdAt,
-			sourceTurn: null,
-			embedding: null,
-			embeddingModel: null,
-		});
-		await fixtures.writeMemoryProjection(agentDir, memoryIdentity.projectKey, memoryStore);
-	} finally {
-		memoryStore.close();
-	}
+	const vaultRoot = fixtures.getVaultRoot(agentDir);
+	const projectKey = fixtures.resolveVaultProject(canonicalProjectDir, "user-selected")!.projectKey;
+	const projectScope = fixtures.getScopeDir(vaultRoot, "project", projectKey);
+	const globalScope = fixtures.getScopeDir(vaultRoot, "global");
+	const globalMemoryPath = path.join(globalScope, "MEMORY.md");
+	const sharedMemoryIndexPath = path.join(projectScope, "MEMORY.md");
+	const globalMemoryTopicPath = path.join(globalScope, "notes", "global-sentinel.md");
+	const projectMemoryTopicPath = path.join(projectScope, "notes", "project-sentinel.md");
+	await writeFixtureFile(globalMemoryTopicPath, "shared global memory\n");
+	await writeFixtureFile(projectMemoryTopicPath, "shared project memory\n");
+	await writeFixtureFile(globalMemoryPath, "- [global-sentinel.md](notes/global-sentinel.md) — sentinel\n");
+	await writeFixtureFile(sharedMemoryIndexPath, "- [project-sentinel.md](notes/project-sentinel.md) — sentinel\n");
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
@@ -4724,7 +4669,7 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 		expect(existsSync(chatPath), chatPath).toBe(false);
 		for (const preservedPath of [
 			codePath,
-			sharedMemory.indexPath,
+			sharedMemoryIndexPath,
 			projectMemoryTopicPath,
 			globalMemoryPath,
 			globalMemoryTopicPath,
@@ -4733,8 +4678,8 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 		}
 		expect(await readFile(projectMemoryTopicPath, "utf8")).toBe("shared project memory\n");
 		expect(await readFile(globalMemoryTopicPath, "utf8")).toBe("shared global memory\n");
-		expect(await readFile(sharedMemory.indexPath, "utf8")).toContain("[project-sentinel.md](project-sentinel.md)");
-		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](global-sentinel.md)");
+		expect(await readFile(sharedMemoryIndexPath, "utf8")).toContain("[project-sentinel.md](notes/project-sentinel.md)");
+		expect(await readFile(globalMemoryPath, "utf8")).toContain("[global-sentinel.md](notes/global-sentinel.md)");
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(

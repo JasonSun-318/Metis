@@ -25,6 +25,8 @@ function session(sessionId: string, mode: "chat" | "code", updatedAt: string, un
 		state: "idle",
 		archived: false,
 		unread,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 

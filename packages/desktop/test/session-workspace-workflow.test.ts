@@ -19,6 +19,8 @@ function summary(sessionId: string, mode: "chat" | "code" = "chat", unread = fal
 		state: "idle",
 		archived: false,
 		unread,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 

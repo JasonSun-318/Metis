@@ -27,8 +27,6 @@ const generalPreferences: GeneralPreferences = {
 const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
 	vision: null,
-	embedding: null,
-	rerank: null,
 	defaultThinkingSelection: "high",
 	providers: [{
 		provider: "openai",
@@ -101,9 +99,16 @@ afterEach(() => {
 	document.body.replaceChildren();
 });
 
+const memorySettings = {
+	enabled: true,
+	dream: { enabled: false, minHours: 24, minSessions: 5, maxUnusedDays: 90, nextEligible: false },
+	activeContext: true,
+	vault: { globalDir: "/tmp/agent/memory/global" },
+};
+
 describe("SettingsDialog", () => {
  it("protects an unsaved personalization draft and keeps navigation focus", async () => {
-  const api = { getProfile: vi.fn().mockResolvedValue(profileSummary), getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }), getPersonalization: vi.fn().mockResolvedValue({ instructions: "" }), updatePersonalization: vi.fn().mockRejectedValue(new Error("offline")), getMemorySettings: vi.fn().mockResolvedValue({ autoMemoryEnabled: true, memoryEngine: "index", embeddingConfigured: false, rerankConfigured: false, lastError: null, memoryMigrationNotice: null }) } as unknown as MetisDesktopApi;
+  const api = { getProfile: vi.fn().mockResolvedValue(profileSummary), getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }), getPersonalization: vi.fn().mockResolvedValue({ instructions: "" }), updatePersonalization: vi.fn().mockRejectedValue(new Error("offline")), getMemorySettings: vi.fn().mockResolvedValue(memorySettings), listMemoryNotes: vi.fn().mockResolvedValue({ notes: [] }), listMemoryHistory: vi.fn().mockResolvedValue({ entries: [] }), undoMemoryChange: vi.fn() } as unknown as MetisDesktopApi;
   const container = document.createElement("div"); document.body.append(container);
   const root = createRoot(container); const onClose = vi.fn();
   await act(async () => root.render(<SettingsDialog api={api} generalPreferences={generalPreferences} onClose={onClose} onGeneralPreferencesChange={() => undefined} onThemeChange={() => undefined} serverReady theme="dark" closeDelayMs={0} />));
@@ -140,14 +145,10 @@ describe("SettingsDialog", () => {
 			updateModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			testModelConnection: vi.fn(),
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
-			getMemorySettings: vi.fn().mockResolvedValue({
-				autoMemoryEnabled: true,
-				memoryEngine: "index",
-				embeddingConfigured: false,
-				rerankConfigured: false,
-				lastError: null,
-				memoryMigrationNotice: null,
-			}),
+			getMemorySettings: vi.fn().mockResolvedValue(memorySettings),
+			listMemoryNotes: vi.fn().mockResolvedValue({ notes: [] }),
+			listMemoryHistory: vi.fn().mockResolvedValue({ entries: [] }),
+			undoMemoryChange: vi.fn(),
 			listBrowserProfiles,
 			listBrowserDownloads,
 			listBrowserHistory,
@@ -460,142 +461,6 @@ describe("ModelSettingsPanel", () => {
 				credential: { action: "set", value: "sk-vision-key" },
 			}),
 		}));
-		await act(async () => root.unmount());
-	});
-
-	it("tests and saves an unsaved Embedding draft with arbitrary supplier metadata", async () => {
-		const configured: ModelSettingsView = {
-			...modelSettings,
-			embedding: {
-				name: "Qwen Embedding",
-				provider: "Qwen Cloud",
-				baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-				api: "openai-compatible",
-				modelId: "text-embedding-v4",
-				authConfigured: true,
-			},
-		};
-		const updateModelSettings = vi.fn().mockResolvedValue(configured);
-		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 17 });
-		const api = {
-			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
-			updateModelSettings,
-			testModelConnection,
-		} as unknown as MetisDesktopApi;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
-		await flush();
-		const panel = [...container.querySelectorAll(".model-service-panel")].find((item) =>
-			item.textContent?.includes("Embedding model"),
-		)!;
-		await act(async () => button(panel, "Configure").click());
-		await flush();
-		const dialog = container.querySelector<HTMLDialogElement>('.model-service-dialog[aria-label="Embedding model"]')!;
-		const inputFor = (label: string) =>
-			[...dialog.querySelectorAll("label")].find((item) => item.querySelector("span")?.textContent === label)?.querySelector(
-				"input",
-			) as HTMLInputElement;
-		await act(async () => {
-			setValue(inputFor("Name"), "Qwen Embedding");
-			setValue(inputFor("Supplier"), "Qwen Cloud");
-			setValue(inputFor("Base URL"), "https://dashscope.aliyuncs.com/compatible-mode/v1");
-			setValue(inputFor("Model ID"), "text-embedding-v4");
-			setValue(inputFor("API key"), "one-shot");
-		});
-		await act(async () => button(dialog, "Test connection").click());
-		await flush();
-		expect(testModelConnection).toHaveBeenCalledWith(
-			expect.objectContaining({
-				kind: "embedding",
-				settings: expect.objectContaining({ provider: "Qwen Cloud", modelId: "text-embedding-v4" }),
-				credential: { action: "set", value: "one-shot" },
-			}),
-		);
-		expect(updateModelSettings).not.toHaveBeenCalled();
-		await act(async () => button(dialog, "Save").click());
-		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(
-			expect.objectContaining({
-				mutation: expect.objectContaining({ type: "set_embedding", credential: { action: "set", value: "one-shot" } }),
-			}),
-		);
-		await act(async () => root.unmount());
-	});
-
-	it("tests and saves a Rerank draft with its complete operation endpoint", async () => {
-		const configured: ModelSettingsView = {
-			...modelSettings,
-			rerank: {
-				name: "Cohere Rerank",
-				provider: "Cohere",
-				endpointUrl: "https://api.cohere.com/v2/rerank",
-				modelId: "rerank-v3.5",
-				authConfigured: true,
-			},
-		};
-		const updateModelSettings = vi.fn().mockResolvedValue(configured);
-		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 11 });
-		const api = {
-			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
-			updateModelSettings,
-			testModelConnection,
-		} as unknown as MetisDesktopApi;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
-		await flush();
-		const panel = [...container.querySelectorAll(".model-service-panel")].find((item) =>
-			item.textContent?.includes("Rerank model"),
-		)!;
-		await act(async () => button(panel, "Configure").click());
-		await flush();
-		const dialog = container.querySelector<HTMLDialogElement>('.model-service-dialog[aria-label="Rerank model"]')!;
-		const inputFor = (label: string) =>
-			[...dialog.querySelectorAll("label")].find((item) => item.querySelector("span")?.textContent === label)?.querySelector(
-				"input",
-			) as HTMLInputElement;
-		expect(inputFor("Base URL")).toBeUndefined();
-		expect(inputFor("Dimensions")).toBeUndefined();
-		await act(async () => {
-			setValue(inputFor("Name"), "Cohere Rerank");
-			setValue(inputFor("Supplier"), "Cohere");
-			setValue(inputFor("Endpoint URL"), "https://api.cohere.com/v2/rerank");
-			setValue(inputFor("Model ID"), "rerank-v3.5");
-			setValue(inputFor("API key"), "rerank-key");
-		});
-		await act(async () => button(dialog, "Test connection").click());
-		await flush();
-		expect(testModelConnection).toHaveBeenCalledWith(
-			expect.objectContaining({
-				kind: "rerank",
-				settings: {
-					name: "Cohere Rerank",
-					provider: "Cohere",
-					endpointUrl: "https://api.cohere.com/v2/rerank",
-					modelId: "rerank-v3.5",
-				},
-				credential: { action: "set", value: "rerank-key" },
-			}),
-		);
-		await act(async () => button(dialog, "Save").click());
-		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(
-			expect.objectContaining({
-				mutation: {
-					type: "set_rerank",
-					settings: {
-						name: "Cohere Rerank",
-						provider: "Cohere",
-						endpointUrl: "https://api.cohere.com/v2/rerank",
-						modelId: "rerank-v3.5",
-					},
-					credential: { action: "set", value: "rerank-key" },
-				},
-			}),
-		);
 		await act(async () => root.unmount());
 	});
 

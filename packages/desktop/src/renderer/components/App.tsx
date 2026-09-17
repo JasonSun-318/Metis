@@ -2027,6 +2027,7 @@ export function App({ api, store }: AppProps) {
 				onGeneralPreferencesChange={setGeneralPreferences}
 				onThemeChange={setTheme}
 				serverReady={serverReady}
+				sessionId={state.activeSessionId ?? undefined}
 				theme={theme}
 			/>
 		) : null}

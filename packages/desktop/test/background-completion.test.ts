@@ -14,6 +14,8 @@ function session(overrides: Partial<SessionSummary> = {}): SessionSummary {
 		state: "running",
 		archived: false,
 		unread: false,
+		useMemory: true,
+		contributeMemory: true,
 		...overrides,
 	};
 }

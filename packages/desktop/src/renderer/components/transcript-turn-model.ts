@@ -41,6 +41,7 @@ const INTERNAL_TOOL_NAMES = new Set([
 	"followup_task",
 	"wait_agents",
 	"interrupt_agent",
+	"memory_search",
 ]);
 const PREVIEW_LINES = 10;
 const PREVIEW_CHARS = 2_000;
@@ -282,6 +283,8 @@ function internalFailureLabel(name: string, t: Translator): string {
 			return t("Failed to interrupt agent");
 		case "tool_search":
 			return t("Tool search failed");
+		case "memory_search":
+			return t("Memory search failed");
 		default:
 			return t("Folder access failed");
 	}
@@ -528,6 +531,33 @@ function toolSearchPresentation(
 	};
 }
 
+function memorySearchPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const input = inputRecord(call);
+	const hits =
+		result?.output.split("\n").flatMap((line) => {
+			const trimmed = line.trim();
+			return trimmed.startsWith("- [") ? [trimmed] : [];
+		}) ?? [];
+	const running = call?.state === "running" || call?.state === "pending";
+	const label = running
+		? t("Searching memory")
+		: hits.length > 0
+			? t("Recalled {{count}} memory notes", { count: hits.length })
+			: t("Searched memory");
+	return {
+		label,
+		detailLines: [
+			...detail(t("Query"), stringField(input, "query")),
+			...hits.slice(0, PREVIEW_LINES).map((hit) => ({ value: hit })),
+		],
+		rawOutputIsError: false,
+	};
+}
+
 function folderAccessPresentation(
 	call: ToolCallBlock | undefined,
 	result: ToolResultBlock | undefined,
@@ -578,6 +608,8 @@ function internalToolPresentation(
 			return interruptAgentPresentation(result, t);
 		case "tool_search":
 			return toolSearchPresentation(call, result, t);
+		case "memory_search":
+			return memorySearchPresentation(call, result, t);
 		default:
 			return folderAccessPresentation(call, result, t);
 	}

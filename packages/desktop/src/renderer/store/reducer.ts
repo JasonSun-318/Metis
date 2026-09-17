@@ -331,6 +331,8 @@ function eventSessionId(event: DomainEvent): string | undefined {
 			return event.sessionId;
 		case "project/invalidated":
 		case "server/state":
+		case "memory/changed":
+		case "memory/dreamCompleted":
 			return undefined;
 	}
 }
@@ -526,6 +528,37 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		case "item/delta":
 			state.itemsById.set(event.itemId, appendItemDelta(state.itemsById.get(event.itemId)!, event.delta));
+			return;
+		case "memory/changed": {
+			// Vault writes are connection-level; surface them like the agent's
+			// "Saved memory: ..." tool text so user/dream edits also toast.
+			const target =
+				"slug" in event.entry.target
+					? `note "${event.entry.target.slug}"`
+					: `pinned block "${event.entry.target.block}"`;
+			state.notifications = [
+				...state.notifications.slice(-99),
+				{
+					type: "interaction/notify",
+					notificationId: event.entry.id,
+					level: "info",
+					message: event.entry.op === "undo" ? `Reverted memory: ${target}` : `Saved memory: ${target}`,
+					createdAt: event.entry.ts,
+				},
+			];
+			return;
+		}
+		case "memory/dreamCompleted":
+			state.notifications = [
+				...state.notifications.slice(-99),
+				{
+					type: "interaction/notify",
+					notificationId: crypto.randomUUID(),
+					level: "info",
+					message: `Memory consolidated: ${event.added} added, ${event.updated} updated, ${event.deleted} deleted`,
+					createdAt: new Date().toISOString(),
+				},
+			];
 	}
 }
 

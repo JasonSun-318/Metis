@@ -3737,8 +3737,6 @@ describe("Chat desktop shell", () => {
 			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
 			defaultThinkingSelection: "max",
 			vision: null,
-			embedding: null,
-			rerank: null,
 			providers: [{
 				provider: "glm",
 				name: "GLM",

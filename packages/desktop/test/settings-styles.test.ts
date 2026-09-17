@@ -45,19 +45,17 @@ describe("Settings visual states", () => {
 		expect(rule(".usage-chart-axis").color).toBe("var(--text-10)");
 		expect(rule(".usage-chart-axis").fontSize).toBe("11px");
 		expect(rule(".usage-detail-card li small").color).toBe("var(--text-09)");
-		expect(rule(".memory-engine-card-desc").color).toBe("var(--text-10)");
+		expect(rule(".memory-history-meta").color).toBe("var(--text-10)");
 		expect(rule(".profile-section-heading small").color).toBe("var(--text-09)");
 		expect(rule(".profile-section-heading small").fontSize).toBe("11px");
 	});
 
-	it("groups Memory engines as two flat choices inside one shared surface", () => {
-		expect(rule(".memory-engine-grid").gap).toBe("0px");
-		expect(rule(".memory-engine-grid").background).toBe("var(--surface-02)");
-		expect(rule(".memory-engine-grid").padding).toBe("0px");
-		expect(rule(".memory-engine-card").borderWidth).toBe("0px");
-		expect(rule(".memory-engine-card").borderRadius).toBe("0px");
-		expect(rule(".memory-engine-card").background).toBe("transparent");
-		expect(rule(".memory-engine-card + .memory-engine-card").borderLeft).toBe("1px solid var(--border-weak)");
+	it("lists Memory history as flat rows inside one shared surface", () => {
+		expect(rule(".memory-history-list").listStyle).toBe("none");
+		expect(rule(".memory-history-row").borderTop).toBe("1px solid var(--border-weak)");
+		expect(rule(".memory-history-row:first-child").borderTop).toBe("0px");
+		expect(rule(".memory-history-target").color).toBe("var(--text-26)");
+		expect(rule(".memory-vault-path").color).toBe("var(--text-09)");
 	});
 
 	it("keeps API key text clear of the reveal control", () => {

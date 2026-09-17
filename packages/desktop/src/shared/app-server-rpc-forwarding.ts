@@ -103,12 +103,40 @@ export const DESKTOP_RPC_FORWARDING = {
 		method: "webSearch/update",
 		input: "required",
 	},
-	getMemorySettings: { channel: "metis:get-memory-settings", method: "memory/get", input: "none" },
+	getMemorySettings: { channel: "metis:get-memory-settings", method: "memory/get", input: "optional" },
 	updateMemorySettings: {
 		channel: "metis:update-memory-settings",
 		method: "memory/update",
 		input: "required",
 	},
+	listMemoryNotes: {
+		channel: "metis:list-memory-notes",
+		method: "memory/notes/list",
+		input: "optional",
+	},
+	readMemoryNote: {
+		channel: "metis:read-memory-note",
+		method: "memory/notes/read",
+		input: "required",
+	},
+	writeMemoryNote: {
+		channel: "metis:write-memory-note",
+		method: "memory/notes/write",
+		input: "required",
+	},
+	listMemoryHistory: {
+		channel: "metis:list-memory-history",
+		method: "memory/history/list",
+		input: "optional",
+	},
+	readMemoryHistory: {
+		channel: "metis:read-memory-history",
+		method: "memory/history/read",
+		input: "required",
+	},
+	undoMemoryChange: { channel: "metis:undo-memory-change", method: "memory/undo", input: "required" },
+	undoMemoryRun: { channel: "metis:undo-memory-run", method: "memory/undoRun", input: "required" },
+	runMemoryDream: { channel: "metis:run-memory-dream", method: "memory/dream/run", input: "none" },
 	listHooks: { channel: "metis:list-hooks", method: "hooks/list", input: "none" },
 	upsertHook: { channel: "metis:upsert-hook", method: "hooks/upsert", input: "required" },
 	deleteHook: { channel: "metis:delete-hook", method: "hooks/delete", input: "required" },
@@ -168,6 +196,11 @@ export const DESKTOP_RPC_FORWARDING = {
 	setPermissionPreset: {
 		channel: "metis:set-permission-preset",
 		method: "session/setPermissionPreset",
+		input: "required",
+	},
+	setSessionMemoryFlags: {
+		channel: "metis:set-session-memory-flags",
+		method: "session/setMemoryFlags",
 		input: "required",
 	},
 	setCollaborationMode: {

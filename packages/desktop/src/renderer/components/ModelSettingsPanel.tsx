@@ -28,26 +28,6 @@ interface VisionDraft {
 	apiKey: string;
 }
 
-interface MemoryServiceDraftBase {
-	name: string;
-	provider: string;
-	modelId: string;
-	apiKey: string;
-}
-
-interface EmbeddingServiceDraft extends MemoryServiceDraftBase {
-	kind: "embedding";
-	baseUrl: string;
-	dimensions: string;
-}
-
-interface RerankServiceDraft extends MemoryServiceDraftBase {
-	kind: "rerank";
-	endpointUrl: string;
-}
-
-type MemoryServiceDraft = EmbeddingServiceDraft | RerankServiceDraft;
-
 interface CustomModelDraft {
 	readonly modelId: string;
 	readonly name: string;
@@ -156,77 +136,6 @@ function providerDraft(provider: ModelSettingsProviderView, defaultModel: ModelS
 	};
 }
 
-function embeddingServiceDraft(current: ModelSettingsView["embedding"] | undefined): EmbeddingServiceDraft {
-	return {
-		kind: "embedding",
-		name: current?.name ?? "",
-		provider: current?.provider ?? "",
-		baseUrl: current?.baseUrl ?? "",
-		modelId: current?.modelId ?? "",
-		dimensions: current?.dimensions?.toString() ?? "",
-		apiKey: "",
-	};
-}
-
-function rerankServiceDraft(current: ModelSettingsView["rerank"] | undefined): RerankServiceDraft {
-	return {
-		kind: "rerank",
-		name: current?.name ?? "",
-		provider: current?.provider ?? "",
-		endpointUrl: current?.endpointUrl ?? "",
-		modelId: current?.modelId ?? "",
-		apiKey: "",
-	};
-}
-
-function memoryServiceInput(draft: MemoryServiceDraft) {
-	const name = draft.name.trim();
-	const provider = draft.provider.trim();
-	const modelId = draft.modelId.trim();
-	if (!name || !provider || !modelId) return null;
-	if (draft.kind === "embedding") {
-		const baseUrl = draft.baseUrl.trim();
-		const dimensions = draft.dimensions.trim();
-		if (!/^https?:\/\//iu.test(baseUrl) || (dimensions && !/^\d+$/u.test(dimensions))) return null;
-		return {
-			kind: "embedding" as const,
-			settings: {
-				name,
-				provider,
-				baseUrl,
-				api: "openai-compatible" as const,
-				modelId,
-				...(dimensions ? { dimensions: Number(dimensions) } : {}),
-			},
-		};
-	}
-	const endpointUrl = draft.endpointUrl.trim();
-	if (!/^https?:\/\//iu.test(endpointUrl)) return null;
-	return { kind: "rerank" as const, settings: { name, provider, endpointUrl, modelId } };
-}
-
-function EmbeddingServiceFields({ draft, busy, onChange }: {
-	readonly draft: EmbeddingServiceDraft;
-	readonly busy: boolean;
-	readonly onChange: (next: EmbeddingServiceDraft) => void;
-}) {
-	const { t } = useTranslation();
-	return <>
-		<label className="model-api-key-field"><span>{t("API format")}</span><input disabled readOnly type="text" value="OpenAI compatible" /></label>
-		<label className="model-api-key-field"><span>{t("Base URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => onChange({ ...draft, baseUrl: event.target.value })} placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" type="text" value={draft.baseUrl} /></label>
-		<label className="model-api-key-field"><span>{t("Dimensions")}</span><input disabled={busy} max={8192} min={1} onChange={(event) => onChange({ ...draft, dimensions: event.target.value })} placeholder={t("Optional")} type="number" value={draft.dimensions} /></label>
-	</>;
-}
-
-function RerankServiceFields({ draft, busy, onChange }: {
-	readonly draft: RerankServiceDraft;
-	readonly busy: boolean;
-	readonly onChange: (next: RerankServiceDraft) => void;
-}) {
-	const { t } = useTranslation();
-	return <label className="model-api-key-field"><span>{t("Endpoint URL")}</span><input autoComplete="off" disabled={busy} maxLength={2048} onChange={(event) => onChange({ ...draft, endpointUrl: event.target.value })} placeholder="https://api.cohere.com/v2/rerank" type="text" value={draft.endpointUrl} /></label>;
-}
-
 const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 const CUSTOM_REASONING_OPTIONS = [
@@ -250,7 +159,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
 	const [visionDraft, setVisionDraft] = useState<VisionDraft | null>(null);
-	const [memoryServiceDraft, setMemoryServiceDraft] = useState<MemoryServiceDraft | null>(null);
 	const [defaultThinking, setDefaultThinking] = useState<ThinkingSelectionView>("medium");
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -258,7 +166,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 	const providerDialogRef = useRef<HTMLDialogElement>(null);
 	const customDialogRef = useRef<HTMLDialogElement>(null);
 	const visionDialogRef = useRef<HTMLDialogElement>(null);
-	const memoryServiceDialogRef = useRef<HTMLDialogElement>(null);
 
 	const applySettings = useCallback((next: ModelSettingsView) => {
 		setSettings(next);
@@ -296,27 +203,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 			Number(right.auth.configured) - Number(left.auth.configured) || left.name.localeCompare(right.name)),
 		[settings],
 	);
-	const memoryServiceEditor =
-		memoryServiceDraft?.kind === "embedding"
-			? {
-					title: t("Embedding model"),
-					description: t("OpenAI-compatible embeddings endpoint."),
-					supplierPlaceholder: "Qwen",
-					configured: settings?.embedding !== null && settings?.embedding !== undefined,
-					authConfigured: settings?.embedding?.authConfigured ?? false,
-				}
-			: memoryServiceDraft
-				? {
-						title: t("Rerank model"),
-						description: t(
-							"Cohere-compatible and Qwen-compatible services use different paths, so enter the complete endpoint URL.",
-						),
-						supplierPlaceholder: "Cohere",
-						configured: settings?.rerank !== null && settings?.rerank !== undefined,
-						authConfigured: settings?.rerank?.authConfigured ?? false,
-					}
-				: null;
-
 	const closeProvider = useCallback(() => {
 		setDraft(null);
 		setCustomDraft(null);
@@ -413,42 +299,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		};
 	}, [closeVisionEditor, Boolean(visionDraft)]);
 
-	const closeMemoryServiceEditor = useCallback(() => {
-		setMemoryServiceDraft(null);
-		setError(null);
-		setNotice(null);
-	}, []);
-
-	useEffect(() => {
-		if (!memoryServiceDraft) return;
-		const dialog = memoryServiceDialogRef.current;
-		if (!dialog) return;
-		try {
-			if (typeof dialog.showModal === "function") dialog.showModal();
-			else dialog.setAttribute("open", "");
-		} catch {
-			dialog.setAttribute("open", "");
-		}
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			closeMemoryServiceEditor();
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("keydown", onKeyDown);
-			if (dialog.open && typeof dialog.close === "function") {
-				try {
-					dialog.close();
-				} catch {
-					dialog.removeAttribute("open");
-				}
-			} else {
-				dialog.removeAttribute("open");
-			}
-		};
-	}, [closeMemoryServiceEditor, Boolean(memoryServiceDraft)]);
-
 	const runUpdate = async (mutation: Parameters<MetisDesktopApi["updateModelSettings"]>[0]["mutation"], success: string) => {
 		setBusy(true);
 		setError(null);
@@ -525,72 +375,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 		const next = await runUpdate({ type: "set_vision", settings: null, credential: { action: "remove" } }, t("Vision model removed"));
 		if (!next) return;
 		setVisionDraft(null);
-	};
-
-	const openMemoryServiceEditor = (kind: MemoryServiceDraft["kind"]) => {
-		setError(null);
-		setNotice(null);
-		setMemoryServiceDraft(
-			kind === "embedding" ? embeddingServiceDraft(settings?.embedding) : rerankServiceDraft(settings?.rerank),
-		);
-	};
-
-	const memoryServiceCredential = () => {
-		if (!memoryServiceDraft) return null;
-		const value = memoryServiceDraft.apiKey;
-		if (value) return { action: "set" as const, value };
-		return memoryServiceEditor?.authConfigured ? { action: "keep" as const } : null;
-	};
-
-	const testMemoryService = async () => {
-		const input = memoryServiceDraft ? memoryServiceInput(memoryServiceDraft) : null;
-		const credential = memoryServiceCredential();
-		if (!input || !credential) {
-			setError(t("Fill in all required fields and an API key."));
-			return;
-		}
-		setBusy(true);
-		setError(null);
-		setNotice(null);
-		try {
-			const result = await api.testModelConnection(
-				input.kind === "embedding"
-					? { requestId: crypto.randomUUID(), kind: "embedding", settings: input.settings, credential }
-					: { requestId: crypto.randomUUID(), kind: "rerank", settings: input.settings, credential },
-			);
-			setNotice(`${t(result.ok ? "Connection succeeded" : "Connection failed")} · ${result.latencyMs} ms${result.ok ? "" : ` · ${result.message}`}`);
-		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : t("Connection test failed."));
-		} finally {
-			setBusy(false);
-		}
-	};
-
-	const saveMemoryService = async () => {
-		const input = memoryServiceDraft ? memoryServiceInput(memoryServiceDraft) : null;
-		const credential = memoryServiceCredential();
-		if (!input || !credential) {
-			setError(t("Fill in all required fields and an API key."));
-			return;
-		}
-		const next = await runUpdate(
-			input.kind === "embedding"
-				? { type: "set_embedding", settings: input.settings, credential }
-				: { type: "set_rerank", settings: input.settings, credential },
-			t(input.kind === "embedding" ? "Embedding model saved" : "Rerank model saved"),
-		);
-		if (next) setMemoryServiceDraft(null);
-	};
-
-	const removeMemoryService = async () => {
-		if (!memoryServiceDraft) return;
-		const next = await runUpdate(
-			memoryServiceDraft.kind === "embedding"
-				? { type: "set_embedding", settings: null, credential: { action: "remove" } }
-				: { type: "set_rerank", settings: null, credential: { action: "remove" } },
-			t("Model removed"),
-		);
-		if (next) setMemoryServiceDraft(null);
 	};
 
 	const saveProvider = async (credentialAction: "set" | "remove" = "set") => {
@@ -815,7 +599,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 					<h3>{t("Specialized models")}</h3>
 				</header>
 				<p className="model-provider-intro">
-					{t("Optional services for images and long-term memory. Your chat model works independently.")}
+					{t("Optional services for images. Your chat model works independently.")}
 				</p>
 
 				<article className="settings-card model-service-panel">
@@ -840,43 +624,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						</div>
 					)}
 				</article>
-
-				{(["embedding", "rerank"] as const).map((kind) => {
-					const current = kind === "embedding" ? settings?.embedding : settings?.rerank;
-					return (
-						<article className="settings-card model-service-panel" key={kind}>
-							<div className="model-service-panel-top">
-								<div className="model-service-copy">
-									<span>{t(kind === "embedding" ? "Embedding model" : "Rerank model")}</span>
-									<p>
-										{t(
-											kind === "embedding"
-												? "Required for Extract; supports OpenAI-compatible providers such as OpenAI and Qwen."
-												: "Optional; enter the provider's complete rerank endpoint URL.",
-										)}
-									</p>
-								</div>
-								<button
-									className="settings-secondary-button"
-									disabled={!serverReady || busy}
-									onClick={() => openMemoryServiceEditor(kind)}
-									type="button"
-								>
-									{current ? t("Edit") : t("Configure")}
-								</button>
-							</div>
-							{current ? (
-								<div className="model-service-status">
-									<strong>{current.name}</strong>
-									<code>{current.modelId}</code>
-									<span className="model-service-badge">{current.provider}</span>
-								</div>
-							) : (
-								<div className="model-service-status unset"><span>{t("Not configured")}</span></div>
-							)}
-						</article>
-					);
-				})}
 			</div>
 			{draft ? <dialog
 				aria-label={t("Configure {{provider}}", { provider: draft.name })}
@@ -986,7 +733,7 @@ export function ModelSettingsPanel({ api, serverReady }: {
 					{notice ? <p className="settings-action-message" role="status"><CheckCircle aria-hidden="true" size={15} />{notice}</p> : null}
 				</div>
 			</dialog> : null}
-			{error && !draft && !customDraft && !visionDraft && !memoryServiceDraft ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
+			{error && !draft && !customDraft && !visionDraft ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
 
 			{visionDraft ? <dialog
 				aria-label={t("Vision model")}
@@ -1015,43 +762,6 @@ export function ModelSettingsPanel({ api, serverReady }: {
 						<div className="settings-form-actions">
 							{settings?.vision ? <button className="settings-danger-button" disabled={busy} onClick={() => void clearVision()} type="button">{t("Remove")}</button> : null}
 							<button className="settings-secondary-button" disabled={busy} onClick={closeVisionEditor} type="button">{t("Cancel")}</button>
-							<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">{busy ? t("Saving…") : t("Save")}</button>
-						</div>
-						{error ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
-						{notice ? <p className="settings-action-message" role="status"><CheckCircle aria-hidden="true" size={15} />{notice}</p> : null}
-					</form>
-				</div>
-			</dialog> : null}
-
-			{memoryServiceDraft && memoryServiceEditor ? <dialog
-				aria-label={memoryServiceEditor.title}
-				className="model-provider-dialog model-service-dialog"
-				onCancel={(event) => { event.preventDefault(); closeMemoryServiceEditor(); }}
-				onClick={(event) => { if (event.target === event.currentTarget) closeMemoryServiceEditor(); }}
-				ref={memoryServiceDialogRef}
-			>
-				<div className="model-provider-dialog-content">
-					<form className="model-provider-editor" onSubmit={(event) => { event.preventDefault(); void saveMemoryService(); }}>
-						<header className="model-provider-editor-header">
-							<div>
-								<h2>{memoryServiceEditor.title}</h2>
-								<p>{memoryServiceEditor.description}</p>
-							</div>
-							<button aria-label={t("Close")} className="model-provider-dialog-close" onClick={closeMemoryServiceEditor} type="button"><X aria-hidden="true" size={18} /></button>
-						</header>
-						<div className="model-custom-provider-fields">
-							<label className="model-api-key-field"><span>{t("Name")}</span><input autoComplete="off" disabled={busy} maxLength={120} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, name: event.target.value })} type="text" value={memoryServiceDraft.name} /></label>
-							<label className="model-api-key-field"><span>{t("Supplier")}</span><input autoComplete="off" disabled={busy} maxLength={120} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, provider: event.target.value })} placeholder={memoryServiceEditor.supplierPlaceholder} type="text" value={memoryServiceDraft.provider} /></label>
-							{memoryServiceDraft.kind === "embedding"
-								? <EmbeddingServiceFields busy={busy} draft={memoryServiceDraft} onChange={setMemoryServiceDraft} />
-								: <RerankServiceFields busy={busy} draft={memoryServiceDraft} onChange={setMemoryServiceDraft} />}
-							<label className="model-api-key-field"><span>{t("Model ID")}</span><input autoComplete="off" disabled={busy} maxLength={200} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, modelId: event.target.value })} type="text" value={memoryServiceDraft.modelId} /></label>
-							<label className="model-api-key-field"><span>{t("API key")}</span><input autoComplete="off" disabled={busy} maxLength={16384} onChange={(event) => setMemoryServiceDraft({ ...memoryServiceDraft, apiKey: event.target.value })} placeholder={memoryServiceCredential()?.action === "keep" ? t("Enter a new key to replace the saved credential") : "sk-…"} type="password" value={memoryServiceDraft.apiKey} /></label>
-						</div>
-						<div className="settings-form-actions">
-							{memoryServiceEditor.configured ? <button className="settings-danger-button" disabled={busy} onClick={() => void removeMemoryService()} type="button">{t("Remove")}</button> : null}
-							<button className="settings-secondary-button" disabled={busy || !serverReady} onClick={() => void testMemoryService()} type="button">{t("Test connection")}</button>
-							<button className="settings-secondary-button" disabled={busy} onClick={closeMemoryServiceEditor} type="button">{t("Cancel")}</button>
 							<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">{busy ? t("Saving…") : t("Save")}</button>
 						</div>
 						{error ? <p className="settings-action-message error" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}

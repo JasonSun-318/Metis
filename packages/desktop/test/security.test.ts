@@ -2424,6 +2424,8 @@ describe("desktop trust boundaries", () => {
 			lastTurnOutcome: "completed",
 			archived: false,
 			unread: true,
+			useMemory: true,
+			contributeMemory: true,
 		};
 		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, onSessionUpdated });
 		const webContents = new FakeWebContents();
@@ -2525,6 +2527,8 @@ describe("desktop trust boundaries", () => {
 									lastTurnOutcome: "completed",
 									archived: false,
 									unread: false,
+									useMemory: true,
+									contributeMemory: true,
 								},
 							},
 						}

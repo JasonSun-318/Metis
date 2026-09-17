@@ -15,7 +15,7 @@ import { ProfilePanel } from "./ProfilePanel.tsx";
 
 type SettingsPage = "profile" | "general" | "model" | "personalization" | "memory" | "agentTypes" | "permissions" | "browser" | "usage";
 
-export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, theme }: {
+export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, sessionId, theme }: {
 	readonly api: MetisDesktopApi;
 	readonly closeDelayMs?: number;
 	readonly generalPreferences: GeneralPreferences;
@@ -23,6 +23,7 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 	readonly onGeneralPreferencesChange: (preferences: GeneralPreferences) => void;
 	readonly onThemeChange: (theme: AppTheme) => void;
 	readonly serverReady: boolean;
+	readonly sessionId?: string;
 	readonly theme: AppTheme;
 }) {
 	const { t } = useTranslation();
@@ -115,7 +116,7 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
 		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
 		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
-		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and the index or extract engine.", icon: Brain },
+		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and review recent changes.", icon: Brain },
 		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
 		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
 		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
@@ -181,7 +182,15 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 							) : null}
 							{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
 							{page === "personalization" ? <PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} /> : null}
-							{page === "memory" ? <MemorySettingsPanel onDirtyChange={setDirty} api={api} onConfigureModels={() => navigate("model")} serverReady={serverReady} /> : null}
+							{page === "memory" ? (
+								<MemorySettingsPanel
+									api={api}
+									onDirtyChange={setDirty}
+									serverReady={serverReady}
+									sessionId={sessionId}
+									theme={theme === "light" ? "light" : "dark"}
+								/>
+							) : null}
 							{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
 							{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
 							{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}

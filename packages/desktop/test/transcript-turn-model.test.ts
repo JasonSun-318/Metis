@@ -266,6 +266,35 @@ describe("transcript turn presentation", () => {
 		expect(folder.detailLines).toEqual([{ label: "Folder", value: "/Users/ent/Desktop" }]);
 	});
 
+	it("presents memory_search recalls as note hits", () => {
+		const running = toolTranscriptPresentation(
+			call("memory_search", { query: "deploy freeze" }, "running"),
+			undefined,
+		);
+		expect(running.label).toBe("Searching memory");
+
+		const recalled = toolTranscriptPresentation(
+			call("memory_search", { query: "deploy freeze" }),
+			result(
+				"memory_search",
+				"2 memory note(s) matched:\n- [project/project] deploy-freeze — Deploy freeze policy (score 0.92, updated 2026-09-16)\n- [global/user] release-checklist — Release checklist (score 0.71, updated 2026-09-10)",
+			),
+		);
+		expect(recalled.label).toBe("Recalled 2 memory notes");
+		expect(recalled.detailLines).toEqual([
+			{ label: "Query", value: "deploy freeze" },
+			{ value: "- [project/project] deploy-freeze — Deploy freeze policy (score 0.92, updated 2026-09-16)" },
+			{ value: "- [global/user] release-checklist — Release checklist (score 0.71, updated 2026-09-10)" },
+		]);
+		expect(recalled.rawOutput).toBeUndefined();
+
+		const empty = toolTranscriptPresentation(
+			call("memory_search", { query: "nothing" }),
+			result("memory_search", "No memory notes matched."),
+		);
+		expect(empty.label).toBe("Searched memory");
+	});
+
 	it("never falls back to structured JSON for failed or orphan internal tools", () => {
 		const failed = toolTranscriptPresentation(
 			call("ask_user", { questions: [] }),
