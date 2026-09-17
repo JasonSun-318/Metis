@@ -24,7 +24,7 @@ Metis keeps long-term memory in a markdown **vault** outside session JSONL files
 ├── .dream/
 │   ├── state.json                # lastRunAt, lastRun, processedSessionIds
 │   └── staging/<sessionId>.jsonl # phase-1 candidates, cleaned after each run
-└── .meta/usage.json              # { "<scope>/<slug>": { useCount, lastUsed } }
+└── .meta/usage.json              # { "global/notes/<slug>" | "projects/<key>/notes/<slug>": { useCount, lastUsed } }
 ```
 
 Directories are `0700` and files are `0600`. `.history/`, `.dream/`, and `.meta/` are internal: the agent's file tools cannot read them, and `other projects'` scopes are likewise outside the read boundary — reads are limited to `global/` and the current `projects/<key>/`.
@@ -83,7 +83,7 @@ At session start Metis injects one snapshot of the protocol, both `MEMORY.md` in
 
 - a compaction completes,
 - `/reload`,
-- a `/memory` toggle (`on`/`off`, `use`, `contribute`) or a model-settings refresh.
+- a `/memory` toggle (`on`/`off`, `use`, `contribute`), or a settings update that changes memory-affecting values (`autoMemoryEnabled`, `memory.*`).
 
 Per-turn prompt rebuilds reuse the cached snapshot, so the prompt stays byte-stable for prefix caching. Side effect: writes from other sessions or Dream are not visible in the frozen prefix — but `memory_search`/`memory_read` always read the live vault, so the agent can still reach the latest content on demand.
 
@@ -91,12 +91,14 @@ Per-turn prompt rebuilds reuse the cached snapshot, so the prompt stays byte-sta
 
 Every `memory_write` is journaled to `.history/`:
 
-- `changelog.jsonl` appends `{ id, ts, actor, op, scope, target, projectKey?, snapshot?, ... }` where `actor` is `agent` (with `sessionId`), `dream` (with `runId`), `user`, or `migrate`.
+- `changelog.jsonl` appends `{ id, ts, actor, op, scope, target, projectKey?, snapshot?, operationId?, ... }` where `actor` is `agent` (with `sessionId`), `dream` (with `runId`), `user`, or `migrate`. Entries sharing an `operationId` form one atomic undo group — a `rename` and the `[[link]]` rewrites it triggered are undone together.
 - Pre-change file contents are snapshotted to `.history/<scope>/<target>/<timestamp>.md`. `create` has no snapshot — undoing it deletes the new file. A `rename` is journaled as two entries sharing one snapshot.
 
 `/memory undo [id]` reverts a change. With no argument it undoes the latest undoable change; an argument is matched as a change-id prefix (the `/memory` list shows 8-character prefixes). Only the newest un-undone change on a target can be undone — undo newer ones first. Project-scope entries are owned by their `projectKey`: a session can only undo changes belonging to its own project, and the desktop resolves each entry's owning project before undoing it.
 
-`undoRun(runId)` rolls back an entire Dream run in reverse order; targets touched by other actors after the run are skipped and reported. Retention is 20 snapshots per target and 90 days, pruned during Dream runs. Undo history does not rely on git.
+`/memory undo-run <runId>` (SDK: `undoMemoryRun`, desktop: **Undo last run**) rolls back an entire Dream run in reverse order; targets touched by other actors after the run are skipped and reported. Retention is 20 snapshots per target and 90 days, pruned during Dream runs. Undo history does not rely on git.
+
+**Compatibility limits.** Snapshots written before this layout remain undoable; old `rename` entries without `operationId` revert only the renamed file itself, not the link-rewrite group. Usage keys written before project-keyed scoping are inherited conservatively — same-slug usage from different projects cannot be reconstructed exactly. With `memory.activeContext` off, `_pinned/active.md` stays on disk but is neither injected into the snapshot nor writable through `memory_write` or Dream.
 
 Editing vault files directly in an external editor produces no changelog or snapshot — accepted behavior; the search index picks the files up via mtime.
 
@@ -153,6 +155,7 @@ Each session stores two flags in its display metadata:
 | `/memory use on\|off` | Toggle this session's use of memory |
 | `/memory contribute on\|off` | Toggle this session's writes and Dream eligibility |
 | `/memory undo [id]` | Revert the latest change, or the change whose id starts with `id` |
+| `/memory undo-run <runId>` | Roll back every change of one Dream run, newest first |
 | `/memory dream` | Run consolidation now, ignoring gate thresholds |
 
 `/dream` no longer exists and prints a pointer to `/memory`. `memory_write` results and `memory/changed` events surface as "Saved memory: <target>" notifications with undo support.

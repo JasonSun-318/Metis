@@ -13,7 +13,7 @@ describe("mode-scoped built-in slash commands", () => {
 
 	it("exposes /memory undo hint and drops /dream", () => {
 		const memory = BUILTIN_SLASH_COMMANDS.find((command) => command.name === "memory");
-		expect(memory?.argumentHint).toBe("[on|off|use on|off|contribute on|off|undo [id]|dream]");
+		expect(memory?.argumentHint).toBe("[on|off|use on|off|contribute on|off|undo [id]|undo-run <runId>|dream]");
 		expect(BUILTIN_SLASH_COMMANDS.some((command) => command.name === "dream")).toBe(false);
 	});
 });

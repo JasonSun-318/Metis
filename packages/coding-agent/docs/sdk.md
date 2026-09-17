@@ -1200,6 +1200,10 @@ getExamplesPath
 SessionManager
 SettingsManager
 
+// Memory
+MemoryEvents
+undoMemoryRun
+
 // Tool factories
 createCodingTools
 createReadOnlyTools
@@ -1217,5 +1221,18 @@ type Skill
 type PromptTemplate
 type Tool
 ```
+
+`undoMemoryRun` rolls back every vault change of one Dream run, newest first. Pass a shared `MemoryEvents` to observe the emitted `changed` notifications:
+
+```typescript
+import { MemoryEvents, undoMemoryRun } from "@metis/coding-agent";
+
+export async function revertConsolidation(agentDir: string, runId: string) {
+  const events = new MemoryEvents();
+  return await undoMemoryRun({ agentDir, runId, actor: { kind: "user" }, events });
+}
+```
+
+`agentDir` is the caller-provided agent directory. The result lists `undone` change ids and `skipped` entries (targets modified by another actor after the run). A failed Dream run's already-committed file writes stay on disk until you undo by `runId`; the run-id journal covers the whole run, and history diffs read "before this change → current version". In-process `MemoryEvents` notifications are not a cross-process file watcher, and the undo file applier does not promise cross-file atomicity on power loss — snapshots are retained for recovery.
 
 For extension types, see [extensions.md](extensions.md) for the full API.

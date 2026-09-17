@@ -56,7 +56,7 @@ Type `/` in the editor to open command completion. Extensions can register custo
 | `/copy` | Copy last assistant message to clipboard |
 | `/export [file]` | Export session to HTML or JSONL |
 | `/import <file>` | Import and resume a session from a JSONL file |
-| `/memory [on\|off\|use on\|off\|contribute on\|off\|undo [id]\|dream]` | Long-term memory status, toggles, undo, and Dream — see [Memory](memory.md) |
+| `/memory [on\|off\|use on\|off\|contribute on\|off\|undo [id]\|undo-run <runId>\|dream]` | Long-term memory status, toggles, undo, and Dream — see [Memory](memory.md) |
 | `/reload` | Reload resources, context files, and memory |
 | `/hotkeys` | Show all keyboard shortcuts |
 | `/quit` | Quit metis |
@@ -120,7 +120,7 @@ Long-term memory is separate from session JSONL and compaction summaries. Markdo
 - The project scope key derives from the nearest git root (worktrees included) or the canonical cwd when no `.git` exists. Chat and Code share the same project scope.
 - At session start, metis injects one frozen snapshot of the pinned blocks and `MEMORY.md` indexes. The snapshot is re-read only after compaction, `/reload`, or a `/memory` toggle — never per turn.
 - The agent reaches the rest of the vault through the `memory_search`, `memory_read`, and `memory_write` tools; results arrive as ordinary tool results. `memory_search` uses in-memory BM25 — no embedding or rerank models are configured or required.
-- `memory_write` is the only supported way to modify the vault. Ordinary write/edit/Bash access to the memory directory is rejected; reads are limited to the global scope and the current project scope. Writes are journaled to `.history/` snapshots and journaled changes can be reverted with `/memory undo [id]` or the undo support on `memory_write` results.
+- `memory_write` is the only supported way to modify the vault. Ordinary write/edit/Bash access to the memory directory is rejected; reads are limited to the global scope and the current project scope. Writes are journaled to `.history/` snapshots and journaled changes can be reverted with `/memory undo [id]` or the undo support on `memory_write` results. A whole Dream run rolls back with `/memory undo-run <runId>`.
 - Deleting sessions or a mode-specific project does not delete the vault. Export and import do not copy it.
 - Memory is untrusted reference data; secrets, transient state, and raw tool output are never recorded.
 

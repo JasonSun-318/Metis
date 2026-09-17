@@ -3980,6 +3980,74 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("heading", { name: "记忆", exact: true })).toBeVisible();
 		await expect(page.locator(".memory-vault-path")).toBeVisible();
 		await expect(page.locator(".memory-history-list, .memory-info-banner").first()).toBeVisible();
+
+		phase = "creating and editing a memory note";
+		await page.getByRole("button", { name: "新建记忆笔记", exact: true }).click();
+		await page.getByLabel("笔记标识", { exact: true }).fill("repair-smoke");
+		await page.getByLabel("笔记名称", { exact: true }).fill("Repair smoke");
+		await page.getByLabel("笔记描述", { exact: true }).fill("Smoke test preference");
+		await page.getByLabel("笔记内容", { exact: true }).fill("original body");
+		await page.getByRole("button", { name: "保存笔记", exact: true }).click();
+		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
+		await page.getByLabel("笔记内容", { exact: true }).fill("edited body");
+		await page.getByRole("button", { name: "保存笔记", exact: true }).click();
+		// Read-only RPC as an independent observation; writes still come from the real UI.
+		await expect
+			.poll(async () =>
+				(await page!.evaluate(async () =>
+					(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
+						scope: "global",
+						slug: "repair-smoke",
+					}),
+				)).note.body,
+			)
+			.toBe("edited body");
+
+		phase = "undoing a memory edit through history";
+		await expect
+			.poll(async () =>
+				(await page!.evaluate(async () =>
+					(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
+				)).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
+			)
+			.toBe("replace");
+		const editHistory = page.locator(".memory-history-row").filter({ hasText: "repair-smoke" }).first();
+		await editHistory.getByRole("button", { name: "撤销记忆变更", exact: true }).click();
+		await expect
+			.poll(async () =>
+				(await page!.evaluate(async () =>
+					(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
+						scope: "global",
+						slug: "repair-smoke",
+					}),
+				)).note.body,
+			)
+			.toBe("original body");
+		await page.locator(".memory-note-row").filter({ hasText: "repair-smoke" }).getByRole("button").click();
+		await expect(page.getByLabel("笔记内容", { exact: true })).toHaveValue("original body");
+
+		phase = "deleting and restoring a memory note";
+		await page.getByRole("button", { name: "删除记忆笔记", exact: true }).click();
+		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(0);
+		await expect
+			.poll(async () =>
+				(await page!.evaluate(async () =>
+					(globalThis as unknown as { metis: MetisDesktopApi }).metis.listMemoryHistory({ limit: 20 }),
+				)).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
+			)
+			.toBe("delete");
+		await page
+			.locator(".memory-history-row")
+			.filter({ hasText: "repair-smoke" })
+			.first()
+			.getByRole("button", { name: "撤销记忆变更", exact: true })
+			.click();
+		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
+		await page.getByLabel("搜索记忆笔记", { exact: true }).fill("zqvzxnomatch");
+		await expect(page.locator(".memory-note-row")).toHaveCount(0);
+		await page.getByLabel("搜索记忆笔记", { exact: true }).fill("");
+		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
+
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-dark-1280x840.png") });
 
 		phase = "capturing matched light settings";
@@ -4040,6 +4108,25 @@ test("packaged General settings and Personalization persist across restart", asy
 		expect(restartedFonts.code).toContain("Songti SC");
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
+
+		phase = "verifying persisted memory note and changelog after restart";
+		const persistedNote = await page.evaluate(async () =>
+			(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
+				scope: "global",
+				slug: "repair-smoke",
+			}),
+		);
+		expect(persistedNote.note.body).toBe("original body");
+		expect(persistedNote.note.sources).toContain("user");
+		const changelog = (await readFile(path.join(agentDir, "memory", ".history", "changelog.jsonl"), "utf8"))
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { op: string; actor: { kind: string }; target: { slug?: string } });
+		const smokeOps = changelog
+			.filter((entry) => entry.target.slug === "repair-smoke")
+			.map((entry) => `${entry.op}:${entry.actor.kind}`);
+		expect(smokeOps).toEqual(["create:user", "replace:user", "undo:user", "delete:user", "undo:user"]);
+
 		phase = "checking keyboard containment and 200 percent zoom-equivalent reflow";
 		await page.setViewportSize({ width: viewport.width / 2, height: viewport.height / 2 });
 		const settingsDialog = page.getByRole("dialog", { name: "设置", exact: true });

@@ -18,7 +18,9 @@ import { resolveDreamSettings } from "../src/core/memory/dream/types.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { MemoryEvents } from "../src/core/memory/vault-events.ts";
 import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
+import { readUsage } from "../src/core/memory/vault-usage.ts";
 import { SessionLease } from "../src/core/session-lease.ts";
 import { encodePathForStorage } from "../src/utils/paths.ts";
 
@@ -177,6 +179,137 @@ describe("dream run", () => {
 		expect(undo.skipped).toEqual([]);
 		expect(undo.undone.length).toBeGreaterThanOrEqual(2);
 		expect(snapshotTree(join(getVaultRoot(agentDir), "global"))).toEqual(before);
+	});
+
+	it("undoMemoryRun byte-restores global and project vaults after a full run", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const rootA = join(makeTemp(), "proj-a");
+		const rootB = join(makeTemp(), "proj-b");
+		mkdirSync(rootA);
+		mkdirSync(rootB);
+		for (let i = 0; i < 5; i++) writeSession(agentDir, `sess-${i}`, `session ${i}`);
+
+		const projectA = resolveVaultProject(rootA, "user-selected")!;
+		const projectB = resolveVaultProject(rootB, "user-selected")!;
+		const globalVault = new MemoryVault({ agentDir });
+		globalVault.ensureLayout();
+		const vaultA = new MemoryVault({ agentDir, project: projectA });
+		vaultA.ensureLayout();
+		const vaultB = new MemoryVault({ agentDir, project: projectB });
+		vaultB.ensureLayout();
+		// Sessions run with cwd=agentDir; materialize that project vault too so its
+		// layout metadata is part of the baseline rather than a post-run leftover.
+		new MemoryVault({ agentDir, project: resolveVaultProject(agentDir, "user-selected") }).ensureLayout();
+		const user = { kind: "user" as const };
+		await globalVault.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "stale" },
+				frontmatter: { type: "reference", description: "will be deleted" },
+				content: "stale",
+			},
+			user,
+		);
+		await vaultA.write(
+			{
+				op: "create",
+				scope: "project",
+				target: { slug: "renamed-me" },
+				frontmatter: { type: "project", description: "rename target" },
+				content: "old name",
+			},
+			user,
+		);
+		await vaultA.write(
+			{
+				op: "create",
+				scope: "project",
+				target: { slug: "linker" },
+				frontmatter: { type: "reference", description: "references the target" },
+				content: "see [[renamed-me]]",
+			},
+			user,
+		);
+		await vaultB.write(
+			{
+				op: "create",
+				scope: "project",
+				target: { slug: "b-note" },
+				frontmatter: { type: "project", description: "untouched" },
+				content: "b stays",
+			},
+			user,
+		);
+		const beforeGlobal = snapshotTree(join(getVaultRoot(agentDir), "global"));
+		const beforeProjects = snapshotTree(join(getVaultRoot(agentDir), "projects"));
+
+		const events = new MemoryEvents();
+		const changed: string[] = [];
+		events.on("changed", (event) => changed.push(event.entry.id));
+		const result = await runDream({
+			agentDir,
+			settings,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async () => ({
+				candidates: [
+					{ scope: "global" as const, slug: "new-note", text: "Fresh fact." },
+					{ scope: "project" as const, slug: "a-note", text: "Project A fact.", project: projectA },
+				],
+			}),
+			promptAgent: async (ctx) => {
+				await ctx.callTool("memory_write", {
+					op: "create",
+					scope: "global",
+					target: { slug: "new-note" },
+					frontmatter: { type: "reference", description: "new" },
+					content: "fresh",
+				});
+				await ctx.callTool("memory_write", {
+					op: "delete",
+					scope: "global",
+					target: { slug: "stale" },
+				});
+				await ctx.callTool("memory_write", {
+					op: "rename",
+					scope: "project",
+					project: projectA.root,
+					target: { slug: "renamed-me" },
+					newSlug: "renamed-done",
+				});
+				await ctx.callTool("memory_write", {
+					op: "append",
+					scope: "project",
+					project: projectA.root,
+					target: { slug: "linker" },
+					content: "\nmore",
+				});
+				await ctx.callTool("memory_write", {
+					op: "append",
+					scope: "project",
+					project: projectA.root,
+					target: { block: "project" },
+					content: "first pinned block",
+				});
+				await ctx.callTool("finish_dream", {});
+			},
+			events,
+		});
+		if (!result.ran) throw new Error(JSON.stringify(result));
+		expect(result.added).toBe(1);
+		expect(result.deleted).toBe(1);
+		const writesDuringRun = changed.length;
+		expect(writesDuringRun).toBeGreaterThanOrEqual(5);
+		expect(readDreamState(agentDir).processedSessionIds).toHaveLength(5);
+
+		const reverted = await undoMemoryRun({ agentDir, runId: result.runId, actor: { kind: "user" }, events });
+		expect(reverted.skipped).toEqual([]);
+		expect(reverted.undone.length).toBeGreaterThanOrEqual(5);
+		expect(snapshotTree(join(getVaultRoot(agentDir), "global"))).toEqual(beforeGlobal);
+		expect(snapshotTree(join(getVaultRoot(agentDir), "projects"))).toEqual(beforeProjects);
+		// Every revert emits its own event; dream search never records usage.
+		expect(changed.length).toBeGreaterThan(writesDuringRun);
+		expect(readUsage(getVaultRoot(agentDir))).toEqual({});
 	});
 
 	it("does not mark sessions processed when phase 2 never finishes", async () => {

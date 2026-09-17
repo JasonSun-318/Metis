@@ -228,9 +228,14 @@ When multiple sources specify a session directory, precedence is `--session-dir`
 | Setting | Type | Default | Description |
 |---------|------|---------|-------------|
 | `autoMemoryEnabled` | boolean | `true` | Inject the frozen memory snapshot and expose `memory_search`/`memory_read`/`memory_write`; global setting only |
-| `memory` | object | — | Optional vault settings: `activeContext` and `dream` (`enabled`, `model`, `minHours`, `minSessions`, `maxUnusedDays`); global setting only |
+| `memory.activeContext` | boolean | `false` | Maintain and inject `_pinned/active.md` for the current project only; the file stays on disk when disabled but is not injected or writable |
+| `memory.dream.enabled` | boolean | `true` | Allow gated Dream consolidation runs |
+| `memory.dream.model` | `{ provider, modelId }` | — | Model override for Dream; unset picks the cheapest credentialed model by input cost |
+| `memory.dream.minHours` | integer | `24` | Minimum hours between runs (1–8760) |
+| `memory.dream.minSessions` | integer | `5` | Minimum eligible unprocessed sessions (1–100000) |
+| `memory.dream.maxUnusedDays` | integer | `90` | Forget unused notes older than this (1–3650) |
 
-Use `/memory on` or `/memory off` to update this setting. See [Memory](memory.md) for the vault layout, scopes, tools, and Dream settings.
+Use `/memory on` or `/memory off` to update `autoMemoryEnabled`. Dream runs never use the session's prompt cache and do not inflate usage stats. See [Memory](memory.md) for the vault layout, scopes, tools, and Dream behavior.
 
 ### Resources
 
