@@ -19,7 +19,7 @@ Metis keeps long-term memory in a markdown **vault** outside session JSONL files
 │   └── notes/<slug>.md
 ├── .history/
 │   ├── changelog.jsonl           # one line per change
-│   ├── <scope>/<target>/<ts>.md  # pre-change snapshots for undo
+│   ├── v2/<scopeKey>/<target>/<ts>.md  # pre-change snapshots for undo
 │   └── legacy-<ts>/              # archived pre-refactor data (one-shot migration)
 ├── .dream/
 │   ├── state.json                # lastRunAt, lastRun, processedSessionIds
@@ -92,7 +92,7 @@ Per-turn prompt rebuilds reuse the cached snapshot, so the prompt stays byte-sta
 Every `memory_write` is journaled to `.history/`:
 
 - `changelog.jsonl` appends `{ id, ts, actor, op, scope, target, projectKey?, snapshot?, operationId?, ... }` where `actor` is `agent` (with `sessionId`), `dream` (with `runId`), `user`, or `migrate`. Entries sharing an `operationId` form one atomic undo group — a `rename` and the `[[link]]` rewrites it triggered are undone together.
-- Pre-change file contents are snapshotted to `.history/<scope>/<target>/<timestamp>.md`. `create` has no snapshot — undoing it deletes the new file. A `rename` is journaled as two entries sharing one snapshot.
+- Pre-change file contents are snapshotted to `.history/v2/<scopeKey>/<targetKey>/<timestamp>.md`, where scopeKey is `global` or `projects/<key>` and targetKey is `<slug>` or `_pinned-<block>`. Snapshots written before project isolation lived under `.history/<scope>/<target>/` and remain undoable. `create` has no snapshot — undoing it deletes the new file. A `rename` is journaled as a `rename`+`create` pair sharing one snapshot, plus a `replace` entry per rewritten backlink, all under one `operationId`.
 
 `/memory undo [id]` reverts a change. With no argument it undoes the latest undoable change; an argument is matched as a change-id prefix (the `/memory` list shows 8-character prefixes). Only the newest un-undone change on a target can be undone — undo newer ones first. Project-scope entries are owned by their `projectKey`: a session can only undo changes belonging to its own project, and the desktop resolves each entry's owning project before undoing it. A rename whose `[[link]]` rewrites span several projects is still one undo group: session-scoped vaults stay confined to their own project, while the host-level vault (desktop undo, `undoMemoryRun`, `/memory undo-run`) reverts the whole group — but only when every foreign leg is a provable referrer rewrite (a `replace` entry whose snapshot still contains the old `[[slug]]` link), so a corrupt changelog line cannot pull an undo into another project.
 
