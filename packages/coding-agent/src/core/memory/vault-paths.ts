@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { canonicalizePathForCreation, resolvePath } from "../../utils/paths.ts";
+import { memoryScopeKey } from "./vault-identity.ts";
 import { type MemoryScope, type MemoryTarget, targetKey } from "./vault-types.ts";
 
 /** Vault root; identical to the legacy getAutoMemoryRoot result. */
@@ -41,8 +42,13 @@ export function getChangelogPath(root: string): string {
 	return join(getHistoryDir(root), "changelog.jsonl");
 }
 
-export function getSnapshotDir(root: string, scope: MemoryScope, target: MemoryTarget): string {
-	return join(getHistoryDir(root), scope, targetKey(target));
+/**
+ * Snapshot directory for a target under `.history/v2/`. Snapshots written
+ * before project isolation used `.history/<scope>/<targetKey>/`; those paths
+ * stay readable through the changelog's relative snapshot references.
+ */
+export function getSnapshotDir(root: string, scope: MemoryScope, target: MemoryTarget, projectKey?: string): string {
+	return join(getHistoryDir(root), "v2", memoryScopeKey(scope, projectKey), targetKey(target));
 }
 
 export function getDreamDir(root: string): string {

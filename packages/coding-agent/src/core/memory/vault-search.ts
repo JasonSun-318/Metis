@@ -1,5 +1,6 @@
 import { readdirSync, statSync } from "node:fs";
 import type { MemoryVault } from "./vault.ts";
+import { memoryUsageKey } from "./vault-identity.ts";
 import { getNotesDir, getScopeDir } from "./vault-paths.ts";
 import { isSafeSlug, MEMORY_SCOPES, type MemoryScope, type Note, type NoteType } from "./vault-types.ts";
 import { readUsage, recordUsage } from "./vault-usage.ts";
@@ -207,7 +208,7 @@ export class MemorySearchIndex {
 		const hits = this.ranker
 			.rank(query, candidates)
 			.map(({ note, score }) => {
-				const key = `${note.scope}/${note.slug}`;
+				const key = memoryUsageKey(note.scope, note.slug, this.vault.project?.projectKey);
 				const useCount = usage[key]?.useCount ?? 0;
 				const finalScore =
 					score * recencyDecay(note.note.frontmatter.updated, nowMs) + Math.log1p(useCount) * USAGE_WEIGHT;
@@ -231,7 +232,7 @@ export class MemorySearchIndex {
 				.then(() =>
 					recordUsage(
 						this.vault.root,
-						hits.map((hit) => `${hit.scope}/${hit.slug}`),
+						hits.map((hit) => memoryUsageKey(hit.scope, hit.slug, this.vault.project?.projectKey)),
 					),
 				)
 				.catch(() => {});

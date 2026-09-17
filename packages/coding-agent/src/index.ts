@@ -370,13 +370,22 @@ export {
 } from "./core/memory/vault-events.ts";
 export { type ChangelogEntry, readChangelog, readSnapshot } from "./core/memory/vault-history.ts";
 export {
+	memoryScopeKey,
+	memoryTargetId,
+	memoryUsageKey,
+} from "./core/memory/vault-identity.ts";
+export {
 	getNotePath,
 	getPinnedPath,
 	getProjectMetaPath,
 	getScopeDir,
 	getVaultRoot,
 } from "./core/memory/vault-paths.ts";
-export { resolveVaultProject, type VaultProjectIdentity } from "./core/memory/vault-project.ts";
+export {
+	listStoredVaultProjects,
+	resolveVaultProject,
+	type VaultProjectIdentity,
+} from "./core/memory/vault-project.ts";
 export {
 	BM25Ranker,
 	type IndexedNote,

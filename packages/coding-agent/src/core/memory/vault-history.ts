@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { appendFileSync, readdirSync, rmSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { ensureDirectoryDurablySync, readSingleLinkTextFileSync, writeFileDurablySync } from "../durable-file.ts";
+import { memoryTargetId } from "./vault-identity.ts";
 import { getChangelogPath, getHistoryDir, getSnapshotDir } from "./vault-paths.ts";
 import type { MemoryActor, MemoryScope, MemoryTarget } from "./vault-types.ts";
 
@@ -85,9 +86,10 @@ export function saveSnapshot(
 	scope: MemoryScope,
 	target: MemoryTarget,
 	currentContent: string | undefined,
+	projectKey?: string,
 ): string | undefined {
 	if (currentContent === undefined) return undefined;
-	const dir = getSnapshotDir(root, scope, target);
+	const dir = getSnapshotDir(root, scope, target, projectKey);
 	ensureDirectoryDurablySync(dir);
 	const stamp = new Date().toISOString().replace(/[:.]/g, "-");
 	const path = join(dir, `${stamp}-${randomUUID().slice(0, 8)}.md`);
@@ -106,58 +108,125 @@ export interface SnapshotRetention {
 	snapshotMaxAgeDays: number;
 }
 
+/** Referenced snapshots grouped by their logical target (project-aware). */
+function snapshotGroups(root: string): Map<string, Set<string>> {
+	const groups = new Map<string, Set<string>>();
+	for (const entry of readChangelogFile(root)) {
+		if (!entry.snapshot) continue;
+		const owner =
+			entry.scope === "project" && !entry.projectKey
+				? `legacy-unknown/${entry.id}`
+				: memoryTargetId(entry.scope, entry.target, entry.projectKey);
+		let group = groups.get(owner);
+		if (!group) {
+			group = new Set();
+			groups.set(owner, group);
+		}
+		group.add(entry.snapshot);
+	}
+	return groups;
+}
+
+/** Enumerate snapshot files under one snapshot directory; returns root-relative paths. */
+function listSnapshotFiles(root: string, scopeDir: string): string[] {
+	const found: string[] = [];
+	let targets: string[];
+	try {
+		targets = readdirSync(scopeDir);
+	} catch {
+		return found;
+	}
+	for (const target of targets) {
+		const targetDir = join(scopeDir, target);
+		try {
+			if (!statSync(targetDir).isDirectory()) continue;
+			for (const name of readdirSync(targetDir)) {
+				if (name.endsWith(".md") && statSync(join(targetDir, name)).isFile()) {
+					found.push(relative(root, join(targetDir, name)).split(sep).join("/"));
+				}
+			}
+		} catch {}
+	}
+	return found;
+}
+
+/** All snapshot file paths (root-relative) in both the v2 and legacy layouts. */
+function enumerateSnapshotFiles(root: string): string[] {
+	const historyDir = getHistoryDir(root);
+	const files = [
+		...listSnapshotFiles(root, join(historyDir, "v2", "global")),
+		...listSnapshotFiles(root, join(historyDir, "global")),
+		...listSnapshotFiles(root, join(historyDir, "project")),
+	];
+	const projectsDir = join(historyDir, "v2", "projects");
+	let projectKeys: string[];
+	try {
+		projectKeys = readdirSync(projectsDir);
+	} catch {
+		projectKeys = [];
+	}
+	for (const key of projectKeys) {
+		files.push(...listSnapshotFiles(root, join(projectsDir, key)));
+	}
+	return files;
+}
+
 /**
- * Enforce retention: keep at most `snapshotsPerTarget` snapshots per target and
- * drop anything older than `snapshotMaxAgeDays`.
+ * Enforce retention: keep at most `snapshotsPerTarget` snapshots per logical
+ * target (project-aware, resolved through changelog entries) and drop anything
+ * older than `snapshotMaxAgeDays`. Snapshot files no entry references are only
+ * age-pruned. Callers hold the vault root lock.
  */
 export function pruneSnapshots(root: string, limits: SnapshotRetention): void {
-	const historyDir = getHistoryDir(root);
 	const now = Date.now();
 	const maxAgeMs = limits.snapshotMaxAgeDays * 24 * 60 * 60 * 1000;
-	for (const scope of ["global", "project"] as const) {
-		const scopeDir = join(historyDir, scope);
-		let targets: string[];
+	const groups = snapshotGroups(root);
+	const referenced = new Set<string>();
+	for (const paths of groups.values()) for (const path of paths) referenced.add(path);
+	const keep = new Set<string>();
+	for (const paths of groups.values()) {
+		const sorted = [...paths]
+			.map((path) => {
+				try {
+					return { path, mtimeMs: statSync(join(root, path)).mtimeMs };
+				} catch {
+					return undefined;
+				}
+			})
+			.filter((item): item is { path: string; mtimeMs: number } => item !== undefined)
+			.sort((left, right) => right.mtimeMs - left.mtimeMs || right.path.localeCompare(left.path));
+		let kept = 0;
+		for (const item of sorted) {
+			if (kept >= limits.snapshotsPerTarget || now - item.mtimeMs > maxAgeMs) continue;
+			keep.add(item.path);
+			kept++;
+		}
+	}
+	const targetDirs = new Set<string>();
+	for (const path of enumerateSnapshotFiles(root)) {
+		targetDirs.add(dirname(join(root, path)));
+		if (keep.has(path)) continue;
+		let ageMs = 0;
 		try {
-			targets = readdirSync(scopeDir);
+			ageMs = now - statSync(join(root, path)).mtimeMs;
 		} catch {
 			continue;
 		}
-		for (const target of targets) {
-			const targetDir = join(scopeDir, target);
-			let files: string[];
+		// Referenced files are kept per their group budget; unreferenced files
+		// are only removed once they age out.
+		if (referenced.has(path) || ageMs > maxAgeMs) {
 			try {
-				if (!statSync(targetDir).isDirectory()) continue;
-				files = readdirSync(targetDir)
-					.filter((name) => name.endsWith(".md"))
-					.sort()
-					.reverse();
+				rmSync(join(root, path), { force: true });
 			} catch {
-				continue;
+				// Best effort; a lingering snapshot is harmless.
 			}
-			let kept = 0;
-			for (const name of files) {
-				const path = join(targetDir, name);
-				let ageMs = 0;
-				try {
-					ageMs = now - statSync(path).mtimeMs;
-				} catch {
-					continue;
-				}
-				if (kept < limits.snapshotsPerTarget && ageMs <= maxAgeMs) {
-					kept++;
-					continue;
-				}
-				try {
-					rmSync(path, { force: true });
-				} catch {
-					// Best effort; a lingering snapshot is harmless.
-				}
-			}
-			try {
-				if (readdirSync(targetDir).length === 0) rmSync(targetDir, { recursive: true, force: true });
-			} catch {
-				// Best effort.
-			}
+		}
+	}
+	for (const dir of targetDirs) {
+		try {
+			if (readdirSync(dir).length === 0) rmSync(dir, { recursive: true, force: true });
+		} catch {
+			// Best effort.
 		}
 	}
 }

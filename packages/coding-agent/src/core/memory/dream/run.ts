@@ -6,6 +6,7 @@ import { withMemoryRootLock } from "../memory-lock.ts";
 import { MemoryVault } from "../vault.ts";
 import type { MemoryEvents } from "../vault-events.ts";
 import { pruneSnapshots, readChangelog } from "../vault-history.ts";
+import { memoryUsageKey } from "../vault-identity.ts";
 import { getDreamDir, getVaultRoot } from "../vault-paths.ts";
 import { MEMORY_LIMITS } from "../vault-types.ts";
 import { removeUsage } from "../vault-usage.ts";
@@ -32,7 +33,7 @@ function countRunChanges(root: string, runId: string): RunCounts {
 		} else if (entry.op === "delete") {
 			counts.deleted++;
 			if ("slug" in entry.target) {
-				counts.deletedKeys.push(`${entry.scope}/${entry.target.slug}`);
+				counts.deletedKeys.push(memoryUsageKey(entry.scope, entry.target.slug, entry.projectKey));
 			}
 		} else if (entry.op !== "undo" && entry.op !== "migrate") {
 			// append/replace/str_replace/rename and the create leg of a rename.
@@ -149,10 +150,14 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 				}
 				const counts = countRunChanges(root, runId);
 				await removeUsage(root, counts.deletedKeys);
-				pruneSnapshots(root, {
-					snapshotsPerTarget: MEMORY_LIMITS.snapshotsPerTarget,
-					snapshotMaxAgeDays: MEMORY_LIMITS.snapshotMaxAgeDays,
-				});
+				// Snapshot retention mutates shared vault state; take the root lock
+				// briefly rather than pinning it for the whole LLM run.
+				await withMemoryRootLock(root, () =>
+					pruneSnapshots(root, {
+						snapshotsPerTarget: MEMORY_LIMITS.snapshotsPerTarget,
+						snapshotMaxAgeDays: MEMORY_LIMITS.snapshotMaxAgeDays,
+					}),
+				);
 				const at = new Date(now).toISOString();
 				const state = readDreamState(agentDir);
 				state.lastRunAt = at;

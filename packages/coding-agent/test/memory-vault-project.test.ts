@@ -3,7 +3,9 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { findGitRoot, resolveVaultProject } from "../src/core/memory/vault-project.ts";
+import { MemoryVault } from "../src/core/memory/vault.ts";
+import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { findGitRoot, listStoredVaultProjects, resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { canonicalizePathForCreation } from "../src/utils/paths.ts";
 
 describe("vault project identity", () => {
@@ -51,5 +53,25 @@ describe("vault project identity", () => {
 	it("returns undefined for managed workspaces", () => {
 		const dir = makeTemp();
 		expect(resolveVaultProject(dir, "managed")).toBeUndefined();
+	});
+
+	it("lists stored project vaults, including orphans with missing metadata", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const cwd = join(makeTemp(), "work");
+		mkdirSync(cwd, { recursive: true });
+		const identity = resolveVaultProject(cwd, "user-selected")!;
+		const vault = new MemoryVault({ agentDir, project: identity });
+		vault.ensureLayout();
+		// An orphan project dir: real directory, no .project.json.
+		const orphanKey = createHash("sha256").update("gone").digest("hex");
+		mkdirSync(join(getVaultRoot(agentDir), "projects", orphanKey), { recursive: true });
+		// A non-hash directory name is never a project.
+		mkdirSync(join(getVaultRoot(agentDir), "projects", "not-a-key"), { recursive: true });
+
+		const projects = listStoredVaultProjects(getVaultRoot(agentDir));
+		const byKey = new Map(projects.map((project) => [project.projectKey, project]));
+		expect(byKey.get(identity.projectKey)?.root).toBe(identity.root);
+		expect(byKey.get(orphanKey)?.root).toBe("");
+		expect(byKey.has("not-a-key")).toBe(false);
 	});
 });

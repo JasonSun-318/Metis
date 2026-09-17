@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { applyVaultFileChanges } from "../src/core/memory/vault-file-changes.ts";
+import { appendChangelog, pruneSnapshots, readChangelog, saveSnapshot } from "../src/core/memory/vault-history.ts";
 import { mustWrite, putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const durableMock = vi.hoisted(() => ({ failOnce: new Set<string>() }));
@@ -18,7 +19,6 @@ vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
 	};
 });
 
-import { pruneSnapshots, readChangelog, saveSnapshot } from "../src/core/memory/vault-history.ts";
 import { getSnapshotDir } from "../src/core/memory/vault-paths.ts";
 import type { VaultProjectIdentity } from "../src/core/memory/vault-project.ts";
 import { MEMORY_LIMITS, type MemoryActor } from "../src/core/memory/vault-types.ts";
@@ -148,7 +148,16 @@ describe("memory history and undo", () => {
 		const vault = makeVault();
 		const target = { slug: "snap-target" };
 		for (let index = 0; index < MEMORY_LIMITS.snapshotsPerTarget + 3; index++) {
-			saveSnapshot(vault.root, "global", target, `snapshot ${index}`);
+			const snapshot = saveSnapshot(vault.root, "global", target, `snapshot ${index}`);
+			appendChangelog(vault.root, {
+				id: `snap-${index}`,
+				ts: new Date().toISOString(),
+				actor: AGENT,
+				op: "replace",
+				scope: "global",
+				target,
+				snapshot,
+			});
 		}
 		const dir = getSnapshotDir(vault.root, "global", target);
 		expect(readdirSync(dir)).toHaveLength(MEMORY_LIMITS.snapshotsPerTarget + 3);
@@ -166,6 +175,51 @@ describe("memory history and undo", () => {
 			snapshotMaxAgeDays: 90,
 		});
 		expect(existsSync(dir)).toBe(false);
+	});
+
+	it("only age-prunes snapshots that no changelog entry references", () => {
+		const vault = makeVault();
+		const orphan = saveSnapshot(vault.root, "global", { slug: "orphan" }, "orphan content")!;
+		pruneSnapshots(vault.root, {
+			snapshotsPerTarget: MEMORY_LIMITS.snapshotsPerTarget,
+			snapshotMaxAgeDays: 90,
+		});
+		expect(existsSync(join(vault.root, orphan))).toBe(true);
+		const old = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+		utimesSync(join(vault.root, orphan), old, old);
+		pruneSnapshots(vault.root, {
+			snapshotsPerTarget: MEMORY_LIMITS.snapshotsPerTarget,
+			snapshotMaxAgeDays: 90,
+		});
+		expect(existsSync(join(vault.root, orphan))).toBe(false);
+	});
+
+	it("another project cannot consume this target's snapshot retention", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			await putNote(a, "project", "shared", "a");
+			await putNote(b, "project", "shared", "b");
+			const edit = mustWrite(
+				await a.write(
+					{ op: "append", scope: "project", target: { slug: "shared" }, content: "edit a" },
+					{ kind: "user" },
+				),
+			);
+			const snapshot = readChangelog(a.root).find((e) => e.id === edit.changeId)!.snapshot!;
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			for (let i = 0; i < 21; i++) {
+				mustWrite(
+					await b.write(
+						{ op: "append", scope: "project", target: { slug: "shared" }, content: `b ${i}` },
+						{ kind: "user" },
+					),
+				);
+			}
+			pruneSnapshots(a.root, { snapshotsPerTarget: 20, snapshotMaxAgeDays: 90 });
+			expect(existsSync(join(a.root, snapshot))).toBe(true);
+			expect((await a.undo(edit.changeId, { kind: "user" })).ok).toBe(true);
+		});
 	});
 
 	describe("cross-project undo", () => {

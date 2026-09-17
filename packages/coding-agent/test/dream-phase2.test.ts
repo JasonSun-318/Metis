@@ -139,7 +139,7 @@ describe("dream phase 2", () => {
 		);
 		const toolset = createDreamToolset({ agentDir, actor: { kind: "dream", runId: RUN_ID } });
 		// Seed an unrelated usage row; a search that recorded usage would grow the map.
-		await recordUsage(getVaultRoot(agentDir), ["global/other"]);
+		await recordUsage(getVaultRoot(agentDir), ["global/notes/other"]);
 		const before = readUsage(getVaultRoot(agentDir));
 		const result = await toolset.call("memory_search", { query: "pnpm" });
 		expect((result.details as { ok: boolean }).ok).toBe(true);

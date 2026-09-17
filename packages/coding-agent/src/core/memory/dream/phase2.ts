@@ -394,7 +394,7 @@ function buildUserPayload(options: {
 	}
 	const usage = clipTail(JSON.stringify(options.usage), MAX_USAGE_PAYLOAD_CHARS);
 	sections.push(
-		`# Usage stats (key "scope/slug" → {useCount,lastUsed}; absent = never recalled)\n${usage.truncated ? "[truncated]" : ""}${usage.text}`,
+		`# Usage stats (key "global/notes/<slug>" or "projects/<projectKey>/notes/<slug>" → {useCount,lastUsed}; absent = never recalled)\n${usage.truncated ? "[truncated]" : ""}${usage.text}`,
 	);
 	return sections.join("\n\n");
 }

@@ -1,12 +1,14 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MemoryVault } from "../src/core/memory/vault.ts";
+import { memoryUsageKey } from "../src/core/memory/vault-identity.ts";
 import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { MemorySearchIndex } from "../src/core/memory/vault-search.ts";
 import type { MemoryActor, NoteType } from "../src/core/memory/vault-types.ts";
-import { readUsage, recordUsage } from "../src/core/memory/vault-usage.ts";
+import { readUsage, recordUsage, removeUsage } from "../src/core/memory/vault-usage.ts";
+import { putNote, withMemoryFixture } from "./helpers/memory-vault-fixture.ts";
 
 const AGENT: MemoryActor = { kind: "agent", sessionId: "sess-1" };
 
@@ -102,7 +104,7 @@ describe("MemorySearchIndex", () => {
 		const vault = await makeVault();
 		await addNote(vault, { slug: "used-note", content: "identical deploy procedure" });
 		await addNote(vault, { slug: "idle-note", content: "identical deploy procedure" });
-		await recordUsage(vault.root, ["global/used-note"]);
+		await recordUsage(vault.root, ["global/notes/used-note"]);
 		const index = new MemorySearchIndex(vault);
 		const hits = index.search("deploy procedure", { recordUsage: false });
 		expect(hits[0]?.slug).toBe("used-note");
@@ -114,11 +116,67 @@ describe("MemorySearchIndex", () => {
 		const index = new MemorySearchIndex(vault);
 		index.search("track me", { recordUsage: false });
 		await index.whenIdle();
-		expect(readUsage(vault.root)["global/rec"]).toBeUndefined();
+		expect(readUsage(vault.root)["global/notes/rec"]).toBeUndefined();
 
 		index.search("track me");
 		await index.whenIdle();
-		expect(readUsage(vault.root)["global/rec"]?.useCount).toBe(1);
+		expect(readUsage(vault.root)["global/notes/rec"]?.useCount).toBe(1);
+	});
+
+	it("project A searches never change project B scores", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			await putNote(a, "project", "z-shared", "needle");
+			await putNote(b, "project", "z-shared", "needle");
+			await putNote(b, "project", "a-other", "needle");
+			const ia = new MemorySearchIndex(a);
+			const ib = new MemorySearchIndex(b);
+			const before = ib.search("needle", { recordUsage: false }).map((hit) => hit.slug);
+			ia.search("needle");
+			await ia.whenIdle();
+			expect(ib.search("needle", { recordUsage: false }).map((hit) => hit.slug)).toEqual(before);
+		});
+	});
+
+	it("legacy usage keys migrate to per-project keys conservatively", async () => {
+		await withMemoryFixture(async (f) => {
+			const a = f.vault("a");
+			const b = f.vault("b");
+			await putNote(a, "project", "shared", "alpha");
+			await putNote(b, "project", "shared", "beta");
+			const usagePath = join(f.agentDir, "memory", ".meta", "usage.json");
+			writeFileSync(
+				usagePath,
+				JSON.stringify({
+					"global/x": { useCount: 2, lastUsed: "2026-01-01T00:00:00Z" },
+					"project/shared": { useCount: 3, lastUsed: "2026-01-01T00:00:00Z" },
+				}),
+			);
+			const keyA = memoryUsageKey("project", "shared", f.project("a").projectKey);
+			const keyB = memoryUsageKey("project", "shared", f.project("b").projectKey);
+			const first = readUsage(a.root);
+			expect(first["global/notes/x"]?.useCount).toBe(2);
+			expect(first[keyA]?.useCount).toBe(3);
+			expect(first[keyB]?.useCount).toBe(3);
+			// Repeated reads don't double-count and stay normalized.
+			expect(readUsage(a.root)[keyA]?.useCount).toBe(3);
+
+			const index = new MemorySearchIndex(a);
+			index.search("alpha");
+			await index.whenIdle();
+			const after = readUsage(a.root);
+			expect(after[keyA]?.useCount).toBe(4);
+			expect(after[keyB]?.useCount).toBe(3);
+			// The original v1 file was preserved before the first locked rewrite.
+			const backup = join(f.agentDir, "memory", ".meta", "usage-v1.json");
+			expect(existsSync(backup)).toBe(true);
+			expect(JSON.parse(readFileSync(backup, "utf8"))["project/shared"]?.useCount).toBe(3);
+			expect(readFileSync(usagePath, "utf8")).not.toContain("project/shared");
+
+			await removeUsage(a.root, [keyA]);
+			expect(readUsage(a.root)[keyB]?.useCount).toBe(3);
+		});
 	});
 
 	it("filters by scope and type", async () => {

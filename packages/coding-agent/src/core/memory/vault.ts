@@ -246,7 +246,7 @@ export class MemoryVault {
 			} catch {
 				existingRoot = undefined;
 			}
-			if (typeof existingRoot !== "string" || existingRoot.length === 0) {
+			if (this.project.root.length > 0 && (typeof existingRoot !== "string" || existingRoot.length === 0)) {
 				replaceFileAtomicallySync(
 					metaPath,
 					JSON.stringify({ root: this.project.root, createdAt: new Date().toISOString() }),
@@ -578,7 +578,7 @@ export class MemoryVault {
 				if ([...merged.description].length > MEMORY_LIMITS.descriptionChars) {
 					return { ok: false, error: `description exceeds ${MEMORY_LIMITS.descriptionChars} characters` };
 				}
-				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw);
+				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw, this.project?.projectKey);
 				replaceFileAtomicallySync(path, serializeNote(merged, body), { mode: 0o600 });
 				bytes = Buffer.byteLength(serializeNote(merged, body), "utf8");
 				primary = this.newEntry(req.op, req.scope, { slug }, actor, { snapshot, beforeExists: true });
@@ -596,7 +596,7 @@ export class MemoryVault {
 				if ([...frontmatter.description].length > MEMORY_LIMITS.descriptionChars) {
 					return { ok: false, error: `description exceeds ${MEMORY_LIMITS.descriptionChars} characters` };
 				}
-				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw);
+				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw, this.project?.projectKey);
 				const serialized = serializeNote(frontmatter, note.body);
 				createFileAtomicallySync(newPath, serialized, { mode: 0o600 });
 				rmSync(path, { force: true });
@@ -613,7 +613,7 @@ export class MemoryVault {
 			}
 			case "delete": {
 				if (existingRaw === undefined) return { ok: false, error: `note "${slug}" not found` };
-				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw);
+				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw, this.project?.projectKey);
 				rmSync(path, { force: true });
 				primary = this.newEntry("delete", req.scope, { slug }, actor, { snapshot, beforeExists: true });
 				break;
@@ -649,7 +649,7 @@ export class MemoryVault {
 				const raw = this.readTextFile(note.path);
 				if (raw === undefined) continue;
 				const body = note.body.replace(pattern, `[[${newSlug}]]`);
-				const snapshot = saveSnapshot(this.root, scanScope, { slug: note.slug }, raw);
+				const snapshot = saveSnapshot(this.root, scanScope, { slug: note.slug }, raw, this.project?.projectKey);
 				const frontmatter: NoteFrontmatter = { ...note.frontmatter, updated: todayString() };
 				replaceFileAtomicallySync(note.path, serializeNote(frontmatter, body), { mode: 0o600 });
 				entries.push(
@@ -693,7 +693,7 @@ export class MemoryVault {
 				error: `pinned block "${block}" exceeds the ${limit} byte limit`,
 			};
 		}
-		const snapshot = saveSnapshot(this.root, req.scope, { block }, existingRaw);
+		const snapshot = saveSnapshot(this.root, req.scope, { block }, existingRaw, this.project?.projectKey);
 		replaceFileAtomicallySync(path, content.endsWith("\n") ? content : `${content}\n`, { mode: 0o600 });
 		const entry = this.newEntry(req.op, req.scope, { block }, actor, {
 			snapshot,
