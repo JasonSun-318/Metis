@@ -24,6 +24,8 @@ export interface ChangelogEntry {
 	beforeExists?: boolean;
 	/** Shared id linking every entry produced by one rename operation. */
 	operationId?: string;
+	/** Internal idempotency key for legacy migration: `<archiveDir>:<groupId>`. */
+	migrationGroup?: string;
 	undoes?: string;
 	undoneBy?: string;
 }

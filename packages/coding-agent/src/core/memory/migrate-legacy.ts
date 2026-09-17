@@ -7,9 +7,15 @@
  * `.history/legacy-<ISOts>/` with relative paths preserved, facts are rewritten
  * as vault notes, and `.history/migrated.json` marks the run so it stays
  * idempotent. With no legacy data present this performs zero fs writes.
+ *
+ * Interrupted runs resume through `.history/migration-in-progress.json`: the
+ * journal is written before any file moves, records which note groups already
+ * imported, and is only removed after the completion marker lands. Archives
+ * left behind by a pre-journal run are re-imported in place instead of
+ * producing a second archive.
  */
 import { randomUUID } from "node:crypto";
-import { type Dirent, existsSync, readdirSync, renameSync } from "node:fs";
+import { type Dirent, existsSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import lockfile from "proper-lockfile";
@@ -23,7 +29,7 @@ import {
 import { MEMORY_LOCK_OPTIONS } from "./memory-lock.ts";
 import { MemoryVault, serializeNote } from "./vault.ts";
 import { MemoryEvents } from "./vault-events.ts";
-import { appendChangelog, type ChangelogEntry } from "./vault-history.ts";
+import { appendChangelog, type ChangelogEntry, readChangelog } from "./vault-history.ts";
 import {
 	getHistoryDir,
 	getNotePath,
@@ -38,6 +44,7 @@ import { isSafeSlug, MEMORY_LIMITS, type MemoryScope, type NoteFrontmatter } fro
 
 const SQLITE_FILES = ["memory.sqlite", "memory.sqlite-wal", "memory.sqlite-shm"] as const;
 const MIGRATED_MARKER = "migrated.json";
+const MIGRATION_JOURNAL = "migration-in-progress.json";
 /** Legacy project keys are sha256 hex digests; anything else is never a directory name. */
 const LEGACY_PROJECT_KEY = /^[0-9a-f]{64}$/u;
 const LEGACY_DIR_PREFIX = "legacy-";
@@ -83,6 +90,16 @@ interface NoteGroup {
 	dates: string[];
 }
 
+interface LegacyMigrationJournal {
+	version: 1;
+	phase: "archiving" | "importing";
+	archives: Array<{ relativeDir: string; inventory: LegacyInventory; completedGroups: string[] }>;
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
 function readdirNames(dir: string): string[] {
 	try {
 		return readdirSync(dir);
@@ -111,11 +128,55 @@ function topLevelDirs(dir: string): string[] {
 	return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 }
 
-/** Marker file or an existing `legacy-*` archive means a previous run already happened. */
-function alreadyMigrated(root: string): boolean {
-	const history = getHistoryDir(root);
-	if (existsSync(join(history, MIGRATED_MARKER))) return true;
-	return readdirNames(history).some((name) => name.startsWith(LEGACY_DIR_PREFIX));
+function journalPath(root: string): string {
+	return join(getHistoryDir(root), MIGRATION_JOURNAL);
+}
+
+/**
+ * The marker only counts when it parses to an object with an `at` timestamp —
+ * a truncated or corrupt file must not short-circuit an unfinished migration.
+ */
+function completedMarker(root: string): boolean {
+	const raw = readSingleLinkTextFileSync(join(getHistoryDir(root), MIGRATED_MARKER), { maxBytes: 64 * 1024 });
+	if (raw === undefined) return false;
+	try {
+		const parsed = JSON.parse(raw) as { at?: unknown } | null;
+		return typeof parsed === "object" && parsed !== null && typeof parsed.at === "string";
+	} catch {
+		return false;
+	}
+}
+
+function readJournal(root: string): LegacyMigrationJournal | undefined {
+	const raw = readSingleLinkTextFileSync(journalPath(root), { maxBytes: 1024 * 1024 });
+	if (raw === undefined) return undefined;
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		throw new Error(`unreadable migration journal: ${errorMessage(error)}`);
+	}
+	const journal = parsed as LegacyMigrationJournal;
+	if (
+		typeof journal !== "object" ||
+		journal === null ||
+		journal.version !== 1 ||
+		(journal.phase !== "archiving" && journal.phase !== "importing") ||
+		!Array.isArray(journal.archives) ||
+		journal.archives.some(
+			(archive) =>
+				typeof archive?.relativeDir !== "string" ||
+				archive.relativeDir.includes("..") ||
+				!Array.isArray(archive.completedGroups),
+		)
+	) {
+		throw new Error("unreadable migration journal: invalid shape");
+	}
+	return journal;
+}
+
+function writeMigrationJournal(root: string, journal: LegacyMigrationJournal): void {
+	replaceFileAtomicallySync(journalPath(root), JSON.stringify(journal), { mode: 0o600 });
 }
 
 function scanLegacy(root: string): LegacyInventory {
@@ -137,17 +198,36 @@ function isEmpty(inventory: LegacyInventory): boolean {
 	return inventory.sqlite.length === 0 && inventory.globalMarkdown.length === 0 && inventory.projectDirs.length === 0;
 }
 
-/** Standalone reader for the deleted store's schema; a broken db yields no rows. */
-function readLegacySqlite(path: string): { facts: LegacyFact[]; projects: Map<string, string> } {
-	const facts: LegacyFact[] = [];
-	const projects = new Map<string, string>();
-	let db: DatabaseSync | undefined;
+/** `.history/legacy-*` archives already on disk (left by pre-journal runs). */
+function orphanArchives(root: string): string[] {
+	return readdirNames(getHistoryDir(root)).filter((name) => name.startsWith(LEGACY_DIR_PREFIX));
+}
+
+/** Rebuild what an existing archive holds so its facts can still be imported. */
+function inventoryFromArchive(dir: string): LegacyInventory {
+	return {
+		sqlite: SQLITE_FILES.filter((name) => existsSync(join(dir, name))),
+		globalMarkdown: topLevelMarkdownFiles(join(dir, "global")),
+		projectDirs: topLevelDirs(join(dir, "projects")),
+	};
+}
+
+/**
+ * Read the deleted store's schema; an unopenable db or a missing/corrupt facts
+ * table is an error, never "zero facts". A missing memory_projects table just
+ * means no cwd mapping (orphan keys stay under their hash).
+ */
+function readLegacySqlite(
+	path: string,
+): { ok: true; facts: LegacyFact[]; projects: Map<string, string> } | { ok: false; error: string } {
+	let db: DatabaseSync;
 	try {
 		db = new DatabaseSync(path, { readOnly: true });
-	} catch {
-		return { facts, projects };
+	} catch (error) {
+		return { ok: false, error: `cannot open legacy database ${path}: ${errorMessage(error)}` };
 	}
 	try {
+		const projects = new Map<string, string>();
 		try {
 			const rows = db.prepare("SELECT project_key, canonical_cwd FROM memory_projects").all() as Array<
 				Record<string, unknown>
@@ -160,25 +240,28 @@ function readLegacySqlite(path: string): { facts: LegacyFact[]; projects: Map<st
 		} catch {
 			// Missing/renamed table → no project mapping.
 		}
+		let rows: Array<Record<string, unknown>>;
 		try {
-			const rows = db
+			rows = db
 				.prepare("SELECT scope, cwd_key, topic_file, text, created_at FROM facts WHERE status = 'active'")
 				.all() as Array<Record<string, unknown>>;
-			for (const row of rows) {
-				if (typeof row.text !== "string" || typeof row.topic_file !== "string") continue;
-				const cwdKey =
-					typeof row.cwd_key === "string" && LEGACY_PROJECT_KEY.test(row.cwd_key) ? row.cwd_key : undefined;
-				facts.push({
-					scope: typeof row.scope === "string" ? row.scope : "global",
-					...(cwdKey ? { cwdKey } : {}),
-					topicFile: row.topic_file,
-					text: row.text,
-					...(typeof row.created_at === "string" ? { createdAt: row.created_at } : {}),
-				});
-			}
-		} catch {
-			// Missing/renamed table → no facts.
+		} catch (error) {
+			return { ok: false, error: `cannot read legacy facts from ${path}: ${errorMessage(error)}` };
 		}
+		const facts: LegacyFact[] = [];
+		for (const row of rows) {
+			if (typeof row.text !== "string" || typeof row.topic_file !== "string") continue;
+			const cwdKey =
+				typeof row.cwd_key === "string" && LEGACY_PROJECT_KEY.test(row.cwd_key) ? row.cwd_key : undefined;
+			facts.push({
+				scope: typeof row.scope === "string" ? row.scope : "global",
+				...(cwdKey ? { cwdKey } : {}),
+				topicFile: row.topic_file,
+				text: row.text,
+				...(typeof row.created_at === "string" ? { createdAt: row.created_at } : {}),
+			});
+		}
+		return { ok: true, facts, projects };
 	} finally {
 		try {
 			db.close();
@@ -186,7 +269,6 @@ function readLegacySqlite(path: string): { facts: LegacyFact[]; projects: Map<st
 			// Best effort.
 		}
 	}
-	return { facts, projects };
 }
 
 /** `topic_file` → vault slug; unrecoverable names fall back to `migrated-<n>`. */
@@ -268,7 +350,9 @@ function mergeFactsIntoExisting(path: string, raw: string, texts: string[]): boo
 	return true;
 }
 
-function moveIntoLegacy(root: string, legacyDir: string, inventory: LegacyInventory): void {
+/** The `[from, to]` moves one archive needs; `to` lives under `.history/legacy-*`. */
+function plannedMoves(root: string, relativeDir: string, inventory: LegacyInventory): Array<[string, string]> {
+	const legacyDir = join(root, relativeDir);
 	const moves: Array<[string, string]> = [];
 	for (const name of inventory.sqlite) moves.push([join(root, name), join(legacyDir, name)]);
 	for (const name of inventory.globalMarkdown) {
@@ -277,85 +361,90 @@ function moveIntoLegacy(root: string, legacyDir: string, inventory: LegacyInvent
 	for (const name of inventory.projectDirs) {
 		moves.push([join(root, "projects", name), join(legacyDir, "projects", name)]);
 	}
-	for (const [from, to] of moves) {
-		try {
-			ensureDirectoryDurablySync(dirname(to));
-			renameSync(from, to);
-		} catch {
-			// Leave unmovable artifacts in place; remaining steps cope either way.
+	return moves;
+}
+
+/** Byte/tree equality for a source/destination pair; archives are never overwritten. */
+function verifySameContent(from: string, to: string): boolean {
+	try {
+		const a = statSync(from);
+		const b = statSync(to);
+		if (a.isFile() && b.isFile()) return readFileSync(from).equals(readFileSync(to));
+		if (a.isDirectory() && b.isDirectory()) {
+			const namesA = readdirSync(from).sort();
+			const namesB = readdirSync(to).sort();
+			if (namesA.length !== namesB.length) return false;
+			return namesA.every(
+				(name, index) => name === namesB[index] && verifySameContent(join(from, name), join(to, name)),
+			);
 		}
+	} catch {
+		return false;
+	}
+	return false;
+}
+
+/**
+ * Perform one archive's moves idempotently: a file already at its destination
+ * counts as moved, a file still at its source is renamed, both-present must
+ * verify identical, and neither-present means data was lost — an error that
+ * keeps the journal so the next run reports it again.
+ */
+function runArchivingPhase(root: string, archive: LegacyMigrationJournal["archives"][number]): void {
+	for (const [from, to] of plannedMoves(root, archive.relativeDir, archive.inventory)) {
+		if (existsSync(to)) {
+			if (existsSync(from) && !verifySameContent(from, to)) {
+				throw new Error(`legacy artifact exists in both locations with different content: ${from}`);
+			}
+			continue;
+		}
+		if (!existsSync(from)) throw new Error(`legacy artifact missing: ${from}`);
+		ensureDirectoryDurablySync(dirname(to));
+		renameSync(from, to);
 	}
 }
 
 function runMigration(
 	agentDir: string,
 	root: string,
-	inventory: LegacyInventory,
+	journal: LegacyMigrationJournal,
 	events: MemoryEvents,
 ): LegacyMigrationSummary {
-	const at = new Date().toISOString();
-	const legacyRel = `.history/${LEGACY_DIR_PREFIX}${at.replace(/[:.]/g, "-")}`;
-	const legacyDir = join(root, legacyRel);
-
-	moveIntoLegacy(root, legacyDir, inventory);
-
-	// Read the moved db when possible; fall back to the original path if its move failed.
-	let facts: LegacyFact[] = [];
-	let projects = new Map<string, string>();
-	if (inventory.sqlite.includes("memory.sqlite")) {
-		const movedPath = join(legacyDir, "memory.sqlite");
-		const dbPath = existsSync(movedPath) ? movedPath : join(root, "memory.sqlite");
-		({ facts, projects } = readLegacySqlite(dbPath));
+	// Phase 1: move every archive's artifacts, then flip the journal.
+	if (journal.phase === "archiving") {
+		for (const archive of journal.archives) runArchivingPhase(root, archive);
+		journal.phase = "importing";
+		writeMigrationJournal(root, journal);
 	}
 
-	const today = at.slice(0, 10);
+	// Phase 2: import each group idempotently. `migrationGroup` in the changelog
+	// covers the note-written-but-journal-lost window; completedGroups covers the
+	// rest. Either way the group is only marked done after its writes landed.
+	const logged = new Set(
+		readChangelog(root)
+			.map((entry) => entry.migrationGroup)
+			.filter((key): key is string => key !== undefined),
+	);
 	const touched = new Map<
 		string,
 		{ scope: MemoryScope; key?: string; root?: string | null; source?: "git" | "cwd" }
 	>();
+	let factsTotal = 0;
 	let notes = 0;
-	for (const group of groupFacts(facts, projects).values()) {
-		try {
-			const scopeDir = getScopeDir(root, group.scope, group.project?.key);
-			ensureRealDirectoryDurablySync(getNotesDir(scopeDir), 0o700);
-			ensureRealDirectoryDurablySync(getPinnedDir(scopeDir), 0o700);
-			if (group.project) {
-				const metaPath = getProjectMetaPath(scopeDir);
-				if (!existsSync(metaPath)) {
-					createFileAtomicallySync(metaPath, JSON.stringify({ root: group.project.root, createdAt: at }), {
-						mode: 0o600,
-					});
-				}
-			}
-			const path = getNotePath(scopeDir, group.slug);
-			const raw = readSingleLinkTextFileSync(path);
-			if (raw === undefined) {
-				const frontmatter: NoteFrontmatter = {
-					name: humanizeSlug(group.slug),
-					description: [...(group.texts[0] ?? "")].slice(0, MEMORY_LIMITS.descriptionChars).join(""),
-					type: "reference",
-					created: group.dates.length ? group.dates.reduce((a, b) => (a < b ? a : b)) : today,
-					updated: group.dates.length ? group.dates.reduce((a, b) => (a > b ? a : b)) : today,
-					sources: ["migrated"],
-					confidence: "medium",
-				};
-				const body = `# ${frontmatter.name}\n\n${group.texts.map((text) => `- ${text}`).join("\n")}`;
-				createFileAtomicallySync(path, serializeNote(frontmatter, body), { mode: 0o600 });
-			} else if (!mergeFactsIntoExisting(path, raw, group.texts)) {
-				continue; // Existing note already covered every fact; no change to record.
-			}
-			notes++;
-			const entry: ChangelogEntry = {
-				id: randomUUID(),
-				ts: new Date().toISOString(),
-				actor: MIGRATE_ACTOR,
-				op: "migrate",
-				scope: group.scope,
-				target: { slug: group.slug },
-				...(group.project ? { projectKey: group.project.key } : {}),
-			};
-			appendChangelog(root, entry);
-			events.emit("changed", { entry });
+	const at = new Date().toISOString();
+	const today = at.slice(0, 10);
+	for (const archive of journal.archives) {
+		const archiveDir = join(root, archive.relativeDir);
+		let facts: LegacyFact[] = [];
+		let projects = new Map<string, string>();
+		if (archive.inventory.sqlite.includes("memory.sqlite")) {
+			const read = readLegacySqlite(join(archiveDir, "memory.sqlite"));
+			if (!read.ok) throw new Error(read.error);
+			facts = read.facts;
+			projects = read.projects;
+		}
+		factsTotal += facts.length;
+		for (const [groupId, group] of groupFacts(facts, projects)) {
 			const touchKey = `${group.scope}:${group.project?.key ?? ""}`;
 			if (!touched.has(touchKey)) {
 				touched.set(touchKey, {
@@ -365,12 +454,63 @@ function runMigration(
 						: {}),
 				});
 			}
-		} catch {
-			// A single malformed group must not abort the rest of the migration.
+			if (archive.completedGroups.includes(groupId)) continue;
+			const migrationGroup = `${archive.relativeDir}:${groupId}`;
+			if (!logged.has(migrationGroup)) {
+				const scopeDir = getScopeDir(root, group.scope, group.project?.key);
+				ensureRealDirectoryDurablySync(getNotesDir(scopeDir), 0o700);
+				ensureRealDirectoryDurablySync(getPinnedDir(scopeDir), 0o700);
+				if (group.project) {
+					const metaPath = getProjectMetaPath(scopeDir);
+					if (!existsSync(metaPath)) {
+						createFileAtomicallySync(metaPath, JSON.stringify({ root: group.project.root, createdAt: at }), {
+							mode: 0o600,
+						});
+					}
+				}
+				const path = getNotePath(scopeDir, group.slug);
+				const raw = readSingleLinkTextFileSync(path);
+				let changed = false;
+				if (raw === undefined) {
+					const frontmatter: NoteFrontmatter = {
+						name: humanizeSlug(group.slug),
+						description: [...(group.texts[0] ?? "")].slice(0, MEMORY_LIMITS.descriptionChars).join(""),
+						type: "reference",
+						created: group.dates.length ? group.dates.reduce((a, b) => (a < b ? a : b)) : today,
+						updated: group.dates.length ? group.dates.reduce((a, b) => (a > b ? a : b)) : today,
+						sources: ["migrated"],
+						confidence: "medium",
+					};
+					const body = `# ${frontmatter.name}\n\n${group.texts.map((text) => `- ${text}`).join("\n")}`;
+					createFileAtomicallySync(path, serializeNote(frontmatter, body), { mode: 0o600 });
+					changed = true;
+				} else {
+					changed = mergeFactsIntoExisting(path, raw, group.texts);
+				}
+				if (changed) {
+					notes++;
+					const entry: ChangelogEntry = {
+						id: randomUUID(),
+						ts: new Date().toISOString(),
+						actor: MIGRATE_ACTOR,
+						op: "migrate",
+						scope: group.scope,
+						target: { slug: group.slug },
+						...(group.project ? { projectKey: group.project.key } : {}),
+						migrationGroup,
+					};
+					appendChangelog(root, entry);
+					events.emit("changed", { entry });
+					logged.add(migrationGroup);
+				}
+			}
+			archive.completedGroups.push(groupId);
+			writeMigrationJournal(root, journal);
 		}
 	}
 
-	// Rebuild indexes through the vault so ordering and limits match exactly.
+	// Rebuild indexes through the vault so ordering and limits match exactly —
+	// including scopes whose groups all replayed as already-logged.
 	for (const scope of touched.values()) {
 		const project =
 			scope.key === undefined
@@ -381,22 +521,63 @@ function runMigration(
 
 	replaceFileAtomicallySync(
 		join(getHistoryDir(root), MIGRATED_MARKER),
-		JSON.stringify({ at, notes, facts: facts.length, legacyDir: legacyRel }),
+		JSON.stringify({
+			version: 2,
+			at,
+			notes,
+			facts: factsTotal,
+			archives: journal.archives.map((archive) => archive.relativeDir),
+			legacyDir: journal.archives[0]?.relativeDir,
+		}),
 		{ mode: 0o600 },
 	);
-	return { migrated: true, facts: facts.length, notes, legacyDir: legacyRel };
+	rmSync(journalPath(root), { force: true });
+	return { migrated: true, facts: factsTotal, notes, legacyDir: journal.archives[0]?.relativeDir };
+}
+
+/** Build a fresh journal covering pending artifacts plus archives from pre-journal runs. */
+function buildJournal(root: string): LegacyMigrationJournal | undefined {
+	const inventory = scanLegacy(root);
+	const orphans = orphanArchives(root).sort();
+	if (isEmpty(inventory) && orphans.length === 0) return undefined;
+	const archives: LegacyMigrationJournal["archives"] = [];
+	if (!isEmpty(inventory)) {
+		const at = new Date().toISOString().replace(/[:.]/g, "-");
+		archives.push({
+			relativeDir: `.history/${LEGACY_DIR_PREFIX}${at}`,
+			inventory,
+			completedGroups: [],
+		});
+	}
+	for (const name of orphans) {
+		archives.push({
+			relativeDir: `.history/${name}`,
+			inventory: inventoryFromArchive(join(getHistoryDir(root), name)),
+			completedGroups: [],
+		});
+	}
+	return { version: 1, phase: "archiving", archives };
 }
 
 /**
  * Migrate the legacy layout under `<agentDir>/memory` once. Synchronous and
  * idempotent: returns `{migrated: false}` with zero side effects when no legacy
- * artifacts exist or a previous run already completed.
+ * artifacts exist or a previous run already completed. A `journal` left by an
+ * interrupted run resumes where it stopped; a failed run reports `error` and
+ * stays resumable instead of marking the migration done.
  */
 export function migrateLegacyMemory(agentDir: string, events?: MemoryEvents): LegacyMigrationSummary {
 	const root = getVaultRoot(agentDir);
-	if (alreadyMigrated(root)) return { migrated: false, facts: 0, notes: 0 };
-	const inventory = scanLegacy(root);
-	if (isEmpty(inventory)) return { migrated: false, facts: 0, notes: 0 };
+	if (completedMarker(root)) {
+		// A journal left after the marker is stale; dropping it is idempotent.
+		rmSync(journalPath(root), { force: true });
+		return { migrated: false, facts: 0, notes: 0 };
+	}
+	// Fast path outside the lock: only lock when a journal, leftover artifacts,
+	// or pre-journal archives make a migration run plausible.
+	if (!existsSync(journalPath(root)) && isEmpty(scanLegacy(root)) && orphanArchives(root).length === 0) {
+		return { migrated: false, facts: 0, notes: 0 };
+	}
 
 	// Serialization against a concurrent app-server/CLI doing the same one-shot
 	// move. The sync lock API rejects `retries`; a held lock just means the other
@@ -411,21 +592,33 @@ export function migrateLegacyMemory(agentDir: string, events?: MemoryEvents): Le
 		return { migrated: false, facts: 0, notes: 0 };
 	}
 	try {
-		if (alreadyMigrated(root)) return { migrated: false, facts: 0, notes: 0 };
-		const fresh = scanLegacy(root);
-		if (isEmpty(fresh)) return { migrated: false, facts: 0, notes: 0 };
+		if (completedMarker(root)) {
+			// Crash between marker write and journal cleanup: just drop the journal.
+			rmSync(journalPath(root), { force: true });
+			return { migrated: false, facts: 0, notes: 0 };
+		}
+		const journal = readJournal(root) ?? buildJournal(root);
+		if (journal === undefined) return { migrated: false, facts: 0, notes: 0 };
+		// Persist before any file moves so an interruption is resumable.
+		writeMigrationJournal(root, journal);
 		try {
-			return runMigration(agentDir, root, fresh, events ?? new MemoryEvents());
+			return runMigration(agentDir, root, journal, events ?? new MemoryEvents());
 		} catch (error) {
-			// Best-effort: a failed run must not take startup down with it. The next
-			// ensureVaultLayout retries unless a legacy-* dir was already created.
 			return {
 				migrated: false,
 				facts: 0,
 				notes: 0,
-				error: error instanceof Error ? error.message : String(error),
+				...(journal.archives[0] ? { legacyDir: journal.archives[0].relativeDir } : {}),
+				error: errorMessage(error),
 			};
 		}
+	} catch (error) {
+		return {
+			migrated: false,
+			facts: 0,
+			notes: 0,
+			error: errorMessage(error),
+		};
 	} finally {
 		try {
 			release();

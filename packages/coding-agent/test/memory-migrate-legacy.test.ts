@@ -3,7 +3,20 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+const durableMock = vi.hoisted(() => ({ failOnce: new Set<string>() }));
+vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../src/core/durable-file.ts")>();
+	return {
+		...mod,
+		replaceFileAtomicallySync: (path: string, data: string | Uint8Array, options?: { mode?: number }) => {
+			if (durableMock.failOnce.delete(path)) throw new Error("injected write failure");
+			return mod.replaceFileAtomicallySync(path, data, options);
+		},
+	};
+});
+
 import { ensureVaultLayout } from "../src/core/auto-memory.ts";
 import { migrateLegacyMemory } from "../src/core/memory/migrate-legacy.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
@@ -285,7 +298,7 @@ describe("migrateLegacyMemory", () => {
 		expect(legacyDirs(root)).toHaveLength(1);
 	});
 
-	it("moves projection files and skips notes when the sqlite is corrupt", () => {
+	it("reports an error and keeps the journal when the sqlite is corrupt", () => {
 		const agentDir = join(makeTemp(), "agent");
 		const root = getVaultRoot(agentDir);
 		mkdirSync(join(root, "global"), { recursive: true });
@@ -294,14 +307,18 @@ describe("migrateLegacyMemory", () => {
 		writeFileSync(join(root, "global", "old.md"), "stale projection\n");
 
 		const result = migrateLegacyMemory(agentDir);
-		expect(result.migrated).toBe(true);
-		expect(result.notes).toBe(0);
+		expect(result.migrated).toBe(false);
+		expect(result.error).toBeDefined();
+		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(false);
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(true);
 
+		// The artifacts were still archived; nothing is left at the live root.
 		const [legacy] = legacyDirs(root);
 		expect(existsSync(join(root, ".history", legacy!, "memory.sqlite"))).toBe(true);
 		expect(existsSync(join(root, ".history", legacy!, "global", "old.md"))).toBe(true);
 		expect(existsSync(join(root, "global", "notes"))).toBe(false);
-		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(true);
+		// A retry fails the same way instead of committing an empty migration.
+		expect(migrateLegacyMemory(agentDir).error).toBeDefined();
 	});
 
 	it("moves legacy project dirs even without a sqlite", () => {
@@ -332,6 +349,117 @@ describe("migrateLegacyMemory", () => {
 		expect(result.migrated).toBe(false);
 		expect(existsSync(join(root, "projects", key, ".project.json"))).toBe(true);
 		expect(legacyDirs(root)).toEqual([]);
+	});
+
+	it("resumes an archive created before any notes or completion marker", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const archive = join(agentDir, "memory", ".history", "legacy-interrupted");
+		mkdirSync(archive, { recursive: true });
+		const db = new DatabaseSync(join(archive, "memory.sqlite"));
+		db.exec(
+			"CREATE TABLE facts (scope TEXT, cwd_key TEXT, topic_file TEXT, text TEXT, created_at TEXT, status TEXT); INSERT INTO facts VALUES ('global', NULL, 'prefs.md', 'original durable preference', '2026-01-01', 'active');",
+		);
+		db.close();
+		const result = migrateLegacyMemory(agentDir);
+		expect(result.error).toBeUndefined();
+		expect(new MemoryVault({ agentDir }).readNote("global", "prefs")!.body).toContain("original durable preference");
+		expect(existsSync(join(archive, "memory.sqlite"))).toBe(true);
+		const first = readFileSync(join(agentDir, "memory", "global", "notes", "prefs.md"), "utf8");
+		migrateLegacyMemory(agentDir);
+		expect(readFileSync(join(agentDir, "memory", "global", "notes", "prefs.md"), "utf8")).toBe(first);
+	});
+
+	it("does not complete migration after a note destination fails", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const root = getVaultRoot(agentDir);
+		writeLegacyDb(join(root, "memory.sqlite"), [{ scope: "global", topicFile: "prefs.md", text: "keep this" }], []);
+		mkdirSync(join(root, "global", "notes", "prefs.md"), { recursive: true });
+		const failed = migrateLegacyMemory(agentDir);
+		expect(failed.error).toBeDefined();
+		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(false);
+		rmSync(join(root, "global", "notes", "prefs.md"), { recursive: true });
+		expect(migrateLegacyMemory(agentDir).error).toBeUndefined();
+		expect(new MemoryVault({ agentDir }).readNote("global", "prefs")!.body).toContain("keep this");
+	});
+
+	it("resume preserves user edits and never duplicates migrated facts", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const root = getVaultRoot(agentDir);
+		mkdirSync(join(root, ".history", "legacy-x"), { recursive: true });
+		writeLegacyDb(
+			join(root, ".history", "legacy-x", "memory.sqlite"),
+			[{ scope: "global", topicFile: "prefs.md", text: "keep this" }],
+			[],
+		);
+		// The interrupted run wrote the note; the user edited it afterwards.
+		new MemoryVault({ agentDir }).ensureLayout();
+		writeFileSync(
+			join(root, "global", "notes", "prefs.md"),
+			"---\nname: prefs\ndescription: user edited\ntype: reference\ncreated: 2026-01-01\nupdated: 2026-01-02\nsources: [migrated, user]\nconfidence: medium\n---\n# prefs\n\n- keep this\n\nuser added text\n",
+		);
+		writeFileSync(
+			join(root, ".history", "migration-in-progress.json"),
+			JSON.stringify({
+				version: 1,
+				phase: "importing",
+				archives: [
+					{
+						relativeDir: ".history/legacy-x",
+						inventory: { sqlite: ["memory.sqlite"], globalMarkdown: [], projectDirs: [] },
+						completedGroups: [],
+					},
+				],
+			}),
+		);
+		const result = migrateLegacyMemory(agentDir);
+		expect(result.error).toBeUndefined();
+		const note = new MemoryVault({ agentDir }).readNote("global", "prefs")!;
+		expect(note.body).toContain("user added text");
+		expect(note.frontmatter.description).toBe("user edited");
+		expect(note.body.match(/keep this/gu)).toHaveLength(1);
+		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(true);
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(false);
+	});
+
+	it("cleans a stale journal left behind after the marker without re-importing", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const root = getVaultRoot(agentDir);
+		writeLegacyDb(join(root, "memory.sqlite"), [{ scope: "global", topicFile: "prefs.md", text: "keep this" }], []);
+		expect(migrateLegacyMemory(agentDir).error).toBeUndefined();
+		const [legacy] = legacyDirs(root);
+		expect(legacy).toBeDefined();
+		const before = readChangelog(root).filter((entry) => entry.op === "migrate").length;
+		// Simulate a crash between writing the marker and deleting the journal.
+		writeFileSync(
+			join(root, ".history", "migration-in-progress.json"),
+			JSON.stringify({
+				version: 1,
+				phase: "importing",
+				archives: [
+					{
+						relativeDir: `.history/${legacy}`,
+						inventory: { sqlite: ["memory.sqlite"], globalMarkdown: [], projectDirs: [] },
+						completedGroups: [],
+					},
+				],
+			}),
+		);
+		expect(migrateLegacyMemory(agentDir)).toEqual({ migrated: false, facts: 0, notes: 0 });
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(false);
+		expect(readChangelog(root).filter((entry) => entry.op === "migrate")).toHaveLength(before);
+	});
+
+	it("does not duplicate migrate entries when the marker write fails", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const root = getVaultRoot(agentDir);
+		writeLegacyDb(join(root, "memory.sqlite"), [{ scope: "global", topicFile: "prefs.md", text: "keep this" }], []);
+		durableMock.failOnce.add(join(root, ".history", "migrated.json"));
+		expect(migrateLegacyMemory(agentDir).error).toBeDefined();
+		const migrations = readChangelog(root).filter((entry) => entry.op === "migrate");
+		expect(migrations.length).toBeGreaterThan(0);
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(true);
+		expect(migrateLegacyMemory(agentDir).error).toBeUndefined();
+		expect(readChangelog(root).filter((entry) => entry.op === "migrate")).toHaveLength(migrations.length);
 	});
 
 	it("runs through ensureVaultLayout before the new dirs exist", () => {
