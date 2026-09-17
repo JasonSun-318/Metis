@@ -119,11 +119,13 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 		ensureDirectoryDurablySync(stagingDir);
 	};
 
+	let attemptedRunId: string | undefined;
 	try {
 		// Hold the dream lock for the whole run; the vault root lock is still
 		// taken per write so interactive sessions are never blocked.
 		return await withMemoryRootLock(dreamDir, async () => {
 			const runId = randomUUID();
+			attemptedRunId = runId;
 			cleanStaging(); // drop leftovers from a crashed run
 			const runSignal = AbortSignal.timeout(options.timeoutMs ?? DREAM_RUN_TIMEOUT_MS);
 			try {
@@ -134,8 +136,13 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 					signal: runSignal,
 					...(options.concurrency !== undefined ? { concurrency: options.concurrency } : {}),
 				});
+				if (runSignal.aborted) throw new Error("dream run timed out during phase 1");
+				const failed = phase1.sessions.filter((session) => !session.processed);
+				if (failed.length > 0 && failed.length === phase1.sessions.length) {
+					throw new Error(`all ${failed.length} session extractions failed`);
+				}
 				if (phase1.candidates.length > 0) {
-					await runDreamPhase2({
+					const phase2 = await runDreamPhase2({
 						agentDir,
 						runId,
 						candidates: phase1.candidates,
@@ -147,6 +154,10 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 						...(options.maxWrites !== undefined ? { maxWrites: options.maxWrites } : {}),
 						...(options.activeContextEnabled ? { activeContextEnabled: options.activeContextEnabled } : {}),
 					});
+					if (runSignal.aborted) throw new Error("dream run timed out during phase 2");
+					if (!phase2.finished) {
+						throw new Error("dream consolidation ended without finish_dream");
+					}
 				}
 				const counts = countRunChanges(root, runId);
 				await removeUsage(root, counts.deletedKeys);
@@ -189,6 +200,11 @@ export async function runDream(options: RunDreamOptions): Promise<DreamRunResult
 		});
 	} catch (error) {
 		if (errorCode(error) === "ELOCKED") return { ran: false, reason: "locked" };
-		return { ran: false, reason: "error", error: error instanceof Error ? error.message : String(error) };
+		return {
+			ran: false,
+			reason: "error",
+			error: error instanceof Error ? error.message : String(error),
+			...(attemptedRunId !== undefined ? { runId: attemptedRunId } : {}),
+		};
 	}
 }

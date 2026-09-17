@@ -416,7 +416,11 @@ export class MemoryService {
 	async dreamRun(_params: ClientParams<"memory/dream/run">): Promise<ClientResult<"memory/dream/run">> {
 		const result = await this.executeDream(true);
 		if (result.ran) return { ok: true, runId: result.runId };
-		return { ok: false, error: dreamRunError(result) };
+		return {
+			ok: false,
+			error: dreamRunError(result),
+			...(result.runId !== undefined ? { runId: result.runId } : {}),
+		};
 	}
 
 	/**

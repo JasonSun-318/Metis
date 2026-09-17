@@ -17,6 +17,7 @@ import { resolveDreamSettings } from "../src/core/memory/dream/types.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { MemoryEvents } from "../src/core/memory/vault-events.ts";
 import { getVaultRoot } from "../src/core/memory/vault-paths.ts";
+import { undoMemoryRun } from "../src/core/memory/vault-run-undo.ts";
 import { encodePathForStorage } from "../src/utils/paths.ts";
 
 describe("dream run", () => {
@@ -174,6 +175,93 @@ describe("dream run", () => {
 		expect(undo.skipped).toEqual([]);
 		expect(undo.undone.length).toBeGreaterThanOrEqual(2);
 		expect(snapshotTree(join(getVaultRoot(agentDir), "global"))).toEqual(before);
+	});
+
+	it("does not mark sessions processed when phase 2 never finishes", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "unfinished", "remember pnpm");
+		const result = await runDream({
+			agentDir,
+			settings,
+			ignoreGate: true,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async () => ({ candidates: [{ scope: "global", text: "user prefers pnpm" }] }),
+			promptAgent: async () => {},
+		});
+		expect(result.ran).toBe(false);
+		expect(readDreamState(agentDir).processedSessionIds).not.toContain("unfinished");
+		expect(readDreamState(agentDir).lastRunAt).toBeUndefined();
+	});
+
+	it("keeps incomplete run writes attributable and retryable", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "partial", "remember pnpm");
+		const result = await runDream({
+			agentDir,
+			settings,
+			ignoreGate: true,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async () => ({ candidates: [{ scope: "global", text: "pnpm only" }] }),
+			promptAgent: async (ctx) => {
+				await ctx.callTool("memory_write", {
+					op: "create",
+					scope: "global",
+					target: { slug: "partial" },
+					frontmatter: { type: "reference" },
+					content: "pnpm",
+				});
+			},
+		});
+		expect(result.ran).toBe(false);
+		if (result.ran || !result.runId) throw new Error("expected failed run with id");
+		expect(readDreamState(agentDir).processedSessionIds).not.toContain("partial");
+		const undo = await undoMemoryRun({ agentDir, runId: result.runId, actor: { kind: "user" } });
+		expect(undo.skipped).toEqual([]);
+		expect(new MemoryVault({ agentDir }).readNote("global", "partial")).toBeUndefined();
+	});
+
+	it("fails the run when every phase 1 prompt fails", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "s1", "remember pnpm");
+		writeSession(agentDir, "s2", "remember npm");
+		const result = await runDream({
+			agentDir,
+			settings,
+			ignoreGate: true,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async () => {
+				throw new Error("model down");
+			},
+			promptAgent: async () => {
+				throw new Error("unreachable");
+			},
+		});
+		expect(result.ran).toBe(false);
+		if (result.ran) return;
+		expect(result.reason).toBe("error");
+		expect(result.error).toContain("2");
+		expect(readDreamState(agentDir).processedSessionIds).toEqual([]);
+	});
+
+	it("marks only successfully processed sessions when some prompts fail", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		writeSession(agentDir, "good", "remember pnpm", join(agentDir, "good-cwd"));
+		writeSession(agentDir, "bad", "remember npm", join(agentDir, "bad-cwd"));
+		const result = await runDream({
+			agentDir,
+			settings,
+			ignoreGate: true,
+			model: { provider: "test", modelId: "cheap" },
+			promptFn: async (request) => {
+				if (request.user.includes("bad-cwd")) throw new Error("model down");
+				return { candidates: [] };
+			},
+			promptAgent: async (ctx) => {
+				await ctx.callTool("finish_dream", {});
+			},
+		});
+		expect(result.ran).toBe(true);
+		expect(readDreamState(agentDir).processedSessionIds).toEqual(["good"]);
 	});
 
 	it("gate failures make zero model calls", async () => {

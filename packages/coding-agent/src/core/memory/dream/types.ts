@@ -104,4 +104,10 @@ export type DreamRunResult =
 			/** Total candidates produced by phase 1. */
 			candidates: number;
 	  }
-	| { ran: false; reason: DreamGateReason | "error"; error?: string };
+	| {
+			ran: false;
+			reason: DreamGateReason | "error";
+			error?: string;
+			/** Present when the run started and failed mid-flight; its writes stay attributable/undoable. */
+			runId?: string;
+	  };
