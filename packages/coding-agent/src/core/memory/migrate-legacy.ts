@@ -487,22 +487,22 @@ function runMigration(
 				} else {
 					changed = mergeFactsIntoExisting(path, raw, group.texts);
 				}
-				if (changed) {
-					notes++;
-					const entry: ChangelogEntry = {
-						id: randomUUID(),
-						ts: new Date().toISOString(),
-						actor: MIGRATE_ACTOR,
-						op: "migrate",
-						scope: group.scope,
-						target: { slug: group.slug },
-						...(group.project ? { projectKey: group.project.key } : {}),
-						migrationGroup,
-					};
-					appendChangelog(root, entry);
-					events.emit("changed", { entry });
-					logged.add(migrationGroup);
-				}
+				if (changed) notes++;
+				// A previous attempt may have saved the note but failed before
+				// recording it. Content deduplication must not skip the missing log.
+				const entry: ChangelogEntry = {
+					id: randomUUID(),
+					ts: new Date().toISOString(),
+					actor: MIGRATE_ACTOR,
+					op: "migrate",
+					scope: group.scope,
+					target: { slug: group.slug },
+					...(group.project ? { projectKey: group.project.key } : {}),
+					migrationGroup,
+				};
+				appendChangelog(root, entry);
+				events.emit("changed", { entry });
+				logged.add(migrationGroup);
 			}
 			archive.completedGroups.push(groupId);
 			writeMigrationJournal(root, journal);

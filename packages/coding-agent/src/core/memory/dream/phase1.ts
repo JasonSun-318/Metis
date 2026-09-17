@@ -140,7 +140,7 @@ export function parseDreamCandidates(raw: unknown, session: EligibleSession, pol
 export interface DreamPhase1SessionResult {
 	sessionId: string;
 	count: number;
-	/** False when the model call failed; the session stays unprocessed and retries next run. */
+	/** False when reading the transcript or calling the model failed; retry next run. */
 	processed: boolean;
 	error?: string;
 }
@@ -182,9 +182,15 @@ export async function runDreamPhase1(options: {
 		let polluted = false;
 		try {
 			({ text, polluted } = serializeSessionForDream(session.path));
-		} catch {
-			// Unreadable sessions are deterministic dead ends; count them as processed.
-			results[index] = { sessionId: session.sessionId, count: 0, processed: true };
+		} catch (error) {
+			// A corrupt or temporarily unreadable transcript is not a successful
+			// empty extraction. Keep it retryable, including after file repair.
+			results[index] = {
+				sessionId: session.sessionId,
+				count: 0,
+				processed: false,
+				error: errorMessage(error),
+			};
 			return;
 		}
 		if (text.trim().length === 0) {

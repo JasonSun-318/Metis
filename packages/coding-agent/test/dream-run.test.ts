@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { enumerateSessions } from "../src/core/memory/dream/gate.ts";
-import { runDream } from "../src/core/memory/dream/run.ts";
+import { type RunDreamOptions, runDream } from "../src/core/memory/dream/run.ts";
 import { readDreamState } from "../src/core/memory/dream/state.ts";
 import { resolveDreamSettings } from "../src/core/memory/dream/types.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
@@ -84,6 +84,45 @@ describe("dream run", () => {
 	}
 
 	const settings = resolveDreamSettings({ dream: { enabled: true, minSessions: 5, minHours: 24 } });
+
+	it.each([false, true])(
+		"keeps corrupt transcripts retryable (with healthy session: %s)",
+		async (withHealthySession) => {
+			const agentDir = join(makeTemp(), "agent");
+			writeSession(agentDir, "broken", "remember this");
+			const path = join(agentDir, "sessions", encodePathForStorage(agentDir), "broken.jsonl");
+			writeFileSync(path, `${readFileSync(path, "utf8")}{not-json}\n`);
+			const old = new Date(Date.now() - 48 * 60 * 60 * 1000);
+			utimesSync(path, old, old);
+			if (withHealthySession) writeSession(agentDir, "healthy", "valid transcript");
+			const promptFn = vi.fn(async () => ({ candidates: [] }));
+			const options: RunDreamOptions = {
+				agentDir,
+				settings,
+				model: { provider: "test", modelId: "cheap" },
+				promptFn,
+				ignoreGate: true,
+				promptAgent: async (ctx) => {
+					await ctx.callTool("finish_dream", {});
+				},
+			};
+			const first = await runDream(options);
+			expect(first.ran).toBe(withHealthySession);
+			expect(readDreamState(agentDir).processedSessionIds).toEqual(withHealthySession ? ["healthy"] : []);
+			if (!withHealthySession) {
+				expect(first).toMatchObject({ reason: "error", error: "all 1 session extractions failed" });
+				expect(readDreamState(agentDir).lastRunAt).toBeUndefined();
+			}
+			expect(promptFn).toHaveBeenCalledTimes(withHealthySession ? 1 : 0);
+
+			writeSession(agentDir, "broken", "repaired transcript");
+			expect(await runDream(options)).toMatchObject({ ran: true, sessions: 1 });
+			expect(promptFn).toHaveBeenCalledTimes(withHealthySession ? 2 : 1);
+			expect(readDreamState(agentDir).processedSessionIds.sort()).toEqual(
+				withHealthySession ? ["broken", "healthy"] : ["broken"],
+			);
+		},
+	);
 
 	it("runs phase 1 + phase 2, updates state, and emits dreamCompleted", async () => {
 		const agentDir = join(makeTemp(), "agent");

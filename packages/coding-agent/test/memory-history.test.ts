@@ -4,6 +4,7 @@ import {
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	renameSync,
 	rmSync,
 	utimesSync,
 	writeFileSync,
@@ -25,6 +26,18 @@ vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
 		replaceFileAtomicallySync: (path: string, data: string | Uint8Array, options?: { mode?: number }) => {
 			if (durableMock.failOnce.delete(path)) throw new Error("injected write failure");
 			return mod.replaceFileAtomicallySync(path, data, options);
+		},
+	};
+});
+vi.mock("../src/core/memory/vault-history.ts", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../src/core/memory/vault-history.ts")>();
+	return {
+		...mod,
+		appendChangelog: (root: string, entry: Parameters<typeof mod.appendChangelog>[1]) => {
+			if (durableMock.failOnce.delete(join(root, ".history", "changelog.jsonl"))) {
+				throw new Error("injected write failure");
+			}
+			return mod.appendChangelog(root, entry);
 		},
 	};
 });
@@ -50,6 +63,7 @@ describe("memory history and undo", () => {
 	};
 
 	afterEach(() => {
+		durableMock.failOnce.clear();
 		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
@@ -627,6 +641,65 @@ describe("memory history and undo", () => {
 			expect(result.undone).toEqual([]);
 			expect(result.skipped).toHaveLength(2);
 			expect(v.readNote("global", "x")!.body).toContain("v2");
+		});
+	});
+
+	it("rename rejects a non-regular changelog before changing live files", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			await putNote(v, "global", "before", "original");
+			await putNote(v, "global", "ref", "See [[before]]");
+			const paths = [
+				v.readNote("global", "before")!.path,
+				v.readNote("global", "ref")!.path,
+				join(v.root, "global", "MEMORY.md"),
+			];
+			const before = paths.map((path) => readFileSync(path, "utf8"));
+			const logPath = join(v.root, ".history", "changelog.jsonl");
+			renameSync(logPath, `${logPath}.saved`);
+			mkdirSync(logPath);
+			expect(
+				await v.write({ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" }, AGENT),
+			).toEqual({ ok: false, error: expect.stringContaining("non-regular file") });
+			expect(paths.map((path) => readFileSync(path, "utf8"))).toEqual(before);
+			expect(v.readNote("global", "after")).toBeUndefined();
+		});
+	});
+
+	it("rename rolls back notes, cross-project references and indexes when its changelog commit fails", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			const project = f.vault("b");
+			await putNote(v, "global", "before", "original");
+			await putNote(v, "global", "ref", "See [[before]]");
+			await putNote(project, "project", "ref", "Project [[before]]");
+			const logPath = join(v.root, ".history", "changelog.jsonl");
+			const paths = [
+				v.readNote("global", "before")!.path,
+				v.readNote("global", "ref")!.path,
+				project.readNote("project", "ref")!.path,
+				join(v.root, "global", "MEMORY.md"),
+				join(getScopeDir(v.root, "project", project.project!.projectKey), "MEMORY.md"),
+				logPath,
+			];
+			const before = paths.map((path) => readFileSync(path, "utf8"));
+			const eventGroupSizes: number[] = [];
+			v.events.on("changed", ({ entry }) => {
+				eventGroupSizes.push(readChangelog(v.root).filter((item) => item.operationId === entry.operationId).length);
+			});
+			durableMock.failOnce.add(logPath);
+			const request = { op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" } as const;
+			expect(await v.write(request, AGENT)).toEqual({ ok: false, error: "injected write failure" });
+			expect(paths.map((path) => readFileSync(path, "utf8"))).toEqual(before);
+			expect(v.readNote("global", "after")).toBeUndefined();
+			expect(eventGroupSizes).toEqual([]);
+
+			const renamed = mustWrite(await v.write(request, AGENT));
+			// No observer can see a partially committed operation group.
+			expect(eventGroupSizes).toEqual([4, 4, 4, 4]);
+			expect(project.readNote("project", "ref")!.body).toBe("Project [[after]]");
+			expect(await v.undo(renamed.changeId, AGENT)).toEqual({ ok: true });
+			expect(paths.slice(0, -1).map((path) => readFileSync(path, "utf8"))).toEqual(before.slice(0, -1));
 		});
 	});
 

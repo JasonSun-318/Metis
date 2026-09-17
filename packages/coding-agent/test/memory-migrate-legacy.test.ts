@@ -16,6 +16,18 @@ vi.mock("../src/core/durable-file.ts", async (importOriginal) => {
 		},
 	};
 });
+vi.mock("../src/core/memory/vault-history.ts", async (importOriginal) => {
+	const mod = await importOriginal<typeof import("../src/core/memory/vault-history.ts")>();
+	return {
+		...mod,
+		appendChangelog: (root: string, entry: Parameters<typeof mod.appendChangelog>[1]) => {
+			if (durableMock.failOnce.delete(join(root, ".history", "changelog.jsonl"))) {
+				throw new Error("injected changelog failure");
+			}
+			return mod.appendChangelog(root, entry);
+		},
+	};
+});
 
 import { ensureVaultLayout } from "../src/core/auto-memory.ts";
 import { migrateLegacyMemory } from "../src/core/memory/migrate-legacy.ts";
@@ -136,6 +148,7 @@ describe("migrateLegacyMemory", () => {
 	};
 
 	afterEach(() => {
+		durableMock.failOnce.clear();
 		for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 	});
 
@@ -447,6 +460,30 @@ describe("migrateLegacyMemory", () => {
 		expect(migrateLegacyMemory(agentDir)).toEqual({ migrated: false, facts: 0, notes: 0 });
 		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(false);
 		expect(readChangelog(root).filter((entry) => entry.op === "migrate")).toHaveLength(before);
+	});
+
+	it("repairs the missing migration log after a note was written but its changelog append failed", () => {
+		const agentDir = join(makeTemp(), "agent");
+		const root = getVaultRoot(agentDir);
+		writeLegacyDb(join(root, "memory.sqlite"), [{ scope: "global", topicFile: "prefs.md", text: "keep this" }], []);
+		durableMock.failOnce.add(join(root, ".history", "changelog.jsonl"));
+		expect(migrateLegacyMemory(agentDir)).toMatchObject({ migrated: false, error: "injected changelog failure" });
+		const notePath = join(root, "global", "notes", "prefs.md");
+		const original = readFileSync(notePath, "utf8");
+		expect(readChangelog(root)).toEqual([]);
+		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(false);
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(true);
+
+		expect(migrateLegacyMemory(agentDir)).toMatchObject({ migrated: true });
+		expect(readFileSync(notePath, "utf8")).toBe(original);
+		const migrations = readChangelog(root).filter((entry) => entry.op === "migrate");
+		expect(migrations).toHaveLength(1);
+		expect(migrations[0]).toMatchObject({ migrationGroup: expect.any(String), target: { slug: "prefs" } });
+		expect(new MemoryVault({ agentDir }).readIndex("global")).toContain("prefs.md");
+		expect(existsSync(join(root, ".history", "migrated.json"))).toBe(true);
+		expect(existsSync(join(root, ".history", "migration-in-progress.json"))).toBe(false);
+		migrateLegacyMemory(agentDir);
+		expect(readChangelog(root)).toEqual(migrations);
 	});
 
 	it("does not duplicate migrate entries when the marker write fails", () => {

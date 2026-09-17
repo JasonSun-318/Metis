@@ -9,6 +9,7 @@ import { AgentSession, type AgentSessionEvent } from "../src/core/agent-session.
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { MemoryVault } from "../src/core/memory/vault.ts";
 import { MemoryEvents } from "../src/core/memory/vault-events.ts";
+import { appendChangelog, readChangelog } from "../src/core/memory/vault-history.ts";
 import { getNotePath, getScopeDir, getVaultRoot } from "../src/core/memory/vault-paths.ts";
 import { resolveVaultProject } from "../src/core/memory/vault-project.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
@@ -247,6 +248,94 @@ describe("AgentSession memory vault", () => {
 			const undo = await session.undoMemoryChange();
 			expect(undo.ok).toBe(true);
 			expect(existsSync(notePath)).toBe(false);
+		} finally {
+			session.dispose();
+		}
+	});
+
+	it.each(["primary", "member", "latest"] as const)(
+		"undoes a global rename with foreign references via %s CLI selection",
+		async (selection) => {
+			const { agentDir, cwd, root } = layout();
+			const otherCwd = join(root, "other-project");
+			mkdirSync(otherCwd);
+			await seedNote(agentDir, cwd, { scope: "global", slug: "before", description: "original" });
+			await seedNote(agentDir, cwd, {
+				scope: "project",
+				slug: "local-ref",
+				description: "ref",
+				body: "See [[before]]",
+			});
+			await seedNote(agentDir, otherCwd, {
+				scope: "project",
+				slug: "foreign-ref",
+				description: "ref",
+				body: "See [[before]]",
+			});
+			const { session, events } = createSession({ agentDir, cwd });
+			try {
+				const tool = session.agent.state.tools.find((tool) => tool.name === "memory_write")!;
+				const result = await tool.execute(
+					"rename",
+					{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+					undefined,
+					undefined,
+				);
+				expect(result.content[0]).toMatchObject({ text: expect.stringContaining("Saved memory") });
+				const entries = readChangelog(getVaultRoot(agentDir));
+				const primary = entries.find((entry) => entry.op === "rename")!;
+				const member = entries.find(
+					(entry) =>
+						entry.operationId === primary.id && "slug" in entry.target && entry.target.slug === "local-ref",
+				)!;
+				const foreign = new MemoryVault({ agentDir, project: resolveVaultProject(otherCwd, "user-selected") });
+				expect(foreign.readNote("project", "foreign-ref")!.body).toBe("See [[after]]");
+				expect(
+					await session.undoMemoryChange(
+						selection === "latest" ? undefined : selection === "primary" ? primary.id : member.id,
+					),
+				).toEqual({ ok: true });
+				expect(foreign.readNote("project", "foreign-ref")!.body).toBe("See [[before]]");
+				expect(foreign.readNote("global", "before")!.body).toBe("original");
+				expect(foreign.readNote("global", "after")).toBeUndefined();
+				expect(events.some((event) => event.type === "memory_changed" && event.entry.op === "undo")).toBe(true);
+			} finally {
+				session.dispose();
+			}
+		},
+	);
+
+	it("CLI global undo still refuses a forged foreign operation member", async () => {
+		const { agentDir, cwd, root } = layout();
+		const otherCwd = join(root, "other-project");
+		mkdirSync(otherCwd);
+		await seedNote(agentDir, cwd, { scope: "global", slug: "before", description: "original" });
+		await seedNote(agentDir, otherCwd, { scope: "project", slug: "untouched", description: "keep" });
+		const { session } = createSession({ agentDir, cwd });
+		try {
+			const vault = new MemoryVault({ agentDir });
+			const renamed = await vault.write(
+				{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+				{ kind: "user" },
+			);
+			if (!renamed.ok) throw new Error(renamed.error);
+			appendChangelog(vault.root, {
+				id: "forged",
+				ts: new Date().toISOString(),
+				actor: { kind: "user" },
+				op: "create",
+				scope: "project",
+				projectKey: resolveVaultProject(otherCwd)!.projectKey,
+				target: { slug: "untouched" },
+				operationId: renamed.changeId,
+			});
+			expect(await session.undoMemoryChange(renamed.changeId)).toEqual({
+				ok: false,
+				error: "change belongs to a different project",
+			});
+			expect(vault.readNote("global", "after")).toBeDefined();
+			const foreign = new MemoryVault({ agentDir, project: resolveVaultProject(otherCwd) });
+			expect(foreign.readNote("project", "untouched")!.body).toBe("keep");
 		} finally {
 			session.dispose();
 		}

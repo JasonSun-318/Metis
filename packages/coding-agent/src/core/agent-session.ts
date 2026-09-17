@@ -2466,7 +2466,8 @@ export class AgentSession {
 	async undoMemoryChange(prefix?: string): Promise<{ ok: boolean; error?: string }> {
 		const vault = this._memoryVault;
 		if (!vault) return { ok: false, error: "long-term memory is not enabled for this session" };
-		const candidates = readChangelog(vault.root).filter(
+		const entries = readChangelog(vault.root);
+		const candidates = entries.filter(
 			(entry) =>
 				!entry.undoneBy &&
 				entry.op !== "undo" &&
@@ -2477,7 +2478,15 @@ export class AgentSession {
 		if (!entry) {
 			return { ok: false, error: prefix ? `no change matching "${prefix}"` : "no changes to undo" };
 		}
-		return vault.undo(entry.id, this._memoryActor());
+		// A global rename can own referrer changes in several projects. Like
+		// the desktop undo entrypoint, route by its primary operation; the
+		// host vault still validates every foreign leg before changing files.
+		const primary = entries.find((candidate) => candidate.id === (entry.operationId ?? entry.id)) ?? entry;
+		const owner =
+			primary.scope === "global" && this._agentDir !== undefined
+				? new MemoryVault({ agentDir: this._agentDir, events: vault.events })
+				: vault;
+		return owner.undo(entry.id, this._memoryActor());
 	}
 
 	/** Roll back an entire Dream run by id across every scope it touched. */

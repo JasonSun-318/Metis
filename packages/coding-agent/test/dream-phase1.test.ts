@@ -53,6 +53,26 @@ describe("dream phase 1", () => {
 		return { path: writeSession(agentDir, id, `session ${id} content`, cwd), sessionId: id, cwd, updatedAt: 1 };
 	}
 
+	it("does not consume an unreadable transcript but still accepts a valid empty transcript", async () => {
+		const agentDir = join(makeTemp(), "agent");
+		const missing = eligible(agentDir, "missing");
+		rmSync(missing.path);
+		const empty = eligible(agentDir, "empty");
+		writeSession(agentDir, "empty", "");
+		let promptCalls = 0;
+		const result = await runDreamPhase1({
+			sessions: [missing, empty],
+			stagingDir: join(makeTemp(), "staging"),
+			promptFn: async () => {
+				promptCalls++;
+				return { candidates: [] };
+			},
+		});
+		expect(result.processed).toEqual(["empty"]);
+		expect(result.sessions[0]).toMatchObject({ sessionId: "missing", processed: false, error: expect.any(String) });
+		expect(promptCalls).toBe(0);
+	});
+
 	it("stages candidates returned by the prompt function", async () => {
 		const agentDir = join(makeTemp(), "agent");
 		const stagingDir = join(makeTemp(), "staging");

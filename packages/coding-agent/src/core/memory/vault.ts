@@ -598,6 +598,7 @@ export class MemoryVault {
 		let bytes = 0;
 		let primary: ChangelogEntry;
 		let indexReport: IndexReport | undefined;
+		let renameChanges: VaultFileChange[] | undefined;
 		const extra: ChangelogEntry[] = [];
 
 		switch (req.op) {
@@ -714,7 +715,7 @@ export class MemoryVault {
 					const indexPath = getIndexPath(scopeDir);
 					changes.push({ path: indexPath, before: this.readCurrentStrict(indexPath), after: report.content });
 				}
-				applyVaultFileChanges(changes);
+				renameChanges = changes;
 				primary = this.newEntry("rename", req.scope, { slug }, actor, {
 					newSlug,
 					snapshot,
@@ -753,8 +754,25 @@ export class MemoryVault {
 		const index = indexReport ?? this.rebuildIndexWithReport(req.scope);
 		const indexSlug = req.op === "rename" ? req.newSlug! : slug;
 		const indexUpdated = req.op === "delete" ? true : index.slugs.has(indexSlug);
-		this.record(primary);
-		for (const entry of extra) this.record(entry);
+		if (renameChanges) {
+			// Commit the complete operation group with its notes and indexes. A
+			// log write failure must roll back the live files too, and observers
+			// must never see a partially recorded rename.
+			const entries = [primary, ...extra];
+			const logPath = getChangelogPath(this.root);
+			const before = readSingleLinkTextFileSync(logPath, { maxBytes: 8 * 1024 * 1024 });
+			const prefix = before ? `${before}${before.endsWith("\n") ? "" : "\n"}` : "";
+			renameChanges.push({
+				path: logPath,
+				before,
+				after: `${prefix}${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`,
+			});
+			applyVaultFileChanges(renameChanges);
+			for (const entry of entries) this.events.emit("changed", { entry });
+		} else {
+			this.record(primary);
+			for (const entry of extra) this.record(entry);
+		}
 		return {
 			ok: true,
 			changeId: primary.id,
