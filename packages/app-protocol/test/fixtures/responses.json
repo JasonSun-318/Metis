@@ -763,6 +763,8 @@
 						"state": "idle",
 						"archived": false,
 						"unread": false,
+						"useMemory": true,
+						"contributeMemory": true,
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					}
@@ -787,6 +789,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -808,6 +812,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -829,6 +835,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -981,6 +989,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -1003,6 +1013,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				},
@@ -1038,6 +1050,8 @@
 					"state": "idle",
 					"archived": true,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -1059,6 +1073,8 @@
 					"state": "idle",
 					"archived": false,
 					"unread": false,
+					"useMemory": true,
+					"contributeMemory": true,
 					"mode": "code",
 					"cwdOrigin": "user-selected"
 				}
@@ -1081,6 +1097,8 @@
 						"state": "idle",
 						"archived": false,
 						"unread": false,
+						"useMemory": true,
+						"contributeMemory": true,
 						"mode": "code",
 						"cwdOrigin": "user-selected"
 					},

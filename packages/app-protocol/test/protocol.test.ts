@@ -186,8 +186,6 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
-			embedding: null,
-			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [
 				{
@@ -236,8 +234,6 @@ const scheduleCases = [
 				modelId: "gpt-4o",
 				authConfigured: true,
 			},
-			embedding: null,
-			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -256,8 +252,6 @@ const scheduleCases = [
 		{
 			defaultModel: { provider: "openai", modelId: "gpt-test" },
 			vision: null,
-			embedding: null,
-			rerank: null,
 			defaultThinkingSelection: "high",
 			providers: [],
 			loadError: null,
@@ -266,22 +260,6 @@ const scheduleCases = [
 	[
 		"model/testConnection",
 		{ requestId: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", kind: "chat", provider: "openai", modelId: "gpt-test" },
-		{ ok: true, message: "Connection succeeded", latencyMs: 42 },
-	],
-	[
-		"model/testConnection",
-		{
-			requestId: "abababab-abab-4bab-8bab-abababababab",
-			kind: "embedding",
-			settings: {
-				name: "Qwen Embedding",
-				provider: "Qwen",
-				baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-				api: "openai-compatible",
-				modelId: "text-embedding-v4",
-			},
-			credential: { action: "set", value: "one-shot" },
-		},
 		{ ok: true, message: "Connection succeeded", latencyMs: 42 },
 	],
 	[
@@ -321,31 +299,135 @@ const scheduleCases = [
 	],
 	[
 		"memory/get",
-		{},
+		{ sessionId: SESSION_ID },
 		{
-			autoMemoryEnabled: true,
-			memoryEngine: "index",
-			embeddingConfigured: false,
-			rerankConfigured: false,
-			lastError: null,
-			memoryMigrationNotice: null,
+			enabled: true,
+			dream: {
+				enabled: true,
+				minHours: 24,
+				minSessions: 5,
+				maxUnusedDays: 90,
+				nextEligible: false,
+			},
+			activeContext: false,
+			vault: {
+				globalDir: "/tmp/metis-agent/memory/global",
+				projectDir: "/tmp/metis-agent/memory/projects/abc123",
+				projectRoot: "/tmp/metis-project",
+			},
 		},
 	],
 	[
 		"memory/update",
 		{
-			autoMemoryEnabled: true,
-			memoryEngine: "extract",
+			sessionId: SESSION_ID,
+			enabled: true,
+			dream: { enabled: false, minHours: 12, model: null },
+			activeContext: true,
 		},
 		{
-			autoMemoryEnabled: true,
-			memoryEngine: "extract",
-			embeddingConfigured: true,
-			rerankConfigured: false,
-			lastError: null,
-			memoryMigrationNotice: null,
+			enabled: true,
+			dream: {
+				enabled: false,
+				minHours: 12,
+				minSessions: 5,
+				maxUnusedDays: 90,
+				nextEligible: false,
+			},
+			activeContext: true,
+			vault: { globalDir: "/tmp/metis-agent/memory/global" },
 		},
 	],
+	[
+		"memory/notes/list",
+		{ sessionId: SESSION_ID, scope: "project", type: "decision", query: "deploy", limit: 10 },
+		{
+			notes: [
+				{
+					scope: "project",
+					slug: "deploy-freeze",
+					type: "decision",
+					name: "Deploy freeze",
+					description: "No deploys on Fridays",
+					updated: "2026-09-10",
+					snippet: "No deploys on Fridays",
+					score: 1.5,
+				},
+			],
+		},
+	],
+	[
+		"memory/notes/read",
+		{ sessionId: SESSION_ID, scope: "global", slug: "editor-preference" },
+		{
+			note: {
+				scope: "global",
+				slug: "editor-preference",
+				name: "Editor preference",
+				description: "User prefers vim keybindings",
+				type: "user",
+				created: "2026-08-01",
+				updated: "2026-09-10",
+				sources: ["user"],
+				confidence: "high",
+				body: "Uses vim keybindings in all editors.",
+				links: [],
+				backlinks: ["deploy-freeze"],
+			},
+		},
+	],
+	[
+		"memory/notes/write",
+		{
+			sessionId: SESSION_ID,
+			op: "create",
+			scope: "project",
+			target: { slug: "deploy-freeze" },
+			frontmatter: { name: "Deploy freeze", description: "No deploys on Fridays", type: "decision" },
+			content: "No deploys on Fridays.",
+		},
+		{ ok: true, changeId: "44444444-4444-4444-8444-444444444444", target: { slug: "deploy-freeze" } },
+	],
+	[
+		"memory/history/list",
+		{ limit: 20 },
+		{
+			entries: [
+				{
+					id: "44444444-4444-4444-8444-444444444444",
+					ts: "2026-09-10T12:00:00.000Z",
+					actor: { kind: "user" },
+					op: "create",
+					scope: "project",
+					target: { slug: "deploy-freeze" },
+					projectKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+				},
+			],
+		},
+	],
+	[
+		"memory/history/read",
+		{ changeId: "44444444-4444-4444-8444-444444444444" },
+		{
+			entry: {
+				id: "44444444-4444-4444-8444-444444444444",
+				ts: "2026-09-10T12:00:00.000Z",
+				actor: { kind: "user" },
+				op: "create",
+				scope: "project",
+				target: { slug: "deploy-freeze" },
+				projectKey: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			},
+			patch: "--- a\n+++ b\n",
+		},
+	],
+	["memory/undo", { changeId: "44444444-4444-4444-8444-444444444444" }, { ok: true }],
+	[
+		"memory/undoRun",
+		{ runId: "55555555-5555-4555-8555-555555555555" },
+		{ undone: ["44444444-4444-4444-8444-444444444444"], skipped: [] },
+	],
+	["memory/dream/run", {}, { ok: true, runId: "55555555-5555-4555-8555-555555555555" }],
 	[
 		"hooks/list",
 		{},
@@ -768,6 +850,11 @@ const scheduleCases = [
 			registryRevision: 5,
 			activation: "applied",
 		},
+	],
+	[
+		"session/setMemoryFlags",
+		{ sessionId: SESSION_ID, requestId: "00000000-0000-4000-8000-000000000099", contributeMemory: false },
+		{ useMemory: true, contributeMemory: false },
 	],
 ] as const;
 

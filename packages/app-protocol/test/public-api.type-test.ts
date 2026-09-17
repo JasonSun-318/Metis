@@ -138,6 +138,8 @@ const session = {
 	state: "idle",
 	archived: false,
 	unread: false,
+	useMemory: true,
+	contributeMemory: true,
 } satisfies SessionSummary;
 
 const turns: TurnView[] = [];

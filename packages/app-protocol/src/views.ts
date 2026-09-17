@@ -103,6 +103,9 @@ export const SessionSummarySchema = StrictObject({
 	unread: Type.Boolean(),
 	recoveryNotice: Type.Optional(PublicTextSchema),
 	scheduled: Type.Optional(StrictObject({ taskId: SessionIdSchema, runId: SessionIdSchema })),
+	/** Per-session memory controls; absent fields on disk default to true. */
+	useMemory: Type.Boolean(),
+	contributeMemory: Type.Boolean(),
 });
 
 export const SkillSourceViewSchema = Type.Union([
@@ -742,28 +745,10 @@ export const VisionSettingsViewSchema = StrictObject({
 	modelId: Type.String({ minLength: 1, maxLength: 300 }),
 	authConfigured: Type.Boolean(),
 });
-export const EmbeddingSettingsViewSchema = StrictObject({
-	name: Type.String({ minLength: 1, maxLength: 120 }),
-	provider: Type.String({ minLength: 1, maxLength: 120 }),
-	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-	api: Type.Literal("openai-compatible"),
-	modelId: Type.String({ minLength: 1, maxLength: 200 }),
-	dimensions: Type.Optional(Type.Integer({ minimum: 1, maximum: 8_192 })),
-	authConfigured: Type.Boolean(),
-});
-export const RerankSettingsViewSchema = StrictObject({
-	name: Type.String({ minLength: 1, maxLength: 120 }),
-	provider: Type.String({ minLength: 1, maxLength: 120 }),
-	endpointUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-	modelId: Type.String({ minLength: 1, maxLength: 200 }),
-	authConfigured: Type.Boolean(),
-});
 export const ModelSettingsViewSchema = StrictObject({
 	defaultModel: Type.Union([ModelRefSchema, Type.Null()]),
 	/** Vision-describer service for image-less models; null when unset. */
 	vision: Type.Union([VisionSettingsViewSchema, Type.Null()]),
-	embedding: Type.Union([EmbeddingSettingsViewSchema, Type.Null()]),
-	rerank: Type.Union([RerankSettingsViewSchema, Type.Null()]),
 	defaultThinkingSelection: ThinkingSelectionSchema,
 	providers: Type.Array(ModelSettingsProviderViewSchema, { maxItems: 128 }),
 	loadError: Type.Union([PublicTextSchema, Type.Null()]),
@@ -782,14 +767,129 @@ export const WebSearchSettingsViewSchema = StrictObject({
 	authSource: Type.Optional(Type.Union([Type.Literal("stored"), Type.Literal("environment")])),
 });
 
-export const MemoryEngineSchema = Type.Union([Type.Literal("index"), Type.Literal("extract")]);
+export const MemoryScopeViewSchema = Type.Union([Type.Literal("global"), Type.Literal("project")]);
+export const MemoryNoteTypeViewSchema = Type.Union([
+	Type.Literal("user"),
+	Type.Literal("feedback"),
+	Type.Literal("project"),
+	Type.Literal("reference"),
+	Type.Literal("decision"),
+]);
+export const MemoryPinnedBlockViewSchema = Type.Union([
+	Type.Literal("user"),
+	Type.Literal("feedback"),
+	Type.Literal("project"),
+	Type.Literal("active"),
+]);
+export const MemoryConfidenceViewSchema = Type.Union([
+	Type.Literal("high"),
+	Type.Literal("medium"),
+	Type.Literal("low"),
+]);
+/** Mirrors the vault's safe-slug contract (lowercase alnum plus ._-, no ".."). */
+export const MemorySlugSchema = Type.Refine(
+	Type.String({ minLength: 1, maxLength: 120, pattern: "^[a-z0-9][a-z0-9._-]*$" }),
+	(value) => !value.includes(".."),
+	`must not contain ".."`,
+);
+export const MemoryTargetViewSchema = Type.Union([
+	StrictObject({ slug: MemorySlugSchema }),
+	StrictObject({ block: MemoryPinnedBlockViewSchema }),
+]);
+export const MemoryActorViewSchema = Type.Union([
+	StrictObject({ kind: Type.Literal("agent"), sessionId: SessionIdSchema }),
+	StrictObject({ kind: Type.Literal("dream"), runId: Type.String({ minLength: 1, maxLength: 64 }) }),
+	StrictObject({ kind: Type.Literal("user") }),
+	StrictObject({ kind: Type.Literal("migrate") }),
+]);
+export const MemoryChangelogOpViewSchema = Type.Union([
+	Type.Literal("create"),
+	Type.Literal("append"),
+	Type.Literal("replace"),
+	Type.Literal("str_replace"),
+	Type.Literal("rename"),
+	Type.Literal("delete"),
+	Type.Literal("undo"),
+	Type.Literal("migrate"),
+]);
+/** Wire view of a vault changelog entry; the internal snapshot path is never exposed. */
+export const MemoryChangelogEntryViewSchema = StrictObject({
+	id: UuidSchema,
+	ts: TimestampSchema,
+	actor: MemoryActorViewSchema,
+	op: MemoryChangelogOpViewSchema,
+	scope: MemoryScopeViewSchema,
+	target: MemoryTargetViewSchema,
+	projectKey: Type.Optional(Sha256Schema),
+	newSlug: Type.Optional(MemorySlugSchema),
+	undoes: Type.Optional(UuidSchema),
+	undoneBy: Type.Optional(UuidSchema),
+});
+export const MemoryModelRefViewSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
+export const MemoryDreamLastRunViewSchema = StrictObject({
+	runId: Type.String({ minLength: 1, maxLength: 64 }),
+	added: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	updated: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	deleted: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	at: TimestampSchema,
+});
+export const MemoryDreamViewSchema = StrictObject({
+	enabled: Type.Boolean(),
+	model: Type.Optional(MemoryModelRefViewSchema),
+	minHours: Type.Integer({ minimum: 1, maximum: 8_760 }),
+	minSessions: Type.Integer({ minimum: 1, maximum: 100_000 }),
+	maxUnusedDays: Type.Integer({ minimum: 1, maximum: 3_650 }),
+	lastRunAt: Type.Optional(TimestampSchema),
+	/** False when no credentialed model can run a dream; manual runs stay disabled too. */
+	modelAvailable: Type.Optional(Type.Boolean()),
+	nextEligible: Type.Boolean(),
+	lastRun: Type.Optional(MemoryDreamLastRunViewSchema),
+});
+export const MemoryVaultViewSchema = StrictObject({
+	globalDir: PathSchema,
+	projectDir: Type.Optional(PathSchema),
+	projectRoot: Type.Optional(PathSchema),
+});
+export const MemorySessionFlagsViewSchema = StrictObject({
+	useMemory: Type.Boolean(),
+	contributeMemory: Type.Boolean(),
+});
 export const MemorySettingsViewSchema = StrictObject({
-	autoMemoryEnabled: Type.Boolean(),
-	memoryEngine: MemoryEngineSchema,
-	embeddingConfigured: Type.Boolean(),
-	rerankConfigured: Type.Boolean(),
-	lastError: Type.Union([PublicTextSchema, Type.Null()]),
-	memoryMigrationNotice: Type.Union([PublicTextSchema, Type.Null()]),
+	enabled: Type.Boolean(),
+	dream: MemoryDreamViewSchema,
+	activeContext: Type.Boolean(),
+	vault: MemoryVaultViewSchema,
+	/** Effective flags for the sessionId passed to memory/get. */
+	session: Type.Optional(MemorySessionFlagsViewSchema),
+});
+export const MemoryNoteSummaryViewSchema = StrictObject({
+	scope: MemoryScopeViewSchema,
+	slug: MemorySlugSchema,
+	type: MemoryNoteTypeViewSchema,
+	name: PublicTextSchema,
+	description: PublicTextSchema,
+	updated: Type.String({ minLength: 1, maxLength: 40 }),
+	snippet: Type.Optional(PublicTextSchema),
+	score: Type.Optional(Type.Number()),
+});
+export const MemoryNoteViewSchema = StrictObject({
+	scope: MemoryScopeViewSchema,
+	slug: MemorySlugSchema,
+	name: PublicTextSchema,
+	description: PublicTextSchema,
+	type: MemoryNoteTypeViewSchema,
+	aliases: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 32 })),
+	created: Type.String({ minLength: 1, maxLength: 40 }),
+	updated: Type.String({ minLength: 1, maxLength: 40 }),
+	sources: Type.Array(Type.String({ minLength: 1, maxLength: 128 }), { maxItems: 64 }),
+	confidence: MemoryConfidenceViewSchema,
+	applies_to: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 32 })),
+	// The vault reads notes up to 1 MiB; keep the wire bound at that limit so a
+	// hand-edited oversized note reports content instead of failing validation.
+	body: Utf8String(1024 * 1024),
+	links: Type.Array(MemorySlugSchema, { maxItems: 64 }),
+	backlinks: Type.Array(MemorySlugSchema, { maxItems: 64 }),
+	malformed: Type.Optional(Type.Boolean()),
 });
 
 export const HookEventNameSchema = Type.Union([
@@ -1416,6 +1516,20 @@ export const ScheduleRunUpdatedEventSchema = StrictObject({
 });
 export const ScheduleRefreshedEventSchema = StrictObject({ type: Type.Literal("schedule/refreshed") });
 
+/** Connection-level vault change; `entry` never contains the internal snapshot path. */
+export const MemoryChangedEventSchema = StrictObject({
+	type: Type.Literal("memory/changed"),
+	entry: MemoryChangelogEntryViewSchema,
+});
+/** Emitted when a dream run finishes consolidating memory. */
+export const MemoryDreamCompletedEventSchema = StrictObject({
+	type: Type.Literal("memory/dreamCompleted"),
+	runId: Type.String({ minLength: 1, maxLength: 64 }),
+	added: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	updated: Type.Integer({ minimum: 0, maximum: 100_000 }),
+	deleted: Type.Integer({ minimum: 0, maximum: 100_000 }),
+});
+
 export const DomainEventSchema = Type.Union([
 	ProcessChangedEventSchema,
 	SessionUpdatedEventSchema,
@@ -1449,6 +1563,8 @@ export const DomainEventSchema = Type.Union([
 	ScheduleDeletedEventSchema,
 	ScheduleRunUpdatedEventSchema,
 	ScheduleRefreshedEventSchema,
+	MemoryChangedEventSchema,
+	MemoryDreamCompletedEventSchema,
 ]);
 
 export const ConnectionEventsParamsSchema = Type.Refine(
@@ -1520,12 +1636,24 @@ export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewS
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;
 export type WebSearchProvider = Static<typeof WebSearchProviderSchema>;
 export type WebSearchSettingsView = Static<typeof WebSearchSettingsViewSchema>;
-export type MemoryEngine = Static<typeof MemoryEngineSchema>;
+export type MemoryScopeView = Static<typeof MemoryScopeViewSchema>;
+export type MemoryNoteTypeView = Static<typeof MemoryNoteTypeViewSchema>;
+export type MemoryPinnedBlockView = Static<typeof MemoryPinnedBlockViewSchema>;
+export type MemoryConfidenceView = Static<typeof MemoryConfidenceViewSchema>;
+export type MemoryTargetView = Static<typeof MemoryTargetViewSchema>;
+export type MemoryActorView = Static<typeof MemoryActorViewSchema>;
+export type MemoryChangelogOpView = Static<typeof MemoryChangelogOpViewSchema>;
+export type MemoryChangelogEntryView = Static<typeof MemoryChangelogEntryViewSchema>;
+export type MemoryModelRefView = Static<typeof MemoryModelRefViewSchema>;
+export type MemoryDreamLastRunView = Static<typeof MemoryDreamLastRunViewSchema>;
+export type MemoryDreamView = Static<typeof MemoryDreamViewSchema>;
+export type MemoryVaultView = Static<typeof MemoryVaultViewSchema>;
+export type MemorySessionFlagsView = Static<typeof MemorySessionFlagsViewSchema>;
 export type MemorySettingsView = Static<typeof MemorySettingsViewSchema>;
+export type MemoryNoteSummaryView = Static<typeof MemoryNoteSummaryViewSchema>;
+export type MemoryNoteView = Static<typeof MemoryNoteViewSchema>;
 export type VisionApiView = Static<typeof VisionApiViewSchema>;
 export type VisionSettingsView = Static<typeof VisionSettingsViewSchema>;
-export type EmbeddingSettingsView = Static<typeof EmbeddingSettingsViewSchema>;
-export type RerankSettingsView = Static<typeof RerankSettingsViewSchema>;
 export type HookEventNameView = Static<typeof HookEventNameSchema>;
 export type HookRunModeView = Static<typeof HookRunModeSchema>;
 export type HookProtocolView = Static<typeof HookProtocolSchema>;

@@ -46,8 +46,16 @@ import {
 	McpScopeViewSchema,
 	McpServerDetailViewSchema,
 	McpServerSummaryViewSchema,
-	MemoryEngineSchema,
+	MemoryChangelogEntryViewSchema,
+	MemoryConfidenceViewSchema,
+	MemoryModelRefViewSchema,
+	MemoryNoteSummaryViewSchema,
+	MemoryNoteTypeViewSchema,
+	MemoryNoteViewSchema,
+	MemoryScopeViewSchema,
 	MemorySettingsViewSchema,
+	MemorySlugSchema,
+	MemoryTargetViewSchema,
 	ModelOptionViewSchema,
 	ModelRefSchema,
 	ModelSettingsViewSchema,
@@ -389,6 +397,8 @@ export const SessionCreateParamsSchema = StrictObject({
 	cwd: Type.Optional(PathSchema),
 	name: Type.Optional(OptionalNameSchema),
 	permissionPreset: Type.Optional(PermissionPresetSchema),
+	useMemory: Type.Optional(Type.Boolean()),
+	contributeMemory: Type.Optional(Type.Boolean()),
 });
 export const SessionCreateResultSchema = StrictObject({ session: SessionSummarySchema });
 
@@ -542,6 +552,21 @@ export const SessionSetCollaborationModeParamsSchema = StrictObject({
 	collaborationMode: CollaborationModeSchema,
 });
 export const SessionCollaborationModeResultSchema = StrictObject({ collaborationMode: CollaborationModeSchema });
+
+export const SessionSetMemoryFlagsParamsSchema = Type.Refine(
+	StrictObject({
+		sessionId: SessionIdSchema,
+		requestId: UuidSchema,
+		useMemory: Type.Optional(Type.Boolean()),
+		contributeMemory: Type.Optional(Type.Boolean()),
+	}),
+	(value) => value.useMemory !== undefined || value.contributeMemory !== undefined,
+	"At least one memory flag is required",
+);
+export const SessionMemoryFlagsResultSchema = StrictObject({
+	useMemory: Type.Boolean(),
+	contributeMemory: Type.Boolean(),
+});
 
 const PlanMutationFields = {
 	sessionId: SessionIdSchema,
@@ -769,35 +794,6 @@ export const CredentialMutationSchema = Type.Union([
 	StrictObject({ action: Type.Literal("remove") }),
 	StrictObject({ action: Type.Literal("set"), value: Type.String({ minLength: 1, maxLength: 32_768 }) }),
 ]);
-const SpecializedCredentialSchema = Type.Union([
-	StrictObject({ action: Type.Literal("keep") }),
-	StrictObject({ action: Type.Literal("remove") }),
-	StrictObject({
-		action: Type.Literal("set"),
-		value: Type.String({ minLength: 1, maxLength: 16_384, pattern: "^[^\\x00-\\x1f\\x7f]+$" }),
-	}),
-]);
-const SpecializedTestCredentialSchema = Type.Union([
-	StrictObject({ action: Type.Literal("keep") }),
-	StrictObject({
-		action: Type.Literal("set"),
-		value: Type.String({ minLength: 1, maxLength: 16_384, pattern: "^[^\\x00-\\x1f\\x7f]+$" }),
-	}),
-]);
-const EmbeddingSettingsInputSchema = StrictObject({
-	name: Type.String({ minLength: 1, maxLength: 120 }),
-	provider: Type.String({ minLength: 1, maxLength: 120 }),
-	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-	api: Type.Literal("openai-compatible"),
-	modelId: Type.String({ minLength: 1, maxLength: 200 }),
-	dimensions: Type.Optional(Type.Integer({ minimum: 1, maximum: 8_192 })),
-});
-const RerankSettingsInputSchema = StrictObject({
-	name: Type.String({ minLength: 1, maxLength: 120 }),
-	provider: Type.String({ minLength: 1, maxLength: 120 }),
-	endpointUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
-	modelId: Type.String({ minLength: 1, maxLength: 200 }),
-});
 export const ModelSettingsMutationSchema = Type.Union([
 	StrictObject({
 		type: Type.Literal("save_provider"),
@@ -836,16 +832,6 @@ export const ModelSettingsMutationSchema = Type.Union([
 		]),
 		credential: CredentialMutationSchema,
 	}),
-	StrictObject({
-		type: Type.Literal("set_embedding"),
-		settings: Type.Union([EmbeddingSettingsInputSchema, Type.Null()]),
-		credential: SpecializedCredentialSchema,
-	}),
-	StrictObject({
-		type: Type.Literal("set_rerank"),
-		settings: Type.Union([RerankSettingsInputSchema, Type.Null()]),
-		credential: SpecializedCredentialSchema,
-	}),
 ]);
 export const ModelSettingsGetParamsSchema = StrictObject({});
 export const ModelSettingsUpdateParamsSchema = StrictObject({
@@ -858,24 +844,7 @@ export const ModelTestConnectionParamsSchema = StrictObject({
 	provider: NameSchema,
 	modelId: NameSchema,
 });
-export const SpecializedModelTestConnectionParamsSchema = Type.Union([
-	StrictObject({
-		requestId: UuidSchema,
-		kind: Type.Literal("embedding"),
-		settings: EmbeddingSettingsInputSchema,
-		credential: SpecializedTestCredentialSchema,
-	}),
-	StrictObject({
-		requestId: UuidSchema,
-		kind: Type.Literal("rerank"),
-		settings: RerankSettingsInputSchema,
-		credential: SpecializedTestCredentialSchema,
-	}),
-]);
-export const AnyModelTestConnectionParamsSchema = Type.Union([
-	ModelTestConnectionParamsSchema,
-	SpecializedModelTestConnectionParamsSchema,
-]);
+export const AnyModelTestConnectionParamsSchema = ModelTestConnectionParamsSchema;
 export const ModelTestConnectionResultSchema = StrictObject({
 	ok: Type.Boolean(),
 	message: PublicTextSchema,
@@ -894,10 +863,104 @@ export const WebSearchUpdateParamsSchema = StrictObject({
 	credential: CredentialMutationSchema,
 });
 
-export const MemoryGetParamsSchema = StrictObject({});
+export const MemoryGetParamsSchema = StrictObject({ sessionId: Type.Optional(SessionIdSchema) });
+export const MemoryDreamSettingsInputSchema = StrictObject({
+	enabled: Type.Optional(Type.Boolean()),
+	model: Type.Optional(Type.Union([MemoryModelRefViewSchema, Type.Null()])),
+	minHours: Type.Optional(Type.Integer({ minimum: 1, maximum: 8_760 })),
+	minSessions: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })),
+	maxUnusedDays: Type.Optional(Type.Integer({ minimum: 1, maximum: 3_650 })),
+});
 export const MemoryUpdateParamsSchema = StrictObject({
-	autoMemoryEnabled: Type.Boolean(),
-	memoryEngine: MemoryEngineSchema,
+	sessionId: Type.Optional(SessionIdSchema),
+	enabled: Type.Optional(Type.Boolean()),
+	dream: Type.Optional(MemoryDreamSettingsInputSchema),
+	activeContext: Type.Optional(Type.Boolean()),
+});
+export const MemoryNotesListParamsSchema = StrictObject({
+	sessionId: Type.Optional(SessionIdSchema),
+	scope: Type.Optional(MemoryScopeViewSchema),
+	type: Type.Optional(MemoryNoteTypeViewSchema),
+	query: Type.Optional(Utf8String(4 * 1024, { minLength: 1 })),
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS })),
+});
+export const MemoryNotesListResultSchema = StrictObject({
+	notes: Type.Array(MemoryNoteSummaryViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
+});
+export const MemoryNotesReadParamsSchema = StrictObject({
+	sessionId: Type.Optional(SessionIdSchema),
+	scope: MemoryScopeViewSchema,
+	slug: MemorySlugSchema,
+});
+export const MemoryNotesReadResultSchema = StrictObject({ note: MemoryNoteViewSchema });
+const MemoryNoteFrontmatterInputSchema = Type.Partial(
+	StrictObject({
+		name: Utf8String(2 * 1024, { minLength: 1 }),
+		description: Utf8String(2 * 1024),
+		type: MemoryNoteTypeViewSchema,
+		aliases: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 32 }),
+		confidence: MemoryConfidenceViewSchema,
+		applies_to: Type.Array(Type.String({ minLength: 1, maxLength: 120 }), { maxItems: 32 }),
+	}),
+);
+/** Same write surface as the memory_write tool, executed with actor=user. */
+export const MemoryNotesWriteParamsSchema = StrictObject({
+	sessionId: Type.Optional(SessionIdSchema),
+	op: Type.Union([
+		Type.Literal("create"),
+		Type.Literal("append"),
+		Type.Literal("replace"),
+		Type.Literal("str_replace"),
+		Type.Literal("rename"),
+		Type.Literal("delete"),
+	]),
+	scope: MemoryScopeViewSchema,
+	target: MemoryTargetViewSchema,
+	newSlug: Type.Optional(MemorySlugSchema),
+	frontmatter: Type.Optional(MemoryNoteFrontmatterInputSchema),
+	content: Type.Optional(Utf8String(64 * 1024)),
+	oldText: Type.Optional(Utf8String(32 * 1024)),
+	newText: Type.Optional(Utf8String(32 * 1024)),
+});
+export const MemoryNotesWriteResultSchema = StrictObject({
+	ok: Type.Boolean(),
+	changeId: Type.Optional(UuidSchema),
+	target: Type.Optional(MemoryTargetViewSchema),
+	warning: Type.Optional(PublicTextSchema),
+	error: Type.Optional(PublicTextSchema),
+});
+export const MemoryHistoryListParamsSchema = StrictObject({
+	limit: Type.Optional(Type.Integer({ minimum: 1, maximum: MAX_HISTORY_ITEMS })),
+});
+export const MemoryHistoryListResultSchema = StrictObject({
+	entries: Type.Array(MemoryChangelogEntryViewSchema, { maxItems: MAX_HISTORY_ITEMS }),
+});
+export const MemoryHistoryReadParamsSchema = StrictObject({ changeId: UuidSchema });
+export const MemoryHistoryReadResultSchema = StrictObject({
+	entry: MemoryChangelogEntryViewSchema,
+	/** Unified patch of the change (pre-change snapshot → current content); absent when nothing remains to diff. */
+	patch: Type.Optional(Utf8String(4 * 1024 * 1024)),
+});
+export const MemoryUndoParamsSchema = StrictObject({ changeId: UuidSchema });
+export const MemoryUndoResultSchema = StrictObject({
+	ok: Type.Boolean(),
+	error: Type.Optional(PublicTextSchema),
+});
+export const MemoryUndoRunParamsSchema = StrictObject({
+	runId: Type.String({ minLength: 1, maxLength: 64 }),
+});
+export const MemoryUndoRunResultSchema = StrictObject({
+	undone: Type.Array(UuidSchema, { maxItems: MAX_HISTORY_ITEMS }),
+	skipped: Type.Array(StrictObject({ changeId: Type.String({ maxLength: 64 }), reason: PublicTextSchema }), {
+		maxItems: MAX_HISTORY_ITEMS,
+	}),
+});
+/** Manual dream trigger: ignores the gate's timing/count thresholds, still needs a model and the vault lock. */
+export const MemoryDreamRunParamsSchema = StrictObject({});
+export const MemoryDreamRunResultSchema = StrictObject({
+	ok: Type.Boolean(),
+	runId: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+	error: Type.Optional(PublicTextSchema),
 });
 
 export const HooksListParamsSchema = StrictObject({});
@@ -1460,6 +1523,7 @@ export const ClientRequestMethods = {
 		SessionSetCollaborationModeParamsSchema,
 		SessionCollaborationModeResultSchema,
 	),
+	"session/setMemoryFlags": method(SessionSetMemoryFlagsParamsSchema, SessionMemoryFlagsResultSchema),
 	"plan/startExecution": method(PlanStartExecutionParamsSchema, AcceptedOperationSchema),
 	"plan/cancel": method(PlanCancelParamsSchema, PlanCancelResultSchema),
 	"permission/rules/list": method(PermissionRulesListParamsSchema, PermissionRulesResultSchema),
@@ -1478,6 +1542,14 @@ export const ClientRequestMethods = {
 	"webSearch/update": method(WebSearchUpdateParamsSchema, WebSearchSettingsViewSchema),
 	"memory/get": method(MemoryGetParamsSchema, MemorySettingsViewSchema),
 	"memory/update": method(MemoryUpdateParamsSchema, MemorySettingsViewSchema),
+	"memory/notes/list": method(MemoryNotesListParamsSchema, MemoryNotesListResultSchema),
+	"memory/notes/read": method(MemoryNotesReadParamsSchema, MemoryNotesReadResultSchema),
+	"memory/notes/write": method(MemoryNotesWriteParamsSchema, MemoryNotesWriteResultSchema),
+	"memory/history/list": method(MemoryHistoryListParamsSchema, MemoryHistoryListResultSchema),
+	"memory/history/read": method(MemoryHistoryReadParamsSchema, MemoryHistoryReadResultSchema),
+	"memory/undo": method(MemoryUndoParamsSchema, MemoryUndoResultSchema),
+	"memory/undoRun": method(MemoryUndoRunParamsSchema, MemoryUndoRunResultSchema),
+	"memory/dream/run": method(MemoryDreamRunParamsSchema, MemoryDreamRunResultSchema),
 	"hooks/list": method(HooksListParamsSchema, HooksListViewSchema),
 	"hooks/upsert": method(HooksUpsertParamsSchema, HooksListViewSchema),
 	"hooks/delete": method(HooksDeleteParamsSchema, HooksListViewSchema),
