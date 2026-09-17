@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, readdirSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { stringify } from "yaml";
 import { parseFrontmatter } from "../../utils/frontmatter.ts";
@@ -35,7 +35,7 @@ import {
 	getScopeDir,
 	getVaultRoot,
 } from "./vault-paths.ts";
-import type { VaultProjectIdentity } from "./vault-project.ts";
+import { listStoredVaultProjects, type VaultProjectIdentity } from "./vault-project.ts";
 import {
 	actorSource,
 	CONFIDENCE_LEVELS,
@@ -177,6 +177,16 @@ interface IndexReport {
 	content: string;
 	slugs: Set<string>;
 	truncated: boolean;
+}
+
+/** A planned `[[oldSlug]]` → `[[newSlug]]` rewrite of one note file. */
+interface LinkRewrite {
+	scope: MemoryScope;
+	projectKey?: string;
+	dir: string;
+	note: Note;
+	raw: string;
+	after: string;
 }
 
 function compareNotesForIndex(left: Note, right: Note): number {
@@ -326,7 +336,11 @@ export class MemoryVault {
 
 	listNotes(scope: MemoryScope): Note[] {
 		const dir = this.scopeDir(scope);
-		if (!dir) return [];
+		return dir ? this.listNotesIn(scope, dir) : [];
+	}
+
+	/** List notes under an explicit scope dir; used for other projects' scopes too. */
+	private listNotesIn(scope: MemoryScope, dir: string): Note[] {
 		const notesDir = getNotesDir(dir);
 		let files: string[];
 		try {
@@ -339,8 +353,10 @@ export class MemoryVault {
 			if (!file.endsWith(".md")) continue;
 			const slug = file.slice(0, -3);
 			if (!isSafeSlug(slug)) continue;
-			const note = this.readNote(scope, slug);
-			if (note) notes.push(note);
+			const path = getNotePath(dir, slug);
+			const raw = this.readTextFile(path);
+			if (raw === undefined) continue;
+			notes.push(this.parseNote(scope, slug, path, raw));
 		}
 		return notes.sort((left, right) => left.slug.localeCompare(right.slug));
 	}
@@ -529,6 +545,7 @@ export class MemoryVault {
 		const today = todayString();
 		let bytes = 0;
 		let primary: ChangelogEntry;
+		let indexReport: IndexReport | undefined;
 		const extra: ChangelogEntry[] = [];
 
 		switch (req.op) {
@@ -596,19 +613,80 @@ export class MemoryVault {
 				if ([...frontmatter.description].length > MEMORY_LIMITS.descriptionChars) {
 					return { ok: false, error: `description exceeds ${MEMORY_LIMITS.descriptionChars} characters` };
 				}
+				// Plan every backlink rewrite first; shadowing or size violations
+				// reject the rename before any file is touched.
+				const rewrites = this.planLinkRewrites(req.scope, slug, newSlug, path);
+				if (!rewrites.ok) return { ok: false, error: rewrites.error };
 				const snapshot = saveSnapshot(this.root, req.scope, { slug }, existingRaw, this.project?.projectKey);
 				const serialized = serializeNote(frontmatter, note.body);
-				createFileAtomicallySync(newPath, serialized, { mode: 0o600 });
-				rmSync(path, { force: true });
 				bytes = Buffer.byteLength(serialized, "utf8");
+				const changes: VaultFileChange[] = [
+					{ path, before: existingRaw, after: undefined },
+					{ path: newPath, before: undefined, after: serialized },
+				];
+				const referrerLegs: Array<{ scope: MemoryScope; slug: string; projectKey?: string; snapshot?: string }> =
+					[];
+				for (const rewrite of rewrites.files) {
+					referrerLegs.push({
+						scope: rewrite.scope,
+						slug: rewrite.note.slug,
+						projectKey: rewrite.projectKey,
+						snapshot: saveSnapshot(
+							this.root,
+							rewrite.scope,
+							{ slug: rewrite.note.slug },
+							rewrite.raw,
+							rewrite.projectKey,
+						),
+					});
+					changes.push({ path: rewrite.note.path, before: rewrite.raw, after: rewrite.after });
+				}
+				// Project the index of every touched scope from disk plus planned writes.
+				const touchedDirs = new Map<string, MemoryScope>([[dir, req.scope]]);
+				for (const rewrite of rewrites.files) touchedDirs.set(rewrite.dir, rewrite.scope);
+				for (const [scopeDir, touchedScope] of touchedDirs) {
+					const projected = new Map(this.listNotesIn(touchedScope, scopeDir).map((n) => [n.slug, n]));
+					if (scopeDir === dir) {
+						projected.delete(slug);
+						projected.set(newSlug, this.parseNote(req.scope, newSlug, newPath, serialized));
+					}
+					for (const rewrite of rewrites.files) {
+						if (rewrite.dir !== scopeDir) continue;
+						projected.set(
+							rewrite.note.slug,
+							this.parseNote(rewrite.scope, rewrite.note.slug, rewrite.note.path, rewrite.after),
+						);
+					}
+					const report = this.buildIndexFromNotes([...projected.values()]);
+					if (scopeDir === dir) indexReport = report;
+					const indexPath = getIndexPath(scopeDir);
+					changes.push({ path: indexPath, before: this.readCurrentStrict(indexPath), after: report.content });
+				}
+				applyVaultFileChanges(changes);
 				primary = this.newEntry("rename", req.scope, { slug }, actor, {
 					newSlug,
 					snapshot,
 					beforeExists: true,
 				});
-				// Second leg: the new note appears as a create sharing the same snapshot.
-				extra.push(this.newEntry("create", req.scope, { slug: newSlug }, actor, { snapshot, beforeExists: false }));
-				extra.push(...this.rewriteLinks(req.scope, slug, newSlug, actor));
+				primary.operationId = primary.id;
+				// Second leg: the new note appears as a create in the same operation.
+				extra.push(
+					this.newEntry("create", req.scope, { slug: newSlug }, actor, {
+						snapshot,
+						beforeExists: false,
+						operationId: primary.id,
+					}),
+				);
+				for (const leg of referrerLegs) {
+					extra.push(
+						this.newEntry("replace", leg.scope, { slug: leg.slug }, actor, {
+							snapshot: leg.snapshot,
+							beforeExists: true,
+							operationId: primary.id,
+							...(leg.projectKey !== undefined ? { projectKey: leg.projectKey } : {}),
+						}),
+					);
+				}
 				break;
 			}
 			case "delete": {
@@ -620,7 +698,7 @@ export class MemoryVault {
 			}
 		}
 
-		const index = this.rebuildIndexWithReport(req.scope);
+		const index = indexReport ?? this.rebuildIndexWithReport(req.scope);
 		const indexSlug = req.op === "rename" ? req.newSlug! : slug;
 		const indexUpdated = req.op === "delete" ? true : index.slugs.has(indexSlug);
 		this.record(primary);
@@ -635,29 +713,94 @@ export class MemoryVault {
 		};
 	}
 
-	/** Rewrite `[[oldSlug]]` to `[[newSlug]]` in every other note across both scopes. */
-	private rewriteLinks(scope: MemoryScope, oldSlug: string, newSlug: string, actor: MemoryActor): ChangelogEntry[] {
+	/**
+	 * Collect the backlink rewrites a rename needs, following link-resolution
+	 * rules: a project rename only affects its own project; a global rename
+	 * affects global notes plus project notes whose `[[oldSlug]]` resolved to
+	 * the global note (no local shadow). A project with a local `newSlug`
+	 * note and live `[[oldSlug]]` links would re-point them to the wrong note,
+	 * so the rename is refused up front.
+	 */
+	private planLinkRewrites(
+		scope: MemoryScope,
+		oldSlug: string,
+		newSlug: string,
+		renamedPath: string,
+	): { ok: true; files: LinkRewrite[] } | { ok: false; error: string } {
 		const pattern = new RegExp(`\\[\\[${oldSlug.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\]\\]`, "gu");
-		const scopes: MemoryScope[] = scope === "global" ? ["global", "project"] : ["project", "global"];
-		const entries: ChangelogEntry[] = [];
-		for (const scanScope of scopes) {
-			const dir = this.scopeDir(scanScope);
-			if (!dir) continue;
-			for (const note of this.listNotes(scanScope)) {
-				if (note.slug === newSlug || (scanScope === scope && note.slug === oldSlug)) continue;
-				if (!note.links.includes(oldSlug)) continue;
-				const raw = this.readTextFile(note.path);
-				if (raw === undefined) continue;
-				const body = note.body.replace(pattern, `[[${newSlug}]]`);
-				const snapshot = saveSnapshot(this.root, scanScope, { slug: note.slug }, raw, this.project?.projectKey);
-				const frontmatter: NoteFrontmatter = { ...note.frontmatter, updated: todayString() };
-				replaceFileAtomicallySync(note.path, serializeNote(frontmatter, body), { mode: 0o600 });
-				entries.push(
-					this.newEntry("replace", scanScope, { slug: note.slug }, actor, { snapshot, beforeExists: true }),
-				);
-			}
+		if (scope === "project") {
+			const dir = this.scopeDir("project")!;
+			return this.linkRewritesIn("project", this.project!.projectKey, dir, pattern, oldSlug, newSlug, renamedPath);
 		}
-		return entries;
+		const planned = this.linkRewritesIn(
+			"global",
+			undefined,
+			this.scopeDir("global")!,
+			pattern,
+			oldSlug,
+			newSlug,
+			renamedPath,
+		);
+		if (!planned.ok) return planned;
+		const files = [...planned.files];
+		for (const project of listStoredVaultProjects(this.root)) {
+			const dir = getScopeDir(this.root, "project", project.projectKey);
+			// A local note with the old slug shadows the renamed global note.
+			if (existsSync(getNotePath(dir, oldSlug))) continue;
+			const projectPlan = this.linkRewritesIn(
+				"project",
+				project.projectKey,
+				dir,
+				pattern,
+				oldSlug,
+				newSlug,
+				renamedPath,
+			);
+			if (!projectPlan.ok) return projectPlan;
+			if (projectPlan.files.length > 0 && existsSync(getNotePath(dir, newSlug))) {
+				return {
+					ok: false,
+					error: `rename would repoint [[${oldSlug}]] links in project ${project.projectKey} to a local note`,
+				};
+			}
+			files.push(...projectPlan.files);
+		}
+		return { ok: true, files };
+	}
+
+	/** `[[oldSlug]]` rewrites for notes in one scope dir; no writes, only a plan. */
+	private linkRewritesIn(
+		scope: MemoryScope,
+		projectKey: string | undefined,
+		dir: string,
+		pattern: RegExp,
+		oldSlug: string,
+		newSlug: string,
+		renamedPath: string,
+	): { ok: true; files: LinkRewrite[] } | { ok: false; error: string } {
+		const files: LinkRewrite[] = [];
+		for (const note of this.listNotesIn(scope, dir)) {
+			if (note.path === renamedPath || note.slug === newSlug) continue;
+			if (!note.links.includes(oldSlug)) continue;
+			const raw = this.readTextFile(note.path);
+			if (raw === undefined) continue;
+			const body = note.body.replace(pattern, `[[${newSlug}]]`);
+			if (Buffer.byteLength(body, "utf8") > MEMORY_LIMITS.noteBodyBytes) {
+				return {
+					ok: false,
+					error: `rewriting [[${oldSlug}]] in "${note.slug}" would exceed the note body limit`,
+				};
+			}
+			files.push({
+				scope,
+				projectKey,
+				dir,
+				note,
+				raw,
+				after: serializeNote({ ...note.frontmatter, updated: todayString() }, body),
+			});
+		}
+		return { ok: true, files };
 	}
 
 	private applyBlockWrite(req: WriteRequest, block: PinnedBlock, actor: MemoryActor): WriteResult {
@@ -722,30 +865,44 @@ export class MemoryVault {
 		const entry = entries.find((candidate) => candidate.id === changeId);
 		if (!entry) return { ok: false, error: `unknown change ${changeId}` };
 		if (!UNDOABLE_OPS.has(entry.op)) return { ok: false, error: `change ${changeId} is not undoable` };
-		if (entry.undoneBy) return { ok: false, error: `change ${changeId} was already undone` };
-		if (!this.ownsEntry(entry)) return { ok: false, error: "change belongs to a different project" };
-		const pair = this.findRenamePair(entry, entries);
-		if (pair && !this.ownsEntry(pair)) {
-			return { ok: false, error: "change belongs to a different project" };
+		const group = this.operationEntries(entry, entries);
+		const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
+		if (group.some((c) => c.undoneBy)) {
+			return { ok: false, error: `change ${changeId} was already undone` };
 		}
-		const touched = pair ? [entry.target, pair.target] : [entry.target];
-		for (const target of touched) {
+		if (!this.ownsEntry(primary)) return { ok: false, error: "change belongs to a different project" };
+		// A change on any member target outside the group conflicts the whole undo.
+		const groupIds = new Set(group.map((c) => c.id));
+		for (const member of group) {
 			const latest = entries.find(
 				(candidate) =>
-					candidate.scope === entry.scope &&
-					this.ownsEntry(candidate) &&
-					targetsEqual(candidate.target, target) &&
+					candidate.scope === member.scope &&
+					(member.scope === "global" || candidate.projectKey === member.projectKey) &&
+					targetsEqual(candidate.target, member.target) &&
 					UNDOABLE_OPS.has(candidate.op) &&
 					!candidate.undoneBy,
 			);
-			if (latest && latest.id !== entry.id && latest.id !== pair?.id) {
+			if (latest && !groupIds.has(latest.id)) {
 				return {
 					ok: false,
 					error: `a newer change ${latest.id} exists for this target; undo it first`,
 				};
 			}
 		}
-		return this.performUndo(entry, actor, pair);
+		return this.performUndo(entry, actor, group);
+	}
+
+	/**
+	 * All changelog entries belonging to the same write operation. Grouped
+	 * renames share `operationId`; entries written before grouping falls back
+	 * to the rename/create pair that shared one snapshot.
+	 */
+	private operationEntries(entry: ChangelogEntry, entries: ChangelogEntry[]): ChangelogEntry[] {
+		if (entry.operationId) {
+			return entries.filter((candidate) => candidate.operationId === entry.operationId);
+		}
+		const pair = this.findRenamePair(entry, entries);
+		return pair ? [entry, pair] : [entry];
 	}
 
 	/** The two rename legs share one snapshot: `rename` (old slug) + `create` (new slug). */
@@ -774,8 +931,15 @@ export class MemoryVault {
 		return undefined;
 	}
 
-	private targetPath(scope: MemoryScope, target: MemoryTarget): string | undefined {
-		const dir = this.scopeDir(scope);
+	/** Scope dir for a changelog entry; project entries resolve by their recorded projectKey. */
+	private entryScopeDir(entry: ChangelogEntry): string | undefined {
+		if (entry.scope === "global") return getScopeDir(this.root, "global");
+		const projectKey = entry.projectKey ?? this.project?.projectKey;
+		return projectKey ? getScopeDir(this.root, "project", projectKey) : undefined;
+	}
+
+	private entryTargetPath(entry: ChangelogEntry, target: MemoryTarget = entry.target): string | undefined {
+		const dir = this.entryScopeDir(entry);
 		if (!dir) return undefined;
 		return "slug" in target ? getNotePath(dir, target.slug) : getPinnedPath(dir, target.block);
 	}
@@ -792,12 +956,18 @@ export class MemoryVault {
 	 */
 	private prepareUndoChanges(
 		entry: ChangelogEntry,
-		pair: ChangelogEntry | undefined,
+		group: ChangelogEntry[],
 		actor: MemoryActor,
 	): { changes: VaultFileChange[]; undoEntry: ChangelogEntry } {
-		// Order the rename leg first so the old path is restored before the new
-		// path is removed.
-		const group = pair ? (entry.op === "create" ? [pair, entry] : [entry, pair]) : [entry];
+		// Rename legs first so old paths are restored before new ones are removed.
+		const ordered = [...group].sort(
+			(left, right) =>
+				(left.op === "rename" ? 0 : left.op === "create" ? 1 : 2) -
+				(right.op === "rename" ? 0 : right.op === "create" ? 1 : 2),
+		);
+		const renamedTo = new Set(
+			ordered.filter((item) => item.op === "rename" && item.newSlug).map((item) => `${item.scope}:${item.newSlug}`),
+		);
 		const restores = new Map<string, string | undefined>();
 		const setRestore = (path: string, after: string | undefined): void => {
 			if (restores.has(path) && restores.get(path) !== after) {
@@ -805,10 +975,11 @@ export class MemoryVault {
 			}
 			restores.set(path, after);
 		};
-		for (const item of group) {
-			const path = this.targetPath(item.scope, item.target);
+		for (const item of ordered) {
+			const path = this.entryTargetPath(item);
 			if (!path) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
-			if (item.op === "create" && (pair !== undefined || wasAbsentBefore(item))) {
+			const isRenameLeg = "slug" in item.target && renamedTo.has(`${item.scope}:${item.target.slug}`);
+			if (item.op === "create" && (wasAbsentBefore(item) || isRenameLeg)) {
 				// A rename leg or a plain create: the file did not exist before.
 				setRestore(path, undefined);
 				continue;
@@ -816,8 +987,9 @@ export class MemoryVault {
 			if (item.op === "rename") {
 				if (!item.newSlug) throw new Error(`rename change ${item.id} is missing newSlug`);
 				setRestore(path, requireSnapshot(this.root, item));
-				const dir = this.scopeDir(item.scope)!;
-				setRestore(getNotePath(dir, item.newSlug), undefined);
+				const newPath = this.entryTargetPath(item, { slug: item.newSlug });
+				if (!newPath) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+				setRestore(newPath, undefined);
 				continue;
 			}
 			setRestore(path, wasAbsentBefore(item) ? undefined : requireSnapshot(this.root, item));
@@ -833,36 +1005,36 @@ export class MemoryVault {
 
 		// Project the post-undo index per affected scope from current notes plus
 		// planned changes, without reading stale files mid-transaction.
-		const slugChanges = new Map<MemoryScope, Map<string, VaultFileChange>>();
-		for (const item of group) {
+		const slugChanges = new Map<string, { scope: MemoryScope; dir: string; map: Map<string, VaultFileChange> }>();
+		for (const item of ordered) {
 			if (!("slug" in item.target)) continue;
-			let scopeMap = slugChanges.get(item.scope);
-			if (!scopeMap) {
-				scopeMap = new Map();
-				slugChanges.set(item.scope, scopeMap);
+			const dir = this.entryScopeDir(item);
+			if (!dir) throw new Error(`scope ${item.scope} is unavailable in this workspace`);
+			let bucket = slugChanges.get(dir);
+			if (!bucket) {
+				bucket = { scope: item.scope, dir, map: new Map() };
+				slugChanges.set(dir, bucket);
 			}
-			const change = byPath.get(this.targetPath(item.scope, item.target)!);
-			if (change) scopeMap.set(item.target.slug, change);
+			const change = byPath.get(this.entryTargetPath(item)!);
+			if (change) bucket.map.set(item.target.slug, change);
 			if (item.op === "rename" && item.newSlug) {
-				const dir = this.scopeDir(item.scope)!;
 				const renamed = byPath.get(getNotePath(dir, item.newSlug));
-				if (renamed) scopeMap.set(item.newSlug, renamed);
+				if (renamed) bucket.map.set(item.newSlug, renamed);
 			}
 		}
-		for (const [scope, map] of slugChanges) {
-			const projected = new Map(this.listNotes(scope).map((note) => [note.slug, note]));
-			for (const [slug, change] of map) {
+		for (const bucket of slugChanges.values()) {
+			const projected = new Map(this.listNotesIn(bucket.scope, bucket.dir).map((note) => [note.slug, note]));
+			for (const [slug, change] of bucket.map) {
 				if (change.after === undefined) projected.delete(slug);
-				else projected.set(slug, this.parseNote(scope, slug, change.path, change.after));
+				else projected.set(slug, this.parseNote(bucket.scope, slug, change.path, change.after));
 			}
 			const report = this.buildIndexFromNotes([...projected.values()]);
-			const dir = this.scopeDir(scope);
-			if (!dir) throw new Error(`scope ${scope} is unavailable in this workspace`);
-			const indexPath = getIndexPath(dir);
+			const indexPath = getIndexPath(bucket.dir);
 			changes.push({ path: indexPath, before: this.readCurrentStrict(indexPath), after: report.content });
 		}
 
-		const undoEntry = this.newEntry("undo", entry.scope, entry.target, actor, { undoes: entry.id });
+		const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
+		const undoEntry = this.newEntry("undo", primary.scope, primary.target, actor, { undoes: primary.id });
 		const logPath = getChangelogPath(this.root);
 		const logBefore = readSingleLinkTextFileSync(logPath, { maxBytes: 8 * 1024 * 1024 });
 		changes.push({
@@ -871,16 +1043,16 @@ export class MemoryVault {
 			after: serializeUndoCommit(
 				logBefore,
 				undoEntry,
-				group.map((item) => item.id),
+				ordered.map((item) => item.id),
 			),
 		});
 		return { changes, undoEntry };
 	}
 
-	private performUndo(entry: ChangelogEntry, actor: MemoryActor, pair?: ChangelogEntry): UndoResult {
+	private performUndo(entry: ChangelogEntry, actor: MemoryActor, group: ChangelogEntry[]): UndoResult {
 		let undoEntry: ChangelogEntry;
 		try {
-			const prepared = this.prepareUndoChanges(entry, pair, actor);
+			const prepared = this.prepareUndoChanges(entry, group, actor);
 			applyVaultFileChanges(prepared.changes);
 			undoEntry = prepared.undoEntry;
 		} catch (error) {
@@ -902,32 +1074,29 @@ export class MemoryVault {
 				for (const changeId of runIds) {
 					const fresh = readChangelog(this.root); // newest first
 					const entry = fresh.find((candidate) => candidate.id === changeId);
-					// Already rolled back as the second leg of a rename pair.
+					// Already rolled back as part of a group (e.g. a rename leg).
 					if (!entry || entry.undoneBy) continue;
-					if (!this.ownsEntry(entry)) {
+					const group = this.operationEntries(entry, fresh);
+					const primary = group.find((c) => c.id === (entry.operationId ?? entry.id)) ?? entry;
+					if (!this.ownsEntry(primary)) {
 						skipped.push({ changeId: entry.id, reason: "change belongs to a different project" });
 						continue;
 					}
-					const pair = this.findRenamePair(entry, fresh);
-					if (pair && !this.ownsEntry(pair)) {
-						skipped.push({ changeId: entry.id, reason: "change belongs to a different project" });
-						continue;
-					}
-					const touched = pair ? [entry.target, pair.target] : [entry.target];
+					const groupIds = new Set(group.map((c) => c.id));
 					const position = fresh.findIndex((candidate) => candidate.id === entry.id);
 					let conflict: ChangelogEntry | undefined;
-					for (const target of touched) {
+					for (const member of group) {
 						conflict = fresh
 							.slice(0, position)
 							.find(
 								(candidate) =>
-									candidate.scope === entry.scope &&
-									this.ownsEntry(candidate) &&
-									targetsEqual(candidate.target, target) &&
+									!groupIds.has(candidate.id) &&
+									candidate.scope === member.scope &&
+									(member.scope === "global" || candidate.projectKey === member.projectKey) &&
+									targetsEqual(candidate.target, member.target) &&
 									UNDOABLE_OPS.has(candidate.op) &&
 									!inRun(candidate) &&
-									!candidate.undoneBy &&
-									candidate.id !== pair?.id,
+									!candidate.undoneBy,
 							);
 						if (conflict) break;
 					}
@@ -938,7 +1107,7 @@ export class MemoryVault {
 						});
 						continue;
 					}
-					const result = this.performUndo(entry, actor, pair);
+					const result = this.performUndo(entry, actor, group);
 					if (result.ok) undone.push(entry.id);
 					else skipped.push({ changeId: entry.id, reason: result.error ?? "undo failed" });
 				}
@@ -953,14 +1122,32 @@ export class MemoryVault {
 		return readChangelog(this.root, limit);
 	}
 
-	/** Slugs of notes in the same scope (and global) that link to `slug`. */
+	/**
+	 * Slugs of notes whose `[[slug]]` actually resolves to this note: global
+	 * notes always count; project notes count for a global target only when
+	 * their project has no local note with that slug, and for a project
+	 * target only when they sit in the same project.
+	 */
 	backlinks(scope: MemoryScope, slug: string): string[] {
-		const scopes: MemoryScope[] = scope === "project" ? ["project", "global"] : ["global"];
 		const found = new Set<string>();
-		for (const scanScope of scopes) {
-			for (const note of this.listNotes(scanScope)) {
-				if (scanScope === scope && note.slug === slug) continue;
-				if (note.links.includes(slug)) found.add(note.slug);
+		for (const note of this.listNotesIn("global", getScopeDir(this.root, "global"))) {
+			if (scope === "global" && note.slug === slug) continue;
+			if (note.links.includes(slug)) found.add(note.slug);
+		}
+		if (scope === "project") {
+			const dir = this.scopeDir("project");
+			if (dir) {
+				for (const note of this.listNotesIn("project", dir)) {
+					if (note.slug !== slug && note.links.includes(slug)) found.add(note.slug);
+				}
+			}
+		} else {
+			for (const project of listStoredVaultProjects(this.root)) {
+				const dir = getScopeDir(this.root, "project", project.projectKey);
+				if (existsSync(getNotePath(dir, slug))) continue;
+				for (const note of this.listNotesIn("project", dir)) {
+					if (note.links.includes(slug)) found.add(note.slug);
+				}
 			}
 		}
 		return [...found].sort();

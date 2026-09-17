@@ -343,6 +343,142 @@ describe("memory history and undo", () => {
 		});
 	});
 
+	it("undo restores a rename's rewritten backlinks in the same operation", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			await putNote(v, "global", "before", "original");
+			await putNote(v, "global", "ref", "see [[before]]");
+			const renamed = mustWrite(
+				await v.write(
+					{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+					{ kind: "user" },
+				),
+			);
+			expect(v.readNote("global", "ref")!.body).toContain("[[after]]");
+			expect((await v.undo(renamed.changeId, { kind: "user" })).ok).toBe(true);
+			expect(v.readNote("global", "before")!.body).toBe("original");
+			expect(v.readNote("global", "after")).toBeUndefined();
+			expect(v.readNote("global", "ref")!.body).toBe("see [[before]]");
+		});
+	});
+
+	it.each([
+		{ name: "rewrites a fallback link in another project", localOld: false, localNew: false, expected: "[[after]]" },
+		{
+			name: "keeps links shadowed by a local note in another project",
+			localOld: true,
+			localNew: false,
+			expected: "[[before]]",
+		},
+	])("global rename $name", async ({ localOld, localNew, expected }) => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			const b = f.vault("b");
+			await putNote(v, "global", "before", "global note");
+			if (localOld) await putNote(b, "project", "before", "local shadow");
+			if (localNew) await putNote(b, "project", "after", "local note");
+			await putNote(b, "project", "ref", "see [[before]]");
+			const renamed = await v.write(
+				{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+				{ kind: "user" },
+			);
+			expect(renamed.ok).toBe(true);
+			expect(b.readNote("project", "ref")!.body).toBe(`see ${expected}`);
+		});
+	});
+
+	it("refuses a global rename whose rewritten links would resolve to a local note", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			const b = f.vault("b");
+			await putNote(v, "global", "before", "global note");
+			await putNote(b, "project", "after", "local note");
+			await putNote(b, "project", "ref", "see [[before]]");
+			const renamed = await v.write(
+				{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+				{ kind: "user" },
+			);
+			expect(renamed.ok).toBe(false);
+			expect(b.readNote("project", "ref")!.body).toBe("see [[before]]");
+			expect(v.readNote("global", "before")!.body).toBe("global note");
+			expect(v.readNote("global", "after")).toBeUndefined();
+		});
+	});
+
+	it("undo refuses a rename group after an external edit to a rewritten note", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			await putNote(v, "global", "before", "original");
+			await putNote(v, "global", "ref", "see [[before]]");
+			const renamed = mustWrite(
+				await v.write(
+					{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+					{ kind: "user" },
+				),
+			);
+			mustWrite(
+				await v.write(
+					{ op: "append", scope: "global", target: { slug: "ref" }, content: "human edit" },
+					{ kind: "user" },
+				),
+			);
+			const result = await v.undo(renamed.changeId, { kind: "user" });
+			expect(result.ok).toBe(false);
+			expect(result.error).toContain("newer change");
+			expect(v.readNote("global", "ref")!.body).toContain("[[after]]");
+			expect(v.readNote("global", "ref")!.body).toContain("human edit");
+			expect(v.readNote("global", "after")).toBeDefined();
+			expect(readChangelog(v.root).some((e) => e.op === "undo")).toBe(false);
+		});
+	});
+
+	it("undo leaves all files when a rewritten note's snapshot is missing", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			await putNote(v, "global", "before", "original");
+			await putNote(v, "global", "ref", "see [[before]]");
+			const renamed = mustWrite(
+				await v.write(
+					{ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" },
+					{ kind: "user" },
+				),
+			);
+			const refEntry = readChangelog(v.root).find(
+				(e) => e.op === "replace" && "slug" in e.target && e.target.slug === "ref",
+			)!;
+			rmSync(join(v.root, refEntry.snapshot!));
+			const refRaw = readFileSync(v.readNote("global", "ref")!.path, "utf8");
+			expect((await v.undo(renamed.changeId, { kind: "user" })).ok).toBe(false);
+			expect(readFileSync(v.readNote("global", "ref")!.path, "utf8")).toBe(refRaw);
+			expect(v.readNote("global", "before")).toBeUndefined();
+			expect(v.readNote("global", "after")).toBeDefined();
+			expect(readChangelog(v.root).some((e) => e.op === "undo")).toBe(false);
+		});
+	});
+
+	it("undoRun skips a rename group when a referrer has an outside change", async () => {
+		await withMemoryFixture(async (f) => {
+			const v = f.vault();
+			const run = DREAM("run-rename");
+			await putNote(v, "global", "before", "original", run);
+			await putNote(v, "global", "ref", "see [[before]]", run);
+			mustWrite(await v.write({ op: "rename", scope: "global", target: { slug: "before" }, newSlug: "after" }, run));
+			mustWrite(
+				await v.write(
+					{ op: "append", scope: "global", target: { slug: "ref" }, content: "human edit" },
+					{ kind: "user" },
+				),
+			);
+			const result = await v.undoRun("run-rename", { kind: "user" });
+			expect(result.undone).toHaveLength(1);
+			expect(result.skipped).toHaveLength(4);
+			expect(v.readNote("global", "ref")!.body).toContain("[[after]]");
+			expect(v.readNote("global", "ref")!.body).toContain("human edit");
+			expect(v.readNote("global", "after")).toBeDefined();
+			expect(v.readNote("global", "before")).toBeUndefined();
+		});
+	});
+
 	it("undo rolls back applied changes when a later write fails", async () => {
 		await withMemoryFixture(async (f) => {
 			const v = f.vault();

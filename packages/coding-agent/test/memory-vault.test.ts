@@ -419,6 +419,60 @@ describe("MemoryVault", () => {
 		).toBe(true);
 	});
 
+	it("project rename leaves references to the same global slug unchanged", async () => {
+		const vault = makeVault({ project: makeProject(makeTemp()) });
+		await vault.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "shared" },
+				frontmatter: { type: "reference", description: "global note" },
+				content: "global",
+			},
+			AGENT,
+		);
+		await vault.write(
+			{
+				op: "create",
+				scope: "project",
+				target: { slug: "shared" },
+				frontmatter: { type: "project", description: "project note" },
+				content: "project",
+			},
+			AGENT,
+		);
+		await vault.write(
+			{
+				op: "create",
+				scope: "global",
+				target: { slug: "global-ref" },
+				frontmatter: { type: "reference", description: "links global" },
+				content: "see [[shared]]",
+			},
+			AGENT,
+		);
+		await vault.write(
+			{
+				op: "create",
+				scope: "project",
+				target: { slug: "proj-ref" },
+				frontmatter: { type: "project", description: "links project" },
+				content: "use [[shared]]",
+			},
+			AGENT,
+		);
+		const renamed = await vault.write(
+			{ op: "rename", scope: "project", target: { slug: "shared" }, newSlug: "renamed" },
+			AGENT,
+		);
+		expect(renamed.ok).toBe(true);
+		// The global note's [[shared]] resolves to global/shared and must not move.
+		expect(vault.readNote("global", "global-ref")!.body).toBe("see [[shared]]");
+		// The project note's [[shared]] resolved to the renamed project note.
+		expect(vault.readNote("project", "proj-ref")!.body).toBe("use [[renamed]]");
+		expect(vault.readNote("project", "renamed")).toBeDefined();
+	});
+
 	it("applies frontmatter overrides on rename", async () => {
 		const vault = makeVault();
 		await vault.write(
