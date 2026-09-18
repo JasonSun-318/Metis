@@ -3851,7 +3851,15 @@ test("packaged General settings and Personalization persist across restart", asy
 		mkdir(userDataDir),
 		mkdir(qaDir, { recursive: true }),
 	]);
-	createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Settings session");
+	await writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers: { local: { baseUrl: "http://127.0.0.1:1/v1", apiKey: "fixture", api: "openai-completions", models: [{ id: "cache-test", name: "Cache test", contextWindow: 1000000, maxTokens: 1024 }] } } }));
+	await writeFile(path.join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "local", defaultModel: "cache-test", retry: { enabled: false } }));
+	const cacheSessionFile = createStoredSession(fixtures, agentDir, projectDir, CHAT_ACTIVE_ID, "chat", false, "Settings session");
+	const cacheSession = fixtures.SessionManager.open(cacheSessionFile);
+	cacheSession.appendMessage({ role: "user", content: "Context usage fixture", timestamp: Date.now() - 1 });
+	cacheSession.appendMessage({ ...assistantMessage(Date.now(), 10400), api: "openai-completions", provider: "local", model: "cache-test", usage: { input: 400, output: 400, cacheRead: 9600, cacheWrite: 0, cacheReported: true, totalTokens: 10400, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+	cacheSession.close();
+	createStoredSession(fixtures, agentDir, projectDir, "11111111-2222-4333-8444-555566667778", "code", false, "修复登录与账户同步");
+	createStoredSession(fixtures, agentDir, projectDir, "11111111-2222-4333-8444-555566667779", "chat", true, "产品设计讨论 · 已归档");
 
 	const diagnostics: string[] = [];
 	const firstPort = await reservePort();
@@ -3884,6 +3892,15 @@ test("packaged General settings and Personalization persist across restart", asy
 		const settingsSession = page.locator('.session-button[aria-label="Settings session"]');
 		await settingsSession.click();
 		await expect(settingsSession).toHaveAttribute("aria-current", "page");
+
+		phase = "checking context and cache measurement scope";
+		await page.locator(".context-usage-ring").click();
+		const contextPanel = page.locator(".session-status-panel");
+		await expect(contextPanel).toContainText("Cache hit rate (latest completed request)");
+		await expect(contextPanel).toContainText("96%");
+		await expect(contextPanel).toContainText("Token counts and category shares are estimates of used tokens.");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-en.png") });
+		await page.getByRole("button", { name: "Close status", exact: true }).click();
 
 		phase = "opening General settings";
 		await page.getByRole("button", { name: "Metis User", exact: true }).click();
@@ -3975,11 +3992,53 @@ test("packaged General settings and Personalization persist across restart", asy
 		await instructions.focus();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "personalization-dark-1280x840.png") });
 
-		phase = "checking the Memory vault settings page";
+		phase = "checking independent Memory dialogs and keyboard navigation";
 		await page.getByRole("button", { name: "记忆", exact: true }).click();
 		await expect(page.getByRole("heading", { name: "记忆", exact: true })).toBeVisible();
-		await expect(page.locator(".memory-vault-path")).toBeVisible();
-		await expect(page.locator(".memory-history-list, .memory-info-banner").first()).toBeVisible();
+		await expect(page.locator(".memory-page details")).toHaveCount(0);
+		await expect(page.getByLabel("记忆模型", { exact: true })).not.toBeVisible();
+		await page.getByRole("button", { name: "本地存储位置", exact: true }).click();
+		await expect(page.locator(".memory-vault-path").first()).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("button", { name: "本地存储位置", exact: true })).toBeFocused();
+		await expect(page.locator(".memory-dialog[open]")).toHaveCount(0);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-overview-dark-1280x840.png") });
+		await page.setViewportSize({ width: 1600, height: 1200 });
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-overview-dark-1600x1200.png") });
+		await page.setViewportSize(viewport);
+		await page.getByRole("button", { name: "高级设置", exact: true }).focus();
+		await page.keyboard.press("Enter");
+		await expect(page.getByLabel("记忆模型", { exact: true })).toBeVisible();
+		await page.getByLabel("最小间隔（小时）", { exact: true }).fill("48");
+		await page.keyboard.press("Escape");
+		await expect(page.getByText("放弃尚未保存的修改？", { exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "继续编辑", exact: true }).click();
+		await expect(page.getByLabel("最小间隔（小时）", { exact: true })).toHaveValue("48");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-advanced-dark-1280x840.png") });
+		await page.getByRole("button", { name: "保存设置", exact: true }).click();
+		await expect(page.locator(".memory-dialog[open]")).toHaveCount(0);
+		await page.getByRole("button", { name: "高级设置", exact: true }).click();
+		await expect(page.getByLabel("最小间隔（小时）", { exact: true })).toHaveValue("48");
+		await page.keyboard.press("Escape");
+		await page.setViewportSize({ width: 720, height: 900 });
+		await page.locator(".settings-page-scroll").evaluate((element) => { element.scrollTop = 0; });
+		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-narrow-720x900.png") });
+		await page.setViewportSize({ width: 600, height: 900 });
+		expect(await page.locator(".memory-page").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-narrow-600x900.png") });
+		await page.setViewportSize(viewport);
+		await page.getByRole("button", { name: "管理已保存的记忆", exact: true }).click();
+		await expect(page.locator(".memory-empty-state")).toBeVisible();
+		const searchLayout = await page.locator(".memory-notes-search").evaluate((label) => {
+			const icon = label.querySelector("svg")!.getBoundingClientRect();
+			const input = label.querySelector("input")!;
+			const box = input.getBoundingClientRect();
+			return { centerOffset: Math.abs(icon.y + icon.height / 2 - box.y - box.height / 2), border: getComputedStyle(input).borderTopWidth, overflow: label.scrollWidth > label.clientWidth };
+		});
+		expect(searchLayout.centerOffset).toBeLessThan(2);
+		expect(searchLayout.border).toBe("0px");
+		expect(searchLayout.overflow).toBe(false);
 
 		phase = "creating and editing a memory note";
 		await page.getByRole("button", { name: "新建记忆笔记", exact: true }).click();
@@ -4003,7 +4062,11 @@ test("packaged General settings and Personalization persist across restart", asy
 			)
 			.toBe("edited body");
 
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-note-editor.png") });
+		await page.getByRole("button", { name: "关闭编辑记忆笔记", exact: true }).click();
+		await page.getByRole("button", { name: "关闭已记住的内容", exact: true }).click();
 		phase = "undoing a memory edit through history";
+		await page.getByRole("button", { name: "最近变更", exact: true }).click();
 		await expect
 			.poll(async () =>
 				(await page!.evaluate(async () =>
@@ -4012,6 +4075,10 @@ test("packaged General settings and Personalization persist across restart", asy
 			)
 			.toBe("replace");
 		const editHistory = page.locator(".memory-history-row").filter({ hasText: "repair-smoke" }).first();
+		await editHistory.locator(".memory-note-open").click();
+		await expect(page.getByRole("dialog", { name: "记忆变更详情", exact: true })).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.getByRole("dialog", { name: "最近变更", exact: true })).toBeVisible();
 		await editHistory.getByRole("button", { name: "撤销记忆变更", exact: true }).click();
 		await expect
 			.poll(async () =>
@@ -4023,6 +4090,8 @@ test("packaged General settings and Personalization persist across restart", asy
 				)).note.body,
 			)
 			.toBe("original body");
+		await page.getByRole("button", { name: "关闭最近变更", exact: true }).click();
+		await page.getByRole("button", { name: "管理已保存的记忆", exact: true }).click();
 		await page.locator(".memory-note-row").filter({ hasText: "repair-smoke" }).getByRole("button").click();
 		await expect(page.getByLabel("笔记内容", { exact: true })).toHaveValue("original body");
 
@@ -4036,19 +4105,49 @@ test("packaged General settings and Personalization persist across restart", asy
 				)).entries.find((e) => "slug" in e.target && e.target.slug === "repair-smoke")?.op,
 			)
 			.toBe("delete");
+		await page.getByRole("button", { name: "关闭已记住的内容", exact: true }).click();
+		await page.getByRole("button", { name: "最近变更", exact: true }).click();
 		await page
 			.locator(".memory-history-row")
 			.filter({ hasText: "repair-smoke" })
 			.first()
 			.getByRole("button", { name: "撤销记忆变更", exact: true })
 			.click();
+		await page.getByRole("button", { name: "关闭最近变更", exact: true }).click();
+		await page.getByRole("button", { name: "管理已保存的记忆", exact: true }).click();
 		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
 		await page.getByLabel("搜索记忆笔记", { exact: true }).fill("zqvzxnomatch");
 		await expect(page.locator(".memory-note-row")).toHaveCount(0);
 		await page.getByLabel("搜索记忆笔记", { exact: true }).fill("");
 		await expect(page.locator(".memory-note-row").filter({ hasText: "repair-smoke" })).toHaveCount(1);
 
+		await page.getByRole("button", { name: "关闭已记住的内容", exact: true }).click();
+		await page.locator(".settings-page-scroll").evaluate((element) => { element.scrollTop = 0; });
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-dark-1280x840.png") });
+
+		phase = "selecting conversation memory exceptions";
+		await page.getByRole("button", { name: /^会话记忆/ }).click();
+		const sessionRow = page.locator(".memory-session-row").filter({ hasText: "Settings session" });
+		await expect(sessionRow).toContainText("当前会话");
+		const excludeLearning = sessionRow.getByRole("switch", { name: "保存新记忆：Settings session", exact: true });
+		await excludeLearning.locator("..").click();
+		await expect(excludeLearning).not.toBeChecked();
+		await expect.poll(async () => (await page!.evaluate(async (sessionId) => (globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }), CHAT_ACTIVE_ID)).session?.contributeMemory).toBe(false);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-session-exceptions.png") });
+		await expect(page.locator(".memory-session-row")).toHaveCount(3);
+		await page.getByRole("button", { name: "已调整", exact: true }).click();
+		await expect(page.locator(".memory-session-row")).toHaveCount(1);
+		await page.getByRole("button", { name: "全部会话", exact: true }).click();
+		await page.getByRole("searchbox", { name: "按会话名称或项目搜索", exact: true }).fill("登录");
+		await expect(page.locator(".memory-session-row")).toHaveCount(1);
+		await page.getByRole("searchbox", { name: "按会话名称或项目搜索", exact: true }).fill("");
+		await page.keyboard.press("Tab");
+		expect(await page.locator(".memory-session-dialog").evaluate(dialog => dialog.contains(document.activeElement))).toBe(true);
+		await page.setViewportSize({ width: 600, height: 900 });
+		expect(await page.locator(".memory-session-dialog").evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-sessions-narrow.png") });
+		await page.setViewportSize(viewport);
+		await page.getByRole("button", { name: "关闭会话记忆", exact: true }).click();
 
 		phase = "capturing matched light settings";
 		await page.getByRole("button", { name: "通用", exact: true }).click();
@@ -4058,7 +4157,11 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.locator(".web-search-section").scrollIntoViewIfNeeded();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "web-search-light-1280x840.png") });
 		await page.getByRole("button", { name: "记忆", exact: true }).click();
+		await expect(page.getByRole("button", { name: "管理已保存的记忆", exact: true })).toBeVisible();
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-light-1280x840.png") });
+		await page.getByRole("button", { name: /^会话记忆/ }).click();
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "memory-sessions-light.png") });
+		await page.getByRole("button", { name: "关闭会话记忆", exact: true }).click();
 		await page.getByRole("button", { name: "个性化", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 		await page.getByRole("textbox", { name: "全局指令", exact: true }).focus();
@@ -4066,8 +4169,25 @@ test("packaged General settings and Personalization persist across restart", asy
 		await page.getByRole("button", { name: "返回应用", exact: true }).click();
 		await expect(settingsSession).toHaveAttribute("aria-current", "page");
 
+		phase = "checking memory notifications dismiss in the chat shell";
+		const memoryNotice = page.locator(".system-notice").filter({ hasText: "已撤销记忆变更：“repair-smoke”" });
+		await expect(memoryNotice).toBeVisible();
+		await expect(memoryNotice.getByRole("button", { name: "关闭提醒", exact: true })).toBeVisible();
+		await expect(page.locator(".system-notice")).toHaveCount(0, { timeout: 7_000 });
+
+		await page.locator(".context-usage-ring").click();
+		await expect(page.locator(".session-status-panel")).toContainText("缓存命中率 · 最近一次成功请求");
+		await expect(page.locator(".session-status-panel")).toContainText("96%");
+		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-zh.png") });
+		await page.keyboard.press("Escape");
+
 		phase = "restarting with persisted settings";
-		await browser.close();
+		expect(await page.evaluate(() => localStorage.getItem("metis.theme.v1"))).toBe("light");
+		await expect.poll(async () => JSON.parse(await readFile(path.join(userDataDir, "theme.json"), "utf8"))).toBe("light");
+		// Close the renderer normally before stopping the background process.
+		// SIGTERM alone can interrupt Chromium's pending localStorage writes.
+		await page.close();
+		await browser.close().catch(() => undefined);
 		browser = undefined;
 		await stopProcess(app);
 		const restartPort = await reservePort();
@@ -4110,6 +4230,7 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.getByRole("textbox", { name: "全局指令", exact: true })).toHaveValue("Prefer concise answers.");
 
 		phase = "verifying persisted memory note and changelog after restart";
+		await expect.poll(async () => (await page!.evaluate(async (sessionId) => (globalThis as unknown as { metis: MetisDesktopApi }).metis.getMemorySettings({ sessionId }), CHAT_ACTIVE_ID)).session?.contributeMemory).toBe(false);
 		const persistedNote = await page.evaluate(async () =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.readMemoryNote({
 				scope: "global",
