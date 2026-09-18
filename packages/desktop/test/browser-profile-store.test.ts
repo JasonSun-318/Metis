@@ -1,7 +1,7 @@
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { BrowserProfileStore, mergeBrowserHistory } from "../src/main/browser-profile-store.ts";
 import { DEFAULT_BROWSER_PROFILE_ID, type DesktopHistoryEntry } from "../src/shared/desktop-api.ts";
 
@@ -12,6 +12,7 @@ function entry(url: string, visitedAt: number): DesktopHistoryEntry {
 describe("BrowserProfileStore", () => {
 	it("preserves Default and maps a source profile to a stable Metis profile", async () => {
 		const userDataPath = await mkdtemp(join(tmpdir(), "metis-browser-profiles-"));
+		onTestFinished(() => rm(userDataPath, { recursive: true, force: true }));
 		const store = new BrowserProfileStore(userDataPath);
 		expect(store.listProfiles()).toEqual([
 			{
@@ -34,12 +35,14 @@ describe("BrowserProfileStore", () => {
 
 	it("falls back to Default for corrupt metadata", async () => {
 		const userDataPath = await mkdtemp(join(tmpdir(), "metis-browser-profiles-"));
+		onTestFinished(() => rm(userDataPath, { recursive: true, force: true }));
 		await writeFile(join(userDataPath, "browser-profiles.json"), "{broken", "utf8");
 		expect(new BrowserProfileStore(userDataPath).listProfiles()).toHaveLength(1);
 	});
 
 	it("isolates history files and caps the merged newest entries at 500", async () => {
 		const userDataPath = await mkdtemp(join(tmpdir(), "metis-browser-history-"));
+		onTestFinished(() => rm(userDataPath, { recursive: true, force: true }));
 		const store = new BrowserProfileStore(userDataPath);
 		const imported = store.ensureImportedProfile({ sourceId: "chrome", sourceProfileId: "Profile 1", name: "Work" });
 		store.saveHistory(DEFAULT_BROWSER_PROFILE_ID, [entry("https://default.example", 10)]);

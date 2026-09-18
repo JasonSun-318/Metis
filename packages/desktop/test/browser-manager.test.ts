@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserObservation } from "@metis/app-protocol";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
 import { BrowserManager } from "../src/main/browser-manager.ts";
 import { BrowserProfileStore } from "../src/main/browser-profile-store.ts";
 import {
@@ -174,7 +174,9 @@ function browserHarness(
 	const openPath = vi.fn(async (): Promise<string> => "");
 	const showItemInFolder = vi.fn();
 	const displayMetricsListeners = new Set<() => void>();
-	const profileStore = new BrowserProfileStore(mkdtempSync(join(tmpdir(), "metis-browser-manager-")));
+	const profileRoot = mkdtempSync(join(tmpdir(), "metis-browser-manager-"));
+	onTestFinished(() => rm(profileRoot, { recursive: true, force: true }));
+	const profileStore = new BrowserProfileStore(profileRoot);
 	if (options.initialHistory)
 		profileStore.saveHistory(DEFAULT_BROWSER_PROFILE_ID, options.initialHistory as DesktopHistoryEntry[]);
 	const loadHistory = vi.spyOn(profileStore, "loadHistory");
@@ -262,6 +264,7 @@ function browserHarness(
 			return () => displayMetricsListeners.delete(listener);
 		},
 	});
+	onTestFinished(() => manager.closeAll());
 	return {
 		backgroundContentView,
 		backgroundWindow,

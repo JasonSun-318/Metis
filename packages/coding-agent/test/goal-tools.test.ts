@@ -1,8 +1,8 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Value } from "typebox/value";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { readThreadGoal, writeThreadGoal } from "../src/core/goal/store.ts";
 import {
 	createCreateGoalToolDefinition,
@@ -14,7 +14,12 @@ import { SessionManager } from "../src/core/session-manager.ts";
 
 function manager(): SessionManager {
 	const dir = mkdtempSync(join(tmpdir(), "metis-goal-tools-"));
-	return SessionManager.create(dir, dir);
+	const session = SessionManager.create(dir, dir);
+	onTestFinished(() => {
+		session.close();
+		rmSync(dir, { recursive: true, force: true });
+	});
+	return session;
 }
 
 describe("goal tools", () => {

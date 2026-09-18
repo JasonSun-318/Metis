@@ -1,6 +1,6 @@
-import { access, chmod, realpath, symlink } from "node:fs/promises";
+import { access, chmod, realpath, rm, symlink } from "node:fs/promises";
 import { delimiter, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, onTestFinished } from "vitest";
 import { NodeExecutionEnv } from "../../src/harness/env/nodejs.ts";
 import { FileError, getOrThrow } from "../../src/harness/types.ts";
 import { executeShellWithCapture } from "../../src/harness/utils/shell-output.ts";
@@ -139,8 +139,10 @@ describe("NodeExecutionEnv", () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });
 		const tempDir = getOrThrow(await env.createTempDir("node-env-test-"));
+		onTestFinished(() => rm(tempDir, { recursive: true, force: true }));
 		await expect(access(tempDir)).resolves.toBeUndefined();
 		const tempFile = getOrThrow(await env.createTempFile({ prefix: "prefix-", suffix: ".txt" }));
+		onTestFinished(() => rm(tempFile, { force: true }));
 		await expect(access(tempFile)).resolves.toBeUndefined();
 		expect(tempFile.endsWith(".txt")).toBe(true);
 	});

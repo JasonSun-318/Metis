@@ -1,8 +1,8 @@
-import { writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import type { SessionHeader } from "../src/core/session-manager.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { initTheme } from "../src/modes/interactive/theme/theme.ts";
@@ -46,7 +46,9 @@ describe("SessionInfo.modified", () => {
 	});
 
 	it("uses last user/assistant message timestamp instead of file mtime", async () => {
-		const filePath = join(tmpdir(), `metis-session-${Date.now()}-modified.jsonl`);
+		const directory = mkdtempSync(join(tmpdir(), "metis-session-modified-"));
+		onTestFinished(() => rmSync(directory, { recursive: true, force: true }));
+		const filePath = join(directory, "modified.jsonl");
 		createSessionFile(filePath);
 
 		const before = await stat(filePath);
@@ -54,6 +56,7 @@ describe("SessionInfo.modified", () => {
 		await new Promise((r) => setTimeout(r, 10));
 
 		const mgr = SessionManager.open(filePath);
+		onTestFinished(() => mgr.close());
 		const msgTime = Date.now();
 		mgr.appendMessage({
 			role: "assistant",

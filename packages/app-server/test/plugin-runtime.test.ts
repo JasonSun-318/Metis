@@ -99,9 +99,14 @@ function finishText(response: ServerResponse, text: string): void {
 describe("app-server plugin runtime end-to-end", () => {
 	const temporaryRoots: string[] = [];
 	const serversToClose: Server[] = [];
+	const appServersToClose: AppServer[] = [];
 	const COMMIT_1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
 	afterEach(async () => {
+		for (const server of appServersToClose.splice(0)) {
+			server.beginShutdown();
+			await server.waitForShutdown();
+		}
 		for (const s of serversToClose.splice(0)) {
 			s.close();
 		}
@@ -210,6 +215,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		const outbound: ConnectionOutboundEnvelope[] = [];
@@ -373,6 +379,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		const outbound: ConnectionOutboundEnvelope[] = [];
@@ -540,6 +547,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		const outbound: ConnectionOutboundEnvelope[] = [];
@@ -661,6 +669,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		await connection.handle({
@@ -755,6 +764,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		await connection.handle({
@@ -905,6 +915,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		const connection = server.connect();
 		await connection.handle({
@@ -1179,6 +1190,7 @@ describe("app-server plugin runtime end-to-end", () => {
 			fetchImpl,
 			titleGenerator: { generate: async () => undefined },
 		});
+		appServersToClose.push(server);
 
 		try {
 			const connection = server.connect();

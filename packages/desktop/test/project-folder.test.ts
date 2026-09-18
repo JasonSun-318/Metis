@@ -1,12 +1,13 @@
-import { mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { createProjectFolder } from "../src/main/project-folder.ts";
 
 describe("project folder creation", () => {
 	it("copies selected files into one new project without changing the originals", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		const source = join(root, "brief.txt");
 		await writeFile(source, "original");
 
@@ -22,6 +23,7 @@ describe("project folder creation", () => {
 
 	it("rejects unsafe input before creating a project", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		await expect(createProjectFolder({ parentDirectory: root, name: "../escape", files: [] })).rejects.toThrow(
 			"valid project name",
 		);
@@ -30,6 +32,7 @@ describe("project folder creation", () => {
 
 	it("rejects duplicate destination names before creating a project", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-project-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		const source = join(root, "brief.txt");
 		await writeFile(source, "original");
 		const parentDirectory = join(root, "projects");

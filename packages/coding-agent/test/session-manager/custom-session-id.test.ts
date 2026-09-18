@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { SessionManager } from "../../src/core/session-manager.ts";
 
 const UUID_V7_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -72,7 +72,9 @@ describe("SessionManager.newSession with custom id", () => {
 
 	it("uses the provided id when creating a persisted session", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "metis-session-manager-"));
+		onTestFinished(() => rmSync(tempDir, { recursive: true, force: true }));
 		const session = SessionManager.create(tempDir, tempDir, { id: "created-session-id" });
+		onTestFinished(() => session.close());
 
 		expect(session.getSessionId()).toBe("created-session-id");
 		expect(session.getHeader()!.id).toBe("created-session-id");
@@ -100,6 +102,7 @@ describe("SessionManager.newSession with custom id", () => {
 
 	it("generates a UUIDv7 id when forking from another session file", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "metis-session-manager-"));
+		onTestFinished(() => rmSync(tempDir, { recursive: true, force: true }));
 		const sourcePath = join(tempDir, "source.jsonl");
 		writeFileSync(
 			sourcePath,
@@ -139,6 +142,7 @@ describe("SessionManager.newSession with custom id", () => {
 		);
 
 		const forked = SessionManager.forkFrom(sourcePath, tempDir, tempDir);
+		onTestFinished(() => forked.close());
 		const header = forked.getHeader();
 		expect(header).not.toBeNull();
 		expect(header!.id).toMatch(UUID_V7_RE);
@@ -147,6 +151,7 @@ describe("SessionManager.newSession with custom id", () => {
 
 	it("uses the provided id when forking from another session file", () => {
 		const tempDir = mkdtempSync(join(tmpdir(), "metis-session-manager-"));
+		onTestFinished(() => rmSync(tempDir, { recursive: true, force: true }));
 		const sourcePath = join(tempDir, "source.jsonl");
 		writeFileSync(
 			sourcePath,
@@ -160,6 +165,7 @@ describe("SessionManager.newSession with custom id", () => {
 		);
 
 		const forked = SessionManager.forkFrom(sourcePath, tempDir, tempDir, { id: "forked-session-id" });
+		onTestFinished(() => forked.close());
 		const header = forked.getHeader();
 		expect(header).not.toBeNull();
 		expect(header!.id).toBe("forked-session-id");

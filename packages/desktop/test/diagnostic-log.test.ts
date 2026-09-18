@@ -1,12 +1,13 @@
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, onTestFinished } from "vitest";
 import { DiagnosticLog } from "../src/main/diagnostic-log.ts";
 
 describe("DiagnosticLog", () => {
 	it("redacts common credential shapes before they reach disk", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 1_024, backups: 2 });
 
@@ -22,6 +23,7 @@ describe("DiagnosticLog", () => {
 
 	it("rotates at the byte limit and retains exactly two backups", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 96, backups: 2 });
 
@@ -36,6 +38,7 @@ describe("DiagnosticLog", () => {
 
 	it("serializes concurrent writes without retaining oversized records", async () => {
 		const root = await mkdtemp(join(tmpdir(), "metis-desktop-log-"));
+		onTestFinished(() => rm(root, { recursive: true, force: true }));
 		const path = join(root, "app-server.log");
 		const log = new DiagnosticLog({ path, maxBytes: 128, backups: 2 });
 
