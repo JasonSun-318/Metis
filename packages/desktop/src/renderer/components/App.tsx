@@ -1010,9 +1010,10 @@ export function App({ api, store }: AppProps) {
 		visibleInteraction?.kind === "ask_user" || visibleInteraction?.kind === "session_permission_approval"
 			? visibleInteraction
 			: undefined;
-	const latestNotification = [...state.notifications]
-		.reverse()
-		.find((notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId);
+	const visibleNotifications = state.notifications.filter(
+		(notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId,
+	);
+	const latestNotification = visibleNotifications.at(-1);
 	const latestTurnErrorCode = state.turnOrder.length > 0
 		? state.turnsById.get(state.turnOrder[state.turnOrder.length - 1]!)?.error?.name
 		: undefined;
@@ -1836,7 +1837,12 @@ export function App({ api, store }: AppProps) {
 						<SystemNotice onDismiss={() => setNotice(null)} title={notice} tone="info" />
 					)}
 					{latestNotification && !errorNotice && !updateNotice && !notice && (
-						<SystemNotice title={latestNotification.message} tone={latestNotification.level} />
+						<SystemNotice
+							key={latestNotification.notificationId}
+							onDismiss={() => store.dismissNotifications(visibleNotifications.map((notification) => notification.notificationId))}
+							title={latestNotification.translation ? t(latestNotification.translation.key, latestNotification.translation.values) : latestNotification.message}
+							tone={latestNotification.level}
+						/>
 					)}
 				</div>
 				{visibleActiveSession && <WorkspaceSessionHeader

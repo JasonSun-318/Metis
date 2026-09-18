@@ -24,6 +24,10 @@ export interface MutableAgentTranscriptState {
 	journalRevision: number;
 }
 
+export type RendererNotification = Extract<DomainEvent, { type: "interaction/notify" }> & {
+	readonly translation?: { readonly key: string; readonly values: Record<string, string | number> };
+};
+
 export interface MutableProjectionState {
 	readonly sessionsById: Map<string, SessionSummary>;
 	sessionOrder: string[];
@@ -34,7 +38,7 @@ export interface MutableProjectionState {
 	itemOrder: string[];
 	readonly interactionsById: Map<string, InteractionView>;
 	interactionOrder: string[];
-	notifications: Array<Extract<DomainEvent, { type: "interaction/notify" }>>;
+	notifications: RendererNotification[];
 	nextBeforeItemId: string | null;
 	activeTurnId: string | null;
 	serverEpoch: string | null;
@@ -544,6 +548,22 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 					level: "info",
 					message: event.entry.op === "undo" ? `Reverted memory: ${target}` : `Saved memory: ${target}`,
 					createdAt: event.entry.ts,
+					translation:
+						"slug" in event.entry.target
+							? {
+									key:
+										event.entry.op === "undo"
+											? 'Reverted memory: note "{{slug}}"'
+											: 'Saved memory: note "{{slug}}"',
+									values: { slug: event.entry.target.slug },
+								}
+							: {
+									key:
+										event.entry.op === "undo"
+											? 'Reverted memory: pinned block "{{block}}"'
+											: 'Saved memory: pinned block "{{block}}"',
+									values: { block: event.entry.target.block },
+								},
 				},
 			];
 			return;
@@ -556,6 +576,10 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 					notificationId: crypto.randomUUID(),
 					level: "info",
 					message: `Memory consolidated: ${event.added} added, ${event.updated} updated, ${event.deleted} deleted`,
+					translation: {
+						key: "Memory consolidated: {{added}} added, {{updated}} updated, {{deleted}} deleted",
+						values: { added: event.added, updated: event.updated, deleted: event.deleted },
+					},
 					createdAt: new Date().toISOString(),
 				},
 			];

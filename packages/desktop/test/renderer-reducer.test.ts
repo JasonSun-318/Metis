@@ -834,6 +834,29 @@ describe("renderer projection reducer", () => {
 		expect(state.syncStatus).toBe("ready");
 	});
 
+	it("dismisses only the captured notifications, preserving other IDs and newer events", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot(EPOCH_A, 0));
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 1,
+			toCursor: 3,
+			events: ["global", "session", "newer"].map((id) => ({
+				type: "interaction/notify" as const,
+				notificationId: id,
+				level: "info" as const,
+				message: id,
+				createdAt: new Date().toISOString(),
+				...(id === "session" ? { sessionId: "session-1" } : {}),
+			})),
+		});
+		store.dismissNotifications(["global"]);
+		expect(store.getSnapshot().notifications.map((notice) => notice.notificationId)).toEqual(["session", "newer"]);
+		const before = store.getSnapshot();
+		store.dismissNotifications(["global"]);
+		expect(store.getSnapshot()).toBe(before);
+	});
+
 	it("surfaces connection-level memory changes as notifications", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot(EPOCH_A, 0));

@@ -10,6 +10,12 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	'Saved memory: note "{{slug}}"': "已保存记忆：“{{slug}}”",
+	'Reverted memory: note "{{slug}}"': "已撤销记忆变更：“{{slug}}”",
+	'Saved memory: pinned block "{{block}}"': "已保存固定记忆：“{{block}}”",
+	'Reverted memory: pinned block "{{block}}"': "已撤销固定记忆变更：“{{block}}”",
+	"Memory consolidated: {{added}} added, {{updated}} updated, {{deleted}} deleted":
+		"记忆已整理：新增 {{added}} 条，更新 {{updated}} 条，删除 {{deleted}} 条",
 	Continue: "继续",
 	"Create and analyze spreadsheets.": "创建表格，整理和分析数据。",
 	"Create and edit PowerPoint presentations.": "创建和编辑 PowerPoint 演示文稿。",

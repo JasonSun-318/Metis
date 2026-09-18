@@ -621,6 +621,53 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
+	it.each(["en", "zh-CN"] as const)("dismisses memory event notifications after five seconds without replaying older notices (%s)", async (locale) => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const active = session("chat-memory", "chat", "/work/chat-project", "Memory");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		const { api, emitEvent } = createHarness({ sessions: [active] });
+		const store = new AppStore();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={store} />));
+			await flush();
+			await act(async () => { await setLocale(locale); });
+			vi.useFakeTimers();
+			const notify = async (cursor: number, slug: string) => act(async () => emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0", method: "connection/events",
+					params: { serverEpoch: EPOCH, fromCursor: cursor, toCursor: cursor, events: [{
+						type: "memory/changed",
+						entry: { id: `memory-${cursor}`, ts: new Date().toISOString(), actor: { kind: "agent", sessionId: active.sessionId }, op: "create", scope: "global", target: { slug } },
+					}] },
+				},
+			}));
+			await notify(1, "older-note");
+			await notify(2, "user-jason-profile");
+			expect(container.querySelector(".system-notice")?.textContent).toContain(locale === "zh-CN" ? "已保存记忆：“user-jason-profile”" : 'Saved memory: note "user-jason-profile"');
+			await act(async () => vi.advanceTimersByTime(4_999));
+			expect(container.querySelector(".system-notice")).not.toBeNull();
+			await act(async () => store.upsertSession({ ...active, name: "Updated while chatting" }));
+			await act(async () => vi.advanceTimersByTime(1));
+			expect(container.querySelector(".system-notice")).toBeNull();
+			await act(async () => store.upsertSession(active));
+			expect(container.querySelector(".system-notice")).toBeNull();
+			await notify(3, "new-note");
+			await act(async () => vi.advanceTimersByTime(4_000));
+			await notify(4, "new-note");
+			await act(async () => vi.advanceTimersByTime(1_000));
+			expect(container.querySelector(".system-notice")?.textContent).toContain("new-note");
+			await act(async () => button(container, locale === "zh-CN" ? "关闭提醒" : "Dismiss notification").click());
+			expect(container.querySelector(".system-notice")).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+			vi.useRealTimers();
+		}
+	});
+
 	it("resizes the sessions sidebar and restores its preferred width after window resizing", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const originalInnerWidth = window.innerWidth;

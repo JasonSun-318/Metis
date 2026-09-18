@@ -2,7 +2,6 @@ import type {
 	AgentMode,
 	ClientResult,
 	ConnectionEventsParams,
-	DomainEvent,
 	InteractionView,
 	ItemView,
 	QueuedTurnView,
@@ -19,6 +18,7 @@ import {
 	markProjectionResubscribing,
 	prependAgentItems,
 	prependProjectionItems,
+	type RendererNotification,
 	removeModeProjectSessions,
 	removePendingInteraction,
 	removeSession,
@@ -50,7 +50,7 @@ export interface AppStoreSnapshot {
 	readonly itemOrder: readonly string[];
 	readonly interactionsById: ReadonlyMap<string, InteractionView>;
 	readonly interactionOrder: readonly string[];
-	readonly notifications: readonly Extract<DomainEvent, { type: "interaction/notify" }>[];
+	readonly notifications: readonly RendererNotification[];
 	readonly nextBeforeItemId: string | null;
 	readonly activeTurnId: string | null;
 	readonly serverEpoch: string | null;
@@ -103,6 +103,14 @@ export class AppStore {
 	};
 
 	getSnapshot = (): AppStoreSnapshot => this.snapshot;
+
+	dismissNotifications(notificationIds: readonly string[]): void {
+		const dismissed = new Set(notificationIds);
+		const remaining = this.state.notifications.filter((notice) => !dismissed.has(notice.notificationId));
+		if (remaining.length === this.state.notifications.length) return;
+		this.state.notifications = remaining;
+		this.commit();
+	}
 
 	setOptimisticThinkingSelection(selection: SessionSnapshot["thinkingSelection"]): void {
 		if (this.state.thinkingSelection === selection) return;
