@@ -41,9 +41,8 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 
 	const fill = status ? contextFillPercent(status) : null;
 	const usagePercent = status ? contextUsagePercent(status) : null;
-	const cacheHitPercent = status?.cacheHitPercent == null
-		? null
-		: Math.max(0, Math.min(100, Math.round(status.cacheHitPercent)));
+	const cacheHitPercent =
+		status?.cacheHitPercent == null ? null : Math.max(0, Math.min(100, Math.round(status.cacheHitPercent * 10) / 10));
 	const breakdown = status?.contextBreakdown ?? [];
 	const categoryLabels: Record<(typeof breakdown)[number]["category"], string> = {
 		system_prompt: "System prompt",
@@ -64,17 +63,33 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 			: null;
 
 	return (
-		<div aria-labelledby="session-status-title" className={`session-status-panel${closing ? " is-closing" : ""}`} id="session-status-panel" ref={rootRef} role="dialog">
+		<div
+			aria-labelledby="session-status-title"
+			className={`session-status-panel${closing ? " is-closing" : ""}`}
+			id="session-status-panel"
+			ref={rootRef}
+			role="dialog"
+		>
 			<header>
 				<strong id="session-status-title">{t("Context Usage")}</strong>
-				<button aria-label={t("Close status")} onClick={onClose} ref={closeButtonRef} type="button"><X aria-hidden="true" size={16} /></button>
+				<button aria-label={t("Close status")} onClick={onClose} ref={closeButtonRef} type="button">
+					<X aria-hidden="true" size={16} />
+				</button>
 			</header>
-			{loading ? <p className="session-status-message" role="status">{t("Loading session status…")}</p> : error ? (
-				<p className="session-status-message is-error" role="alert">{t(error)}</p>
+			{loading ? (
+				<p className="session-status-message" role="status">
+					{t("Loading session status…")}
+				</p>
+			) : error ? (
+				<p className="session-status-message is-error" role="alert">
+					{t(error)}
+				</p>
 			) : status ? (
 				<>
 					<p className="context-usage-summary">
-						<span>{usagePercent == null ? "—" : t("{{percent}}% Full", { percent: Math.round(usagePercent) })}</span>
+						<span>
+							{usagePercent == null ? "—" : t("{{percent}}% Full", { percent: Math.round(usagePercent * 10) / 10 })}
+						</span>
 						<span>{tokensLine ?? "—"}</span>
 					</p>
 					<div aria-hidden="true" className="context-usage-bar">
@@ -98,6 +113,13 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 						<p className="context-usage-basis">{t("Context breakdown unavailable")}</p>
 					) : (
 						<>
+							<p className="context-usage-basis">
+								{t(
+									status.contextBasis === "reported_total"
+										? "Current context, including history. Total based on reported usage; category shares are estimates of used tokens."
+										: "Current context, including history. Token counts and category shares are estimates of used tokens.",
+								)}
+							</p>
 							<ul className="context-usage-breakdown">
 								{breakdown.map((item) => (
 									<li data-category={item.category} key={item.category}>
@@ -112,24 +134,33 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 							</ul>
 						</>
 					)}
-					{cacheHitPercent !== null && (
+					{
 						<div className="context-usage-cache">
 							<div className="context-usage-cache-heading">
-								<span>{t("Cache hit rate")}</span>
-								<strong>{cacheHitPercent}%</strong>
+								<span>{t("Cache hit rate (latest completed request)")}</span>
+								<strong>{cacheHitPercent === null ? "—" : `${cacheHitPercent}%`}</strong>
 							</div>
-							<div
-								aria-label={`${t("Cache hit rate")} ${cacheHitPercent}%`}
-								aria-valuemax={100}
-								aria-valuemin={0}
-								aria-valuenow={cacheHitPercent}
-								className="context-usage-cache-track"
-								role="progressbar"
-							>
-								<span className="context-usage-cache-meter" style={{ width: `${cacheHitPercent}%` }} />
-							</div>
+							{cacheHitPercent !== null && (
+								<div
+									aria-label={`${t("Cache hit rate (latest completed request)")} ${cacheHitPercent}%`}
+									aria-valuemax={100}
+									aria-valuemin={0}
+									aria-valuenow={cacheHitPercent}
+									className="context-usage-cache-track"
+									role="progressbar"
+								>
+									<span className="context-usage-cache-meter" style={{ width: `${cacheHitPercent}%` }} />
+								</div>
+							)}
+							<p className="context-usage-basis">
+								{t(
+									cacheHitPercent === null
+										? "Cache usage not reported for a completed request on this model."
+										: "Cached input / total input for one model request; output tokens are excluded.",
+								)}
+							</p>
 						</div>
-					)}
+					}
 				</>
 			) : null}
 		</div>

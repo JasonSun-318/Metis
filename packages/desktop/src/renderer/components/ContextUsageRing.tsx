@@ -18,8 +18,8 @@ export function ContextUsageRing({ controls, expanded, percent, onClick }: Conte
 		percent === null
 			? t("Context usage unavailable")
 			: percent > 100
-				? t("Context usage {{percent}}%; context exceeded", { percent: Math.round(percent) })
-				: t("Context usage {{percent}}%", { percent: Math.round(percent) });
+				? t("Context usage {{percent}}%; context exceeded", { percent: Math.round(percent * 10) / 10 })
+				: t("Context usage {{percent}}%", { percent: Math.round(percent * 10) / 10 });
 	return (
 		<button
 			aria-controls={controls}

@@ -702,6 +702,14 @@ const zhCN = {
 	Remaining: "剩余",
 	Cache: "缓存",
 	"Cache hit rate": "缓存命中率",
+	"Cache hit rate (latest completed request)": "缓存命中率 · 最近一次成功请求",
+	"Current context, including history. Total based on reported usage; category shares are estimates of used tokens.":
+		"当前上下文包含历史消息。总量依据模型用量；各分类占已用 Token 的比例为估算。",
+	"Current context, including history. Token counts and category shares are estimates of used tokens.":
+		"当前上下文包含历史消息。Token 数量为估算；各分类占比以已用 Token 为分母。",
+	"Cache usage not reported for a completed request on this model.": "当前模型尚无可用的请求缓存统计。",
+	"Cached input / total input for one model request; output tokens are excluded.":
+		"单次模型请求的缓存读取量 ÷ 总输入量，不包含输出 Token。",
 	"Compacting conversation…": "正在压缩会话…",
 	Compacted: "已压缩",
 	Fork: "Fork",
