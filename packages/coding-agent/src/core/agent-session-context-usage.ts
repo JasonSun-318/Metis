@@ -1,11 +1,10 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { AgentMessage, BeforeProviderRequestContext } from "@metis/agent-core";
-import { type AssistantMessage, estimateMessageTokens, type Model, type Tool } from "@metis/ai/compat";
+import type { AssistantMessage, Model, Tool } from "@metis/ai/compat";
 import { calculateContextTokens } from "./compaction/index.ts";
 import {
 	estimateContextUsageBreakdown,
-	FIXED_CONTEXT_USAGE_CATEGORIES,
 	mergeContextUsageBreakdown,
 	reconcileContextUsageBreakdown,
 	reconcileContextUsageBreakdownWithFixed,
@@ -17,10 +16,12 @@ import type { SystemPromptPart } from "./system-prompt.ts";
 interface PreparedContextUsageSnapshot {
 	readonly configurationFingerprint: string;
 	readonly breakdown: readonly ContextUsageBreakdownItem[];
+	readonly rawFixed: readonly ContextUsageBreakdownItem[];
 }
 
 interface ReportedContextUsageSnapshot extends PreparedContextUsageSnapshot {
 	readonly assistant: AssistantMessage;
+	readonly prefix: readonly AgentMessage[];
 	readonly tokens: number;
 }
 
@@ -56,6 +57,7 @@ export class AgentSessionContextUsage {
 		this._prepared = {
 			configurationFingerprint: this._fingerprint(prepared.model, systemPrompt, tools),
 			breakdown: this._estimateBreakdown(systemPrompt, prepared.agentMessages, tools),
+			rawFixed: this._estimateBreakdown(systemPrompt, [], tools),
 		};
 	}
 
@@ -66,20 +68,32 @@ export class AgentSessionContextUsage {
 		if (!prepared || message.stopReason === "error" || message.stopReason === "aborted" || reportedTokens <= 0) {
 			return;
 		}
-		const rawBreakdown = mergeContextUsageBreakdown(prepared.breakdown, [
-			{ category: "conversation", tokens: estimateMessageTokens(message) },
-		]);
-		const calibration = this._calibration;
-		const breakdown =
-			calibration?.configurationFingerprint === prepared.configurationFingerprint
-				? reconcileContextUsageBreakdownWithFixed(rawBreakdown, reportedTokens, calibration.fixedBreakdown)
-				: reconcileContextUsageBreakdown(rawBreakdown, reportedTokens);
+		// Calibrate the prompt separately: generated output belongs only to the conversation.
+		const outputTokens = Math.min(reportedTokens, Math.max(0, message.usage.output));
+		const promptTokens = reportedTokens - outputTokens;
+		const rawTotal = prepared.breakdown.reduce((sum, item) => sum + item.tokens, 0);
+		const rawFixedTotal = prepared.rawFixed.reduce((sum, item) => sum + item.tokens, 0);
+		let calibration = this._calibration;
 		if (calibration?.configurationFingerprint !== prepared.configurationFingerprint) {
-			this._calibration = {
+			calibration = {
 				configurationFingerprint: prepared.configurationFingerprint,
-				fixedBreakdown: breakdown.filter((item) => FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
+				fixedBreakdown: reconcileContextUsageBreakdown(
+					prepared.rawFixed,
+					rawTotal > 0 ? Math.round((promptTokens * rawFixedTotal) / rawTotal) : 0,
+				),
 			};
+			this._calibration = calibration;
 		}
+		const promptBreakdown = reconcileContextUsageBreakdownWithFixed(
+			prepared.breakdown,
+			promptTokens,
+			calibration.fixedBreakdown,
+			prepared.rawFixed,
+		);
+		const breakdown =
+			promptTokens > 0 && promptBreakdown.length === 0
+				? []
+				: mergeContextUsageBreakdown(promptBreakdown, [{ category: "conversation", tokens: outputTokens }]);
 		const messages = this._source.getMessages();
 		let stateAssistant = message;
 		for (let index = messages.length - 1; index >= 0; index--) {
@@ -91,8 +105,10 @@ export class AgentSessionContextUsage {
 		}
 		this._reported = {
 			assistant: stateAssistant,
+			prefix: messages.slice(0, messages.indexOf(stateAssistant) + 1),
 			configurationFingerprint: prepared.configurationFingerprint,
 			breakdown,
+			rawFixed: prepared.rawFixed,
 			tokens: reportedTokens,
 		};
 	}
@@ -109,7 +125,12 @@ export class AgentSessionContextUsage {
 		const fingerprint = this._fingerprint(model, systemPrompt, tools);
 		const reported = this._reported;
 		const assistantIndex = reported ? messages.indexOf(reported.assistant) : -1;
-		if (reported && reported.configurationFingerprint === fingerprint && assistantIndex >= 0) {
+		// Compaction or branch changes can retain the assistant while replacing its prompt.
+		const samePrefix =
+			reported &&
+			reported.prefix.length === assistantIndex + 1 &&
+			reported.prefix.every((message, index) => message === messages[index]);
+		if (reported && reported.configurationFingerprint === fingerprint && assistantIndex >= 0 && samePrefix) {
 			const tail = this._estimateBreakdown("", messages.slice(assistantIndex + 1), []);
 			const breakdown = mergeContextUsageBreakdown(reported.breakdown, tail);
 			const tokens = reported.tokens + tail.reduce((sum, item) => sum + item.tokens, 0);
@@ -124,11 +145,17 @@ export class AgentSessionContextUsage {
 
 		const estimatedBreakdown = this._estimateBreakdown(systemPrompt, messages, tools);
 		const calibration = this._calibration;
+		const rawFixed = this._estimateBreakdown(systemPrompt, [], tools);
+		const estimatedTotal = estimatedBreakdown.reduce((sum, item) => sum + item.tokens, 0);
 		const breakdown =
 			calibration?.configurationFingerprint === fingerprint
-				? mergeContextUsageBreakdown(
+				? reconcileContextUsageBreakdownWithFixed(
+						estimatedBreakdown,
+						estimatedTotal -
+							rawFixed.reduce((sum, item) => sum + item.tokens, 0) +
+							calibration.fixedBreakdown.reduce((sum, item) => sum + item.tokens, 0),
 						calibration.fixedBreakdown,
-						estimatedBreakdown.filter((item) => !FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
+						rawFixed,
 					)
 				: estimatedBreakdown;
 		const tokens = breakdown.reduce((sum, item) => sum + item.tokens, 0);

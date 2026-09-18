@@ -129,10 +129,14 @@ export function reconcileContextUsageBreakdown(
 	return scaled.filter((item) => item.tokens > 0).map(({ item, tokens }) => ({ category: item.category, tokens }));
 }
 
+/** Preserve only the static prefix contribution; loaded skills may share its category but remain dynamic. */
 export function reconcileContextUsageBreakdownWithFixed(
 	raw: readonly ContextUsageBreakdownItem[],
 	total: number,
 	fixed: readonly ContextUsageBreakdownItem[],
+	rawFixed: readonly ContextUsageBreakdownItem[] = raw.filter((item) =>
+		FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category),
+	),
 ): ContextUsageBreakdownItem[] {
 	const normalizedTotal = Math.max(0, Math.trunc(total));
 	const fixedBreakdown = mergeContextUsageBreakdown(
@@ -144,7 +148,13 @@ export function reconcileContextUsageBreakdownWithFixed(
 	const dynamicTotal = normalizedTotal - fixedTotal;
 	if (dynamicTotal === 0) return fixedBreakdown;
 	const dynamicBreakdown = reconcileContextUsageBreakdown(
-		raw.filter((item) => !FIXED_CONTEXT_USAGE_CATEGORIES.has(item.category)),
+		raw.map((item) => ({
+			...item,
+			tokens: Math.max(
+				0,
+				item.tokens - (rawFixed.find((fixedItem) => fixedItem.category === item.category)?.tokens ?? 0),
+			),
+		})),
 		dynamicTotal,
 	);
 	return dynamicBreakdown.length > 0 ? mergeContextUsageBreakdown(fixedBreakdown, dynamicBreakdown) : [];
