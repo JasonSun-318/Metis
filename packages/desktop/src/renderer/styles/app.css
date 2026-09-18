@@ -2754,7 +2754,11 @@ classes so their inline layout wins the cascade. */
 .web-search-api-key-reveal:disabled { cursor: default; opacity: .5; }
 .web-search-actions { min-height: 56px; margin: 0; padding: 10px 16px; }
 .web-search-message { margin: 0 16px 12px; }
-.memory-page { display: grid; align-content: start; gap: 16px; }
+.memory-page { display: grid; align-content: start; gap: 24px; }
+.memory-page .settings-section { margin-bottom: 0; }
+.memory-page .settings-section-heading { align-items: center; }
+.memory-page .settings-section-heading h3 { text-transform: none; letter-spacing: 0; }
+.memory-section-caption { color: var(--text-09); font-size: 11.5px; line-height: 1.5; font-weight: 400; }
 .memory-settings-section { margin-top: 0; }
 .memory-vault-path { display: flex; align-items: center; gap: 7px; border-top: 1px solid var(--border-weak); margin: 0 16px; color: var(--text-09); padding: 10px 0 12px; font-size: 11.5px; }
 .memory-vault-path svg { flex: none; color: var(--text-14); }
@@ -2777,9 +2781,9 @@ classes so their inline layout wins the cascade. */
 .memory-scope-tabs button { border: 0; background: transparent; color: var(--text-09); cursor: pointer; font: inherit; font-size: 11.5px; padding: 5px 10px; }
 .memory-scope-tabs button.is-active { background: var(--surface-09); color: var(--text-26); }
 .memory-scope-tabs button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
-.memory-notes-search { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 1px solid var(--border-weak); border-radius: 6px; color: var(--text-14); padding: 0 8px; }
-.memory-notes-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-26); font: inherit; font-size: 12px; padding: 5px 0; }
-.memory-notes-search input:focus-visible { outline: none; }
+.settings-page .memory-notes-search { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; border: 1px solid var(--border-weak); border-radius: 6px; color: var(--text-14); padding: 0 8px; }
+.settings-page .memory-notes-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text-26); font: inherit; font-size: 12px; padding: 5px 0; }
+.settings-page .memory-notes-search input:focus-visible { outline: none; }
 .memory-notes-search:focus-within { border-color: var(--focus); }
 .memory-note-open { display: grid; gap: 2px; flex: 1; min-width: 0; border: 0; background: transparent; cursor: pointer; font: inherit; padding: 0; text-align: left; }
 .memory-note-open:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -2788,13 +2792,37 @@ classes so their inline layout wins the cascade. */
 .memory-history-diff { border-top: 1px solid var(--border-weak); margin-top: 10px; padding-top: 10px; }
 .memory-history-diff [class*="diff"] { font-size: 11.5px; }
 .memory-note-editor { border-top: 1px solid var(--border-weak); margin: 0 16px; padding: 12px 0 14px; }
-.memory-note-editor-grid { display: grid; gap: 8px; grid-template-columns: 1fr 1fr; margin-bottom: 8px; }
+.memory-note-editor-grid { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 8px; }
 .memory-note-editor-grid label { display: grid; gap: 3px; min-width: 0; }
 .memory-note-editor-grid label > span { color: var(--text-10); font-size: 11px; }
 .memory-note-editor-grid input, .memory-note-editor-grid select { border: 1px solid var(--border-weak); border-radius: 6px; background: var(--surface-09); color: var(--text-26); font: inherit; font-size: 12px; padding: 5px 8px; }
 .memory-note-body { box-sizing: border-box; width: 100%; border: 1px solid var(--border-weak); border-radius: 6px; background: var(--surface-09); color: var(--text-26); font-family: var(--font-mono, monospace); font-size: 12px; line-height: 1.5; padding: 8px; resize: vertical; }
 .memory-note-editor-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
 .memory-note-delete { margin-right: auto; }
+
+.memory-page .memory-empty-state { display: grid; justify-items: center; gap: 7px; padding: 24px 20px 30px; text-align: center; color: var(--text-14); }
+.memory-empty-state strong { color: var(--text-24); font-size: 13px; font-weight: 550; }
+.memory-page .memory-empty-state p { margin: 0; max-width: 360px; }
+.memory-advanced-body { padding: 4px 16px 18px; gap: 18px 20px; margin: 0; }
+.memory-page .memory-advanced-body label { align-content: start; gap: 7px; }
+.memory-page .memory-advanced-body label > span { font-size: 12px; color: var(--text-22); }
+.memory-advanced-body small { color: var(--text-09); font-size: 11.5px; line-height: 1.55; font-weight: 400; }
+.memory-dream-actions { flex-wrap: wrap; border-top: 1px solid var(--border-weak); margin: 0; padding: 12px 16px; }
+.memory-run-hint { flex: 1; min-width: 160px; color: var(--text-09); font-size: 11.5px; line-height: 1.5; }
+.memory-history-content { border-top: 1px solid var(--border-weak); }
+.memory-page .memory-form-actions { flex-wrap: wrap; margin: 0; padding-top: 16px; border-top: 1px solid var(--border-weak); }
+.memory-form-actions > .memory-section-caption, .memory-form-actions > .settings-unsaved-label { margin-right: auto; }
+.memory-page .memory-form-actions .settings-action-message { flex-basis: 100%; margin: 0; }
+@media (max-width: 700px) {
+ .memory-page { gap: 20px; }
+ .memory-page .settings-section-heading { align-items: flex-start; flex-wrap: wrap; gap: 4px 12px; }
+ .memory-notes-toolbar { flex-wrap: wrap; }
+ .settings-page .memory-notes-search { order: 3; flex-basis: 100%; }
+ .memory-notes-toolbar > .settings-secondary-button { margin-left: auto; }
+ .memory-note-editor-grid { grid-template-columns: minmax(0, 1fr); }
+ .memory-page .general-setting-copy { min-width: 0; }
+ .memory-page .general-setting-control { flex: none; }
+}
 .web-search-toggle { position: relative; display: inline-flex !important; cursor: pointer; }
 .web-search-toggle input[type="checkbox"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .web-search-toggle-track { position: relative; display: block; width: 36px; height: 22px; border: 1px solid var(--border-strong); border-radius: 999px; background: var(--surface-09); transition: background-color 140ms ease, border-color 140ms ease; }
@@ -3797,3 +3825,61 @@ classes so their inline layout wins the cascade. */
 .ask-user-answer-summary dl { display: grid; gap: 10px; margin: 14px 0 2px; }
 .ask-user-answer-summary dt { color: var(--text-19); margin-bottom: 4px; }
 .ask-user-answer-summary dd { margin: 0; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+
+
+.memory-manage-row { display: flex; align-items: center; gap: 14px; width: 100%; border: 0; background: transparent; padding: 17px 18px; text-align: left; color: var(--text-22); cursor: pointer; }
+.memory-manage-row + .memory-manage-row { border-top: 1px solid var(--border-weak); }
+.memory-manage-row:hover { background: var(--surface-04); }
+.memory-manage-row:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; border-radius: 10px; }
+.memory-manage-row > svg { flex: none; color: var(--text-14); }
+.memory-manage-copy { display: grid; gap: 5px; flex: 1; min-width: 0; }
+.memory-manage-copy strong { font-size: 13px; font-weight: 500; }
+.memory-manage-copy > span { font-size: 12px; line-height: 1.45; color: var(--text-09); }
+.memory-advanced-entry { border-top: 1px solid var(--border-weak); }
+.memory-dialog { width: min(700px, calc(100vw - 40px)); max-height: min(820px, calc(100dvh - 64px)); border: 1px solid var(--border-strong); border-radius: 16px; background: var(--panel-raised); color: var(--text); padding: 0; box-shadow: var(--overlay-shadow); overflow: hidden; -webkit-app-region: no-drag; }
+.memory-dialog[open] { display: flex; flex-direction: column; }
+.memory-dialog::backdrop { background: rgb(0 0 0 / 48%); backdrop-filter: blur(4px); }
+.memory-dialog-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid var(--border-weak); flex: none; }
+.memory-dialog-header h2 { margin: 0; font-size: 17px; line-height: 1.4; font-weight: 550; }
+.memory-dialog-header p { margin: 7px 0 0; color: var(--text-10); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
+.memory-dialog-close { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border: 0; border-radius: 7px; color: var(--text-14); background: transparent; cursor: pointer; }
+.memory-dialog-close:hover { color: var(--text); background: var(--surface-08); }
+.memory-dialog-body { min-height: 0; overflow: auto; padding: 20px 24px 24px; overscroll-behavior: contain; scrollbar-color: var(--scrollbar-thumb) transparent; }
+.memory-dialog-footer { display: flex; flex: none; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 16px 24px; border-top: 1px solid var(--border-weak); }
+.memory-dialog-discard p { margin: 0 auto 0 0; font-size: 12px; }
+.memory-dialog .memory-note-editor { border: 0; padding: 0; }
+.memory-dialog .memory-notes-toolbar { padding: 0 0 16px; }
+.memory-dialog .memory-history-row, .memory-dialog .memory-note-row { padding: 14px 0; }
+.memory-dialog .memory-advanced-body { padding: 0; grid-template-columns: 1fr; gap: 20px; }
+.memory-dialog .memory-advanced-body label > span { font-size: 13px; }
+.memory-dialog .memory-note-body { min-height: 180px; max-height: 40vh; }
+.memory-dialog-notice { font-size: 12px; color: var(--text-14); margin: 14px 0 0; }
+.memory-storage-location + .memory-storage-location { border-top: 1px solid var(--border-weak); padding-top: 18px; margin-top: 18px; }
+.memory-storage-location strong { font-size: 13px; }
+.memory-storage-location p { font-size: 12px; color: var(--text-10); }
+.memory-storage-location .memory-vault-path { display: block; margin: 10px 0 0; border: 0; padding: 12px; border-radius: 8px; background: var(--surface-04); overflow-wrap: anywhere; user-select: text; }
+.memory-session-toolbar { display: grid; gap: 14px; margin-bottom: 18px; }
+.memory-session-toolbar .memory-notes-search { min-height: 38px; }
+.memory-session-toolbar .memory-scope-tabs { justify-self: start; }
+.memory-session-list { list-style: none; display: grid; gap: 14px; padding: 0; margin: 0; }
+.memory-session-row { border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden; background: var(--surface-02); }
+.memory-session-heading { display: flex; align-items: center; gap: 12px; padding: 16px; }
+.memory-session-icon { width: 36px; height: 36px; flex: none; border-radius: 10px; background: var(--surface-08); color: var(--text-19); display: grid; place-items: center; }
+.memory-session-identity { min-width: 0; flex: 1; display: grid; gap: 5px; }
+.memory-session-identity strong { font-size: 13px; font-weight: 550; overflow-wrap: anywhere; }
+.memory-session-identity > span { color: var(--text-09); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.memory-session-badges { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; max-width: 120px; }
+.memory-session-badges span { font-size: 10px; color: var(--text-14); background: var(--surface-08); border-radius: 5px; padding: 3px 6px; }
+.memory-session-options { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--border-weak); padding: 12px 16px; gap: 24px; }
+.memory-session-option { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--text-19); }
+.memory-session-option + .memory-session-option { border-left: 1px solid var(--border-weak); padding-left: 24px; }
+.memory-session-meta { padding: 0 16px 12px; display: flex; justify-content: space-between; font-size: 10px; color: var(--text-09); }
+@media (max-width: 700px) {
+ .memory-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 32px); }
+ .memory-dialog-header { padding: 18px; }
+ .memory-dialog-body { padding: 18px; }
+ .memory-dialog-footer { padding: 14px 18px; }
+ .memory-session-options { grid-template-columns: 1fr; gap: 12px; }
+ .memory-session-option + .memory-session-option { padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border-weak); }
+ .memory-manage-row > .memory-section-caption { display: none; }
+}

@@ -25,12 +25,21 @@ async function flush() {
 }
 
 function button(container: HTMLElement, name: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((item) => item.textContent?.includes(name));
+	const buttons = [...container.querySelectorAll("button")];
+	const match =
+		buttons.find((item) => item.getAttribute("aria-label") === name || item.textContent === name) ??
+		buttons.find((item) => item.textContent?.includes(name));
 	if (!match) throw new Error(`Missing button: ${name}`);
 	return match as HTMLButtonElement;
 }
 
+async function openPanel(container: HTMLElement, name: string) {
+	await act(async () => button(container, name).click());
+	await flush();
+}
+
 async function fillNumber(container: HTMLElement, label: string, value: string) {
+	if (!container.querySelector(`input[aria-label="${label}"]`)) await openPanel(container, "Advanced settings");
 	const input = container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!;
 	expect(input).not.toBeNull();
 	await act(async () => {
@@ -100,6 +109,27 @@ const noteView: MemoryNoteView = {
 
 function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 	return {
+		listSessions: vi
+			.fn()
+			.mockResolvedValue({
+				sessions: [
+					{
+						sessionId: "99999999-8888-4777-8666-555544443333",
+						name: "Memory test",
+						mode: "code",
+						cwdOrigin: "user-selected",
+						cwd: "/work/metis",
+						createdAt: "2026-09-18T00:00:00Z",
+						updatedAt: "2026-09-18T00:00:00Z",
+						state: "idle",
+						archived: false,
+						unread: false,
+						useMemory: true,
+						contributeMemory: true,
+					},
+				],
+				nextAfterSessionId: null,
+			}),
 		getMemorySettings: vi.fn().mockResolvedValue(memorySettings),
 		updateMemorySettings: vi.fn().mockResolvedValue(memorySettings),
 		listMemoryNotes: vi.fn().mockResolvedValue({ notes: [noteSummary] }),
@@ -146,9 +176,13 @@ describe("MemorySettingsPanel", () => {
 		expect(api.getMemorySettings).toHaveBeenCalledTimes(1);
 		expect(api.listMemoryHistory).toHaveBeenCalledWith({ limit: 20 });
 		expect(toggle(container, "Enable long-term memory").checked).toBe(true);
-		expect(toggle(container, "Active context").checked).toBe(true);
+		expect(toggle(container, "Remember project progress").checked).toBe(true);
 		expect(toggle(container, "Consolidate memory while idle").checked).toBe(false);
+		expect(container.querySelector("dialog")).toBeNull();
+		await openPanel(container, "Storage location");
 		expect(container.querySelector(".memory-vault-path")?.textContent).toContain("/tmp/agent/memory/global");
+		await openPanel(container, "Close Storage location");
+		await openPanel(container, "Recent changes");
 		expect(container.querySelector(".memory-history-target")?.textContent).toContain("prefers-concise-replies");
 		await act(async () => root.unmount());
 	});
@@ -175,6 +209,87 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("preserves session controls and project scope after saving preferences", async () => {
+		const sessionId = "99999999-8888-4777-8666-555544443333";
+		const context: MemorySettingsView = {
+			...memorySettings,
+			session: { useMemory: true, contributeMemory: true },
+			vault: { ...memorySettings.vault, projectDir: "/tmp/project-memory", projectRoot: "/tmp/project" },
+		};
+		const api = makeApi({
+			getMemorySettings: vi.fn().mockResolvedValue(context),
+			updateMemorySettings: vi.fn(async (params) => (params.sessionId ? context : memorySettings)),
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady sessionId={sessionId} />));
+			await flush();
+			await act(async () => toggle(container, "Remember project progress").click());
+			await act(async () => button(container, "Save").click());
+			await flush();
+			expect(api.updateMemorySettings).toHaveBeenCalledWith(expect.objectContaining({ sessionId }));
+			await openPanel(container, "Conversation memory");
+			expect(
+				container.querySelector<HTMLInputElement>('input[aria-label="Use saved memories: Memory test"]')?.checked,
+			).toBe(true);
+			await openPanel(container, "Close Conversation memory");
+			await openPanel(container, "Manage saved memories");
+			expect(button(container, "Project")).toBeDefined();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("explains memory controls in Chinese and distinguishes an empty search", async () => {
+		await setLocale("zh-CN");
+		const api = makeApi({
+			getMemorySettings: vi
+				.fn()
+				.mockResolvedValue({ ...memorySettings, session: { useMemory: true, contributeMemory: true } }),
+			listMemoryNotes: vi.fn().mockResolvedValue({ notes: [] }),
+			listMemoryHistory: vi
+				.fn()
+				.mockResolvedValue({ entries: [{ ...historyEntry, op: "migrate", actor: { kind: "migrate" } }] }),
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () =>
+				root.render(<MemorySettingsPanel api={api} serverReady sessionId="99999999-8888-4777-8666-555544443333" />),
+			);
+			await flush();
+			for (const label of ["启用长期记忆", "记住项目进展"]) expect(toggle(container, label)).toBeDefined();
+			await openPanel(container, "会话记忆");
+			expect(container.textContent).toContain("开关立即生效");
+			await openPanel(container, "关闭会话记忆");
+			await openPanel(container, "管理已保存的记忆");
+			expect(container.textContent).toContain("还没有记忆");
+			expect(container.textContent).not.toMatch(/This session|Dream|New note|Search notes|migrate/);
+			await openPanel(container, "关闭已记住的内容");
+			await openPanel(container, "最近变更");
+			expect(container.textContent).toContain("导入 · 全局 · 导入");
+			await openPanel(container, "关闭最近变更");
+			await openPanel(container, "高级设置");
+			const model = container.querySelector<HTMLSelectElement>('select[aria-label="记忆模型"]')!;
+			expect(document.getElementById(model.getAttribute("aria-describedby")!)?.textContent).toContain("仅用于整理记忆");
+			await openPanel(container, "关闭高级设置");
+			await openPanel(container, "管理已保存的记忆");
+			const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
+			await act(async () => {
+				Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(search, "unmatched");
+				search.dispatchEvent(new Event("input", { bubbles: true }));
+			});
+			await flush();
+			expect(container.textContent).toContain("没有找到匹配的记忆");
+			expect(container.textContent).not.toContain("还没有记忆");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("reports dirty state through onDirtyChange", async () => {
 		const api = makeApi();
 		const onDirtyChange = vi.fn();
@@ -185,7 +300,7 @@ describe("MemorySettingsPanel", () => {
 		await flush();
 		expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 
-		await act(async () => toggle(container, "Active context").click());
+		await act(async () => toggle(container, "Remember project progress").click());
 		expect(onDirtyChange).toHaveBeenLastCalledWith(true);
 		await act(async () => root.unmount());
 	});
@@ -198,6 +313,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 		await flush();
 
+		await openPanel(container, "Recent changes");
 		await act(async () => button(container, "Undo").click());
 		await flush();
 
@@ -214,6 +330,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 		await flush();
 
+		await openPanel(container, "Recent changes");
 		expect(container.textContent).toContain("No memory changes yet.");
 		expect(container.querySelector(".memory-history-row")).toBeNull();
 		await act(async () => root.unmount());
@@ -237,7 +354,9 @@ describe("MemorySettingsPanel", () => {
 	});
 
 	it("surfaces a failed dream run", async () => {
-		const api = makeApi({ runMemoryDream: vi.fn().mockResolvedValue({ ok: false, error: "No credentialed model is available" }) });
+		const api = makeApi({
+			runMemoryDream: vi.fn().mockResolvedValue({ ok: false, error: "No credentialed model is available" }),
+		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -276,6 +395,7 @@ describe("MemorySettingsPanel", () => {
 		await flush();
 
 		expect(api.listMemoryNotes).toHaveBeenCalledWith({ scope: "global", limit: 100 });
+		await openPanel(container, "Manage saved memories");
 		expect(button(container, "Prefers concise replies")).toBeDefined();
 
 		await act(async () => button(container, "Prefers concise replies").click());
@@ -307,6 +427,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 		await flush();
 
+		await openPanel(container, "Manage saved memories");
 		await act(async () => button(container, "New note").click());
 		await flush();
 
@@ -333,6 +454,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 		await flush();
 
+		await openPanel(container, "Manage saved memories");
 		await act(async () => button(container, "Prefers concise replies").click());
 		await flush();
 		await act(async () => button(container, "Delete").click());
@@ -344,7 +466,7 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("shows session memory toggles and applies them immediately", async () => {
+	it("selects an explicit conversation and applies memory exceptions immediately", async () => {
 		const withSession: MemorySettingsView = {
 			...memorySettings,
 			session: { useMemory: true, contributeMemory: true },
@@ -362,10 +484,17 @@ describe("MemorySettingsPanel", () => {
 		expect(api.listMemoryNotes).toHaveBeenCalledWith(
 			expect.objectContaining({ sessionId: "99999999-8888-4777-8666-555544443333" }),
 		);
-		expect(toggle(container, "Use memory in this session").checked).toBe(true);
-		expect(toggle(container, "Learn from this session").checked).toBe(true);
+		await openPanel(container, "Conversation memory");
+		expect(
+			container.querySelector<HTMLInputElement>('input[aria-label="Use saved memories: Memory test"]')?.checked,
+		).toBe(true);
+		expect(
+			container.querySelector<HTMLInputElement>('input[aria-label="Save new memories: Memory test"]')?.checked,
+		).toBe(true);
 
-		await act(async () => toggle(container, "Learn from this session").click());
+		await act(async () =>
+			container.querySelector<HTMLInputElement>('input[aria-label="Save new memories: Memory test"]')!.click(),
+		);
 		await flush();
 
 		expect(api.setSessionMemoryFlags).toHaveBeenCalledWith(
@@ -382,8 +511,9 @@ describe("MemorySettingsPanel", () => {
 		await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 		await flush();
 
-		const historyRow = [...container.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((item) =>
-			item.textContent?.includes("prefers-concise-replies"),
+		await openPanel(container, "Recent changes");
+		const historyRow = [...container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]')].find(
+			(item) => item.textContent?.includes("prefers-concise-replies"),
 		)!;
 		await act(async () => historyRow.click());
 		await flush();
@@ -427,7 +557,7 @@ describe("MemorySettingsPanel", () => {
 			await fillNumber(container, "Minimum interval (hours)", "48");
 			await fillNumber(container, "Minimum eligible sessions", "9");
 			await fillNumber(container, "Unused-note age (days)", "120");
-			await act(async () => button(container, "Save").click());
+			await act(async () => button(container, "Save settings").click());
 			await flush();
 			expect(api.updateMemorySettings).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -448,9 +578,9 @@ describe("MemorySettingsPanel", () => {
 			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 			await flush();
 			await fillNumber(container, "Minimum interval (hours)", value);
-			expect(button(container, "Save").disabled).toBe(true);
+			expect(button(container, "Save settings").disabled).toBe(true);
 			expect(container.textContent).toContain("Minimum interval must be an integer");
-			await act(async () => button(container, "Save").click());
+			await act(async () => button(container, "Save settings").click());
 			await flush();
 			expect(api.updateMemorySettings).not.toHaveBeenCalled();
 		} finally {
@@ -503,10 +633,11 @@ describe("MemorySettingsPanel", () => {
 		try {
 			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 			await flush();
+			await openPanel(container, "Advanced settings");
 			const select = container.querySelector<HTMLSelectElement>('select[aria-label="Memory model"]')!;
 			expect(select.value).toBe(JSON.stringify(["openai", "gpt-5"]));
 			await selectOption(container, "Memory model", "");
-			await act(async () => button(container, "Save").click());
+			await act(async () => button(container, "Save settings").click());
 			await flush();
 			expect(api.updateMemorySettings).toHaveBeenCalledWith(
 				expect.objectContaining({ dream: expect.objectContaining({ model: null }) }),
@@ -528,6 +659,7 @@ describe("MemorySettingsPanel", () => {
 		try {
 			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 			await flush();
+			await openPanel(container, "Advanced settings");
 			const select = container.querySelector<HTMLSelectElement>('select[aria-label="Memory model"]')!;
 			expect(select.value).toBe(JSON.stringify(["acme", "gone-model"]));
 			const savedOption = [...select.options].find((o) => o.value === select.value)!;
@@ -577,7 +709,7 @@ describe("MemorySettingsPanel", () => {
 		}
 	});
 
-	it("keeps unsaved Dream numbers after a run reload", async () => {
+	it("guards advanced edits and restores the saved values when discarded", async () => {
 		const api = makeApi();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -586,13 +718,20 @@ describe("MemorySettingsPanel", () => {
 			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 			await flush();
 			await fillNumber(container, "Minimum interval (hours)", "48");
-			await act(async () => button(container, "Run now").click());
-			await flush();
-			expect(api.getMemorySettings).toHaveBeenCalledTimes(2);
+			await openPanel(container, "Close Advanced settings");
+			expect(container.textContent).toContain("Discard unsaved changes?");
+			await openPanel(container, "Keep editing");
 			expect(container.querySelector<HTMLInputElement>('input[aria-label="Minimum interval (hours)"]')!.value).toBe(
 				"48",
 			);
-			expect(container.textContent).toContain("Save changes to use them for the next run.");
+			await openPanel(container, "Close Advanced settings");
+			await openPanel(container, "Discard changes");
+			expect(container.querySelector("dialog")).toBeNull();
+			expect(api.updateMemorySettings).not.toHaveBeenCalled();
+			await openPanel(container, "Advanced settings");
+			expect(container.querySelector<HTMLInputElement>('input[aria-label="Minimum interval (hours)"]')!.value).toBe(
+				"24",
+			);
 		} finally {
 			await act(async () => root.unmount());
 		}
@@ -606,8 +745,9 @@ describe("MemorySettingsPanel", () => {
 		try {
 			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady />));
 			await flush();
-			const historyRow = [...container.querySelectorAll<HTMLButtonElement>("button[aria-expanded]")].find((item) =>
-				item.textContent?.includes("prefers-concise-replies"),
+			await openPanel(container, "Recent changes");
+			const historyRow = [...container.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]')].find(
+				(item) => item.textContent?.includes("prefers-concise-replies"),
 			)!;
 			await act(async () => historyRow.click());
 			await flush();
