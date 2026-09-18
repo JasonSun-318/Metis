@@ -41,6 +41,106 @@ describe("production runtime streaming", () => {
 		for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
 
+	it("projects cache hits, explicit misses, and missing reports without mixing them", async () => {
+		let calls = 0;
+		const cacheCounts = [9600, 0, undefined];
+		const provider = createServer(async (request, response) => {
+			for await (const _ of request) {
+				/* Drain the request body. */
+			}
+			const cache = cacheCounts[calls++];
+			response.writeHead(200, { "content-type": "text/event-stream" });
+			response.end(
+				`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 10000, completion_tokens: 400, ...(cache === undefined ? {} : { prompt_tokens_details: { cached_tokens: cache } }) } })}\n\ndata: [DONE]\n\n`,
+			);
+		});
+		const port = await listen(provider);
+		const root = mkdtempSync(join(tmpdir(), "metis-cache-status-"));
+		temporaryRoots.push(root);
+		const agentDir = join(root, "agent"),
+			projectDir = join(root, "project");
+		mkdirSync(agentDir);
+		mkdirSync(projectDir);
+		writeFileSync(
+			join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: {
+					local: {
+						baseUrl: `http://127.0.0.1:${port}/v1`,
+						apiKey: "test",
+						api: "openai-completions",
+						models: [{ id: "cache-test", name: "Cache test", contextWindow: 32000, maxTokens: 1024 }],
+					},
+				},
+			}),
+		);
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({ defaultProvider: "local", defaultModel: "cache-test", retry: { enabled: false } }),
+		);
+		const server = await AppServer.create({
+			agentDir,
+			sessionsRoot: join(agentDir, "sessions"),
+			titleGenerator: { generate: async () => undefined },
+		});
+		const connection = server.connect();
+		try {
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "init",
+				method: "initialize",
+				params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+			});
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create",
+				method: "session/create",
+				params: { requestId: SESSION_REQUEST, cwd: projectDir },
+			});
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "open",
+				method: "session/open",
+				params: { sessionId: SESSION_REQUEST },
+			});
+			for (let i = 0; i < 3; i++) {
+				const start = await connection.handle({
+					jsonrpc: "2.0",
+					id: `turn-${i}`,
+					method: "turn/start",
+					params: {
+						sessionId: SESSION_REQUEST,
+						requestId: `00000000-0000-4000-8000-00000000020${i}`,
+						text: `question ${i}`,
+					},
+				});
+				expect(start).not.toHaveProperty("error");
+				await expect.poll(() => calls).toBe(i + 1);
+				await expect.poll(() => server.catalog.get(SESSION_REQUEST).summary.state).toBe("idle");
+				const status = await connection.handle({
+					jsonrpc: "2.0",
+					id: `status-${i}`,
+					method: "session/status",
+					params: { sessionId: SESSION_REQUEST },
+				});
+				expect(status).toMatchObject({
+					result: { contextTokens: 10400, contextBasis: "reported_total", cacheHitPercent: [96, 0, null][i] },
+				});
+				if ("result" in status && "contextBreakdown" in status.result) {
+					expect(status.result.contextBreakdown?.reduce((sum, item) => sum + item.tokens, 0)).toBe(10400);
+				}
+			}
+			const transcript = readFileSync(server.catalog.get(SESSION_REQUEST).path, "utf8");
+			expect(transcript).toContain('"cacheReported":true');
+			expect(transcript).toContain('"cacheReported":false');
+		} finally {
+			server.beginShutdown();
+			await server.waitForShutdown();
+			provider.closeAllConnections();
+			await new Promise<void>((resolve) => provider.close(() => resolve()));
+		}
+	});
+
 	it("projects ordered thinking and text before the provider stream ends", async () => {
 		const longThinking = "t".repeat(9 * 1024);
 		let completionResponse: ServerResponse | undefined;

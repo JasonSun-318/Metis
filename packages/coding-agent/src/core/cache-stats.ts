@@ -34,18 +34,33 @@ export interface ModelPriceSource {
 	find(provider: string, modelId: string): { cost: { cacheRead: number } } | undefined;
 }
 
-/** Cache hit percentage for the latest completed model request, once the provider has reported caching. */
-export function getLatestCacheHitPercent(entries: readonly SessionEntry[]): number | undefined {
-	let reportedCache = false;
-	let latest: AssistantMessage["usage"] | undefined;
+/** Latest successful request on the supplied branch; excludes output tokens from the denominator. */
+export function getLatestCacheHitPercent(
+	entries: readonly SessionEntry[],
+	model?: { provider: string; id: string },
+): number | undefined {
+	const reportingModels = new Set<string>();
+	let latest: AssistantMessage | undefined;
 	for (const entry of entries) {
 		if (entry.type !== "message" || entry.message.role !== "assistant") continue;
-		latest = entry.message.usage;
-		reportedCache ||= latest.cacheRead + latest.cacheWrite > 0;
+		const message = entry.message;
+		if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+		latest = message;
+		if (message.usage.cacheRead + message.usage.cacheWrite > 0) {
+			reportingModels.add(JSON.stringify([message.provider, message.model]));
+		}
 	}
-	const promptTokens = latest ? latest.input + latest.cacheRead + latest.cacheWrite : 0;
-	return reportedCache && latest && promptTokens > 0
-		? Math.max(0, Math.min(100, (latest.cacheRead / promptTokens) * 100))
+	if (!latest || (model && (latest.provider !== model.provider || latest.model !== model.id))) return undefined;
+	const usage = latest.usage;
+	if (![usage.input, usage.cacheRead, usage.cacheWrite].every((value) => Number.isFinite(value) && value >= 0))
+		return undefined;
+	const promptTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+	// Old transcripts lack the explicit reporting flag. Infer support only within the same model.
+	const reported =
+		usage.cacheReported ??
+		(usage.cacheRead + usage.cacheWrite > 0 || reportingModels.has(JSON.stringify([latest.provider, latest.model])));
+	return reported && Number.isFinite(promptTokens) && promptTokens > 0
+		? (usage.cacheRead / promptTokens) * 100
 		: undefined;
 }
 

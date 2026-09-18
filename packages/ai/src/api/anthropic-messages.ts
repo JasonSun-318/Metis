@@ -575,6 +575,9 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					output.responseId = event.message.id;
 					// Capture initial token usage from message_start event
 					// This ensures we have input token counts even if the stream is aborted early
+					output.usage.cacheReported =
+						event.message.usage.cache_read_input_tokens != null ||
+						event.message.usage.cache_creation_input_tokens != null;
 					output.usage.input = event.message.usage.input_tokens || 0;
 					output.usage.output = event.message.usage.output_tokens || 0;
 					output.usage.cacheRead = event.message.usage.cache_read_input_tokens || 0;
@@ -722,9 +725,11 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 							output.usage.output = event.usage.output_tokens;
 						}
 						if (event.usage.cache_read_input_tokens != null) {
+							output.usage.cacheReported = true;
 							output.usage.cacheRead = event.usage.cache_read_input_tokens;
 						}
 						if (event.usage.cache_creation_input_tokens != null) {
+							output.usage.cacheReported = true;
 							output.usage.cacheWrite = event.usage.cache_creation_input_tokens;
 						}
 						// Anthropic reports reasoning tokens in `output_tokens_details.thinking_tokens` on the

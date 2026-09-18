@@ -281,6 +281,8 @@ export interface ToolCall {
 }
 
 export interface Usage {
+	/** Whether this response explicitly reports cache counts, including zero. Absent in older transcripts. */
+	cacheReported?: boolean;
 	input: number;
 	output: number;
 	cacheRead: number;

@@ -529,6 +529,8 @@ function handleMetadata(
 	output: AssistantMessage,
 ): void {
 	if (event.usage) {
+		output.usage.cacheReported =
+			event.usage.cacheReadInputTokens != null || event.usage.cacheWriteInputTokens != null;
 		output.usage.input = event.usage.inputTokens || 0;
 		output.usage.output = event.usage.outputTokens || 0;
 		output.usage.cacheRead = event.usage.cacheReadInputTokens || 0;

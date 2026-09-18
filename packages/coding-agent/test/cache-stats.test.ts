@@ -150,3 +150,32 @@ describe("getLatestCacheHitPercent", () => {
 		expect(getLatestCacheHitPercent([entry(assistant({ input: 100_000 }))])).toBeUndefined();
 	});
 });
+
+it("does not let an unsuccessful request replace the latest completed cache statistic", () => {
+	const failed = { ...assistant({ input: 100, cacheRead: 0 }), stopReason: "error" as const };
+	expect(getLatestCacheHitPercent([entry(turn2), entry(failed)])).toBeCloseTo(100_000 / 1050, 5);
+});
+
+it("does not infer cache reporting for a different model from earlier requests", () => {
+	expect(
+		getLatestCacheHitPercent([entry(turn2), entry(assistant({ model: "no-cache-report", input: 100 }))]),
+	).toBeUndefined();
+});
+
+it("distinguishes an explicit zero hit count from missing cache reporting", () => {
+	const zero = assistant({ input: 100 });
+	zero.usage.cacheReported = true;
+	expect(getLatestCacheHitPercent([entry(zero)])).toBe(0);
+	zero.usage.cacheReported = false;
+	expect(getLatestCacheHitPercent([entry(turn2), entry(zero)])).toBeUndefined();
+});
+
+it("does not show the previous model's ratio when the selected model has changed", () => {
+	expect(getLatestCacheHitPercent([entry(turn2)], { provider: "test", id: "other" })).toBeUndefined();
+});
+
+it("rejects invalid token counts instead of clamping a fabricated rate", () => {
+	for (const input of [-1, NaN, Infinity]) {
+		expect(getLatestCacheHitPercent([entry(assistant({ input, cacheRead: 100 }))])).toBeUndefined();
+	}
+});

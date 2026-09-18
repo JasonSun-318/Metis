@@ -1245,13 +1245,15 @@ function parseChunkUsage(
 		prompt_tokens?: number;
 		completion_tokens?: number;
 		prompt_cache_hit_tokens?: number;
+		cached_tokens?: number;
 		prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number };
 		completion_tokens_details?: { reasoning_tokens?: number };
 	},
 	model: Model<"openai-completions">,
 ): AssistantMessage["usage"] {
 	const promptTokens = rawUsage.prompt_tokens || 0;
-	const cacheReadTokens = rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? 0;
+	const cacheReadTokens =
+		rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? rawUsage.cached_tokens ?? 0;
 	const cacheWriteTokens = rawUsage.prompt_tokens_details?.cache_write_tokens || 0;
 
 	// Follow documented OpenAI/OpenRouter semantics: cached_tokens is cache-read
@@ -1266,6 +1268,11 @@ function parseChunkUsage(
 	// OpenAI completion_tokens already includes reasoning_tokens.
 	const outputTokens = rawUsage.completion_tokens || 0;
 	const usage: AssistantMessage["usage"] = {
+		cacheReported:
+			rawUsage.prompt_tokens_details?.cached_tokens != null ||
+			rawUsage.prompt_tokens_details?.cache_write_tokens != null ||
+			rawUsage.prompt_cache_hit_tokens != null ||
+			rawUsage.cached_tokens != null,
 		input,
 		output: outputTokens,
 		cacheRead: cacheReadTokens,

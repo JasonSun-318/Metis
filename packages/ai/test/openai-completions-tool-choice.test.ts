@@ -13,8 +13,10 @@ const mockState = vi.hoisted(() => ({
 				usage?: {
 					prompt_tokens: number;
 					completion_tokens: number;
-					prompt_tokens_details: { cached_tokens: number; cache_write_tokens?: number };
-					completion_tokens_details: { reasoning_tokens: number };
+					prompt_tokens_details?: { cached_tokens: number; cache_write_tokens?: number };
+					cached_tokens?: number;
+					prompt_cache_hit_tokens?: number;
+					completion_tokens_details?: { reasoning_tokens: number };
 				};
 		  }>
 		| undefined,
@@ -1715,5 +1717,36 @@ describe("openai-completions tool_choice", () => {
 		).result();
 
 		expect((payload ?? mockState.lastParams) as { reasoning?: unknown }).not.toHaveProperty("reasoning");
+	});
+});
+
+// Provider usage must retain whether zero is reported or merely defaulted.
+it.each([
+	[{ cached_tokens: 96 }, 96, true],
+	[{ prompt_cache_hit_tokens: 96 }, 96, true],
+	[{ prompt_tokens_details: { cached_tokens: 96 } }, 96, true],
+	[{ prompt_tokens_details: { cached_tokens: 0 } }, 0, true],
+	[{}, 0, false],
+] as const)("normalizes cache reporting from compatible usage %j", async (cache, expected, reported) => {
+	mockState.chunks = [
+		{
+			choices: [{ delta: { content: "OK" }, finish_reason: "stop" }],
+			usage: { prompt_tokens: 100, completion_tokens: 25, ...cache },
+		},
+	];
+	const { compat: _compat, ...baseModel } = getModel("openai", "gpt-4o-mini")!;
+	const model = { ...baseModel, api: "openai-completions" } as const;
+	const response = await streamSimple(
+		model,
+		{ messages: [{ role: "user", content: "hello", timestamp: 1 }] },
+		{ apiKey: "test" },
+	).result();
+	expect(response.usage).toMatchObject({
+		input: 100 - expected,
+		cacheRead: expected,
+		cacheWrite: 0,
+		output: 25,
+		totalTokens: 125,
+		cacheReported: reported,
 	});
 });

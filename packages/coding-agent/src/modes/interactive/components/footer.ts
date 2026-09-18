@@ -91,7 +91,7 @@ export class FooterComponent implements Component {
 		let totalCacheWrite = 0;
 		let totalCost = 0;
 		const entries = this.session.sessionManager.getEntries();
-		const latestCacheHitRate = getLatestCacheHitPercent(entries);
+		const latestCacheHitRate = getLatestCacheHitPercent(this.session.sessionManager.getBranch(), this.session.model);
 
 		for (const entry of entries) {
 			if (entry.type === "message" && entry.message.role === "assistant") {

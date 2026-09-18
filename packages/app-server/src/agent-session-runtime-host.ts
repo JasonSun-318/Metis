@@ -1528,7 +1528,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			contextBasis,
 			contextBreakdown,
 			remainingPercent: context?.percent == null ? null : Math.max(0, Math.min(100, 100 - context.percent)),
-			cacheHitPercent: getLatestCacheHitPercent(this.session.sessionManager.getEntries()) ?? null,
+			cacheHitPercent: getLatestCacheHitPercent(this.session.sessionManager.getBranch(), this.session.model) ?? null,
 		};
 	}
 
