@@ -3881,6 +3881,11 @@ export class AgentSession {
 			if (this._agentDir) clearSessionAttachmentNonFiles(this._agentDir, sessionId);
 			const errors: unknown[] = [];
 			try {
+				this.sessionManager.migrateCompactionCarry();
+			} catch (error) {
+				errors.push(error);
+			}
+			try {
 				await this.agent.prompt(messages);
 				while (await this._handlePostAgentRun()) {
 					await this.agent.continue();
@@ -4996,7 +5001,15 @@ export class AgentSession {
 				throw new Error("Compaction cancelled");
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
+			const contextCarry = this.sessionManager.computeCompactionCarry(firstKeptEntryId);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				contextCarry,
+			);
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
@@ -5278,7 +5291,15 @@ export class AgentSession {
 				return false;
 			}
 
-			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension);
+			const contextCarry = this.sessionManager.computeCompactionCarry(firstKeptEntryId);
+			this.sessionManager.appendCompaction(
+				summary,
+				firstKeptEntryId,
+				tokensBefore,
+				details,
+				fromExtension,
+				contextCarry,
+			);
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;

@@ -659,6 +659,8 @@ export {
 	type BranchSummaryEntry,
 	buildContextEntries,
 	buildSessionContext,
+	CONTEXT_CARRY_MIGRATION_TYPE,
+	type CompactionContextCarry,
 	type CompactionEntry,
 	CURRENT_SESSION_VERSION,
 	type CustomEntry,
