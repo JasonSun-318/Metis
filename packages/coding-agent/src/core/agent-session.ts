@@ -630,6 +630,7 @@ export class AgentSession {
 	 * requests never touch this field.
 	 */
 	private _pendingPromptCacheObservation?: PromptCacheObservation;
+	private _promptCacheDiagnostics: PromptCacheObservation[] = [];
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -938,6 +939,10 @@ export class AgentSession {
 			this._mapPromptCacheHints(agentMessages, llmMessages);
 		this.agent.onPromptCachePrepared = (observation) => {
 			this._pendingPromptCacheObservation = observation;
+			if (this.settingsManager.getPromptCacheSettings().diagnostics) {
+				this._promptCacheDiagnostics.push(observation);
+				if (this._promptCacheDiagnostics.length > 64) this._promptCacheDiagnostics.shift();
+			}
 		};
 
 		this._buildRuntime({
@@ -1022,6 +1027,15 @@ export class AgentSession {
 
 	get permissionGrantCount(): number {
 		return this._permissionRuntime.activeGrantCount;
+	}
+
+	/**
+	 * Recent prompt-cache layout observations (most recent last, at most 64).
+	 * Empty unless promptCache.diagnostics is enabled; observations carry
+	 * digests and byte counts only — no prompt bodies.
+	 */
+	getPromptCacheDiagnostics(): readonly PromptCacheObservation[] {
+		return [...this._promptCacheDiagnostics];
 	}
 
 	async disposeInteractiveExecution(): Promise<void> {

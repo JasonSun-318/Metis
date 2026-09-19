@@ -1,4 +1,4 @@
-import type { AssistantMessage } from "@metis/ai";
+import type { AssistantMessage, Usage } from "@metis/ai";
 import type { SessionEntry } from "./session-manager.ts";
 
 /**
@@ -32,6 +32,47 @@ export interface CacheWasteTotals {
 /** Minimal pricing lookup, satisfied by ModelRegistry. Cost is $/million tokens. */
 export interface ModelPriceSource {
 	find(provider: string, modelId: string): { cost: { cacheRead: number } } | undefined;
+}
+
+export interface PromptCacheTotals {
+	/** Total prompt-side tokens across requests that report cache usage (ordinary input + cache read + cache write). */
+	inputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	/** Requests whose usage explicitly reports cache fields. */
+	reportedRequests: number;
+	/** Requests whose usage does not report cache fields — unknown, not a measured zero hit. */
+	unreportedRequests: number;
+	/** cacheRead / inputTokens over reported requests; undefined when nothing was measured. */
+	hitRatio: number | undefined;
+}
+
+/**
+ * Aggregate prompt-cache usage across requests. Only usages with an explicit
+ * `cacheReported: true` count toward the ratio — legacy or uninstrumented
+ * records are listed as unreported rather than read as a zero hit.
+ */
+export function summarizePromptCacheUsage(usages: readonly Usage[]): PromptCacheTotals {
+	const result: PromptCacheTotals = {
+		inputTokens: 0,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		reportedRequests: 0,
+		unreportedRequests: 0,
+		hitRatio: undefined,
+	};
+	for (const usage of usages) {
+		if (usage.cacheReported !== true) {
+			result.unreportedRequests++;
+			continue;
+		}
+		result.reportedRequests++;
+		result.inputTokens += usage.input + usage.cacheRead + usage.cacheWrite;
+		result.cacheReadTokens += usage.cacheRead;
+		result.cacheWriteTokens += usage.cacheWrite;
+	}
+	result.hitRatio = result.inputTokens > 0 ? result.cacheReadTokens / result.inputTokens : undefined;
+	return result;
 }
 
 /** Latest successful request on the supplied branch; excludes output tokens from the denominator. */

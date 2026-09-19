@@ -6,6 +6,7 @@ import {
 	detectCacheMiss,
 	getLatestCacheHitPercent,
 	type ModelPriceSource,
+	summarizePromptCacheUsage,
 } from "../src/core/cache-stats.ts";
 import type { SessionEntry } from "../src/core/session-manager.ts";
 
@@ -178,4 +179,24 @@ it("rejects invalid token counts instead of clamping a fabricated rate", () => {
 	for (const input of [-1, NaN, Infinity]) {
 		expect(getLatestCacheHitPercent([entry(assistant({ input, cacheRead: 100 }))])).toBeUndefined();
 	}
+});
+
+describe("summarizePromptCacheUsage", () => {
+	it("never infers reporting from non-zero cache fields on legacy records", () => {
+		const legacy = assistant({ input: 50, cacheRead: 900 }).usage;
+		const result = summarizePromptCacheUsage([legacy]);
+		expect(result.reportedRequests).toBe(0);
+		expect(result.unreportedRequests).toBe(1);
+		expect(result.inputTokens).toBe(0);
+		expect(result.hitRatio).toBeUndefined();
+	});
+
+	it("excludes output tokens from the ratio", () => {
+		const usage = assistant({ input: 100, cacheRead: 300 }).usage;
+		usage.output = 50_000;
+		usage.cacheReported = true;
+		const result = summarizePromptCacheUsage([usage]);
+		expect(result.inputTokens).toBe(400);
+		expect(result.hitRatio).toBeCloseTo(300 / 400);
+	});
 });
