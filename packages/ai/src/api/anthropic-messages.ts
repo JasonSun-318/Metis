@@ -17,6 +17,8 @@ import type {
 	ImageContent,
 	Message,
 	Model,
+	PromptCacheHints,
+	PromptCacheObservation,
 	ProviderEnv,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -33,6 +35,12 @@ import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
+import {
+	type CacheCandidate,
+	chooseCacheCandidates,
+	digestCacheValue,
+	reusableCandidate,
+} from "../utils/prompt-cache-layout.ts";
 import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 
@@ -553,10 +561,34 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 				client = created.client;
 				isOAuth = created.isOAuthToken;
 			}
-			let params = buildParams(model, context, isOAuth, options);
+			const built = buildParams(model, context, isOAuth, options);
+			let params = built.params;
+			let prepared: PromptCacheObservation | undefined;
+			if (built.layout) {
+				try {
+					const layout = await applyAnthropicCacheLayout(built.params, built.layout, model);
+					if (layout) {
+						params = layout.payload;
+						prepared = layout.observation;
+					}
+				} catch {
+					// Cache layout is an optimization; on failure keep the legacy
+					// marker placement rather than risking the request.
+				}
+				if (!prepared) {
+					params = buildParams(model, { ...context, cacheHints: undefined }, isOAuth, options).params;
+				}
+			}
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as MessageCreateParamsStreaming;
+			}
+			if (prepared) {
+				try {
+					options?.onPromptCachePrepared?.(prepared);
+				} catch {
+					// Observation callbacks must never break the request path.
+				}
 			}
 			const requestOptions = {
 				...(options?.signal ? { signal: options.signal } : {}),
@@ -942,15 +974,40 @@ function createClient(
 	return { client, isOAuthToken: false };
 }
 
+interface AnthropicCacheLayoutInput {
+	cacheControl: CacheControlEphemeral;
+	hints: PromptCacheHints;
+	transformedToSource: (number | null)[];
+	paramSpans: AnthropicParamSpan[];
+	isOAuthToken: boolean;
+	supportsToolMarkers: boolean;
+	immediateToolCount: number;
+}
+
 function buildParams(
 	model: Model<"anthropic-messages">,
 	context: Context,
 	isOAuthToken: boolean,
 	options?: AnthropicOptions,
-): MessageCreateParamsStreaming {
+): { params: MessageCreateParamsStreaming; layout?: AnthropicCacheLayoutInput } {
 	const { cacheControl } = getCacheControl(model, options?.cacheRetention, options?.env);
 	const compat = getAnthropicCompat(model);
-	const transformedMessages = transformMessages(context.messages, model, normalizeToolCallId);
+	const hints = context.cacheHints;
+	const hintsEligible =
+		cacheControl !== undefined && hints !== undefined && hints.origins.length === context.messages.length;
+	const transformedToSource: (number | null)[] = [];
+	const transformedMessages = transformMessages(
+		context.messages,
+		model,
+		normalizeToolCallId,
+		hintsEligible
+			? {
+					onOutput: (outputIndex, sourceIndex) => {
+						transformedToSource[outputIndex] = sourceIndex;
+					},
+				}
+			: undefined,
+	);
 	const normalizeToolName = isOAuthToken ? toClaudeCodeName : (name: string) => name;
 	const toolPlacement = splitDeferredTools(
 		{ ...context, messages: transformedMessages },
@@ -964,34 +1021,41 @@ function buildParams(
 		deferredTools = [];
 	}
 	const deferredToolNames = new Set(deferredTools.map((tool) => normalizeToolName(tool.name)));
+	const paramSpans: AnthropicParamSpan[] = [];
 	const params: MessageCreateParamsStreaming = {
 		model: model.id,
 		messages: convertMessages(
 			transformedMessages,
 			isOAuthToken,
-			cacheControl,
+			hintsEligible ? undefined : cacheControl,
 			compat.allowEmptySignature,
 			deferredToolNames,
 			normalizeToolName,
+			hintsEligible
+				? (paramIndex, span) => {
+						paramSpans[paramIndex] = span;
+					}
+				: undefined,
 		),
 		max_tokens: options?.maxTokens ?? model.maxTokens,
 		stream: true,
 	};
 
 	// For OAuth tokens, we MUST include Claude Code identity
+	const staticCacheControl = hintsEligible ? undefined : cacheControl;
 	if (isOAuthToken) {
 		params.system = [
 			{
 				type: "text",
 				text: "You are Claude Code, Anthropic's official CLI for Claude.",
-				...(cacheControl ? { cache_control: cacheControl } : {}),
+				...(staticCacheControl ? { cache_control: staticCacheControl } : {}),
 			},
 		];
 		if (context.systemPrompt) {
 			params.system.push({
 				type: "text",
 				text: sanitizeSurrogates(context.systemPrompt),
-				...(cacheControl ? { cache_control: cacheControl } : {}),
+				...(staticCacheControl ? { cache_control: staticCacheControl } : {}),
 			});
 		}
 	} else if (context.systemPrompt) {
@@ -1000,7 +1064,7 @@ function buildParams(
 			{
 				type: "text",
 				text: sanitizeSurrogates(context.systemPrompt),
-				...(cacheControl ? { cache_control: cacheControl } : {}),
+				...(staticCacheControl ? { cache_control: staticCacheControl } : {}),
 			},
 		];
 	}
@@ -1016,7 +1080,7 @@ function buildParams(
 				immediateTools,
 				isOAuthToken,
 				compat.supportsEagerToolInputStreaming,
-				compat.supportsCacheControlOnTools ? cacheControl : undefined,
+				compat.supportsCacheControlOnTools ? staticCacheControl : undefined,
 			),
 			...convertTools(deferredTools, isOAuthToken, compat.supportsEagerToolInputStreaming, undefined, true),
 		];
@@ -1068,7 +1132,234 @@ function buildParams(
 		}
 	}
 
-	return params;
+	return {
+		params,
+		layout:
+			hintsEligible && cacheControl && hints
+				? {
+						cacheControl,
+						hints,
+						transformedToSource,
+						paramSpans,
+						isOAuthToken,
+						supportsToolMarkers: compat.supportsCacheControlOnTools === true,
+						immediateToolCount: immediateTools.length,
+					}
+				: undefined,
+	};
+}
+
+// Anthropic allows at most four cache_control markers per request, shared
+// between system, tools, and message breakpoints.
+const ANTHROPIC_CACHE_MARKER_BUDGET = 4;
+
+interface AnthropicMarkedCandidate extends CacheCandidate {
+	paramIndex: number;
+	blockIndex: number;
+	bytes: number;
+}
+
+const MARKABLE_BLOCK_TYPES = new Set(["text", "image", "tool_result", "tool_use"]);
+
+function markAnthropicBlock(
+	param: MessageParam,
+	blockIndex: number,
+	stringContent: boolean,
+	cacheControl: CacheControlEphemeral,
+): boolean {
+	if (stringContent && typeof param.content === "string") {
+		param.content = [{ type: "text", text: param.content, cache_control: cacheControl }] as never;
+		return true;
+	}
+	if (!Array.isArray(param.content)) return false;
+	const block = param.content[blockIndex];
+	if (!block || !MARKABLE_BLOCK_TYPES.has(block.type)) return false;
+	(block as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
+	return true;
+}
+
+/**
+ * Place cache breakpoints on stable history endpoints instead of the volatile
+ * request tail. Returns undefined when no stable candidate exists so the
+ * caller can rebuild with the legacy marker placement.
+ */
+async function applyAnthropicCacheLayout(
+	params: MessageCreateParamsStreaming,
+	layout: AnthropicCacheLayoutInput,
+	model: Model<"anthropic-messages">,
+): Promise<{ payload: MessageCreateParamsStreaming; observation: PromptCacheObservation } | undefined> {
+	const { cacheControl, hints, transformedToSource, paramSpans, isOAuthToken, supportsToolMarkers } = layout;
+	const { messages: _messages, tools: _tools, system: _system, ...settingsFrame } = params;
+	const settingsDigest = await digestCacheValue(settingsFrame);
+
+	let chain = settingsDigest;
+	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
+	const extend = async (frame: unknown): Promise<void> => {
+		const json = JSON.stringify(frame);
+		chain = await digestCacheValue([chain, json]);
+		bytes += new TextEncoder().encode(json).length;
+	};
+	if (params.tools) await extend(params.tools);
+	if (params.system) await extend(params.system);
+
+	// Last payload block attributed to each transformed source index.
+	const lastPosition = new Map<number, { paramIndex: number; blockIndex: number }>();
+	let firstVolatile: { paramIndex: number; blockIndex: number } | undefined;
+	params.messages.forEach((param, paramIndex) => {
+		const span = paramSpans[paramIndex];
+		const blockCount =
+			span?.stringContent === true && typeof param.content === "string"
+				? 1
+				: Array.isArray(param.content)
+					? param.content.length
+					: 0;
+		for (let blockIndex = 0; blockIndex < blockCount; blockIndex++) {
+			const transformedIndex = span?.blockSources[blockIndex];
+			const sourceIndex =
+				transformedIndex === null || transformedIndex === undefined ? null : transformedToSource[transformedIndex];
+			const origin = sourceIndex === null || sourceIndex === undefined ? undefined : hints.origins[sourceIndex];
+			if (origin?.kind !== "stable") {
+				firstVolatile ??= { paramIndex, blockIndex };
+				continue;
+			}
+			if (transformedIndex !== null && transformedIndex !== undefined) {
+				lastPosition.set(transformedIndex, { paramIndex, blockIndex });
+			}
+		}
+	});
+
+	const candidates: AnthropicMarkedCandidate[] = [];
+	const ordinals = new Map<string, number>();
+	let stableBytes = 0;
+	let candidateIndex = 0;
+
+	for (let paramIndex = 0; paramIndex < params.messages.length; paramIndex++) {
+		const param = params.messages[paramIndex];
+		const span = paramSpans[paramIndex];
+		await extend({ role: param.role });
+		const blocks =
+			span?.stringContent === true && typeof param.content === "string"
+				? [param.content]
+				: Array.isArray(param.content)
+					? param.content
+					: [];
+		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+			await extend(blocks[blockIndex]);
+			if (
+				firstVolatile &&
+				(paramIndex > firstVolatile.paramIndex ||
+					(paramIndex === firstVolatile.paramIndex && blockIndex >= firstVolatile.blockIndex))
+			) {
+				continue;
+			}
+			const transformedIndex = span?.blockSources[blockIndex];
+			if (transformedIndex === null || transformedIndex === undefined) continue;
+			const last = lastPosition.get(transformedIndex);
+			if (!last || last.paramIndex !== paramIndex || last.blockIndex !== blockIndex) continue;
+			const sourceIndex = transformedToSource[transformedIndex];
+			const origin = sourceIndex === null || sourceIndex === undefined ? undefined : hints.origins[sourceIndex];
+			if (origin?.kind !== "stable") continue;
+			const ordinal = ordinals.get(origin.id) ?? 0;
+			ordinals.set(origin.id, ordinal + 1);
+			candidates.push({
+				originId: origin.id,
+				ordinal,
+				prefixDigest: chain,
+				index: candidateIndex++,
+				paramIndex,
+				blockIndex,
+				bytes,
+			});
+			stableBytes = bytes;
+		}
+	}
+
+	if (candidates.length === 0) return undefined;
+
+	const previous = hints.previous;
+	const settingsMismatch =
+		previous !== undefined &&
+		(previous.provider !== model.provider ||
+			previous.model !== model.id ||
+			previous.settingsDigest !== settingsDigest);
+	const previousBoundary = settingsMismatch ? undefined : previous?.historyBoundary;
+	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as AnthropicMarkedCandidate[];
+	const reused = reusableCandidate(candidates, previousBoundary) as AnthropicMarkedCandidate | undefined;
+
+	let markers = 0;
+	for (const candidate of chosen) {
+		const param = params.messages[candidate.paramIndex];
+		const span = paramSpans[candidate.paramIndex];
+		if (param && span && markAnthropicBlock(param, candidate.blockIndex, span.stringContent, cacheControl)) {
+			markers++;
+		}
+	}
+
+	if (params.system && params.system.length > 0 && markers < ANTHROPIC_CACHE_MARKER_BUDGET) {
+		const last = params.system[params.system.length - 1];
+		if (
+			last &&
+			typeof last === "object" &&
+			(last as { cache_control?: CacheControlEphemeral }).cache_control === undefined
+		) {
+			(last as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
+			markers++;
+		}
+	}
+	if (
+		supportsToolMarkers &&
+		params.tools &&
+		layout.immediateToolCount > 0 &&
+		markers < ANTHROPIC_CACHE_MARKER_BUDGET
+	) {
+		const last = params.tools[layout.immediateToolCount - 1];
+		if (last && (last as { cache_control?: CacheControlEphemeral }).cache_control === undefined) {
+			(last as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
+			markers++;
+		}
+	}
+	// The OAuth identity block keeps a marker only when the budget still has
+	// room after history, system, and tools; its text content is never changed.
+	if (isOAuthToken && params.system && params.system.length > 0 && markers < ANTHROPIC_CACHE_MARKER_BUDGET) {
+		const identity = params.system[0];
+		if (
+			identity &&
+			typeof identity === "object" &&
+			(identity as { cache_control?: CacheControlEphemeral }).cache_control === undefined
+		) {
+			(identity as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
+			markers++;
+		}
+	}
+
+	const newestChosen = chosen[chosen.length - 1];
+	const observation: PromptCacheObservation = {
+		checkpoint: newestChosen
+			? {
+					version: 1,
+					provider: model.provider,
+					model: model.id,
+					settingsDigest,
+					historyBoundary: {
+						originId: newestChosen.originId,
+						ordinal: newestChosen.ordinal,
+						prefixDigest: newestChosen.prefixDigest,
+					},
+				}
+			: undefined,
+		reason: !previous
+			? "append"
+			: settingsMismatch
+				? "settings-change"
+				: reused
+					? chosen[chosen.length - 1] !== reused
+						? "append"
+						: "suffix"
+					: "history-change",
+		reusableInputBytes: reused?.bytes ?? 0,
+		stableInputBytes: stableBytes,
+	};
+	return { payload: params, observation };
 }
 
 // Normalize tool call IDs to match Anthropic's required pattern and length
@@ -1111,6 +1402,19 @@ function convertToolResult(
 	};
 }
 
+/**
+ * Per-param source map for prompt-cache layout. `blockSources` has one entry
+ * per serialized content block (a raw string body counts as a single block),
+ * holding the index of the transformed message that produced it, or null for
+ * synthesized content.
+ */
+interface AnthropicParamSpan {
+	blockSources: (number | null)[];
+	stringContent: boolean;
+}
+
+type ParamTrace = (paramIndex: number, span: AnthropicParamSpan) => void;
+
 function convertMessages(
 	transformedMessages: Message[],
 	isOAuthToken: boolean,
@@ -1118,9 +1422,14 @@ function convertMessages(
 	allowEmptySignature = false,
 	deferredToolNames: ReadonlySet<string> = new Set(),
 	normalizeToolName: (name: string) => string = (name) => name,
+	onParam?: ParamTrace,
 ): MessageParam[] {
 	const params: MessageParam[] = [];
 	const loadedToolNames = new Set<string>();
+	const pushParam = (param: MessageParam, span: AnthropicParamSpan) => {
+		params.push(param);
+		onParam?.(params.length - 1, span);
+	};
 
 	for (let i = 0; i < transformedMessages.length; i++) {
 		const msg = transformedMessages[i];
@@ -1128,10 +1437,13 @@ function convertMessages(
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
 				if (msg.content.trim().length > 0) {
-					params.push({
-						role: "user",
-						content: sanitizeSurrogates(msg.content),
-					});
+					pushParam(
+						{
+							role: "user",
+							content: sanitizeSurrogates(msg.content),
+						},
+						{ blockSources: [i], stringContent: true },
+					);
 				}
 			} else {
 				const blocks: ContentBlockParam[] = msg.content.map((item) => {
@@ -1158,10 +1470,13 @@ function convertMessages(
 					return true;
 				});
 				if (filteredBlocks.length === 0) continue;
-				params.push({
-					role: "user",
-					content: filteredBlocks,
-				});
+				pushParam(
+					{
+						role: "user",
+						content: filteredBlocks,
+					},
+					{ blockSources: filteredBlocks.map(() => i), stringContent: false },
+				);
 			}
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
@@ -1218,14 +1533,19 @@ function convertMessages(
 				}
 			}
 			if (blocks.length === 0) continue;
-			params.push({
-				role: "assistant",
-				content: blocks,
-			});
+			pushParam(
+				{
+					role: "assistant",
+					content: blocks,
+				},
+				{ blockSources: blocks.map(() => i), stringContent: false },
+			);
 		} else if (msg.role === "toolResult") {
 			// Collect all consecutive toolResult messages, needed for z.ai Anthropic endpoint.
 			const toolResults: ContentBlockParam[] = [];
 			const siblingContent: ContentBlockParam[] = [];
+			const toolResultSources: (number | null)[] = [];
+			const siblingSources: (number | null)[] = [];
 			let j = i;
 			while (j < transformedMessages.length && transformedMessages[j].role === "toolResult") {
 				const converted = convertToolResult(
@@ -1236,7 +1556,9 @@ function convertMessages(
 					normalizeToolName,
 				);
 				toolResults.push(converted.toolResult);
+				toolResultSources.push(j);
 				siblingContent.push(...converted.siblingContent);
+				for (let k = 0; k < converted.siblingContent.length; k++) siblingSources.push(j);
 				j++;
 			}
 
@@ -1244,10 +1566,13 @@ function convertMessages(
 			i = j - 1;
 
 			// Displaced reference-bearing results must follow every tool_result block.
-			params.push({
-				role: "user",
-				content: [...toolResults, ...siblingContent],
-			});
+			pushParam(
+				{
+					role: "user",
+					content: [...toolResults, ...siblingContent],
+				},
+				{ blockSources: [...toolResultSources, ...siblingSources], stringContent: false },
+			);
 		}
 	}
 

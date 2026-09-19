@@ -2,12 +2,13 @@ import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { stream as anthropic } from "../src/api/anthropic-messages.ts";
 import { stream as responses } from "../src/api/openai-responses.ts";
-import type { Context, Model, StreamOptions } from "../src/types.ts";
+import type { Context, Model, PromptCacheObservation, StreamOptions } from "../src/types.ts";
 
 export type PromptCacheWireApi = "anthropic-messages" | "openai-responses";
 
 export interface CapturedWire {
 	body: Record<string, unknown>;
+	observations: PromptCacheObservation[];
 }
 
 type CompatFor<TApi extends PromptCacheWireApi> = TApi extends "anthropic-messages"
@@ -39,6 +40,7 @@ export async function captureWire(
 	compat?: CompatFor<PromptCacheWireApi>,
 ): Promise<CapturedWire> {
 	let body: Record<string, unknown> | undefined;
+	const observations: PromptCacheObservation[] = [];
 	const server = createServer(async (request, response) => {
 		const chunks: Buffer[] = [];
 		for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -56,17 +58,22 @@ export async function captureWire(
 		provider: "cache-test",
 		baseUrl,
 		reasoning: false,
-		input: ["text" as const],
+		input: ["text" as const, "image" as const],
 		contextWindow: 200_000,
 		maxTokens: 1024,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 	};
 	try {
+		const userCallback = options.onPromptCachePrepared;
 		const opts = {
 			apiKey: "test-key",
 			maxRetries: 0,
 			timeoutMs: 2000,
 			...options,
+			onPromptCachePrepared: (observation: PromptCacheObservation) => {
+				observations.push(observation);
+				userCallback?.(observation);
+			},
 		};
 		const events =
 			api === "anthropic-messages"
@@ -99,7 +106,7 @@ export async function captureWire(
 		await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
 	}
 	if (!body) throw new Error("Expected loopback provider request");
-	return { body };
+	return { body, observations };
 }
 
 /**
