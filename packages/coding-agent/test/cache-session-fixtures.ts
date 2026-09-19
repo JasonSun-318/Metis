@@ -35,6 +35,9 @@ export interface CacheSessionFixture {
 export interface CacheSessionOptions {
 	readonly contextWindow?: number;
 	readonly configureAgent?: (agent: Agent) => void;
+	/** Reuse an existing manager (e.g. a reopened session file); hydrates the
+	 *  agent state from its buildSessionContext() like the production resume path. */
+	readonly manager?: SessionManager;
 }
 
 export function createCacheSession(root: string, options?: CacheSessionOptions): CacheSessionFixture {
@@ -52,8 +55,11 @@ export function createCacheSession(root: string, options?: CacheSessionOptions):
 		convertToLlm,
 	});
 	options?.configureAgent?.(agent);
-	const manager = SessionManager.create(root, join(root, "sessions"));
+	const manager = options?.manager ?? SessionManager.create(root, join(root, "sessions"));
 	manager.setPermissionPreset("full");
+	if (options?.manager) {
+		agent.state.messages = [...manager.buildSessionContext().messages];
+	}
 	const settings = SettingsManager.create(root, root);
 	const auth = AuthStorage.create(join(root, "auth.json"));
 	auth.setRuntimeApiKey("anthropic", "test-key");

@@ -41,9 +41,19 @@ function canonicalJson(value: unknown): string {
  * results this covers content, toolName, toolCallId, isError, and details.
  * This is a source-integrity digest, not the provider prefix digest used for
  * breakpoint reuse.
+ *
+ * Memoized per message object: journal entries and transformed views are
+ * immutable once produced (the only in-place rewrite path operates on
+ * structured clones), so a request does not re-hash the whole history.
  */
+const sourceDigestCache = new WeakMap<AgentMessage, string>();
+
 export function getContextSourceDigest(message: AgentMessage): string {
-	return createHash("sha256").update(canonicalJson(message)).digest("hex");
+	const cached = sourceDigestCache.get(message);
+	if (cached !== undefined) return cached;
+	const digest = createHash("sha256").update(canonicalJson(message)).digest("hex");
+	sourceDigestCache.set(message, digest);
+	return digest;
 }
 
 export type ContextViewErrorCode =
