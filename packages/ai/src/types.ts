@@ -131,6 +131,12 @@ export interface StreamOptions {
 	 */
 	onPayload?: (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
 	/**
+	 * Optional callback invoked once per request after the provider cache layout
+	 * is prepared. The observation describes what was marked, not whether the
+	 * provider served the request from cache.
+	 */
+	onPromptCachePrepared?: (observation: PromptCacheObservation) => void;
+	/**
 	 * Optional callback invoked after an HTTP response is received and before
 	 * its body stream is consumed.
 	 */
@@ -354,10 +360,68 @@ export interface Tool<TParameters extends TSchema = TSchema> {
 	parameters: TParameters;
 }
 
+/**
+ * Origin metadata for a Context message, used to keep prompt-cache breakpoints
+ * attached to stable history entries across requests.
+ */
+export interface PromptCacheOrigin {
+	id: string;
+	kind: "stable" | "volatile";
+}
+
+/**
+ * A markable position inside the serialized provider payload, identified by
+ * the originating history entry, its markable-block ordinal, and a digest of
+ * the request prefix that precedes it.
+ */
+export interface PromptCacheBoundary {
+	originId: string;
+	ordinal: number;
+	prefixDigest: string;
+}
+
+/**
+ * A persisted record of the cache layout a completed request used, so later
+ * requests on the same provider/model/settings can reuse its breakpoints.
+ */
+export interface PromptCacheCheckpoint {
+	version: 1;
+	provider: string;
+	model: string;
+	settingsDigest: string;
+	historyBoundary: PromptCacheBoundary;
+}
+
+export interface PromptCacheHints {
+	/** One entry per `Context.messages` element, in the same order. */
+	origins: readonly PromptCacheOrigin[];
+	previous?: PromptCacheCheckpoint;
+}
+
+/**
+ * An observation of the cache layout a request used. It records what was
+ * marked, not whether the provider actually served the request from cache.
+ */
+export interface PromptCacheObservation {
+	checkpoint?: PromptCacheCheckpoint;
+	reason:
+		| "append"
+		| "suffix"
+		| "history-change"
+		| "settings-change"
+		| "hook-change"
+		| "unsupported"
+		| "disabled"
+		| "unmapped";
+	reusableInputBytes: number;
+	stableInputBytes: number;
+}
+
 export interface Context {
 	systemPrompt?: string;
 	messages: Message[];
 	tools?: Tool[];
+	cacheHints?: PromptCacheHints;
 }
 
 /**
