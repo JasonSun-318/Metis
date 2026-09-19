@@ -7,6 +7,7 @@ import type {
 	ImageContent,
 	Message,
 	Model,
+	PromptCacheHints,
 	SimpleStreamOptions,
 	TextContent,
 	Tool,
@@ -92,6 +93,17 @@ export interface BeforeProviderRequestContext {
 	readonly agentMessages: readonly AgentMessage[];
 	readonly llmContext: Context;
 }
+
+/**
+ * Maps the transformed agent messages and the converted LLM messages to prompt
+ * cache hints attached to `Context.cacheHints`. Return undefined when the
+ * conversion cannot be traced back to durable origins (e.g. a custom
+ * `convertToLlm` whose output does not match per-message conversion).
+ */
+export type PromptCacheHintsMapper = (
+	agentMessages: readonly AgentMessage[],
+	llmMessages: readonly Message[],
+) => PromptCacheHints | undefined;
 
 /** A single tool call content block emitted by an assistant message. */
 export type AgentToolCall = Extract<AssistantMessage["content"][number], { type: "toolCall" }>;
@@ -242,6 +254,13 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 	 * ```
 	 */
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+
+	/**
+	 * Optional mapper that attaches prompt-cache origin hints to the outgoing
+	 * `Context`. Called once per provider request after `convertToLlm`.
+	 * Must not throw; a throwing mapper leaves the request without cache hints.
+	 */
+	mapPromptCacheHints?: PromptCacheHintsMapper;
 
 	/**
 	 * Resolves an API key dynamically for each LLM call.

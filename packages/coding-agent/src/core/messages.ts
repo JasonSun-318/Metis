@@ -6,7 +6,7 @@
  */
 
 import type { AgentMessage } from "@metis/agent-core";
-import type { ImageContent, Message, TextContent } from "@metis/ai";
+import type { ImageContent, Message, PromptCacheOrigin, TextContent } from "@metis/ai";
 
 export const COMPACTION_SUMMARY_PREFIX = `The conversation history before this point was compacted into the following summary:
 
@@ -143,6 +143,66 @@ export function createCustomMessage(
 	};
 }
 
+function convertMessageToLlm(m: AgentMessage): Message | undefined {
+	switch (m.role) {
+		case "bashExecution":
+			// Skip messages excluded from context (!! prefix)
+			if (m.excludeFromContext) {
+				return undefined;
+			}
+			return {
+				role: "user",
+				content: [{ type: "text", text: bashExecutionToText(m) }],
+				timestamp: m.timestamp,
+			};
+		case "custom": {
+			const content = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
+			return {
+				role: "user",
+				content,
+				timestamp: m.timestamp,
+			};
+		}
+		case "branchSummary":
+			return {
+				role: "user",
+				content: [{ type: "text" as const, text: BRANCH_SUMMARY_PREFIX + m.summary + BRANCH_SUMMARY_SUFFIX }],
+				timestamp: m.timestamp,
+			};
+		case "compactionSummary":
+			return {
+				role: "user",
+				content: [
+					{ type: "text" as const, text: COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX },
+				],
+				timestamp: m.timestamp,
+			};
+		case "user": {
+			const hookContext = (m as { hookContext?: string }).hookContext;
+			if (!hookContext) {
+				return m;
+			}
+			if (typeof m.content === "string") {
+				return {
+					...m,
+					content: `${m.content}\n\n${hookContext}`,
+				};
+			}
+			return {
+				...m,
+				content: [...m.content, { type: "text" as const, text: hookContext }],
+			};
+		}
+		case "assistant":
+		case "toolResult":
+			return m;
+		default: {
+			const exhaustiveCheck: never = m;
+			return exhaustiveCheck;
+		}
+	}
+}
+
 /**
  * Transform AgentMessages (including custom types) to LLM-compatible Messages.
  *
@@ -152,65 +212,29 @@ export function createCustomMessage(
  * - Custom extensions and tools
  */
 export function convertToLlm(messages: AgentMessage[]): Message[] {
-	return messages
-		.map((m): Message | undefined => {
-			switch (m.role) {
-				case "bashExecution":
-					// Skip messages excluded from context (!! prefix)
-					if (m.excludeFromContext) {
-						return undefined;
-					}
-					return {
-						role: "user",
-						content: [{ type: "text", text: bashExecutionToText(m) }],
-						timestamp: m.timestamp,
-					};
-				case "custom": {
-					const content = typeof m.content === "string" ? [{ type: "text" as const, text: m.content }] : m.content;
-					return {
-						role: "user",
-						content,
-						timestamp: m.timestamp,
-					};
-				}
-				case "branchSummary":
-					return {
-						role: "user",
-						content: [{ type: "text" as const, text: BRANCH_SUMMARY_PREFIX + m.summary + BRANCH_SUMMARY_SUFFIX }],
-						timestamp: m.timestamp,
-					};
-				case "compactionSummary":
-					return {
-						role: "user",
-						content: [
-							{ type: "text" as const, text: COMPACTION_SUMMARY_PREFIX + m.summary + COMPACTION_SUMMARY_SUFFIX },
-						],
-						timestamp: m.timestamp,
-					};
-				case "user": {
-					const hookContext = (m as { hookContext?: string }).hookContext;
-					if (!hookContext) {
-						return m;
-					}
-					if (typeof m.content === "string") {
-						return {
-							...m,
-							content: `${m.content}\n\n${hookContext}`,
-						};
-					}
-					return {
-						...m,
-						content: [...m.content, { type: "text" as const, text: hookContext }],
-					};
-				}
-				case "assistant":
-				case "toolResult":
-					return m;
-				default:
-					// biome-ignore lint/correctness/noSwitchDeclarations: fine
-					const _exhaustiveCheck: never = m;
-					return undefined;
-			}
-		})
-		.filter((m) => m !== undefined);
+	return messages.map(convertMessageToLlm).filter((m) => m !== undefined);
+}
+
+/**
+ * Convert AgentMessages while tracking which prompt-cache origin produced each
+ * output message. `origins` must have exactly one entry per input message;
+ * messages that convert to zero outputs drop their origin alongside them.
+ */
+export function convertToLlmWithOrigins(
+	messages: AgentMessage[],
+	origins: readonly PromptCacheOrigin[],
+): { messages: Message[]; origins: PromptCacheOrigin[] } {
+	if (messages.length !== origins.length) {
+		throw new Error(`origin count mismatch: ${origins.length} origins for ${messages.length} messages`);
+	}
+	const converted: Message[] = [];
+	const mapped: PromptCacheOrigin[] = [];
+	messages.forEach((message, index) => {
+		const result = convertMessageToLlm(message);
+		if (result !== undefined) {
+			converted.push(result);
+			mapped.push(origins[index]!);
+		}
+	});
+	return { messages: converted, origins: mapped };
 }

@@ -30,7 +30,16 @@ import type {
 	PrepareNextTurnContext,
 	ThinkingLevel,
 } from "@metis/agent-core";
-import type { AssistantMessage, ImageContent, Message, Model, TextContent, Tool } from "@metis/ai/compat";
+import type {
+	AssistantMessage,
+	ImageContent,
+	Message,
+	Model,
+	PromptCacheHints,
+	PromptCacheOrigin,
+	TextContent,
+	Tool,
+} from "@metis/ai/compat";
 import {
 	clampThinkingLevel,
 	cleanupSessionResources,
@@ -67,6 +76,7 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
+import { getContextSourceDigest } from "./context-view.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -125,7 +135,7 @@ import { MemorySearchIndex } from "./memory/vault-search.ts";
 import { buildMemoryPromptSnapshot, type MemoryPromptSnapshot } from "./memory/vault-snapshot.ts";
 import { createMemoryToolDefinitions, MEMORY_TOOL_NAMES } from "./memory/vault-tools.ts";
 import type { MemoryActor } from "./memory/vault-types.ts";
-import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
+import { type BashExecutionMessage, type CustomMessage, convertToLlm, convertToLlmWithOrigins } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
 import type { RequestPermissionApproval } from "./permissions/approval.ts";
 import {
@@ -892,6 +902,8 @@ export class AgentSession {
 		this._installToolResultMicrocompactionHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
+		this.agent.mapPromptCacheHints = (agentMessages, llmMessages) =>
+			this._mapPromptCacheHints(agentMessages, llmMessages);
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -1324,12 +1336,65 @@ export class AgentSession {
 		const transformContext = this.agent.transformContext;
 		this.agent.transformContext = async (messages, signal) => {
 			const transformed = transformContext ? await transformContext(messages, signal) : messages;
-			return projectPlanContext(transformed, {
-				collaborationMode: this.sessionManager.getCollaborationMode(),
-				currentPlan: this.sessionManager.getPlanState().currentPlan,
-				executionPlan: this._currentDurablePlanExecution(),
-			});
+			const sources = new Map<AgentMessage, AgentMessage>();
+			const projected = projectPlanContext(
+				transformed,
+				{
+					collaborationMode: this.sessionManager.getCollaborationMode(),
+					currentPlan: this.sessionManager.getPlanState().currentPlan,
+					executionPlan: this._currentDurablePlanExecution(),
+				},
+				sources,
+			);
+			this._planProjectionSources = sources;
+			return projected;
 		};
+	}
+
+	private _planProjectionSources = new Map<AgentMessage, AgentMessage>();
+
+	/**
+	 * Attach stable durable origins to converted LLM messages so provider cache
+	 * breakpoints can be reused across requests. Returns undefined when a
+	 * custom convertToLlm produced output that does not match per-message
+	 * conversion, since origins could then be misattributed.
+	 */
+	private _mapPromptCacheHints(
+		agentMessages: readonly AgentMessage[],
+		llmMessages: readonly Message[],
+	): PromptCacheHints | undefined {
+		let digestIndex: Map<string, string | null> | undefined;
+		const digestFor = (message: AgentMessage): string | undefined => {
+			digestIndex ??= (() => {
+				const index = new Map<string, string | null>();
+				for (const entry of this.sessionManager.getBranch()) {
+					if (entry.type !== "message") continue;
+					const digest = getContextSourceDigest(entry.message as AgentMessage);
+					index.set(digest, index.has(digest) ? null : entry.id);
+				}
+				return index;
+			})();
+			return digestIndex.get(getContextSourceDigest(message)) ?? undefined;
+		};
+		const origins = agentMessages.map((message, index): PromptCacheOrigin => {
+			const source = this._planProjectionSources.get(message) ?? message;
+			const entryId = this.sessionManager.getMessageEntryId(source);
+			if (entryId !== undefined) return { id: entryId, kind: "stable" };
+			if (message.role === "custom" && message.customType === "metis_plan_context") {
+				return { id: "request:plan", kind: "volatile" };
+			}
+			const digestId = digestFor(source);
+			if (digestId !== undefined) return { id: digestId, kind: "stable" };
+			return { id: `volatile:${index}`, kind: "volatile" };
+		});
+		const converted = convertToLlmWithOrigins([...agentMessages], origins);
+		if (
+			this.agent.convertToLlm !== convertToLlm &&
+			JSON.stringify(converted.messages) !== JSON.stringify(llmMessages)
+		) {
+			return undefined;
+		}
+		return { origins: converted.origins };
 	}
 
 	private _installToolResultMicrocompactionHook(): void {

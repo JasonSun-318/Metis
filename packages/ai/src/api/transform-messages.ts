@@ -57,6 +57,16 @@ function downgradeUnsupportedImages<TApi extends Api>(messages: Message[], model
 }
 
 /**
+ * Trace hook for transformMessages. For every message appended to the output,
+ * `onOutput` reports the output index and the index of the input message it was
+ * derived from. Synthesized outputs (e.g. synthetic tool results for orphaned
+ * tool calls) report `null` as their source index.
+ */
+export interface MessageTransformTrace {
+	onOutput: (outputIndex: number, sourceIndex: number | null) => void;
+}
+
+/**
  * Normalize tool call ID for cross-provider compatibility.
  * OpenAI Responses API generates IDs that are 450+ chars with special characters like `|`.
  * Anthropic APIs require IDs matching ^[a-zA-Z0-9_-]+$ (max 64 chars).
@@ -65,6 +75,7 @@ export function transformMessages<TApi extends Api>(
 	messages: Message[],
 	model: Model<TApi>,
 	normalizeToolCallId?: (id: string, model: Model<TApi>, source: AssistantMessage) => string,
+	trace?: MessageTransformTrace,
 ): Message[] {
 	// Build a map of original tool call IDs to normalized IDs
 	const toolCallIdMap = new Map<string, string>();
@@ -160,18 +171,25 @@ export function transformMessages<TApi extends Api>(
 	const result: Message[] = [];
 	let pendingToolCalls: ToolCall[] = [];
 	let existingToolResultIds = new Set<string>();
+	const push = (message: Message, sourceIndex: number | null) => {
+		result.push(message);
+		trace?.onOutput(result.length - 1, sourceIndex);
+	};
 	const insertSyntheticToolResults = () => {
 		if (pendingToolCalls.length > 0) {
 			for (const tc of pendingToolCalls) {
 				if (!existingToolResultIds.has(tc.id)) {
-					result.push({
-						role: "toolResult",
-						toolCallId: tc.id,
-						toolName: tc.name,
-						content: [{ type: "text", text: "No result provided" }],
-						isError: true,
-						timestamp: Date.now(),
-					} as ToolResultMessage);
+					push(
+						{
+							role: "toolResult",
+							toolCallId: tc.id,
+							toolName: tc.name,
+							content: [{ type: "text", text: "No result provided" }],
+							isError: true,
+							timestamp: Date.now(),
+						} as ToolResultMessage,
+						null,
+					);
 				}
 			}
 			pendingToolCalls = [];
@@ -203,16 +221,16 @@ export function transformMessages<TApi extends Api>(
 				existingToolResultIds = new Set();
 			}
 
-			result.push(msg);
+			push(msg, i);
 		} else if (msg.role === "toolResult") {
 			existingToolResultIds.add(msg.toolCallId);
-			result.push(msg);
+			push(msg, i);
 		} else if (msg.role === "user") {
 			// User message interrupts tool flow - insert synthetic results for orphaned calls
 			insertSyntheticToolResults();
-			result.push(msg);
+			push(msg, i);
 		} else {
-			result.push(msg);
+			push(msg, i);
 		}
 	}
 

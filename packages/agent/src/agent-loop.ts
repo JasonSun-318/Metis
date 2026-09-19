@@ -345,6 +345,14 @@ async function streamAssistantResponse(
 		messages: llmMessages,
 		tools: context.tools,
 	};
+	if (config.mapPromptCacheHints) {
+		try {
+			llmContext.cacheHints = config.mapPromptCacheHints(messages, llmMessages);
+		} catch {
+			// Cache hints are an optimization hint only; a failing mapper must not
+			// interrupt the provider request.
+		}
+	}
 
 	const streamFunction = streamFn || streamSimple;
 

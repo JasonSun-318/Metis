@@ -34,16 +34,22 @@ export interface PlanContextProjectionInput {
 	readonly executionPlan?: StoredPlan;
 }
 
-function filterSubmitPlanHistory(messages: readonly AgentMessage[]): AgentMessage[] {
+function filterSubmitPlanHistory(
+	messages: readonly AgentMessage[],
+	sources?: Map<AgentMessage, AgentMessage>,
+): AgentMessage[] {
 	const filtered: AgentMessage[] = [];
 	for (const message of messages) {
 		if (message.role === "toolResult" && message.toolName === "submit_plan") continue;
 		if (message.role === "assistant") {
 			const content = message.content.filter((block) => block.type !== "toolCall" || block.name !== "submit_plan");
 			if (content.length === 0) continue;
-			filtered.push(content.length === message.content.length ? message : { ...message, content });
+			const projected = content.length === message.content.length ? message : { ...message, content };
+			sources?.set(projected, message);
+			filtered.push(projected);
 			continue;
 		}
+		sources?.set(message, message);
 		filtered.push(message);
 	}
 	return filtered;
@@ -52,8 +58,9 @@ function filterSubmitPlanHistory(messages: readonly AgentMessage[]): AgentMessag
 export function projectPlanContext(
 	messages: readonly AgentMessage[],
 	input: PlanContextProjectionInput,
+	sources?: Map<AgentMessage, AgentMessage>,
 ): AgentMessage[] {
-	const filtered = filterSubmitPlanHistory(messages);
+	const filtered = filterSubmitPlanHistory(messages, sources);
 	const plan = input.executionPlan ?? (input.collaborationMode === "plan" ? input.currentPlan : undefined);
 	if (!plan) return filtered;
 	return [

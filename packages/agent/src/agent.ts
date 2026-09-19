@@ -28,6 +28,7 @@ import type {
 	BeforeToolCallResult,
 	BeforeToolExecuteContext,
 	PrepareNextTurnContext,
+	PromptCacheHintsMapper,
 	QueueMode,
 	StreamFn,
 	ToolExecutionMode,
@@ -104,6 +105,7 @@ export interface AgentOptions {
 	initialState?: Partial<Omit<AgentState, "pendingToolCalls" | "isStreaming" | "streamingMessage" | "errorMessage">>;
 	convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	mapPromptCacheHints?: PromptCacheHintsMapper;
 	streamFn?: StreamFn;
 	getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	onPayload?: SimpleStreamOptions["onPayload"];
@@ -154,6 +156,7 @@ export class Agent {
 
 	public convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
 	public transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
+	public mapPromptCacheHints?: PromptCacheHintsMapper;
 	public streamFn: StreamFn;
 	public getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 	public onPayload?: SimpleStreamOptions["onPayload"];
@@ -190,6 +193,7 @@ export class Agent {
 		this._state = createMutableAgentState(options.initialState);
 		this.convertToLlm = options.convertToLlm ?? defaultConvertToLlm;
 		this.transformContext = options.transformContext;
+		this.mapPromptCacheHints = options.mapPromptCacheHints;
 		this.streamFn = options.streamFn ?? streamSimple;
 		this.getApiKey = options.getApiKey;
 		this.onPayload = options.onPayload;
@@ -486,6 +490,7 @@ export class Agent {
 					: undefined,
 			convertToLlm: this.convertToLlm,
 			transformContext: this.transformContext,
+			mapPromptCacheHints: this.mapPromptCacheHints,
 			getApiKey: this.getApiKey,
 			reserveSteeringMessages: () => {
 				if (skipInitialSteeringPoll) {
