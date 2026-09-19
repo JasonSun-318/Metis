@@ -27,6 +27,13 @@ import { canonicalizePathForCreation, encodePathForStorage, normalizePath, resol
 import { trashPathsSync } from "../utils/trash.ts";
 import { type AgentMode, DEFAULT_AGENT_MODE, isAgentMode } from "./agent-mode.ts";
 import {
+	assertContextRewriteBatch,
+	type ContextRewriteBatch,
+	ContextViewError,
+	contextRewriteBatchIdentity,
+	getContextSourceDigest,
+} from "./context-view.ts";
+import {
 	createFileAtomicallySync,
 	ensureDirectoryDurablySync,
 	ensureRealDirectoryDurablySync,
@@ -1078,6 +1085,7 @@ export type ReadonlySessionManager = Pick<
 	| "getEntries"
 	| "getTree"
 	| "getSessionName"
+	| "getContextRewrites"
 >;
 
 function deepFreeze<T>(value: T): T {
@@ -1121,6 +1129,7 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getEntries: () => manager.getEntries(),
 		getTree: () => manager.getTree(),
 		getSessionName: () => manager.getSessionName(),
+		getContextRewrites: () => manager.getContextRewrites(),
 	});
 }
 
@@ -2791,6 +2800,8 @@ function createPersistedSessionState(
 }
 
 const SESSION_RECOVERY_CUSTOM_TYPE = "metis.session_recovery";
+const CONTEXT_REWRITE_CUSTOM_TYPE = "metis_context_rewrite_v1";
+const CONTEXT_REWRITE_NAMESPACE = "metis_context_rewrite_";
 
 function isSessionRecoveryCustomType(value: string): boolean {
 	return value === SESSION_RECOVERY_CUSTOM_TYPE;
@@ -3572,6 +3583,72 @@ export class SessionManager {
 		};
 		this._appendEntry(entry);
 		return entry.id;
+	}
+
+	/**
+	 * Commit one context-rewrite batch durably. Idempotent on `batchId` for the
+	 * current branch: an identical retry returns the original entry id, a
+	 * diverging one throws `batch-conflict` — both before the leaf check. Any
+	 * validation failure leaves the in-memory leaf untouched.
+	 */
+	appendContextRewrite(batch: ContextRewriteBatch): string {
+		assertContextRewriteBatch(batch);
+		const identity = contextRewriteBatchIdentity(batch);
+		for (const entry of this.getBranch()) {
+			if (entry.type !== "custom" || entry.customType !== CONTEXT_REWRITE_CUSTOM_TYPE) continue;
+			const stored = entry.data as ContextRewriteBatch;
+			if (stored.batchId !== batch.batchId) continue;
+			if (contextRewriteBatchIdentity(stored) === identity) return entry.id;
+			throw new ContextViewError(
+				"batch-conflict",
+				`Context rewrite batch ${batch.batchId} conflicts with the committed batch`,
+			);
+		}
+		if (batch.expectedLeafId !== this.leafId) {
+			throw new ContextViewError(
+				"stale-leaf",
+				`Context rewrite batch ${batch.batchId} expected leaf ${String(batch.expectedLeafId)}, got ${String(this.leafId)}`,
+			);
+		}
+		const branchIds = new Set(this.getBranch().map((entry) => entry.id));
+		for (const replacement of batch.replacements) {
+			const source = branchIds.has(replacement.sourceEntryId) ? this.byId.get(replacement.sourceEntryId) : undefined;
+			if (!source || source.type !== "message" || source.message.role !== "toolResult") {
+				throw new ContextViewError(
+					"invalid-record",
+					`Context rewrite source ${replacement.sourceEntryId} is not a branch toolResult`,
+				);
+			}
+			if (getContextSourceDigest(source.message) !== replacement.sourceDigest) {
+				throw new ContextViewError(
+					"stale-source",
+					`Context rewrite source ${replacement.sourceEntryId} digest mismatch`,
+				);
+			}
+		}
+		return this.appendCustomEntry(CONTEXT_REWRITE_CUSTOM_TYPE, batch);
+	}
+
+	/**
+	 * Committed rewrite batches on the current branch, oldest first. Entries in
+	 * the reserved `metis_context_rewrite_` namespace with an unknown suffix or
+	 * schema are reported, never silently skipped. Returns defensive copies.
+	 */
+	getContextRewrites(): readonly ContextRewriteBatch[] {
+		const batches: ContextRewriteBatch[] = [];
+		for (const entry of this.getBranch()) {
+			if (entry.type !== "custom") continue;
+			if (entry.customType === CONTEXT_REWRITE_CUSTOM_TYPE) {
+				assertContextRewriteBatch(entry.data);
+				batches.push(structuredClone(entry.data) as ContextRewriteBatch);
+			} else if (entry.customType.startsWith(CONTEXT_REWRITE_NAMESPACE)) {
+				throw new ContextViewError(
+					"unsupported-version",
+					`Unsupported context rewrite entry type: ${entry.customType}`,
+				);
+			}
+		}
+		return batches;
 	}
 
 	/** Append a session info entry (e.g., display name). Returns entry id. */
