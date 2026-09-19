@@ -1,7 +1,12 @@
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createAssistantMessageEventStream, fauxAssistantMessage, fauxToolCall } from "@metis/ai";
+import {
+	createAssistantMessageEventStream,
+	fauxAssistantMessage,
+	fauxToolCall,
+	type PromptCacheCheckpoint,
+} from "@metis/ai";
 import { registerFauxProvider } from "@metis/ai/compat";
 import { Type } from "typebox";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -145,6 +150,43 @@ describe("prompt-cache configuration stability", () => {
 		await h.session.prompt("restored");
 		expect(h.session.agent.state.systemPrompt).toBe(base);
 		expect(h.captured[2]!.systemPrompt).toBe(base);
+	});
+
+	it("offers the persisted checkpoint as the previous request boundary", async () => {
+		const h = createCacheSession(root);
+		fixture = h;
+		const checkpoint: PromptCacheCheckpoint = {
+			version: 1,
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			settingsDigest: "digest-1",
+			historyBoundary: { originId: "entry:seed", ordinal: 0, prefixDigest: "prefix-1" },
+		};
+		h.manager.appendMessage(fauxAssistantMessage("earlier turn"), undefined, undefined, checkpoint);
+
+		await h.session.prompt("next");
+		expect(h.captured).toHaveLength(1);
+		const hints = h.captured[0]!.cacheHints;
+		expect(hints?.previous).toEqual(checkpoint);
+		expect(hints?.origins).toHaveLength(h.captured[0]!.messages.length);
+	});
+
+	it("emits no cache hints when history anchors are disabled", async () => {
+		const h = createCacheSession(root);
+		fixture = h;
+		h.settings.applyOverrides({ promptCache: { historyAnchors: false } });
+		const checkpoint: PromptCacheCheckpoint = {
+			version: 1,
+			provider: "anthropic",
+			model: "claude-sonnet-4-5",
+			settingsDigest: "digest-1",
+			historyBoundary: { originId: "entry:seed", ordinal: 0, prefixDigest: "prefix-1" },
+		};
+		h.manager.appendMessage(fauxAssistantMessage("earlier turn"), undefined, undefined, checkpoint);
+
+		await h.session.prompt("next");
+		expect(h.captured).toHaveLength(1);
+		expect(h.captured[0]!.cacheHints).toBeUndefined();
 	});
 
 	it("completes a normal request on a provider without cache support", async () => {

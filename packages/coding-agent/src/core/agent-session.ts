@@ -35,6 +35,7 @@ import type {
 	ImageContent,
 	Message,
 	Model,
+	PromptCacheCheckpoint,
 	PromptCacheHints,
 	PromptCacheObservation,
 	PromptCacheOrigin,
@@ -1412,6 +1413,7 @@ export class AgentSession {
 		agentMessages: readonly AgentMessage[],
 		llmMessages: readonly Message[],
 	): PromptCacheHints | undefined {
+		if (!this.settingsManager.getPromptCacheSettings().historyAnchors) return undefined;
 		let digestIndex: Map<string, string | null> | undefined;
 		const digestFor = (message: AgentMessage): string | undefined => {
 			digestIndex ??= (() => {
@@ -1443,7 +1445,19 @@ export class AgentSession {
 		) {
 			return undefined;
 		}
-		return { origins: converted.origins };
+		// Reuse the newest checkpoint recorded on this branch. Scanning backward
+		// (rather than trusting the latest assistant) recovers to an earlier
+		// recorded checkpoint when a request crashed before its response landed.
+		let previous: PromptCacheCheckpoint | undefined;
+		const branch = this.sessionManager.getBranch();
+		for (let index = branch.length - 1; index >= 0; index--) {
+			const entry = branch[index];
+			if (entry?.type === "message" && entry.message.role === "assistant" && entry.cacheCheckpoint) {
+				previous = entry.cacheCheckpoint;
+				break;
+			}
+		}
+		return { origins: converted.origins, ...(previous ? { previous } : {}) };
 	}
 
 	private _installToolResultMicrocompactionHook(): void {
