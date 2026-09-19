@@ -26,6 +26,7 @@ export interface CacheSessionFixture {
 	readonly agent: Agent;
 	readonly manager: SessionManager;
 	readonly settings: SettingsManager;
+	readonly auth: AuthStorage;
 	/** JSON-deep copies of each Context passed to the fake provider stream. */
 	readonly captured: Context[];
 	readonly close: () => void;
@@ -88,6 +89,7 @@ export function createCacheSession(root: string, options?: CacheSessionOptions):
 		agent,
 		manager,
 		settings,
+		auth,
 		captured,
 		close: () => {
 			session.dispose();
