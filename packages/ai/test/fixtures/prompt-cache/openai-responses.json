@@ -1,0 +1,76 @@
+{
+  "model": "cache-test",
+  "input": [
+    {
+      "role": "system",
+      "content": "You are a deterministic test assistant."
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "first user turn"
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_1",
+      "name": "lookup",
+      "arguments": "{\"value\":\"a\"}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_1",
+      "output": [
+        {
+          "type": "input_text",
+          "text": "tool result body\n"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "prompt_cache_breakpoint stays literal user text"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "complete-plan"
+        }
+      ]
+    }
+  ],
+  "stream": true,
+  "store": false,
+  "tools": [
+    {
+      "type": "function",
+      "name": "lookup",
+      "description": "Look up a value",
+      "parameters": {
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "cache_control": {
+            "type": "string"
+          }
+        }
+      },
+      "strict": false
+    }
+  ]
+}
