@@ -168,12 +168,21 @@ function createBenchSession(root: string, reuse?: { manager: SessionManager }): 
 	// mode intentionally resolves the real auth store (gated above).
 	const auth = AuthStorage.create(live ? undefined : join(root, "auth.json"));
 	if (!live) auth.setRuntimeApiKey("anthropic", "bench-key");
+	const modelRegistry = ModelRegistry.create(auth, join(root, "models.json"));
+	if (live) {
+		// Enforce --max-requests before every model call: the agent loop,
+		// compaction/summary requests (agent.streamFn), and the permission
+		// reviewer (modelRegistry.streamSimple) all pass through here.
+		agent.streamFn = gatedLiveStream(agent.streamFn);
+		const registryStream = modelRegistry.streamSimple.bind(modelRegistry);
+		modelRegistry.streamSimple = (m, c, o) => gatedLiveStream(registryStream)(m, c, o);
+	}
 	const session = new AgentSession({
 		agent,
 		sessionManager: manager,
 		settingsManager: settings,
 		cwd: root,
-		modelRegistry: ModelRegistry.create(auth, join(root, "models.json")),
+		modelRegistry,
 		resourceLoader: benchResourceLoader,
 	});
 	if (reuse?.manager) {
@@ -322,6 +331,34 @@ function scriptedStream(policy: Policy, usage: SimulatedUsage, rep: RepMetrics, 
 			stream.end();
 		});
 		return stream;
+	};
+}
+
+/** Live-mode wrapper: counts every model call and fails it before any network
+ *  traffic once --max-requests is exhausted. */
+function gatedLiveStream<M, O>(inner: (model: M, context: Context, options?: O) => ReturnType<typeof createAssistantMessageEventStream>) {
+	return (requestModel: M, context: Context, options?: O) => {
+		counters.requests++;
+		if (counters.requests > maxRequests) {
+			counters.limitHit = true;
+			const stream = createAssistantMessageEventStream();
+			const base = requestModel as { api?: string; provider?: string; id?: string };
+			queueMicrotask(() => {
+				stream.push({
+					type: "error",
+					reason: "error",
+					error: {
+						...fauxAssistantMessage("", { stopReason: "error", errorMessage: "max-requests reached" }),
+						api: base.api,
+						provider: base.provider,
+						model: base.id,
+					},
+				});
+				stream.end();
+			});
+			return stream;
+		}
+		return inner(requestModel, context, options);
 	};
 }
 
@@ -665,6 +702,7 @@ async function runLiveTask(name: string, setup: (dir: string) => void, prompt: s
 		setup(dir);
 		const bench = createBenchSession(dir);
 		const t0 = performance.now();
+		const requestsBefore = counters.requests;
 		bench.agent.onResponse = () => {
 			rep.ttftMs ??= performance.now() - t0;
 		};
@@ -678,9 +716,9 @@ async function runLiveTask(name: string, setup: (dir: string) => void, prompt: s
 		const assistant = bench.agent.state.messages.filter(
 			(m): m is AssistantMessage => m.role === "assistant",
 		);
-		rep.requestCount = assistant.length;
-		counters.requests += rep.requestCount;
-		if (counters.requests > maxRequests) counters.limitHit = true;
+		// Every model call (loop, retry, compaction, review) was counted by the
+		// gated stream wrapper inside createBenchSession.
+		rep.requestCount = counters.requests - requestsBefore;
 		for (const message of assistant) {
 			rep.inputTokens += message.usage.input;
 			rep.cacheReadTokens += message.usage.cacheRead;
