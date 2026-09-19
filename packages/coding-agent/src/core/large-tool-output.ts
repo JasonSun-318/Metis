@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { constants as fsConstants, lstatSync, type Stats } from "node:fs";
-import { type FileHandle, open } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { type FileHandle, open, unlink } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ImageContent, TextContent } from "@metis/ai";
 import { ensureDirectoryDurablySync } from "./durable-file.ts";
@@ -84,8 +84,15 @@ async function openPinnedOutputDirectory(path: string): Promise<PinnedOutputDire
 }
 
 async function openVerifiedOutputFile(outputDir: string, directory: PinnedOutputDirectory): Promise<OpenedOutputFile> {
+	return openExclusiveOutputFile(outputDir, directory, join(outputDir, `${crypto.randomUUID()}.txt`));
+}
+
+async function openExclusiveOutputFile(
+	outputDir: string,
+	directory: PinnedOutputDirectory,
+	path: string,
+): Promise<OpenedOutputFile> {
 	assertPinnedOutputDirectory(outputDir, directory);
-	const path = join(outputDir, `${crypto.randomUUID()}.txt`);
 	const noFollow = typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0;
 	const flags = fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | noFollow;
 	const handle = await open(path, flags, 0o600);
@@ -344,4 +351,189 @@ export async function externalizeLargeToolOutput(
 
 	if (!oversizedText && !imageOmitted) return undefined;
 	return { content: boundedContent, toolOutput };
+}
+
+export interface ContextArtifact {
+	relativePath: string;
+	absolutePath: string;
+	digest: string;
+	bytes: number;
+}
+
+async function digestOpenedSourceFile(source: OpenedSourceFile): Promise<{ digest: string; bytes: number }> {
+	const hash = crypto.createHash("sha256");
+	const buffer = Buffer.allocUnsafe(64 * 1024);
+	let position = 0;
+	while (true) {
+		const { bytesRead } = await source.handle.read(buffer, 0, buffer.length, position);
+		if (bytesRead === 0) break;
+		hash.update(buffer.subarray(0, bytesRead));
+		position += bytesRead;
+	}
+	if (position !== source.size) throw new Error(`Tool output file size changed while reading: ${source.path}`);
+	await assertOpenedSourceFile(source);
+	return { digest: hash.digest("hex"), bytes: position };
+}
+
+function isSafeArtifactName(relativePath: string): boolean {
+	return (
+		relativePath.length > 0 &&
+		!relativePath.includes("/") &&
+		!relativePath.includes("\\") &&
+		relativePath !== "." &&
+		relativePath !== ".."
+	);
+}
+
+export async function archiveContextOutput(
+	outputDir: string,
+	input: { text: string } | { sourcePath: string },
+	signal?: AbortSignal,
+): Promise<ContextArtifact> {
+	signal?.throwIfAborted();
+	const absolutePath =
+		"text" in input
+			? await persistToolOutputText(input.text, outputDir)
+			: await importToolOutputFile(input.sourcePath, outputDir);
+	signal?.throwIfAborted();
+	if (dirname(resolve(absolutePath)) !== resolve(outputDir)) {
+		throw new Error(`Tool output archive escaped its directory: ${absolutePath}`);
+	}
+	const directory = await openPinnedOutputDirectory(outputDir);
+	let source: OpenedSourceFile | undefined;
+	try {
+		source = await openVerifiedSourceFile(absolutePath);
+		const { digest, bytes } = await digestOpenedSourceFile(source);
+		assertPinnedOutputDirectory(outputDir, directory);
+		return { relativePath: basename(absolutePath), absolutePath, digest, bytes };
+	} finally {
+		await source?.handle.close().catch(() => undefined);
+		await directory.handle.close().catch(() => undefined);
+	}
+}
+
+export async function restoreContextArtifact(
+	outputDir: string,
+	artifact: ContextArtifact,
+	recover: { text: string } | { sourcePath: string } | undefined,
+	signal?: AbortSignal,
+): Promise<"ready" | "unavailable"> {
+	signal?.throwIfAborted();
+	if (
+		!isSafeArtifactName(artifact.relativePath) ||
+		!/^[0-9a-f]{64}$/.test(artifact.digest) ||
+		!Number.isInteger(artifact.bytes) ||
+		artifact.bytes < 0
+	) {
+		return "unavailable";
+	}
+	const target = join(outputDir, artifact.relativePath);
+	// A recorded path inside this directory must agree with the relative name;
+	// a foreign directory is the cross-directory import case.
+	if (dirname(resolve(artifact.absolutePath)) === resolve(outputDir) && resolve(artifact.absolutePath) !== target) {
+		return "unavailable";
+	}
+	try {
+		const directory = await openPinnedOutputDirectory(outputDir);
+		try {
+			let existing: Stats | undefined;
+			try {
+				existing = lstatSync(target);
+			} catch (error) {
+				if (errorCode(error) !== "ENOENT") throw error;
+			}
+			if (existing) {
+				if (!existing.isFile() || existing.nlink !== 1) return "unavailable";
+				let source: OpenedSourceFile | undefined;
+				try {
+					source = await openVerifiedSourceFile(target);
+					const { digest, bytes } = await digestOpenedSourceFile(source);
+					assertPinnedOutputDirectory(outputDir, directory);
+					return digest === artifact.digest && bytes === artifact.bytes ? "ready" : "unavailable";
+				} finally {
+					await source?.handle.close().catch(() => undefined);
+				}
+			}
+			if (!recover) return "unavailable";
+			if ("text" in recover) {
+				const data = Buffer.from(recover.text, "utf8");
+				if (
+					data.length !== artifact.bytes ||
+					crypto.createHash("sha256").update(data).digest("hex") !== artifact.digest
+				) {
+					return "unavailable";
+				}
+				let outputFile: OpenedOutputFile | undefined = await openExclusiveOutputFile(outputDir, directory, target);
+				try {
+					await outputFile.handle.writeFile(data);
+					await syncOutputFile(outputDir, directory, outputFile);
+					return "ready";
+				} catch (error) {
+					await outputFile.handle.close().catch(() => undefined);
+					outputFile = undefined;
+					await unlink(target).catch(() => undefined);
+					throw error;
+				} finally {
+					await outputFile?.handle.close().catch(() => undefined);
+				}
+			}
+			let source: OpenedSourceFile;
+			try {
+				source = await openVerifiedSourceFile(recover.sourcePath);
+			} catch {
+				return "unavailable";
+			}
+			let outputFile: OpenedOutputFile | undefined;
+			try {
+				if (source.size !== artifact.bytes) return "unavailable";
+				outputFile = await openExclusiveOutputFile(outputDir, directory, target);
+				const hash = crypto.createHash("sha256");
+				const buffer = Buffer.allocUnsafe(64 * 1024);
+				let position = 0;
+				while (true) {
+					const { bytesRead } = await source.handle.read(buffer, 0, buffer.length, position);
+					if (bytesRead === 0) break;
+					hash.update(buffer.subarray(0, bytesRead));
+					let offset = 0;
+					while (offset < bytesRead) {
+						const { bytesWritten } = await outputFile.handle.write(
+							buffer,
+							offset,
+							bytesRead - offset,
+							position + offset,
+						);
+						if (bytesWritten === 0) throw new Error("Tool output copy made no progress");
+						offset += bytesWritten;
+					}
+					position += bytesRead;
+				}
+				if (position !== source.size)
+					throw new Error(`Tool output source size changed while copying: ${source.path}`);
+				await assertOpenedSourceFile(source);
+				if (position !== artifact.bytes || hash.digest("hex") !== artifact.digest) {
+					await outputFile.handle.close().catch(() => undefined);
+					outputFile = undefined;
+					await unlink(target).catch(() => undefined);
+					return "unavailable";
+				}
+				await syncOutputFile(outputDir, directory, outputFile);
+				return "ready";
+			} catch (error) {
+				if (outputFile) {
+					await outputFile.handle.close().catch(() => undefined);
+					outputFile = undefined;
+					await unlink(target).catch(() => undefined);
+				}
+				throw error;
+			} finally {
+				await outputFile?.handle.close().catch(() => undefined);
+				await source.handle.close().catch(() => undefined);
+			}
+		} finally {
+			await directory.handle.close().catch(() => undefined);
+		}
+	} catch {
+		signal?.throwIfAborted();
+		return "unavailable";
+	}
 }
