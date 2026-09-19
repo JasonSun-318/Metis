@@ -382,6 +382,26 @@ interface ResponsesMarkedCandidate extends CacheCandidate {
 }
 
 /**
+ * A breakpoint this layout added, with enough data to re-verify it after an
+ * `onPayload` hook may have rewritten the request.
+ */
+export interface ResponsesCacheMark {
+	itemIndex: number;
+	blockIndex: number;
+	prefixDigest: string;
+	/** Serialized item before the marker was applied. */
+	itemJson: string;
+	/** True when the marker wrapped a raw string `output` into input_text. */
+	stringOutput: boolean;
+}
+
+export interface ResponsesCacheLayoutResult {
+	observation: PromptCacheObservation;
+	settingsDigest?: string;
+	marks: ResponsesCacheMark[];
+}
+
+/**
  * Markable block positions inside a converted input item: `input_text` blocks
  * in message content, plus `function_call_output` text (a raw string output
  * counts as block 0 and is wrapped only when it is actually marked).
@@ -438,12 +458,11 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 	params: TParams,
 	layout: ResponsesCacheLayoutInput,
 	model: Pick<Model<"openai-responses">, "provider" | "id">,
-): Promise<PromptCacheObservation | undefined> {
+): Promise<ResponsesCacheLayoutResult> {
 	const { hints, itemSources } = layout;
-	const diagnostic = (reason: PromptCacheObservation["reason"]): PromptCacheObservation => ({
-		reason,
-		reusableInputBytes: 0,
-		stableInputBytes: 0,
+	const diagnostic = (reason: PromptCacheObservation["reason"]): ResponsesCacheLayoutResult => ({
+		observation: { reason, reusableInputBytes: 0, stableInputBytes: 0 },
+		marks: [],
 	});
 	if (!layout.supported) return diagnostic("unsupported");
 	if (!layout.enabled) return diagnostic("disabled");
@@ -454,7 +473,10 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 
 	const { input: _input, ...settingsFrame } = params;
 	const settingsDigest = await digestCacheValue(settingsFrame);
-	let chain = settingsDigest;
+	// Mark prefix digests chain from the prompt-relevant frame only. Request
+	// settings that don't shape the prompt (metadata, sampling) may be
+	// changed by a payload hook without invalidating breakpoints.
+	let chain = await digestCacheValue(responsesPromptFrame(params));
 	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
 	const extend = async (frame: unknown): Promise<void> => {
 		const json = JSON.stringify(frame);
@@ -525,38 +547,183 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as ResponsesMarkedCandidate[];
 	const reused = reusableCandidate(candidates, previousBoundary) as ResponsesMarkedCandidate | undefined;
 
+	const marks: ResponsesCacheMark[] = [];
 	for (const candidate of chosen) {
 		const item = input[candidate.itemIndex];
-		if (item) markResponseBlock(item, candidate.blockIndex);
+		if (!item) continue;
+		const stringOutput = item.type === "function_call_output" && typeof item.output === "string";
+		const itemJson = JSON.stringify(item);
+		if (markResponseBlock(item, candidate.blockIndex)) {
+			marks.push({
+				itemIndex: candidate.itemIndex,
+				blockIndex: candidate.blockIndex,
+				prefixDigest: candidate.prefixDigest,
+				itemJson,
+				stringOutput,
+			});
+		}
 	}
 
 	const newestChosen = chosen[chosen.length - 1];
 	return {
-		checkpoint: newestChosen
-			? {
-					version: 1,
-					provider: model.provider,
-					model: model.id,
-					settingsDigest,
-					historyBoundary: {
-						originId: newestChosen.originId,
-						ordinal: newestChosen.ordinal,
-						prefixDigest: newestChosen.prefixDigest,
-					},
-				}
-			: undefined,
-		reason: !previous
-			? "append"
-			: settingsMismatch
-				? "settings-change"
-				: reused
-					? chosen[chosen.length - 1] !== reused
-						? "append"
-						: "suffix"
-					: "history-change",
-		reusableInputBytes: reused?.bytes ?? 0,
-		stableInputBytes: stableBytes,
+		observation: {
+			checkpoint: newestChosen
+				? {
+						version: 1,
+						provider: model.provider,
+						model: model.id,
+						settingsDigest,
+						historyBoundary: {
+							originId: newestChosen.originId,
+							ordinal: newestChosen.ordinal,
+							prefixDigest: newestChosen.prefixDigest,
+						},
+					}
+				: undefined,
+			reason: !previous
+				? "append"
+				: settingsMismatch
+					? "settings-change"
+					: reused
+						? chosen[chosen.length - 1] !== reused
+							? "append"
+							: "suffix"
+						: "history-change",
+			reusableInputBytes: reused?.bytes ?? 0,
+			stableInputBytes: stableBytes,
+		},
+		settingsDigest,
+		marks,
 	};
+}
+
+/**
+ * The request params that shape the prompt prefix for cache purposes —
+ * everything else (metadata, sampling, limits) may be changed by a payload
+ * hook without invalidating breakpoint placement.
+ */
+function responsesPromptFrame(params: { input?: unknown }): unknown {
+	const record = params as Record<string, unknown>;
+	return {
+		model: record.model ?? null,
+		instructions: record.instructions ?? null,
+		tool_choice: record.tool_choice ?? null,
+		tools: record.tools ?? null,
+		previous_response_id: record.previous_response_id ?? null,
+	};
+}
+
+/**
+ * Reproduce the pre-marking digest form of an input item: breakpoint fields
+ * are stripped, and a string output wrapped by a mark collapses back to its
+ * original string.
+ */
+function responsesItemDigestFrame(item: unknown, mark?: ResponsesCacheMark): unknown {
+	if (item === null || typeof item !== "object") return item;
+	const record = item as Record<string, unknown>;
+	const strip = (block: unknown): unknown => {
+		if (block === null || typeof block !== "object") return block;
+		const { prompt_cache_breakpoint: _breakpoint, ...rest } = block as Record<string, unknown>;
+		return rest;
+	};
+	if (record.type === "function_call_output") {
+		if (mark?.stringOutput && Array.isArray(record.output) && record.output.length === 1) {
+			const block = record.output[0] as { type?: string; text?: string };
+			if (block?.type === "input_text") return { ...record, output: block.text };
+		}
+		if (Array.isArray(record.output)) return { ...record, output: record.output.map(strip) };
+		return record;
+	}
+	if (Array.isArray(record.content)) return { ...record, content: record.content.map(strip) };
+	return record;
+}
+
+function responsesMarkMatchesItem(item: unknown, mark: ResponsesCacheMark): boolean {
+	return JSON.stringify(responsesItemDigestFrame(item, mark)) === mark.itemJson;
+}
+
+function responsesItemHasBreakpoint(item: unknown): boolean {
+	if (item === null || typeof item !== "object") return false;
+	const record = item as Record<string, unknown>;
+	for (const key of ["content", "output"] as const) {
+		const blocks = record[key];
+		if (!Array.isArray(blocks)) continue;
+		for (const block of blocks) {
+			if (
+				block !== null &&
+				typeof block === "object" &&
+				(block as { prompt_cache_breakpoint?: unknown }).prompt_cache_breakpoint !== undefined
+			) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+function responsesClearBreakpoints(item: unknown): void {
+	if (item === null || typeof item !== "object") return;
+	const record = item as Record<string, unknown>;
+	for (const key of ["content", "output"] as const) {
+		const blocks = record[key];
+		if (!Array.isArray(blocks)) continue;
+		for (const block of blocks) {
+			if (block !== null && typeof block === "object") {
+				delete (block as { prompt_cache_breakpoint?: unknown }).prompt_cache_breakpoint;
+			}
+		}
+	}
+}
+
+/**
+ * Remove one recorded breakpoint wherever it can still be identified — at its
+ * recorded position, or on any item whose pre-marker serialization matches
+ * (covers hook reordering). Hook-written breakpoints on other items are left
+ * untouched.
+ */
+function dropResponsesMark(input: unknown[], mark: ResponsesCacheMark): boolean {
+	const target = input[mark.itemIndex];
+	if (responsesItemHasBreakpoint(target) && responsesMarkMatchesItem(target, mark)) {
+		responsesClearBreakpoints(target);
+		return true;
+	}
+	for (const item of input) {
+		if (responsesItemHasBreakpoint(item) && responsesMarkMatchesItem(item, mark)) {
+			responsesClearBreakpoints(item);
+			return true;
+		}
+	}
+	return false;
+}
+
+/** Remove every breakpoint this layout added that can still be identified. */
+export function revokeResponsesMarks(input: unknown[], marks: ResponsesCacheMark[]): void {
+	for (const mark of marks) dropResponsesMark(input, mark);
+}
+
+/**
+ * Re-verify recorded breakpoints against the post-`onPayload` payload. A
+ * breakpoint stays valid only while its target keeps the same prefix digest;
+ * volatile suffix changes are ignored.
+ */
+export async function validateResponsesCacheLayout<TParams extends { input?: unknown }>(
+	params: TParams,
+	marks: ResponsesCacheMark[],
+): Promise<boolean> {
+	const input = params.input;
+	if (!Array.isArray(input)) return false;
+	const marksByItem = new Map(marks.map((mark) => [mark.itemIndex, mark]));
+	const lastMarkIndex = marks.reduce((max, mark) => Math.max(max, mark.itemIndex), -1);
+	if (input.length <= lastMarkIndex) return false;
+	let chain = await digestCacheValue(responsesPromptFrame(params));
+	for (let itemIndex = 0; itemIndex <= lastMarkIndex; itemIndex++) {
+		const mark = marksByItem.get(itemIndex);
+		chain = await digestCacheValue([chain, JSON.stringify(responsesItemDigestFrame(input[itemIndex], mark))]);
+		if (mark && (chain !== mark.prefixDigest || !responsesItemHasBreakpoint(input[itemIndex]))) {
+			return false;
+		}
+	}
+	return true;
 }
 
 // =============================================================================

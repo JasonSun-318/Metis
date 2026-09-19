@@ -563,25 +563,45 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 			}
 			const built = buildParams(model, context, isOAuth, options);
 			let params = built.params;
-			let prepared: PromptCacheObservation | undefined;
+			let layoutResult: AnthropicCacheLayoutResult | undefined;
 			if (built.layout) {
 				try {
-					const layout = await applyAnthropicCacheLayout(built.params, built.layout, model);
-					if (layout) {
-						params = layout.payload;
-						prepared = layout.observation;
+					layoutResult = await applyAnthropicCacheLayout(built.params, built.layout, model);
+					if (layoutResult) {
+						params = layoutResult.payload;
 					}
 				} catch {
 					// Cache layout is an optimization; on failure keep the legacy
 					// marker placement rather than risking the request.
+					layoutResult = undefined;
 				}
-				if (!prepared) {
+				if (!layoutResult) {
 					params = buildParams(model, { ...context, cacheHints: undefined }, isOAuth, options).params;
 				}
 			}
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as MessageCreateParamsStreaming;
+			}
+			let prepared = layoutResult?.observation;
+			if (prepared && layoutResult && options?.onPayload) {
+				try {
+					const valid = await validateAnthropicCacheLayout(params, layoutResult.marks);
+					if (!valid) {
+						revokeAnthropicMarks(params, layoutResult.marks);
+						prepared = {
+							reason: "hook-change",
+							reusableInputBytes: 0,
+							stableInputBytes: prepared.stableInputBytes,
+						};
+					} else {
+						// Markers the hook wrote count against the budget; only our
+						// own markers may be revoked to stay within it.
+						enforceAnthropicMarkerBudget(params, layoutResult.marks);
+					}
+				} catch {
+					// Layout validation must never break the request path.
+				}
 			}
 			if (prepared) {
 				try {
@@ -1159,6 +1179,32 @@ interface AnthropicMarkedCandidate extends CacheCandidate {
 	bytes: number;
 }
 
+/**
+ * A breakpoint this layout added, with enough data to re-verify it after an
+ * `onPayload` hook may have rewritten the request.
+ */
+interface AnthropicCacheMark {
+	paramIndex: number;
+	blockIndex: number;
+	role: string;
+	prefixDigest: string;
+	/** Serialized markable content before the marker was applied. */
+	blockJson: string;
+	/** True when the marker wrapped a raw string body into a text block. */
+	stringContent: boolean;
+}
+
+export interface AnthropicCacheLayoutResult {
+	payload: MessageCreateParamsStreaming;
+	observation: PromptCacheObservation;
+	settingsDigest: string;
+	marks: AnthropicCacheMark[];
+}
+
+// Sentinel paramIndex values for markers outside the message list.
+const SYSTEM_MARK_PARAM = -1;
+const TOOLS_MARK_PARAM = -2;
+
 const MARKABLE_BLOCK_TYPES = new Set(["text", "image", "tool_result", "tool_use"]);
 
 function markAnthropicBlock(
@@ -1187,12 +1233,15 @@ async function applyAnthropicCacheLayout(
 	params: MessageCreateParamsStreaming,
 	layout: AnthropicCacheLayoutInput,
 	model: Model<"anthropic-messages">,
-): Promise<{ payload: MessageCreateParamsStreaming; observation: PromptCacheObservation } | undefined> {
+): Promise<AnthropicCacheLayoutResult | undefined> {
 	const { cacheControl, hints, transformedToSource, paramSpans, isOAuthToken, supportsToolMarkers } = layout;
 	const { messages: _messages, tools: _tools, system: _system, ...settingsFrame } = params;
 	const settingsDigest = await digestCacheValue(settingsFrame);
 
-	let chain = settingsDigest;
+	// Mark prefix digests chain from the prompt-relevant frame only. Request
+	// settings that don't shape the prompt (metadata, sampling) may be
+	// changed by a payload hook without invalidating breakpoints.
+	let chain = await digestCacheValue(anthropicPromptFrame(params));
 	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
 	const extend = async (frame: unknown): Promise<void> => {
 		const json = JSON.stringify(frame);
@@ -1286,17 +1335,35 @@ async function applyAnthropicCacheLayout(
 	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as AnthropicMarkedCandidate[];
 	const reused = reusableCandidate(candidates, previousBoundary) as AnthropicMarkedCandidate | undefined;
 
+	const marks: AnthropicCacheMark[] = [];
 	let markers = 0;
 	for (const candidate of chosen) {
 		const param = params.messages[candidate.paramIndex];
 		const span = paramSpans[candidate.paramIndex];
-		if (param && span && markAnthropicBlock(param, candidate.blockIndex, span.stringContent, cacheControl)) {
+		if (!param || !span) continue;
+		const originalBlock =
+			span.stringContent && typeof param.content === "string"
+				? param.content
+				: Array.isArray(param.content)
+					? param.content[candidate.blockIndex]
+					: undefined;
+		if (originalBlock === undefined) continue;
+		if (markAnthropicBlock(param, candidate.blockIndex, span.stringContent, cacheControl)) {
 			markers++;
+			marks.push({
+				paramIndex: candidate.paramIndex,
+				blockIndex: candidate.blockIndex,
+				role: param.role,
+				prefixDigest: candidate.prefixDigest,
+				blockJson: JSON.stringify(originalBlock),
+				stringContent: span.stringContent === true,
+			});
 		}
 	}
 
 	if (params.system && params.system.length > 0 && markers < ANTHROPIC_CACHE_MARKER_BUDGET) {
-		const last = params.system[params.system.length - 1];
+		const index = params.system.length - 1;
+		const last = params.system[index];
 		if (
 			last &&
 			typeof last === "object" &&
@@ -1304,6 +1371,7 @@ async function applyAnthropicCacheLayout(
 		) {
 			(last as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
 			markers++;
+			marks.push(systemMark(index, last));
 		}
 	}
 	if (
@@ -1312,10 +1380,12 @@ async function applyAnthropicCacheLayout(
 		layout.immediateToolCount > 0 &&
 		markers < ANTHROPIC_CACHE_MARKER_BUDGET
 	) {
-		const last = params.tools[layout.immediateToolCount - 1];
+		const index = layout.immediateToolCount - 1;
+		const last = params.tools[index];
 		if (last && (last as { cache_control?: CacheControlEphemeral }).cache_control === undefined) {
 			(last as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
 			markers++;
+			marks.push(toolsMark(index, last));
 		}
 	}
 	// The OAuth identity block keeps a marker only when the budget still has
@@ -1329,6 +1399,7 @@ async function applyAnthropicCacheLayout(
 		) {
 			(identity as { cache_control?: CacheControlEphemeral }).cache_control = cacheControl;
 			markers++;
+			marks.push(systemMark(0, identity));
 		}
 	}
 
@@ -1359,7 +1430,200 @@ async function applyAnthropicCacheLayout(
 		reusableInputBytes: reused?.bytes ?? 0,
 		stableInputBytes: stableBytes,
 	};
-	return { payload: params, observation };
+	return { payload: params, observation, settingsDigest, marks };
+}
+
+/**
+ * The request params that shape the prompt prefix for cache purposes —
+ * everything else (metadata, sampling, limits) may be changed by a payload
+ * hook without invalidating breakpoint placement.
+ */
+function anthropicPromptFrame(params: MessageCreateParamsStreaming): unknown {
+	return { model: params.model ?? null, tool_choice: params.tool_choice ?? null };
+}
+
+/**
+ * Strip the marker fields this layout owns from a block-like value so its
+ * digest matches the pre-marking request prefix.
+ */
+function withoutAnthropicMarkers(value: unknown): unknown {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return value;
+	const { cache_control: _cacheControl, ...rest } = value as Record<string, unknown>;
+	return rest;
+}
+
+function systemMark(index: number, block: unknown): AnthropicCacheMark {
+	return {
+		paramIndex: SYSTEM_MARK_PARAM,
+		blockIndex: index,
+		role: "system",
+		prefixDigest: "",
+		blockJson: JSON.stringify(withoutAnthropicMarkers(block)),
+		stringContent: false,
+	};
+}
+
+function toolsMark(index: number, tool: unknown): AnthropicCacheMark {
+	return {
+		paramIndex: TOOLS_MARK_PARAM,
+		blockIndex: index,
+		role: "tools",
+		prefixDigest: "",
+		blockJson: JSON.stringify(withoutAnthropicMarkers(tool)),
+		stringContent: false,
+	};
+}
+
+function anthropicMarkMatchesBlock(block: unknown, mark: AnthropicCacheMark): boolean {
+	if (block === null || typeof block !== "object") return false;
+	const { cache_control: _cacheControl, ...rest } = block as Record<string, unknown>;
+	if (JSON.stringify(rest) === mark.blockJson) return true;
+	// A mark that wrapped a raw string body is identified by the block's text.
+	if (mark.stringContent && (block as { type?: string }).type === "text") {
+		return JSON.stringify((block as { text?: string }).text) === mark.blockJson;
+	}
+	return false;
+}
+
+function anthropicMarkTarget(params: MessageCreateParamsStreaming, mark: AnthropicCacheMark): unknown {
+	if (mark.paramIndex === SYSTEM_MARK_PARAM) return params.system?.[mark.blockIndex];
+	if (mark.paramIndex === TOOLS_MARK_PARAM) return params.tools?.[mark.blockIndex];
+	const param = params.messages?.[mark.paramIndex];
+	if (!param || typeof param.content === "string" || !Array.isArray(param.content)) return undefined;
+	return param.content[mark.blockIndex];
+}
+
+/**
+ * Remove one recorded marker wherever it can still be identified — at its
+ * recorded position, or on any block whose pre-marker serialization matches
+ * (covers hook reordering). Extension-written cache fields are left
+ * untouched. Returns true when a marker was removed.
+ */
+function dropAnthropicMark(params: MessageCreateParamsStreaming, mark: AnthropicCacheMark): boolean {
+	const target = anthropicMarkTarget(params, mark);
+	if (
+		target !== null &&
+		typeof target === "object" &&
+		(target as { cache_control?: unknown }).cache_control !== undefined &&
+		anthropicMarkMatchesBlock(target, mark)
+	) {
+		delete (target as { cache_control?: unknown }).cache_control;
+		return true;
+	}
+	const containers: unknown[][] = [];
+	if (params.messages) {
+		for (const param of params.messages) {
+			if (Array.isArray(param.content)) containers.push(param.content);
+		}
+	}
+	if (Array.isArray(params.system)) containers.push([...params.system]);
+	if (params.tools) containers.push([...params.tools]);
+	for (const container of containers) {
+		for (const block of container) {
+			if (
+				block !== null &&
+				typeof block === "object" &&
+				(block as { cache_control?: unknown }).cache_control !== undefined &&
+				anthropicMarkMatchesBlock(block, mark)
+			) {
+				delete (block as { cache_control?: unknown }).cache_control;
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+/** Remove every marker this layout added that can still be identified. */
+function revokeAnthropicMarks(params: MessageCreateParamsStreaming, marks: AnthropicCacheMark[]): void {
+	for (const mark of marks) dropAnthropicMark(params, mark);
+}
+
+function countAnthropicMarkers(params: MessageCreateParamsStreaming): number {
+	const marked = (block: unknown) =>
+		block !== null && typeof block === "object" && (block as { cache_control?: unknown }).cache_control !== undefined;
+	const systemBlocks = Array.isArray(params.system) ? params.system : [];
+	let total = systemBlocks.filter(marked).length + (params.tools ?? []).filter(marked).length;
+	for (const param of params.messages ?? []) {
+		if (typeof param.content !== "string" && Array.isArray(param.content)) {
+			total += param.content.filter(marked).length;
+		}
+	}
+	return total;
+}
+
+/**
+ * Keep the total marker count inside Anthropic's budget after a payload hook
+ * ran. Markers written by the hook itself are respected and count against the
+ * budget; only this layout's own markers are revoked, oldest first so the
+ * newest history endpoint survives.
+ */
+function enforceAnthropicMarkerBudget(params: MessageCreateParamsStreaming, marks: AnthropicCacheMark[]): void {
+	let total = countAnthropicMarkers(params);
+	for (const mark of marks) {
+		if (total <= ANTHROPIC_CACHE_MARKER_BUDGET) return;
+		if (dropAnthropicMark(params, mark)) total--;
+	}
+}
+
+/**
+ * Re-verify recorded breakpoints against the post-`onPayload` payload. A
+ * breakpoint stays valid only while its target keeps the same role and prefix
+ * digest; volatile suffix changes are ignored. Returns the markers that were
+ * revoked because history was rewritten or no longer maps.
+ */
+async function validateAnthropicCacheLayout(
+	params: MessageCreateParamsStreaming,
+	marks: AnthropicCacheMark[],
+): Promise<boolean> {
+	// System/tool marks are not prefix-digested; they stay valid only while
+	// their exact pre-marker content still carries the marker.
+	for (const mark of marks) {
+		if (mark.paramIndex >= 0) continue;
+		const target = anthropicMarkTarget(params, mark);
+		if (
+			target === null ||
+			typeof target !== "object" ||
+			(target as { cache_control?: unknown }).cache_control === undefined ||
+			!anthropicMarkMatchesBlock(target, mark)
+		) {
+			return false;
+		}
+	}
+	let chain = await digestCacheValue(anthropicPromptFrame(params));
+	const extend = async (frame: unknown): Promise<void> => {
+		chain = await digestCacheValue([chain, JSON.stringify(frame)]);
+	};
+	if (params.tools) await extend(params.tools.map(withoutAnthropicMarkers));
+	if (params.system) {
+		await extend(typeof params.system === "string" ? params.system : params.system.map(withoutAnthropicMarkers));
+	}
+	const marksByPosition = new Map(marks.map((mark) => [`${mark.paramIndex}:${mark.blockIndex}`, mark]));
+	const lastMarkIndex = marks.reduce((max, mark) => Math.max(max, mark.paramIndex), -1);
+	const messages = params.messages ?? [];
+	for (let paramIndex = 0; paramIndex < messages.length && paramIndex <= lastMarkIndex; paramIndex++) {
+		const param = messages[paramIndex]!;
+		await extend({ role: param.role });
+		const blocks =
+			typeof param.content === "string" ? [param.content] : Array.isArray(param.content) ? param.content : [];
+		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
+			const mark = marksByPosition.get(`${paramIndex}:${blockIndex}`);
+			const block = blocks[blockIndex]!;
+			// A mark that wrapped a raw string body digests as that string; other
+			// blocks digest without their marker field.
+			const digestForm =
+				mark?.stringContent === true && typeof block === "object" && block !== null && block.type === "text"
+					? block.text
+					: withoutAnthropicMarkers(block);
+			await extend(digestForm);
+			const hasMarker =
+				typeof block === "object" &&
+				block !== null &&
+				(block as { cache_control?: unknown }).cache_control !== undefined;
+			if (mark && (!hasMarker || param.role !== mark.role || chain !== mark.prefixDigest)) return false;
+		}
+	}
+	return true;
 }
 
 // Normalize tool call IDs to match Anthropic's required pattern and length

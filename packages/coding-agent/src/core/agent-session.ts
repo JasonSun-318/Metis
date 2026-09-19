@@ -36,6 +36,7 @@ import type {
 	Message,
 	Model,
 	PromptCacheHints,
+	PromptCacheObservation,
 	PromptCacheOrigin,
 	TextContent,
 	Tool,
@@ -599,6 +600,14 @@ export class AgentSession {
 	private _stopCurrentRunAfterAbort = false;
 	private _durableRecoveryRequired = false;
 
+	/**
+	 * Prompt-cache layout observation for the in-flight provider request. Set by
+	 * the stream callback after `onPayload`, cleared at each primary request, and
+	 * consumed by the matching assistant `message_end`. Summary and child-agent
+	 * requests never touch this field.
+	 */
+	private _pendingPromptCacheObservation?: PromptCacheObservation;
+
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
 	/** Tracks pending follow-up messages for UI display. Removed when delivered. */
@@ -904,6 +913,9 @@ export class AgentSession {
 		this._installAgentNextTurnRefresh();
 		this.agent.mapPromptCacheHints = (agentMessages, llmMessages) =>
 			this._mapPromptCacheHints(agentMessages, llmMessages);
+		this.agent.onPromptCachePrepared = (observation) => {
+			this._pendingPromptCacheObservation = observation;
+		};
 
 		this._buildRuntime({
 			activeToolNames: this._initialActiveToolNames,
@@ -1663,6 +1675,7 @@ export class AgentSession {
 				}
 			},
 			beforeProviderRequest: async (prepared) => {
+				this._pendingPromptCacheObservation = undefined;
 				this._commitStagedAgentMailboxDelivery();
 				this._markDurableProviderEpoch();
 				this._contextUsage.capturePrepared(prepared);
@@ -2054,12 +2067,23 @@ export class AgentSession {
 				event.message.role === "assistant" ||
 				event.message.role === "toolResult"
 			) {
+				// The pending cache observation belongs to the provider request
+				// behind this assistant message; it is consumed here whether or
+				// not the message succeeded.
+				const cacheCheckpoint =
+					event.message.role === "assistant" &&
+					event.message.stopReason !== "error" &&
+					event.message.stopReason !== "aborted"
+						? this._pendingPromptCacheObservation?.checkpoint
+						: undefined;
+				if (event.message.role === "assistant") this._pendingPromptCacheObservation = undefined;
 				// Regular LLM message - persist as SessionMessageEntry
 				try {
 					this.sessionManager.appendMessage(
 						event.message,
 						event.message.role === "toolResult" ? toolOutput : undefined,
 						this._durableTurn?.turnId,
+						cacheCheckpoint,
 					);
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);

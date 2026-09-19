@@ -8,7 +8,6 @@ import type {
 	Context,
 	Model,
 	OpenAIResponsesCompat,
-	PromptCacheObservation,
 	ProviderEnv,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -29,6 +28,9 @@ import {
 	convertResponsesTools,
 	processResponsesStream,
 	type ResponsesCacheLayoutInput,
+	type ResponsesCacheLayoutResult,
+	revokeResponsesMarks,
+	validateResponsesCacheLayout,
 } from "./openai-responses-shared.ts";
 import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
@@ -152,20 +154,37 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId);
 			const built = buildParams(model, context, options);
 			let params = built.params;
-			let prepared: PromptCacheObservation | undefined;
+			let layoutResult: ResponsesCacheLayoutResult | undefined;
 			if (built.layout) {
 				try {
-					prepared = (await applyResponsesCacheLayout(built.params, built.layout, model)) ?? undefined;
+					layoutResult = await applyResponsesCacheLayout(built.params, built.layout, model);
 				} catch {
 					// Cache layout is an optimization; on failure rebuild without
 					// hints so the request keeps its baseline shape.
 					params = buildParams(model, { ...context, cacheHints: undefined }, options).params;
-					prepared = undefined;
+					layoutResult = undefined;
 				}
 			}
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as ResponseCreateParamsStreaming;
+			}
+			let prepared = layoutResult?.observation;
+			if (prepared?.checkpoint && layoutResult && options?.onPayload) {
+				try {
+					const input = (params as { input?: unknown }).input;
+					const valid = Array.isArray(input) && (await validateResponsesCacheLayout(params, layoutResult.marks));
+					if (!valid) {
+						if (Array.isArray(input)) revokeResponsesMarks(input, layoutResult.marks);
+						prepared = {
+							reason: "hook-change",
+							reusableInputBytes: 0,
+							stableInputBytes: prepared.stableInputBytes,
+						};
+					}
+				} catch {
+					// Layout validation must never break the request path.
+				}
 			}
 			if (prepared) {
 				try {

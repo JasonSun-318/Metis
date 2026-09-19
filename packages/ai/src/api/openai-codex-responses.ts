@@ -28,7 +28,6 @@ import type {
 	AssistantMessage,
 	Context,
 	Model,
-	PromptCacheObservation,
 	ProviderEnv,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -54,6 +53,9 @@ import {
 	convertResponsesTools,
 	processResponsesStream,
 	type ResponsesCacheLayoutInput,
+	type ResponsesCacheLayoutResult,
+	revokeResponsesMarks,
+	validateResponsesCacheLayout,
 } from "./openai-responses-shared.ts";
 import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
@@ -262,20 +264,37 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 			const accountId = extractAccountId(apiKey);
 			const built = buildRequestBody(model, context, options);
 			let body = built.body;
-			let prepared: PromptCacheObservation | undefined;
+			let layoutResult: ResponsesCacheLayoutResult | undefined;
 			if (built.layout) {
 				try {
-					prepared = (await applyResponsesCacheLayout(built.body, built.layout, model)) ?? undefined;
+					layoutResult = await applyResponsesCacheLayout(built.body, built.layout, model);
 				} catch {
 					// Cache layout is an optimization; on failure rebuild without
 					// hints so the request keeps its baseline shape.
 					body = buildRequestBody(model, { ...context, cacheHints: undefined }, options).body;
-					prepared = undefined;
+					layoutResult = undefined;
 				}
 			}
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as RequestBody;
+			}
+			let prepared = layoutResult?.observation;
+			if (prepared?.checkpoint && layoutResult && options?.onPayload) {
+				try {
+					const input = body.input;
+					const valid = Array.isArray(input) && (await validateResponsesCacheLayout(body, layoutResult.marks));
+					if (!valid) {
+						if (Array.isArray(input)) revokeResponsesMarks(input, layoutResult.marks);
+						prepared = {
+							reason: "hook-change",
+							reusableInputBytes: 0,
+							stableInputBytes: prepared.stableInputBytes,
+						};
+					}
+				} catch {
+					// Layout validation must never break the request path.
+				}
 			}
 			if (prepared) {
 				try {

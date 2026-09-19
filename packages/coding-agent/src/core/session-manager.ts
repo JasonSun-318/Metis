@@ -1,5 +1,5 @@
 import type { AgentMessage, ThinkingLevel } from "@metis/agent-core";
-import type { ImageContent, Message, TextContent } from "@metis/ai";
+import type { ImageContent, Message, PromptCacheCheckpoint, TextContent } from "@metis/ai";
 import { createHash, randomUUID } from "crypto";
 import {
 	closeSync,
@@ -898,6 +898,8 @@ export interface SessionMessageEntry extends SessionEntryBase {
 	message: AgentMessage;
 	toolOutput?: PersistedToolOutput;
 	turnId?: string;
+	/** Prompt-cache boundary recorded for the provider request that produced this message. */
+	cacheCheckpoint?: PromptCacheCheckpoint;
 }
 
 export interface ThinkingLevelChangeEntry extends SessionEntryBase {
@@ -3335,6 +3337,7 @@ export class SessionManager {
 		message: Message | CustomMessage | BashExecutionMessage,
 		toolOutput?: PersistedToolOutput,
 		turnId?: string,
+		cacheCheckpoint?: PromptCacheCheckpoint,
 	): string {
 		if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
 			throw new TypeError("turnId must be a non-empty string");
@@ -3347,6 +3350,7 @@ export class SessionManager {
 			message,
 			...(toolOutput ? { toolOutput } : {}),
 			...(turnId === undefined ? {} : { turnId }),
+			...(cacheCheckpoint === undefined ? {} : { cacheCheckpoint }),
 		};
 		this._appendEntry(entry);
 		return entry.id;
