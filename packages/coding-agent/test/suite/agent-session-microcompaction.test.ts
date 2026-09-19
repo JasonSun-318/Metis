@@ -14,6 +14,31 @@ describe("AgentSession tool-result microcompaction", () => {
 		const outputDir = join(tmpdir(), "metis-tool-results", harness.sessionManager.getSessionId());
 		const original = "x".repeat(80_000);
 		try {
+			const callIds = Array.from({ length: MICROCOMPACTION_KEEP_RECENT + 1 }, (_, index) => `read-${index}`);
+			const assistant = {
+				role: "assistant" as const,
+				content: callIds.map((id) => ({
+					type: "toolCall" as const,
+					id,
+					name: "read",
+					arguments: { path: `/f/${id}` },
+				})),
+				api: "anthropic-messages",
+				provider: "anthropic",
+				model: "m",
+				usage: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				},
+				stopReason: "toolUse" as const,
+				timestamp: 0,
+			};
+			harness.session.agent.state.messages.push(assistant);
+			harness.sessionManager.appendMessage(assistant);
 			for (let index = 0; index < MICROCOMPACTION_KEEP_RECENT + 1; index++) {
 				const message = {
 					role: "toolResult" as const,
@@ -22,7 +47,7 @@ describe("AgentSession tool-result microcompaction", () => {
 					content: [{ type: "text" as const, text: index === 0 ? original : `recent-${index}` }],
 					details: {},
 					isError: false,
-					timestamp: index,
+					timestamp: index + 1,
 				};
 				harness.session.agent.state.messages.push(message);
 				harness.sessionManager.appendMessage(message);

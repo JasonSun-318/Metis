@@ -18,6 +18,12 @@ export interface CompactionSettings {
 	keepRecentTokens?: number; // default: 20000
 }
 
+export interface PromptCacheSettings {
+	historyAnchors?: boolean; // default: true
+	microcompaction?: "legacy" | "pressure" | "off"; // default: "legacy"
+	diagnostics?: boolean; // default: false
+}
+
 export interface BranchSummarySettings {
 	reserveTokens?: number; // default: 16384 (tokens reserved for prompt + LLM response)
 	skipPrompt?: boolean; // default: false - when true, skips "Summarize branch?" prompt and defaults to no summary
@@ -151,6 +157,7 @@ export interface Settings {
 	followUpMode?: "all" | "one-at-a-time";
 	theme?: string;
 	compaction?: CompactionSettings;
+	promptCache?: PromptCacheSettings;
 	branchSummary?: BranchSummarySettings;
 	retry?: RetrySettings;
 	hideThinkingBlock?: boolean;
@@ -1111,6 +1118,24 @@ export class SettingsManager {
 			enabled: this.getCompactionEnabled(),
 			reserveTokens: this.getCompactionReserveTokens(),
 			keepRecentTokens: this.getCompactionKeepRecentTokens(),
+		};
+	}
+
+	getPromptCacheSettings(): Required<PromptCacheSettings> {
+		const value = this.settings.promptCache;
+		if (value?.historyAnchors !== undefined && typeof value.historyAnchors !== "boolean") {
+			throw new Error("promptCache.historyAnchors must be boolean");
+		}
+		if (value?.diagnostics !== undefined && typeof value.diagnostics !== "boolean") {
+			throw new Error("promptCache.diagnostics must be boolean");
+		}
+		if (value?.microcompaction !== undefined && !["legacy", "pressure", "off"].includes(value.microcompaction)) {
+			throw new Error("Invalid promptCache.microcompaction");
+		}
+		return {
+			historyAnchors: value?.historyAnchors ?? true,
+			microcompaction: value?.microcompaction ?? "legacy",
+			diagnostics: value?.diagnostics ?? false,
 		};
 	}
 

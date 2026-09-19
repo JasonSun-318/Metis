@@ -280,7 +280,10 @@ export async function prepareMicrocompaction(
 			recentProtected.has(index) ||
 			input.protectedEntryIds.has(source.entryId) ||
 			batched.has(source.entryId) ||
-			message.isError
+			message.isError ||
+			// Rewrites only apply to sources extensions left unmodified; an
+			// already-transformed view entry cannot benefit from a new batch.
+			getContextSourceDigest(message) !== getContextSourceDigest(source.message)
 		) {
 			continue;
 		}

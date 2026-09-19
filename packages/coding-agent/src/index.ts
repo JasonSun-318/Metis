@@ -712,6 +712,7 @@ export {
 	type McpStdioServerSettings,
 	type MemorySettings,
 	type PackageSource,
+	type PromptCacheSettings,
 	type RetrySettings,
 	SettingsManager,
 	type SettingsManagerCreateOptions,

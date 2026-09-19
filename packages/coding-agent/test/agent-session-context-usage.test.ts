@@ -94,3 +94,33 @@ it("preserves a reported prefix when only new messages are appended", () => {
 	expect(usage.tokens).toBeGreaterThan(1100);
 	expect(usage.breakdown?.reduce((sum, item) => sum + item.tokens, 0)).toBe(usage.tokens);
 });
+
+it("invalidates old reported totals after replacing a model context view", () => {
+	const h = harness();
+	h.respond(10_000, 100);
+	h.tracker.invalidateReportedContext();
+	expect(h.tracker.getUsage()!.basis).toBe("estimated_total");
+});
+
+it("estimates a prepared view without consuming the pending prepared snapshot", () => {
+	const h = harness();
+	h.respond(10_000, 100);
+	const alternative: AgentMessage[] = [
+		{ role: "user", content: "much longer alternative question ".repeat(200), timestamp: 5 },
+	];
+	const estimated = h.tracker.estimatePreparedTokens({
+		model,
+		agentMessages: alternative,
+		llmContext: { systemPrompt: "SYSTEM", messages: [], tools: [] },
+	});
+	const baseline = h.tracker.estimatePreparedTokens({
+		model,
+		agentMessages: [],
+		llmContext: { systemPrompt: "SYSTEM", messages: [], tools: [] },
+	});
+	expect(estimated).toBeGreaterThan(baseline);
+	// The reported anchor is untouched and the next response still calibrates.
+	const usage = h.respond(2000, 50);
+	expect(usage.basis).toBe("reported_total");
+	expect(usage.tokens).toBe(2050);
+});

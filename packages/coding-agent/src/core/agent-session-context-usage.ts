@@ -61,6 +61,36 @@ export class AgentSessionContextUsage {
 		};
 	}
 
+	/**
+	 * Estimate prepared prompt tokens for a context view without touching the
+	 * pending `_prepared` snapshot or reported anchors. Reuses the fixed
+	 * calibration when the configuration fingerprint matches.
+	 */
+	estimatePreparedTokens(prepared: BeforeProviderRequestContext): number {
+		const systemPrompt = prepared.llmContext.systemPrompt ?? "";
+		const tools = prepared.llmContext.tools ?? [];
+		const breakdown = this._estimateBreakdown(systemPrompt, prepared.agentMessages, tools);
+		const estimatedTotal = breakdown.reduce((sum, item) => sum + item.tokens, 0);
+		const calibration = this._calibration;
+		const fingerprint = this._fingerprint(prepared.model, systemPrompt, tools);
+		if (calibration?.configurationFingerprint !== fingerprint) return estimatedTotal;
+		const rawFixedTotal = this._estimateBreakdown(systemPrompt, [], tools).reduce(
+			(sum, item) => sum + item.tokens,
+			0,
+		);
+		const calibratedFixed = calibration.fixedBreakdown.reduce((sum, item) => sum + item.tokens, 0);
+		return estimatedTotal - rawFixedTotal + calibratedFixed;
+	}
+
+	/**
+	 * Drop the last reported-usage anchor after a durable context rewrite so a
+	 * stale large total cannot immediately retrigger full compaction. Fixed
+	 * calibration for the same configuration is kept.
+	 */
+	invalidateReportedContext(): void {
+		this._reported = undefined;
+	}
+
 	captureReported(message: AssistantMessage): void {
 		const prepared = this._prepared;
 		this._prepared = undefined;

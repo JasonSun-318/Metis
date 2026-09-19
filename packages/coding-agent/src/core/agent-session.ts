@@ -77,7 +77,12 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
-import { getContextSourceDigest } from "./context-view.ts";
+import {
+	type ContextReplacement,
+	type ContextRewriteBatch,
+	ContextViewError,
+	getContextSourceDigest,
+} from "./context-view.ts";
 import { exportSessionToHtml, type ToolHtmlRenderer } from "./export-html/index.ts";
 import { createToolHtmlRenderer } from "./export-html/tool-renderer.ts";
 import {
@@ -215,7 +220,11 @@ import {
 	describeToolAction,
 	ToolPermissionDescriptionError,
 } from "./tool-permission-adapter.ts";
-import { createToolResultMicrocompactor } from "./tool-result-microcompaction.ts";
+import {
+	getMicrocompactionTarget,
+	type MicrocompactionTarget,
+	prepareMicrocompaction,
+} from "./tool-result-microcompaction.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createDescribeImageToolDefinition } from "./tools/describe-image.ts";
 import { createAllToolDefinitions, getDefaultToolNames } from "./tools/index.ts";
@@ -555,6 +564,20 @@ interface ActiveAgentMailboxDelivery {
 	readonly deliveryId: string;
 	readonly eventIds: readonly string[];
 }
+
+/**
+ * A transformed view message paired with the durable branch entry it was
+ * derived from. Extension-injected or otherwise untraceable messages never
+ * form a pair and can never be rewrite candidates.
+ */
+interface ContextViewPair {
+	readonly index: number;
+	readonly entryId: string;
+	readonly source: AgentMessage;
+	readonly message: AgentMessage;
+}
+
+type ContextPruneResult = "committed" | "not-needed" | "insufficient";
 
 function durablePromptResidentPayloadBytes(input: DurablePromptInput, text = input.text): number {
 	return (
@@ -1411,19 +1434,333 @@ export class AgentSession {
 
 	private _installToolResultMicrocompactionHook(): void {
 		const transformContext = this.agent.transformContext;
-		const microcompact = createToolResultMicrocompactor({
-			outputDir: this._toolOutputDir,
-			isBuiltinTool: (toolName) => {
-				if (this._baseToolDefinitionsOverride) return false;
-				const active = this._toolDefinitions.get(toolName)?.definition;
-				const builtin = this._baseToolDefinitions.get(toolName);
-				return active !== undefined && active === builtin;
-			},
-		});
 		this.agent.transformContext = async (messages, signal) => {
 			const transformed = transformContext ? await transformContext(messages, signal) : messages;
-			return microcompact(transformed, signal);
+			const pairs = this._resolveContextViewPairs(transformed);
+			this._contextViewSnapshot = { transformed, pairs };
+			return this._projectAndMaybePrune(transformed, pairs, signal);
 		};
+	}
+
+	private _contextViewSnapshot: { transformed: readonly AgentMessage[]; pairs: ContextViewPair[] } | undefined;
+	private _readbackProtectedEntryIds = new Set<string>();
+	private _readbackProtectionInitialized = false;
+	private _contextGrowthSamples: number[] = [];
+	private _lastPreparedEstimate: number | undefined;
+	private _growthConfigKey: string | undefined;
+
+	/** Pairs each transformed view message with its durable branch source, if any. */
+	private _resolveContextViewPairs(transformed: readonly AgentMessage[]): ContextViewPair[] {
+		const branchSources = new Map<string, AgentMessage>();
+		const digestIndex = new Map<string, string | null>();
+		for (const entry of this.sessionManager.getBranch()) {
+			if (entry.type !== "message") continue;
+			const message = entry.message as AgentMessage;
+			branchSources.set(entry.id, message);
+			const digest = getContextSourceDigest(message);
+			digestIndex.set(digest, digestIndex.has(digest) ? null : entry.id);
+		}
+		const pairs: ContextViewPair[] = [];
+		for (let index = 0; index < transformed.length; index++) {
+			const message = transformed[index]!;
+			const source = this._planProjectionSources.get(message) ?? message;
+			const entryId =
+				this.sessionManager.getMessageEntryId(source) ??
+				digestIndex.get(getContextSourceDigest(source)) ??
+				undefined;
+			const durable = entryId !== undefined ? branchSources.get(entryId) : undefined;
+			if (entryId !== undefined && durable !== undefined) {
+				pairs.push({ index, entryId, source: durable, message });
+			}
+		}
+		return pairs;
+	}
+
+	/**
+	 * Overlay committed rewrite batches onto unmodified view messages. A view
+	 * entry the extension transform rewrote keeps the extension content; the
+	 * durable replacement applies only when the view still matches the recorded
+	 * source digest.
+	 */
+	private _projectContextViewPairs(
+		pairs: readonly ContextViewPair[],
+		batches: readonly ContextRewriteBatch[],
+	): AgentMessage[] {
+		const applied = new Map<string, ContextReplacement>();
+		const microcompacted = new Set<string>();
+		for (const batch of batches) {
+			for (const replacement of batch.replacements) {
+				if (batch.reason === "microcompaction") {
+					if (microcompacted.has(replacement.sourceEntryId)) continue;
+					microcompacted.add(replacement.sourceEntryId);
+				}
+				applied.set(replacement.sourceEntryId, replacement);
+			}
+		}
+		return pairs.map(({ entryId, message }) => {
+			const replacement = applied.get(entryId);
+			if (!replacement) return message;
+			if (getContextSourceDigest(message) !== replacement.sourceDigest) return message;
+			return { ...message, content: replacement.content };
+		});
+	}
+
+	private _estimateViewClosure(
+		transformed: readonly AgentMessage[],
+		pairs: readonly ContextViewPair[],
+	): (pairView: readonly AgentMessage[]) => number {
+		const pairPositions = new Map<number, number>();
+		pairs.forEach((pair, position) => {
+			pairPositions.set(pair.index, position);
+		});
+		return (pairView) => {
+			const full = transformed.map((message, index) => {
+				const position = pairPositions.get(index);
+				return position === undefined ? message : pairView[position]!;
+			});
+			return this._estimatePreparedViewTokens(full);
+		};
+	}
+
+	private _estimatePreparedViewTokens(messages: readonly AgentMessage[]): number {
+		const model = this.model;
+		if (!model) return 0;
+		return this._contextUsage.estimatePreparedTokens({
+			model,
+			agentMessages: messages,
+			llmContext: {
+				systemPrompt: this.agent.state.systemPrompt,
+				tools: this.agent.state.tools,
+				messages: [],
+			},
+		});
+	}
+
+	private _resetContextGrowth(newBase?: number): void {
+		this._contextGrowthSamples = [];
+		this._lastPreparedEstimate = newBase;
+	}
+
+	private _recordContextGrowth(used: number): void {
+		const model = this.model;
+		const settings = this.settingsManager.getPromptCacheSettings();
+		const key = model
+			? `${model.provider}/${model.id}/${model.contextWindow ?? 0}/${settings.microcompaction}/${this.settingsManager.getCompactionReserveTokens()}`
+			: "none";
+		if (key !== this._growthConfigKey) {
+			this._growthConfigKey = key;
+			this._resetContextGrowth();
+		}
+		if (!Number.isFinite(used) || used <= 0) return;
+		const previous = this._lastPreparedEstimate;
+		this._lastPreparedEstimate = used;
+		if (previous === undefined) return;
+		const growth = used - previous;
+		if (growth <= 0) return;
+		this._contextGrowthSamples.push(growth);
+		if (this._contextGrowthSamples.length > 8) this._contextGrowthSamples.shift();
+	}
+
+	private _growthP95(): number {
+		if (this._contextGrowthSamples.length === 0) return 0;
+		const sorted = [...this._contextGrowthSamples].sort((a, b) => a - b);
+		return sorted[Math.ceil(sorted.length * 0.95) - 1]!;
+	}
+
+	private _isMicrocompactionBuiltinTool(toolName: string): boolean {
+		if (this._baseToolDefinitionsOverride) return false;
+		const active = this._toolDefinitions.get(toolName)?.definition;
+		const builtin = this._baseToolDefinitions.get(toolName);
+		return active !== undefined && active === builtin;
+	}
+
+	private _artifactSourceIndex(): Map<string, string> {
+		const index = new Map<string, string>();
+		for (const batch of this.sessionManager.getContextRewrites()) {
+			for (const replacement of batch.replacements) {
+				index.set(
+					canonicalizeActionPath(join(this._toolOutputDir, replacement.artifactRelativePath), this._cwd),
+					replacement.sourceEntryId,
+				);
+			}
+		}
+		return index;
+	}
+
+	private _initReadbackProtection(): void {
+		if (this._readbackProtectionInitialized) return;
+		this._readbackProtectionInitialized = true;
+		// Rebuild a conservative pin set from the most recent tool round-trip:
+		// a read call on a recorded artifact keeps its source protected until
+		// the next healthy assistant message_end.
+		const artifactIndex = this._artifactSourceIndex();
+		if (artifactIndex.size === 0) return;
+		const messages = this.agent.state.messages;
+		for (let index = messages.length - 1; index >= 0; index--) {
+			const message = messages[index];
+			if (message?.role === "assistant") {
+				for (const block of message.content) {
+					if (block.type !== "toolCall" || block.name !== "read") continue;
+					const path = (block.arguments as Record<string, unknown> | undefined)?.path;
+					if (typeof path !== "string") continue;
+					const pinned = artifactIndex.get(canonicalizeActionPath(path, this._cwd));
+					if (pinned) this._readbackProtectedEntryIds.add(pinned);
+				}
+				break;
+			}
+			if (message?.role === "toolResult") continue;
+			break;
+		}
+	}
+
+	private _noteReadToolCall(args: unknown): void {
+		if (typeof args !== "object" || args === null || Array.isArray(args)) return;
+		const path = (args as Record<string, unknown>).path;
+		if (typeof path !== "string") return;
+		const pinned = this._artifactSourceIndex().get(canonicalizeActionPath(path, this._cwd));
+		if (pinned) this._readbackProtectedEntryIds.add(pinned);
+	}
+
+	/**
+	 * Replay committed batches over the resolved view and, when scheduling
+	 * allows, prepare and durably commit one more batch before rebuilding the
+	 * final view. Returns the provider-facing message list.
+	 */
+	private async _projectAndMaybePrune(
+		transformed: readonly AgentMessage[],
+		pairs: readonly ContextViewPair[],
+		signal?: AbortSignal,
+	): Promise<AgentMessage[]> {
+		const pairPositions = new Map<number, number>();
+		pairs.forEach((pair, position) => {
+			pairPositions.set(pair.index, position);
+		});
+		const toFullView = (pairView: readonly AgentMessage[]) =>
+			transformed.map((message, index) => {
+				const position = pairPositions.get(index);
+				return position === undefined ? message : pairView[position]!;
+			});
+		const estimateView = this._estimateViewClosure(transformed, pairs);
+
+		let batches = this.sessionManager.getContextRewrites();
+		let projectedPairs = this._projectContextViewPairs(pairs, batches);
+		const mode = this.settingsManager.getPromptCacheSettings().microcompaction;
+		if (mode === "off") return toFullView(projectedPairs);
+
+		const used = estimateView(projectedPairs);
+		this._recordContextGrowth(used);
+		if (mode === "pressure") {
+			const model = this.model;
+			const high = (model?.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
+			if (!getMicrocompactionTarget({ used, high, growthP95: this._growthP95() })) {
+				return toFullView(projectedPairs);
+			}
+		}
+
+		this._initReadbackProtection();
+		const committed = await this._prepareAndCommitPrune(mode, pairs, projectedPairs, batches, estimateView, signal);
+		if (!committed) return toFullView(projectedPairs);
+		batches = this.sessionManager.getContextRewrites();
+		projectedPairs = this._projectContextViewPairs(pairs, batches);
+		this._contextUsage.invalidateReportedContext();
+		this._resetContextGrowth(estimateView(projectedPairs));
+		return toFullView(projectedPairs);
+	}
+
+	private async _prepareAndCommitPrune(
+		mode: "legacy" | "pressure",
+		pairs: readonly ContextViewPair[],
+		projectedPairs: AgentMessage[],
+		batches: readonly ContextRewriteBatch[],
+		estimateView: (pairView: readonly AgentMessage[]) => number,
+		signal?: AbortSignal,
+	): Promise<ContextRewriteBatch | undefined> {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const tokensBefore = estimateView(projectedPairs);
+			const target: MicrocompactionTarget =
+				mode === "pressure"
+					? (() => {
+							const model = this.model;
+							const high = (model?.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
+							const computed = getMicrocompactionTarget({
+								used: tokensBefore,
+								high,
+								growthP95: this._growthP95(),
+							});
+							return computed ?? { low: tokensBefore, minimumGain: Number.MAX_SAFE_INTEGER };
+						})()
+					: { low: tokensBefore, minimumGain: 0 };
+			if (mode === "pressure" && target.minimumGain === Number.MAX_SAFE_INTEGER) return undefined;
+
+			const batch = await prepareMicrocompaction(
+				{
+					mode,
+					sources: pairs.map((pair) => ({ entryId: pair.entryId, message: pair.source })),
+					view: projectedPairs,
+					batches,
+					expectedLeafId: this.sessionManager.getLeafId(),
+					protectedEntryIds: this._readbackProtectedEntryIds,
+					target,
+					tokensBefore,
+					signal,
+				},
+				{
+					outputDir: this._toolOutputDir,
+					isBuiltinTool: (toolName) => this._isMicrocompactionBuiltinTool(toolName),
+					estimateView,
+				},
+			);
+			if (!batch) return undefined;
+			try {
+				this.sessionManager.appendContextRewrite(batch);
+				return batch;
+			} catch (error) {
+				if (error instanceof ContextViewError) {
+					// The leaf moved while archiving (e.g. a mailbox commit); recompute
+					// once against the new state, then give up rather than loop.
+					if (error.code === "stale-leaf" && attempt === 0) {
+						batches = this.sessionManager.getContextRewrites();
+						projectedPairs = this._projectContextViewPairs(pairs, batches);
+						continue;
+					}
+					return undefined;
+				}
+				throw error;
+			}
+		}
+		return undefined;
+	}
+
+	/**
+	 * Try a durable context prune outside the transform pipeline using the last
+	 * verified view snapshot. Does not re-run extension transforms.
+	 */
+	private async _tryContextPrune(mode: "legacy" | "pressure", signal?: AbortSignal): Promise<ContextPruneResult> {
+		const snapshot = this._contextViewSnapshot;
+		if (!snapshot || snapshot.pairs.length === 0 || !this.model) return "insufficient";
+		const settings = this.settingsManager.getPromptCacheSettings();
+		if (settings.microcompaction === "off") return "not-needed";
+
+		const pairs = snapshot.pairs;
+		const estimateView = this._estimateViewClosure(snapshot.transformed, pairs);
+		const batches = this.sessionManager.getContextRewrites();
+		const projectedPairs = this._projectContextViewPairs(pairs, batches);
+		const used = estimateView(projectedPairs);
+		this._recordContextGrowth(used);
+		if (mode === "pressure") {
+			const high = (this.model.contextWindow ?? 0) - this.settingsManager.getCompactionReserveTokens();
+			if (!getMicrocompactionTarget({ used, high, growthP95: this._growthP95() })) {
+				return "not-needed";
+			}
+		}
+		this._initReadbackProtection();
+		const committed = await this._prepareAndCommitPrune(mode, pairs, projectedPairs, batches, estimateView, signal);
+		if (!committed) return "insufficient";
+		this._contextUsage.invalidateReportedContext();
+		this._resetContextGrowth(
+			estimateView(this._projectContextViewPairs(pairs, this.sessionManager.getContextRewrites())),
+		);
+		return "committed";
 	}
 
 	private _commitStagedAgentMailboxDelivery(): void {
@@ -1525,6 +1862,9 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			if (toolCall.name === "read" && this._isBuiltinTool(toolCall.name)) {
+				this._noteReadToolCall(args);
+			}
 			const runner = this._extensionRunner;
 			if (!runner.hasHandlers("tool_call")) {
 				return undefined;
@@ -2076,7 +2416,12 @@ export class AgentSession {
 					event.message.stopReason !== "aborted"
 						? this._pendingPromptCacheObservation?.checkpoint
 						: undefined;
-				if (event.message.role === "assistant") this._pendingPromptCacheObservation = undefined;
+				if (event.message.role === "assistant") {
+					this._pendingPromptCacheObservation = undefined;
+					if (event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
+						this._readbackProtectedEntryIds.clear();
+					}
+				}
 				// Regular LLM message - persist as SessionMessageEntry
 				try {
 					this.sessionManager.appendMessage(
@@ -4656,6 +5001,9 @@ export class AgentSession {
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+			this._contextViewSnapshot = undefined;
+			this._readbackProtectedEntryIds.clear();
+			this._resetContextGrowth();
 
 			// Compaction is a snapshot boundary: re-read the vault and rebuild the prompt.
 			this._invalidateMemorySnapshot();
@@ -4821,6 +5169,15 @@ export class AgentSession {
 			contextTokens = directContextTokens;
 		}
 		if (shouldCompact(contextTokens, contextWindow, settings)) {
+			// Pressure pruning can satisfy the threshold without summarization:
+			// a committed rewrite shrinks the next request's view durably.
+			if (this.settingsManager.getPromptCacheSettings().microcompaction === "pressure") {
+				try {
+					if ((await this._tryContextPrune("pressure")) === "committed") return false;
+				} catch {
+					// A failed prune must not block the normal compaction path.
+				}
+			}
 			return await this._runAutoCompaction("threshold", false);
 		}
 		return false;
@@ -4926,6 +5283,9 @@ export class AgentSession {
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
 			const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
+			this._contextViewSnapshot = undefined;
+			this._readbackProtectedEntryIds.clear();
+			this._resetContextGrowth();
 
 			// Compaction is a snapshot boundary: re-read the vault and rebuild the prompt.
 			this._invalidateMemorySnapshot();
