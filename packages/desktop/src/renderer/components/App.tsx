@@ -1214,6 +1214,8 @@ export function App({ api, store }: AppProps) {
 	const changePermissionPreset = async (sessionId: string, permissionPreset: PermissionPresetView) => {
 		try {
 			await api.setPermissionPreset({ sessionId, requestId: crypto.randomUUID(), permissionPreset });
+			if (store.getSnapshot().activeSessionId === sessionId)
+				setNotice(t("Permissions updated. Applies to subsequent tools; running operations continue."));
 		} catch (cause) {
 			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
 			reportError(cause);
@@ -1483,10 +1485,7 @@ export function App({ api, store }: AppProps) {
 		/>
 	) : undefined;
 	const permissionSessionId = visibleNewTaskDraft?.sessionId ?? visibleActiveSession?.sessionId;
-	const permissionSession = permissionSessionId ? state.sessionsById.get(permissionSessionId) : undefined;
 	const permissionSessionOpen = permissionSessionId === undefined || state.activeSessionId === permissionSessionId;
-	const permissionSessionRunning = permissionSession?.state === "running" ||
-		(permissionSessionId !== undefined && state.activeSessionId === permissionSessionId && state.activeTurnId !== null);
 	const draftCreatePending = workspaceState.draftCreatePending;
 	const permissionView = permissionSessionId && permissionSessionOpen
 		? {
@@ -1503,14 +1502,7 @@ export function App({ api, store }: AppProps) {
 		<PermissionSelector
 			activeReview={permissionView.activeReview}
 			constrainedByParent={permissionView.constrainedByParent}
-			disabled={
-				draftBusy ||
-				!serverReady ||
-				draftCreatePending ||
-				!permissionSessionOpen ||
-				permissionSessionRunning ||
-				visibleInteraction !== undefined
-			}
+			disabled={draftBusy || !serverReady || draftCreatePending || !permissionSessionOpen}
 			onChange={(permissionPreset) => permissionSessionId
 				? changePermissionPreset(permissionSessionId, permissionPreset)
 				: workspaceWorkflow.setDraftPermission(permissionPreset)}
@@ -1522,7 +1514,7 @@ export function App({ api, store }: AppProps) {
 		<PermissionSelector
 			activeReview={state.activeReview}
 			constrainedByParent={state.constrainedByParent}
-			disabled={!serverReady || running || visibleInteraction !== undefined}
+			disabled={!serverReady}
 			onChange={(permissionPreset) => changePermissionPreset(visibleActiveSession.sessionId, permissionPreset)}
 			onSetupSandbox={api.platform === "win32" ? setupWindowsSandbox : undefined}
 			sandboxHealth={state.sandboxHealth}

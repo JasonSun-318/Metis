@@ -928,6 +928,17 @@ export class ClientBroker {
 			this.browserToolHost.handleCancellation(notification);
 			return;
 		}
+		if (notification.method === "interaction/cancelled") {
+			const { interactionId, sessionId, requestId } = notification.params;
+			const pending = this.pendingInteractions.get(interactionId);
+			if (!pending || pending.request.id !== requestId || pending.request.params.interaction.sessionId !== sessionId)
+				return;
+			this.pendingInteractions.delete(interactionId);
+			if (pending.timer) clearTimeout(pending.timer);
+			this.sendEvent({ type: "interaction-cancelled", interactionId });
+			this.releaseAnsweredBackgroundSession(sessionId);
+			return;
+		}
 		if (notification.method !== "connection/events") return;
 		for (const event of notification.params.events) {
 			if ((event.type === "turn/completed" || event.type === "turn/interrupted") && event.turn.completedAt) {

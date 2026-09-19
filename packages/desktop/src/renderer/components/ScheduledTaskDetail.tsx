@@ -2,6 +2,7 @@ import type { ScheduleRunView, ScheduleTaskView } from "@metis/app-protocol";
 import { ArrowLeft, NotePencil, Play, Trash } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DrawerDetails } from "./DrawerDetails.tsx";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
@@ -170,7 +171,7 @@ export function ScheduledTaskDetail({ api, task, onBack, onChanged, onDeleted, o
 						<div><dt>{t("Project")}</dt><dd>{task.target.workspace === "fixed" ? task.target.cwd : t("Dedicated task workspace")}</dd></div>
 						<div><dt>{t("Time zone")}</dt><dd>{task.timezone}</dd></div>
 					</dl>
-					<details className="scheduled-task-permissions"><summary>{t("Permissions")}</summary><p>{t("Workspace files, web access, and available Skills. No Connectors, Extensions, or project memory.")}</p></details>
+					<DrawerDetails className="scheduled-task-permissions" summary={t("Permissions")}><p>{t("Workspace files, web access, and available Skills. No Connectors, Extensions, or project memory.")}</p></DrawerDetails>
 				</aside>
 			</div>
 			{confirmDelete && <ScheduledTaskDeleteDialog deleteSchedule={(input) => api.deleteSchedule(input)} onClose={() => setConfirmDelete(false)} onDeleted={() => { setConfirmDelete(false); onDeleted(task.id); }} task={task} />}

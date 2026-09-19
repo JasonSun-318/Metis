@@ -25,6 +25,10 @@
 	},
 	"files": {
 		"includes": [
+			"scripts/bench-prompt-cache.ts",
+			"scripts/fixtures/prompt-cache-baseline.ts",
+			"scripts/lib/prompt-cache-quality.ts",
+			"packages/ai/test-support/prompt-cache-wire.ts",
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",

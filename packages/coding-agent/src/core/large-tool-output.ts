@@ -353,6 +353,21 @@ export async function externalizeLargeToolOutput(
 	return { content: boundedContent, toolOutput };
 }
 
+/** The durable placeholder path line is a versioned replay contract. */
+const CONTEXT_ARTIFACT_PATH_PREFIX = "Tool result saved to: ";
+
+export function formatContextArtifactReference(path: string): string {
+	return `${CONTEXT_ARTIFACT_PATH_PREFIX}${path}`;
+}
+
+export function parseContextArtifactReference(content: readonly TextContent[]): string | undefined {
+	for (const block of content) {
+		const line = block.text.split("\n").find((line) => line.startsWith(CONTEXT_ARTIFACT_PATH_PREFIX));
+		if (line) return line.slice(CONTEXT_ARTIFACT_PATH_PREFIX.length);
+	}
+	return undefined;
+}
+
 export interface ContextArtifact {
 	relativePath: string;
 	absolutePath: string;

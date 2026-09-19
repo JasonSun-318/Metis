@@ -35,6 +35,8 @@ export interface PermissionExecutionRequest<T> {
 	readonly signal: AbortSignal;
 	readonly execute: (grant: ExecutionGrant) => Promise<T>;
 	readonly autoCommandRules: readonly AutoCommandRule[];
+	/** Re-evaluate an unstarted action after a live permission change. Action identity must stay exact. */
+	readonly revalidateOnSettingsChange?: boolean;
 }
 
 export type PermissionRuntimeInvalidation =
@@ -169,6 +171,7 @@ export class ToolAuthorizationRuntime {
 	private reviewTail: Promise<void> = Promise.resolve();
 	private reviewer: PermissionReviewer | undefined;
 	private epoch = 0;
+	private authorityEpoch = 0;
 	private lifecycle = new AbortController();
 	private currentReview:
 		| { readonly actionId: string; readonly reviewer: "model" | "user"; readonly riskLevel: RiskLevel }
@@ -203,6 +206,7 @@ export class ToolAuthorizationRuntime {
 
 	invalidate(reason: PermissionRuntimeInvalidation): number {
 		this.epoch += 1;
+		if (reason !== "settings") this.authorityEpoch += 1;
 		this.lifecycle.abort(new Error(`Permission runtime invalidated: ${reason}`));
 		this.lifecycle = new AbortController();
 		this.reviewTail = Promise.resolve();
@@ -365,6 +369,33 @@ export class ToolAuthorizationRuntime {
 	}
 
 	async authorizeAndExecute<T>(request: PermissionExecutionRequest<T>): Promise<T> {
+		const originalAction = this.snapshot(request).action;
+		const authorityEpoch = this.authorityEpoch;
+		for (let attempt = 0; attempt < 16; attempt++) {
+			throwIfAborted(request.signal);
+			const epoch = this.epoch;
+			let started = false;
+			try {
+				return await this.authorizeAttempt(request, () => {
+					started = true;
+				});
+			} catch (error) {
+				if (
+					!request.revalidateOnSettingsChange ||
+					started ||
+					this.epoch === epoch ||
+					this.authorityEpoch !== authorityEpoch
+				)
+					throw error;
+				throwIfAborted(request.signal);
+				const changed = actionChangeReason(originalAction, this.snapshot(request).action);
+				if (changed) throw new PermissionDeniedError(changed);
+			}
+		}
+		throw new PermissionDeniedError("settings.unstable");
+	}
+
+	private async authorizeAttempt<T>(request: PermissionExecutionRequest<T>, onStarted: () => void): Promise<T> {
 		throwIfAborted(request.signal);
 		const initial = this.snapshot(request);
 		const initialDecision = this.evaluate(initial);
@@ -403,19 +434,20 @@ export class ToolAuthorizationRuntime {
 				interactive: request.interactive,
 				signal,
 			});
-			this.currentReview = {
+			const activeReview = {
 				actionId: initial.action.actionId,
 				reviewer: initialDecision.minimumReviewer,
 				riskLevel: initialDecision.riskLevel,
 			};
-			this.notifyReview({ phase: "started", ...this.currentReview });
+			this.currentReview = activeReview;
+			this.notifyReview({ phase: "started", ...activeReview });
 			let review: PermissionReviewResult;
 			try {
 				review = await this.queueReview(reviewRequest);
 			} catch {
 				review = unavailableReview(initialDecision.minimumReviewer, "Permission review was cancelled");
 			} finally {
-				this.currentReview = undefined;
+				if (this.currentReview === activeReview) this.currentReview = undefined;
 			}
 			this.notifyReview({
 				phase: "completed",
@@ -479,6 +511,7 @@ export class ToolAuthorizationRuntime {
 				throw error;
 			}
 			try {
+				onStarted();
 				const result = await request.execute(consumed);
 				await this.appendAudit(
 					current.action,

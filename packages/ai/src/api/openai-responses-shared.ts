@@ -36,9 +36,9 @@ import { shortHash } from "../utils/hash.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import {
 	type CacheCandidate,
-	chooseCacheCandidates,
+	digestCacheFrame,
 	digestCacheValue,
-	reusableCandidate,
+	selectCacheLayout,
 } from "../utils/prompt-cache-layout.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { transformMessages } from "./transform-messages.ts";
@@ -478,10 +478,17 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 	// changed by a payload hook without invalidating breakpoints.
 	let chain = await digestCacheValue(responsesPromptFrame(params));
 	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
-	const extend = async (frame: unknown): Promise<void> => {
+	const extend = (frame: unknown): void | Promise<void> => {
 		const json = JSON.stringify(frame);
-		chain = await digestCacheValue([chain, json]);
+		const result = digestCacheFrame(chain, json);
 		bytes += new TextEncoder().encode(json).length;
+		if (typeof result === "string") {
+			chain = result;
+			return;
+		}
+		return result.then((digest) => {
+			chain = digest;
+		});
 	};
 
 	// Last markable block per source, plus the first volatile item that ends
@@ -513,7 +520,10 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 	const ordinals = new Map<string, number>();
 	let stableBytes = 0;
 	for (let itemIndex = 0; itemIndex < input.length; itemIndex++) {
-		await extend(input[itemIndex]);
+		{
+			const pending = extend(input[itemIndex]);
+			if (pending) await pending;
+		}
 		if (firstVolatile !== undefined && itemIndex >= firstVolatile) continue;
 		const sourceIndex = itemSources[itemIndex];
 		if (sourceIndex === null || sourceIndex === undefined) continue;
@@ -537,15 +547,7 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 
 	if (candidates.length === 0) return diagnostic("unmapped");
 
-	const previous = hints.previous;
-	const settingsMismatch =
-		previous !== undefined &&
-		(previous.provider !== model.provider ||
-			previous.model !== model.id ||
-			previous.settingsDigest !== settingsDigest);
-	const previousBoundary = settingsMismatch ? undefined : previous?.historyBoundary;
-	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as ResponsesMarkedCandidate[];
-	const reused = reusableCandidate(candidates, previousBoundary) as ResponsesMarkedCandidate | undefined;
+	const { chosen, observation } = selectCacheLayout(candidates, hints.previous, model, settingsDigest, stableBytes);
 
 	const marks: ResponsesCacheMark[] = [];
 	for (const candidate of chosen) {
@@ -564,34 +566,8 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 		}
 	}
 
-	const newestChosen = chosen[chosen.length - 1];
 	return {
-		observation: {
-			checkpoint: newestChosen
-				? {
-						version: 1,
-						provider: model.provider,
-						model: model.id,
-						settingsDigest,
-						historyBoundary: {
-							originId: newestChosen.originId,
-							ordinal: newestChosen.ordinal,
-							prefixDigest: newestChosen.prefixDigest,
-						},
-					}
-				: undefined,
-			reason: !previous
-				? "append"
-				: settingsMismatch
-					? "settings-change"
-					: reused
-						? chosen[chosen.length - 1] !== reused
-							? "append"
-							: "suffix"
-						: "history-change",
-			reusableInputBytes: reused?.bytes ?? 0,
-			stableInputBytes: stableBytes,
-		},
+		observation,
 		settingsDigest,
 		marks,
 	};
@@ -718,7 +694,8 @@ export async function validateResponsesCacheLayout<TParams extends { input?: unk
 	let chain = await digestCacheValue(responsesPromptFrame(params));
 	for (let itemIndex = 0; itemIndex <= lastMarkIndex; itemIndex++) {
 		const mark = marksByItem.get(itemIndex);
-		chain = await digestCacheValue([chain, JSON.stringify(responsesItemDigestFrame(input[itemIndex], mark))]);
+		const digest = digestCacheFrame(chain, JSON.stringify(responsesItemDigestFrame(input[itemIndex], mark)));
+		chain = typeof digest === "string" ? digest : await digest;
 		if (mark && (chain !== mark.prefixDigest || !responsesItemHasBreakpoint(input[itemIndex]))) {
 			return false;
 		}

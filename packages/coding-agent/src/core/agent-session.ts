@@ -78,6 +78,8 @@ import {
 	prepareCompaction,
 	shouldCompact,
 } from "./compaction/index.ts";
+import { ContextArtifactReplay } from "./context-artifact-replay.ts";
+import { ContextMessageSources } from "./context-message-sources.ts";
 import {
 	type ContextReplacement,
 	type ContextRewriteBatch,
@@ -960,18 +962,34 @@ export class AgentSession {
 		return this._modelRegistry;
 	}
 
+	// Serialize Bash authorization with execution, so queued commands never retain
+	// grants issued before a permission change while another command is running.
+	private _bashPermissionTail: Promise<void> = Promise.resolve();
+
+	private _inBashPermissionLane<T>(run: () => Promise<T>): Promise<T> {
+		const result = this._bashPermissionTail.then(run);
+		this._bashPermissionTail = result.then(
+			() => undefined,
+			() => undefined,
+		);
+		return result;
+	}
+
 	async setPermissionPreset(preset: PermissionPreset): Promise<void> {
 		if (!isPermissionPreset(preset)) throw new TypeError("Invalid permission preset");
 		const current = this.sessionManager.getPermissionPreset();
 		if (current === preset) return;
-		if (
-			settingsForPreset(preset).sandboxPolicy === "danger-full-access" &&
-			settingsForPreset(current).sandboxPolicy !== "danger-full-access"
-		) {
-			await this._interactiveBashBoundary?.reset();
-		}
 		this.sessionManager.setPermissionPreset(preset);
 		this._permissionRuntime.invalidate("settings");
+		if (
+			settingsForPreset(preset).sandboxPolicy === "danger-full-access" &&
+			settingsForPreset(current).sandboxPolicy !== "danger-full-access" &&
+			this._interactiveBashBoundary
+		) {
+			// Retire the old sandbox only after in-flight work finishes. Publishing
+			// the new preset must neither stop a command nor await its completion.
+			void this._inBashPermissionLane(() => this._interactiveBashBoundary!.reset()).catch(() => undefined);
+		}
 	}
 
 	notifyPermissionCeilingChanged(): void {
@@ -1170,6 +1188,7 @@ export class AgentSession {
 				const session = this;
 				const request = {
 					args: params,
+					revalidateOnSettingsChange: true,
 					get action() {
 						return describeToolAction(entry.definition, params, {
 							actionId: toolCallId,
@@ -1204,7 +1223,15 @@ export class AgentSession {
 					},
 				};
 				try {
-					return await this._permissionRuntime.authorizeAndExecute(request);
+					const authorize = () => {
+						executionSignal.throwIfAborted();
+						if (this._toolDefinitions.get(tool.name)?.toolIdentity !== entry.toolIdentity)
+							throw new Error("Tool identity changed before execution");
+						return this._permissionRuntime.authorizeAndExecute(request);
+					};
+					return await (managedBash && this._interactiveBashBoundary
+						? this._inBashPermissionLane(authorize)
+						: authorize());
 				} catch (error) {
 					if (error instanceof ToolPermissionDescriptionError) {
 						await this._permissionAudit.append(
@@ -1414,29 +1441,15 @@ export class AgentSession {
 		llmMessages: readonly Message[],
 	): PromptCacheHints | undefined {
 		if (!this.settingsManager.getPromptCacheSettings().historyAnchors) return undefined;
-		let digestIndex: Map<string, string | null> | undefined;
-		const digestFor = (message: AgentMessage): string | undefined => {
-			digestIndex ??= (() => {
-				const index = new Map<string, string | null>();
-				for (const entry of this.sessionManager.getBranch()) {
-					if (entry.type !== "message") continue;
-					const digest = getContextSourceDigest(entry.message as AgentMessage);
-					index.set(digest, index.has(digest) ? null : entry.id);
-				}
-				return index;
-			})();
-			return digestIndex.get(getContextSourceDigest(message)) ?? undefined;
-		};
+		const sources = this._preparedContextSources ?? this._contextMessageSources();
 		const origins = agentMessages.map((message, index): PromptCacheOrigin => {
-			const source = this._planProjectionSources.get(message) ?? message;
-			const entryId = this.sessionManager.getMessageEntryId(source);
-			if (entryId !== undefined) return { id: entryId, kind: "stable" };
 			if (message.role === "custom" && message.customType === "metis_plan_context") {
 				return { id: "request:plan", kind: "volatile" };
 			}
-			const digestId = digestFor(source);
-			if (digestId !== undefined) return { id: digestId, kind: "stable" };
-			return { id: `volatile:${index}`, kind: "volatile" };
+			const source =
+				this._contextProjectionSources.get(message) ?? this._planProjectionSources.get(message) ?? message;
+			const durable = sources.resolve(source, this.sessionManager.getMessageEntryId(source));
+			return durable ? { id: durable.originId, kind: "stable" } : { id: `volatile:${index}`, kind: "volatile" };
 		});
 		const converted = convertToLlmWithOrigins([...agentMessages], origins);
 		if (
@@ -1477,28 +1490,34 @@ export class AgentSession {
 	private _lastPreparedEstimate: number | undefined;
 	private _growthConfigKey: string | undefined;
 
+	private _preparedContextSources: ContextMessageSources | undefined;
+	private _contextArtifactReplay = new ContextArtifactReplay();
+	private _contextProjectionSources = new WeakMap<AgentMessage, AgentMessage>();
+
+	private _contextMessageSources(): ContextMessageSources {
+		const staged = this._stagedAgentMailboxEventIds.flatMap((id) => {
+			const pending = this._pendingAgentMailboxEvents.get(id);
+			return pending ? [this._agentMailboxMessage(pending.event)] : [];
+		});
+		return new ContextMessageSources(this.sessionManager.buildContextEntries(), staged);
+	}
+
 	/** Pairs each transformed view message with its durable branch source, if any. */
 	private _resolveContextViewPairs(transformed: readonly AgentMessage[]): ContextViewPair[] {
-		const branchSources = new Map<string, AgentMessage>();
-		const digestIndex = new Map<string, string | null>();
-		for (const entry of this.sessionManager.getBranch()) {
-			if (entry.type !== "message") continue;
-			const message = entry.message as AgentMessage;
-			branchSources.set(entry.id, message);
-			const digest = getContextSourceDigest(message);
-			digestIndex.set(digest, digestIndex.has(digest) ? null : entry.id);
-		}
+		const sources = this._contextMessageSources();
+		this._preparedContextSources = sources;
 		const pairs: ContextViewPair[] = [];
 		for (let index = 0; index < transformed.length; index++) {
 			const message = transformed[index]!;
 			const source = this._planProjectionSources.get(message) ?? message;
-			const entryId =
-				this.sessionManager.getMessageEntryId(source) ??
-				digestIndex.get(getContextSourceDigest(source)) ??
-				undefined;
-			const durable = entryId !== undefined ? branchSources.get(entryId) : undefined;
-			if (entryId !== undefined && durable !== undefined) {
-				pairs.push({ index, entryId, source: durable, message });
+			const durable = sources.resolve(source, this.sessionManager.getMessageEntryId(source));
+			if (
+				durable &&
+				(durable.message.role === "toolResult" ||
+					durable.message.role === "assistant" ||
+					durable.message.role === "user")
+			) {
+				pairs.push({ index, entryId: durable.entryId, source: durable.message, message });
 			}
 		}
 		return pairs;
@@ -1529,7 +1548,9 @@ export class AgentSession {
 			const replacement = applied.get(entryId);
 			if (!replacement) return message;
 			if (getContextSourceDigest(message) !== replacement.sourceDigest) return message;
-			return { ...message, content: replacement.content };
+			const projected = { ...message, content: replacement.content };
+			this._contextProjectionSources.set(projected, this._planProjectionSources.get(message) ?? message);
+			return projected;
 		});
 	}
 
@@ -1649,11 +1670,40 @@ export class AgentSession {
 		if (pinned) this._readbackProtectedEntryIds.add(pinned);
 	}
 
-	/**
-	 * Replay committed batches over the resolved view and, when scheduling
-	 * allows, prepare and durably commit one more batch before rebuilding the
-	 * final view. Returns the provider-facing message list.
-	 */
+	/** Verify referenced output files and durably record any relocated paths before sending. */
+	private async _restoreContextArtifacts(pairs: readonly ContextViewPair[], signal?: AbortSignal): Promise<void> {
+		for (let attempt = 0; attempt < 2; attempt++) {
+			const leaf = this.sessionManager.getLeafId();
+			const batches = this.sessionManager.getContextRewrites();
+			const repairs = await this._contextArtifactReplay.prepare(
+				this._toolOutputDir,
+				pairs.map(({ entryId, message }) => ({ entryId, message })),
+				batches,
+				signal,
+			);
+			signal?.throwIfAborted();
+			if (leaf !== this.sessionManager.getLeafId()) {
+				if (attempt === 0) continue;
+				throw new ContextViewError("stale-leaf", "Session changed while restoring tool results");
+			}
+			if (repairs.length) {
+				const estimate = this._estimateViewClosure(this._contextViewSnapshot!.transformed, pairs);
+				const repair: ContextRewriteBatch = {
+					schemaVersion: 1,
+					batchId: randomUUID(),
+					expectedLeafId: leaf,
+					reason: "artifact_repair",
+					replacements: repairs,
+					tokensBefore: estimate(this._projectContextViewPairs(pairs, batches)),
+					tokensAfter: 0,
+				};
+				repair.tokensAfter = estimate(this._projectContextViewPairs(pairs, [...batches, repair]));
+				this.sessionManager.appendContextRewrite(repair);
+			}
+			return;
+		}
+	}
+
 	private async _projectAndMaybePrune(
 		transformed: readonly AgentMessage[],
 		pairs: readonly ContextViewPair[],
@@ -1670,6 +1720,7 @@ export class AgentSession {
 			});
 		const estimateView = this._estimateViewClosure(transformed, pairs);
 
+		await this._restoreContextArtifacts(pairs, signal);
 		let batches = this.sessionManager.getContextRewrites();
 		let projectedPairs = this._projectContextViewPairs(pairs, batches);
 		const mode = this.settingsManager.getPromptCacheSettings().microcompaction;

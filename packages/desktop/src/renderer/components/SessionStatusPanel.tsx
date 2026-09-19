@@ -1,6 +1,6 @@
 import type { SessionStatusView } from "@metis/app-protocol";
-import { X } from "@phosphor-icons/react";
-import { useEffect, useRef } from "react";
+import { Info, X } from "@phosphor-icons/react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { contextFillPercent, contextUsagePercent, formatContextTokens } from "../context-usage.ts";
 
@@ -14,6 +14,9 @@ interface SessionStatusPanelProps {
 
 export function SessionStatusPanel({ closing = false, error, loading, onClose, status }: SessionStatusPanelProps) {
 	const { t } = useTranslation();
+	const [cacheInfoOpen, setCacheInfoOpen] = useState(false);
+	const [cacheInfoHovered, setCacheInfoHovered] = useState(false);
+	const cacheInfoId = useId();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	useEffect(() => {
@@ -134,33 +137,23 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 							</ul>
 						</>
 					)}
-					{
-						<div className="context-usage-cache">
-							<div className="context-usage-cache-heading">
-								<span>{t("Cache hit rate (latest completed request)")}</span>
-								<strong>{cacheHitPercent === null ? "—" : `${cacheHitPercent}%`}</strong>
-							</div>
-							{cacheHitPercent !== null && (
-								<div
-									aria-label={`${t("Cache hit rate (latest completed request)")} ${cacheHitPercent}%`}
-									aria-valuemax={100}
-									aria-valuemin={0}
-									aria-valuenow={cacheHitPercent}
-									className="context-usage-cache-track"
-									role="progressbar"
-								>
-									<span className="context-usage-cache-meter" style={{ width: `${cacheHitPercent}%` }} />
-								</div>
-							)}
-							<p className="context-usage-basis">
-								{t(
-									cacheHitPercent === null
-										? "Cache usage not reported for a completed request on this model."
-										: "Cached input / total input for one model request; output tokens are excluded.",
-								)}
-							</p>
+					<div className="context-usage-cache">
+						<div className="context-usage-cache-heading">
+							<span>{t("Cache hit rate")}</span>
+							<small>{t("Latest completed request")}</small>
+							<span className="context-usage-cache-info" onMouseEnter={() => setCacheInfoHovered(true)} onMouseLeave={() => setCacheInfoHovered(false)}>
+								<button type="button" aria-label={t("About cache hit rate")} aria-describedby={cacheInfoId}
+									onFocus={() => setCacheInfoOpen(true)} onBlur={() => setCacheInfoOpen(false)} onClick={() => setCacheInfoOpen(true)}
+									onKeyDown={(event) => { if (event.key === "Escape" && (cacheInfoOpen || cacheInfoHovered)) { event.stopPropagation(); setCacheInfoOpen(false); setCacheInfoHovered(false); } }}>
+									<Info aria-hidden="true" size={13} />
+								</button>
+								<p id={cacheInfoId} role="tooltip" hidden={!cacheInfoOpen && !cacheInfoHovered}>
+									{t(cacheHitPercent === null ? "Cache usage not reported for a completed request on this model." : "Cached input / total input for one model request; output tokens are excluded.")}
+								</p>
+							</span>
 						</div>
-					}
+						<span className="context-usage-cache-value">{cacheHitPercent === null ? "—" : `${cacheHitPercent}%`}</span>
+					</div>
 				</>
 			) : null}
 		</div>

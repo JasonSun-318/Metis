@@ -37,9 +37,9 @@ import { headersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import {
 	type CacheCandidate,
-	chooseCacheCandidates,
+	digestCacheFrame,
 	digestCacheValue,
-	reusableCandidate,
+	selectCacheLayout,
 } from "../utils/prompt-cache-layout.ts";
 import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
@@ -1243,13 +1243,26 @@ async function applyAnthropicCacheLayout(
 	// changed by a payload hook without invalidating breakpoints.
 	let chain = await digestCacheValue(anthropicPromptFrame(params));
 	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
-	const extend = async (frame: unknown): Promise<void> => {
+	const extend = (frame: unknown): void | Promise<void> => {
 		const json = JSON.stringify(frame);
-		chain = await digestCacheValue([chain, json]);
+		const result = digestCacheFrame(chain, json);
 		bytes += new TextEncoder().encode(json).length;
+		if (typeof result === "string") {
+			chain = result;
+			return;
+		}
+		return result.then((digest) => {
+			chain = digest;
+		});
 	};
-	if (params.tools) await extend(params.tools);
-	if (params.system) await extend(params.system);
+	if (params.tools) {
+		const pending = extend(params.tools);
+		if (pending) await pending;
+	}
+	if (params.system) {
+		const pending = extend(params.system);
+		if (pending) await pending;
+	}
 
 	// Last payload block attributed to each transformed source index.
 	const lastPosition = new Map<number, { paramIndex: number; blockIndex: number }>();
@@ -1285,7 +1298,10 @@ async function applyAnthropicCacheLayout(
 	for (let paramIndex = 0; paramIndex < params.messages.length; paramIndex++) {
 		const param = params.messages[paramIndex];
 		const span = paramSpans[paramIndex];
-		await extend({ role: param.role });
+		{
+			const pending = extend({ role: param.role });
+			if (pending) await pending;
+		}
 		const blocks =
 			span?.stringContent === true && typeof param.content === "string"
 				? [param.content]
@@ -1293,7 +1309,10 @@ async function applyAnthropicCacheLayout(
 					? param.content
 					: [];
 		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
-			await extend(blocks[blockIndex]);
+			{
+				const pending = extend(blocks[blockIndex]);
+				if (pending) await pending;
+			}
 			if (
 				firstVolatile &&
 				(paramIndex > firstVolatile.paramIndex ||
@@ -1325,15 +1344,7 @@ async function applyAnthropicCacheLayout(
 
 	if (candidates.length === 0) return undefined;
 
-	const previous = hints.previous;
-	const settingsMismatch =
-		previous !== undefined &&
-		(previous.provider !== model.provider ||
-			previous.model !== model.id ||
-			previous.settingsDigest !== settingsDigest);
-	const previousBoundary = settingsMismatch ? undefined : previous?.historyBoundary;
-	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as AnthropicMarkedCandidate[];
-	const reused = reusableCandidate(candidates, previousBoundary) as AnthropicMarkedCandidate | undefined;
+	const { chosen, observation } = selectCacheLayout(candidates, hints.previous, model, settingsDigest, stableBytes);
 
 	const marks: AnthropicCacheMark[] = [];
 	let markers = 0;
@@ -1403,33 +1414,6 @@ async function applyAnthropicCacheLayout(
 		}
 	}
 
-	const newestChosen = chosen[chosen.length - 1];
-	const observation: PromptCacheObservation = {
-		checkpoint: newestChosen
-			? {
-					version: 1,
-					provider: model.provider,
-					model: model.id,
-					settingsDigest,
-					historyBoundary: {
-						originId: newestChosen.originId,
-						ordinal: newestChosen.ordinal,
-						prefixDigest: newestChosen.prefixDigest,
-					},
-				}
-			: undefined,
-		reason: !previous
-			? "append"
-			: settingsMismatch
-				? "settings-change"
-				: reused
-					? chosen[chosen.length - 1] !== reused
-						? "append"
-						: "suffix"
-					: "history-change",
-		reusableInputBytes: reused?.bytes ?? 0,
-		stableInputBytes: stableBytes,
-	};
 	return { payload: params, observation, settingsDigest, marks };
 }
 
@@ -1591,19 +1575,37 @@ async function validateAnthropicCacheLayout(
 		}
 	}
 	let chain = await digestCacheValue(anthropicPromptFrame(params));
-	const extend = async (frame: unknown): Promise<void> => {
-		chain = await digestCacheValue([chain, JSON.stringify(frame)]);
+	const extend = (frame: unknown): void | Promise<void> => {
+		const result = digestCacheFrame(chain, JSON.stringify(frame));
+		if (typeof result === "string") {
+			chain = result;
+			return;
+		}
+		return result.then((digest) => {
+			chain = digest;
+		});
 	};
-	if (params.tools) await extend(params.tools.map(withoutAnthropicMarkers));
+	if (params.tools) {
+		const pending = extend(params.tools.map(withoutAnthropicMarkers));
+		if (pending) await pending;
+	}
 	if (params.system) {
-		await extend(typeof params.system === "string" ? params.system : params.system.map(withoutAnthropicMarkers));
+		{
+			const pending = extend(
+				typeof params.system === "string" ? params.system : params.system.map(withoutAnthropicMarkers),
+			);
+			if (pending) await pending;
+		}
 	}
 	const marksByPosition = new Map(marks.map((mark) => [`${mark.paramIndex}:${mark.blockIndex}`, mark]));
 	const lastMarkIndex = marks.reduce((max, mark) => Math.max(max, mark.paramIndex), -1);
 	const messages = params.messages ?? [];
 	for (let paramIndex = 0; paramIndex < messages.length && paramIndex <= lastMarkIndex; paramIndex++) {
 		const param = messages[paramIndex]!;
-		await extend({ role: param.role });
+		{
+			const pending = extend({ role: param.role });
+			if (pending) await pending;
+		}
 		const blocks =
 			typeof param.content === "string" ? [param.content] : Array.isArray(param.content) ? param.content : [];
 		for (let blockIndex = 0; blockIndex < blocks.length; blockIndex++) {
@@ -1615,7 +1617,10 @@ async function validateAnthropicCacheLayout(
 				mark?.stringContent === true && typeof block === "object" && block !== null && block.type === "text"
 					? block.text
 					: withoutAnthropicMarkers(block);
-			await extend(digestForm);
+			{
+				const pending = extend(digestForm);
+				if (pending) await pending;
+			}
 			const hasMarker =
 				typeof block === "object" &&
 				block !== null &&

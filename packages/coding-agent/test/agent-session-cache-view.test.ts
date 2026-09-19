@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentMessage } from "@metis/agent-core";
 import type { AssistantMessage, Context, ToolResultMessage } from "@metis/ai";
 import { createAssistantMessageEventStream, fauxAssistantMessage } from "@metis/ai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { type CacheSessionFixture, createCacheSession } from "./cache-session-fixtures.ts";
 
 const BIG = (index: number) => `big-${index}-${"x".repeat(100_000)}`;
@@ -115,6 +116,70 @@ describe("AgentSession durable context view", () => {
 		const stateText = fixture.agent.state.messages.map((m) => textOf(m)).join("");
 		for (let index = 0; index < 8; index++) expect(stateText).toContain(`big-${index}-`);
 		expect(artifactFiles(fixture).length).toBe(batches[0]!.replacements.length);
+	});
+
+	it("keeps durable mailbox, compaction, and rewritten results in the stable prefix", async () => {
+		pressureFixture();
+		const kept = fixture.manager.appendMessage({ role: "user", content: "retained", timestamp: 1 });
+		fixture.manager.appendCompaction("summary", kept, 1000, undefined, false, { version: 1, messages: [] });
+		fixture.manager.appendCustomMessageEntry("agent_mailbox", "durable delivery", true, { eventId: "event-1" });
+		fixture.agent.state.messages = fixture.manager.buildSessionContext().messages;
+		seedRoundTrips(fixture, pressureTexts());
+		await fixture.session.prompt("continue");
+		const request = fixture.captured.at(-1)!;
+		expect(request.cacheHints?.origins.every((origin) => origin.kind === "stable")).toBe(true);
+		expect(request.cacheHints?.origins.some((origin) => origin.id === "mailbox:event-1")).toBe(true);
+		expect(contextText(request)).toContain("<tool-result-cleared>");
+	});
+
+	it("restores a missing committed artifact before replay, including when pruning is off", async () => {
+		pressureFixture();
+		seedRoundTrips(fixture, pressureTexts());
+		await fixture.session.prompt("first");
+		const replacement = fixture.manager.getContextRewrites()[0]!.replacements[0]!;
+		const path = join(fixture.manager.getToolOutputDir()!, replacement.artifactRelativePath);
+		const original = readFileSync(path, "utf8");
+		unlinkSync(path);
+		fixture.settings.applyOverrides({ promptCache: { microcompaction: "off" } });
+		await fixture.session.prompt("again");
+		expect(readFileSync(path, "utf8")).toBe(original);
+		expect(contextText(fixture.captured.at(-1)!)).toContain(replacement.content[0]!.text);
+		expect(fixture.manager.getContextRewrites()).toHaveLength(1);
+	});
+
+	it("copies committed artifacts to a fork and records repaired references before sending", async () => {
+		pressureFixture();
+		seedRoundTrips(fixture, pressureTexts());
+		await fixture.session.prompt("first");
+		const sourceFile = fixture.manager.getSessionFile()!;
+		const oldDir = fixture.manager.getToolOutputDir()!;
+		const replacement = fixture.manager.getContextRewrites()[0]!.replacements[0]!;
+		const original = readFileSync(join(oldDir, replacement.artifactRelativePath), "utf8");
+		fixture.close();
+		const destination = join(root, "fork");
+		mkdirSync(destination);
+		const manager = SessionManager.forkFrom(sourceFile, destination, join(destination, "sessions"));
+		rmSync(oldDir, { recursive: true });
+		fixture = createCacheSession(destination, { manager });
+		fixture.settings.applyOverrides({ promptCache: { microcompaction: "off" } });
+		await fixture.session.prompt("continue from fork");
+		const repairedPath = join(manager.getToolOutputDir()!, replacement.artifactRelativePath);
+		expect(readFileSync(repairedPath, "utf8")).toBe(original);
+		expect(manager.getContextRewrites().at(-1)?.reason).toBe("artifact_repair");
+		expect(contextText(fixture.captured.at(-1)!)).toContain(repairedPath);
+		expect(contextText(fixture.captured.at(-1)!)).not.toContain(oldDir);
+	});
+
+	it("does not replay a false saved-result reference when its artifact is occupied", async () => {
+		pressureFixture();
+		seedRoundTrips(fixture, pressureTexts());
+		await fixture.session.prompt("first");
+		const replacement = fixture.manager.getContextRewrites()[0]!.replacements[0]!;
+		const path = join(fixture.manager.getToolOutputDir()!, replacement.artifactRelativePath);
+		writeFileSync(path, "foreign content");
+		await fixture.session.prompt("again").catch(() => {});
+		expect(fixture.captured).toHaveLength(1);
+		expect(readFileSync(path, "utf8")).toBe("foreign content");
 	});
 
 	it("does not create new files or batches while below the pressure watermark", async () => {
@@ -273,6 +338,10 @@ describe("AgentSession durable context view", () => {
 					textOf({ content: entry.content }).includes("mailbox payload"),
 			);
 		expect(mailboxMessages).toHaveLength(1);
+		const firstOrigins = fixture.captured[0]!.cacheHints!.origins;
+		expect(firstOrigins.every((origin) => origin.kind === "stable")).toBe(true);
+		await fixture.session.prompt("next");
+		expect(fixture.captured[1]!.cacheHints!.origins.slice(0, firstOrigins.length)).toEqual(firstOrigins);
 	});
 
 	it("does not add an LLM summarization call when compaction is disabled", async () => {

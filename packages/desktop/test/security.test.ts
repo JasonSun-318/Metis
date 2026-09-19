@@ -2356,6 +2356,91 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("removes only the exact server-cancelled approval and preserves its replacement", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!(event);
+		webContents.sent.length = 0;
+		const request = (id: string, interactionId: string) => ({
+			jsonrpc: "2.0",
+			id,
+			method: "interaction/request",
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId,
+					sessionId: "session-1",
+					title: "Approve tool?",
+					message: "Approval required",
+					createdAt: "2026-09-20T00:00:00.000Z",
+					kind: "session_permission_approval",
+					requestId: interactionId,
+					actionId: "same-tool-call",
+					toolLabel: "bash",
+					riskLevel: "low",
+					executionTarget: "sandbox",
+					reason: "Approval required",
+					scopeComplete: true,
+					details: [],
+					choices: ["allow-once", "deny-once"],
+				},
+			},
+		});
+		const oldRequest = request("old-rpc", "22222222-2222-4222-8222-222222222222");
+		const replacement = request("new-rpc", "33333333-3333-4333-8333-333333333333");
+		try {
+			emitMessage(oldRequest);
+			emitMessage(replacement);
+			const cancellation = {
+				jsonrpc: "2.0",
+				method: "interaction/cancelled",
+				params: {
+					serverEpoch: oldRequest.params.serverEpoch,
+					sessionId: "session-1",
+					interactionId: oldRequest.params.interaction.interactionId,
+					requestId: oldRequest.id,
+				},
+			};
+			for (const mismatch of [
+				{ requestId: "wrong-rpc" },
+				{ sessionId: "other-session" },
+				{ serverEpoch: "44444444-4444-4444-8444-444444444444" },
+			]) {
+				emitMessage({ ...cancellation, params: { ...cancellation.params, ...mismatch } });
+			}
+			expect(webContents.sent).toHaveLength(2);
+			emitMessage(cancellation);
+			emitMessage(cancellation);
+			expect(webContents.sent).toHaveLength(3);
+			expect(webContents.sent[2]).toEqual([
+				"metis:event",
+				{ type: "interaction-cancelled", interactionId: oldRequest.params.interaction.interactionId },
+			]);
+			expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+			const respond = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.respondToInteraction)!;
+			await expect(
+				respond(event, {
+					interactionId: oldRequest.params.interaction.interactionId,
+					kind: "session_permission_approval",
+					choice: "allow-once",
+				}),
+			).rejects.toThrow("no longer pending");
+			await respond(event, {
+				interactionId: replacement.params.interaction.interactionId,
+				kind: "session_permission_approval",
+				choice: "allow-once",
+			});
+			expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce();
+			expect(supervisor.respondToServerRequest.mock.calls[0]?.[0]).toEqual(replacement);
+		} finally {
+			broker.dispose();
+		}
+	});
+
 	it("clears an expired interaction from main and renderer state", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-07-16T00:00:00.000Z"));

@@ -58,6 +58,7 @@ function fakeBashBoundary() {
 		hostExec,
 		sandboxExec,
 		createSandbox,
+		sandbox,
 		setCwd: (next: string) => {
 			cwd = next;
 		},
@@ -110,6 +111,84 @@ describe("AgentSession permission enforcement", () => {
 		expect(fake.hostExec).toHaveBeenCalledTimes(target === "host" ? 1 : 0);
 		expect(fake.createSandbox).toHaveBeenCalledTimes(target === "sandbox" ? 1 : 0);
 	});
+
+	it("switches a waiting Ask approval to Full without restarting the model turn", async () => {
+		const fake = fakeBashBoundary();
+		let oldSignal: AbortSignal | undefined;
+		const requestApproval = vi.fn(async (request: PermissionApprovalRequest) => {
+			oldSignal = request.signal;
+			return new Promise<{ decision: "allow" }>(() => {});
+		});
+		const harness = await createHarness({
+			permissionPreset: "ask",
+			requestPermissionApproval: requestApproval,
+			interactiveBashBoundary: fake.boundary,
+		});
+		harnesses.push(harness);
+		fake.setCwd(harness.tempDir);
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+		]);
+		const turn = harness.session.prompt("run it");
+		await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce());
+		await harness.session.setPermissionPreset("full");
+		await turn;
+		expect(oldSignal?.aborted).toBe(true);
+		expect(fake.hostExec).toHaveBeenCalledOnce();
+		expect(fake.sandboxExec).not.toHaveBeenCalled();
+		expect(harness.session.messages.filter((message) => message.role === "toolResult")).toHaveLength(1);
+	});
+
+	it.each(["auto", "full"] as const)(
+		"keeps an in-flight %s command and authorizes the next command under the new preset",
+		async (initial) => {
+			const fake = fakeBashBoundary();
+			let finish!: () => void;
+			const runningExec = initial === "full" ? fake.hostExec : fake.sandboxExec;
+			runningExec.mockImplementationOnce(async () => {
+				await new Promise<void>((resolve) => {
+					finish = resolve;
+				});
+				return { exitCode: 0 };
+			});
+			const requestApproval = vi.fn(async () => ({ decision: "deny" as const }));
+			const harness = await createHarness({
+				permissionPreset: initial,
+				requestPermissionApproval: requestApproval,
+				interactiveBashBoundary: fake.boundary,
+			});
+			harnesses.push(harness);
+			fake.setCwd(harness.tempDir);
+			harness.setResponses([
+				fauxAssistantMessage([fauxToolCall("bash", { command: "pwd" }), fauxToolCall("bash", { command: "ls" })], {
+					stopReason: "toolUse",
+				}),
+				fauxAssistantMessage("done"),
+			]);
+			const turn = harness.session.prompt("run both");
+			await vi.waitFor(() => expect(runningExec).toHaveBeenCalledOnce());
+			await harness.session.setPermissionPreset(initial === "full" ? "ask" : "full");
+			expect(fake.sandbox.dispose).not.toHaveBeenCalled();
+			expect(requestApproval).not.toHaveBeenCalled();
+			finish();
+			await turn;
+			const results = harness.session.messages.filter((message) => message.role === "toolResult");
+			expect(results).toHaveLength(2);
+			expect(results[0]?.isError).toBe(false);
+			if (initial === "full") {
+				expect(requestApproval).toHaveBeenCalledOnce();
+				expect(fake.hostExec).toHaveBeenCalledOnce();
+				expect(fake.sandboxExec).not.toHaveBeenCalled();
+				expect(results[1]?.isError).toBe(true);
+			} else {
+				expect(fake.sandboxExec).toHaveBeenCalledOnce();
+				expect(fake.hostExec).toHaveBeenCalledOnce();
+				expect(fake.sandbox.dispose).toHaveBeenCalledOnce();
+				expect(results[1]?.isError).toBe(false);
+			}
+		},
+	);
 
 	it("executes Python on the host in Full and restores Ask approval in the same session", async () => {
 		let cwd = process.cwd();

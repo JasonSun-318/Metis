@@ -69,7 +69,7 @@ interface ServerRequestFixture {
 }
 
 interface NotificationFixture {
-	method: "connection/events" | "browser/tool/cancelled";
+	method: "connection/events" | "browser/tool/cancelled" | "interaction/cancelled";
 	envelope: Record<string, unknown>;
 }
 

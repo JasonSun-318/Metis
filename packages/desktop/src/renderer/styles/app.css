@@ -2108,11 +2108,15 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 [data-category="agent_definitions"] { --context-category: #6fa8dc; }
 [data-category="summarized_conversation"] { --context-category: #ec6f91; }
 [data-category="conversation"] { --context-category: #df7b77; }
-.context-usage-cache { display: grid; width: 100%; gap: 7px; margin: 12px 0 0; border-top: 1px solid var(--border); padding-top: 10px; font-size: 11px; font-variant-numeric: tabular-nums; }
-.context-usage-cache-heading { display: flex; align-items: center; justify-content: space-between; color: var(--text-18); }
-.context-usage-cache-heading strong { color: var(--text-22); font-weight: 560; }
-.context-usage-cache-track { width: 100%; height: 6px; overflow: hidden; border-radius: 999px; background: var(--text-01, rgba(255, 255, 255, 0.12)); }
-.context-usage-cache-meter { display: block; height: 100%; border-radius: inherit; background: var(--text-18); }
+.context-usage-cache { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 12px 0 0; border-top: 1px solid var(--border); padding-top: 10px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.context-usage-cache-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--text-18); }
+.context-usage-cache-heading small { color: var(--text-10); font-size: 10px; }
+.context-usage-cache-value { flex: none; color: var(--text-18); font-weight: 500; }
+.context-usage-cache-info { position: relative; display: inline-flex; }
+.context-usage-cache-info > button { display: grid; place-items: center; width: 20px; height: 20px; color: var(--text-10); border-radius: 4px; }
+.context-usage-cache-info > button:hover, .context-usage-cache-info > button:focus-visible { color: var(--text-22); background: var(--surface-05); }
+.context-usage-cache-info > button:focus-visible { outline: 1px solid var(--border-strong); }
+.context-usage-cache-info > p { position: absolute; z-index: 1; inset: auto auto calc(100% + 5px) 0; transform: translateX(-65%); width: min(240px, 65vw); margin: 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--panel); color: var(--text-18); font-size: 11px; line-height: 1.5; box-shadow: var(--overlay-shadow); }
 .session-status-message { margin: 10px 0 0; color: var(--text-10); font-size: 11px; }
 .session-status-message.is-error { color: var(--danger); }
 .composer-icon-button { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 50%; padding: 0; transition: background-color 140ms ease, box-shadow 140ms ease, transform 140ms ease; }
@@ -3883,3 +3887,9 @@ classes so their inline layout wins the cascade. */
  .memory-session-option + .memory-session-option { padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border-weak); }
  .memory-manage-row > .memory-section-caption { display: none; }
 }
+
+/* Standalone disclosures share the transcript tool drawer, including close motion. */
+.drawer-details > summary { list-style: none; }
+.drawer-details > summary::-webkit-details-marker { display: none; }
+.drawer-details-caret { display: inline-block; vertical-align: -2px; margin-right: 5px; transition: transform 280ms cubic-bezier(.22, .8, .24, 1); }
+.drawer-details[open] > summary > .drawer-details-caret { transform: rotate(90deg); }

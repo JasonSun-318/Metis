@@ -2,12 +2,71 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentMessage } from "@metis/agent-core";
+import { fauxAssistantMessage } from "@metis/ai";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { estimateTokens } from "../src/core/compaction/index.ts";
+import { applyContextRewrites, getContextSourceDigest } from "../src/core/context-view.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 import {
-	createToolResultMicrocompactor,
 	MICROCOMPACTION_KEEP_RECENT,
 	MICROCOMPACTION_TRIGGER_TOKENS,
+	prepareMicrocompaction,
 } from "../src/core/tool-result-microcompaction.ts";
+
+/** Exercise the current durable implementation, retaining the original eligibility regression cases. */
+function createTestMicrocompactor(options: { outputDir: string; isBuiltinTool: (name: string) => boolean }) {
+	const manager = SessionManager.inMemory();
+	const ids = new Map<string, string>();
+	let pending = Promise.resolve();
+	return (messages: AgentMessage[], signal?: AbortSignal): Promise<AgentMessage[]> => {
+		const operation = pending.then(async () => {
+			const group = fauxAssistantMessage(
+				messages.flatMap((message) =>
+					message.role === "toolResult"
+						? [{ type: "toolCall" as const, id: message.toolCallId, name: message.toolName, arguments: {} }]
+						: [],
+				),
+				{ stopReason: "toolUse", timestamp: 1 },
+			);
+			const fullMessages: AgentMessage[] = [group, ...messages];
+			const sources = fullMessages.map((message) => {
+				const digest = getContextSourceDigest(message);
+				let entryId = ids.get(digest);
+				if (!entryId) {
+					entryId = manager.appendMessage(message as Extract<AgentMessage, { role: "toolResult" | "assistant" }>);
+					ids.set(digest, entryId);
+				}
+				return { entryId, message };
+			});
+			const batches = manager.getContextRewrites();
+			const view = batches.length ? applyContextRewrites(sources, batches) : fullMessages;
+			const estimateView = (items: readonly AgentMessage[]) =>
+				items.reduce((sum, message) => sum + estimateTokens(message), 0);
+			const batch = await prepareMicrocompaction(
+				{
+					mode: "legacy",
+					sources,
+					view,
+					batches,
+					expectedLeafId: manager.getLeafId(),
+					protectedEntryIds: new Set(),
+					target: { low: estimateView(view), minimumGain: 0 },
+					tokensBefore: estimateView(view),
+					signal,
+				},
+				{ ...options, estimateView },
+			);
+			if (!batch) return batches.length ? view.slice(1) : messages;
+			manager.appendContextRewrite(batch);
+			return applyContextRewrites(sources, manager.getContextRewrites()).slice(1);
+		});
+		pending = operation.then(
+			() => {},
+			() => {},
+		);
+		return operation;
+	};
+}
 
 function result(id: string, text: string, overrides: Partial<Extract<AgentMessage, { role: "toolResult" }>> = {}) {
 	return {
@@ -43,7 +102,7 @@ describe("tool-result microcompaction", () => {
 	afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 	it("does no I/O below the 20,000-token threshold", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [result("1", "x".repeat(MICROCOMPACTION_TRIGGER_TOKENS * 4 - 4))];
 		for (let index = 2; index <= MICROCOMPACTION_KEEP_RECENT + 1; index++) {
 			messages.push(result(String(index), "recent"));
@@ -54,7 +113,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it.each(["web_fetch", "web_search"])("clears older %s results at the exact threshold", async (toolName) => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const oldText = "x".repeat(MICROCOMPACTION_TRIGGER_TOKENS * 4);
 		const messages = [result("1", oldText, { toolName })];
 		for (let index = 2; index <= MICROCOMPACTION_KEEP_RECENT + 1; index++) {
@@ -73,7 +132,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it("clears every older eligible result when their combined size reaches the threshold", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [
 			result("old-1", "a".repeat(40_000)),
 			result("old-2", "b".repeat(40_000)),
@@ -89,7 +148,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it("counts only eligible results when protecting the latest five", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: (name) => name === "read" });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: (name) => name === "read" });
 		const messages: AgentMessage[] = [result("old", "x".repeat(80_000))];
 		for (let index = 0; index < 20; index++) {
 			messages.push(result(`custom-${index}`, "custom", { toolName: "mcp_search" }));
@@ -103,7 +162,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it.each(["set_tasks", "spawn_agent", "mcp_search", "custom_tool"])("never clears %s results", async (toolName) => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [result("old", "x".repeat(100_000), { toolName })];
 		for (let index = 0; index < 5; index++) messages.push(result(`recent-${index}`, "recent"));
 
@@ -112,7 +171,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it("clears bash only when a complete output path is declared", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const withoutPath = [
 			result("old", "x".repeat(100_000), { toolName: "bash" }),
 			...Array.from({ length: 5 }, (_, index) => result(`recent-${index}`, "recent")),
@@ -133,8 +192,8 @@ describe("tool-result microcompaction", () => {
 		expect(readdirSync(outputDir)).toHaveLength(1);
 	});
 
-	it("keeps shadowed builtins, image results, and allows eligible text errors", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: (name) => name !== "grep" });
+	it("keeps shadowed builtins, image results, and errors", async () => {
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: (name) => name !== "grep" });
 		const shadowed = result("shadowed", "s".repeat(80_000), { toolName: "grep" });
 		const image = result("image", "ignored", {
 			content: [{ type: "image", data: "aW1hZ2U=", mimeType: "image/png" }],
@@ -147,13 +206,13 @@ describe("tool-result microcompaction", () => {
 
 		expect(projected[0]).toEqual(shadowed);
 		expect(projected[1]).toEqual(image);
-		expect(textOf(projected[2]!)).toContain("tool-result-cleared");
+		expect(projected[2]).toEqual(error);
 	});
 
 	it("removes an existing preview only after importing its complete file", async () => {
 		const sourcePath = join(root, "legacy-full.log");
 		writeFileSync(sourcePath, "complete legacy output");
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [
 			result("old", "preview only".repeat(8_000), { details: { fullOutputPath: sourcePath } }),
 			...Array.from({ length: 5 }, (_, index) => result(`recent-${index}`, "recent")),
@@ -170,7 +229,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it("keeps the preview when its declared complete file is unavailable", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const messages = [
 			result("old", "preview only".repeat(8_000), { details: { fullOutputPath: join(root, "missing.log") } }),
 			...Array.from({ length: 5 }, (_, index) => result(`recent-${index}`, "recent")),
@@ -182,7 +241,7 @@ describe("tool-result microcompaction", () => {
 	});
 
 	it("honors cancellation before persistence", async () => {
-		const compact = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const compact = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
 		const controller = new AbortController();
 		controller.abort(new Error("cancelled"));
 		const messages = [
@@ -196,8 +255,8 @@ describe("tool-result microcompaction", () => {
 
 	it("reuses stable paths across repeated projections and isolates concurrent sessions", async () => {
 		const otherOutputDir = join(root, "other-tool-results");
-		const first = createToolResultMicrocompactor({ outputDir, isBuiltinTool: () => true });
-		const second = createToolResultMicrocompactor({ outputDir: otherOutputDir, isBuiltinTool: () => true });
+		const first = createTestMicrocompactor({ outputDir, isBuiltinTool: () => true });
+		const second = createTestMicrocompactor({ outputDir: otherOutputDir, isBuiltinTool: () => true });
 		const messages = [
 			result("old", "x".repeat(80_000)),
 			...Array.from({ length: 5 }, (_, index) => result(`r-${index}`, "r")),

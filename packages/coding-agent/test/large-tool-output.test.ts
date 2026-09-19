@@ -237,9 +237,9 @@ describe("externalizeLargeToolOutput", () => {
 		);
 		expect(result?.toolOutput).toBeUndefined();
 		expect(readdirSync(movedDir)).toEqual([]);
-		const replacementFiles = readdirSync(outputDir);
-		expect(replacementFiles).toHaveLength(1);
-		expect(readFileSync(join(outputDir, replacementFiles[0]), "utf8")).toBe("");
+		// The pinned-directory check runs before creating the output file.
+		expect(readdirSync(outputDir)).toEqual([]);
+		expect(result?.content[0]).toEqual({ type: "text", text: expect.stringContaining("could not be saved") });
 	});
 
 	it("does not remove a replaced leaf after a persistence failure", async () => {

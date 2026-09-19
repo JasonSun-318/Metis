@@ -51,3 +51,6 @@ collect.sh
 pnpm-lock.yaml
 docs/
 .cursor
+
+# Local agent reviews and execution artifacts
+.devin/

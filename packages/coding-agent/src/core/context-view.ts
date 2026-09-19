@@ -42,21 +42,22 @@ function canonicalJson(value: unknown): string {
  * This is a source-integrity digest, not the provider prefix digest used for
  * breakpoint reuse.
  *
- * Memoized per message object: journal entries and transformed views are
- * immutable once produced (the only in-place rewrite path operates on
- * structured clones), so a request does not re-hash the whole history.
+ * Memoized only while the exact serialization is unchanged. Extensions can
+ * mutate objects in place; object identity alone cannot prove integrity.
  */
-const sourceDigestCache = new WeakMap<AgentMessage, string>();
+const sourceDigestCache = new WeakMap<AgentMessage, { serialized: string; digest: string }>();
 
 export function getContextSourceDigest(message: AgentMessage): string {
+	const serialized = JSON.stringify(message);
 	const cached = sourceDigestCache.get(message);
-	if (cached !== undefined) return cached;
+	if (cached?.serialized === serialized) return cached.digest;
 	const digest = createHash("sha256").update(canonicalJson(message)).digest("hex");
-	sourceDigestCache.set(message, digest);
+	sourceDigestCache.set(message, { serialized, digest });
 	return digest;
 }
 
 export type ContextViewErrorCode =
+	| "artifact-unavailable"
 	| "invalid-record"
 	| "stale-source"
 	| "stale-leaf"

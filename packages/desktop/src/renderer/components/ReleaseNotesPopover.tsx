@@ -1,6 +1,7 @@
 import { BellSimple, CaretDown, X } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DrawerDetails } from "./DrawerDetails.tsx";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
 import { Markdown } from "./Markdown.tsx";
 
@@ -49,20 +50,14 @@ function ReleaseNotesEntry({
 	readonly version: string;
 }) {
 	const { t } = useTranslation();
-	const [expanded, setExpanded] = useState(latest);
 	return (
-		<details
-			className="release-notes-release"
-			onToggle={(event) => setExpanded(event.currentTarget.open)}
-			open={expanded}
-		>
-			<summary>
+		<DrawerDetails className="release-notes-release" defaultOpen={latest} showCaret={false} summary={<>
 				<span>{t("Version")} {version}</span>
 				{latest && <small>{t("Latest")}</small>}
 				<CaretDown aria-hidden="true" size={14} />
-			</summary>
+			</>}>
 			<div className="release-notes-markdown"><Markdown text={notes} /></div>
-		</details>
+		</DrawerDetails>
 	);
 }
 

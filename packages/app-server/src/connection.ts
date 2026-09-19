@@ -104,7 +104,7 @@ export interface ConnectionOptions {
 
 export type ConnectionOutboundEnvelope =
 	| OutboundEnvelope
-	| ServerRpcNotification<"browser/tool/cancelled">
+	| ServerRpcNotification<"browser/tool/cancelled" | "interaction/cancelled">
 	| ServerRpcRequest;
 export type ConnectionOutboundSender = (envelope: ConnectionOutboundEnvelope) => Promise<void> | void;
 
@@ -211,6 +211,21 @@ export class AppServerConnection {
 					});
 					void Promise.resolve(this.sender(notification)).catch(() => undefined);
 				}
+				if (request.method === "interaction/request" && this.sender) {
+					const interactionRequest = request as ServerRpcRequest<"interaction/request">;
+					const notification = validateServerNotification({
+						jsonrpc: "2.0",
+						method: "interaction/cancelled",
+						params: {
+							serverEpoch: interactionRequest.params.serverEpoch,
+							sessionId: interactionRequest.params.interaction.sessionId,
+							interactionId: interactionRequest.params.interaction.interactionId,
+							requestId: request.id,
+						},
+					});
+					void Promise.resolve(this.sender(notification)).catch(() => undefined);
+				}
+
 				const pending = this.takePendingServerRequest(request.id);
 				pending?.reject(cancelledRequestError(request));
 			};

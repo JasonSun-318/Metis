@@ -1,36 +1,16 @@
 #!/usr/bin/env node
-/**
- * Prompt-cache evaluation harness (docs/plans/2026-09-19-prompt-cache-execution-plan.md
- * Task 13). One invocation measures one variant:
- *
- *   node --import tsx scripts/bench-prompt-cache.ts --mode offline --variant stable --output out.json
- *
- * --mode offline|live   default offline. Live requires METIS_CACHE_EVAL_LIVE=1
- *                       plus --provider/--model/--max-requests.
- * --variant baseline|stable|pressure
- *     baseline: historyAnchors=false + microcompaction=off (pre-change wire
- *               behaviour on a fresh session; no migrated view is un-expanded).
- *     stable:   historyAnchors=true  + microcompaction=legacy (current defaults).
- *     pressure: historyAnchors=true  + microcompaction=pressure.
- * --output <path>       JSON report destination.
- * --reps <n>            task repetitions (default 5).
- *
- * Offline mode runs real AgentSession + real tools on synthetic mkdtemp projects
- * with a deterministic scripted provider stream (no oauth, no user auth file,
- * no external network). Token usage is simulated by prefix matching consecutive
- * serialized request payloads (usageSimulated=true); real provider usage is only
- * collected in live mode.
- */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import type { AgentMessage } from "../packages/agent/src/index.ts";
 import { Agent } from "../packages/agent/src/index.ts";
-import { createAssistantMessageEventStream, fauxAssistantMessage } from "../packages/ai/src/index.ts";
+import { stream as anthropicStream } from "../packages/ai/src/api/anthropic-messages.ts";
 import { getModel } from "../packages/ai/src/compat.ts";
+import { createAssistantMessageEventStream, fauxAssistantMessage } from "../packages/ai/src/index.ts";
 import type { AssistantMessage, Context, Model, StreamOptions, Usage } from "../packages/ai/src/types.ts";
+import { captureWire } from "../packages/ai/test-support/prompt-cache-wire.ts";
 import { AgentSession } from "../packages/coding-agent/src/core/agent-session.ts";
 import { AuthStorage } from "../packages/coding-agent/src/core/auth-storage.ts";
 import { createExtensionRuntime } from "../packages/coding-agent/src/core/extensions/loader.ts";
@@ -40,6 +20,29 @@ import type { ResourceLoader } from "../packages/coding-agent/src/core/resource-
 import { SessionManager } from "../packages/coding-agent/src/core/session-manager.ts";
 import { SettingsManager } from "../packages/coding-agent/src/core/settings-manager.ts";
 import { createCodingTools } from "../packages/coding-agent/src/index.ts";
+import { createToolResultMicrocompactor as createBaselineMicrocompactor } from "./fixtures/prompt-cache-baseline.ts";
+/**
+ * Prompt-cache evaluation harness (docs/plans/2026-09-19-prompt-cache-execution-plan.md
+ * Task 13). One invocation measures one variant:
+ *
+ *   node --import tsx scripts/bench-prompt-cache.ts --mode offline --variant stable --output out.json
+ *
+ * --mode offline|live   default offline. Live requires METIS_CACHE_EVAL_LIVE=1
+ *                       plus --provider/--model/--max-requests.
+ * --variant baseline|stable|pressure
+ *     baseline: historyAnchors=false + frozen 1447e9f microcompaction fixture.
+ *     stable:   historyAnchors=true  + microcompaction=legacy (current defaults).
+ *     pressure: historyAnchors=true  + microcompaction=pressure.
+ * --output <path>       JSON report destination.
+ * --reps <n>            task repetitions (default 5).
+ *
+ * Offline mode runs real AgentSession + real tools on synthetic mkdtemp projects
+ * with a deterministic scripted provider stream (no oauth, no user auth file,
+ * no external network). Real provider serialization is exercised through loopback HTTP. Offline
+ * token estimates only drive context pressure; cache usage/cost stay null.
+ * Actual provider usage is collected only in live mode.
+ */
+import { assertTaskOutcome, snapshotProject, unapprovedProjectChanges } from "./lib/prompt-cache-quality.ts";
 
 // ---------------------------------------------------------------------------
 // CLI gates (Task 13 Step 3 contract)
@@ -54,8 +57,9 @@ const mode = value("--mode") ?? "offline";
 if (mode !== "offline" && mode !== "live") throw new Error("Invalid --mode");
 const variant = value("--variant") ?? "stable";
 if (!["baseline", "stable", "pressure"].includes(variant)) throw new Error("Invalid --variant");
-const outputPath = value("--output");
-if (!outputPath) throw new Error("Missing --output <path>");
+const requestedOutputPath = value("--output");
+if (!requestedOutputPath) throw new Error("Missing --output <path>");
+const outputPath: string = requestedOutputPath;
 if (mode === "live" && process.env.METIS_CACHE_EVAL_LIVE !== "1") {
 	throw new Error("Live evaluation requires METIS_CACHE_EVAL_LIVE=1");
 }
@@ -73,11 +77,12 @@ if (mode === "live") {
 	maxRequests = Number(maxRequestsArg);
 	if (!Number.isInteger(maxRequests) || maxRequests <= 0) throw new Error("Invalid --max-requests");
 }
-const reps = Math.max(1, Number(value("--reps") ?? 5));
+const reps = Number(value("--reps") ?? 5);
+if (!Number.isInteger(reps) || reps < 1) throw new Error("Invalid --reps");
 
 const baseCommit = (() => {
 	try {
-		return execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+		return execFileSync("git", ["rev-parse", "1447e9f"], { encoding: "utf8" }).trim();
 	} catch {
 		return null;
 	}
@@ -151,31 +156,45 @@ function promptCacheOverrides(v: string) {
 
 function createBenchSession(root: string, reuse?: { manager: SessionManager }): BenchSession {
 	const live = mode === "live";
-	const model = live
+	const selectedModel = live
 		? (getModel(provider!, modelId!) as Model<"anthropic-messages"> | undefined)
 		: (getModel("anthropic", "claude-sonnet-4-5") as Model<"anthropic-messages">);
-	if (!model) throw new Error(`Model ${provider}/${modelId} not found`);
-	model.contextWindow = 100_000;
+	if (!selectedModel) throw new Error(`Model ${provider}/${modelId} not found`);
+	const model = structuredClone(selectedModel);
+	model.contextWindow = 96_000;
 	const agent = new Agent({
 		initialState: { model, systemPrompt: "Bench agent", tools: createCodingTools(root) },
-		getApiKey: () => "bench-key",
+		getApiKey: async () => {
+			if (!live) return "bench-key";
+			const result = await modelRegistry.getApiKeyAndHeaders(model);
+			if (!result.ok) throw new Error(result.error);
+			return result.apiKey;
+		},
 		convertToLlm,
 	});
-	const manager = reuse?.manager ?? SessionManager.create(root, join(root, "sessions"));
-	const settings = SettingsManager.create(root, root);
-	settings.applyOverrides({ promptCache: promptCacheOverrides(variant) });
+	const harnessRoot = join(root, ".bench");
+	mkdirSync(harnessRoot, { recursive: true });
+	const manager = reuse?.manager ?? SessionManager.create(root, join(harnessRoot, "sessions"));
+	const settings = SettingsManager.create(root, harnessRoot);
+	settings.applyOverrides({ promptCache: promptCacheOverrides(variant), compaction: { enabled: false } });
 	// Offline never touches user auth: temp auth file + runtime key only. Live
 	// mode intentionally resolves the real auth store (gated above).
-	const auth = AuthStorage.create(live ? undefined : join(root, "auth.json"));
+	const auth = AuthStorage.create(live ? undefined : join(harnessRoot, "auth.json"));
 	if (!live) auth.setRuntimeApiKey("anthropic", "bench-key");
-	const modelRegistry = ModelRegistry.create(auth, join(root, "models.json"));
+	const modelRegistry = ModelRegistry.create(auth, join(harnessRoot, "models.json"));
 	if (live) {
 		// Enforce --max-requests before every model call: the agent loop,
 		// compaction/summary requests (agent.streamFn), and the permission
 		// reviewer (modelRegistry.streamSimple) all pass through here.
-		agent.streamFn = gatedLiveStream(agent.streamFn);
+		const stream = agent.streamFn;
+		agent.streamFn = gatedLiveStream(async (m, c, o) => {
+			const auth = await modelRegistry.getApiKeyAndHeaders(m);
+			if (!auth.ok) throw new Error(auth.error);
+			return stream(m, c, { ...o, apiKey: auth.apiKey, headers: { ...auth.headers, ...o?.headers }, env: auth.env });
+		});
 		const registryStream = modelRegistry.streamSimple.bind(modelRegistry);
-		modelRegistry.streamSimple = (m, c, o) => gatedLiveStream(registryStream)(m, c, o);
+		modelRegistry.streamSimple = (m, c, o) =>
+			gatedLiveStream(registryStream)(m, c, o) as ReturnType<typeof registryStream>;
 	}
 	const session = new AgentSession({
 		agent,
@@ -188,7 +207,14 @@ function createBenchSession(root: string, reuse?: { manager: SessionManager }): 
 	if (reuse?.manager) {
 		agent.state.messages = [...manager.buildSessionContext().messages];
 	}
-	session.subscribe(() => {});
+	if (variant === "baseline") {
+		// Replace the entire transform: the baseline must not run new source
+		// mapping, artifact replay or durable pruning before its frozen fixture.
+		agent.transformContext = createBaselineMicrocompactor({
+			outputDir: manager.getToolOutputDir()!,
+			isBuiltinTool: () => true,
+		});
+	}
 	return { session, agent, manager, settings };
 }
 
@@ -196,44 +222,34 @@ function createBenchSession(root: string, reuse?: { manager: SessionManager }): 
 // Metrics plumbing
 // ---------------------------------------------------------------------------
 
-const counters = { requests: 0, limitHit: false };
-
-/** Serialized request prefix used for simulated cache accounting. */
-const requestKey = (context: Context) =>
-	JSON.stringify([context.systemPrompt ?? "", context.messages, (context.tools ?? []).map((t) => t.name)]);
-
-function commonPrefixChars(a: string | undefined, b: string): number {
-	if (a === undefined) return 0;
-	const bound = Math.min(a.length, b.length);
-	let i = 0;
-	while (i < bound && a.charCodeAt(i) === b.charCodeAt(i)) i++;
-	return i;
-}
+const counters = {
+	requests: 0,
+	limitHit: false,
+	input: 0,
+	cacheRead: 0,
+	cacheWrite: 0,
+	cost: 0,
+	missingCacheUsage: 0,
+	pendingUsage: [] as Promise<void>[],
+};
 
 class SimulatedUsage {
-	private previousKey: string | undefined;
-	private totals = { input: 0, cacheRead: 0, cacheWrite: 0 };
-	/** Simulated per-request usage (chars/4 convention, prefix-match cache read). */
+	private input = 0;
 	next(context: Context): Usage {
-		const key = requestKey(context);
-		const input = Math.ceil(key.length / 4);
-		const cacheRead = Math.ceil(commonPrefixChars(this.previousKey, key) / 4);
-		this.previousKey = key;
-		const usage = {
+		const input = Math.ceil(JSON.stringify(context.messages).length / 4);
+		this.input += input;
+		return {
 			input,
 			output: 8,
-			cacheRead,
-			cacheWrite: Math.max(0, input - cacheRead),
+			cacheRead: 0,
+			cacheWrite: 0,
+			cacheReported: false,
 			totalTokens: input + 8,
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
-		this.totals.input += usage.input;
-		this.totals.cacheRead += usage.cacheRead;
-		this.totals.cacheWrite += usage.cacheWrite;
-		return usage;
 	}
 	snapshot() {
-		return { ...this.totals };
+		return { input: this.input, cacheRead: 0, cacheWrite: 0 };
 	}
 }
 
@@ -260,33 +276,28 @@ interface RepMetrics {
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
 	success: boolean;
+	cost?: number;
+	cacheReported?: boolean;
 	notes: string[];
 }
 
-function scriptedStream(policy: Policy, usage: SimulatedUsage, rep: RepMetrics, liveContext?: never) {
+function scriptedStream(policy: Policy, usage: SimulatedUsage, rep: RepMetrics) {
 	let callIndex = 0;
 	return (requestModel: Model<"anthropic-messages">, context: Context, _options?: StreamOptions) => {
+		if (counters.requests >= maxRequests) {
+			counters.limitHit = true;
+			throw new Error("max-requests reached");
+		}
 		rep.requestCount++;
 		counters.requests++;
-		const t0 = performance.now();
 		const stream = createAssistantMessageEventStream();
-		queueMicrotask(() => {
+		queueMicrotask(async () => {
 			try {
+				await captureWire("anthropic-messages", context, {
+					cacheRetention: "short",
+					onPromptCachePrepared: _options?.onPromptCachePrepared,
+				});
 				const base = { api: requestModel.api, provider: requestModel.provider, model: requestModel.id };
-				if (rep.ttftMs === null) rep.ttftMs = performance.now() - t0;
-				if (counters.requests > maxRequests) {
-					counters.limitHit = true;
-					stream.push({
-						type: "error",
-						reason: "error",
-						error: {
-							...fauxAssistantMessage("", { stopReason: "error", errorMessage: "max-requests reached" }),
-							...base,
-						},
-					});
-					stream.end();
-					return;
-				}
 				const action = policy(context);
 				if ("final" in action) {
 					stream.push({
@@ -336,13 +347,14 @@ function scriptedStream(policy: Policy, usage: SimulatedUsage, rep: RepMetrics, 
 
 /** Live-mode wrapper: counts every model call and fails it before any network
  *  traffic once --max-requests is exhausted. */
-function gatedLiveStream<M, O>(inner: (model: M, context: Context, options?: O) => ReturnType<typeof createAssistantMessageEventStream>) {
-	return (requestModel: M, context: Context, options?: O) => {
-		counters.requests++;
-		if (counters.requests > maxRequests) {
+function gatedLiveStream(
+	inner: import("../packages/agent/src/types.ts").StreamFn,
+): import("../packages/agent/src/types.ts").StreamFn {
+	return (requestModel, context, options) => {
+		if (counters.requests >= maxRequests) {
 			counters.limitHit = true;
 			const stream = createAssistantMessageEventStream();
-			const base = requestModel as { api?: string; provider?: string; id?: string };
+			const base = requestModel;
 			queueMicrotask(() => {
 				stream.push({
 					type: "error",
@@ -358,23 +370,35 @@ function gatedLiveStream<M, O>(inner: (model: M, context: Context, options?: O) 
 			});
 			return stream;
 		}
-		return inner(requestModel, context, options);
+		counters.requests++;
+		const result = inner(requestModel, context, { ...options, maxRetries: 0 });
+		counters.pendingUsage.push(
+			Promise.resolve(result)
+				.then((stream) => stream.result())
+				.then(
+					(message) => {
+						counters.input += message.usage.input;
+						counters.cacheRead += message.usage.cacheRead;
+						counters.cacheWrite += message.usage.cacheWrite;
+						counters.cost += message.usage.cost.total;
+						if (message.usage.cacheReported !== true) counters.missingCacheUsage++;
+					},
+					() => {
+						counters.missingCacheUsage++;
+					},
+				),
+		);
+		return result;
 	};
 }
 
 function countCompactions(manager: SessionManager): number {
 	const branch = manager.getBranch();
 	const compactions = branch.filter((e) => e.type === "compaction").length;
-	return compactions + manager.getContextRewrites().length;
+	return compactions;
 }
 
-async function runRep(
-	name: string,
-	setup: (dir: string) => void,
-	prepare: ((bench: BenchSession, dir: string, rep: RepMetrics, usage: SimulatedUsage) => Promise<BenchSession>) | undefined,
-	policy: Policy,
-	verify: (bench: BenchSession, dir: string) => string | null,
-): Promise<RepMetrics> {
+async function runRep(task: TaskSpec): Promise<RepMetrics> {
 	const dir = mkdtempSync(join(tmpdir(), "metis-cache-bench-"));
 	const rep: RepMetrics = {
 		requestCount: 0,
@@ -388,54 +412,71 @@ async function runRep(
 		success: false,
 		notes: [],
 	};
-	if (counters.limitHit) {
-		rep.notes.push("skipped: max-requests reached");
-		rmSync(dir, { recursive: true, force: true });
-		return rep;
-	}
+	const started = performance.now();
+	const requestsBefore = counters.requests;
+	const usageBefore = {
+		input: counters.input,
+		cacheRead: counters.cacheRead,
+		cacheWrite: counters.cacheWrite,
+		cost: counters.cost,
+		missing: counters.missingCacheUsage,
+	};
+	let bench: BenchSession | undefined;
 	try {
-		setup(dir);
+		task.setup(dir);
+		const projectBefore = snapshotProject(dir);
+		bench = createBenchSession(dir);
 		const usage = new SimulatedUsage();
-		const initial = createBenchSession(dir);
-		// Deterministic permission posture: approved writes/tests allowed,
-		// destructive deletion denied — used by the approved-plan task.
-		const approval = async (request: { action: { command?: string } }) => {
-			const command = request.action.command ?? "";
-			if (/rm\s+(-[a-z]*r|-[a-z]*f[a-z]*r)/.test(command)) {
-				return { decision: "deny" as const, reason: "unapproved destructive change" };
-			}
-			return { decision: "allow" as const };
+		const configure = (current: BenchSession) => {
+			current.session.setPermissionApprovalHandler(async (request) => {
+				const command = (request.action as { command?: string }).command ?? "";
+				return /rm\s+(-[a-z]*r|-[a-z]*f[a-z]*r)/.test(command)
+					? { decision: "deny", reason: "unapproved destructive change" }
+					: { decision: "allow" };
+			});
+			current.manager.setPermissionPreset("auto");
 		};
-		initial.session.setPermissionApprovalHandler(approval);
-		initial.manager.setPermissionPreset("auto");
-		const ready = prepare ? await prepare(initial, dir, rep, usage) : initial;
-		ready.session.setPermissionApprovalHandler(approval);
-		ready.manager.setPermissionPreset("auto");
-		if (mode === "offline") {
-			ready.agent.streamFn = scriptedStream(policy, usage, rep) as never;
+		configure(bench);
+		const observe = (current: BenchSession) =>
+			current.session.subscribe((event) => {
+				if (mode === "live" && event.type === "message_update" && event.assistantMessageEvent.type === "text_delta")
+					rep.ttftMs ??= performance.now() - started;
+				if (event.type !== "message_end") return;
+				if (event.message.role === "toolResult" && event.message.toolName === "read" && !event.message.isError)
+					rep.toolReadbacks++;
+			});
+		observe(bench);
+		if (task.prepare) {
+			const prepared = await task.prepare(bench, dir, rep, usage);
+			if (prepared !== bench) {
+				configure(prepared);
+				observe(prepared);
+			}
+			bench = prepared;
 		}
-		const started = performance.now();
-		try {
-			await ready.session.prompt(`bench task: ${name}`);
-			await ready.agent.waitForIdle();
-		} catch (error) {
-			rep.notes.push(`prompt error: ${String(error)}`);
-		}
-		rep.durationMs = performance.now() - started;
-		rep.toolReadbacks = ready.agent.state.messages.filter(
-			(m) => m.role === "toolResult" && ["read", "grep", "bash"].includes(m.toolName ?? ""),
-		).length;
-		rep.compactions = countCompactions(ready.manager);
-		const totals = usage.snapshot();
-		rep.inputTokens = totals.input;
-		rep.cacheReadTokens = totals.cacheRead;
-		rep.cacheWriteTokens = totals.cacheWrite;
-		const failure = verify(ready, dir);
-		rep.success = failure === null && rep.requestCount > 0;
-		if (failure) rep.notes.push(failure);
-		ready.session.dispose();
-		ready.manager.close();
+		if (mode === "offline") bench.agent.streamFn = scriptedStream(task.policy, usage, rep) as never;
+		await bench.session.prompt(`bench task: ${task.name}\n${task.livePrompt}`);
+		await bench.agent.waitForIdle();
+		const ready = bench;
+		assertTaskOutcome(bench.agent.state.messages, () => task.verify(ready, dir, projectBefore));
+		rep.compactions = countCompactions(bench.manager);
+		if (mode === "offline") rep.inputTokens = usage.snapshot().input;
+		rep.success = true;
+	} catch (error) {
+		rep.notes.push(String(error));
 	} finally {
+		await Promise.all(counters.pendingUsage.splice(0));
+		if (mode === "live") {
+			rep.inputTokens = counters.input - usageBefore.input;
+			rep.cacheReadTokens = counters.cacheRead - usageBefore.cacheRead;
+			rep.cacheWriteTokens = counters.cacheWrite - usageBefore.cacheWrite;
+			rep.cost = counters.cost - usageBefore.cost;
+			rep.cacheReported = counters.missingCacheUsage === usageBefore.missing;
+		}
+		rep.requestCount = counters.requests - requestsBefore;
+		rep.durationMs = performance.now() - started;
+		bench?.session.dispose();
+		bench?.manager.close();
 		rmSync(dir, { recursive: true, force: true });
 	}
 	return rep;
@@ -457,7 +498,9 @@ function setupLogProject(dir: string): void {
 			// Misleading trailing noise: errors that are NOT the root cause.
 			lines.push(`2026-09-19T23:59:5${i - (LOG_LINES - 5)}Z ERROR disk_quota_soft_limit retry_ok=true`);
 		} else {
-			lines.push(`2026-09-19T00:${String(i % 60).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z INFO tick ${i} ${seededFill(48, i)}`);
+			lines.push(
+				`2026-09-19T00:${String(i % 60).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}Z INFO tick ${i} ${seededFill(48, i)}`,
+			);
 		}
 	}
 	writeFileSync(join(dir, "app.log"), `${lines.join("\n")}\n`);
@@ -481,21 +524,20 @@ const FIXED_MATH = `export function sumUnique(values: number[]): number {
 }
 `;
 
-function setupRepairProject(dir: string): void {
-	mkdirSync(join(dir, "src"), { recursive: true });
-	mkdirSync(join(dir, "test"), { recursive: true });
-	writeFileSync(join(dir, "src", "math.ts"), BUGGY_MATH);
-	writeFileSync(
-		join(dir, "test", "math.test.ts"),
-		`import assert from "node:assert/strict";
+const REPAIR_TEST = `import assert from "node:assert/strict";
 import { test } from "node:test";
 import { sumUnique } from "../src/math.ts";
 
 test("sumUnique dedupes", () => {
 	assert.equal(sumUnique([1, 1, 2]), 3);
 });
-`,
-	);
+`;
+
+function setupRepairProject(dir: string): void {
+	mkdirSync(join(dir, "src"), { recursive: true });
+	mkdirSync(join(dir, "test"), { recursive: true });
+	writeFileSync(join(dir, "src", "math.ts"), BUGGY_MATH);
+	writeFileSync(join(dir, "test", "math.test.ts"), REPAIR_TEST);
 	writeFileSync(join(dir, "README.md"), "tiny node:test project\n");
 }
 
@@ -518,35 +560,25 @@ const taskRepairPolicy: Policy = (context) => {
 	}
 };
 
-const EVIDENCE_FILES = 8;
+const EVIDENCE_FILES = 13;
 
 function setupEvidenceProject(dir: string): void {
 	mkdirSync(join(dir, "evidence"), { recursive: true });
 	for (let i = 0; i < EVIDENCE_FILES; i++) {
 		writeFileSync(
 			join(dir, "evidence", `e${i}.txt`),
-			`EVIDENCE_${i}_TOKEN=${(i * 7919) % 9973}\n${seededFill(60_000, i + 11)}\n`,
+			`EVIDENCE_${i}_TOKEN=${(i * 7919) % 9973}\n${seededFill(i < 8 ? 40_000 : 100, i + 11)}\n`,
 		);
 	}
 	writeFileSync(join(dir, "notes.md"), "evidence bundle for recovery test\n");
 }
 
-/** Phase A policy: one assistant turn reads every evidence file at once. */
+/** Phase A policy: read every evidence file over real tool round trips. */
 const taskEvidenceIngestPolicy: Policy = (context) => {
-	if (toolResults(context).length === 0) {
-		// First call issues all reads in a single multi-tool turn.
-		return { tool: "read", args: { path: "evidence/e0.txt" } };
-	}
-	if (toolResults(context).length < EVIDENCE_FILES) {
-		const done = new Set(
-			toolResults(context)
-				.map((r) => /e(\d+)\.txt/.exec(textOf(r))?.[1])
-				.filter((v): v is string => v !== undefined),
-		);
-		const next = Array.from({ length: EVIDENCE_FILES }, (_, i) => i).find((i) => !done.has(String(i)));
-		if (next !== undefined) return { tool: "read", args: { path: `evidence/e${next}.txt` } };
-	}
-	return { final: "ingested evidence bundle" };
+	const count = toolResults(context).length;
+	return count < EVIDENCE_FILES
+		? { tool: "read", args: { path: `evidence/e${count}.txt` } }
+		: { final: "ingested evidence bundle" };
 };
 
 /** Phase B policy (post-reopen): read back one archived source, then report.
@@ -554,9 +586,19 @@ const taskEvidenceIngestPolicy: Policy = (context) => {
  *  contains the phase-A results. */
 const taskEvidenceResumePolicy: Policy = (context) => {
 	if (resultsAfterLastPrompt(context).length === 0) {
-		return { tool: "read", args: { path: "evidence/e0.txt" } };
+		const archive = context.messages
+			.map(textOf)
+			.join("\n")
+			.match(/Tool result saved to: (.+)/)?.[1];
+		if (!archive) throw new Error("No archived evidence reference after reopen");
+		return { tool: "read", args: { path: archive } };
 	}
-	return { final: "recovery report: EVIDENCE_0_TOKEN=0 confirmed from reopened session" };
+	const evidence = resultsAfterLastPrompt(context)
+		.map(textOf)
+		.join("\n")
+		.match(/EVIDENCE_0_TOKEN=\d+/)?.[0];
+	if (!evidence) throw new Error("Archived readback did not contain the expected evidence");
+	return { final: `recovery report: ${evidence} confirmed from reopened session` };
 };
 
 // ---------------------------------------------------------------------------
@@ -574,10 +616,11 @@ interface OverheadResult {
 	p95VariantMs: number | null;
 	p50DeltaMs: number | null;
 	p95DeltaMs: number | null;
+	stages?: Record<string, { p50: number | null; p95: number | null }>;
 }
 
 type SessionInternals = {
-	_mapPromptCacheHints?: (a: readonly AgentMessage[], l: unknown[]) => unknown;
+	_mapPromptCacheHints: (a: readonly AgentMessage[], l: Context["messages"]) => Context["cacheHints"];
 };
 
 function seedHistory(bench: BenchSession, chars: number): AgentMessage[] {
@@ -586,7 +629,7 @@ function seedHistory(bench: BenchSession, chars: number): AgentMessage[] {
 	const count = Math.max(1, Math.ceil(chars / per));
 	const messages: AgentMessage[] = [];
 	for (let i = 0; i < count; i++) {
-		const assistant: AgentMessage = {
+		const assistant: AssistantMessage = {
 			role: "assistant",
 			content: [{ type: "toolCall", id: `seed-${i}`, name: "read", arguments: { path: `/f/${i}` } }],
 			api: "anthropic-messages",
@@ -602,15 +645,15 @@ function seedHistory(bench: BenchSession, chars: number): AgentMessage[] {
 			},
 			stopReason: "toolUse",
 			timestamp: i * 2,
-		} as AgentMessage;
-		const result: AgentMessage = {
+		};
+		const result: Extract<AgentMessage, { role: "toolResult" }> = {
 			role: "toolResult",
 			toolCallId: `seed-${i}`,
 			toolName: "read",
 			content: [{ type: "text", text: seededFill(per, i + 1) }],
 			isError: false,
 			timestamp: i * 2 + 1,
-		} as AgentMessage;
+		};
 		bench.manager.appendMessage(assistant);
 		bench.manager.appendMessage(result);
 		messages.push(assistant, result);
@@ -625,15 +668,62 @@ async function measurePrepOverhead(sizeChars: number): Promise<OverheadResult> {
 		const bench = createBenchSession(dir);
 		const messages = seedHistory(bench, sizeChars);
 		const internals = bench.session as unknown as SessionInternals;
-		const baseline = async () => {
-			convertToLlm(messages);
+		if (typeof internals._mapPromptCacheHints !== "function")
+			throw new Error("Preparation benchmark requires AgentSession cache-origin mapping");
+		// Compare the same fixed-length history, independent of variant pruning.
+		if (variant === "baseline") bench.agent.transformContext = undefined;
+		// Measure the full actual provider preparation, including hook validation
+		// and SDK JSON serialization. The fetch boundary is local and never sends.
+		bench.settings.applyOverrides({ promptCache: { microcompaction: "off" } });
+		const model = { ...bench.agent.state.model!, baseUrl: "http://127.0.0.1:9" } as Model<"anthropic-messages">;
+		const prepare = async (context: Context) => {
+			const originalFetch = globalThis.fetch;
+			let captured = false;
+			let checkpoint = false;
+			globalThis.fetch = async () => {
+				captured = true;
+				return new Response("", { headers: { "content-type": "text/event-stream" } });
+			};
+			try {
+				await anthropicStream(model, context, {
+					apiKey: "bench-key",
+					cacheRetention: "short",
+					maxRetries: 0,
+					onPayload: () => undefined,
+					onPromptCachePrepared: (observation) => {
+						checkpoint = observation.checkpoint !== undefined;
+					},
+				}).result();
+				if (!captured) throw new Error("Preparation benchmark did not reach the serialized fetch boundary");
+				if (context.cacheHints && !checkpoint)
+					throw new Error("Preparation benchmark silently fell back without a cache checkpoint");
+			} finally {
+				globalThis.fetch = originalFetch;
+			}
 		};
+		const baseline = async () =>
+			prepare({
+				systemPrompt: bench.agent.state.systemPrompt,
+				tools: bench.agent.state.tools,
+				messages: convertToLlm(messages),
+			});
+		const stages = { view: [] as number[], mapping: [] as number[], provider: [] as number[] };
 		const variantPath = async () => {
-			// Full per-request prep added by this feature: transform hooks (plan
-			// projection + durable view projection) + LLM conversion + hints.
+			const start = performance.now();
 			const transformed = (await bench.agent.transformContext?.(messages)) ?? messages;
+			const afterView = performance.now();
 			const llm = convertToLlm(transformed);
-			internals._mapPromptCacheHints?.(transformed, llm);
+			const cacheHints = internals._mapPromptCacheHints(transformed, llm);
+			const afterMapping = performance.now();
+			await prepare({
+				systemPrompt: bench.agent.state.systemPrompt,
+				tools: bench.agent.state.tools,
+				messages: llm,
+				cacheHints,
+			});
+			stages.view.push(afterView - start);
+			stages.mapping.push(afterMapping - afterView);
+			stages.provider.push(performance.now() - afterMapping);
 		};
 		const WARMUPS = 20;
 		const SAMPLES = 100;
@@ -641,17 +731,25 @@ async function measurePrepOverhead(sizeChars: number): Promise<OverheadResult> {
 			await baseline();
 			await variantPath();
 		}
-		const sample = async (fn: () => Promise<void>) => {
-			const times: number[] = [];
-			for (let i = 0; i < SAMPLES; i++) {
-				const t0 = performance.now();
-				await fn();
-				times.push(performance.now() - t0);
-			}
-			return times.sort((a, b) => a - b);
+		for (const values of Object.values(stages)) values.length = 0;
+		const baselineTimes: number[] = [];
+		const variantTimes: number[] = [];
+		const sample = async (fn: () => Promise<void>, into: number[]) => {
+			const start = performance.now();
+			await fn();
+			into.push(performance.now() - start);
 		};
-		const baselineTimes = await sample(baseline);
-		const variantTimes = await sample(variantPath);
+		for (let i = 0; i < SAMPLES; i++) {
+			if (i % 2 === 0) {
+				await sample(baseline, baselineTimes);
+				await sample(variantPath, variantTimes);
+			} else {
+				await sample(variantPath, variantTimes);
+				await sample(baseline, baselineTimes);
+			}
+		}
+		baselineTimes.sort((a, b) => a - b);
+		variantTimes.sort((a, b) => a - b);
 		bench.session.dispose();
 		bench.manager.close();
 		const p50b = percentile(baselineTimes, 50);
@@ -669,71 +767,16 @@ async function measurePrepOverhead(sizeChars: number): Promise<OverheadResult> {
 			p95VariantMs: p95v,
 			p50DeltaMs: p50v !== null && p50b !== null ? p50v - p50b : null,
 			p95DeltaMs: p95v !== null && p95b !== null ? p95v - p95b : null,
+			stages: Object.fromEntries(
+				Object.entries(stages).map(([key, values]) => {
+					values.sort((a, b) => a - b);
+					return [key, { p50: percentile(values, 50), p95: percentile(values, 95) }];
+				}),
+			),
 		};
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Live mode: real provider via the normal Agent loop (streamSimple), real usage
-// ---------------------------------------------------------------------------
-
-async function runLiveTask(name: string, setup: (dir: string) => void, prompt: string): Promise<RepMetrics> {
-	const dir = mkdtempSync(join(tmpdir(), "metis-cache-bench-live-"));
-	const rep: RepMetrics = {
-		requestCount: 0,
-		toolReadbacks: 0,
-		compactions: 0,
-		durationMs: 0,
-		ttftMs: null,
-		inputTokens: 0,
-		cacheReadTokens: 0,
-		cacheWriteTokens: 0,
-		success: false,
-		notes: [],
-	};
-	if (counters.limitHit) {
-		rep.notes.push("skipped: max-requests reached");
-		rmSync(dir, { recursive: true, force: true });
-		return rep;
-	}
-	try {
-		setup(dir);
-		const bench = createBenchSession(dir);
-		const t0 = performance.now();
-		const requestsBefore = counters.requests;
-		bench.agent.onResponse = () => {
-			rep.ttftMs ??= performance.now() - t0;
-		};
-		try {
-			await bench.session.prompt(prompt);
-			await bench.agent.waitForIdle();
-		} catch (error) {
-			rep.notes.push(`prompt error: ${String(error)}`);
-		}
-		rep.durationMs = performance.now() - t0;
-		const assistant = bench.agent.state.messages.filter(
-			(m): m is AssistantMessage => m.role === "assistant",
-		);
-		// Every model call (loop, retry, compaction, review) was counted by the
-		// gated stream wrapper inside createBenchSession.
-		rep.requestCount = counters.requests - requestsBefore;
-		for (const message of assistant) {
-			rep.inputTokens += message.usage.input;
-			rep.cacheReadTokens += message.usage.cacheRead;
-			rep.cacheWriteTokens += message.usage.cacheWrite;
-		}
-		rep.toolReadbacks = bench.agent.state.messages.filter((m) => m.role === "toolResult").length;
-		rep.compactions = countCompactions(bench.manager);
-		const last = assistant.at(-1);
-		rep.success = last?.stopReason === "stop" || last?.stopReason === "toolUse" ? last !== undefined : false;
-		bench.session.dispose();
-		bench.manager.close();
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-	return rep;
 }
 
 // ---------------------------------------------------------------------------
@@ -745,8 +788,8 @@ interface TaskSpec {
 	setup: (dir: string) => void;
 	policy: Policy;
 	livePrompt: string;
-	verify: (bench: BenchSession, dir: string) => string | null;
-	prepare?: (bench: BenchSession, dir: string) => Promise<BenchSession>;
+	verify: (bench: BenchSession, dir: string, projectBefore: ReadonlyMap<string, string>) => string | null;
+	prepare?: (bench: BenchSession, dir: string, rep: RepMetrics, usage: SimulatedUsage) => Promise<BenchSession>;
 }
 
 const tasks: TaskSpec[] = [
@@ -759,6 +802,17 @@ const tasks: TaskSpec[] = [
 		verify: (bench) => {
 			const last = bench.agent.state.messages.at(-1);
 			const text = last?.role === "assistant" ? textOf(last) : "";
+			const results = toolResults({ messages: convertToLlm(bench.agent.state.messages) });
+			for (const name of ["grep", "read"])
+				if (
+					!results.some(
+						(result) =>
+							result.toolName === name &&
+							!result.isError &&
+							textOf(result).includes("ROOT_CAUSE=port_collision"),
+					)
+				)
+					return `verified ${name} root-cause evidence missing`;
 			if (!text.includes("port_collision")) return "final answer missing root cause token";
 			if (!text.includes(String(ROOT_CAUSE_LINE))) return "final answer missing line number";
 			if (/root cause.{0,40}disk_quota/i.test(text)) return "reported the misleading tail error";
@@ -769,26 +823,62 @@ const tasks: TaskSpec[] = [
 		name: "approved-plan-repair",
 		setup: setupRepairProject,
 		policy: taskRepairPolicy,
+		prepare: async (bench) => {
+			await bench.session.setCollaborationMode("plan");
+			const plan = bench.manager.submitPlan({
+				title: "Repair sumUnique",
+				markdown: "Fix only src/math.ts deduplication. Run test/math.test.ts. Preserve all other project files.",
+			});
+			bench.manager.acceptPlan({ planId: plan.planId, revision: plan.revision });
+			await bench.session.setCollaborationMode("default");
+			return bench;
+		},
 		livePrompt:
-			"src/math.ts has a bug: sumUnique([1,1,2]) returns 4 instead of 3. The approved plan allows only fixing the dedup logic in src/math.ts and running node --test test/. Do not make other changes.",
-		verify: (bench, dir) => {
-			const content = existsSync(join(dir, "src", "math.ts")) ? readFileSync(join(dir, "src", "math.ts"), "utf8") : "";
-			if (!content.includes("new Set")) return "fix not applied to src/math.ts";
-			const results = toolResults({ messages: bench.agent.state.messages } as Context);
-			const denied = results.find((r) => r.isError);
-			if (!denied) return "unapproved modification was not denied";
-			if (!existsSync(join(dir, "src", "math.ts"))) return "src/ deleted despite denial";
-			const testRun = results.find((r) => r.toolName === "bash" && !r.isError);
-			if (!testRun) return "approved test run missing";
+			"src/math.ts has a bug: sumUnique([1,1,2]) returns 4 instead of 3. The approved plan allows only fixing the dedup logic in src/math.ts and running node --test test/math.test.ts. Do not make other changes.",
+		verify: (bench, dir, projectBefore) => {
+			const changed = unapprovedProjectChanges(projectBefore, snapshotProject(dir), new Set(["src/math.ts"]));
+			if (changed.length) return `unapproved project changes: ${changed.join(", ")}`;
+			if (!bench.manager.getPlanState().plans.some((plan) => plan.status === "accepted"))
+				return "approved plan missing";
+			const content = existsSync(join(dir, "src", "math.ts"))
+				? readFileSync(join(dir, "src", "math.ts"), "utf8")
+				: "";
+			if (content === BUGGY_MATH) return "fix not applied to src/math.ts";
+			try {
+				execFileSync(process.execPath, ["--test", "test/math.test.ts"], { cwd: dir, stdio: "pipe" });
+			} catch {
+				return "repaired project tests failed";
+			}
+			const results = toolResults({ messages: convertToLlm(bench.agent.state.messages) });
+			const calls = bench.agent.state.messages.flatMap((message) =>
+				message.role === "assistant" ? message.content.filter((block) => block.type === "toolCall") : [],
+			);
+			const testCommands = new Set([
+				"node --test test/math.test.ts",
+				`${process.execPath} --test test/math.test.ts`,
+			]);
+			let ranTests = false;
+			for (const call of calls) {
+				const result = results.find((result) => result.toolCallId === call.id);
+				const isTest = call.name === "bash" && testCommands.has(String(call.arguments.command).trim());
+				const allowed =
+					["read", "grep", "find", "ls"].includes(call.name) ||
+					isTest ||
+					(["edit", "write"].includes(call.name) &&
+						resolve(dir, String(call.arguments.path)) === join(dir, "src/math.ts"));
+				if (!allowed && !result?.isError) return `unapproved operation was not denied: ${call.name}`;
+				if (isTest && result && !result.isError) ranTests = true;
+			}
+			if (!ranTests) return "approved test run missing";
 			return null;
 		},
 	},
 	{
-		name: "compaction-resume-continue",
+		name: "prune-resume-continue",
 		setup: setupEvidenceProject,
 		policy: taskEvidenceResumePolicy,
 		livePrompt:
-			"Read evidence/e0.txt and report the EVIDENCE_0_TOKEN value, continuing from the earlier investigation summary.",
+			"Continue the earlier investigation. The original evidence/e0.txt is no longer available. Read its archived tool-result file referenced in the history and report the EVIDENCE_0_TOKEN value.",
 		prepare: async (bench, dir, rep, usage) => {
 			// Phase A: ingest all evidence files through real tool calls.
 			if (mode === "offline") {
@@ -796,10 +886,20 @@ const tasks: TaskSpec[] = [
 			}
 			await bench.session.prompt("phase A ingest: read every evidence file");
 			await bench.agent.waitForIdle();
-			// Compaction entry via the real journal API, then reopen the file.
-			const kept = bench.manager.appendMessage({ role: "user", content: "retained", timestamp: 1 });
-			const carry = bench.manager.computeCompactionCarry(kept);
-			bench.manager.appendCompaction("EVIDENCE-SUMMARY", kept, 1000, undefined, false, carry);
+			assertTaskOutcome(bench.agent.state.messages);
+			const readCalls = bench.agent.state.messages.flatMap((message) =>
+				message.role === "assistant"
+					? message.content
+							.filter((block) => block.type === "toolCall" && block.name === "read")
+							.map((block) => (block as { arguments: { path?: string } }).arguments.path)
+					: [],
+			);
+			for (let i = 0; i < EVIDENCE_FILES; i++)
+				if (!readCalls.some((path) => path?.endsWith(`e${i}.txt`)))
+					throw new Error(`Evidence e${i}.txt was not read before resume`);
+			if (variant !== "baseline" && bench.manager.getContextRewrites().length === 0)
+				throw new Error("No durable pruning batch before resume");
+			rmSync(join(dir, "evidence", "e0.txt"));
 			const file = bench.manager.getSessionFile()!;
 			bench.session.dispose();
 			bench.manager.close();
@@ -807,8 +907,14 @@ const tasks: TaskSpec[] = [
 			return createBenchSession(dir, { manager: reopened });
 		},
 		verify: (bench) => {
-			const results = bench.agent.state.messages.filter((m) => m.role === "toolResult");
-			if (results.length === 0) return "readback missing after reopen";
+			const results = resultsAfterLastPrompt({ messages: convertToLlm(bench.agent.state.messages) });
+			if (
+				!results.some(
+					(result) =>
+						result.toolName === "read" && !result.isError && textOf(result).includes("EVIDENCE_0_TOKEN=0"),
+				)
+			)
+				return "verified evidence readback missing after reopen";
 			const last = bench.agent.state.messages.at(-1);
 			const text = last?.role === "assistant" ? textOf(last) : "";
 			if (!text.includes("EVIDENCE_0_TOKEN=0")) return "final report missing evidence token";
@@ -827,34 +933,29 @@ async function main(): Promise<void> {
 	let inputTokens = 0;
 	let cacheReadTokens = 0;
 	let cacheWriteTokens = 0;
-	let ttftSamples: number[] = [];
-	let durations: number[] = [];
+	let cost = 0;
+	let cacheReported = true;
+	const ttftSamples: number[] = [];
+	const durations: number[] = [];
 
 	for (const task of tasks) {
 		const repsResults: RepMetrics[] = [];
 		for (let rep = 0; rep < reps && !counters.limitHit; rep++) {
-			const result =
-				mode === "live"
-					? await runLiveTask(task.name, task.setup, task.livePrompt)
-					: await runRep(
-							task.name,
-							task.setup,
-							async (bench, dir) => (task.prepare ? task.prepare(bench, dir) : bench),
-							task.policy,
-							task.verify,
-						);
+			const result = await runRep(task);
 			repsResults.push(result);
 		}
 		const ok = repsResults.filter((r) => r.success).length;
-		const skippedHere = repsResults.filter((r) => r.requestCount === 0 && r.notes.length > 0).length;
+		const skippedHere = reps - repsResults.length;
 		successes += ok;
-		failures += repsResults.length - ok - skippedHere;
+		failures += repsResults.length - ok;
 		skipped += skippedHere;
 		for (const r of repsResults) {
 			totalRequests += r.requestCount;
 			inputTokens += r.inputTokens;
 			cacheReadTokens += r.cacheReadTokens;
 			cacheWriteTokens += r.cacheWriteTokens;
+			cost += r.cost ?? 0;
+			cacheReported &&= r.cacheReported === true;
 			durations.push(r.durationMs);
 			if (r.ttftMs !== null) ttftSamples.push(r.ttftMs);
 		}
@@ -862,7 +963,7 @@ async function main(): Promise<void> {
 			name: task.name,
 			reps: repsResults.length,
 			successes: ok,
-			failures: repsResults.length - ok - skippedHere,
+			failures: repsResults.length - ok,
 			skipped: skippedHere,
 			durationsMs: repsResults.map((r) => Math.round(r.durationMs * 100) / 100),
 			requestCounts: repsResults.map((r) => r.requestCount),
@@ -890,18 +991,21 @@ async function main(): Promise<void> {
 		model: mode === "live" ? modelId : null,
 		requestCount: totalRequests,
 		tests,
-		inputTokens,
-		cacheReadTokens,
-		cacheWriteTokens,
-		cost: null,
-		ttftMs: percentile(ttftSamples, 50),
+		inputTokens: mode === "live" ? inputTokens : null,
+		cacheReadTokens: mode === "live" && cacheReported ? cacheReadTokens : null,
+		cacheWriteTokens: mode === "live" && cacheReported ? cacheWriteTokens : null,
+		estimatedInputTokens: mode === "offline" ? inputTokens : null,
+		cost: mode === "live" ? cost : null,
+		ttftMs: mode === "live" ? percentile(ttftSamples, 50) : null,
 		taskDurationMs: {
 			p50: percentile(durations, 50),
 			p95: percentile(durations, 95),
 			samples: durations.length,
 		},
 		toolReadbacks: tests
-			.filter((t): t is { toolReadbacks: number[] } => Array.isArray((t as { toolReadbacks?: unknown }).toolReadbacks))
+			.filter((t): t is { toolReadbacks: number[] } =>
+				Array.isArray((t as { toolReadbacks?: unknown }).toolReadbacks),
+			)
 			.flatMap((t) => t.toolReadbacks)
 			.reduce((a, b) => a + b, 0),
 		compactions: tests
@@ -919,6 +1023,7 @@ async function main(): Promise<void> {
 	mkdirSync(dirname(outputPath), { recursive: true });
 	writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 	console.log(JSON.stringify({ wrote: outputPath, successes, failures, skipped, requestCount: totalRequests }));
+	if (failures > 0) process.exitCode = 1;
 }
 
 await main();

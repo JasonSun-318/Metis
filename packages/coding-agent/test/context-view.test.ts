@@ -164,3 +164,17 @@ describe("assertContextRewriteBatch", () => {
 		expectCode(batch({ replacements: [r, { ...r, artifactRelativePath: "b.txt" }] }), "invalid-record");
 	});
 });
+
+it("rechecks source integrity after an extension mutates the same object", () => {
+	const message = {
+		role: "toolResult" as const,
+		toolCallId: "mutated",
+		toolName: "read",
+		isError: false,
+		timestamp: 1,
+		content: [{ type: "text" as const, text: "before" }],
+	};
+	const original = getContextSourceDigest(message);
+	message.content[0]!.text = "after";
+	expect(getContextSourceDigest(message)).not.toBe(original);
+});

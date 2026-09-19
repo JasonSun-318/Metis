@@ -702,7 +702,10 @@ const zhCN = {
 	Remaining: "剩余",
 	Cache: "缓存",
 	"Cache hit rate": "缓存命中率",
-	"Cache hit rate (latest completed request)": "缓存命中率 · 最近一次成功请求",
+	"Latest completed request": "最近一次成功请求",
+	"About cache hit rate": "缓存命中率说明",
+	"Permissions updated. Applies to subsequent tools; running operations continue.":
+		"权限已切换，后续工具使用新权限，正在执行的操作继续运行。",
 	"Current context, including history. Total based on reported usage; category shares are estimates of used tokens.":
 		"当前上下文包含历史消息。总量依据模型用量；各分类占已用 Token 的比例为估算。",
 	"Current context, including history. Token counts and category shares are estimates of used tokens.":

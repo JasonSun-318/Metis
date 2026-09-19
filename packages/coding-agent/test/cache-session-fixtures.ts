@@ -41,7 +41,7 @@ export interface CacheSessionOptions {
 }
 
 export function createCacheSession(root: string, options?: CacheSessionOptions): CacheSessionFixture {
-	const model = getModel("anthropic", "claude-sonnet-4-5") as Model<"anthropic-messages">;
+	const model = structuredClone(getModel("anthropic", "claude-sonnet-4-5")) as Model<"anthropic-messages">;
 	if (options?.contextWindow) model.contextWindow = options.contextWindow;
 	const agent = new Agent({
 		initialState: {

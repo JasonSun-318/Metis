@@ -1300,6 +1300,13 @@ export const BrowserToolCancelledParamsSchema = StrictObject({
 	requestId: OpaqueIdSchema,
 });
 
+export const InteractionCancelledParamsSchema = StrictObject({
+	serverEpoch: UuidSchema,
+	sessionId: SessionIdSchema,
+	interactionId: UuidSchema,
+	requestId: OpaqueIdSchema,
+});
+
 export const InteractionRequestParamsSchema = StrictObject({
 	serverEpoch: UuidSchema,
 	interaction: InteractionViewSchema,
@@ -1610,6 +1617,7 @@ export const ServerRequestMethods = {
 export const ServerNotificationMethods = {
 	"connection/events": ConnectionEventsParamsSchema,
 	"browser/tool/cancelled": BrowserToolCancelledParamsSchema,
+	"interaction/cancelled": InteractionCancelledParamsSchema,
 } as const;
 
 export type ClientRequestMethod = keyof typeof ClientRequestMethods;

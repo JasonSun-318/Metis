@@ -1,5 +1,6 @@
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DrawerDetails } from "../DrawerDetails.tsx";
 import type { ConversationSubmission } from "../../composer-submission.ts";
 import { type DraftFileSelection, selectionTargetLabel, validateSelectionSize } from "./file-selection.ts";
 
@@ -103,8 +104,7 @@ export function FileSelectionChips() {
 	const { t } = useTranslation();
 	if (!context?.selections.length) return null;
 	return (
-		<details className="composer-selections">
-			<summary>{t("{{count}} selected text fragments", { count: context.selections.length })}</summary>
+		<DrawerDetails className="composer-selections" summary={t("{{count}} selected text fragments", { count: context.selections.length })}>
 			<div className="composer-selection-list">
 				{context.selections.map((selection) => (
 					<div className="composer-selection" key={selection.id}>
@@ -128,6 +128,6 @@ export function FileSelectionChips() {
 					</div>
 				))}
 			</div>
-		</details>
+		</DrawerDetails>
 	);
 }

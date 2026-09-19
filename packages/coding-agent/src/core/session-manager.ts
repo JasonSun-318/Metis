@@ -721,19 +721,24 @@ function copyReferencedToolOutputsStrictly(
 	const copied = new Map<string, string>();
 
 	for (const record of rewritten) {
-		if (record.type !== "message") continue;
 		const candidates = new Set<string>();
-		if (record.toolOutput?.fullOutputPath) candidates.add(record.toolOutput.fullOutputPath);
-		if (record.message.role === "toolResult") {
-			const details = record.message.details;
-			if (typeof details === "object" && details !== null && !Array.isArray(details)) {
-				const path = (details as { fullOutputPath?: unknown }).fullOutputPath;
-				if (typeof path === "string") candidates.add(path);
+		if (record.type === "custom" && record.customType === CONTEXT_REWRITE_CUSTOM_TYPE) {
+			assertContextRewriteBatch(record.data);
+			for (const replacement of record.data.replacements)
+				candidates.add(join(sourceDir, replacement.artifactRelativePath));
+		} else if (record.type === "message") {
+			if (record.toolOutput?.fullOutputPath) candidates.add(record.toolOutput.fullOutputPath);
+			if (record.message.role === "toolResult") {
+				const details = record.message.details;
+				if (typeof details === "object" && details !== null && !Array.isArray(details)) {
+					const path = (details as { fullOutputPath?: unknown }).fullOutputPath;
+					if (typeof path === "string") candidates.add(path);
+				}
 			}
-		}
-		if (record.message.role === "bashExecution" && record.message.fullOutputPath) {
-			candidates.add(record.message.fullOutputPath);
-		}
+			if (record.message.role === "bashExecution" && record.message.fullOutputPath) {
+				candidates.add(record.message.fullOutputPath);
+			}
+		} else continue;
 
 		for (const candidate of candidates) {
 			const sourcePath = ownedToolOutputPath(candidate, sourceStoragePath);
@@ -786,7 +791,26 @@ function copyReferencedToolOutputsStrictly(
 				syncDirectorySync(destinationDir);
 				copied.set(sourcePath, destinationPath);
 			}
-			rewriteToolOutputPath(record, candidate, destinationPath);
+			if (record.type === "message") rewriteToolOutputPath(record, candidate, destinationPath);
+		}
+	}
+
+	// Source paths in copied message entries may have changed. Rebind only
+	// projections whose source matched before this explicit session migration.
+	const originalSources = new Map(
+		records.flatMap((record) => (record.type === "message" ? [[record.id, record.message] as const] : [])),
+	);
+	const copiedSources = new Map(
+		rewritten.flatMap((record) => (record.type === "message" ? [[record.id, record.message] as const] : [])),
+	);
+	for (const record of rewritten) {
+		if (record.type !== "custom" || record.customType !== CONTEXT_REWRITE_CUSTOM_TYPE) continue;
+		assertContextRewriteBatch(record.data);
+		for (const replacement of record.data.replacements) {
+			const before = originalSources.get(replacement.sourceEntryId);
+			const after = copiedSources.get(replacement.sourceEntryId);
+			if (before && after && replacement.sourceDigest === getContextSourceDigest(before))
+				replacement.sourceDigest = getContextSourceDigest(after);
 		}
 	}
 

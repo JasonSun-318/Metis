@@ -52,11 +52,21 @@ describe("SessionStatusPanel", () => {
 		expect(container.textContent).not.toContain("Reported total; fixed modules calibrated for this model");
 		expect(container.textContent).not.toContain("Other");
 		expect(container.querySelector(".context-usage-bar-used")?.getAttribute("style")).toMatch(/width:\s*50%/);
-		expect(container.textContent).toContain("Cache hit rate (latest completed request)");
+		expect(container.textContent).toContain("Cache hit rate");
 		expect(container.textContent).toContain("category shares are estimates of used tokens");
 		expect(container.textContent).toContain("24.6%");
-		expect(container.querySelector(".context-usage-cache-track")?.getAttribute("aria-valuenow")).toBe("24.6");
-		expect(container.querySelector(".context-usage-cache-meter")?.getAttribute("style")).toMatch(/width:\s*24\.6%/);
+		expect(container.querySelector(".context-usage-cache [role='progressbar']")).toBeNull();
+		expect(container.querySelector(".context-usage-cache-meter")).toBeNull();
+		expect(container.querySelector(".context-usage-cache-value")?.textContent).toBe("24.6%");
+		const info = container.querySelector<HTMLButtonElement>(".context-usage-cache-info button")!;
+		const tooltip = container.querySelector<HTMLElement>("[role='tooltip']")!;
+		expect(tooltip.hidden).toBe(true);
+		await act(async () => info.focus());
+		expect(tooltip.hidden).toBe(false);
+		expect(tooltip.textContent).toContain("output tokens are excluded");
+		await act(async () => info.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		expect(tooltip.hidden).toBe(true);
+		expect(onClose).not.toHaveBeenCalled();
 		expect(container.textContent).not.toContain("session-1");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		expect(onClose).toHaveBeenCalledOnce();
@@ -80,11 +90,12 @@ describe("SessionStatusPanel", () => {
 						contextBasis: "estimated_total",
 						contextBreakdown: [{ category: "conversation", tokens: 144_000 }],
 						remainingPercent: 0,
-						cacheHitPercent: null,
+						cacheHitPercent: 0,
 					}}
 				/>,
 			),
 		);
+		expect(container.querySelector(".context-usage-cache-value")?.textContent).toBe("0%");
 		expect(container.textContent).toContain("112.5% Full");
 		expect(container.textContent).toContain("Context exceeded");
 		expect(container.textContent).not.toContain("Context and breakdown estimated");
@@ -117,6 +128,7 @@ describe("SessionStatusPanel", () => {
 		expect(container.textContent).toContain("~64.0K / 128K");
 		expect(container.textContent).toContain("Context breakdown unavailable");
 		expect(container.querySelector(".context-usage-breakdown")).toBeNull();
+		expect(container.querySelector(".context-usage-cache-value")?.textContent).toBe("—");
 		expect(container.textContent).toContain("Cache usage not reported");
 		expect(container.querySelector(".context-usage-cache-track")).toBeNull();
 		await act(async () => root.unmount());

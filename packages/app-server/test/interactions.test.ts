@@ -963,6 +963,73 @@ describe("InteractionBroker", () => {
 		connection.close();
 	});
 
+	it("cancels an obsolete approval on the wire before reissuing the same action", async () => {
+		const connection = new AppServerConnection({
+			dispatcher: { dispatch: vi.fn() } as never,
+			serverEpoch: EPOCH,
+			serverVersion: "test",
+			subscriptionHub: new SessionSubscriptions(EPOCH),
+		});
+		const outbound: unknown[] = [];
+		connection.onMessage((envelope) => {
+			outbound.push(envelope);
+		});
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "initialize",
+			method: "initialize",
+			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
+		});
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		broker.assign(SESSION_ID, connection);
+		try {
+			const controller = new AbortController();
+			const oldApproval = broker.requestPermissionApproval(SESSION_ID, childApproval({ signal: controller.signal }));
+			await vi.waitFor(() => expect(outbound).toHaveLength(1));
+			const oldRequest = outbound[0] as ServerRpcRequest<"interaction/request">;
+			controller.abort(new Error("Permission preset changed"));
+			await expect(oldApproval).rejects.toThrow("cancelled");
+			expect(broker.hasPending(SESSION_ID)).toBe(false);
+			expect(outbound[1]).toEqual({
+				jsonrpc: "2.0",
+				method: "interaction/cancelled",
+				params: {
+					serverEpoch: EPOCH,
+					sessionId: SESSION_ID,
+					interactionId: oldRequest.params.interaction.interactionId,
+					requestId: oldRequest.id,
+				},
+			});
+			const newApproval = broker.requestPermissionApproval(SESSION_ID, childApproval());
+			await vi.waitFor(() => expect(outbound).toHaveLength(3));
+			const newRequest = outbound[2] as ServerRpcRequest<"interaction/request">;
+			expect(newRequest.params.interaction.interactionId).not.toBe(oldRequest.params.interaction.interactionId);
+			connection.handleServerResponse({
+				jsonrpc: "2.0",
+				id: oldRequest.id,
+				result: {
+					interactionId: oldRequest.params.interaction.interactionId,
+					kind: "session_permission_approval",
+					choice: "deny-once",
+				},
+			});
+			expect(broker.hasPending(SESSION_ID)).toBe(true);
+			connection.handleServerResponse({
+				jsonrpc: "2.0",
+				id: newRequest.id,
+				result: {
+					interactionId: newRequest.params.interaction.interactionId,
+					kind: "session_permission_approval",
+					choice: "allow-once",
+				},
+			});
+			await expect(newApproval).resolves.toEqual({ decision: "allow" });
+			expect(broker.hasPending(SESSION_ID)).toBe(false);
+		} finally {
+			connection.close();
+		}
+	});
+
 	it("notifies desktop when an in-flight browser request is aborted", async () => {
 		const connection = new AppServerConnection({
 			dispatcher: { dispatch: vi.fn() } as never,

@@ -2441,22 +2441,37 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("disables session permission changes while a turn is running", async () => {
+	it.each([false, true])("allows live permission changes without stopping the turn (waiting approval=%s)", async (waiting) => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
-		const { api } = createHarness();
+		const { api, emitEvent } = createHarness();
 		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		const interactionId = "22222222-2222-4222-8222-222222222222";
 		vi.mocked(api.openSession).mockResolvedValueOnce({
-			...snapshot(running),
-			activeTurnId: "turn-running",
+			...snapshot(running), activeTurnId: "turn-running",
+			pendingInteractions: waiting ? [{ interactionId, sessionId: "chat-existing", title: "Approve bash?",
+				message: "Approval required", createdAt: "2026-09-20T00:00:00.000Z", kind: "session_permission_approval",
+				requestId: interactionId, actionId: "bash-call", toolLabel: "bash", riskLevel: "low", executionTarget: "sandbox",
+				reason: "Approval required", scopeComplete: true, details: [], choices: ["allow-once", "deny-once"] }] : [],
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		const store = new AppStore();
+		await act(async () => root.render(<App api={api} store={store} />));
 		await flush();
-
-		expect(button(container, "Select permissions, current Ask").disabled).toBe(true);
+		expect(button(container, "Select permissions, current Ask").disabled).toBe(false);
+		await act(async () => button(container, "Select permissions, current Ask").click());
+		await act(async () => menuOption(container, "Full").click());
+		expect(api.setPermissionPreset).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing", permissionPreset: "full" }));
+		expect(api.interruptTurn).not.toHaveBeenCalled();
+		expect(store.getSnapshot().activeTurnId).toBe("turn-running");
+		if (waiting) {
+			expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(true);
+			await act(async () => emitEvent({ type: "interaction-cancelled", interactionId }));
+			expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(false);
+			expect(container.querySelector(".permission-approval-panel")).toBeNull();
+		}
 		await act(async () => root.unmount());
 	});
 
