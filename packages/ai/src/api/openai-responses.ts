@@ -8,6 +8,7 @@ import type {
 	Context,
 	Model,
 	OpenAIResponsesCompat,
+	PromptCacheObservation,
 	ProviderEnv,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -22,7 +23,13 @@ import { headersToRecord } from "../utils/headers.ts";
 import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
-import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
+import {
+	applyResponsesCacheLayout,
+	convertResponsesMessages,
+	convertResponsesTools,
+	processResponsesStream,
+	type ResponsesCacheLayoutInput,
+} from "./openai-responses-shared.ts";
 import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
@@ -143,10 +150,29 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 			const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
 			const cacheSessionId = cacheRetention === "none" ? undefined : options?.sessionId;
 			const client = createClient(model, context, apiKey, options?.headers, cacheSessionId);
-			let params = buildParams(model, context, options);
+			const built = buildParams(model, context, options);
+			let params = built.params;
+			let prepared: PromptCacheObservation | undefined;
+			if (built.layout) {
+				try {
+					prepared = (await applyResponsesCacheLayout(built.params, built.layout, model)) ?? undefined;
+				} catch {
+					// Cache layout is an optimization; on failure rebuild without
+					// hints so the request keeps its baseline shape.
+					params = buildParams(model, { ...context, cacheHints: undefined }, options).params;
+					prepared = undefined;
+				}
+			}
 			const nextParams = await options?.onPayload?.(params, model);
 			if (nextParams !== undefined) {
 				params = nextParams as ResponseCreateParamsStreaming;
+			}
+			if (prepared) {
+				try {
+					options?.onPromptCachePrepared?.(prepared);
+				} catch {
+					// Observation callbacks must never break the request path.
+				}
 			}
 			const requestOptions = {
 				...(options?.signal ? { signal: options.signal } : {}),
@@ -248,14 +274,32 @@ function createClient(
 	});
 }
 
-function buildParams(model: Model<"openai-responses">, context: Context, options?: OpenAIResponsesOptions) {
+function buildParams(
+	model: Model<"openai-responses">,
+	context: Context,
+	options?: OpenAIResponsesOptions,
+): { params: ResponseCreateParamsStreaming; layout?: ResponsesCacheLayoutInput } {
 	const compat = getCompat(model);
 	const toolPlacement = splitDeferredTools(context, compat.supportsToolSearch);
+	const hints = context.cacheHints;
+	const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
+	const traceItems =
+		hints !== undefined &&
+		compat.supportsExplicitPromptCacheMode &&
+		cacheRetention !== "none" &&
+		hints.origins.length === context.messages.length;
+	const itemSources: (number | null)[] = [];
 	const messages = convertResponsesMessages(model, context, OPENAI_TOOL_CALL_PROVIDERS, {
 		deferredTools: toolPlacement.deferred,
+		...(traceItems
+			? {
+					onOutput: (inputIndex: number, sourceIndex: number | null) => {
+						itemSources[inputIndex] = sourceIndex;
+					},
+				}
+			: {}),
 	});
 
-	const cacheRetention = resolveCacheRetention(options?.cacheRetention, options?.env);
 	const params: ResponseCreateParamsStreaming & {
 		prompt_cache_options?: { mode?: "explicit"; ttl?: "30m" };
 	} = {
@@ -305,7 +349,18 @@ function buildParams(model: Model<"openai-responses">, context: Context, options
 		}
 	}
 
-	return params;
+	return {
+		params,
+		layout: hints
+			? {
+					hints,
+					itemSources,
+					supported: compat.supportsExplicitPromptCacheMode,
+					enabled: cacheRetention !== "none",
+					messageCount: context.messages.length,
+				}
+			: undefined,
+	};
 }
 
 function getServiceTierCostMultiplier(

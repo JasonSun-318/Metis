@@ -21,6 +21,8 @@ import type {
 	Context,
 	ImageContent,
 	Model,
+	PromptCacheHints,
+	PromptCacheObservation,
 	StopReason,
 	TextContent,
 	TextSignatureV1,
@@ -32,6 +34,12 @@ import type {
 import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { shortHash } from "../utils/hash.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
+import {
+	type CacheCandidate,
+	chooseCacheCandidates,
+	digestCacheValue,
+	reusableCandidate,
+} from "../utils/prompt-cache-layout.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { transformMessages } from "./transform-messages.ts";
 
@@ -80,6 +88,13 @@ export interface OpenAIResponsesStreamOptions {
 export interface ConvertResponsesMessagesOptions {
 	includeSystemPrompt?: boolean;
 	deferredTools?: ReadonlyMap<string, Tool>;
+	/**
+	 * For every item appended to the converted input, reports the item index
+	 * and the index of the `Context.messages` entry that produced it — null
+	 * for synthesized items such as the system prompt or repaired tool
+	 * results. Used to map prompt-cache breakpoints back to history origins.
+	 */
+	onOutput?: (inputIndex: number, sourceIndex: number | null) => void;
 }
 
 export interface ConvertResponsesToolsOptions {
@@ -127,26 +142,52 @@ export function convertResponsesMessages<TApi extends Api>(
 		return `${normalizedCallId}|${normalizedItemId}`;
 	};
 
-	const transformedMessages = transformMessages(context.messages, model, normalizeToolCallId);
+	const transformedToSource: (number | null)[] = [];
+	const transformedMessages = transformMessages(
+		context.messages,
+		model,
+		normalizeToolCallId,
+		options?.onOutput
+			? {
+					onOutput: (outputIndex, sourceIndex) => {
+						transformedToSource[outputIndex] = sourceIndex;
+					},
+				}
+			: undefined,
+	);
+
+	const emit = (item: ResponseInput[number], transformedIndex: number | null): void => {
+		messages.push(item);
+		options?.onOutput?.(
+			messages.length - 1,
+			transformedIndex === null ? null : (transformedToSource[transformedIndex] ?? null),
+		);
+	};
 
 	const includeSystemPrompt = options?.includeSystemPrompt ?? true;
 	if (includeSystemPrompt && context.systemPrompt) {
 		const compat = model.compat as { supportsDeveloperRole?: boolean } | undefined;
 		const role = model.reasoning && compat?.supportsDeveloperRole !== false ? "developer" : "system";
-		messages.push({
-			role,
-			content: sanitizeSurrogates(context.systemPrompt),
-		});
+		emit(
+			{
+				role,
+				content: sanitizeSurrogates(context.systemPrompt),
+			},
+			null,
+		);
 	}
 
 	let msgIndex = 0;
-	for (const msg of transformedMessages) {
+	for (const [ti, msg] of transformedMessages.entries()) {
 		if (msg.role === "user") {
 			if (typeof msg.content === "string") {
-				messages.push({
-					role: "user",
-					content: [{ type: "input_text", text: sanitizeSurrogates(msg.content) }],
-				});
+				emit(
+					{
+						role: "user",
+						content: [{ type: "input_text", text: sanitizeSurrogates(msg.content) }],
+					},
+					ti,
+				);
 			} else {
 				const content: ResponseInputContent[] = msg.content.map((item): ResponseInputContent => {
 					if (item.type === "text") {
@@ -162,10 +203,13 @@ export function convertResponsesMessages<TApi extends Api>(
 					} satisfies ResponseInputImage;
 				});
 				if (content.length === 0) continue;
-				messages.push({
-					role: "user",
-					content,
-				});
+				emit(
+					{
+						role: "user",
+						content,
+					},
+					ti,
+				);
 			}
 		} else if (msg.role === "assistant") {
 			const output: ResponseInput = [];
@@ -225,7 +269,7 @@ export function convertResponsesMessages<TApi extends Api>(
 				}
 			}
 			if (output.length === 0) continue;
-			messages.push(...output);
+			for (const item of output) emit(item, ti);
 		} else if (msg.role === "toolResult") {
 			const textResult = msg.content
 				.filter((c): c is TextContent => c.type === "text")
@@ -261,11 +305,14 @@ export function convertResponsesMessages<TApi extends Api>(
 				output = sanitizeSurrogates(hasText ? textResult : hasImages ? "(see attached image)" : "(no tool output)");
 			}
 
-			messages.push({
-				type: "function_call_output",
-				call_id: callId,
-				output,
-			});
+			emit(
+				{
+					type: "function_call_output",
+					call_id: callId,
+					output,
+				},
+				ti,
+			);
 
 			const deferredTools: Tool[] = [];
 			for (const name of msg.addedToolNames ?? []) {
@@ -277,26 +324,239 @@ export function convertResponsesMessages<TApi extends Api>(
 			if (deferredTools.length > 0) {
 				const names = deferredTools.map((tool) => tool.name);
 				const searchCallId = `metis_tool_load_${shortHash(`${msg.toolCallId}:${names.join(",")}`)}`;
-				messages.push({
-					type: "tool_search_call",
-					call_id: searchCallId,
-					execution: "client",
-					status: "completed",
-					arguments: { query: names.join(" "), limit: names.length },
-				} satisfies ResponseInputItem);
-				messages.push({
-					type: "tool_search_output",
-					call_id: searchCallId,
-					execution: "client",
-					status: "completed",
-					tools: convertResponsesTools(deferredTools, { deferLoading: true }),
-				} satisfies ResponseToolSearchOutputItemParam);
+				emit(
+					{
+						type: "tool_search_call",
+						call_id: searchCallId,
+						execution: "client",
+						status: "completed",
+						arguments: { query: names.join(" "), limit: names.length },
+					} satisfies ResponseInputItem,
+					ti,
+				);
+				emit(
+					{
+						type: "tool_search_output",
+						call_id: searchCallId,
+						execution: "client",
+						status: "completed",
+						tools: convertResponsesTools(deferredTools, { deferLoading: true }),
+					} satisfies ResponseToolSearchOutputItemParam,
+					ti,
+				);
 			}
 		}
 		msgIndex++;
 	}
 
 	return messages;
+}
+
+// =============================================================================
+// Explicit prompt-cache layout
+// =============================================================================
+
+/**
+ * Inputs gathered while building a Responses request so stable history
+ * endpoints can be marked with explicit `prompt_cache_breakpoint` fields.
+ * `itemSources` is populated only when tracing was enabled during conversion.
+ */
+export interface ResponsesCacheLayoutInput {
+	hints: PromptCacheHints;
+	itemSources: (number | null)[];
+	supported: boolean;
+	enabled: boolean;
+	messageCount: number;
+}
+
+type ExplicitCacheText = {
+	type: "input_text";
+	text: string;
+	prompt_cache_breakpoint?: { mode: "explicit" };
+};
+
+interface ResponsesMarkedCandidate extends CacheCandidate {
+	itemIndex: number;
+	blockIndex: number;
+	bytes: number;
+}
+
+/**
+ * Markable block positions inside a converted input item: `input_text` blocks
+ * in message content, plus `function_call_output` text (a raw string output
+ * counts as block 0 and is wrapped only when it is actually marked).
+ */
+function markableResponseBlocks(item: ResponseInput[number]): number[] {
+	if (item.type === "function_call_output") {
+		if (typeof item.output === "string") return [0];
+		if (Array.isArray(item.output)) {
+			return item.output
+				.map((block, index) => (block?.type === "input_text" ? index : -1))
+				.filter((index) => index >= 0);
+		}
+		return [];
+	}
+	const content = (item as { content?: unknown }).content;
+	if (!Array.isArray(content)) return [];
+	return content.map((block, index) => (block?.type === "input_text" ? index : -1)).filter((index) => index >= 0);
+}
+
+function markResponseBlock(item: ResponseInput[number], blockIndex: number): boolean {
+	if (item.type === "function_call_output") {
+		if (typeof item.output === "string" && blockIndex === 0) {
+			const wrapped: ExplicitCacheText = {
+				type: "input_text",
+				text: item.output,
+				prompt_cache_breakpoint: { mode: "explicit" },
+			};
+			item.output = [wrapped] as unknown as typeof item.output;
+			return true;
+		}
+		if (Array.isArray(item.output)) {
+			const block = item.output[blockIndex] as ExplicitCacheText | undefined;
+			if (block?.type !== "input_text") return false;
+			block.prompt_cache_breakpoint = { mode: "explicit" };
+			return true;
+		}
+		return false;
+	}
+	const content = (item as { content?: unknown }).content;
+	if (!Array.isArray(content)) return false;
+	const block = content[blockIndex] as ExplicitCacheText | undefined;
+	if (block?.type !== "input_text") return false;
+	block.prompt_cache_breakpoint = { mode: "explicit" };
+	return true;
+}
+
+/**
+ * Place explicit `prompt_cache_breakpoint` markers on stable history
+ * endpoints. Only legal `input_text` blocks can carry the marker; when a
+ * source's trailing items are not markable (e.g. deferred tool-search items),
+ * the endpoint retreats to that source's last markable block.
+ */
+export async function applyResponsesCacheLayout<TParams extends { input?: unknown }>(
+	params: TParams,
+	layout: ResponsesCacheLayoutInput,
+	model: Pick<Model<"openai-responses">, "provider" | "id">,
+): Promise<PromptCacheObservation | undefined> {
+	const { hints, itemSources } = layout;
+	const diagnostic = (reason: PromptCacheObservation["reason"]): PromptCacheObservation => ({
+		reason,
+		reusableInputBytes: 0,
+		stableInputBytes: 0,
+	});
+	if (!layout.supported) return diagnostic("unsupported");
+	if (!layout.enabled) return diagnostic("disabled");
+	const input = params.input;
+	if (hints.origins.length !== layout.messageCount || !Array.isArray(input) || itemSources.length !== input.length) {
+		return diagnostic("unmapped");
+	}
+
+	const { input: _input, ...settingsFrame } = params;
+	const settingsDigest = await digestCacheValue(settingsFrame);
+	let chain = settingsDigest;
+	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
+	const extend = async (frame: unknown): Promise<void> => {
+		const json = JSON.stringify(frame);
+		chain = await digestCacheValue([chain, json]);
+		bytes += new TextEncoder().encode(json).length;
+	};
+
+	// Last markable block per source, plus the first volatile item that ends
+	// the stable prefix. Leading source-less items (the system prompt) are
+	// settings frame content; source-less items after real history are
+	// synthesized and volatile.
+	const lastMarkable = new Map<number, { itemIndex: number; blockIndex: number }>();
+	let firstVolatile: number | undefined;
+	let seenSourced = false;
+	for (let itemIndex = 0; itemIndex < input.length; itemIndex++) {
+		const sourceIndex = itemSources[itemIndex];
+		if (sourceIndex === null || sourceIndex === undefined) {
+			if (seenSourced) firstVolatile ??= itemIndex;
+			continue;
+		}
+		seenSourced = true;
+		const origin = hints.origins[sourceIndex];
+		if (origin?.kind !== "stable") {
+			firstVolatile ??= itemIndex;
+			continue;
+		}
+		const blocks = markableResponseBlocks(input[itemIndex]!);
+		if (blocks.length > 0) {
+			lastMarkable.set(sourceIndex, { itemIndex, blockIndex: blocks[blocks.length - 1]! });
+		}
+	}
+
+	const candidates: ResponsesMarkedCandidate[] = [];
+	const ordinals = new Map<string, number>();
+	let stableBytes = 0;
+	for (let itemIndex = 0; itemIndex < input.length; itemIndex++) {
+		await extend(input[itemIndex]);
+		if (firstVolatile !== undefined && itemIndex >= firstVolatile) continue;
+		const sourceIndex = itemSources[itemIndex];
+		if (sourceIndex === null || sourceIndex === undefined) continue;
+		const last = lastMarkable.get(sourceIndex);
+		if (!last || last.itemIndex !== itemIndex) continue;
+		const origin = hints.origins[sourceIndex];
+		if (origin?.kind !== "stable") continue;
+		const ordinal = ordinals.get(origin.id) ?? 0;
+		ordinals.set(origin.id, ordinal + 1);
+		candidates.push({
+			originId: origin.id,
+			ordinal,
+			prefixDigest: chain,
+			index: candidates.length,
+			itemIndex,
+			blockIndex: last.blockIndex,
+			bytes,
+		});
+		stableBytes = bytes;
+	}
+
+	if (candidates.length === 0) return diagnostic("unmapped");
+
+	const previous = hints.previous;
+	const settingsMismatch =
+		previous !== undefined &&
+		(previous.provider !== model.provider ||
+			previous.model !== model.id ||
+			previous.settingsDigest !== settingsDigest);
+	const previousBoundary = settingsMismatch ? undefined : previous?.historyBoundary;
+	const chosen = chooseCacheCandidates(candidates, previousBoundary, 2) as ResponsesMarkedCandidate[];
+	const reused = reusableCandidate(candidates, previousBoundary) as ResponsesMarkedCandidate | undefined;
+
+	for (const candidate of chosen) {
+		const item = input[candidate.itemIndex];
+		if (item) markResponseBlock(item, candidate.blockIndex);
+	}
+
+	const newestChosen = chosen[chosen.length - 1];
+	return {
+		checkpoint: newestChosen
+			? {
+					version: 1,
+					provider: model.provider,
+					model: model.id,
+					settingsDigest,
+					historyBoundary: {
+						originId: newestChosen.originId,
+						ordinal: newestChosen.ordinal,
+						prefixDigest: newestChosen.prefixDigest,
+					},
+				}
+			: undefined,
+		reason: !previous
+			? "append"
+			: settingsMismatch
+				? "settings-change"
+				: reused
+					? chosen[chosen.length - 1] !== reused
+						? "append"
+						: "suffix"
+					: "history-change",
+		reusableInputBytes: reused?.bytes ?? 0,
+		stableInputBytes: stableBytes,
+	};
 }
 
 // =============================================================================

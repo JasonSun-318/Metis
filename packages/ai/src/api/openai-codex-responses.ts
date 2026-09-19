@@ -28,6 +28,7 @@ import type {
 	AssistantMessage,
 	Context,
 	Model,
+	PromptCacheObservation,
 	ProviderEnv,
 	ProviderHeaders,
 	SimpleStreamOptions,
@@ -47,7 +48,13 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.ts";
-import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.ts";
+import {
+	applyResponsesCacheLayout,
+	convertResponsesMessages,
+	convertResponsesTools,
+	processResponsesStream,
+	type ResponsesCacheLayoutInput,
+} from "./openai-responses-shared.ts";
 import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 
 // ============================================================================
@@ -253,10 +260,29 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 			}
 
 			const accountId = extractAccountId(apiKey);
-			let body = buildRequestBody(model, context, options);
+			const built = buildRequestBody(model, context, options);
+			let body = built.body;
+			let prepared: PromptCacheObservation | undefined;
+			if (built.layout) {
+				try {
+					prepared = (await applyResponsesCacheLayout(built.body, built.layout, model)) ?? undefined;
+				} catch {
+					// Cache layout is an optimization; on failure rebuild without
+					// hints so the request keeps its baseline shape.
+					body = buildRequestBody(model, { ...context, cacheHints: undefined }, options).body;
+					prepared = undefined;
+				}
+			}
 			const nextBody = await options?.onPayload?.(body, model);
 			if (nextBody !== undefined) {
 				body = nextBody as RequestBody;
+			}
+			if (prepared) {
+				try {
+					options?.onPromptCachePrepared?.(prepared);
+				} catch {
+					// Observation callbacks must never break the request path.
+				}
 			}
 			const websocketRequestId = options?.sessionId || createCodexRequestId();
 			const sseHeaders = buildSSEHeaders(model.headers, options?.headers, accountId, apiKey, options?.sessionId);
@@ -483,11 +509,24 @@ function buildRequestBody(
 	model: Model<"openai-codex-responses">,
 	context: Context,
 	options?: OpenAICodexResponsesOptions,
-): RequestBody {
+): { body: RequestBody; layout?: ResponsesCacheLayoutInput } {
 	const toolPlacement = splitDeferredTools(context, model.compat?.supportsToolSearch ?? false);
+	const hints = context.cacheHints;
+	const explicitSupported = model.compat?.supportsExplicitPromptCacheMode === true;
+	const enabled = options?.cacheRetention !== "none";
+	const traceItems =
+		hints !== undefined && explicitSupported && enabled && hints.origins.length === context.messages.length;
+	const itemSources: (number | null)[] = [];
 	const messages = convertResponsesMessages(model, context, CODEX_TOOL_CALL_PROVIDERS, {
 		includeSystemPrompt: false,
 		deferredTools: toolPlacement.deferred,
+		...(traceItems
+			? {
+					onOutput: (inputIndex: number, sourceIndex: number | null) => {
+						itemSources[inputIndex] = sourceIndex;
+					},
+				}
+			: {}),
 	});
 
 	const body: RequestBody = {
@@ -528,7 +567,18 @@ function buildRequestBody(
 		}
 	}
 
-	return body;
+	return {
+		body,
+		layout: hints
+			? {
+					hints,
+					itemSources,
+					supported: explicitSupported,
+					enabled,
+					messageCount: context.messages.length,
+				}
+			: undefined,
+	};
 }
 
 function getServiceTierCostMultiplier(
