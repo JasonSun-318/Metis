@@ -43,6 +43,7 @@ export type {
 	OAuthSelectPrompt,
 } from "./utils/oauth/types.ts";
 export * from "./utils/overflow.ts";
+export { observePromptCacheRequest } from "./utils/prompt-cache-diagnostics.ts";
 export * from "./utils/prompt-cache-layout.ts";
 export * from "./utils/retry.ts";
 export * from "./utils/typebox-helpers.ts";

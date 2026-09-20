@@ -35,6 +35,7 @@ import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { headersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
+import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
 import {
 	type CacheCandidate,
 	digestCacheFrame,
@@ -610,6 +611,7 @@ export const stream: StreamFunction<"anthropic-messages", AnthropicOptions> = (
 					// Observation callbacks must never break the request path.
 				}
 			}
+			await observePromptCacheRequest(model, { ...params, stream: true }, options);
 			const requestOptions = {
 				...(options?.signal ? { signal: options.signal } : {}),
 				...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),

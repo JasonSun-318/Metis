@@ -136,6 +136,11 @@ export interface StreamOptions {
 	 * provider served the request from cache.
 	 */
 	onPromptCachePrepared?: (observation: PromptCacheObservation) => void;
+	/** Opt-in, digest-only observation of final SDK payloads; never affects cache controls. */
+	promptCacheDiagnostics?: {
+		enabled: () => boolean;
+		onRequest: (snapshot: PromptCacheRequestSnapshot) => void | Promise<void>;
+	};
 	/**
 	 * Optional callback invoked after an HTTP response is received and before
 	 * its body stream is consumed.
@@ -398,10 +403,31 @@ export interface PromptCacheHints {
 	previous?: PromptCacheCheckpoint;
 }
 
-/**
- * An observation of the cache layout a request used. It records what was
- * marked, not whether the provider actually served the request from cache.
- */
+/** A SHA-256 digest and the number of serialized UTF-8 bytes it describes. */
+export interface PromptCacheFingerprint {
+	digest: string;
+	bytes: number;
+}
+
+/** Local request evidence, not a provider cache-hit or exact wire-byte measurement. */
+export interface PromptCacheRequestSnapshot {
+	version: 1;
+	boundary: "adapter-payload";
+	api: Api;
+	provider: string;
+	model: string;
+	endpointDigest: string;
+	capturedAt: number;
+	settings: PromptCacheFingerprint;
+	system: PromptCacheFingerprint;
+	tools: PromptCacheFingerprint;
+	history: PromptCacheFingerprint;
+	messages: PromptCacheFingerprint[];
+	messageCount: number;
+	complete: boolean;
+}
+
+/** Cache marker placement, not evidence of a server cache hit. */
 export interface PromptCacheObservation {
 	checkpoint?: PromptCacheCheckpoint;
 	reason:

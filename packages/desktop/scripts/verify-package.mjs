@@ -25,7 +25,10 @@ function nativeArch() {
 }
 
 const expectedArch = nativeArch();
-const packageRoot = path.join(desktopRoot, "out", `Metis-${process.platform}-${expectedArch}`);
+// An explicit package root also supports verifying an isolated local build.
+const packageRoot = process.argv[2]
+	? path.resolve(process.argv[2])
+	: path.join(desktopRoot, "out", `Metis-${process.platform}-${expectedArch}`);
 const resourcesRoot =
 	process.platform === "darwin"
 		? path.join(packageRoot, "Metis.app", "Contents", "Resources")

@@ -47,6 +47,30 @@ Use `/trust` in interactive mode to save a project trust decision for future ses
 }
 ```
 
+### Prompt cache diagnostics
+
+Set `promptCache.diagnostics` to `true` in settings to record request fingerprints for cache investigations. It defaults to `false`. Restart the desktop App after changing the settings file.
+
+```json
+{
+  "promptCache": {
+    "diagnostics": true
+  }
+}
+```
+
+All nine built-in API adapters record SHA-256 digests and byte lengths of the final SDK request's settings, system content, tools, and ordered message items. This runs after payload hooks and cache-marker validation. Request evidence is saved as `cacheRequest` metadata beside the corresponding assistant message and its actual usage; it is never sent to the model. Custom adapters must call `observePromptCacheRequest` to participate.
+
+From a repository checkout, inspect a session without printing its content:
+
+```bash
+node --import tsx scripts/inspect-prompt-cache.ts /absolute/path/to/session.jsonl
+```
+
+The report covers the last 20 assistant requests. It distinguishes missing evidence, changed sections, the first changed message index (zero-based adapter item index), identical requests, and appended messages. It retains at most 2,048 message fingerprints per request; longer histories are marked incomplete. Cache control markers are included, so marker movement can also produce a request difference. No prompt text, tool arguments, credentials, or headers are saved by this diagnostic feature. Disabling the setting avoids fingerprint computation and affects future requests only.
+
+The boundary is the adapter's SDK payload, not the SDK's final HTTP bytes, provider tokenization, headers, retry attempts or internal routing. The endpoint digest describes `model.baseUrl`; SDK-specific environment overrides are not observed. Stable fingerprints do not guarantee server-side cache hits. The displayed hit percentage continues to use actual reported cache reads divided by total input, excluding output; missing usage remains unknown. Existing sessions cannot retrospectively explain misses that happened without request fingerprints. These digests also do not prove that a changed field invalidated a provider cache.
+
 ### UI & Display
 
 | Setting | Type | Default | Description |

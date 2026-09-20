@@ -39,6 +39,7 @@ import type {
 	PromptCacheHints,
 	PromptCacheObservation,
 	PromptCacheOrigin,
+	PromptCacheRequestSnapshot,
 	TextContent,
 	Tool,
 } from "@metis/ai/compat";
@@ -634,6 +635,7 @@ export class AgentSession {
 	 */
 	private _pendingPromptCacheObservation?: PromptCacheObservation;
 	private _promptCacheDiagnostics: PromptCacheObservation[] = [];
+	private _pendingPromptCacheRequest: PromptCacheRequestSnapshot | undefined;
 
 	/** Tracks pending steering messages for UI display. Removed when delivered. */
 	private _steeringMessages: string[] = [];
@@ -940,6 +942,12 @@ export class AgentSession {
 		this._installAgentNextTurnRefresh();
 		this.agent.mapPromptCacheHints = (agentMessages, llmMessages) =>
 			this._mapPromptCacheHints(agentMessages, llmMessages);
+		this.agent.promptCacheDiagnostics = {
+			enabled: () => this.settingsManager.getPromptCacheSettings().diagnostics,
+			onRequest: (snapshot) => {
+				this._pendingPromptCacheRequest = snapshot;
+			},
+		};
 		this.agent.onPromptCachePrepared = (observation) => {
 			this._pendingPromptCacheObservation = observation;
 			if (this.settingsManager.getPromptCacheSettings().diagnostics) {
@@ -2495,8 +2503,10 @@ export class AgentSession {
 					event.message.stopReason !== "aborted"
 						? this._pendingPromptCacheObservation?.checkpoint
 						: undefined;
+				const cacheRequest = event.message.role === "assistant" ? this._pendingPromptCacheRequest : undefined;
 				if (event.message.role === "assistant") {
 					this._pendingPromptCacheObservation = undefined;
+					this._pendingPromptCacheRequest = undefined;
 					if (event.message.stopReason !== "error" && event.message.stopReason !== "aborted") {
 						this._readbackProtectedEntryIds.clear();
 					}
@@ -2508,6 +2518,7 @@ export class AgentSession {
 						event.message.role === "toolResult" ? toolOutput : undefined,
 						this._durableTurn?.turnId,
 						cacheCheckpoint,
+						cacheRequest,
 					);
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);

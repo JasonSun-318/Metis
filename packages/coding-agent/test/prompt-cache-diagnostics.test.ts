@@ -1,10 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fauxAssistantMessage } from "@metis/ai";
+import { createAssistantMessageEventStream, fauxAssistantMessage, observePromptCacheRequest } from "@metis/ai";
 import type { PromptCacheObservation } from "@metis/ai/compat";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { summarizePromptCacheUsage } from "../src/core/cache-stats.ts";
+import { SessionManager } from "../src/core/session-manager.ts";
 import { type CacheSessionFixture, createCacheSession } from "./cache-session-fixtures.ts";
 
 describe("summarizePromptCacheUsage", () => {
@@ -104,5 +105,55 @@ describe("AgentSession prompt-cache diagnostics", () => {
 		expect(diagnostics.at(-1)?.reusableInputBytes).toBe(69);
 		(diagnostics as PromptCacheObservation[]).pop();
 		expect(h.session.getPromptCacheDiagnostics()).toHaveLength(64);
+	});
+	it("associates snapshots with responses, persists on reopen, and never sends them as context", async () => {
+		const h = createCacheSession(root);
+		fixture = h;
+		h.settings.applyOverrides({ promptCache: { diagnostics: true } });
+		const originalStream = h.agent.streamFn;
+		let fail = false;
+		h.agent.streamFn = async (model, context, options) => {
+			await observePromptCacheRequest(
+				model,
+				{ system: context.systemPrompt, messages: context.messages, tools: context.tools },
+				options,
+			);
+			if (!fail) return originalStream(model, context, options);
+			const stream = createAssistantMessageEventStream();
+			const message = {
+				...fauxAssistantMessage("", { stopReason: "aborted" }),
+				api: model.api,
+				model: model.id,
+				provider: model.provider,
+			};
+			stream.push({ type: "error", reason: "aborted", error: message });
+			stream.end();
+			return stream;
+		};
+		await h.session.prompt("first");
+		await h.session.prompt("second");
+		fail = true;
+		await h.session.prompt("abort");
+		fail = false;
+		h.settings.applyOverrides({ promptCache: { diagnostics: false } });
+		await h.session.prompt("unobserved");
+		const assistants = h.manager.getBranch().filter((e) => e.type === "message" && e.message.role === "assistant");
+		expect(assistants).toHaveLength(4);
+		for (const entry of assistants.slice(0, 3)) {
+			expect(entry.type === "message" && entry.cacheRequest?.boundary).toBe("adapter-payload");
+		}
+		expect(assistants[3]?.type === "message" && assistants[3].cacheRequest).toBeUndefined();
+		expect(JSON.stringify(h.captured)).not.toContain("adapter-payload");
+		const file = h.manager.getSessionFile()!;
+		h.close();
+		fixture = undefined;
+		const reopened = SessionManager.open(file);
+		try {
+			const saved = reopened.getBranch().filter((e) => e.type === "message" && e.cacheRequest);
+			expect(saved).toHaveLength(3);
+			expect(JSON.stringify(reopened.buildSessionContext().messages)).not.toContain("adapter-payload");
+		} finally {
+			reopened.close();
+		}
 	});
 });

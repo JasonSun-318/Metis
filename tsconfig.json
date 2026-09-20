@@ -24,6 +24,6 @@
 			"@metis/tui/*": ["./packages/tui/src/*"]
 		}
 	},
-	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*", "scripts/bench-prompt-cache.ts"],
+	"include": ["packages/*/src/**/*", "packages/*/test/**/*", "packages/coding-agent/examples/**/*", "scripts/bench-prompt-cache.ts", "scripts/inspect-prompt-cache.ts"],
 	"exclude": ["**/dist/**", "packages/desktop/**", "packages/coding-agent/examples/extensions/gondolin/**"]
 }

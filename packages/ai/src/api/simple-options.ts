@@ -35,6 +35,8 @@ export function buildBaseOptions(
 		headers: options?.headers,
 		onPayload: options?.onPayload,
 		onResponse: options?.onResponse,
+		onPromptCachePrepared: options?.onPromptCachePrepared,
+		promptCacheDiagnostics: options?.promptCacheDiagnostics,
 		timeoutMs: options?.timeoutMs,
 		websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs,
 		maxRetries: options?.maxRetries,

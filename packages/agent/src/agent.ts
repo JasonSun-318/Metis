@@ -111,6 +111,7 @@ export interface AgentOptions {
 	onPayload?: SimpleStreamOptions["onPayload"];
 	onResponse?: SimpleStreamOptions["onResponse"];
 	onPromptCachePrepared?: SimpleStreamOptions["onPromptCachePrepared"];
+	promptCacheDiagnostics?: SimpleStreamOptions["promptCacheDiagnostics"];
 	beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
 	afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
 	prepareNextTurn?: (
@@ -163,6 +164,7 @@ export class Agent {
 	public onPayload?: SimpleStreamOptions["onPayload"];
 	public onResponse?: SimpleStreamOptions["onResponse"];
 	public onPromptCachePrepared?: SimpleStreamOptions["onPromptCachePrepared"];
+	public promptCacheDiagnostics?: SimpleStreamOptions["promptCacheDiagnostics"];
 	public beforeToolCall?: (
 		context: BeforeToolCallContext,
 		signal?: AbortSignal,
@@ -201,6 +203,7 @@ export class Agent {
 		this.onPayload = options.onPayload;
 		this.onResponse = options.onResponse;
 		this.onPromptCachePrepared = options.onPromptCachePrepared;
+		this.promptCacheDiagnostics = options.promptCacheDiagnostics;
 		this.beforeToolCall = options.beforeToolCall;
 		this.afterToolCall = options.afterToolCall;
 		this.prepareNextTurn = options.prepareNextTurn;
@@ -474,6 +477,7 @@ export class Agent {
 			onPayload: this.onPayload,
 			onResponse: this.onResponse,
 			onPromptCachePrepared: this.onPromptCachePrepared,
+			promptCacheDiagnostics: this.promptCacheDiagnostics,
 			transport: this.transport,
 			thinkingBudgets: this.thinkingBudgets,
 			maxRetryDelayMs: this.maxRetryDelayMs,
