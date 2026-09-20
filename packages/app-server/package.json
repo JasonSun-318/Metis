@@ -1,6 +1,6 @@
 {
 	"name": "@metis/app-server",
-	"version": "0.0.7",
+	"version": "0.0.8",
 	"description": "Recoverable multi-session application server for Metis clients",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -30,8 +30,8 @@
 		"prepublishOnly": "npm run clean && npm run build"
 	},
 	"dependencies": {
-		"@metis/app-protocol": "^0.0.7",
-		"@metis/coding-agent": "^0.0.7",
+		"@metis/app-protocol": "^0.0.8",
+		"@metis/coding-agent": "^0.0.8",
 		"jsonc-parser": "3.3.1",
 		"yauzl": "2.10.0"
 	},
