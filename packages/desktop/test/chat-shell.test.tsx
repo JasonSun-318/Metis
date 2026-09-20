@@ -12,6 +12,7 @@ import {
 } from "../src/renderer/components/App.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
+import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesPopover.tsx";
 import { GENERAL_PREFERENCES_STORAGE_KEY } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomePeriod, HOME_GREETINGS } from "../src/renderer/new-task-home-content.ts";
@@ -872,6 +873,42 @@ describe("Chat desktop shell", () => {
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
 		expect(container.querySelector('[role="dialog"][aria-label="Settings"]')).toBeNull();
 		await act(async () => root.unmount());
+	});
+
+	it("lights the unread bell when an update arrives after the previous release was read", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
+		const { api, emitUpdate } = createHarness({
+			changelog: { schemaVersion: 1, releases: [CHANGELOG.releases[1]!] },
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			expect(button(container, "Open release notes")).toBeTruthy();
+			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			vi.mocked(api.getChangelog).mockResolvedValue(CHANGELOG);
+			await act(async () => emitUpdate({ status: "available", version: "0.82.0", releaseNotes: "" }));
+			await flush();
+			expect(container.querySelector(".sidebar-update-notice")).not.toBeNull();
+			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
+			await act(async () => button(container, "Open unread release notes").click());
+			expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
+			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			await act(async () => button(container, "Close release notes").click());
+			const loadsAfterRead = vi.mocked(api.getChangelog).mock.calls.length;
+			for (const progress of [10, 50, 100]) {
+				await act(async () => emitUpdate({ status: "downloading", version: "0.82.0", releaseNotes: "", progress }));
+			}
+			await act(async () => emitUpdate({ status: "ready", version: "0.82.0", releaseNotes: "" }));
+			expect(api.getChangelog).toHaveBeenCalledTimes(loadsAfterRead);
+			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("shows the update action above Metis only when a newer version is available and handles manual check flow", async () => {

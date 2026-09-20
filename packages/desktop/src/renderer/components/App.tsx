@@ -1789,6 +1789,7 @@ export function App({ api, store }: AppProps) {
 							{!toolsSidebarOpen && (
 								<ReleaseNotesPopover
 									loadChangelog={api.getChangelog}
+									availableVersion={"version" in updateState ? updateState.version : null}
 								/>
 							)}
 							<button

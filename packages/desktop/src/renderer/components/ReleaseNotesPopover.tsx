@@ -9,12 +9,17 @@ export const RELEASE_NOTES_READ_VERSION_STORAGE_KEY = "metis.release-notes-read-
 
 interface ReleaseNotesPopoverProps {
 	readonly loadChangelog: () => Promise<DesktopChangelog>;
+	readonly availableVersion?: string | null;
 }
 
 type ChangelogLoader = ReleaseNotesPopoverProps["loadChangelog"];
 
 const changelogCache = new WeakMap<ChangelogLoader, DesktopChangelog>();
 const changelogLoads = new WeakMap<ChangelogLoader, Promise<DesktopChangelog>>();
+
+function isNewerVersion(version: string | null, previous: string | null): boolean {
+	return version !== null && (previous === null || version.localeCompare(previous, "en", { numeric: true }) > 0);
+}
 
 function loadReleaseNotes(loadChangelog: ChangelogLoader, force: boolean): Promise<DesktopChangelog> {
 	if (!force) {
@@ -61,7 +66,7 @@ function ReleaseNotesEntry({
 	);
 }
 
-export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps) {
+export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: ReleaseNotesPopoverProps) {
 	const { t } = useTranslation();
 	const [changelog, setChangelog] = useState<DesktopChangelog | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -75,7 +80,7 @@ export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps)
 	});
 	const [open, setOpen] = useState(false);
 	const latestVersion = changelog?.releases[0]?.version ?? null;
-	const unread = latestVersion !== null && latestVersion !== readVersion;
+	const unread = isNewerVersion(latestVersion, readVersion) || isNewerVersion(availableVersion, readVersion);
 	const mountedRef = useRef(true);
 	const loadTaskRef = useRef<Promise<void> | null>(null);
 
@@ -102,14 +107,17 @@ export function ReleaseNotesPopover({ loadChangelog }: ReleaseNotesPopoverProps)
 
 	useEffect(() => {
 		mountedRef.current = true;
-		void refresh();
+		// Update discovery must bypass history cached before this version was published.
+		const cachedVersion = changelogCache.get(loadChangelog)?.releases[0]?.version ?? null;
+		void refresh(isNewerVersion(availableVersion, cachedVersion));
 		return () => {
 			mountedRef.current = false;
 		};
-	}, [refresh]);
+	}, [availableVersion, loadChangelog, refresh]);
 
 	useEffect(() => {
-		if (!open || !latestVersion || latestVersion === readVersion) return;
+		// Only acknowledge displayed history, never a version known solely from the updater.
+		if (!open || !latestVersion || !isNewerVersion(latestVersion, readVersion)) return;
 		setReadVersion(latestVersion);
 		try {
 			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, latestVersion);

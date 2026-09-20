@@ -44,6 +44,74 @@ afterEach(() => {
 });
 
 describe("ReleaseNotesPopover", () => {
+	it.each(["failure", "stale history"])("keeps a discovered update unread when refresh returns %s", async (result) => {
+		localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const oldHistory: DesktopChangelog = { schemaVersion: 1, releases: [CHANGELOG.releases[1]!] };
+		const loadChangelog = vi.fn().mockResolvedValue(oldHistory);
+		try {
+			await view(root, loadChangelog);
+			if (result === "failure") loadChangelog.mockRejectedValue(new Error("offline"));
+			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
+			await act(async () => findButton(container, "Open unread release notes").click());
+			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
+			expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.81.0");
+			await act(async () => findButton(container, "Close release notes").click());
+			loadChangelog.mockResolvedValue(CHANGELOG);
+			await act(async () => findButton(container, "Open unread release notes").click());
+			expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
+			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.82.0");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("refreshes stale cached history when the bell remounts with a discovered update", async () => {
+		localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		const loadChangelog = vi.fn()
+			.mockResolvedValueOnce({ schemaVersion: 1, releases: [CHANGELOG.releases[1]!] })
+			.mockResolvedValue(CHANGELOG);
+		try {
+			await view(root, loadChangelog);
+			await act(async () => root.unmount());
+			root = createRoot(container);
+			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			expect(loadChangelog).toHaveBeenCalledTimes(2);
+			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("does not let an older in-flight history overwrite the discovered release", async () => {
+		localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		let resolveOld!: (changelog: DesktopChangelog) => void;
+		const loadChangelog = vi.fn()
+			.mockImplementationOnce(() => new Promise<DesktopChangelog>((resolve) => { resolveOld = resolve; }))
+			.mockResolvedValue(CHANGELOG);
+		try {
+			await view(root, loadChangelog);
+			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			await act(async () => findButton(container, "Open unread release notes").click());
+			await act(async () => resolveOld({ schemaVersion: 1, releases: [CHANGELOG.releases[1]!] }));
+			expect(container.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
+			expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.82.0");
+			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("loads independently, shows an unread dot, and renders newest-first history", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
