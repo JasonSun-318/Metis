@@ -182,7 +182,7 @@ test.describe("Desktop Plugin Marketplaces Lifecycle & Runtime", () => {
 				await expect(addButton).toHaveCSS("background-color", theme === "dark" ? "rgb(255, 255, 255)" : "rgb(107, 107, 107)");
 				await expect(addButton).toHaveCSS("color", theme === "dark" ? "rgb(18, 18, 18)" : "rgb(243, 243, 243)");
 				await cancelButton.hover();
-				await expect(cancelButton).toHaveCSS("background-color", theme === "dark" ? "rgb(34, 34, 34)" : "rgb(242, 241, 238)");
+				await expect(cancelButton).toHaveCSS("background-color", theme === "dark" ? "rgb(34, 34, 34)" : "rgb(236, 235, 230)");
 			}
 			await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
 			fixtureServer!.setRateLimited(true);

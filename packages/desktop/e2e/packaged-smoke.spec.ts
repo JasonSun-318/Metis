@@ -1182,7 +1182,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			);
 			return;
 		}
-		if (toolNames.includes("memory_write")) {
+		const lastUserText = JSON.stringify(
+			(payload.messages ?? [])
+				.filter((message): message is { role?: unknown } => typeof message === "object" && message !== null)
+				.filter((message) => message.role === "user")
+				.at(-1) ?? null,
+		);
+		if (toolNames.includes("memory_write") && lastUserText.includes("request packaged memory")) {
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			const toolAlreadyCalled = providerTranscript.includes("call-packaged-memory");
 			response.end(
@@ -1839,6 +1845,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.getByRole("button", { name: "Send" }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
 		expect(providerRequests).toBe(3);
+
+		phase = "exercising a packaged memory write";
+		await page.locator("#composer-input").fill("request packaged memory");
+		await page.getByRole("button", { name: "Send" }).click();
+		await expect
+			.poll(() => existsSync(path.join(agentDir, "memory", "global", "notes", "packaged-smoke.md")))
+			.toBe(true);
 
 		phase = "answering packaged structured questions";
 		await page.setViewportSize({ width: 1097, height: 588 });
@@ -3896,7 +3909,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		phase = "checking context and cache measurement scope";
 		await page.locator(".context-usage-ring").click();
 		const contextPanel = page.locator(".session-status-panel");
-		await expect(contextPanel).toContainText("Cache hit rate (latest completed request)");
+		await expect(contextPanel).toContainText("Cache hit rate");
+		await expect(contextPanel).toContainText("Latest completed request");
 		await expect(contextPanel).toContainText("96%");
 		await expect(contextPanel).toContainText("Token counts and category shares are estimates of used tokens.");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-en.png") });
@@ -4176,7 +4190,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.locator(".system-notice")).toHaveCount(0, { timeout: 7_000 });
 
 		await page.locator(".context-usage-ring").click();
-		await expect(page.locator(".session-status-panel")).toContainText("缓存命中率 · 最近一次成功请求");
+		await expect(page.locator(".session-status-panel")).toContainText("缓存命中率");
+		await expect(page.locator(".session-status-panel")).toContainText("最近一次成功请求");
 		await expect(page.locator(".session-status-panel")).toContainText("96%");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-zh.png") });
 		await page.keyboard.press("Escape");
@@ -4838,6 +4853,10 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	await writeFixtureFile(projectMemoryTopicPath, "shared project memory\n");
 	await writeFixtureFile(globalMemoryPath, "- [global-sentinel.md](notes/global-sentinel.md) — sentinel\n");
 	await writeFixtureFile(sharedMemoryIndexPath, "- [project-sentinel.md](notes/project-sentinel.md) — sentinel\n");
+	await writeFixtureFile(
+		path.join(projectScope, ".project.json"),
+		JSON.stringify({ root: canonicalProjectDir, createdAt: new Date().toISOString() }),
+	);
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
