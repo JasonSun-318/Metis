@@ -2183,7 +2183,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .effort-axis { margin-top: 13px; color: var(--text-13); font-size: 13px; }
 .effort-slider-shell { position: relative; height: 20px; margin-top: 6px; overflow: hidden; border-radius: 7px; background: var(--surface-00); transition: background 220ms ease; }
 .effort-slider-shell.is-highest { background: linear-gradient(90deg, var(--highest-effort-track) 0%, var(--highest-effort-track) 52%, var(--highest-effort-track) 100%); }
-.effort-slider-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 7px 0 0 7px; background: var(--surface-11); opacity: 1; pointer-events: none; transition: opacity 180ms ease; will-change: width; }
+.effort-slider-fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 7px 0 0 7px; background: var(--slider-fill); opacity: 1; pointer-events: none; transition: opacity 180ms ease; will-change: width; }
 .effort-slider-shell.is-highest .effort-slider-fill { opacity: 0; }
 .effort-highest-field { position: absolute; z-index: 1; width: 100%; height: 100%; border-radius: inherit; opacity: 1; inset: 0; pointer-events: none; animation: effort-pixels-in 200ms ease; }
 .effort-ticks { position: absolute; z-index: 2; display: flex; align-items: center; justify-content: space-between; opacity: 1; inset: 0 6.5px; pointer-events: none; transition: opacity 180ms ease; }

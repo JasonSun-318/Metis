@@ -6,10 +6,10 @@ import { DESKTOP_THEME_CHANNEL, type DesktopThemePreference } from "../shared/de
 const THEME_FILE_NAME = "theme.json";
 
 export const DARK_WINDOW_BACKGROUND = "#1f201e";
-export const LIGHT_WINDOW_BACKGROUND = "#ffffff";
+export const LIGHT_WINDOW_BACKGROUND = "#f4f2ed";
 export const WINDOWS_TITLE_BAR_HEIGHT = 32;
 const WINDOWS_DARK_TITLE_BAR = "#121212";
-const WINDOWS_LIGHT_TITLE_BAR = "#fcfcfb";
+const WINDOWS_LIGHT_TITLE_BAR = "#f4f2ed";
 
 export function isDesktopThemePreference(value: unknown): value is DesktopThemePreference {
 	return value === "dark" || value === "light" || value === "system";
