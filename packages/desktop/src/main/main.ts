@@ -10,6 +10,7 @@ import {
 	nativeImage,
 	type OpenDialogOptions,
 	powerSaveBlocker,
+	session,
 	shell,
 	utilityProcess,
 } from "electron";
@@ -110,6 +111,12 @@ function spawnAppServer(): UtilityChild {
 
 async function launch(): Promise<void> {
 	await app.whenReady();
+	// Route kill signals through the normal quit path so shutdown flushes
+	// renderer storage and winds down the app-server; a second signal hits the
+	// Node default (immediate exit) once each listener is consumed.
+	for (const signal of ["SIGINT", "SIGTERM"] as const) {
+		process.once(signal, () => app.quit());
+	}
 	// Windows and Linux show the stock File/Edit/View menu; remove it. macOS
 	// keeps its system menu bar at the top of the screen.
 	if (process.platform !== "darwin") Menu.setApplicationMenu(null);
@@ -293,6 +300,9 @@ async function launch(): Promise<void> {
 		if (allowQuit) return;
 		event.preventDefault();
 		if (!confirmDiscardWorkspaceEdits(mainWindow, "quit")) return;
+		// Commit pending DOM-storage writes before teardown; the shutdown below
+		// can take seconds and an abrupt exit would drop them.
+		void session.defaultSession.flushStorageData();
 		scheduleKeepAwake.set(false);
 		broker.dispose();
 		void supervisor.shutdown().finally(() => {

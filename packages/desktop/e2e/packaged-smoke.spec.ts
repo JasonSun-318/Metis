@@ -4840,6 +4840,10 @@ test("packaged project delete preserves exact-cwd shared memory", async () => {
 	await writeFixtureFile(projectMemoryTopicPath, "shared project memory\n");
 	await writeFixtureFile(globalMemoryPath, "- [global-sentinel.md](notes/global-sentinel.md) — sentinel\n");
 	await writeFixtureFile(sharedMemoryIndexPath, "- [project-sentinel.md](notes/project-sentinel.md) — sentinel\n");
+	await writeFixtureFile(
+		path.join(projectScope, ".project.json"),
+		JSON.stringify({ root: canonicalProjectDir, createdAt: new Date().toISOString() }),
+	);
 
 	const debuggingPort = await reservePort();
 	const diagnostics: string[] = [];
