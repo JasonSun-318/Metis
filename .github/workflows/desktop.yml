@@ -6,6 +6,7 @@ on:
       - ".github/workflows/desktop.yml"
       - "package-lock.json"
       - "package.json"
+      - "packages/ai/**"
       - "packages/app-protocol/**"
       - "packages/app-server/**"
       - "packages/coding-agent/**"
