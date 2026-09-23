@@ -92,7 +92,7 @@ describe("Code transcript visual contract", () => {
 
 	it("fixes the plan card scroll viewport", () => {
 		const planBody = rule(".plan-card-body");
-		expect(planBody.height).toBe("280px");
+		expect(planBody.maxHeight).toBe("280px");
 		expect(planBody.overflowY).toBe("auto");
 		expect(planBody.overscrollBehavior).toBe("contain");
 	});
