@@ -3896,7 +3896,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		phase = "checking context and cache measurement scope";
 		await page.locator(".context-usage-ring").click();
 		const contextPanel = page.locator(".session-status-panel");
-		await expect(contextPanel).toContainText("Cache hit rate (latest completed request)");
+		await expect(contextPanel).toContainText("Cache hit rate");
+		await expect(contextPanel).toContainText("Latest completed request");
 		await expect(contextPanel).toContainText("96%");
 		await expect(contextPanel).toContainText("Token counts and category shares are estimates of used tokens.");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-en.png") });

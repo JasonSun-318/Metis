@@ -308,9 +308,9 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		const planBody = page.locator(".plan-card-body").first();
 		const bodyMetrics = await planBody.evaluate((element) => {
 			const style = getComputedStyle(element);
-			return { height: style.height, overflowY: style.overflowY, overscrollBehavior: style.overscrollBehavior };
+			return { maxHeight: style.maxHeight, overflowY: style.overflowY, overscrollBehavior: style.overscrollBehavior };
 		});
-		expect(bodyMetrics.height).toBe("280px");
+		expect(bodyMetrics.maxHeight).toBe("280px");
 		expect(bodyMetrics.overflowY).toBe("auto");
 		expect(bodyMetrics.overscrollBehavior).toBe("contain");
 
