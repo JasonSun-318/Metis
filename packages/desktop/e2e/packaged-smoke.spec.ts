@@ -1182,7 +1182,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			);
 			return;
 		}
-		if (toolNames.includes("memory_write")) {
+		const lastUserText = JSON.stringify(
+			(payload.messages ?? [])
+				.filter((message): message is { role?: unknown } => typeof message === "object" && message !== null)
+				.filter((message) => message.role === "user")
+				.at(-1) ?? null,
+		);
+		if (toolNames.includes("memory_write") && lastUserText.includes("request packaged memory")) {
 			response.writeHead(200, { "content-type": "text/event-stream" });
 			const toolAlreadyCalled = providerTranscript.includes("call-packaged-memory");
 			response.end(
@@ -1839,6 +1845,13 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.getByRole("button", { name: "Send" }).click();
 		await expect(page.getByText("packaged-turn-ok", { exact: true })).toBeVisible();
 		expect(providerRequests).toBe(3);
+
+		phase = "exercising a packaged memory write";
+		await page.locator("#composer-input").fill("request packaged memory");
+		await page.getByRole("button", { name: "Send" }).click();
+		await expect
+			.poll(() => existsSync(path.join(agentDir, "memory", "global", "notes", "packaged-smoke.md")))
+			.toBe(true);
 
 		phase = "answering packaged structured questions";
 		await page.setViewportSize({ width: 1097, height: 588 });
