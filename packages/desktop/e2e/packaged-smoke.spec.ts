@@ -4177,7 +4177,8 @@ test("packaged General settings and Personalization persist across restart", asy
 		await expect(page.locator(".system-notice")).toHaveCount(0, { timeout: 7_000 });
 
 		await page.locator(".context-usage-ring").click();
-		await expect(page.locator(".session-status-panel")).toContainText("缓存命中率 · 最近一次成功请求");
+		await expect(page.locator(".session-status-panel")).toContainText("缓存命中率");
+		await expect(page.locator(".session-status-panel")).toContainText("最近一次成功请求");
 		await expect(page.locator(".session-status-panel")).toContainText("96%");
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "context-usage-zh.png") });
 		await page.keyboard.press("Escape");
