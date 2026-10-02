@@ -1364,5 +1364,121 @@
 				"id": "auditor"
 			}
 		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-list",
+			"result": {
+				"libraries": [
+					{
+						"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Product notes",
+						"path": "/Users/test/knowledge"
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/register",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-register",
+			"result": {
+				"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				"name": "Product notes",
+				"path": "/Users/test/knowledge"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/scan",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-scan",
+			"result": {
+				"notes": [
+					{
+						"path": "Home.md",
+						"title": "Home",
+						"links": [
+							{
+								"target": "topic/Note",
+								"kind": "wiki",
+								"path": "topic/Note.md"
+							},
+							{
+								"target": "missing.md",
+								"kind": "markdown",
+								"path": null
+							}
+						]
+					},
+					{
+						"path": "topic/Note.md",
+						"title": "Note",
+						"links": []
+					}
+				],
+				"edges": [
+					{
+						"source": "Home.md",
+						"target": "topic/Note.md"
+					}
+				],
+				"warnings": []
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/read",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-read",
+			"result": {
+				"path": "topic/Note.md",
+				"content": "# Note"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/knowledge/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-session-knowledge-get",
+			"result": {
+				"libraries": [
+					{
+						"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Product notes",
+						"path": "/Users/test/knowledge"
+					}
+				]
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/knowledge/set",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-session-knowledge-set",
+			"result": {
+				"libraries": [
+					{
+						"id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+						"name": "Product notes",
+						"path": "/Users/test/knowledge"
+					}
+				]
+			}
+		}
 	}
 ]

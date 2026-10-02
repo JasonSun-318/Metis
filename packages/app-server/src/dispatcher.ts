@@ -13,6 +13,7 @@ import {
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
+import { KnowledgeService } from "./knowledge.ts";
 import type { MemoryService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
@@ -112,6 +113,7 @@ function withPluginActivationState<T extends { plugin: PluginInstalledView; acti
 }
 
 export class Dispatcher {
+	private readonly knowledge: KnowledgeService;
 	private readonly replay = new Map<string, ReplayEntry>();
 	private readonly catalog: SessionCatalog;
 	private readonly registry: SessionRegistry;
@@ -149,6 +151,7 @@ export class Dispatcher {
 		titleGenerator: SessionTitleGenerator,
 	) {
 		this.catalog = catalog;
+		this.knowledge = new KnowledgeService(catalog.agentDir);
 		this.registry = registry;
 		this.subscriptionHub = subscriptionHub;
 		this.interactions = interactions;
@@ -520,6 +523,28 @@ export class Dispatcher {
 					),
 				};
 			}
+			case "knowledge/list":
+				return this.knowledge.list();
+			case "knowledge/register":
+				return await this.replayMutation(request, () => this.knowledge.register(request.params.path));
+			case "knowledge/scan":
+				return await this.knowledge.scan(request.params.libraryId);
+			case "knowledge/read":
+				return await this.knowledge.read(request.params.libraryId, request.params.path);
+			case "session/knowledge/get": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				return await this.registry.run(ref, (runtime) => runtime.getKnowledgeLinks?.() ?? { libraries: [] });
+			}
+			case "session/knowledge/set":
+				return await this.replayMutation(request, async () => {
+					const libraries = this.knowledge.libraries(request.params.libraryIds);
+					const ref = this.runtimeRef(request.params.sessionId);
+					return await this.registry.run(ref, (runtime) => {
+						if (!runtime.setKnowledgeLinks)
+							throw new AppServerError("READ_ONLY_SESSION", { sessionId: request.params.sessionId });
+						return runtime.setKnowledgeLinks(libraries);
+					});
+				});
 			case "skill/list":
 				if ("sessionId" in request.params) {
 					const ref = this.runtimeRef(request.params.sessionId);

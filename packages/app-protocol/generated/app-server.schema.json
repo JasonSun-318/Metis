@@ -29,6 +29,260 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "knowledge/list"
+                },
+                "params": {
+                  "type": "object",
+                  "properties": {},
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "knowledge/register"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "path"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "knowledge/scan"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "libraryId"
+                  ],
+                  "properties": {
+                    "libraryId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "knowledge/read"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "libraryId",
+                    "path"
+                  ],
+                  "properties": {
+                    "libraryId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/knowledge/get"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "session/knowledge/set"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "libraryIds"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "libraryIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "uniqueItems": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "initialize"
                 },
                 "params": {
@@ -16832,6 +17086,389 @@
         },
         {
           "anyOf": [
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "libraries"
+                  ],
+                  "properties": {
+                    "libraries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "path"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "name",
+                    "path"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "name": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "notes",
+                    "edges",
+                    "warnings"
+                  ],
+                  "properties": {
+                    "notes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "path",
+                          "title",
+                          "links"
+                        ],
+                        "properties": {
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          },
+                          "title": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "links": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "target",
+                                "kind",
+                                "path"
+                              ],
+                              "properties": {
+                                "target": {
+                                  "type": "string",
+                                  "x-metis-maxUtf8Bytes": 65536
+                                },
+                                "kind": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "wiki"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "markdown"
+                                    }
+                                  ]
+                                },
+                                "path": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 32768
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "edges": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "source",
+                          "target"
+                        ],
+                        "properties": {
+                          "source": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          },
+                          "target": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "warnings": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "content"
+                  ],
+                  "properties": {
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    },
+                    "content": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 4194304
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "libraries"
+                  ],
+                  "properties": {
+                    "libraries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "path"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "libraries"
+                  ],
+                  "properties": {
+                    "libraries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "path"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
             {
               "type": "object",
               "required": [
@@ -44743,6 +45380,260 @@
             },
             "method": {
               "type": "string",
+              "const": "knowledge/list"
+            },
+            "params": {
+              "type": "object",
+              "properties": {},
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "knowledge/register"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "path"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "knowledge/scan"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "libraryId"
+              ],
+              "properties": {
+                "libraryId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "knowledge/read"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "libraryId",
+                "path"
+              ],
+              "properties": {
+                "libraryId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/knowledge/get"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "session/knowledge/set"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "libraryIds"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "libraryIds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "format": "uuid"
+                  },
+                  "uniqueItems": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "initialize"
             },
             "params": {
@@ -54167,6 +55058,389 @@
     },
     "ClientSuccessResponseEnvelope": {
       "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "libraries"
+              ],
+              "properties": {
+                "libraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "path"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "path"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "notes",
+                "edges",
+                "warnings"
+              ],
+              "properties": {
+                "notes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "path",
+                      "title",
+                      "links"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      },
+                      "title": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "links": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "target",
+                            "kind",
+                            "path"
+                          ],
+                          "properties": {
+                            "target": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 65536
+                            },
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "wiki"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "markdown"
+                                }
+                              ]
+                            },
+                            "path": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-metis-maxUtf8Bytes": 32768
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "source",
+                      "target"
+                    ],
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      },
+                      "target": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                },
+                "warnings": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "x-metis-maxUtf8Bytes": 65536
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "path",
+                "content"
+              ],
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                },
+                "content": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 4194304
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "libraries"
+              ],
+              "properties": {
+                "libraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "path"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "libraries"
+              ],
+              "properties": {
+                "libraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "path"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         {
           "type": "object",
           "required": [

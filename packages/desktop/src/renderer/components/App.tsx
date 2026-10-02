@@ -41,6 +41,7 @@ import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
+import { KnowledgeLinkControl } from "./KnowledgeLinkControl.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -219,6 +220,7 @@ export function App({ api, store }: AppProps) {
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [sessionSidebarPreferredWidth, setSessionSidebarPreferredWidth] = useState(loadSessionSidebarPreferredWidth);
 	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
+	const [knowledgeRequest, setKnowledgeRequest] = useState<{ id: number; sessionId: string }>();
 	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
 	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
@@ -846,7 +848,14 @@ export function App({ api, store }: AppProps) {
 	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !newTaskOpen
 		? activeSession
 		: undefined;
-	const toolsSidebarAvailable = visibleActiveSession !== undefined;
+	const toolsSession = visibleActiveSession ?? (visibleNewTaskDraft?.sessionId
+		? state.sessionsById.get(visibleNewTaskDraft.sessionId)
+		: undefined);
+	const toolsSidebarAvailable = toolsSession !== undefined;
+	const openKnowledge = (sessionId: string) => {
+		setKnowledgeRequest({ id: Date.now(), sessionId });
+		showToolsSidebar();
+	};
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	useEffect(() => {
 		const sessionId = visibleActiveSession?.sessionId ?? null;
@@ -1866,6 +1875,18 @@ export function App({ api, store }: AppProps) {
 							folderLocked={visibleNewTaskDraft.sessionId !== null}
 							mode={mode}
 							modelControl={modelControl}
+							knowledgeControl={serverReady && visibleNewTaskDraft.sessionId ? (
+								<KnowledgeLinkControl api={api} sessionId={visibleNewTaskDraft.sessionId} key={visibleNewTaskDraft.sessionId} onOpen={() => openKnowledge(visibleNewTaskDraft.sessionId!)} />
+							) : (
+								<div className="composer-knowledge">
+									<button
+										className="composer-knowledge-chip"
+										disabled={draftBusy || !serverReady || (mode === "code" && !visibleNewTaskDraft.folder)}
+										type="button"
+										onClick={() => void workspaceWorkflow.prepareNewTask().then((id) => { if (id) openKnowledge(id); }).catch(reportError)}
+									>{t("Knowledge")}</button>
+								</div>
+							)}
 							permissionControl={permissionControl}
 							onChooseFolder={chooseNewTaskFolder}
 							projectControl={
@@ -1936,6 +1957,14 @@ export function App({ api, store }: AppProps) {
 							)}
 							<div className="conversation-composer">
 								<Composer
+									knowledgeControl={serverReady && writableSessionId ? (
+										<KnowledgeLinkControl
+											api={api}
+											sessionId={writableSessionId}
+											key={writableSessionId}
+											onOpen={() => openKnowledge(writableSessionId)}
+										/>
+									) : undefined}
 									appearance={visibleActiveSession.mode}
 									collaborationControl={collaborationControl}
 									contextControl={planRevisionChip}
@@ -1994,7 +2023,8 @@ export function App({ api, store }: AppProps) {
 					</div>
 				) : null}
 				<ToolsSidebar
-					activeSession={visibleActiveSession ?? null}
+					knowledgeRequest={knowledgeRequest}
+					activeSession={toolsSession ?? null}
 					api={api}
 					cleanupSessionIds={toolCleanupSessionIds}
 					mode={mode}

@@ -133,6 +133,7 @@ import {
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,
 } from "./interactive-bash-boundary.ts";
+import { appendKnowledgeContext, readKnowledgeLinks } from "./knowledge-context.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import { createMcpToolDefinitions, type McpManager } from "./mcp/index.ts";
 import { MemoryVault, type UndoRunResult } from "./memory/vault.ts";
@@ -3789,6 +3790,10 @@ export class AgentSession {
 			}
 		}
 
+		userPromptContext = appendKnowledgeContext(
+			userPromptContext,
+			readKnowledgeLinks(this.sessionManager.getBranch()),
+		);
 		let text = this._expandSkillCommand(currentText, true);
 		text = expandPromptTemplate(text, [...this.promptTemplates], MAX_DURABLE_PROMPT_TEXT_BYTES);
 		const textBytes = Buffer.byteLength(text, "utf8");
@@ -4193,6 +4198,11 @@ export class AgentSession {
 				}
 			}
 
+			userPromptContext = appendKnowledgeContext(
+				userPromptContext,
+				readKnowledgeLinks(this.sessionManager.getBranch()),
+			);
+
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
 			let expandedText = currentText;
 			if (expandPromptTemplates) {
@@ -4513,7 +4523,12 @@ export class AgentSession {
 			content.push(...images);
 		}
 		this.agent.steer(
-			{ role: "user", content, timestamp: Date.now(), ...(hookContext ? { hookContext } : {}) },
+			{
+				role: "user",
+				content,
+				timestamp: Date.now(),
+				hookContext: appendKnowledgeContext(hookContext, readKnowledgeLinks(this.sessionManager.getBranch())),
+			},
 			identity,
 		);
 	}
@@ -4538,7 +4553,12 @@ export class AgentSession {
 			content.push(...images);
 		}
 		this.agent.followUp(
-			{ role: "user", content, timestamp: Date.now(), ...(hookContext ? { hookContext } : {}) },
+			{
+				role: "user",
+				content,
+				timestamp: Date.now(),
+				hookContext: appendKnowledgeContext(hookContext, readKnowledgeLinks(this.sessionManager.getBranch())),
+			},
 			identity,
 		);
 	}

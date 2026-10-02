@@ -1,5 +1,16 @@
 import { type Static, type TSchema, Type } from "typebox";
 import {
+	KnowledgeLibrariesSchema,
+	KnowledgeLibrarySchema,
+	KnowledgeReadParamsSchema,
+	KnowledgeReadSchema,
+	KnowledgeRegisterParamsSchema,
+	KnowledgeScanParamsSchema,
+	KnowledgeScanSchema,
+	KnowledgeSessionParamsSchema,
+	KnowledgeSetParamsSchema,
+} from "./knowledge.ts";
+import {
 	CapabilitySchema,
 	CursorSchema,
 	MAX_ASK_USER_CUSTOM_ANSWER_UTF8_BYTES,
@@ -1478,6 +1489,12 @@ export const PluginUpdateParamsSchema = StrictObject({
 });
 
 export const ClientRequestMethods = {
+	"knowledge/list": method(StrictObject({}), KnowledgeLibrariesSchema),
+	"knowledge/register": method(KnowledgeRegisterParamsSchema, KnowledgeLibrarySchema),
+	"knowledge/scan": method(KnowledgeScanParamsSchema, KnowledgeScanSchema),
+	"knowledge/read": method(KnowledgeReadParamsSchema, KnowledgeReadSchema),
+	"session/knowledge/get": method(KnowledgeSessionParamsSchema, KnowledgeLibrariesSchema),
+	"session/knowledge/set": method(KnowledgeSetParamsSchema, KnowledgeLibrariesSchema),
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
 	"session/list": method(SessionListParamsSchema, SessionListResultSchema),
 	"skill/list": method(SkillListParamsSchema, SkillListResultSchema),

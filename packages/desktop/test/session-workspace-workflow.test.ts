@@ -578,6 +578,32 @@ describe("SessionWorkspaceWorkflow", () => {
 		await submission;
 	});
 
+	it("prepares an empty draft for knowledge linking and reuses it for the first user turn", async () => {
+		const { api, workflow } = harness();
+		const created = summary("knowledge-draft");
+		vi.mocked(api.createSession).mockResolvedValue({ session: created });
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId));
+		workflow.startNewTask("chat");
+		expect(await workflow.prepareNewTask()).toBe(created.sessionId);
+		expect(workflow.getSnapshot().draft?.sessionId).toBe(created.sessionId);
+		expect(api.startTurn).not.toHaveBeenCalled();
+		await workflow.submitNewTask({ text: "Store this in my linked library", attachments: [] });
+		expect(api.createSession).toHaveBeenCalledOnce();
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: created.sessionId }));
+		expect(workflow.getSnapshot().draft).toBeNull();
+	});
+	it("does not open a prepared draft if the user navigates away during creation", async () => {
+		const { api, workflow } = harness();
+		const pending = deferred<{ session: SessionSummary }>();
+		vi.mocked(api.createSession).mockReturnValue(pending.promise);
+		workflow.startNewTask("chat");
+		const preparation = workflow.prepareNewTask();
+		workflow.cancelNewTask();
+		pending.resolve({ session: summary("late-knowledge-draft") });
+		expect(await preparation).toBeNull();
+		expect(api.openSession).not.toHaveBeenCalled();
+		expect(api.startTurn).not.toHaveBeenCalled();
+	});
 	it("deduplicates an in-flight empty project session create", async () => {
 		const { api, workflow } = harness();
 		const created = summary("project-created", "code");

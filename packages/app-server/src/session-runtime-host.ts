@@ -3,6 +3,7 @@ import type {
 	ClientResult,
 	DomainEvent,
 	ItemView,
+	KnowledgeLibrary,
 	RpcErrorName,
 	SessionSnapshot,
 	SessionSummary,
@@ -35,6 +36,8 @@ export interface OpenedSessionRuntime {
 	renameSession(name: string): Promise<SessionSummary>;
 	/** Create an independent branch session rooted at the given entry and return its session id. */
 	fork(input: { entryId: string; name: string; requestId: string; targetSessionId: string }): Promise<string>;
+	getKnowledgeLinks?(): ClientResult<"session/knowledge/get">;
+	setKnowledgeLinks?(libraries: KnowledgeLibrary[]): ClientResult<"session/knowledge/set">;
 	listSkills(): Promise<ClientResult<"skill/list">>;
 	listMcpServers(): Promise<ClientResult<"mcp/list">>;
 	inspectMcpImport(input: ClientParams<"mcp/import/inspect">): Promise<ClientResult<"mcp/import/inspect">>;

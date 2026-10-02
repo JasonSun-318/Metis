@@ -41,6 +41,16 @@ export function unwrapDesktopRpcIpcResult(value: unknown): unknown {
 }
 
 export const DESKTOP_RPC_FORWARDING = {
+	listKnowledgeLibraries: { channel: "metis:list-knowledge-libraries", method: "knowledge/list", input: "none" },
+	registerKnowledgeLibrary: {
+		channel: "metis:register-knowledge-library",
+		method: "knowledge/register",
+		input: "required",
+	},
+	scanKnowledgeLibrary: { channel: "metis:scan-knowledge-library", method: "knowledge/scan", input: "required" },
+	readKnowledgeNote: { channel: "metis:read-knowledge-note", method: "knowledge/read", input: "required" },
+	getSessionKnowledge: { channel: "metis:get-session-knowledge", method: "session/knowledge/get", input: "required" },
+	setSessionKnowledge: { channel: "metis:set-session-knowledge", method: "session/knowledge/set", input: "required" },
 	listSessions: { channel: "metis:list-sessions", method: "session/list", input: "optional" },
 	listSkills: { channel: "metis:list-skills", method: "skill/list", input: "required" },
 	getSkill: { channel: "metis:get-skill", method: "skill/get", input: "required" },

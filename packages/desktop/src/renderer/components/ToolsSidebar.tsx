@@ -1,5 +1,5 @@
 import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@metis/app-protocol";
-import { ClipboardText, FileText, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
+import { Books, ClipboardText, FileText, Globe, Plus, Robot, SidebarSimple, TerminalWindow, X } from "@phosphor-icons/react";
 import type { CSSProperties } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -13,6 +13,7 @@ import {
 } from "../../shared/desktop-api.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { BrowserPanel } from "./BrowserPanel.tsx";
+import { KnowledgePanel } from "./KnowledgePanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
 import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
@@ -86,7 +87,13 @@ interface ProcessTab {
 	readonly process: SessionProcessView;
 }
 
-type ToolTab = ProcessTab | TerminalTab | BrowserTab | FileTab | ReviewTab | AgentTab | PreviewTab | PlanTab;
+interface KnowledgeTab {
+	readonly kind: "knowledge";
+	readonly id: string;
+	readonly title: string;
+}
+
+type ToolTab = KnowledgeTab | ProcessTab | TerminalTab | BrowserTab | FileTab | ReviewTab | AgentTab | PreviewTab | PlanTab;
 
 interface ToolWorkspace {
 	readonly tabs: readonly ToolTab[];
@@ -117,6 +124,7 @@ interface ToolsSidebarProps {
 	readonly preferredWidth: number;
 	readonly previewRequest?: UniversalPreviewTarget | null;
 	readonly planPreviewRequest?: PlanView | null;
+	readonly knowledgeRequest?: { readonly id: number; readonly sessionId: string };
 	readonly store: AppStore;
 	readonly theme: "dark" | "light";
 	readonly width: number;
@@ -184,7 +192,7 @@ function remapPath(path: string, previous: string, next: string): string {
 	return path === previous ? next : `${next}${path.slice(previous.length)}`;
 }
 
-export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onActivateSession, onClose, onOpen, process, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
+export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onActivateSession, onClose, onOpen, process, onCleanupSessionIdsHandled, onDirtySessionIdsChange, onError, onWidthChange, open, planPreviewRequest, knowledgeRequest, preferredWidth, previewRequest, store, theme, width }: ToolsSidebarProps) {
 	const { t } = useTranslation();
 	const [workspaces, setWorkspaces] = useState<ReadonlyMap<string, ToolWorkspace>>(new Map());
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
@@ -638,6 +646,27 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 		setMenuOpen(false);
 	};
 
+	const addKnowledge = useCallback(() => {
+		if (!sessionId) return;
+		setWorkspaces((current) => {
+			const previous = current.get(sessionId) ?? { tabs: [], activeId: "", nextNumber: 1 };
+			const existing = previous.tabs.find((tab) => tab.kind === "knowledge");
+			const tab: KnowledgeTab = existing ?? { kind: "knowledge", id: crypto.randomUUID(), title: t("Knowledge") };
+			return new Map(current).set(sessionId, {
+				...previous,
+				tabs: existing ? previous.tabs : [...previous.tabs, tab],
+				activeId: tab.id,
+			});
+		});
+		setMenuOpen(false);
+	}, [sessionId, t]);
+	const handledKnowledgeRequest = useRef<number | undefined>(undefined);
+	useEffect(() => {
+		if (!knowledgeRequest || knowledgeRequest.sessionId !== sessionId || knowledgeRequest.id === handledKnowledgeRequest.current) return;
+		handledKnowledgeRequest.current = knowledgeRequest.id;
+		addKnowledge();
+	}, [addKnowledge, knowledgeRequest, sessionId]);
+
 	const openFile = (ownerSessionId: string, cwd: string, relativePath: string, fix: boolean) => {
 		setWorkspaces((current) => {
 			const previous = current.get(ownerSessionId);
@@ -940,6 +969,10 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 			role={compact ? "menu" : undefined}
 			style={compact ? menuStyle : undefined}
 		>
+			<button aria-label={t("Knowledge")} disabled={!activeSession} onClick={addKnowledge} role={compact ? "menuitem" : undefined} type="button">
+				<div className="tool-menu-icon"><Books aria-hidden="true" size={compact ? 14 : 20} /></div>
+				<span>{t("Knowledge")}</span>
+			</button>
 			{mode === "code" && (
 				<button aria-label={t("Review")} disabled={!activeSession?.cwd} onClick={addReview} role={compact ? "menuitem" : undefined} title={activeSession?.cwd ? undefined : t("Open a task before reviewing changes")} type="button">
 					<div className="tool-menu-icon"><ClipboardText aria-hidden="true" size={compact ? 14 : 20} /></div>
@@ -1017,14 +1050,14 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 								return (
 								<div className={`tool-tab${workspace?.activeId === tab.id ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`} key={tab.id}>
 									<button
-									aria-controls={tab.kind === "file" ? `file-panel-${sessionId}` : tab.kind === "review" ? `review-panel-${sessionId}` : tab.kind === "agent" ? `agent-panel-${sessionId}` : `${tab.kind}-panel-${tab.id}`}
+									aria-controls={tab.kind === "knowledge" ? `knowledge-panel-${sessionId}` : tab.kind === "file" ? `file-panel-${sessionId}` : tab.kind === "review" ? `review-panel-${sessionId}` : tab.kind === "agent" ? `agent-panel-${sessionId}` : `${tab.kind}-panel-${tab.id}`}
 										aria-label={dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle}
 										aria-selected={workspace?.activeId === tab.id}
 										className="tool-tab-select"
 										onClick={() => selectTab(tab.id)}
 										role="tab"
 										type="button"
-									>{tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} /> : tab.kind === "browser" ? <Globe aria-hidden="true" size={13} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={13} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={13} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
+									>{tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} /> : tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} /> : tab.kind === "browser" ? <Globe aria-hidden="true" size={13} /> : tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />) : tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} /> : tab.kind === "agent" ? <Robot aria-hidden="true" size={13} /> : tab.kind === "plan" ? <FileText aria-hidden="true" size={13} /> : tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}<span>{displayTitle}</span>{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}</button>
 									<button aria-label={t("Close {{name}}", { name: displayTitle })} className="tool-tab-close" disabled={saving} onClick={() => closeTab(tab.id)} type="button"><X aria-hidden="true" size={11} /></button>
 								</div>
 								);
@@ -1087,6 +1120,8 @@ export function ToolsSidebar({ activeSession, api, cleanupSessionIds, mode, onAc
 								profiles={browserProfiles}
 								visible={open && !menuOpen && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id}
 							/>
+						) : tab.kind === "knowledge" ? (
+							<KnowledgePanel api={api} key={tab.id} sessionId={ownerSessionId} visible={open && ownerSessionId === sessionId && ownerWorkspace.activeId === tab.id} />
 						) : tab.kind === "review" ? (
 							<ReviewPanel
 								api={api}

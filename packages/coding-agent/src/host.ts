@@ -4,6 +4,12 @@
  * additions belong in the package root unless a host runtime consumes them.
  */
 
+export {
+	KNOWLEDGE_LINKS_CUSTOM_TYPE,
+	type KnowledgeLibraryLink,
+	readKnowledgeLinks,
+} from "./core/knowledge-context.ts";
+export { parseKnowledgeNote, resolveKnowledgeLink } from "./core/knowledge-markdown.ts";
 // Schedule data trash seam for hosts that need to inject a non-OS trash implementation.
 export { trashScheduledTaskData } from "./core/schedules/delete.ts";
 export type {

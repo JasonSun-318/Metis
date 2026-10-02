@@ -370,6 +370,69 @@ export class SessionWorkspaceWorkflow {
 		}
 	}
 
+	private async createDraftSession(
+		draft: NewTaskDraft,
+		sessionName: string | undefined,
+		intent: number,
+		lifecycle: number,
+	): Promise<string | null> {
+		let sessionId = draft.sessionId;
+		if (!sessionId) {
+			const createKey = JSON.stringify({
+				mode: draft.mode,
+				cwd: draft.folder,
+				name: sessionName ?? null,
+				permissionPreset: draft.permissionPreset,
+			});
+			const request =
+				this.newTaskCreateRequest?.key === createKey
+					? this.newTaskCreateRequest
+					: { key: createKey, requestId: this.requestId() };
+			this.newTaskCreateRequest = request;
+			this.commit({ draftCreatePending: true });
+			const created = await this.api.createSession({
+				requestId: request.requestId,
+				mode: draft.mode,
+				...(draft.folder ? { cwd: draft.folder } : {}),
+				...(sessionName ? { name: sessionName } : {}),
+				permissionPreset: draft.permissionPreset,
+			});
+			if (!this.isCurrentIntent(intent, lifecycle)) return null;
+			sessionId = created.session.sessionId;
+			if (this.state.draft?.mode === draft.mode) {
+				this.commit({ draft: { ...this.state.draft, sessionId }, draftCreatePending: false });
+			}
+			this.newTaskCreateRequest = null;
+		}
+		return sessionId;
+	}
+
+	async prepareNewTask(): Promise<string | null> {
+		const draft = this.state.draft;
+		if (!draft || this.state.draftBusy || (draft.mode === "code" && !draft.folder)) return null;
+		const lifecycle = this.lifecycleGeneration;
+		const intent = this.intentGeneration;
+		this.commit({ draftBusy: true, failure: null });
+		try {
+			const sessionId = await this.createDraftSession(draft, undefined, intent, lifecycle);
+			if (!sessionId) return null;
+			await this.refreshSessions();
+			if (!this.isCurrentIntent(intent, lifecycle)) return null;
+			if (!(await this.openSessionForIntent(sessionId, intent, lifecycle))) return null;
+			return sessionId;
+		} catch (cause) {
+			if (!this.isCurrentIntent(intent, lifecycle)) return null;
+			if (!shouldReuseMutationRequest(cause)) this.newTaskCreateRequest = null;
+			this.commit({
+				failure: failure("prepare-new-task", cause),
+				draftCreatePending: this.newTaskCreateRequest !== null && this.state.draft?.sessionId === null,
+			});
+			throw cause;
+		} finally {
+			if (this.isCurrentIntent(intent, lifecycle)) this.commit({ draftBusy: false });
+		}
+	}
+
 	async submitNewTask(input: ConversationSubmission, sessionName?: string): Promise<void> {
 		const draft = this.state.draft;
 		if (!draft) return;
@@ -378,34 +441,8 @@ export class SessionWorkspaceWorkflow {
 		const intent = this.intentGeneration;
 		this.commit({ draftBusy: true, failure: null });
 		try {
-			let sessionId = draft.sessionId;
-			if (!sessionId) {
-				const createKey = JSON.stringify({
-					mode: draft.mode,
-					cwd: draft.folder,
-					name: sessionName ?? null,
-					permissionPreset: draft.permissionPreset,
-				});
-				const request =
-					this.newTaskCreateRequest?.key === createKey
-						? this.newTaskCreateRequest
-						: { key: createKey, requestId: this.requestId() };
-				this.newTaskCreateRequest = request;
-				this.commit({ draftCreatePending: true });
-				const created = await this.api.createSession({
-					requestId: request.requestId,
-					mode: draft.mode,
-					...(draft.folder ? { cwd: draft.folder } : {}),
-					...(sessionName ? { name: sessionName } : {}),
-					permissionPreset: draft.permissionPreset,
-				});
-				if (!this.isCurrentIntent(intent, lifecycle)) return;
-				sessionId = created.session.sessionId;
-				if (this.state.draft?.mode === draft.mode) {
-					this.commit({ draft: { ...this.state.draft, sessionId }, draftCreatePending: false });
-				}
-				this.newTaskCreateRequest = null;
-			}
+			const sessionId = await this.createDraftSession(draft, sessionName, intent, lifecycle);
+			if (!sessionId) return;
 			await this.refreshSessions();
 			if (!this.isCurrentIntent(intent, lifecycle)) return;
 			if (!(await this.openSessionForIntent(sessionId, intent, lifecycle))) return;

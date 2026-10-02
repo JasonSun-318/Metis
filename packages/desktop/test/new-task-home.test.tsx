@@ -103,6 +103,19 @@ describe("NewTaskHome", () => {
 		}
 	});
 
+	it("allows the knowledge control to be used before the first message", async () => {
+		const openKnowledge = vi.fn();
+		const { container, root } = await renderHome("chat", {
+			knowledgeControl: <button type="button" onClick={openKnowledge}>Knowledge</button>,
+		});
+		try {
+			const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!;
+			await act(async () => button.click());
+			expect(openKnowledge).toHaveBeenCalledOnce();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
 	it("orders and deduplicates recent Code projects by their latest conversation", () => {
 		const recent = recentProjectsFromGroups([
 			project("/work/older", "Older", "2026-09-09T08:00:00.000Z"),

@@ -101,6 +101,7 @@ interface NewTaskHomeProps {
 	readonly folderLocked: boolean;
 	readonly mode: AgentMode;
 	readonly modelControl?: ReactNode;
+	readonly knowledgeControl?: ReactNode;
 	readonly permissionControl?: ReactNode;
 	readonly reducedMotion: boolean;
 	readonly onChooseFolder: () => Promise<void>;
@@ -131,6 +132,7 @@ export function NewTaskHome({
 	folderLocked,
 	mode,
 	modelControl,
+	knowledgeControl,
 	permissionControl,
 	reducedMotion,
 	onChooseFolder,
@@ -249,6 +251,7 @@ export function NewTaskHome({
 									prefillRequest={prefillRequest}
 									running={false}
 									skills={skills}
+									knowledgeControl={knowledgeControl}
 									submitDisabled={mode === "code" && folder === null}
 									thinkingControl={thinkingControl}
 								/>

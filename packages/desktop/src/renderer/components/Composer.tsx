@@ -293,6 +293,7 @@ interface ComposerProps {
 	readonly appearance?: "chat" | "code";
 	readonly collaborationControl?: ReactNode;
 	readonly contextControl?: ReactNode;
+	readonly knowledgeControl?: ReactNode;
 	readonly interactionControl?: ReactNode;
 	readonly goalControl?: ReactNode;
 	readonly queuedTurnControl?: ReactNode;
@@ -333,6 +334,7 @@ export function Composer({
 	appearance = "code",
 	collaborationControl,
 	contextControl,
+	knowledgeControl,
 	contextUsageExpanded = false,
 	contextUsagePercent,
 	onOpenContextUsage,
@@ -763,6 +765,7 @@ export function Composer({
 				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
 				<div className="composer-box">
 					<FileSelectionChips />
+					{knowledgeControl}
 					{attachments.length > 0 && (
 						<div aria-label={t("Message additions")} className="composer-attachments">
 							{attachments.map((attachment) => attachment.previewDataUrl ? (

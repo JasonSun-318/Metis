@@ -981,5 +981,81 @@
 				"id": "auditor"
 			}
 		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/list",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-list",
+			"method": "knowledge/list",
+			"params": {}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/register",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-register",
+			"method": "knowledge/register",
+			"params": {
+				"requestId": "00000000-0000-4000-8000-000000000001",
+				"path": "/Users/test/knowledge"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/scan",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-scan",
+			"method": "knowledge/scan",
+			"params": {
+				"libraryId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/read",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-read",
+			"method": "knowledge/read",
+			"params": {
+				"libraryId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				"path": "topic/Note.md"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/knowledge/get",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-session-knowledge-get",
+			"method": "session/knowledge/get",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "session/knowledge/set",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-session-knowledge-set",
+			"method": "session/knowledge/set",
+			"params": {
+				"sessionId": "11111111-1111-4111-8111-111111111111",
+				"requestId": "00000000-0000-4000-8000-000000000002",
+				"libraryIds": [
+					"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+				]
+			}
+		}
 	}
 ]

@@ -37,6 +37,7 @@ import {
 	importSessionAttachments,
 	installScheduleHost,
 	isScheduleSessionEligible,
+	KNOWLEDGE_LINKS_CUSTOM_TYPE,
 	loadAgentTypeDefinitions,
 	McpConfigurationConflictError,
 	McpConfigurationCoordinator,
@@ -54,6 +55,7 @@ import {
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
 	readCustomAgentTypes,
+	readKnowledgeLinks,
 	readPluginSnapshot,
 	readThreadGoal,
 	reducePlanState,
@@ -1895,6 +1897,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			nextAgentAfterId:
 				agents.length < agentSummaries.length ? (agentSummaries[agents.length - 1]?.agentId ?? null) : null,
 		});
+	}
+
+	getKnowledgeLinks(): ClientResult<"session/knowledge/get"> {
+		return { libraries: readKnowledgeLinks(this.session.sessionManager.getBranch()) };
+	}
+
+	setKnowledgeLinks(
+		libraries: ClientResult<"session/knowledge/set">["libraries"],
+	): ClientResult<"session/knowledge/set"> {
+		this.session.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries });
+		return { libraries };
 	}
 
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
