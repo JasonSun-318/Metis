@@ -2,11 +2,14 @@ import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@m
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
+import { messageText } from "./transcript-turn-model.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
 
 interface TranscriptProps {
+	readonly showNavigation?: boolean;
 	readonly waitingForAnswer?: boolean;
 	readonly activeTurnId?: string | null;
 	readonly activeTurnStartedAt?: string;
@@ -64,14 +67,24 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
+export function Transcript({ showNavigation = false, waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
 	const { t } = useTranslation();
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const loadingOlderRef = useRef(false);
 	const followLatest = useRef(true);
 	const previousSessionId = useRef<string | undefined>(undefined);
 	const [hasNewItems, setHasNewItems] = useState(false);
+	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
+	const [pendingJump, setPendingJump] = useState<string | null>(null);
 	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
+	const navigation = useMemo<ConversationNavigationEntry[]>(() => !showNavigation ? [] : transcript.flatMap((row, rowIndex) => {
+		const items = row.itemIds.flatMap((id) => { const item = itemsById.get(id); return item ? [item] : []; });
+		const user = items.find((item) => item.role === "user");
+		if (!user) return [];
+		const answer = [...items].reverse().find((item) => item.role === "assistant" && messageText(item).trim() !== "");
+		return [{ itemId: user.itemId, rowIndex, text: messageText(user).slice(0, 1200),
+			answer: answer ? messageText(answer).slice(0, 1200) : "", attachments: user.attachments?.map((file) => file.name) ?? [] }];
+	}), [showNavigation, transcript, itemsById]);
 	const virtualizer = useVirtualizer({
 		count: transcript.length,
 		getScrollElement: () => scrollRef.current,
@@ -82,6 +95,42 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 	});
 	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
 		shouldAdjustTranscriptScroll(item.end, scrollRef.current?.scrollTop ?? 0);
+	const jumpToMessage = (entry: ConversationNavigationEntry) => {
+		followLatest.current = false;
+		setHasNewItems(false);
+		setPendingJump(entry.itemId);
+		setActiveNavigationIndex(navigation.findIndex((candidate) => candidate.itemId === entry.itemId));
+		virtualizer.scrollToIndex(entry.rowIndex, { align: "start" });
+	};
+	// Keep the anchor while newly mounted virtual rows are being measured.
+	// A turn can contain several user messages, so its row offset alone is insufficient.
+	useLayoutEffect(() => {
+		if (!pendingJump) return;
+		let frame = 0;
+		let stableFrames = 0;
+		const startedAt = performance.now();
+		const alignMessage = () => {
+			const scroll = scrollRef.current;
+			const target = Array.from(scroll?.querySelectorAll<HTMLElement>("[data-user-message]") ?? [])
+				.find((node) => node.dataset.userMessage === pendingJump);
+			if (scroll && target) {
+				const desired = scroll.scrollTop + target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 56;
+				const offset = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, desired));
+				if (Math.abs(offset - scroll.scrollTop) > 1) {
+					stableFrames = 0;
+					virtualizer.scrollToOffset(offset);
+				} else stableFrames += 1;
+			}
+			if (stableFrames >= 4 || performance.now() - startedAt > 2000) {
+				setPendingJump(null);
+				return;
+			}
+			frame = requestAnimationFrame(alignMessage);
+		};
+		frame = requestAnimationFrame(alignMessage);
+		return () => cancelAnimationFrame(frame);
+	}, [pendingJump, virtualizer]);
+
 	const lastItemId = itemIds.at(-1);
 	const lastItem = lastItemId ? itemsById.get(lastItemId) : undefined;
 	useLayoutEffect(() => {
@@ -89,6 +138,8 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 			previousSessionId.current = lastItem?.sessionId;
 			followLatest.current = true;
 			setHasNewItems(false);
+			setActiveNavigationIndex(0);
+			setPendingJump(null);
 		}
 		const scroll = scrollRef.current;
 		if (!scroll || !lastItem || transcript.length === 0) return;
@@ -97,10 +148,10 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 			return;
 		}
 		const frame = requestAnimationFrame(() => {
-			if (followLatest.current) scroll.scrollTop = scroll.scrollHeight;
+			if (followLatest.current) virtualizer.scrollToIndex(transcript.length - 1, { align: "end" });
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [lastItem, latestLabel, transcript.length]);
+	}, [lastItem, latestLabel, transcript.length, virtualizer]);
 	useLayoutEffect(() => {
 		const scroll = scrollRef.current;
 		if (!scroll) return;
@@ -117,8 +168,9 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 		const scroll = scrollRef.current;
 		if (scroll) scroll.scrollTop = scroll.scrollHeight;
 	};
-	const loadOlderAtTop = async (scroll: HTMLDivElement) => {
-		if (!autoLoadOlder || !hasOlder || loadingOlder || loadingOlderRef.current || scroll.scrollTop > 48) return;
+	const loadOlderAtTop = async (scroll: HTMLDivElement, requested = false) => {
+		if (!hasOlder || loadingOlder || loadingOlderRef.current || (!requested && (!autoLoadOlder || scroll.scrollTop > 48))) return;
+		if (requested) followLatest.current = false;
 		loadingOlderRef.current = true;
 		const previousHeight = scroll.scrollHeight;
 		const previousTop = scroll.scrollTop;
@@ -147,7 +199,9 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 				}));
 
 	return (
-		<section className={`transcript transcript-${appearance}`} aria-label={t(ariaLabel)}>
+		<section className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`} aria-label={t(ariaLabel)}>
+			{showNavigation && <ConversationNavigation key={lastItem?.sessionId ?? "empty"} entries={navigation} activeIndex={activeNavigationIndex}
+				hasOlder={hasOlder} loadingOlder={loadingOlder} onLoadOlder={() => { const scroll = scrollRef.current; if (scroll) void loadOlderAtTop(scroll, true); }} onJump={jumpToMessage} />}
 			{hasOlder && !autoLoadOlder && (
 				<button className="history-button button-secondary" disabled={loadingOlder} onClick={() => void onLoadOlder()} type="button">
 					{loadingOlder ? t("Loading…") : t(olderLabel)}
@@ -156,11 +210,20 @@ export function Transcript({ waitingForAnswer = false, activeTurnId, activeTurnS
 			<div
 				aria-busy={loadingOlder || undefined}
 				className="transcript-scroll"
+				onWheel={() => setPendingJump(null)}
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
-					followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+					if (!pendingJump) followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+					if (navigation.length > 0 && !pendingJump) {
+						const rowIndex = virtualizer.getVirtualItemForOffset(scroll.scrollTop + 56)?.index ?? 0;
+						let index = 0;
+						for (let cursor = navigation.length - 1; cursor >= 0; cursor -= 1) {
+							if (navigation[cursor]!.rowIndex <= rowIndex) { index = cursor; break; }
+						}
+						setActiveNavigationIndex(Math.max(0, index));
+					}
 					if (followLatest.current) setHasNewItems(false);
-					if (scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
+					if (!pendingJump && scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
 				}}
 				ref={scrollRef}
 			>

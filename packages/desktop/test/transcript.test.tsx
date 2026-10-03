@@ -1121,3 +1121,22 @@ describe("Transcript", () => {
 		}
 	});
 });
+
+describe("sent attachment cards", () => {
+	it.each(["chat", "code"] as const)("renders files separately from the %s message and preserves literal brackets", async (appearance) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+		const upload: ItemView = { ...item("upload", "user", [{ type: "text", text: "Read [notes.pdf]" }]),
+			attachments: [{ name: "notes.pdf", byteLength: 4096 }, { name: "说明.md", byteLength: 80 }] };
+		await act(async () => root.render(<Turn items={[upload]} />));
+		expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
+		expect(container.querySelector(".message-file-card")?.textContent).toContain("PDF · 4 KB");
+		expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe("Read [notes.pdf]");
+		await act(async () => root.render(<Turn items={[{ ...upload, content: [] }]} />));
+		expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
+		expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
+		await act(async () => root.unmount());
+	});
+});

@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { MessageAttachments } from "./MessageAttachments.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -312,10 +313,11 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 					if (segment.type === "user") {
 						const copyText = messageText(segment.item);
 						return (
-							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId}>
-								<div className="message message-user">
+							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
+								<MessageAttachments attachments={segment.item.attachments} />
+								{segment.item.content.length > 0 && <div className="message message-user">
 									{segment.item.content.map((block, blockIndex) => <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />)}
-								</div>
+								</div>}
 								{onCopy && copyText.trim() !== "" && (
 									<div className="turn-actions">
 										<TurnCopyButton onCopy={onCopy} text={copyText} />

@@ -7,6 +7,7 @@ import { AppStore } from "./store/app-store.ts";
 import { applyThemeToDocument, loadTheme } from "./theme.ts";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/transcript-navigation.css";
 import "./styles/knowledge.css";
 
 // Apply the persisted theme before the first paint to avoid a flash.

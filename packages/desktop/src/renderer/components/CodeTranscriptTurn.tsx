@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { MessageAttachments } from "./MessageAttachments.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -211,8 +212,9 @@ export function CodeTranscriptTurn({
 					if (segment.type === "user") {
 						const copyText = messageText(segment.item);
 						return (
-							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId}>
-								<div className="code-turn-user-bubble">{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>
+							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
+								<MessageAttachments attachments={segment.item.attachments} />
+								{segment.item.content.length > 0 && <div className="code-turn-user-bubble">{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>}
 								{onCopy && copyText.trim() !== "" && (
 									<div className="turn-actions">
 										<TurnCopyButton onCopy={onCopy} text={copyText} />
