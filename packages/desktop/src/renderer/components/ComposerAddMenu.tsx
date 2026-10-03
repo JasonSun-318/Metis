@@ -1,12 +1,14 @@
 import type { McpServerSummaryView, SkillSummaryView } from "@metis/app-protocol";
-import { Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "@phosphor-icons/react";
+import { Books, Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { KnowledgeLinkMenu, type KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 
 interface ComposerAddMenuProps {
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
 	readonly iconSize?: number;
+	readonly knowledge?: KnowledgeLinkMenuProps;
 	readonly mcpServers: readonly McpServerSummaryView[];
 	readonly skills: readonly SkillSummaryView[];
 	readonly onAddFiles: () => void;
@@ -15,11 +17,25 @@ interface ComposerAddMenuProps {
 	readonly onSelectSkill: (skill: SkillSummaryView) => void;
 }
 
-export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpServers, skills, onAddFiles, onManageMcp, onManageSkills, onSelectSkill }: ComposerAddMenuProps) {
+export function ComposerAddMenu({
+	commandRequest,
+	disabled,
+	iconSize = 18,
+	knowledge,
+	mcpServers,
+	skills,
+	onAddFiles,
+	onManageMcp,
+	onManageSkills,
+	onSelectSkill,
+}: ComposerAddMenuProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [mcpOpen, setMcpOpen] = useState(false);
 	const [skillsOpen, setSkillsOpen] = useState(false);
+	const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+	const knowledgeTrigger = useRef<HTMLButtonElement>(null);
+	const knowledgeMenu = useRef<HTMLDivElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const menuRef = useRef<HTMLDivElement>(null);
@@ -30,6 +46,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 	const [submenuAlign, setSubmenuAlign] = useState<"right" | "left" | "stacked">("right");
 	const [submenuVertical, setSubmenuVertical] = useState<"bottom" | "top">("bottom");
 	const [submenuMaxHeight, setSubmenuMaxHeight] = useState(340);
+	const [submenuWidth, setSubmenuWidth] = useState(280);
 	const [submenuOffsetX, setSubmenuOffsetX] = useState(0);
 	const [submenuOffsetY, setSubmenuOffsetY] = useState(0);
 	const lastCommandRequest = useRef<number | undefined>(undefined);
@@ -38,6 +55,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 		setOpen(false);
 		setMcpOpen(false);
 		setSkillsOpen(false);
+		setKnowledgeOpen(false);
 		if (restoreFocus) triggerRef.current?.focus();
 	};
 
@@ -46,6 +64,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 		setOpen(false);
 		setMcpOpen(false);
 		setSkillsOpen(false);
+		setKnowledgeOpen(false);
 	}, [disabled]);
 
 	useEffect(() => {
@@ -54,6 +73,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 		setOpen(commandRequest.open && !disabled);
 		setMcpOpen(commandRequest.open && !disabled);
 		setSkillsOpen(false);
+		setKnowledgeOpen(false);
 	}, [commandRequest, disabled]);
 
 	useEffect(() => {
@@ -76,25 +96,33 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 
 	useLayoutEffect(() => {
 		if (!open) return;
+		const clippedSurface = triggerRef.current?.closest<HTMLElement>(
+			'.editor-welcome-overlay, .app-shell[data-surface="editor"] .workspace',
+		);
 		const updatePositions = () => {
 			const trigger = triggerRef.current;
 			if (!trigger) return;
 			const triggerRect = trigger.getBoundingClientRect();
-			const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-			const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+			const measuredSurface = clippedSurface?.getBoundingClientRect();
+			const surfaceBounds = measuredSurface?.width && measuredSurface.height ? measuredSurface : undefined;
+			const viewportWidth = surfaceBounds?.right ?? (document.documentElement.clientWidth || window.innerWidth);
+			const viewportHeight = surfaceBounds?.bottom ?? (document.documentElement.clientHeight || window.innerHeight);
 			const MARGIN = 8;
+			const minX = (surfaceBounds?.left ?? 0) + MARGIN;
+			const minY = (surfaceBounds?.top ?? 0) + MARGIN;
 			const MAIN_MENU_WIDTH = 200;
 			const menu = menuRef.current;
 			const menuHeight = menu ? menu.offsetHeight : 120;
-			const SUBMENU_WIDTH = 180;
+			const SUBMENU_WIDTH = Math.min(knowledgeOpen ? 280 : 180, Math.max(0, viewportWidth - MARGIN - minX));
+			setSubmenuWidth(SUBMENU_WIDTH);
 			const SUBMENU_PREFERRED_HEIGHT = 340;
 
 			// 1. Popover alignment
 			const fitsRight = triggerRect.left + MAIN_MENU_WIDTH + MARGIN <= viewportWidth;
-			const fitsLeft = triggerRect.right - MAIN_MENU_WIDTH - MARGIN >= 0;
+			const fitsLeft = triggerRect.right - MAIN_MENU_WIDTH >= minX;
 			const pAlign = !fitsRight && fitsLeft ? "right" : "left";
 
-			const spaceAboveTrigger = triggerRect.top - MARGIN;
+			const spaceAboveTrigger = triggerRect.top - minY;
 			const spaceBelowTrigger = viewportHeight - triggerRect.bottom - MARGIN;
 			const neededSpaceAbove = menuHeight + 4;
 			const pVertical = spaceAboveTrigger < neededSpaceAbove && spaceBelowTrigger > spaceAboveTrigger ? "below" : "above";
@@ -102,35 +130,35 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 			let pOffsetX = 0;
 			if (pAlign === "left") {
 				if (triggerRect.left + MAIN_MENU_WIDTH > viewportWidth - MARGIN) {
-					pOffsetX = (viewportWidth - MARGIN) - (triggerRect.left + MAIN_MENU_WIDTH);
+					pOffsetX = viewportWidth - MARGIN - (triggerRect.left + MAIN_MENU_WIDTH);
 				}
-				if (triggerRect.left + pOffsetX < MARGIN) {
-					pOffsetX = MARGIN - triggerRect.left;
+				if (triggerRect.left + pOffsetX < minX) {
+					pOffsetX = minX - triggerRect.left;
 				}
 			} else {
-				if (triggerRect.right - MAIN_MENU_WIDTH < MARGIN) {
-					pOffsetX = MARGIN - (triggerRect.right - MAIN_MENU_WIDTH);
+				if (triggerRect.right - MAIN_MENU_WIDTH < minX) {
+					pOffsetX = minX - (triggerRect.right - MAIN_MENU_WIDTH);
 				}
 				if (triggerRect.right + pOffsetX > viewportWidth - MARGIN) {
-					pOffsetX = (viewportWidth - MARGIN) - triggerRect.right;
+					pOffsetX = viewportWidth - MARGIN - triggerRect.right;
 				}
 			}
 
 			let pOffsetY = 0;
 			if (pVertical === "above") {
 				const unshiftedTop = triggerRect.top - 4 - menuHeight;
-				if (unshiftedTop < MARGIN) {
-					pOffsetY = MARGIN - unshiftedTop;
+				if (unshiftedTop < minY) {
+					pOffsetY = minY - unshiftedTop;
 				} else if (triggerRect.top - 4 + pOffsetY > viewportHeight - MARGIN) {
-					pOffsetY = (viewportHeight - MARGIN) - (triggerRect.top - 4);
+					pOffsetY = viewportHeight - MARGIN - (triggerRect.top - 4);
 				}
 			} else {
 				const unshiftedBottom = triggerRect.bottom + 4 + menuHeight;
 				if (unshiftedBottom > viewportHeight - MARGIN) {
-					pOffsetY = (viewportHeight - MARGIN) - unshiftedBottom;
+					pOffsetY = viewportHeight - MARGIN - unshiftedBottom;
 				}
-				if (triggerRect.bottom + 4 + pOffsetY < MARGIN) {
-					pOffsetY = MARGIN - (triggerRect.bottom + 4);
+				if (triggerRect.bottom + 4 + pOffsetY < minY) {
+					pOffsetY = minY - (triggerRect.bottom + 4);
 				}
 			}
 
@@ -140,7 +168,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 			setPopoverOffsetY(pOffsetY);
 
 			// 2. Submenu alignment
-			if (skillsOpen || mcpOpen) {
+			if (skillsOpen || mcpOpen || knowledgeOpen) {
 				const popoverLeft = (pAlign === "left" ? triggerRect.left : triggerRect.right - MAIN_MENU_WIDTH) + pOffsetX;
 				const popoverRight = popoverLeft + MAIN_MENU_WIDTH;
 				const popoverTop = (pVertical === "above" ? triggerRect.top - 4 - menuHeight : triggerRect.bottom + 4) + pOffsetY;
@@ -149,7 +177,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 				let subH: "right" | "left" | "stacked" = "right";
 				if (popoverRight + 3 + SUBMENU_WIDTH + MARGIN <= viewportWidth) {
 					subH = "right";
-				} else if (popoverLeft - 3 - SUBMENU_WIDTH - MARGIN >= 0) {
+				} else if (popoverLeft - 3 - SUBMENU_WIDTH >= minX) {
 					subH = "left";
 				} else {
 					subH = "stacked";
@@ -159,7 +187,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 				let maxH = SUBMENU_PREFERRED_HEIGHT;
 
 				if (subH !== "stacked") {
-					const spaceAboveMenu = popoverBottom - MARGIN;
+					const spaceAboveMenu = popoverBottom - minY;
 					const spaceBelowMenu = viewportHeight - popoverTop - MARGIN;
 					if (spaceAboveMenu >= SUBMENU_PREFERRED_HEIGHT) {
 						subV = "bottom";
@@ -172,7 +200,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 						maxH = Math.max(120, Math.min(SUBMENU_PREFERRED_HEIGHT, spaceAboveMenu));
 					}
 				} else {
-					const spaceAbove = popoverTop - 4 - MARGIN;
+					const spaceAbove = popoverTop - 4 - minY;
 					const spaceBelow = viewportHeight - popoverBottom - 4 - MARGIN;
 					if (spaceAbove >= spaceBelow) {
 						subV = "bottom";
@@ -188,48 +216,48 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 				if (subH === "right") {
 					const naturalSubRight = popoverRight + 3 + SUBMENU_WIDTH;
 					if (naturalSubRight > viewportWidth - MARGIN) {
-						subOffsetX = (viewportWidth - MARGIN) - naturalSubRight;
+						subOffsetX = viewportWidth - MARGIN - naturalSubRight;
 					}
 				} else if (subH === "left") {
 					const naturalSubLeft = popoverLeft - 3 - SUBMENU_WIDTH;
-					if (naturalSubLeft < MARGIN) {
-						subOffsetX = MARGIN - naturalSubLeft;
+					if (naturalSubLeft < minX) {
+						subOffsetX = minX - naturalSubLeft;
 					}
 				} else {
 					const naturalSubRight = popoverLeft + SUBMENU_WIDTH;
 					if (naturalSubRight > viewportWidth - MARGIN) {
-						subOffsetX = (viewportWidth - MARGIN) - naturalSubRight;
+						subOffsetX = viewportWidth - MARGIN - naturalSubRight;
 					}
-					if (popoverLeft + subOffsetX < MARGIN) {
-						subOffsetX = MARGIN - popoverLeft;
+					if (popoverLeft + subOffsetX < minX) {
+						subOffsetX = minX - popoverLeft;
 					}
 				}
 
 				if (subH !== "stacked") {
 					if (subV === "bottom") {
 						const naturalSubTop = popoverBottom - maxH;
-						if (naturalSubTop < MARGIN) {
-							subOffsetY = MARGIN - naturalSubTop;
+						if (naturalSubTop < minY) {
+							subOffsetY = minY - naturalSubTop;
 						}
 					} else {
 						const naturalSubBottom = popoverTop + maxH;
 						if (naturalSubBottom > viewportHeight - MARGIN) {
-							subOffsetY = (viewportHeight - MARGIN) - naturalSubBottom;
+							subOffsetY = viewportHeight - MARGIN - naturalSubBottom;
 						}
-						if (popoverTop + subOffsetY < MARGIN) {
-							subOffsetY = MARGIN - popoverTop;
+						if (popoverTop + subOffsetY < minY) {
+							subOffsetY = minY - popoverTop;
 						}
 					}
 				} else {
 					if (subV === "bottom") {
 						const naturalSubTop = popoverTop - 4 - maxH;
-						if (naturalSubTop < MARGIN) {
-							subOffsetY = MARGIN - naturalSubTop;
+						if (naturalSubTop < minY) {
+							subOffsetY = minY - naturalSubTop;
 						}
 					} else {
 						const naturalSubBottom = popoverBottom + 4 + maxH;
 						if (naturalSubBottom > viewportHeight - MARGIN) {
-							subOffsetY = (viewportHeight - MARGIN) - naturalSubBottom;
+							subOffsetY = viewportHeight - MARGIN - naturalSubBottom;
 						}
 					}
 				}
@@ -244,11 +272,14 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 		updatePositions();
 		window.addEventListener("resize", updatePositions);
 		window.addEventListener("scroll", updatePositions, true);
+		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(updatePositions) : undefined;
+		if (clippedSurface) observer?.observe(clippedSurface);
 		return () => {
+			observer?.disconnect();
 			window.removeEventListener("resize", updatePositions);
 			window.removeEventListener("scroll", updatePositions, true);
 		};
-	}, [open, skillsOpen, mcpOpen]);
+	}, [open, skillsOpen, mcpOpen, knowledgeOpen]);
 
 	useEffect(() => {
 		if (disabled) return;
@@ -274,6 +305,7 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 					setOpen((value) => !value);
 					setMcpOpen(false);
 					setSkillsOpen(false);
+					setKnowledgeOpen(false);
 				}}
 				ref={triggerRef}
 				type="button"
@@ -289,17 +321,107 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 							: undefined
 					}
 				>
-					<div className="composer-add-menu" ref={menuRef} role="menu">
-						<button aria-label={t("Add files or photos")} onClick={() => { close(); onAddFiles(); }} role="menuitem" type="button">
+					<div
+						className="composer-add-menu"
+						ref={menuRef}
+						role="menu"
+						onKeyDown={(event) => {
+							const menu = (event.target as Element).closest('[role="menu"]');
+							if (event.key === "ArrowLeft" && menu === knowledgeMenu.current) {
+								event.preventDefault();
+								setKnowledgeOpen(false);
+								knowledgeTrigger.current?.focus();
+								return;
+							}
+							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key) || !menu) return;
+							event.preventDefault();
+							const items = Array.from(menu.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")).filter(
+								(item) => item.closest('[role="menu"]') === menu,
+							);
+							const current = items.indexOf(document.activeElement as HTMLButtonElement);
+							const next =
+								event.key === "Home"
+									? 0
+									: event.key === "End"
+										? items.length - 1
+										: event.key === "ArrowDown"
+											? (current + 1) % items.length
+											: (current <= 0 ? items.length : current) - 1;
+							items[next]?.focus();
+						}}
+					>
+						<button
+							aria-label={t("Add files or photos")}
+							onClick={() => {
+								close();
+								onAddFiles();
+							}}
+							role="menuitem"
+							type="button"
+						>
 							<Paperclip aria-hidden="true" size={15} />
 							<span>{t("Add files or photos")}</span>
 							<span aria-hidden="true" className="composer-menu-shortcut">⌘U</span>
 						</button>
+						{knowledge && (
+							<>
+								<button
+									aria-expanded={knowledgeOpen}
+									aria-haspopup="menu"
+									className={knowledgeOpen ? "is-active" : undefined}
+									disabled={knowledge.disabled}
+									onClick={() => {
+										setKnowledgeOpen((value) => !value);
+										setSkillsOpen(false);
+										setMcpOpen(false);
+									}}
+									onKeyDown={(event) => {
+										if (event.key !== "ArrowRight") return;
+										event.preventDefault();
+										setKnowledgeOpen(true);
+										setSkillsOpen(false);
+										setMcpOpen(false);
+										queueMicrotask(() =>
+											knowledgeMenu.current
+												?.querySelector<HTMLButtonElement>("button:not(:disabled)")
+												?.focus(),
+										);
+									}}
+									ref={knowledgeTrigger}
+									role="menuitem"
+									type="button"
+								>
+									<Books aria-hidden="true" size={15} />
+									<span>{t("Knowledge")}</span>
+									<CaretRight aria-hidden="true" className="composer-menu-caret" size={13} />
+								</button>
+								{knowledgeOpen && (
+									<div
+										aria-label={t("Choose knowledge library")}
+										className={`composer-skill-menu composer-knowledge-menu${submenuAlign === "left" ? " is-align-left" : submenuAlign === "stacked" ? " is-stacked" : ""}${submenuVertical === "top" ? " is-align-top" : ""}`}
+										ref={knowledgeMenu}
+										role="menu"
+										style={{
+											width: `${submenuWidth}px`,
+											minWidth: 0,
+											maxHeight: `${submenuMaxHeight}px`,
+											transform: `translate(${submenuOffsetX}px, ${submenuOffsetY}px)`,
+										}}
+									>
+										<KnowledgeLinkMenu {...knowledge} onClose={() => close(true)} />
+									</div>
+								)}
+							</>
+						)}
 						<div className="composer-menu-separator" role="separator" />
 						<button
 							aria-expanded={skillsOpen}
 							className={skillsOpen ? "is-active" : undefined}
-							onClick={() => { setSkillsOpen((value) => !value); setMcpOpen(false); }}
+							onClick={() => {
+								setSkillsOpen((value) => !value);
+								setMcpOpen(false);
+								setKnowledgeOpen(false);
+							}}
 							role="menuitem"
 							type="button"
 						>
@@ -334,7 +456,11 @@ export function ComposerAddMenu({ commandRequest, disabled, iconSize = 18, mcpSe
 						<button
 							aria-expanded={mcpOpen}
 							className={mcpOpen ? "is-active" : undefined}
-							onClick={() => { setMcpOpen((value) => !value); setSkillsOpen(false); }}
+							onClick={() => {
+								setMcpOpen((value) => !value);
+								setSkillsOpen(false);
+								setKnowledgeOpen(false);
+							}}
 							role="menuitem"
 							type="button"
 						>

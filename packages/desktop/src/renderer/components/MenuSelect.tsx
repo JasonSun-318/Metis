@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 export interface MenuSelectOption<T extends string> {
 	readonly value: T;
 	readonly label: string;
+	readonly description?: string;
 	readonly icon?: ReactNode;
 	readonly disabled?: boolean;
 }
@@ -144,6 +145,8 @@ export function MenuSelect<T extends string>({
 				return (
 					<button
 						aria-selected={active}
+						aria-description={option.description}
+						className={option.description ? "menu-select-option-with-description" : undefined}
 						disabled={option.disabled}
 						key={option.value}
 						onClick={() => {
@@ -151,11 +154,14 @@ export function MenuSelect<T extends string>({
 							if (!active) onChange(option.value);
 						}}
 						role="option"
+						title={option.description}
 						type="button"
 					>
 						<span className="menu-select-option-label">
 							{option.icon}
-							<span>{option.label}</span>
+							{option.description ? (
+								<span className="menu-select-option-copy"><span>{option.label}</span><small>{option.description}</small></span>
+							) : <span>{option.label}</span>}
 						</span>
 						{active && <Check aria-hidden="true" size={16} weight="bold" />}
 					</button>

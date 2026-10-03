@@ -7,10 +7,16 @@ export function notifyKnowledgeChanged() {
 	window.dispatchEvent(new Event(KNOWLEDGE_CHANGED_EVENT));
 }
 
-export function useKnowledgeLinks(api: MetisDesktopApi, sessionId: string, active = true) {
+export function useKnowledgeLinks(
+	api: MetisDesktopApi,
+	sessionId: string | undefined,
+	active = true,
+	prepareSession?: () => Promise<string | null>,
+) {
 	const [libraries, setLibraries] = useState<KnowledgeLibrary[]>([]);
 	const [linked, setLinked] = useState<KnowledgeLibrary[]>([]);
 	const [busy, setBusy] = useState(false);
+	const [loading, setLoading] = useState(active);
 	const [error, setError] = useState<string>();
 	const revision = useRef(0);
 	const reload = useCallback(async () => {
@@ -18,7 +24,7 @@ export function useKnowledgeLinks(api: MetisDesktopApi, sessionId: string, activ
 		try {
 			const [catalog, links] = await Promise.all([
 				api.listKnowledgeLibraries(),
-				api.getSessionKnowledge({ sessionId }),
+				sessionId ? api.getSessionKnowledge({ sessionId }) : Promise.resolve({ libraries: [] }),
 			]);
 			if (request !== revision.current) return;
 			setLibraries(catalog.libraries);
@@ -26,12 +32,15 @@ export function useKnowledgeLinks(api: MetisDesktopApi, sessionId: string, activ
 			setError(undefined);
 		} catch (cause) {
 			if (request === revision.current) setError(cause instanceof Error ? cause.message : String(cause));
+		} finally {
+			if (request === revision.current) setLoading(false);
 		}
 	}, [api, sessionId]);
 	useEffect(() => {
 		setLibraries([]);
 		setLinked([]);
 		setError(undefined);
+		setLoading(active);
 		if (!active) return;
 		void reload();
 		const refresh = () => {
@@ -50,11 +59,13 @@ export function useKnowledgeLinks(api: MetisDesktopApi, sessionId: string, activ
 		const request = revision.current;
 		setBusy(true);
 		try {
+			const id = sessionId ?? (await prepareSession?.());
+			if (!id) return;
 			// Read the current links before mutation so another panel's change is retained.
-			const current = await api.getSessionKnowledge({ sessionId });
+			const current = await api.getSessionKnowledge({ sessionId: id });
 			const ids = current.libraries.map((item) => item.id);
 			const result = await api.setSessionKnowledge({
-				sessionId,
+				sessionId: id,
 				requestId: crypto.randomUUID(),
 				libraryIds: ids.includes(library.id) ? ids.filter((id) => id !== library.id) : [...ids, library.id],
 			});
@@ -69,5 +80,5 @@ export function useKnowledgeLinks(api: MetisDesktopApi, sessionId: string, activ
 			setBusy(false);
 		}
 	};
-	return { libraries, linked, busy, error, reload, toggle };
+	return { libraries, linked, busy, loading, error, reload, toggle };
 }

@@ -1,9 +1,19 @@
 import type { ClientResult, KnowledgeNote } from "@metis/app-protocol";
-import { ArrowLeft, ArrowsClockwise, FolderPlus, Link, LinkBreak } from "@phosphor-icons/react";
+import {
+	ArrowLeft,
+	ArrowsClockwise,
+	Books,
+	FileText,
+	FolderPlus,
+	Graph,
+	MagnifyingGlass,
+	X,
+} from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { KnowledgeGraph } from "./KnowledgeGraph.tsx";
+import { KnowledgeNoteList } from "./KnowledgeNoteList.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { notifyKnowledgeChanged, useKnowledgeLinks } from "./use-knowledge-links.ts";
@@ -66,11 +76,9 @@ export function KnowledgePanel({
 	const { t } = useTranslation();
 	const {
 		libraries,
-		linked,
-		busy: linking,
-		error: linkError,
+		loading: catalogLoading,
+		error: catalogError,
 		reload,
-		toggle,
 	} = useKnowledgeLinks(api, sessionId, visible);
 	const [selectedId, setSelectedId] = useState(() => localStorage.getItem(VIEW_KEY) ?? "");
 	const [graph, setGraph] = useState(EMPTY_GRAPH);
@@ -86,7 +94,6 @@ export function KnowledgePanel({
 	const requestRevision = useRef(0);
 	const contentPath = useRef("");
 	const library = libraries.find((item) => item.id === selectedId);
-	const isLinked = linked.some((item) => item.id === selectedId);
 	const note = graph.notes.find((item) => item.path === selectedPath);
 
 	useEffect(() => {
@@ -103,7 +110,10 @@ export function KnowledgePanel({
 	useEffect(() => {
 		setGraph(EMPTY_GRAPH);
 		setError(undefined);
-		if (!visible || !library) return;
+		if (!visible || !library) {
+			setLoading(false);
+			return;
+		}
 		let active = true;
 		let scanning = false;
 		setLoading(true);
@@ -198,51 +208,41 @@ export function KnowledgePanel({
 				<MenuSelect
 					ariaLabel={t("Choose knowledge library")}
 					placeholder={t("Choose knowledge library")}
+					triggerIcon={<Books aria-hidden="true" size={17} />}
 					value={selectedId}
-					options={libraries.map((item) => ({ value: item.id, label: item.name }))}
+					options={libraries.map((item) => ({
+						value: item.id,
+						label: item.name,
+						description: item.path,
+						icon: <Books aria-hidden="true" size={15} />,
+					}))}
+					popoverClassName="knowledge-library-options"
 					onChange={setSelectedId}
 				/>
 				<button
 					type="button"
-					className="icon-button"
+					className="knowledge-icon-button"
 					disabled={adding}
 					aria-label={t("Choose knowledge directory")}
 					title={t("Choose knowledge directory")}
 					onClick={() => void chooseDirectory()}
 				>
-					<FolderPlus size={18} />
+					<FolderPlus aria-hidden="true" size={17} />
 				</button>
 				<button
 					type="button"
-					className="icon-button"
+					className="knowledge-icon-button"
 					disabled={!library || loading}
 					aria-label={t("Refresh knowledge")}
 					title={t("Refresh knowledge")}
 					onClick={() => setRefresh((value) => value + 1)}
 				>
-					<ArrowsClockwise size={18} />
+					<ArrowsClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={17} />
 				</button>
 			</div>
-			{library && (
-				<div className="knowledge-library-context">
-					<span className="knowledge-root-path" title={library.path}>
-						{library.path}
-					</span>
-					<button
-						className="knowledge-link-button"
-						type="button"
-						disabled={linking}
-						aria-pressed={isLinked}
-						onClick={() => void toggle(library)}
-					>
-						{isLinked ? <LinkBreak size={14} /> : <Link size={14} />}
-						{t(isLinked ? "Unlink from conversation" : "Link to conversation")}
-					</button>
-				</div>
-			)}
-			{(error || linkError) && (
+			{(error || catalogError) && (
 				<div className="knowledge-error" role="alert">
-					{error || linkError}
+					<span>{error || catalogError}</span>
 					<button
 						type="button"
 						onClick={() => {
@@ -262,86 +262,123 @@ export function KnowledgePanel({
 					))}
 				</details>
 			)}
-			{!library ? (
+			{catalogLoading || loading ? (
+				<div className="knowledge-empty" role="status">
+					<ArrowsClockwise aria-hidden="true" className="is-spinning" size={24} />
+					{t("Loading…")}
+				</div>
+			) : !library ? (
 				<div className="knowledge-empty">
+					<Books aria-hidden="true" size={32} weight="light" />
+					<strong>{t("Your knowledge, in one place")}</strong>
 					<p>{t("Choose a directory as your knowledge library.")}</p>
-					<button type="button" disabled={adding} onClick={() => void chooseDirectory()}>
+					<button
+						className="knowledge-action"
+						type="button"
+						disabled={adding}
+						onClick={() => void chooseDirectory()}
+					>
+						<FolderPlus aria-hidden="true" size={15} />
 						{t("Choose knowledge directory")}
 					</button>
 				</div>
-			) : loading ? (
-				<div className="knowledge-empty" role="status">
-					{t("Loading…")}
-				</div>
 			) : !graph.notes.length ? (
 				<div className="knowledge-empty">
-					<p>{t("No usable content in this knowledge library yet.")}</p>
-					<p>{t("Link this library to your conversation, then send a material and ask Metis to organize it.")}</p>
+					<FileText aria-hidden="true" size={32} weight="light" />
+					<strong>{t("No usable content in this knowledge library yet.")}</strong>
+					<p>{t("Use + → Knowledge to link this library, then send a material and ask Metis to organize it.")}</p>
 				</div>
 			) : selectedPath ? (
 				<div className="knowledge-note-view">
-					<button className="knowledge-back" type="button" onClick={() => setSelectedPath(null)}>
-						<ArrowLeft size={16} />
-						{t("Back to knowledge library")}
-					</button>
-					<h3>{note?.title ?? selectedPath}</h3>
-					<div className="knowledge-root-path">{selectedPath}</div>
-					{readError && (
-						<p className="knowledge-error" role="alert">
-							{readError}
-						</p>
-					)}
-					{content !== undefined && note ? (
-						<div
-							className="knowledge-markdown"
-							onClick={(event) => {
-								const anchor = (event.target as Element).closest("a");
-								const href = anchor?.getAttribute("href");
-								if (href?.startsWith("#knowledge-note/")) {
-									event.preventDefault();
-									setSelectedPath(decodeURIComponent(href.slice("#knowledge-note/".length)));
-								}
-							}}
+					<div className="knowledge-reader-toolbar">
+						<button
+							className="knowledge-icon-button"
+							type="button"
+							aria-label={t("Back to knowledge library")}
+							title={t("Back to knowledge library")}
+							onClick={() => setSelectedPath(null)}
 						>
-							<Markdown text={knowledgeNoteMarkdown(content, note)} />
-						</div>
-					) : !readError ? (
-						<p role="status">{t("Loading…")}</p>
-					) : null}
+							<ArrowLeft aria-hidden="true" size={17} />
+						</button>
+						<span title={selectedPath}>{note?.title ?? selectedPath}</span>
+					</div>
+					<div className="knowledge-reader-scroll">
+						<div className="knowledge-note-path">{selectedPath}</div>
+						{readError && (
+							<p className="knowledge-error" role="alert">
+								{readError}
+							</p>
+						)}
+						{content !== undefined && note ? (
+							<div
+								className="knowledge-markdown turn-answer"
+								onClick={(event) => {
+									const href = (event.target as Element).closest("a")?.getAttribute("href");
+									if (href?.startsWith("#knowledge-note/")) {
+										event.preventDefault();
+										setSelectedPath(decodeURIComponent(href.slice("#knowledge-note/".length)));
+									}
+								}}
+							>
+								<Markdown text={knowledgeNoteMarkdown(content, note)} />
+							</div>
+						) : !readError ? (
+							<p role="status">{t("Loading…")}</p>
+						) : null}
+					</div>
 				</div>
 			) : (
 				<>
 					<div className="knowledge-view-controls">
-						<div>
+						<div className="knowledge-view-switch" role="group" aria-label={t("Knowledge view")}>
 							<button type="button" aria-pressed={mode === "graph"} onClick={() => setMode("graph")}>
+								<Graph aria-hidden="true" size={14} />
 								{t("Graph")}
 							</button>
 							<button type="button" aria-pressed={mode === "notes"} onClick={() => setMode("notes")}>
+								<FileText aria-hidden="true" size={14} />
 								{t("Knowledge notes")}
 							</button>
 						</div>
-						<input
-							aria-label={t("Search knowledge notes")}
-							placeholder={t("Search knowledge notes")}
-							value={query}
-							onChange={(event) => setQuery(event.target.value)}
-						/>
+						<div className="knowledge-search">
+							<MagnifyingGlass aria-hidden="true" size={14} />
+							<input
+								aria-label={t("Search knowledge notes")}
+								placeholder={t("Search notes")}
+								value={query}
+								onChange={(event) => setQuery(event.target.value)}
+							/>
+							{query && (
+								<button type="button" aria-label={t("Clear search")} onClick={() => setQuery("")}>
+									<X aria-hidden="true" size={12} />
+								</button>
+							)}
+						</div>
 					</div>
 					{!filtered.notes.length ? (
-						<p className="knowledge-empty">{t("No matching notes")}</p>
-					) : mode === "graph" ? (
-						<KnowledgeGraph graph={filtered} onOpen={setSelectedPath} />
-					) : (
-						<div className="knowledge-note-list">
-							{filtered.notes.map((item) => (
-								<button type="button" key={item.path} onClick={() => setSelectedPath(item.path)}>
-									<strong>{item.title}</strong>
-									<span>{item.path}</span>
-								</button>
-							))}
+						<div className="knowledge-empty">
+							<MagnifyingGlass aria-hidden="true" size={28} weight="light" />
+							<strong>{t("No matching notes")}</strong>
+							<button className="knowledge-action" type="button" onClick={() => setQuery("")}>
+								{t("Clear search")}
+							</button>
 						</div>
+					) : mode === "graph" ? (
+						<KnowledgeGraph key={library.id} graph={filtered} onOpen={setSelectedPath} active={visible} />
+					) : (
+						<KnowledgeNoteList
+							notes={filtered.notes}
+							onOpen={setSelectedPath}
+							expandAll={Boolean(query.trim())}
+						/>
 					)}
 				</>
+			)}
+			{library && (
+				<div className="knowledge-footer" title={library.path}>
+					<span>{library.path}</span>
+					<span>{t("{{count}} notes", { count: graph.notes.length })}</span>
+				</div>
 			)}
 		</section>
 	);

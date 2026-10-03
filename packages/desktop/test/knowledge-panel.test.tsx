@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { KnowledgePanel, knowledgeNoteMarkdown } from "../src/renderer/components/KnowledgePanel.tsx";
-import { KnowledgeLinkControl } from "../src/renderer/components/KnowledgeLinkControl.tsx";
+import { Composer } from "../src/renderer/components/Composer.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
@@ -64,7 +64,13 @@ async function mount(api: ReturnType<typeof fixture>, control = false) {
 	await act(async () => {
 		root.render(
 			control ? (
-				<KnowledgeLinkControl api={api as unknown as MetisDesktopApi} sessionId={sessionId} onOpen={vi.fn()} />
+				<Composer
+					disabled={false}
+					running={false}
+					onInterrupt={async () => undefined}
+					onSubmit={async () => undefined}
+					knowledge={{ api: api as unknown as MetisDesktopApi, sessionId, onOpen: vi.fn() }}
+				/>
 			) : (
 				<KnowledgePanel api={api as unknown as MetisDesktopApi} sessionId={sessionId} visible />
 			),
@@ -78,17 +84,17 @@ async function click(element: Element) {
 	});
 }
 function button(container: Element, text: string) {
-	return [...container.querySelectorAll("button")].find((item) => item.textContent === text)!;
+	return [...container.querySelectorAll("button")].find(
+		(item) => item.textContent === text || item.getAttribute("aria-label") === text,
+	)!;
 }
 describe("Knowledge sidebar and conversation links", () => {
-	it("viewing a directory does not link it; explicit linking does", async () => {
+	it("viewing a directory never links it", async () => {
 		const api = fixture();
 		const container = await mount(api);
 		expect(container.textContent).toContain(a.path);
 		expect(api.setSessionKnowledge).not.toHaveBeenCalled();
-		await click(button(container, "Link to conversation"));
-		expect(api.setSessionKnowledge).toHaveBeenCalledWith(expect.objectContaining({ sessionId, libraryIds: [a.id] }));
-		expect(button(container, "Unlink from conversation")).toBeDefined();
+		expect(button(container, "Link to conversation")).toBeUndefined();
 	});
 	it("opens nested notes from graph nodes and navigates their wikilinks", async () => {
 		const api = fixture();
@@ -102,9 +108,13 @@ describe("Knowledge sidebar and conversation links", () => {
 	it("retains other linked libraries when linking or unlinking from the composer", async () => {
 		const api = fixture([a, b], [a]);
 		const container = await mount(api, true);
-		await click(button(container, "Tech"));
+		expect(container.querySelector(".composer-box")?.textContent).not.toContain("Knowledge");
+		await click(container.querySelector('[aria-label="Add to message"]')!);
+		await click(button(container, "Knowledge"));
+		await click(container.querySelector('[role="menuitemcheckbox"][aria-label="Tech"]')!);
 		expect(api.setSessionKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ libraryIds: [a.id, b.id] }));
-		await click(container.querySelector('[aria-label="Unlink knowledge library: Product"]')!);
+		expect(container.querySelectorAll('[role="menuitemcheckbox"][aria-checked="true"]')).toHaveLength(2);
+		await click(container.querySelector('[role="menuitemcheckbox"][aria-label="Product"]')!);
 		expect(api.setSessionKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ libraryIds: [b.id] }));
 	});
 	it("shows note read failures and allows returning to the graph", async () => {
@@ -146,17 +156,67 @@ describe("Knowledge sidebar and conversation links", () => {
 	});
 	it("dismisses the conversation library picker on Escape and outside clicks", async () => {
 		const container = await mount(fixture(), true);
-		const picker = container.querySelector("details")!;
-		picker.open = true;
+		const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
+		await click(trigger);
+		await click(button(container, "Knowledge"));
 		await act(async () => {
-			window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
 		});
-		expect(picker.open).toBe(false);
-		picker.open = true;
+		expect(container.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+		await click(trigger);
+		await click(button(container, "Knowledge"));
 		await act(async () => {
 			document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
 		});
-		expect(picker.open).toBe(false);
+		expect(container.querySelector('[role="menu"]')).toBeNull();
+	});
+	it("navigates the library submenu with the keyboard and returns to the parent", async () => {
+		const container = await mount(fixture(), true);
+		await click(container.querySelector('[aria-label="Add to message"]')!);
+		const entry = button(container, "Knowledge");
+		entry.focus();
+		await act(async () => entry.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+		const rows = container.querySelectorAll<HTMLButtonElement>('[role="menuitemcheckbox"]');
+		expect(document.activeElement).toBe(rows[0]);
+		await act(async () => rows[0].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+		expect(document.activeElement).toBe(rows[1]);
+		await act(async () => rows[1].dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+		expect(container.querySelector('[role="menuitemcheckbox"]')).toBeNull();
+		expect(document.activeElement).toBe(entry);
+	});
+	it("browses nested folders and expands matching notes when searching", async () => {
+		const api = fixture();
+		const container = await mount(api);
+		await click(button(container, "Knowledge notes"));
+		const folders = container.querySelectorAll<HTMLDetailsElement>(".knowledge-folder");
+		expect(folders).toHaveLength(2);
+		expect([...folders].every((folder) => !folder.open)).toBe(true);
+		const input = container.querySelector<HTMLInputElement>('[aria-label="Search knowledge notes"]')!;
+		await act(async () => {
+			Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "deep");
+			input.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		expect([...folders].every((folder) => folder.open)).toBe(true);
+		expect(button(container, "Home")).toBeUndefined();
+		await click(button(container, "Deep note"));
+		expect(api.readKnowledgeNote).toHaveBeenLastCalledWith({ libraryId: a.id, path: "topic/deep/Note.md" });
+		expect(container.querySelectorAll("h1")).toHaveLength(1);
+	});
+	it("shows a link error without discarding the previous selection", async () => {
+		const api = fixture([a, b], [a]);
+		api.setSessionKnowledge.mockRejectedValue(new Error("Saving links failed"));
+		const container = await mount(api, true);
+		await click(container.querySelector('[aria-label="Add to message"]')!);
+		await click(button(container, "Knowledge"));
+		await click(container.querySelector('[role="menuitemcheckbox"][aria-label="Tech"]')!);
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Saving links failed");
+		expect(
+			container.querySelector('[role="menuitemcheckbox"][aria-label="Product"]')?.getAttribute("aria-checked"),
+		).toBe("true");
+		expect(
+			container.querySelector('[role="menuitemcheckbox"][aria-label="Tech"]')?.getAttribute("aria-checked"),
+		).toBe("false");
 	});
 	it("selects an empty directory without creating content or linking automatically", async () => {
 		const api = fixture([]);

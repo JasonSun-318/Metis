@@ -23,6 +23,7 @@ import {
 } from "@phosphor-icons/react";
 import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
 import { getHomeStarters, pickHomeGreeting, type HomeStarterId } from "../new-task-home-content.ts";
@@ -101,7 +102,7 @@ interface NewTaskHomeProps {
 	readonly folderLocked: boolean;
 	readonly mode: AgentMode;
 	readonly modelControl?: ReactNode;
-	readonly knowledgeControl?: ReactNode;
+	readonly knowledge?: KnowledgeLinkMenuProps;
 	readonly permissionControl?: ReactNode;
 	readonly reducedMotion: boolean;
 	readonly onChooseFolder: () => Promise<void>;
@@ -132,7 +133,7 @@ export function NewTaskHome({
 	folderLocked,
 	mode,
 	modelControl,
-	knowledgeControl,
+	knowledge,
 	permissionControl,
 	reducedMotion,
 	onChooseFolder,
@@ -251,7 +252,7 @@ export function NewTaskHome({
 									prefillRequest={prefillRequest}
 									running={false}
 									skills={skills}
-									knowledgeControl={knowledgeControl}
+									knowledge={knowledge}
 									submitDisabled={mode === "code" && folder === null}
 									thinkingControl={thinkingControl}
 								/>

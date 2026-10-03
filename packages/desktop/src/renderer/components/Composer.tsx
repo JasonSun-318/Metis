@@ -11,6 +11,7 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
@@ -293,7 +294,7 @@ interface ComposerProps {
 	readonly appearance?: "chat" | "code";
 	readonly collaborationControl?: ReactNode;
 	readonly contextControl?: ReactNode;
-	readonly knowledgeControl?: ReactNode;
+	readonly knowledge?: KnowledgeLinkMenuProps;
 	readonly interactionControl?: ReactNode;
 	readonly goalControl?: ReactNode;
 	readonly queuedTurnControl?: ReactNode;
@@ -334,7 +335,7 @@ export function Composer({
 	appearance = "code",
 	collaborationControl,
 	contextControl,
-	knowledgeControl,
+	knowledge,
 	contextUsageExpanded = false,
 	contextUsagePercent,
 	onOpenContextUsage,
@@ -765,7 +766,6 @@ export function Composer({
 				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
 				<div className="composer-box">
 					<FileSelectionChips />
-					{knowledgeControl}
 					{attachments.length > 0 && (
 						<div aria-label={t("Message additions")} className="composer-attachments">
 							{attachments.map((attachment) => attachment.previewDataUrl ? (
@@ -835,6 +835,7 @@ export function Composer({
 							commandRequest={commandRequest}
 							disabled={disabled || awaitingAnswer || submitting}
 							iconSize={isCode ? 13 : 16}
+							knowledge={knowledge}
 							mcpServers={mcpServers}
 							onAddFiles={() => void addFiles().catch(() => undefined)}
 							onManageMcp={() => onManageMcp?.()}

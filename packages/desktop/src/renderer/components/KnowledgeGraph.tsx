@@ -1,104 +1,131 @@
 import type { ClientResult } from "@metis/app-protocol";
-import { useMemo, useRef, useState } from "react";
+import { ArrowsOut, Minus, Plus } from "@phosphor-icons/react";
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { graphEdgeKey, useKnowledgeGraph } from "./use-knowledge-graph.ts";
 
 type Graph = ClientResult<"knowledge/scan">;
-export function KnowledgeGraph({ graph, onOpen }: { readonly graph: Graph; readonly onOpen: (path: string) => void }) {
+export function KnowledgeGraph({
+	graph,
+	onOpen,
+	active = true,
+}: {
+	readonly graph: Graph;
+	readonly onOpen: (path: string) => void;
+	readonly active?: boolean;
+}) {
 	const { t } = useTranslation();
-	const [view, setView] = useState({ x: 0, y: 0, zoom: 1 });
-	const drag = useRef<{ x: number; y: number; originX: number; originY: number } | null>(null);
-	const points = useMemo(() => {
-		const total = graph.notes.length;
-		const extent = Math.max(360, Math.sqrt(total) * 55);
-		return {
-			extent,
-			byPath: new Map(
-				graph.notes.map((note, index) => {
-					const angle = index * Math.PI * (3 - Math.sqrt(5));
-					const radius = total <= 1 ? 0 : Math.sqrt(index / (total - 1)) * extent * 0.36;
-					return [
-						note.path,
-						{ x: extent / 2 + Math.cos(angle) * radius, y: extent / 2 + Math.sin(angle) * radius },
-					];
-				}),
-			),
-		};
-	}, [graph.notes]);
-	const zoom = (factor: number) =>
-		setView((current) => ({ ...current, zoom: Math.max(0.25, Math.min(6, current.zoom * factor)) }));
+	const interaction = useKnowledgeGraph(graph, active);
+	const related = useMemo(() => {
+		const paths = new Set<string>();
+		if (interaction.highlighted) {
+			paths.add(interaction.highlighted);
+			for (const edge of graph.edges) {
+				if (edge.source === interaction.highlighted) paths.add(edge.target);
+				if (edge.target === interaction.highlighted) paths.add(edge.source);
+			}
+		}
+		return paths;
+	}, [graph.edges, interaction.highlighted]);
 	return (
 		<div className="knowledge-graph">
 			<div className="knowledge-graph-controls">
-				<button type="button" aria-label={t("Zoom out")} onClick={() => zoom(0.8)}>
-					−
-				</button>
-				<button type="button" aria-label={t("Zoom in")} onClick={() => zoom(1.25)}>
-					+
-				</button>
-				<button type="button" onClick={() => setView({ x: 0, y: 0, zoom: 1 })}>
-					{t("Reset view")}
-				</button>
-				<span>
-					{t("{{count}} notes", { count: graph.notes.length })} ·{" "}
-					{t("{{count}} links", { count: graph.edges.length })}
-				</span>
-			</div>
-			<svg
-				aria-label={t("Knowledge graph")}
-				className="knowledge-graph-canvas"
-				role="group"
-				viewBox={`0 0 ${points.extent} ${points.extent}`}
-				onWheel={(event) => zoom(event.deltaY > 0 ? 0.9 : 1.1)}
-				onPointerDown={(event) => {
-					if ((event.target as Element).closest(".knowledge-node")) return;
-					drag.current = { x: event.clientX, y: event.clientY, originX: view.x, originY: view.y };
-					event.currentTarget.setPointerCapture?.(event.pointerId);
-				}}
-				onPointerMove={(event) => {
-					if (!drag.current) return;
-					const bounds = event.currentTarget.getBoundingClientRect();
-					const scale = points.extent / Math.max(1, Math.min(bounds.width, bounds.height));
-					setView((current) => ({
-						...current,
-						x: drag.current!.originX + (event.clientX - drag.current!.x) * scale,
-						y: drag.current!.originY + (event.clientY - drag.current!.y) * scale,
-					}));
-				}}
-				onPointerUp={() => {
-					drag.current = null;
-				}}
-				onPointerCancel={() => {
-					drag.current = null;
-				}}
-			>
-				<g
-					transform={`translate(${view.x + points.extent / 2} ${view.y + points.extent / 2}) scale(${view.zoom}) translate(${-points.extent / 2} ${-points.extent / 2})`}
+				<button
+					className="knowledge-icon-button"
+					type="button"
+					title={t("Zoom out")}
+					aria-label={t("Zoom out")}
+					onClick={() => interaction.zoom(0.8)}
 				>
-					{graph.edges.map((edge) => {
-						const source = points.byPath.get(edge.source);
-						const target = points.byPath.get(edge.target);
-						return source && target ? (
-							<line
-								className="knowledge-edge"
-								key={`${edge.source}\0${edge.target}`}
-								x1={source.x}
-								y1={source.y}
-								x2={target.x}
-								y2={target.y}
-							/>
-						) : null;
-					})}
-					{graph.notes.map((note) => {
-						const point = points.byPath.get(note.path)!;
-						return (
+					<Minus aria-hidden="true" size={15} />
+				</button>
+				<button
+					className="knowledge-icon-button"
+					type="button"
+					title={t("Zoom in")}
+					aria-label={t("Zoom in")}
+					onClick={() => interaction.zoom(1.25)}
+				>
+					<Plus aria-hidden="true" size={15} />
+				</button>
+				<button
+					className="knowledge-icon-button"
+					type="button"
+					title={t("Fit graph to panel")}
+					aria-label={t("Reset view")}
+					onClick={interaction.fit}
+				>
+					<ArrowsOut aria-hidden="true" size={15} />
+				</button>
+				<span>{t("{{count}} links", { count: graph.edges.length })}</span>
+			</div>
+			<div className="knowledge-graph-stage" ref={interaction.stage}>
+				{/* biome-ignore lint/a11y/useSemanticElements: The SVG graph cannot use an HTML fieldset. */}
+				<svg
+					aria-label={t("Knowledge graph")}
+					aria-description={t("Drag nodes to rearrange, drag the background to pan, and scroll to zoom.")}
+					className="knowledge-graph-canvas"
+					ref={interaction.canvas}
+					role="group"
+					// biome-ignore lint/a11y/noNoninteractiveTabindex: The graph supports keyboard zoom and fit.
+					tabIndex={0}
+					viewBox="0 0 1 1"
+					onPointerDown={interaction.onPointerDown}
+					onPointerMove={interaction.onPointerMove}
+					onPointerUp={interaction.onPointerUp}
+					onPointerCancel={interaction.onPointerCancel}
+					onLostPointerCapture={interaction.onLostPointerCapture}
+					onKeyDown={(event) => {
+						if (event.target !== event.currentTarget) return;
+						if (event.key === "+" || event.key === "=") {
+							event.preventDefault();
+							interaction.zoom(1.25);
+						} else if (event.key === "-") {
+							event.preventDefault();
+							interaction.zoom(0.8);
+						} else if (event.key === "0") {
+							event.preventDefault();
+							interaction.fit();
+						}
+					}}
+				>
+					<g className="knowledge-graph-viewport" ref={interaction.viewport}>
+						{graph.edges.map((edge) => {
+							const key = graphEdgeKey(edge.source, edge.target);
+							const highlighted =
+								edge.source === interaction.highlighted || edge.target === interaction.highlighted;
+							return (
+								<line
+									className={`knowledge-edge${highlighted ? " is-highlighted" : interaction.highlighted ? " is-muted" : ""}`}
+									key={key}
+									ref={(element) => {
+										if (element) interaction.edges.current.set(key, element);
+										else interaction.edges.current.delete(key);
+									}}
+									vectorEffect="non-scaling-stroke"
+								/>
+							);
+						})}
+						{graph.notes.map((note) => (
+							// biome-ignore lint/a11y/useSemanticElements: Native HTML buttons cannot be used inside the SVG graph.
 							<g
-								className="knowledge-node"
+								className={`knowledge-node${interaction.highlighted && !related.has(note.path) ? " is-muted" : ""}`}
+								data-knowledge-path={note.path}
 								key={note.path}
-								transform={`translate(${point.x} ${point.y})`}
+								ref={(element) => {
+									if (element) interaction.nodes.current.set(note.path, element);
+									else interaction.nodes.current.delete(note.path);
+								}}
 								role="button"
 								tabIndex={0}
 								aria-label={note.title}
-								onClick={() => onOpen(note.path)}
+								onClick={() => {
+									if (interaction.allowOpen(note.path)) onOpen(note.path);
+								}}
+								onPointerEnter={() => interaction.highlight(note.path)}
+								onPointerLeave={() => interaction.highlight(null)}
+								onFocus={() => interaction.highlight(note.path)}
+								onBlur={() => interaction.highlight(null)}
 								onKeyDown={(event) => {
 									if (event.key === "Enter" || event.key === " ") {
 										event.preventDefault();
@@ -106,22 +133,21 @@ export function KnowledgeGraph({ graph, onOpen }: { readonly graph: Graph; reado
 									}
 								}}
 							>
-								<title>{note.path}</title>
-								<circle r={graph.notes.length > 300 ? 3 : 5} />
-								{graph.notes.length <= 150 && (
-									<text
-										x={point.x > points.extent / 2 ? -9 : 9}
-										y={4}
-										textAnchor={point.x > points.extent / 2 ? "end" : "start"}
-									>
-										{note.title.length > 24 ? `${note.title.slice(0, 24)}…` : note.title}
-									</text>
+								<title>
+									{note.title}
+									{"\n"}
+									{note.path}
+								</title>
+								<circle className="knowledge-node-hit" r={12} />
+								<circle className="knowledge-node-dot" r={5} vectorEffect="non-scaling-stroke" />
+								{(graph.notes.length <= 150 || interaction.highlighted === note.path) && (
+									<text>{note.title}</text>
 								)}
 							</g>
-						);
-					})}
-				</g>
-			</svg>
+						))}
+					</g>
+				</svg>
+			</div>
 		</div>
 	);
 }
