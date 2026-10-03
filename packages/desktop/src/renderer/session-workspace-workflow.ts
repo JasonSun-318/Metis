@@ -21,22 +21,23 @@ import {
 } from "./store/project-preferences.ts";
 import { loadSessionPins, saveSessionPins, setSessionPinned } from "./store/session-pins.ts";
 
-type SessionWorkspaceApi = Pick<
-	MetisDesktopApi,
-	| "createSession"
-	| "deleteProject"
-	| "deleteSession"
-	| "forkSession"
-	| "getServerState"
-	| "listSessions"
-	| "markSessionRead"
-	| "openSession"
-	| "previewProjectDelete"
-	| "renameSession"
-	| "selectProjectFolder"
-	| "startTurn"
-	| "subscribe"
->;
+type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinkingSelection">> &
+	Pick<
+		MetisDesktopApi,
+		| "createSession"
+		| "deleteProject"
+		| "deleteSession"
+		| "forkSession"
+		| "getServerState"
+		| "listSessions"
+		| "markSessionRead"
+		| "openSession"
+		| "previewProjectDelete"
+		| "renameSession"
+		| "selectProjectFolder"
+		| "startTurn"
+		| "subscribe"
+	>;
 
 export interface NewTaskDraft {
 	readonly mode: AgentMode;
@@ -433,7 +434,14 @@ export class SessionWorkspaceWorkflow {
 		}
 	}
 
-	async submitNewTask(input: ConversationSubmission, sessionName?: string): Promise<void> {
+	async submitNewTask(
+		input: ConversationSubmission,
+		sessionName?: string,
+		settings?: {
+			readonly model?: AppStoreSnapshot["model"];
+			readonly thinkingSelection?: AppStoreSnapshot["thinkingSelection"];
+		},
+	): Promise<void> {
 		const draft = this.state.draft;
 		if (!draft) return;
 		if (draft.mode === "code" && !draft.folder) return;
@@ -446,6 +454,20 @@ export class SessionWorkspaceWorkflow {
 			await this.refreshSessions();
 			if (!this.isCurrentIntent(intent, lifecycle)) return;
 			if (!(await this.openSessionForIntent(sessionId, intent, lifecycle))) return;
+			if (settings?.model) {
+				if (!this.api.setModel) throw new Error("Model configuration is unavailable");
+				await this.api.setModel({ sessionId, requestId: this.requestId(), ...settings.model });
+				if (!this.isCurrentIntent(intent, lifecycle)) return;
+			}
+			if (settings?.thinkingSelection !== undefined) {
+				if (!this.api.setThinkingSelection) throw new Error("Thinking configuration is unavailable");
+				await this.api.setThinkingSelection({
+					sessionId,
+					requestId: this.requestId(),
+					selection: settings.thinkingSelection,
+				});
+				if (!this.isCurrentIntent(intent, lifecycle)) return;
+			}
 			const turnKey = JSON.stringify({ sessionId, input: composerRequestKey(input) });
 			const turnRequest =
 				this.newTaskTurnRequest?.key === turnKey

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSessionGroup } from "../src/renderer/components/SessionSidebar.tsx";
@@ -103,15 +104,48 @@ describe("NewTaskHome", () => {
 		}
 	});
 
-	it("allows the knowledge control to be used before the first message", async () => {
+	it("opens the knowledge sidebar through the plus menu before the first message", async () => {
 		const openKnowledge = vi.fn();
+		const prepare = vi.fn(async () => "prepared-session");
+		const api = {
+			listKnowledgeLibraries: vi.fn(async () => ({ libraries: [] })),
+			getSessionKnowledge: vi.fn(async () => ({ libraries: [] })),
+		} as unknown as MetisDesktopApi;
 		const { container, root } = await renderHome("chat", {
-			knowledgeControl: <button type="button" onClick={openKnowledge}>Knowledge</button>,
+			knowledge: { api, onPrepare: prepare, onOpen: openKnowledge },
 		});
 		try {
-			const button = [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!;
-			await act(async () => button.click());
-			expect(openKnowledge).toHaveBeenCalledOnce();
+			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click());
+			expect(prepare).not.toHaveBeenCalled();
+			expect(api.getSessionKnowledge).not.toHaveBeenCalled();
+			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Open knowledge sidebar")!.click());
+			expect(prepare).toHaveBeenCalledOnce();
+			expect(openKnowledge).toHaveBeenCalledWith("prepared-session");
+			expect(container.querySelector('[role="menu"]')).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+	it("prepares the draft only when explicitly linking a library and never sends a turn", async () => {
+		const library = { id: "library", name: "Product", path: "/Users/test/Product" };
+		const prepare = vi.fn(async () => "prepared-session");
+		const setLinks = vi.fn(async () => ({ libraries: [library] }));
+		const onSubmit = vi.fn(async () => undefined);
+		const api = {
+			listKnowledgeLibraries: vi.fn(async () => ({ libraries: [library] })),
+			getSessionKnowledge: vi.fn(async () => ({ libraries: [] })),
+			setSessionKnowledge: setLinks,
+		} as unknown as MetisDesktopApi;
+		const { container, root } = await renderHome("chat", { knowledge: { api, onPrepare: prepare, onOpen: vi.fn() }, onSubmit });
+		try {
+			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click());
+			expect(prepare).not.toHaveBeenCalled();
+			await act(async () => container.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]')!.click());
+			expect(prepare).toHaveBeenCalledOnce();
+			expect(setLinks).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "prepared-session", libraryIds: ["library"] }));
+			expect(onSubmit).not.toHaveBeenCalled();
 		} finally {
 			await act(async () => root.unmount());
 		}

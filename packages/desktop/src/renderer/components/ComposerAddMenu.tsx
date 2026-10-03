@@ -96,20 +96,15 @@ export function ComposerAddMenu({
 
 	useLayoutEffect(() => {
 		if (!open) return;
-		const clippedSurface = triggerRef.current?.closest<HTMLElement>(
-			'.editor-welcome-overlay, .app-shell[data-surface="editor"] .workspace',
-		);
 		const updatePositions = () => {
 			const trigger = triggerRef.current;
 			if (!trigger) return;
 			const triggerRect = trigger.getBoundingClientRect();
-			const measuredSurface = clippedSurface?.getBoundingClientRect();
-			const surfaceBounds = measuredSurface?.width && measuredSurface.height ? measuredSurface : undefined;
-			const viewportWidth = surfaceBounds?.right ?? (document.documentElement.clientWidth || window.innerWidth);
-			const viewportHeight = surfaceBounds?.bottom ?? (document.documentElement.clientHeight || window.innerHeight);
+			const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+			const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
 			const MARGIN = 8;
-			const minX = (surfaceBounds?.left ?? 0) + MARGIN;
-			const minY = (surfaceBounds?.top ?? 0) + MARGIN;
+			const minX = MARGIN;
+			const minY = MARGIN;
 			const MAIN_MENU_WIDTH = 200;
 			const menu = menuRef.current;
 			const menuHeight = menu ? menu.offsetHeight : 120;
@@ -272,10 +267,7 @@ export function ComposerAddMenu({
 		updatePositions();
 		window.addEventListener("resize", updatePositions);
 		window.addEventListener("scroll", updatePositions, true);
-		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(updatePositions) : undefined;
-		if (clippedSurface) observer?.observe(clippedSurface);
 		return () => {
-			observer?.disconnect();
 			window.removeEventListener("resize", updatePositions);
 			window.removeEventListener("scroll", updatePositions, true);
 		};

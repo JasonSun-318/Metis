@@ -1,4 +1,3 @@
-import type { AskUserDraft } from "./AskUserPanel.tsx";
 import {
 	type AgentMode,
 	type InteractionResponseInput,
@@ -22,6 +21,7 @@ import { ArrowLeft, ArrowRight, Lightbulb, SidebarSimple, XCircle } from "@phosp
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { ConversationSubmission } from "../composer-submission.ts";
 import { contextUsagePercent } from "../context-usage.ts";
 import {
 	applyGeneralPreferencesToDocument,
@@ -40,8 +40,8 @@ import { SessionWorkspaceWorkflow, sessionProjectKey, type NewTaskDraft } from "
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
+import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
-import { KnowledgeLinkControl } from "./KnowledgeLinkControl.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import { GoalBar } from "./GoalBar.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -1251,7 +1251,7 @@ export function App({ api, store }: AppProps) {
 	};
 
 	const configurationSession = visibleActiveSession ?? (
-		newTaskOpen && activeSession?.mode === mode ? activeSession : undefined
+		newTaskOpen && visibleNewTaskDraft?.sessionId && activeSession?.sessionId === visibleNewTaskDraft.sessionId ? activeSession : undefined
 	);
 
 	const openPlan = useCallback((plan: PlanView) => {
@@ -1584,7 +1584,8 @@ export function App({ api, store }: AppProps) {
 		}
 	};
 	const openSettings = useCallback(() => {
-		settingsReturnFocusRef.current = document.querySelector<HTMLElement>(".account-menu-trigger") ?? document.activeElement as HTMLElement | null;
+		settingsReturnFocusRef.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+			? document.activeElement : document.querySelector<HTMLElement>(".account-menu-trigger");
 		rememberCurrentNavigation();
 		setSettingsOpen(true);
 	}, [rememberCurrentNavigation]);
@@ -1713,6 +1714,69 @@ export function App({ api, store }: AppProps) {
 		else showSessionSidebar();
 	};
 
+	const homePage = visibleNewTaskDraft ? (
+		<>
+			<NewTaskHome
+				key={mode}
+				busy={draftBusy || !serverReady}
+				commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
+				composerFormRef={homeComposerFormRef}
+				disabledSlashCommands={disabledSlashCommands}
+				disabledSlashReasons={disabledSlashReasons}
+				folder={visibleNewTaskDraft.folder}
+				folderLocked={visibleNewTaskDraft.sessionId !== null}
+				mode={mode}
+				modelControl={modelControl}
+				knowledge={{
+					api,
+					sessionId: visibleNewTaskDraft.sessionId ?? undefined,
+					disabled: draftBusy || !serverReady || (mode === "code" && !visibleNewTaskDraft.folder),
+					onPrepare: () => workspaceWorkflow.prepareNewTask(),
+					onOpen: openKnowledge,
+				}}
+				permissionControl={permissionControl}
+				onChooseFolder={chooseNewTaskFolder}
+				projectControl={
+					<HomeProjectPicker
+						busy={draftBusy || !serverReady}
+						folder={visibleNewTaskDraft.folder}
+						folderLocked={visibleNewTaskDraft.sessionId !== null}
+						mode={mode}
+						onChooseFolder={chooseNewTaskFolder}
+						onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
+						onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
+					/>
+				}
+				onManageMcp={openMcpManagement}
+				onManageSkills={openSkillsDestination}
+				onPickFiles={pickAttachmentFiles}
+				onResolveDroppedFiles={api.resolveDroppedFiles}
+				onSelectRecentProject={(cwd) => selectHomeProject("code", cwd)}
+				reducedMotion={reducedMotion}
+				onSlashCommand={handleSlashCommand}
+				onSubmit={submitNewTaskDraft}
+				recentProjects={recentCodeProjects}
+				skills={skills}
+				thinkingControl={thinkingControl}
+			/>
+			{mode === "code" && codeProjectSetupOpen && (
+				<CodeProjectSetup
+					busy={draftBusy || !serverReady}
+					initialStep="create"
+					onCancel={closeCodeProjectSetup}
+					onChooseExisting={chooseCodeProjectFolder}
+					onChooseLocation={chooseCodeProjectFolder}
+					onCreateProject={createCodeProjectFolder}
+					onGetDefaultLocation={api.getDefaultProjectLocation}
+					onOpenProject={async (cwd) => selectCodeProject(cwd, activeCodeProjectSetupRequest)}
+					onProjectCreated={(cwd) => handleCodeProjectCreated(cwd, activeCodeProjectSetupRequest)}
+					onPickFiles={pickAttachmentFiles}
+					onResolveDroppedFiles={api.resolveDroppedFiles}
+				/>
+			)}
+		</>
+	) : null;
+
 	return (
 		<FileSelectionProvider
 			sessionId={writableSessionId ?? null}
@@ -1722,6 +1786,7 @@ export function App({ api, store }: AppProps) {
 			)}
 			onSubmit={submit}
 		>
+
 		{api.platform === "win32" && (
 			<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
 				<button
@@ -1863,75 +1928,12 @@ export function App({ api, store }: AppProps) {
 				) : destination === "schedules" && mode === "chat" ? (
 					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
 				) : newTaskOpen ? (
-					<>
-						<NewTaskHome
-							key={mode}
-							busy={draftBusy || !serverReady}
-							commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
-							composerFormRef={homeComposerFormRef}
-							disabledSlashCommands={disabledSlashCommands}
-							disabledSlashReasons={disabledSlashReasons}
-							folder={visibleNewTaskDraft.folder}
-							folderLocked={visibleNewTaskDraft.sessionId !== null}
-							mode={mode}
-							modelControl={modelControl}
-							knowledgeControl={serverReady && visibleNewTaskDraft.sessionId ? (
-								<KnowledgeLinkControl api={api} sessionId={visibleNewTaskDraft.sessionId} key={visibleNewTaskDraft.sessionId} onOpen={() => openKnowledge(visibleNewTaskDraft.sessionId!)} />
-							) : (
-								<div className="composer-knowledge">
-									<button
-										className="composer-knowledge-chip"
-										disabled={draftBusy || !serverReady || (mode === "code" && !visibleNewTaskDraft.folder)}
-										type="button"
-										onClick={() => void workspaceWorkflow.prepareNewTask().then((id) => { if (id) openKnowledge(id); }).catch(reportError)}
-									>{t("Knowledge")}</button>
-								</div>
-							)}
-							permissionControl={permissionControl}
-							onChooseFolder={chooseNewTaskFolder}
-							projectControl={
-								<HomeProjectPicker
-									busy={draftBusy || !serverReady}
-									folder={visibleNewTaskDraft.folder}
-									folderLocked={visibleNewTaskDraft.sessionId !== null}
-									mode={mode}
-									onChooseFolder={chooseNewTaskFolder}
-									onClearFolder={mode === "chat" ? () => clearHomeProject("chat") : undefined}
-									onCreateProject={mode === "code" ? openCodeProjectSetup : undefined}
-								/>
-							}
-							onManageMcp={openMcpManagement}
-							onManageSkills={openSkillsDestination}
-							onPickFiles={pickAttachmentFiles}
-							onResolveDroppedFiles={api.resolveDroppedFiles}
-							onSelectRecentProject={(cwd) => selectHomeProject("code", cwd)}
-							reducedMotion={reducedMotion}
-							onSlashCommand={handleSlashCommand}
-							onSubmit={submitNewTaskDraft}
-							recentProjects={recentCodeProjects}
-							skills={skills}
-							thinkingControl={thinkingControl}
-						/>
-						{mode === "code" && codeProjectSetupOpen && (
-							<CodeProjectSetup
-								busy={draftBusy || !serverReady}
-								initialStep="create"
-								onCancel={closeCodeProjectSetup}
-								onChooseExisting={chooseCodeProjectFolder}
-								onChooseLocation={chooseCodeProjectFolder}
-								onCreateProject={createCodeProjectFolder}
-								onGetDefaultLocation={api.getDefaultProjectLocation}
-								onOpenProject={async (cwd) => selectCodeProject(cwd, activeCodeProjectSetupRequest)}
-								onProjectCreated={(cwd) => handleCodeProjectCreated(cwd, activeCodeProjectSetupRequest)}
-								onPickFiles={pickAttachmentFiles}
-								onResolveDroppedFiles={api.resolveDroppedFiles}
-							/>
-						)}
-					</>
+					homePage
 				) : visibleActiveSession ? (
 					<div className="workspace-body">
 						<div className="conversation-column" data-mode={visibleActiveSession.mode}>
 							<Transcript
+								showNavigation
 								activeTurnId={state.activeTurnId}
 								waitingForAnswer={waitingForAnswer}
 								activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined}
@@ -1957,14 +1959,7 @@ export function App({ api, store }: AppProps) {
 							)}
 							<div className="conversation-composer">
 								<Composer
-									knowledgeControl={serverReady && writableSessionId ? (
-										<KnowledgeLinkControl
-											api={api}
-											sessionId={writableSessionId}
-											key={writableSessionId}
-											onOpen={() => openKnowledge(writableSessionId)}
-										/>
-									) : undefined}
+									knowledge={serverReady && writableSessionId ? { api, sessionId: writableSessionId, onOpen: openKnowledge } : undefined}
 									appearance={visibleActiveSession.mode}
 									collaborationControl={collaborationControl}
 									contextControl={planRevisionChip}

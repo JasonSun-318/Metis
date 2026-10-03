@@ -104,6 +104,34 @@ function harness(sessions: readonly SessionSummary[] = [], onDesktopEvent?: (eve
 describe("SessionWorkspaceWorkflow", () => {
 	beforeEach(() => localStorage.clear());
 
+	it("applies the welcome model and thinking selection before the first Code turn", async () => {
+		const { api, workflow } = harness();
+		Object.assign(api, {
+			setModel: vi.fn().mockResolvedValue({}),
+			setThinkingSelection: vi.fn().mockResolvedValue({}),
+		});
+		vi.mocked(api.createSession).mockResolvedValue({ session: summary("new-code", "code") });
+		vi.mocked(api.openSession).mockResolvedValue(snapshot("new-code", "code"));
+		workflow.startNewTask("code");
+		await workflow.submitNewTask({ text: "Build it", attachments: [] });
+		expect(api.createSession).not.toHaveBeenCalled();
+		workflow.setDraftFolder("/project");
+		await workflow.submitNewTask({ text: "Build it", attachments: [] }, undefined, {
+			model: { provider: "example", modelId: "code-model" },
+			thinkingSelection: "high",
+		});
+		expect(api.setModel).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: "new-code", provider: "example", modelId: "code-model" }),
+		);
+		expect(api.setThinkingSelection).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: "new-code", selection: "high" }),
+		);
+		expect(vi.mocked(api.setThinkingSelection).mock.invocationCallOrder[0]).toBeLessThan(
+			vi.mocked(api.startTurn).mock.invocationCallOrder[0]!,
+		);
+		expect(workflow.getSnapshot().draft).toBeNull();
+	});
+
 	it("keeps the newest open result when older work finishes later", async () => {
 		const { api, store, workflow } = harness();
 		const first = deferred<SessionSnapshot>();
@@ -603,6 +631,30 @@ describe("SessionWorkspaceWorkflow", () => {
 		expect(await preparation).toBeNull();
 		expect(api.openSession).not.toHaveBeenCalled();
 		expect(api.startTurn).not.toHaveBeenCalled();
+	});
+	it("applies editor settings to the prepared knowledge session without creating another conversation", async () => {
+		const { api, workflow } = harness();
+		Object.assign(api, {
+			setModel: vi.fn().mockResolvedValue({}),
+			setThinkingSelection: vi.fn().mockResolvedValue({}),
+		});
+		const created = summary("editor-knowledge", "code");
+		vi.mocked(api.createSession).mockResolvedValue({ session: created });
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(created.sessionId, "code"));
+		workflow.startNewTask("code");
+		workflow.setDraftFolder("/project");
+		expect(await workflow.prepareNewTask()).toBe(created.sessionId);
+		expect(api.startTurn).not.toHaveBeenCalled();
+		await workflow.submitNewTask({ text: "Use the linked knowledge", attachments: [] }, undefined, {
+			model: { provider: "example", modelId: "editor-model" },
+			thinkingSelection: "high",
+		});
+		expect(api.createSession).toHaveBeenCalledOnce();
+		expect(api.setModel).toHaveBeenCalledWith(expect.objectContaining({ sessionId: created.sessionId }));
+		expect(api.setThinkingSelection).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: created.sessionId, selection: "high" }),
+		);
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: created.sessionId }));
 	});
 	it("deduplicates an in-flight empty project session create", async () => {
 		const { api, workflow } = harness();
