@@ -3126,7 +3126,7 @@ describe("AppServer", () => {
 		expect(recentItems).toHaveLength(3);
 		const userItem = recentItems.find((item) => item.role === "user");
 		expect(Buffer.byteLength(JSON.stringify(userItem), "utf8")).toBeLessThan(20 * 1024);
-		expect(JSON.stringify(userItem)).toContain("[report.pdf]");
+		expect(userItem?.attachments).toEqual([{ name: "report.pdf", byteLength: 12 }]);
 		expect(JSON.stringify(userItem)).not.toContain(internalPath);
 
 		await connection.handle({

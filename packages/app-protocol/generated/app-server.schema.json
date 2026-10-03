@@ -12268,6 +12268,30 @@
                                     },
                                     "maxItems": 256
                                   },
+                                  "attachments": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "byteLength"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        },
+                                        "byteLength": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 134217728
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 16
+                                  },
                                   "usage": {
                                     "type": "object",
                                     "required": [
@@ -12869,6 +12893,30 @@
                                       ]
                                     },
                                     "maxItems": 256
+                                  },
+                                  "attachments": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "byteLength"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        },
+                                        "byteLength": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 134217728
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 16
                                   },
                                   "usage": {
                                     "type": "object",
@@ -14923,6 +14971,30 @@
                                     },
                                     "maxItems": 256
                                   },
+                                  "attachments": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "byteLength"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        },
+                                        "byteLength": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 134217728
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 16
+                                  },
                                   "usage": {
                                     "type": "object",
                                     "required": [
@@ -15532,6 +15604,30 @@
                                       ]
                                     },
                                     "maxItems": 256
+                                  },
+                                  "attachments": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "name",
+                                        "byteLength"
+                                      ],
+                                      "properties": {
+                                        "name": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 255
+                                        },
+                                        "byteLength": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 134217728
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 16
                                   },
                                   "usage": {
                                     "type": "object",
@@ -23213,6 +23309,30 @@
                             },
                             "maxItems": 256
                           },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 134217728
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 16
+                          },
                           "usage": {
                             "type": "object",
                             "required": [
@@ -25750,6 +25870,30 @@
                                   ]
                                 },
                                 "maxItems": 256
+                              },
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "byteLength"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "byteLength": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 134217728
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
                               },
                               "usage": {
                                 "type": "object",
@@ -32816,6 +32960,30 @@
                               ]
                             },
                             "maxItems": 256
+                          },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 134217728
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 16
                           },
                           "usage": {
                             "type": "object",
@@ -61185,6 +61353,30 @@
                         },
                         "maxItems": 256
                       },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -63722,6 +63914,30 @@
                               ]
                             },
                             "maxItems": 256
+                          },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 134217728
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 16
                           },
                           "usage": {
                             "type": "object",
@@ -70788,6 +71004,30 @@
                           ]
                         },
                         "maxItems": 256
+                      },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
                       },
                       "usage": {
                         "type": "object",
@@ -82163,6 +82403,30 @@
                         },
                         "maxItems": 256
                       },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -82764,6 +83028,30 @@
                           ]
                         },
                         "maxItems": 256
+                      },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
                       },
                       "usage": {
                         "type": "object",
@@ -84818,6 +85106,30 @@
                         },
                         "maxItems": 256
                       },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -85427,6 +85739,30 @@
                           ]
                         },
                         "maxItems": 256
+                      },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
                       },
                       "usage": {
                         "type": "object",
@@ -88003,6 +88339,30 @@
                   },
                   "maxItems": 256
                 },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "byteLength"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "byteLength": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 134217728
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
+                },
                 "usage": {
                   "type": "object",
                   "required": [
@@ -88604,6 +88964,30 @@
                     ]
                   },
                   "maxItems": 256
+                },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "byteLength"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "byteLength": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 134217728
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
                 },
                 "usage": {
                   "type": "object",
@@ -90658,6 +91042,30 @@
                   },
                   "maxItems": 256
                 },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "byteLength"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "byteLength": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 134217728
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
+                },
                 "usage": {
                   "type": "object",
                   "required": [
@@ -91267,6 +91675,30 @@
                     ]
                   },
                   "maxItems": 256
+                },
+                "attachments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "name",
+                      "byteLength"
+                    ],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "byteLength": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 134217728
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 16
                 },
                 "usage": {
                   "type": "object",
@@ -94021,6 +94453,30 @@
             ]
           },
           "maxItems": 256
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "byteLength"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "byteLength": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 134217728
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 16
         },
         "usage": {
           "type": "object",
@@ -97470,6 +97926,30 @@
                                 },
                                 "maxItems": 256
                               },
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "byteLength"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "byteLength": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 134217728
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
+                              },
                               "usage": {
                                 "type": "object",
                                 "required": [
@@ -98071,6 +98551,30 @@
                                   ]
                                 },
                                 "maxItems": 256
+                              },
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "byteLength"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "byteLength": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 134217728
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
                               },
                               "usage": {
                                 "type": "object",
@@ -100125,6 +100629,30 @@
                                 },
                                 "maxItems": 256
                               },
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "byteLength"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "byteLength": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 134217728
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
+                              },
                               "usage": {
                                 "type": "object",
                                 "required": [
@@ -100734,6 +101262,30 @@
                                   ]
                                 },
                                 "maxItems": 256
+                              },
+                              "attachments": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "name",
+                                    "byteLength"
+                                  ],
+                                  "properties": {
+                                    "name": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "byteLength": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 134217728
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 16
                               },
                               "usage": {
                                 "type": "object",
@@ -105785,6 +106337,30 @@
                   ]
                 },
                 "maxItems": 256
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "name",
+                    "byteLength"
+                  ],
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255
+                    },
+                    "byteLength": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 134217728
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "maxItems": 16
               },
               "usage": {
                 "type": "object",

@@ -11,8 +11,10 @@ import type {
 } from "@metis/app-protocol";
 import {
 	formatSessionAttachmentDisplayText,
+	formatSessionFileSelections,
 	parseDeliverFileDetails,
 	type StoredPlan,
+	splitSessionAttachmentPrompt,
 	type ThreadGoal,
 } from "@metis/coding-agent/host";
 
@@ -184,23 +186,35 @@ function assistantBlocks(
 	return blocks;
 }
 
-function userBlocks(content: unknown, budget: TextBudget): ItemContentBlockView[] {
-	if (typeof content === "string") return textBlocks(formatSessionAttachmentDisplayText(content), budget);
-	if (!Array.isArray(content)) return [];
-	return textBlocks(
-		content.map((candidate) =>
-			typeof candidate === "object" &&
-			candidate !== null &&
-			(candidate as Record<string, unknown>).type === "text" &&
-			typeof (candidate as Record<string, unknown>).text === "string"
-				? {
-						...candidate,
-						text: formatSessionAttachmentDisplayText((candidate as Record<string, unknown>).text as string),
-					}
-				: candidate,
-		),
-		budget,
-	);
+function userContent(content: unknown, budget: TextBudget): Pick<ItemView, "content" | "attachments"> {
+	const attachments: NonNullable<ItemView["attachments"]> = [];
+	const publicText = (text: string): string => {
+		const prompt = splitSessionAttachmentPrompt(text);
+		for (const attachment of prompt.attachments) {
+			if (attachments.length >= 16) break;
+			if (!Number.isSafeInteger(attachment.size) || attachment.size < 0 || attachment.size > 128 * 1024 * 1024)
+				continue;
+			attachments.push({ name: attachment.name.slice(0, 255), byteLength: attachment.size });
+		}
+		// Preserve the existing selection/editor labels while removing upload paths.
+		return formatSessionAttachmentDisplayText(formatSessionFileSelections(prompt.text, prompt.fileSelections));
+	};
+	const sanitized =
+		typeof content === "string"
+			? publicText(content)
+			: Array.isArray(content)
+				? content.slice(0, 256).map((candidate) => {
+						if (typeof candidate !== "object" || candidate === null) return candidate;
+						const block = candidate as Record<string, unknown>;
+						return block.type === "text" && typeof block.text === "string"
+							? { ...block, text: publicText(block.text) }
+							: candidate;
+					})
+				: [];
+	return {
+		content: textBlocks(sanitized, budget).filter((block) => block.type !== "text" || block.text.trim() !== ""),
+		...(attachments.length > 0 ? { attachments } : {}),
+	};
 }
 
 export interface MessageProjectionInput {
@@ -353,7 +367,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			...(turnId === undefined ? {} : { turnId }),
 			role: "user",
 			state,
-			content: userBlocks(message.content, budget),
+			...userContent(message.content, budget),
 			createdAt,
 			...(state === "streaming" ? {} : { completedAt: createdAt }),
 		};

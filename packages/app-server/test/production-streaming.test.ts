@@ -409,7 +409,10 @@ describe("production runtime streaming", () => {
 				method: "session/readItems",
 				params: { sessionId: SESSION_REQUEST, limit: 200 },
 			});
-			expect(JSON.stringify(visibleUserItem)).toContain("[legal report.pdf]");
+			expect(JSON.stringify(visibleUserItem)).toContain(
+				'"attachments":[{"name":"legal report.pdf","byteLength":8}]',
+			);
+			expect(JSON.stringify(visibleUserItem)).not.toContain("[legal report.pdf]");
 			expect(JSON.stringify(visibleUserItem)).not.toContain(metadata[0]!.path);
 			completionResponse!.write(
 				`data: ${JSON.stringify({

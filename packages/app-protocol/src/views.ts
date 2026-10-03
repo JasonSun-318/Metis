@@ -531,6 +531,12 @@ export const ItemUsageViewSchema = StrictObject({
 	cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
 });
 
+/** Public upload metadata; owned storage paths stay on the server. */
+export const MessageAttachmentViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 255 }),
+	byteLength: Type.Integer({ minimum: 0, maximum: 128 * 1024 * 1024 }),
+});
+
 export const ItemViewSchema = StrictObject({
 	itemId: OpaqueIdSchema,
 	sessionId: SessionIdSchema,
@@ -538,6 +544,7 @@ export const ItemViewSchema = StrictObject({
 	role: Type.Union([Type.Literal("user"), Type.Literal("assistant"), Type.Literal("tool"), Type.Literal("system")]),
 	state: Type.Union([Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("interrupted")]),
 	content: Type.Array(ItemContentBlockViewSchema, { maxItems: 256 }),
+	attachments: Type.Optional(Type.Array(MessageAttachmentViewSchema, { maxItems: 16 })),
 	usage: Type.Optional(ItemUsageViewSchema),
 	createdAt: TimestampSchema,
 	completedAt: Type.Optional(TimestampSchema),

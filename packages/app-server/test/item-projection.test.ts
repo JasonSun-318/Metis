@@ -328,3 +328,69 @@ describe("plan projection", () => {
 		expect(projectMessageEntry(submitToolResultInput)).toBeUndefined();
 	});
 });
+
+describe("uploaded file presentation", () => {
+	const project = (content: unknown) =>
+		projectLiveMessage({
+			itemId: "user-attachment",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			state: "completed",
+			fallbackTimestamp: CREATED_AT,
+			message: { role: "user", content },
+		});
+	it("keeps real uploads separate from literal bracketed text in live and saved messages", () => {
+		const content = `Read [notes.pdf]\n\n<attachments>${JSON.stringify([
+			{ name: "notes.pdf", path: "/private/owned/hash.pdf", size: 2400 },
+			{ name: "说明.md", path: "/private/owned/hash.md", size: 80 },
+		])}</attachments>`;
+		const live = project(content)!;
+		expect(live.content).toEqual([{ type: "text", text: "Read [notes.pdf]" }]);
+		expect(live.attachments).toEqual([
+			{ name: "notes.pdf", byteLength: 2400 },
+			{ name: "说明.md", byteLength: 80 },
+		]);
+		expect(JSON.stringify(live)).not.toContain("/private/owned");
+		const saved = projectMessageEntry({
+			entry: {
+				type: "message",
+				id: "user-attachment",
+				turnId: "turn-1",
+				timestamp: CREATED_AT,
+				message: { role: "user", content },
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		});
+		expect(saved).toEqual(live);
+		expect(project("[notes.pdf]")?.attachments).toBeUndefined();
+	});
+	it("retains all sixteen files after a long text block, and supports file-only messages", () => {
+		const files = Array.from({ length: 16 }, (_, index) => ({
+			name: `file-${index}.md`,
+			path: `/private/${index}`,
+			size: index,
+		}));
+		const metadata = `<attachments>${JSON.stringify(files)}</attachments>`;
+		const result = project([
+			{ type: "text", text: "长".repeat(30_000) },
+			{ type: "text", text: metadata },
+		])!;
+		expect(result.attachments).toHaveLength(16);
+		expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(20 * 1024);
+		expect(project(metadata)?.content).toEqual([]);
+		expect(project(metadata)?.attachments).toHaveLength(16);
+	});
+	it("does not leak paths for parsed invalid file sizes or turn ordinary text into uploads", () => {
+		const result = project(
+			`<attachment>${JSON.stringify({ name: "bad.txt", path: "/private/bad", size: 1.5 })}</attachment>`,
+		)!;
+		expect(result.attachments).toBeUndefined();
+		expect(JSON.stringify(result)).not.toContain("/private/bad");
+		expect(project("explain <attachments>XML</attachments>")?.content).toEqual([
+			{ type: "text", text: "explain <attachments>XML</attachments>" },
+		]);
+	});
+});
