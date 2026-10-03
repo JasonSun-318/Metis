@@ -1,24 +1,24 @@
 ---
-name: obsidian-markdown
-description: Create and edit Obsidian Flavored Markdown with wikilinks, embeds, callouts, properties, and other Obsidian-specific syntax. Use when working with .md files in Obsidian, or when the user mentions wikilinks, callouts, frontmatter, tags, embeds, or Obsidian notes.
+name: metis-markdown
+description: Create and edit Metis knowledge notes with Obsidian-compatible Markdown, including wikilinks, embeds, callouts, properties, and advanced syntax. Use when formatting knowledge notes or working with these Markdown extensions.
 ---
 
-<!-- Source: https://github.com/kepano/obsidian-skills/tree/3ccff5338ea700537839b21900aa5358a0402c98/skills/obsidian-markdown; MIT, Steph Ango. -->
-
-# Obsidian Flavored Markdown Skill
+# Metis Markdown
 
 Create and edit valid Obsidian Flavored Markdown. Obsidian extends CommonMark and GFM with wikilinks, embeds, callouts, properties, comments, and other syntax. This skill covers only Obsidian-specific extensions -- standard Markdown (headings, bold, italic, lists, quotes, code blocks, tables) is assumed knowledge.
 
-## Workflow: Creating an Obsidian Note
+This reference describes Obsidian-compatible syntax, including advanced forms that Metis may not fully display. For Metis knowledge tasks, follow the `knowledge` skill for library selection, optional artifacts, and current reading capabilities. The examples describe available syntax; they are not a checklist of required note content.
 
-1. **Add frontmatter** with properties (title, tags, aliases) at the top of the file. See [PROPERTIES.md](references/PROPERTIES.md) for all property types.
-2. **Write content** using standard Markdown for structure, plus Obsidian-specific syntax below.
-3. **Link related notes** using wikilinks (`[[Note]]`) for internal vault connections, or standard Markdown links for external URLs.
-4. **Embed content** from other notes, images, or PDFs using the `![[embed]]` syntax. See [EMBEDS.md](references/EMBEDS.md) for all embed types.
-5. **Add callouts** for highlighted information using `> [!type]` syntax. See [CALLOUTS.md](references/CALLOUTS.md) for all callout types.
-6. **Verify** the note renders correctly in Obsidian's reading view.
+## Optional Note Authoring
 
-> When choosing between wikilinks and Markdown links: use `[[wikilinks]]` for notes within the vault (Obsidian tracks renames automatically) and `[text](url)` for external URLs only.
+1. **Add frontmatter when useful or requested**, with properties (title, tags, aliases) at the top of the file. See `references/PROPERTIES.md` for all property types.
+2. **Write content** using standard Markdown for structure, choosing extensions below when useful or requested.
+3. **Link related existing notes** using wikilinks (`[[Note]]`) for internal library connections, or ordinary Markdown links for relative note paths and external URLs.
+4. **Embed content when useful or requested** from other notes, images, or PDFs using the `![[embed]]` syntax. See `references/EMBEDS.md` for all embed types.
+5. **Add callouts when useful or requested** for highlighted information using `> [!type]` syntax. See `references/CALLOUTS.md` for all callout types.
+6. **Verify** the written content and linked targets with existing file tools. Check Obsidian's reading view only when the user requests an Obsidian workflow and that application is available; Metis tasks do not require it.
+
+> In Obsidian, when choosing between wikilinks and Markdown links: use `[[wikilinks]]` for notes within the vault (Obsidian tracks renames automatically) and `[text](url)` for external URLs only.
 
 ## Internal Links (Wikilinks)
 
@@ -56,7 +56,7 @@ Prefix any wikilink with `!` to embed its content inline:
 ![[document.pdf#page=3]]               Embed PDF page
 ```
 
-See [EMBEDS.md](references/EMBEDS.md) for audio, video, search embeds, and external images.
+See `references/EMBEDS.md` for audio, video, search embeds, and external images.
 
 ## Callouts
 
@@ -73,7 +73,7 @@ See [EMBEDS.md](references/EMBEDS.md) for audio, video, search embeds, and exter
 
 Common types: `note`, `tip`, `warning`, `info`, `example`, `quote`, `bug`, `danger`, `success`, `failure`, `question`, `abstract`, `todo`.
 
-See [CALLOUTS.md](references/CALLOUTS.md) for the full list with aliases, nesting, and custom CSS callouts.
+See `references/CALLOUTS.md` for the full list with aliases, nesting, and custom CSS callouts.
 
 ## Properties (Frontmatter)
 
@@ -93,7 +93,7 @@ cssclasses:
 
 Default properties: `tags` (searchable labels), `aliases` (alternative note names for link suggestions), `cssclasses` (CSS classes for styling).
 
-See [PROPERTIES.md](references/PROPERTIES.md) for all property types, tag syntax rules, and advanced usage.
+See `references/PROPERTIES.md` for all property types, tag syntax rules, and advanced usage.
 
 ## Tags
 
@@ -189,10 +189,8 @@ The algorithm uses $O(n \log n)$ sorting. See [[Algorithm Notes#Sorting]] for de
 Reviewed in [[Meeting Notes 2024-01-10#Decisions]].
 ````
 
-## References
+## Local Reference Files
 
-- [Obsidian Flavored Markdown](https://help.obsidian.md/obsidian-flavored-markdown)
-- [Internal links](https://help.obsidian.md/links)
-- [Embed files](https://help.obsidian.md/embeds)
-- [Callouts](https://help.obsidian.md/callouts)
-- [Properties](https://help.obsidian.md/properties)
+- Read `references/PROPERTIES.md` for property types and tags.
+- Read `references/EMBEDS.md` for note, media, PDF, and query embed syntax.
+- Read `references/CALLOUTS.md` for callout types, nesting, and custom styling.

@@ -49,7 +49,7 @@ it("persists multiple linked directories across restart and keeps conversations 
 		};
 		let rpc = await connect();
 		const skills = (await rpc("skill/list", { sessionId: first })).skills;
-		expect(skills.map((skill) => skill.name)).toEqual(expect.arrayContaining(["knowledge", "obsidian-markdown"]));
+		expect(skills.map((skill) => skill.name)).toEqual(expect.arrayContaining(["knowledge", "metis-markdown"]));
 		const libraries = await Promise.all(
 			paths.map((path) => rpc("knowledge/register", { path, requestId: randomUUID() })),
 		);
