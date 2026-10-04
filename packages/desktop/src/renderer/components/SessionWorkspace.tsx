@@ -269,6 +269,11 @@ export function SessionWorkspaceView({
 		[fileDrafts, workspace],
 	);
 	const dirtySessionKey = dirtySessionIds.join("");
+	const retainedKey = useMemo(
+		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => (tab.sessionId === null ? [] : [tab.sessionId])))]
+			.sort().join("\n"),
+		[workspace],
+	);
 
 	const seenProcesses = useRef(new Map<string, string>());
 	const autoOpenedProcessSessions = useRef(new Set<string>());
@@ -486,6 +491,9 @@ export function SessionWorkspaceView({
 		setTabMenu(null);
 	}, [mode, chatSessionId]);
 	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
+	useEffect(() => {
+		void api.retainWorkspaceSessions({ sessionIds: retainedKey === "" ? [] : retainedKey.split("\n") }).catch(onError);
+	}, [api, retainedKey, onError]);
 	useEffect(() => {
 		if (cleanupSessionIds.length === 0) return;
 		const removedSessions = new Set(cleanupSessionIds);

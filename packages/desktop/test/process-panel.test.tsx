@@ -23,7 +23,7 @@ vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => (
 const sessionId = "11111111-1111-4111-8111-111111111111";
 let root: Root;
 let container: HTMLDivElement;
-const api = { listBrowserProfiles: vi.fn().mockResolvedValue([]), subscribeBrowser: vi.fn(() => () => {}), createTerminal: vi.fn() } as unknown as MetisDesktopApi;
+const api = { listBrowserProfiles: vi.fn().mockResolvedValue([]), subscribeBrowser: vi.fn(() => () => {}), createTerminal: vi.fn(), retainWorkspaceSessions: vi.fn().mockResolvedValue(undefined) } as unknown as MetisDesktopApi;
 const onError = vi.fn();
 const command = (id: string, output = "", state: SessionProcessView["state"] = "running"): SessionProcessView => ({ processId: id, command: `echo ${id}`, output, state, truncated: false });
 const activeProcessTab = () => container.querySelector('[role="tab"][aria-label="Process"][aria-selected="true"]');

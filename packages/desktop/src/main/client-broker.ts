@@ -55,6 +55,7 @@ import {
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
 	validateResolveBrowserHandoffInput,
+	validateRetainWorkspaceSessions,
 	validateSearchWorkspaceFilesInput,
 	validateWorkspaceEditState,
 	validateWorkspaceMutationInput,
@@ -316,6 +317,7 @@ export class ClientBroker {
 	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
+	private readonly retainedWorkspaceSessions = new Set<string>();
 	private readonly backgroundQuestionSessions = new Set<string>();
 	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
 	private scheduleSubscribed = false;
@@ -480,11 +482,13 @@ export class ClientBroker {
 				if (view.state !== "ready") {
 					this.browserToolHost.cancelAll("server_restarted");
 					this.dropPendingInteractions();
+					for (const sessionId of this.subscribedSessions) {
+						if (!this.retainedWorkspaceSessions.has(sessionId)) this.workspaceFiles.revoke(sessionId);
+					}
 					this.subscribedSessions.clear();
 					this.backgroundQuestionSessions.clear();
 					this.subscribedSessionScopes.clear();
 					this.scheduleSubscribed = false;
-					this.workspaceFiles.clear();
 				}
 				this.sendEvent({ type: "supervisor", view });
 			}),
@@ -620,7 +624,10 @@ export class ClientBroker {
 					if (session.mode === "code" && session.cwd)
 						this.workspaceFiles.authorize(session.sessionId, session.cwd);
 					else this.workspaceFiles.revoke(params.sessionId);
-					for (const previousSessionId of previousSessionIds) this.workspaceFiles.revoke(previousSessionId);
+					for (const previousSessionId of previousSessionIds) {
+						if (!this.retainedWorkspaceSessions.has(previousSessionId))
+							this.workspaceFiles.revoke(previousSessionId);
+					}
 					const previousSessions = new Set(previousSessionIds);
 					// Keep the owner of an unanswered question alive while the user visits another task.
 					// Permission approvals still cancel when their task is hidden.
@@ -797,6 +804,16 @@ export class ClientBroker {
 		});
 		this.register(DESKTOP_IPC_CHANNELS.setWorkspaceEditState, 1, async (_event, [input]) => {
 			this.setWorkspaceEditState(validateWorkspaceEditState(input));
+		});
+		this.register(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions, 1, async (_event, [input]) => {
+			const next = new Set(validateRetainWorkspaceSessions(input).sessionIds);
+			for (const sessionId of this.retainedWorkspaceSessions) {
+				if (!next.has(sessionId) && !this.subscribedSessions.has(sessionId)) {
+					this.workspaceFiles.revoke(sessionId);
+				}
+			}
+			this.retainedWorkspaceSessions.clear();
+			for (const sessionId of next) this.retainedWorkspaceSessions.add(sessionId);
 		});
 	}
 
@@ -1090,6 +1107,7 @@ export class ClientBroker {
 			() => this.browserToolHost.cancelAll("tab_closed"),
 			() => this.browserManager.closeAll(),
 			() => this.workspaceFiles.clear(),
+			() => this.retainedWorkspaceSessions.clear(),
 			() => this.cancelPendingInteractions(),
 			() => this.releaseSessionSubscriptions(),
 			() => this.setWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null }),
@@ -1103,6 +1121,7 @@ export class ClientBroker {
 			() => this.browserToolHost.cancelAll("tab_closed"),
 			() => this.browserManager.suspendRenderer(),
 			() => this.workspaceFiles.clear(),
+			() => this.retainedWorkspaceSessions.clear(),
 			() => this.cancelPendingInteractions(),
 			() => this.releaseSessionSubscriptions(),
 		]);
@@ -1137,6 +1156,7 @@ export class ClientBroker {
 		for (const sessionId of ids) {
 			this.workspaceFiles.revoke(sessionId);
 			this.subscribedSessions.delete(sessionId);
+			this.retainedWorkspaceSessions.delete(sessionId);
 			this.backgroundQuestionSessions.delete(sessionId);
 			this.subscribedSessionScopes.delete(sessionId);
 		}

@@ -45,6 +45,7 @@ import {
 	validateReadWorkspaceFileInput,
 	validateResizeTerminalInput,
 	validateResolveBrowserHandoffInput,
+	validateRetainWorkspaceSessions,
 	validateSearchWorkspaceFilesInput,
 	validateWorkspaceEditState,
 	validateWorkspaceMutationInput,
@@ -217,6 +218,9 @@ const api = {
 	},
 	setWorkspaceEditState: async (input) => {
 		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.setWorkspaceEditState, validateWorkspaceEditState(input));
+	},
+	retainWorkspaceSessions: async (input) => {
+		await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions, validateRetainWorkspaceSessions(input));
 	},
 	getChangelog: async (): Promise<DesktopChangelog> =>
 		validateDesktopChangelog(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getChangelog)),

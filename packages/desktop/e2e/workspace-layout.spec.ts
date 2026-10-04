@@ -1,6 +1,7 @@
+import type { ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { createServer } from "node:http";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -19,8 +20,27 @@ import {
 	writeOfflineProviderConfig,
 } from "./packaged-app-harness.ts";
 
-test("terminal keeps its content when its tab is split into a second pane", async () => {
-	test.setTimeout(120_000);
+interface SeedSession {
+	readonly id: string;
+	readonly mode: "chat" | "code";
+	readonly name: string;
+}
+
+interface LaunchedWorkspace {
+	readonly app: ChildProcess;
+	readonly browser: Browser;
+	readonly consoleErrors: string[];
+	readonly diagnostics: string[];
+	readonly fakeProvider: Server;
+	readonly page: Page;
+	readonly projectDir: string;
+	readonly tempRoot: string;
+}
+
+async function launchWorkspace(options: {
+	readonly projectFiles?: Readonly<Record<string, string>>;
+	readonly sessions: readonly SeedSession[];
+}): Promise<LaunchedWorkspace> {
 	const executable = packagedExecutable();
 	expect(existsSync(executable), `Package the desktop app first: ${executable}`).toBe(true);
 
@@ -28,7 +48,7 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat"; permissionPreset: "full" }): {
+			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full" }): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -45,15 +65,19 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 	const projectDir = path.join(tempRoot, "project");
 	const userDataDir = path.join(tempRoot, "electron");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
+	for (const [name, contents] of Object.entries(options.projectFiles ?? {})) {
+		await writeFile(path.join(projectDir, name), contents);
+	}
 
-	const sessionId = "81000000-0000-4000-8000-0000000000c3";
-	const manager = sessions.SessionManager.create(
-		projectDir,
-		sessions.getDefaultSessionDir(projectDir, agentDir),
-		{ id: sessionId, mode: "chat", permissionPreset: "full" },
-	);
-	manager.appendSessionInfo("Layout Alpha");
-	manager.close();
+	for (const seed of options.sessions) {
+		const manager = sessions.SessionManager.create(
+			projectDir,
+			sessions.getDefaultSessionDir(projectDir, agentDir),
+			{ id: seed.id, mode: seed.mode, permissionPreset: "full" },
+		);
+		manager.appendSessionInfo(seed.name);
+		manager.close();
+	}
 	new trust.ProjectTrustStore(agentDir).set(projectDir, true);
 
 	const fakeProvider = createServer(async (request, response) => {
@@ -80,17 +104,39 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 		diagnostics,
 		env: { METIS_UPDATE_BASE_URL: "", ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
 	});
-	let browser: Browser | undefined;
-	let page: Page | undefined;
-	try {
-		({ browser, page } = await connectToApp(debuggingPort, app, diagnostics));
-		page.setDefaultTimeout(15_000);
-		page.on("console", (message) => {
-			if (message.type() === "error") consoleErrors.push(message.text());
-		});
-		await page.setViewportSize({ width: 1200, height: 800 });
-		await waitForServerReady(page);
+	const { browser, page } = await connectToApp(debuggingPort, app, diagnostics);
+	page.setDefaultTimeout(15_000);
+	page.on("console", (message) => {
+		if (message.type() === "error") consoleErrors.push(message.text());
+	});
+	await page.setViewportSize({ width: 1200, height: 800 });
+	await waitForServerReady(page);
+	return { app, browser, consoleErrors, diagnostics, fakeProvider, page, projectDir, tempRoot };
+}
 
+async function stopWorkspace(workspace: LaunchedWorkspace): Promise<void> {
+	await workspace.browser.close().catch(() => undefined);
+	await stopProcess(workspace.app);
+	workspace.fakeProvider.closeAllConnections();
+	await new Promise<void>((resolve) => workspace.fakeProvider.close(() => resolve()));
+	await rm(workspace.tempRoot, { recursive: true, force: true }).catch(() => undefined);
+}
+
+async function rendererFailure(error: unknown, page: Page, diagnostics: readonly string[]): Promise<Error> {
+	const bodyText = await page.locator("body").innerText().catch(() => "renderer unavailable");
+	return new Error(
+		`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
+	);
+}
+
+test("terminal keeps its content when its tab is split into a second pane", async () => {
+	test.setTimeout(120_000);
+	const sessionId = "81000000-0000-4000-8000-0000000000c3";
+	const workspace = await launchWorkspace({
+		sessions: [{ id: sessionId, mode: "chat", name: "Layout Alpha" }],
+	});
+	const { consoleErrors, diagnostics, page } = workspace;
+	try {
 		await page.locator('.session-button[aria-label="Layout Alpha"]').click();
 		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 
@@ -102,7 +148,7 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 		await expect(panel).toBeVisible();
 		const terminalId = (await panel.getAttribute("id"))!.slice("terminal-panel-".length);
 		const panelHandle = await panel.elementHandle();
-		await expect.poll(async () => page!.evaluate(async (id) => {
+		await expect.poll(async () => page.evaluate(async (id) => {
 			try {
 				await (globalThis as unknown as { metis: { writeTerminal(input: { terminalId: string; data: string }): Promise<void> } }).metis
 					.writeTerminal({ terminalId: id, data: "" });
@@ -132,13 +178,51 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 		}
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
-		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
-		throw new Error(
-			`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
-		);
+		throw await rendererFailure(error, page, diagnostics);
 	} finally {
-		await browser?.close().catch(() => undefined);
-		await stopProcess(app);
-		await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+		await stopWorkspace(workspace);
+	}
+});
+
+test("a file tab keeps workspace authorization after another session is opened", async () => {
+	test.setTimeout(120_000);
+	const alphaId = "81000000-0000-4000-8000-0000000000d1";
+	const betaId = "81000000-0000-4000-8000-0000000000d2";
+	const workspace = await launchWorkspace({
+		projectFiles: { "README.md": "metis p0b readme\n" },
+		sessions: [
+			{ id: alphaId, mode: "code", name: "Files Alpha" },
+			{ id: betaId, mode: "code", name: "Files Beta" },
+		],
+	});
+	const { consoleErrors, diagnostics, page, projectDir } = workspace;
+	try {
+		await page.locator(".mode-switch").getByRole("button", { name: "Code", exact: true }).click();
+		await page.locator('.session-button[aria-label="Files Alpha"]').click();
+		await page.locator(`[data-active-session-id="${alphaId}"]`).waitFor({ state: "visible" });
+
+		await page.locator(".tool-add-trigger").first().click();
+		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Files", exact: true }).click();
+		const readmeRow = page.locator('.file-tree-row-select[title="README.md"]');
+		await readmeRow.click();
+		await expect(page.getByRole("tab", { name: "README.md", exact: true })).toBeVisible();
+		await readmeRow.dblclick();
+
+		await page.locator('.session-button[aria-label="Files Beta"]').click();
+		await page.locator(`[data-active-session-id="${betaId}"]`).waitFor({ state: "visible" });
+
+		await page.getByRole("tab", { name: "README.md", exact: true }).click();
+		const editor = page.locator(".file-panel.is-visible .cm-content");
+		await editor.click();
+		await page.keyboard.insertText("p0b-edit\n");
+		await page.keyboard.press(process.platform === "darwin" ? "Meta+s" : "Control+s");
+
+		await expect.poll(async () => readFile(path.join(projectDir, "README.md"), "utf8")).toContain("p0b-edit");
+		await expect(page.getByText("not authorized", { exact: false })).toHaveCount(0);
+		expect(consoleErrors).toEqual([]);
+	} catch (error) {
+		throw await rendererFailure(error, page, diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
 	}
 });

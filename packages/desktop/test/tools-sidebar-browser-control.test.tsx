@@ -54,6 +54,7 @@ function fixture() {
 			listeners.add(listener);
 			return () => listeners.delete(listener);
 		}),
+		retainWorkspaceSessions: vi.fn().mockResolvedValue(undefined),
 	} as unknown as MetisDesktopApi;
 	const onActivateSession = vi.fn();
 	const container = document.createElement("div");

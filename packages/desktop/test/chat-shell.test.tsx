@@ -471,6 +471,7 @@ function createHarness(options: {
 		}),
 		writeClipboardText: vi.fn().mockResolvedValue(undefined),
 		setWorkspaceEditState: vi.fn().mockResolvedValue(undefined),
+		retainWorkspaceSessions: vi.fn().mockResolvedValue(undefined),
 		getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		updateWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		getChangelog: vi.fn().mockResolvedValue(options.changelog ?? CHANGELOG),
@@ -4683,6 +4684,37 @@ describe("Chat desktop shell", () => {
 		await act(async () => moveItem.click());
 		await flush();
 		expect(container.querySelector("#composer-input")).toBe(composer);
+
+		await act(async () => root.unmount());
+	});
+
+	it("declares retained sessions from the session ids of open tabs", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await addTool(container, "Terminal");
+		await flush();
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-existing"] });
+
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-existing", "chat-other"] });
+
+		await act(async () => button(container, "Close Chat project task").click());
+		await act(async () => button(container, "Close Terminal").click());
+		await flush();
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-other"] });
 
 		await act(async () => root.unmount());
 	});

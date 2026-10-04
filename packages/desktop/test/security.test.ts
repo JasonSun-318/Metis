@@ -24,6 +24,7 @@ import {
 	validateListWorkspaceDirectoryInput,
 	validateOpenWorkspaceFileInput,
 	validateReadWorkspaceFileInput,
+	validateRetainWorkspaceSessions,
 	validateSearchWorkspaceFilesInput,
 	validateWorkspaceEditState,
 	validateWorkspaceMutationInput,
@@ -322,6 +323,19 @@ describe("desktop trust boundaries", () => {
 		expect(() =>
 			validateWorkspaceEditState({ dirty: true, language: "en", visibleSessionId: "", extra: true }),
 		).toThrow();
+	});
+
+	it("accepts only exact workspace session retention reports", () => {
+		expect(validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"] })).toEqual({
+			sessionIds: ["valid-session-id"],
+		});
+		expect(validateRetainWorkspaceSessions({ sessionIds: [] })).toEqual({ sessionIds: [] });
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: "not-an-array" })).toThrow();
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: ["bad id"] })).toThrow();
+		expect(() =>
+			validateRetainWorkspaceSessions({ sessionIds: Array.from({ length: 257 }, (_, index) => `s-${index}`) }),
+		).toThrow();
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: [], extra: true })).toThrow();
 	});
 
 	it("validates release notes on every versioned desktop update state", () => {
@@ -1188,11 +1202,101 @@ describe("desktop trust boundaries", () => {
 		expect(workspaceFiles.revoke).toHaveBeenCalledWith(chatSessionId);
 
 		setView({ state: "restarting" });
-		expect(workspaceFiles.clear).toHaveBeenCalledTimes(1);
+		expect(workspaceFiles.clear).not.toHaveBeenCalled();
 		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
-		expect(workspaceFiles.clear).toHaveBeenCalledTimes(2);
+		expect(workspaceFiles.clear).toHaveBeenCalledTimes(1);
 		broker.dispose();
-		expect(workspaceFiles.clear).toHaveBeenCalledTimes(3);
+		expect(workspaceFiles.clear).toHaveBeenCalledTimes(2);
+	});
+
+	it("retains workspace file authorization only for sessions with open tabs", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { setView, supervisor } = supervisorHarness();
+		const alphaId = "10000000-0000-4000-8000-0000000000a1";
+		const betaId = "10000000-0000-4000-8000-0000000000b2";
+		const gammaId = "10000000-0000-4000-8000-0000000000c3";
+		const neverOpenedId = "10000000-0000-4000-8000-0000000000d4";
+		const cwds = new Map([
+			[alphaId, "/work/alpha"],
+			[betaId, "/work/beta"],
+			[gammaId, "/work/gamma"],
+		]);
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? {
+							snapshot: {
+								session: {
+									sessionId: request.params.sessionId,
+									mode: "code",
+									cwd: cwds.get(request.params.sessionId),
+								},
+							},
+						}
+					: {},
+		}));
+		const workspaceFiles = {
+			authorize: vi.fn(),
+			revoke: vi.fn(),
+			clear: vi.fn(),
+			listDirectory: vi.fn(async () => [{ name: "src", relativePath: "src", kind: "directory" as const }]),
+			search: vi.fn(async () => []),
+			readFile: vi.fn(),
+			readPreviewBytes: vi.fn(),
+			writeFile: vi.fn(),
+			openFile: vi.fn(),
+			mutateEntry: vi.fn(),
+			getReview: vi.fn(),
+			getReviewFileDiff: vi.fn(),
+			getReviewFileContext: vi.fn(),
+		};
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor, workspaceFiles });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		workspaceFiles.clear.mockClear();
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		const retain = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions)!;
+
+		await openSession(event, { sessionId: alphaId });
+		expect(workspaceFiles.authorize).toHaveBeenCalledWith(alphaId, "/work/alpha");
+		await retain(event, { sessionIds: [alphaId] });
+		await openSession(event, { sessionId: betaId });
+		expect(workspaceFiles.authorize).toHaveBeenCalledWith(betaId, "/work/beta");
+		expect(workspaceFiles.revoke).not.toHaveBeenCalledWith(alphaId);
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.listWorkspaceDirectory)!(event, {
+				sessionId: alphaId,
+				relativePath: "",
+			}),
+		).resolves.toEqual([{ name: "src", relativePath: "src", kind: "directory" }]);
+		expect(workspaceFiles.listDirectory).toHaveBeenCalledWith({ sessionId: alphaId, relativePath: "" });
+
+		await retain(event, { sessionIds: [betaId] });
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(alphaId);
+		await retain(event, { sessionIds: [betaId, neverOpenedId] });
+		expect(workspaceFiles.authorize).not.toHaveBeenCalledWith(neverOpenedId, expect.anything());
+		await retain(event, { sessionIds: [betaId] });
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(neverOpenedId);
+
+		await openSession(event, { sessionId: gammaId });
+		expect(workspaceFiles.revoke).not.toHaveBeenCalledWith(betaId);
+		setView({ state: "restarting" });
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(gammaId);
+		expect(workspaceFiles.revoke).not.toHaveBeenCalledWith(betaId);
+		expect(workspaceFiles.clear).not.toHaveBeenCalled();
+
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.deleteSession)!(event, {
+			sessionId: betaId,
+			requestId: "11111111-1111-4111-8111-111111111401",
+		});
+		expect(workspaceFiles.revoke).toHaveBeenCalledWith(betaId);
+		const betaRevokes = workspaceFiles.revoke.mock.calls.filter(([id]) => id === betaId).length;
+		await retain(event, { sessionIds: [] });
+		expect(workspaceFiles.revoke.mock.calls.filter(([id]) => id === betaId)).toHaveLength(betaRevokes);
+		broker.dispose();
 	});
 
 	it("maps only typed calls and revalidates their parameters in main", async () => {

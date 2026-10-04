@@ -127,6 +127,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	getWorkspaceReviewFileContext: "metis:get-workspace-review-file-context",
 	writeClipboardText: "metis:write-clipboard-text",
 	setWorkspaceEditState: "metis:set-workspace-edit-state",
+	retainWorkspaceSessions: "metis:retain-workspace-sessions",
 	getChangelog: "metis:get-changelog",
 	getUpdateState: "metis:get-update-state",
 	checkForUpdate: "metis:check-for-update",
@@ -539,6 +540,10 @@ export interface DesktopWorkspaceEditState {
 	readonly visibleSessionId: string | null;
 }
 
+export interface DesktopRetainWorkspaceSessions {
+	readonly sessionIds: readonly string[];
+}
+
 export interface DesktopCreateProjectFolderInput {
 	readonly parentDirectory: string;
 	readonly name: string;
@@ -604,6 +609,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	getWorkspaceReviewFileContext(input: DesktopWorkspaceReviewFileInput): Promise<DesktopWorkspaceReviewFileContext>;
 	writeClipboardText(input: DesktopWriteClipboardTextInput): Promise<void>;
 	setWorkspaceEditState(input: DesktopWorkspaceEditState): Promise<void>;
+	retainWorkspaceSessions(input: DesktopRetainWorkspaceSessions): Promise<void>;
 	getChangelog(): Promise<DesktopChangelog>;
 	getUpdateState(): Promise<DesktopUpdateState>;
 	checkForUpdate(): Promise<DesktopUpdateState>;
@@ -862,6 +868,18 @@ export function validateWorkspaceEditState(value: unknown): DesktopWorkspaceEdit
 		language: input.language,
 		visibleSessionId: input.visibleSessionId as string | null,
 	};
+}
+
+export function validateRetainWorkspaceSessions(value: unknown): DesktopRetainWorkspaceSessions {
+	const input = exactRecord(value, ["sessionIds"], "workspace session retention");
+	if (!Array.isArray(input.sessionIds) || input.sessionIds.length > 256) {
+		throw new TypeError("Invalid workspace session retention");
+	}
+	const sessionIds = input.sessionIds.map((sessionId) => {
+		assertSchema(sessionIdValidator, sessionId, "invalid_params", "workspace session id");
+		return sessionId as string;
+	});
+	return { sessionIds };
 }
 
 const STABLE_DESKTOP_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
