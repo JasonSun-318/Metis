@@ -996,6 +996,7 @@ export class SessionWorkspaceWorkflow {
 		const afterFailure = this.store.getSnapshot();
 		if (afterFailure.syncStatus !== "resnapshot_required" || !before.activeSessionId) return;
 		this.invalidateSessionLists();
+		this.store.markResubscribing();
 		try {
 			const recovered = await this.api.openSession({ sessionId: before.activeSessionId });
 			if (this.isCurrentOpen(generation, lifecycle)) {
@@ -1004,6 +1005,7 @@ export class SessionWorkspaceWorkflow {
 			}
 		} catch {
 			// Preserve resnapshot_required so a later server event retries recovery.
+			this.store.restoreSyncStatusAfterFailedOpen(afterFailure);
 		}
 	}
 

@@ -44,6 +44,7 @@ export interface MutableProjectionState {
 	serverEpoch: string | null;
 	cursor: number;
 	syncStatus: ProjectionSyncStatus;
+	resubscribeBuffer: { readonly cursor: number; readonly event: DomainEvent }[] | "overflowed" | null;
 	collaborationMode: SessionSnapshot["collaborationMode"];
 	permissionPreset: SessionSnapshot["permissionPreset"];
 	effectiveSettings: SessionSnapshot["effectiveSettings"];
@@ -95,6 +96,7 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		syncStatus: "empty",
+		resubscribeBuffer: null,
 		collaborationMode: "default",
 		permissionPreset: "auto",
 		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
@@ -253,8 +255,10 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 
 	state.nextBeforeItemId = snapshot.nextBeforeItemId;
 	state.activeTurnId = snapshot.activeTurnId;
-	state.serverEpoch = snapshot.serverEpoch;
-	state.cursor = snapshot.cursor;
+	if (snapshot.serverEpoch !== state.serverEpoch || state.cursor === 0) {
+		state.serverEpoch = snapshot.serverEpoch;
+		state.cursor = snapshot.cursor;
+	}
 	state.syncStatus = "ready";
 	state.collaborationMode = snapshot.collaborationMode;
 	state.permissionPreset = snapshot.permissionPreset;
@@ -277,10 +281,32 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	state.queuedTurns = snapshot.queuedTurns;
 	if (sessionChanged) clearAgentTranscript(state.agentTranscript);
 	else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
+	const buffered = state.resubscribeBuffer;
+	state.resubscribeBuffer = null;
+	if (buffered === "overflowed") {
+		state.syncStatus = "resnapshot_required";
+	} else if (buffered) {
+		const replay = buffered
+			.filter((entry) => {
+				if (entry.event.type === "session/updated") return false;
+				const eventSession = eventSessionId(entry.event);
+				return eventSession === undefined || (eventSession === sessionId && entry.cursor > snapshot.cursor);
+			})
+			.map((entry) => entry.event);
+		replayProjectionEvents(state, replay);
+	}
 }
 
 export function markProjectionResubscribing(state: MutableProjectionState): void {
 	state.syncStatus = "resubscribing";
+}
+
+export function replayProjectionEvents(state: MutableProjectionState, events: readonly DomainEvent[]): void {
+	if (!canApplyEvents(state, events)) {
+		state.syncStatus = "resnapshot_required";
+		return;
+	}
+	for (const event of events) applyEvent(state, event);
 }
 
 export function restoreProjectionSyncStatus(
@@ -298,7 +324,7 @@ export function restoreProjectionSyncStatus(
 	return true;
 }
 
-function eventSessionId(event: DomainEvent): string | undefined {
+export function eventSessionId(event: DomainEvent): string | undefined {
 	switch (event.type) {
 		case "session/updated":
 			return event.session.sessionId;
@@ -588,11 +614,12 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 
 export function applyConnectionEvents(state: MutableProjectionState, batch: ConnectionEventsParams): BatchApplyResult {
 	const invalid =
-		state.syncStatus !== "ready" ||
 		batch.serverEpoch !== state.serverEpoch ||
-		batch.fromCursor !== state.cursor + 1 ||
+		batch.fromCursor <= state.cursor ||
 		batch.toCursor < batch.fromCursor ||
-		!canApplyEvents(state, batch.events);
+		state.syncStatus === "empty" ||
+		state.syncStatus === "resnapshot_required" ||
+		(state.syncStatus === "resubscribing" && state.resubscribeBuffer === null);
 	if (invalid) {
 		if (
 			batch.serverEpoch === state.serverEpoch &&
@@ -607,6 +634,38 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 		return "resnapshot_required";
 	}
 
+	if (state.syncStatus === "resubscribing") {
+		const buffer = state.resubscribeBuffer === "overflowed" ? null : state.resubscribeBuffer;
+		for (let index = 0; index < batch.events.length; index += 1) {
+			const event = batch.events[index]!;
+			if (event.type === "session/updated") applyEvent(state, event);
+			else if (buffer) {
+				buffer.push({ cursor: batch.fromCursor + index, event });
+				if (buffer.length > 5000) {
+					state.resubscribeBuffer = "overflowed";
+					break;
+				}
+			}
+		}
+		state.cursor = batch.toCursor;
+		return "applied";
+	}
+
+	const applicable: DomainEvent[] = [];
+	for (const event of batch.events) {
+		const sessionId = eventSessionId(event);
+		if (sessionId === undefined || sessionId === state.activeSessionId || event.type === "session/updated") {
+			applicable.push(event);
+		}
+	}
+	if (!canApplyEvents(state, applicable)) {
+		for (const event of batch.events) {
+			if (event.type === "session/updated") applyEvent(state, event);
+		}
+		state.syncStatus = "resnapshot_required";
+		return "resnapshot_required";
+	}
+
 	const reloadRequired = batch.events.some(
 		(event) =>
 			(event.type === "session/invalidated" &&
@@ -616,8 +675,11 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 				event.reason === "reload_required" &&
 				targetsActiveProject(state, event)),
 	);
-	for (const event of batch.events) applyEvent(state, event);
-	if (reloadRequired) return "resnapshot_required";
+	for (const event of applicable) applyEvent(state, event);
+	if (reloadRequired) {
+		state.syncStatus = "resnapshot_required";
+		return "resnapshot_required";
+	}
 	state.cursor = batch.toCursor;
 	return "applied";
 }

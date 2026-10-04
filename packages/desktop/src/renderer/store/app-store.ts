@@ -15,6 +15,7 @@ import {
 	applyConnectionEvents,
 	type BatchApplyResult,
 	createProjectionState,
+	eventSessionId,
 	markProjectionResubscribing,
 	prependAgentItems,
 	prependProjectionItems,
@@ -25,6 +26,7 @@ import {
 	replaceAgentItems,
 	replaceProjectionSnapshot,
 	replaceSessionList,
+	replayProjectionEvents,
 	restoreProjectionSyncStatus,
 	selectAgentTranscript,
 } from "./reducer.ts";
@@ -201,6 +203,7 @@ export class AppStore {
 	}
 
 	markResubscribing(): void {
+		this.state.resubscribeBuffer = [];
 		if (this.state.syncStatus === "resubscribing") return;
 		markProjectionResubscribing(this.state);
 		this.commit();
@@ -209,7 +212,25 @@ export class AppStore {
 	restoreSyncStatusAfterFailedOpen(
 		previous: Pick<AppStoreSnapshot, "activeSessionId" | "serverEpoch" | "syncStatus">,
 	): void {
-		if (restoreProjectionSyncStatus(this.state, previous)) this.commit();
+		const buffered = this.state.resubscribeBuffer;
+		this.state.resubscribeBuffer = null;
+		if (!restoreProjectionSyncStatus(this.state, previous)) return;
+		if (this.state.syncStatus === "ready") {
+			if (buffered === "overflowed") {
+				this.state.syncStatus = "resnapshot_required";
+			} else if (buffered) {
+				const replay = buffered
+					.filter((entry) => {
+						const eventSession = eventSessionId(entry.event);
+						return eventSession === undefined || eventSession === previous.activeSessionId;
+					})
+					.map((entry) => entry.event);
+				replayProjectionEvents(this.state, replay);
+			}
+		} else if (this.state.syncStatus === "resubscribing") {
+			this.state.syncStatus = "resnapshot_required";
+		}
+		this.commit();
 	}
 
 	setSupervisor(view: SupervisorView): void {

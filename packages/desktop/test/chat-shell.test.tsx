@@ -4307,11 +4307,13 @@ describe("Chat desktop shell", () => {
 					serverEpoch: EPOCH,
 					fromCursor: 1,
 					toCursor: 1,
-					events: [{ type: "server/state", state: "ready" }],
+					events: [
+						{ type: "project/invalidated", mode: "chat", cwd: "/work/chat-project", reason: "reload_required" },
+					],
 				},
 			},
 		});
-		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
+		expect(store.getSnapshot().syncStatus).toBe("resubscribing");
 		await act(async () => rejectOpen(new Error("switch failed")));
 		await flush();
 

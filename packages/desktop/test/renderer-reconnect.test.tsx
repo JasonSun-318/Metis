@@ -110,7 +110,7 @@ describe("renderer reconnect behavior", () => {
 		const recovered = new AppStore();
 		recovered.applySnapshot(snapshot(EPOCH_A, 0, "A"));
 		recovered.markResubscribing();
-		expect(recovered.applyBatch(delta(EPOCH_A, 1, "lost"))).toBe("resnapshot_required");
+		expect(recovered.applyBatch(delta(EPOCH_A, 1, "lost"))).toBe("applied");
 		recovered.applySnapshot(snapshot(EPOCH_B, 1, "AB"));
 
 		expect(projectedText(recovered)).toBe(projectedText(uninterrupted));
