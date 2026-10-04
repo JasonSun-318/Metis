@@ -75,7 +75,6 @@ import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { SessionWorkspaceView } from "./SessionWorkspace.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
-import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -551,6 +550,10 @@ export function App({ api, store }: AppProps) {
 		(session: SessionSummary, pinned: boolean) => workspaceWorkflow.pinSession(session, pinned),
 		[workspaceWorkflow],
 	);
+	const copySessionTitle = useCallback(
+		(title: string) => api.writeClipboardText({ text: title }),
+		[api],
+	);
 	const previewProjectDelete = useCallback(
 		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ mode: group.mode, cwd: group.cwd }),
 		[workspaceWorkflow],
@@ -803,6 +806,13 @@ export function App({ api, store }: AppProps) {
 	const projectContext = visibleActiveSession?.cwd
 		? { mode: visibleActiveSession.mode, cwd: visibleActiveSession.cwd }
 		: undefined;
+	const workspaceProjectName = (() => {
+		const cwd = visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null;
+		const contextMode = visibleActiveSession?.mode ?? visibleNewTaskDraft?.mode ?? mode;
+		if (!cwd) return "Metis";
+		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
+		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
+	})();
 	const openNewSessionInProject = projectContext
 		? () => void createEmptySessionInProject(projectContext.mode, projectContext.cwd)
 		: undefined;
@@ -1614,6 +1624,7 @@ export function App({ api, store }: AppProps) {
 		onModeChange: changeMode,
 		onNewTask: startNewTask,
 		onOpen: openVisibleSession,
+		onCopySessionTitle: copySessionTitle,
 		onPinProject: pinProject,
 		onPinSession: pinSession,
 		onPreviewProjectDelete: previewProjectDelete,
@@ -1625,6 +1636,7 @@ export function App({ api, store }: AppProps) {
 	}), [
 		bootstrapped,
 		changeMode,
+		copySessionTitle,
 		createEmptyProjectSession,
 		deleteProject,
 		deleteSession,
@@ -1781,7 +1793,10 @@ export function App({ api, store }: AppProps) {
 			<main
 				className="workspace"
 			>
-				<div className="workspace-titlebar-actions">
+				<header
+				className="workspace-titlebar"
+				data-active-session-id={visibleActiveSession?.sessionId}
+			>
 					{api.platform !== "win32" && (
 						<button
 							aria-label={t(sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar")}
@@ -1793,6 +1808,7 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
+					<span className="workspace-project-name">{workspaceProjectName}</span>
 					{toolsSession !== undefined && (
 						<div className="workspace-titlebar-end">
 							<ReleaseNotesPopover
@@ -1801,7 +1817,7 @@ export function App({ api, store }: AppProps) {
 							/>
 						</div>
 					)}
-				</div>
+				</header>
 				<div className="system-notice-stack">
 					{state.supervisor.state === "failed" && (
 						<SystemNotice
@@ -1833,17 +1849,6 @@ export function App({ api, store }: AppProps) {
 						/>
 					)}
 				</div>
-				{visibleActiveSession && <WorkspaceSessionHeader
-					deleteDisabled={running || visibleInteraction !== undefined}
-					disabled={!serverReady || draftBusy}
-					displayName={sessionDisplayTitle(visibleActiveSession)}
-					onCopy={(displayName) => api.writeClipboardText({ text: displayName })}
-					onDelete={deleteSession}
-					onPin={pinSession}
-					onRename={renameSession}
-					pinned={pinnedSessionIds.has(visibleActiveSession.sessionId)}
-					session={visibleActiveSession}
-				/>}
 				{!bootstrapped ? null : destination === "skills" ? (
 					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (

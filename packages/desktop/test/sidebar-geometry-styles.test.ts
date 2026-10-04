@@ -26,15 +26,15 @@ describe("Sidebar geometry and workspace grid styles", () => {
 	});
 
 	it("keeps one fixed left sidebar toggle aligned with the platform title controls", () => {
-		const fixedButton = rule(".workspace-titlebar-actions .sessions-sidebar-toggle-fixed");
+		const fixedButton = rule(".workspace-titlebar .sessions-sidebar-toggle-fixed");
 		expect(fixedButton.top).toBe("7px");
 		expect(fixedButton.left).toBe("18px");
 		expect(
 			rule(
-				':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar-actions .sessions-sidebar-toggle-fixed',
+				':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar .sessions-sidebar-toggle-fixed',
 			).left,
 		).toBe("76px");
-		const actionButton = rule(".workspace-titlebar-actions button");
+		const actionButton = rule(".workspace-titlebar button");
 		expect(actionButton.width).toBe("30px");
 		expect(actionButton.height).toBe("30px");
 
@@ -54,22 +54,22 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(sidebar.borderRadius).toBe("0 0 9px 9px");
 	});
 
-	it("unifies titlebar actions and right sidebar toggle to top 7px and right 20px", () => {
-		const actions = rule(".workspace-titlebar-actions");
-		expect(actions.top).toBe("7px");
-		expect(actions.right).toBe("20px");
+	it("renders the titlebar as a centered in-flow drag row", () => {
+		const titlebar = rule(".workspace-titlebar");
+		expect(titlebar.height).toBe("40px");
+		expect(titlebar.justifyContent).toBe("center");
 
-		const actionButtons = rule(".workspace-titlebar-actions button");
+		const actionButtons = rule(".workspace-titlebar button");
 		expect(actionButtons.width).toBe("30px");
 		expect(actionButtons.height).toBe("30px");
 		expect(actionButtons.borderRadius).toBe("7px");
 	});
 
-	it("keeps the release bell and tools toggle in one right-aligned group", () => {
+	it("keeps the release bell anchored to the titlebar's right edge", () => {
 		const end = rule(".workspace-titlebar-end");
-		expect(end.position).toBe("relative");
+		expect(end.position).toBe("absolute");
+		expect(end.right).toBe("10px");
 		expect(end.display).toBe("flex");
-		expect(end.marginLeft).toBe("auto");
 
 		const popover = rule(".release-notes-popover");
 		expect(popover.top).toBe("36px");

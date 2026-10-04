@@ -78,6 +78,7 @@ export interface SessionSidebarWorkspace {
 	readonly onDeleteSession: (session: SessionSummary) => Promise<void>;
 	readonly onPinSession: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRenameSession: (session: SessionSummary, name: string) => Promise<void>;
+	readonly onCopySessionTitle: (title: string) => Promise<void>;
 	readonly onCreateProjectSession: (group: ProjectSessionGroup) => Promise<void>;
 	readonly onDeleteProject: (
 		group: ProjectSessionGroup,
@@ -147,9 +148,10 @@ export function taskTitle(session: SessionSummary, locale: Intl.LocalesArgument 
 	return `${taskLabel} · ${new Date(session.createdAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}`;
 }
 
-function SessionButton({ busy, deleteDisabled, onDelete, onPin, onRename, pinned, selected, session, onOpen }: {
+function SessionButton({ busy, deleteDisabled, onCopy, onDelete, onPin, onRename, pinned, selected, session, onOpen }: {
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
+	readonly onCopy: (title: string) => Promise<void>;
 	readonly onDelete: (session: SessionSummary) => Promise<void>;
 	readonly onPin: (session: SessionSummary, pinned: boolean) => void;
 	readonly onRename: (session: SessionSummary, name: string) => Promise<void>;
@@ -202,6 +204,7 @@ function SessionButton({ busy, deleteDisabled, onDelete, onPin, onRename, pinned
 				deleteDisabled={deleteDisabled}
 				disabled={busy}
 				displayName={title}
+				onCopy={onCopy}
 				onDelete={onDelete}
 				onPin={onPin}
 				onRename={onRename}
@@ -275,7 +278,7 @@ function ProjectGroup({
 			<div className="project-drawer" inert={!open}>
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
-						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onDelete={workspace.onDeleteSession} onOpen={workspace.onOpen} onPin={workspace.onPinSession} onRename={workspace.onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
+						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onCopy={workspace.onCopySessionTitle} onDelete={workspace.onDeleteSession} onOpen={workspace.onOpen} onPin={workspace.onPinSession} onRename={workspace.onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
 					))}
 				</div>
 			</div>
@@ -307,6 +310,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 		busy,
 		mode,
 		newTaskOpen,
+		onCopySessionTitle,
 		onDeleteSession,
 		onModeChange,
 		onNewTask,
@@ -374,6 +378,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 			busy={busy}
 			deleteDisabled={isDeleteDisabled(session)}
 			key={session.sessionId}
+			onCopy={onCopySessionTitle}
 			onDelete={onDeleteSession}
 			onOpen={onOpen}
 			onPin={onPinSession}

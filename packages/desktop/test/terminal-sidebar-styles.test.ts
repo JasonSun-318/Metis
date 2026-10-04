@@ -29,13 +29,12 @@ describe("Terminal sidebar shell", () => {
 	});
 
 	it("keeps its interactive header outside the window drag region", () => {
-		expect(rule(".workspace-titlebar-actions").right).toBe("20px");
+		expect(css).toMatch(/\.workspace-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/u);
 		expect(css).toMatch(/\.workspace-tabbar\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
 	});
 
-	it("matches the compact rounded pane frame", () => {
+	it("renders panes flush without a card frame", () => {
 		const pane = rule(".workspace-pane");
-		expect(pane.borderRadius).toBe("9px");
 		expect(pane.overflow).toBe("hidden");
 		expect(rule(".workspace-tabbar").height).toBe("40px");
 		expect(rule(".tool-tabs-scroll").flex).toBe("1 1 0%");
@@ -61,7 +60,7 @@ describe("Terminal sidebar shell", () => {
 	it("anchors the tool-add menu to the plus trigger button", () => {
 		expect(rule(".tool-add").position).toBe("relative");
 		expect(rule(".tool-add-menu").position).toBe("absolute");
-		expect(rule(".workspace-add-menu").right).toBe("0px");
+		expect(rule(".tool-add-menu").right).toBe("0px");
 	});
 
 	it("keeps the file tree beside the preview until the sidebar reaches its minimum width", () => {

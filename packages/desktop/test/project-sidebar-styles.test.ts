@@ -80,7 +80,7 @@ describe("Project sidebar motion", () => {
 			".new-task-button:hover:not(:disabled), .sidebar-nav-button:hover:not(:disabled)",
 			".project-heading:hover:not(:disabled)",
 			".session-row:hover > .session-button:not(:disabled)",
-			".workspace-titlebar-actions button:hover",
+			".workspace-titlebar button:hover",
 		]) {
 			const start = css.indexOf(selector);
 			const hoverRule = css.slice(start, css.indexOf("}", start) + 1);
@@ -140,7 +140,6 @@ describe("Project sidebar motion", () => {
 		);
 		expect(rule(".file-search-field:focus-within").borderColor).toBe("var(--border-strong)");
 		expect(rule(".browser-address-field:focus-within").borderColor).toBe("var(--border-strong)");
-		expect(rule(".workspace-title-editor input:focus").outline).toBe("none");
 		expect(rule(".plugins-search:focus-within").borderColor).toBe("var(--border-strong)");
 		expect(rule(".plugins-search:focus-within").boxShadow).toBe("none");
 		expect(rule(".composer:focus-within").borderColor).toBe("var(--border-strong)");
@@ -172,11 +171,9 @@ describe("Project sidebar motion", () => {
 		expect(hover.outline).toBe("0px");
 	});
 
-	it("keeps the workspace title and actions above the native window drag region", () => {
-		const title = rule(".workspace-title");
-		expect(title.position).toBe("relative");
-		expect(title.zIndex).toBe("8");
-		expect(css).toMatch(/\.workspace-title\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
+	it("keeps the titlebar interactive controls outside the window drag region", () => {
+		expect(css).toMatch(/\.workspace-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/u);
+		expect(css).toMatch(/\.workspace-titlebar button\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
 	});
 
 	it("reveals row actions on interaction and slides sessions into a collapsed drawer", () => {

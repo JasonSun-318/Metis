@@ -1352,7 +1352,7 @@ describe("Chat desktop shell", () => {
 		expect(retainedRow.querySelector(".session-scheduled-badge")).toBeNull();
 		expect(container.querySelector(".loose-tasks")?.textContent ?? "").not.toContain("检查桌面文件");
 		await act(async () => button(retainedRow, "Actions for 检查桌面文件").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Delete"]);
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Copy title", "Delete"]);
 		await act(async () => button(document.body, "Delete").click());
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
@@ -1410,7 +1410,7 @@ describe("Chat desktop shell", () => {
 
 		let otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Other task").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Rename", "Delete"]);
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
 		await act(async () => button(document.body, "Pin").click());
 		expect(button(container, "Pinned")).toBeTruthy();
 		otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
@@ -1504,7 +1504,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("edits the active title inline and exposes the header session actions", async () => {
+	it("exposes rename, pin, copy, and delete through the session actions", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const active = session("chat-header-actions", "chat", "/work/shared", "Active task");
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
@@ -1515,17 +1515,21 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		let header = container.querySelector<HTMLElement>(".workspace-header")!;
-		await act(async () => button(header, "Active task").click());
-		let input = header.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+		await act(async () => button(container, "Actions for Active task").click());
+		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
+			"Pin",
+			"Copy title",
+			"Rename",
+			"Delete",
+		]);
+		await act(async () => button(document.body, "Rename").click());
+		let input = document.body.querySelector<HTMLInputElement>("#session-rename-input")!;
 		expect(input.value).toBe("Active task");
-		await act(async () => {
-			input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-		});
+		await act(async () => button(document.body, "Cancel").click());
 		expect(api.renameSession).not.toHaveBeenCalled();
 
-		await act(async () => button(header, "Active task").click());
-		input = header.querySelector<HTMLInputElement>('input[aria-label="Session name"]')!;
+		await act(async () => button(document.body, "Rename").click());
+		input = document.body.querySelector<HTMLInputElement>("#session-rename-input")!;
 		await act(async () => changeInput(input, "Renamed active task"));
 		await act(async () => input.form!.requestSubmit());
 		await flush();
@@ -1534,12 +1538,7 @@ describe("Chat desktop shell", () => {
 			name: "Renamed active task",
 		}));
 
-		await act(async () => button(header, "Actions for Renamed active task").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
-			"Pin",
-			"Copy title",
-			"Delete",
-		]);
+		await act(async () => button(container, "Actions for Renamed active task").click());
 		await act(async () => button(document.body, "Pin").click());
 		const pinnedSection = button(container, "Pinned").closest<HTMLElement>(".session-section")!;
 		expect(pinnedSection.textContent).toContain("Renamed active task");
@@ -1554,19 +1553,18 @@ describe("Chat desktop shell", () => {
 		root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		header = container.querySelector<HTMLElement>(".workspace-header")!;
 		expect(button(container, "Pinned")).toBeTruthy();
-		await act(async () => button(header, "Actions for Renamed active task").click());
+		await act(async () => button(container, "Actions for Renamed active task").click());
 		expect(button(document.body, "Unpin")).toBeTruthy();
 		await act(async () => button(document.body, "Unpin").click());
 		expect([...container.querySelectorAll<HTMLButtonElement>(".session-section-heading")].some((candidate) => candidate.textContent?.trim() === "Pinned")).toBe(false);
 		expect(projectRow(container, "/work/shared").textContent).toContain("Renamed active task");
 
-		await act(async () => button(header, "Actions for Renamed active task").click());
+		await act(async () => button(container, "Actions for Renamed active task").click());
 		await act(async () => button(document.body, "Copy title").click());
 		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "Renamed active task" });
 
-		await act(async () => button(header, "Actions for Renamed active task").click());
+		await act(async () => button(container, "Actions for Renamed active task").click());
 		await act(async () => button(document.body, "Delete").click());
 		expect(container.querySelector(".project-dialog")?.textContent).toContain("Delete session?");
 		await act(async () => button(container, "Cancel").click());

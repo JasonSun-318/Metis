@@ -959,7 +959,7 @@ export function SessionWorkspaceView({
 	const toolMenu = (ownerSessionId: string, paneId: string) => (
 		<nav
 			aria-label={t("Available tools")}
-			className="tool-add-menu workspace-add-menu"
+			className="tool-add-menu"
 			role="menu"
 		>
 			<button disabled={!activeSession} onClick={() => addKnowledge(paneId)} role="menuitem" type="button">
