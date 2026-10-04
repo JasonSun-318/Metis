@@ -7,7 +7,7 @@ if (!existsSync(join(root, "packages"))) {
 	console.error("check:boundaries must run from the repository root (packages/ not found)");
 	process.exit(1);
 }
-const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules"]);
+const ignoredDirectories = new Set([".git", "coverage", "dist", "node_modules", "out"]);
 const files = [];
 
 function collectSourceFiles(directory) {
