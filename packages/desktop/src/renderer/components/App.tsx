@@ -216,6 +216,11 @@ export function App({ api, store }: AppProps) {
 	const [knowledgeRequest, setKnowledgeRequest] = useState<{ id: number; sessionId: string }>();
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
+	const chatFocusNonce = useRef(0);
+	const [chatFocusRequest, setChatFocusRequest] = useState<{ nonce: number; sessionId: string | null } | null>(null);
+	const requestChatFocus = useCallback((sessionId: string | null) => {
+		setChatFocusRequest({ nonce: chatFocusNonce.current += 1, sessionId });
+	}, []);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
 	const [reducedMotion, setReducedMotion] = useState(() =>
@@ -619,11 +624,14 @@ export function App({ api, store }: AppProps) {
 			closeCodeProjectSetup();
 			workspaceWorkflow.startNewTask("code");
 			workspaceWorkflow.setDraftFolder(cwd);
+			requestChatFocus(null);
 			return;
 		}
 		setDestination("tasks");
 		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
-	}, [cancelHomeTransition, closeCodeProjectSetup, rememberCurrentNavigation, workspaceWorkflow]);
+		const created = store.getSnapshot().activeSessionId;
+		if (created) requestChatFocus(created);
+	}, [cancelHomeTransition, closeCodeProjectSetup, rememberCurrentNavigation, requestChatFocus, store, workspaceWorkflow]);
 	const createEmptyProjectSession = useCallback(
 		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
 		[createEmptySessionInProject],
@@ -649,12 +657,13 @@ export function App({ api, store }: AppProps) {
 		cancelHomeTransition();
 		setDestination("tasks");
 		closeCodeProjectSetup();
+		requestChatFocus(sessionId);
 		try {
 			await workspaceWorkflow.openVisibleSession(sessionId);
 		} catch {
 			// The workflow reports the error while preserving the current projection.
 		}
-	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, workspaceWorkflow]);
+	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, requestChatFocus, workspaceWorkflow]);
 	const forkFromReply = async (entryId: string) => {
 		try {
 			await workspaceWorkflow.forkSession(entryId);
@@ -720,13 +729,27 @@ export function App({ api, store }: AppProps) {
 		closeCodeProjectSetup();
 		setError(null);
 		workspaceWorkflow.startNewTask();
-	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, workspaceWorkflow]);
+		requestChatFocus(null);
+	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, requestChatFocus, workspaceWorkflow]);
 	const cancelNewTask = () => {
 		cancelHomeTransition();
 		closeCodeProjectSetup();
 		setError(null);
 		workspaceWorkflow.cancelNewTask();
 	};
+
+	const focusWorkspaceSession = useCallback((sessionId: string | null) => {
+		if (sessionId === null) {
+			startNewTask();
+			return;
+		}
+		void openVisibleSession(sessionId);
+	}, [openVisibleSession, startNewTask]);
+
+	const sessionTitleFor = useCallback((sessionId: string) => {
+		const session = store.getSnapshot().sessionsById.get(sessionId);
+		return session ? sessionDisplayTitle(session) : t("New task");
+	}, [store, t]);
 
 	const changeMode = useCallback((nextMode: AgentMode) => {
 		if (nextMode === mode) return;
@@ -735,8 +758,11 @@ export function App({ api, store }: AppProps) {
 		setDestination("tasks");
 		closeCodeProjectSetup();
 		setError(null);
-		void workspaceWorkflow.selectMode(nextMode);
-	}, [cancelHomeTransition, closeCodeProjectSetup, mode, rememberCurrentNavigation, workspaceWorkflow]);
+		void workspaceWorkflow.selectMode(nextMode).then(() => {
+			const landedDraft = workspaceWorkflow.getSnapshot().draft;
+			requestChatFocus(landedDraft ? landedDraft.sessionId : store.getSnapshot().activeSessionId);
+		});
+	}, [cancelHomeTransition, closeCodeProjectSetup, mode, rememberCurrentNavigation, requestChatFocus, store, workspaceWorkflow]);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 	const homeProjects = useMemo(
@@ -803,9 +829,6 @@ export function App({ api, store }: AppProps) {
 	const openKnowledge = (sessionId: string) => {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
 	};
-	const projectContext = visibleActiveSession?.cwd
-		? { mode: visibleActiveSession.mode, cwd: visibleActiveSession.cwd }
-		: undefined;
 	const workspaceProjectName = (() => {
 		const cwd = visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null;
 		const contextMode = visibleActiveSession?.mode ?? visibleNewTaskDraft?.mode ?? mode;
@@ -813,9 +836,6 @@ export function App({ api, store }: AppProps) {
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
 	})();
-	const openNewSessionInProject = projectContext
-		? () => void createEmptySessionInProject(projectContext.mode, projectContext.cwd)
-		: undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
@@ -1856,7 +1876,6 @@ export function App({ api, store }: AppProps) {
 				) : null}
 				{bootstrapped ? (
 					<SessionWorkspaceView
-						activeSession={toolsSession ?? null}
 						api={api}
 						chat={newTaskOpen || !visibleActiveSession ? homePage : (
 							<div className="workspace-body">
@@ -1946,18 +1965,27 @@ export function App({ api, store }: AppProps) {
 						</div>
 					</div>
 						)}
-						chatTitle={visibleActiveSession ? sessionDisplayTitle(visibleActiveSession) : t("New task")}
+						chatCwd={toolsSession?.cwd ?? null}
+						chatFocusRequest={chatFocusRequest}
+						chatIsDraft={newTaskOpen}
+						chatSessionId={toolsSession?.sessionId ?? null}
 						cleanupSessionIds={toolCleanupSessionIds}
 						mode={mode}
 						onActivateSession={activateBrowserSession}
+						onChatSession={focusWorkspaceSession}
 						onCleanupSessionIdsHandled={handleToolCleanupHandled}
 						onDirtySessionIdsChange={handleDirtySessionIdsChange}
 						onError={reportError}
-						onNewSession={openNewSessionInProject}
+						onNewSession={(target) => {
+							if (target) void createEmptySessionInProject(target.mode, target.cwd);
+							else startNewTask();
+						}}
 						planPreviewRequest={planPreviewRequest}
 						previewRequest={previewRequest}
 						knowledgeRequest={knowledgeRequest}
 						process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
+						sessionsById={state.sessionsById}
+						sessionTitleFor={sessionTitleFor}
 						store={store}
 						theme={resolvedTheme}
 						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}

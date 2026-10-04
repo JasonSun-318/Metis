@@ -279,6 +279,8 @@ textarea { resize: none; }
 .workspace-pane-body > * { position: absolute; inset: 0; }
 .workspace-pane-body > [hidden] { display: none; }
 .workspace-chat-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+.workspace-session-placeholder, .workspace-empty { display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--text-14); font-size: 13px; text-align: center; padding: 24px; }
+.workspace-session-placeholder .button-secondary { height: 30px; padding: 0 12px; }
 .workspace-add-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 .workspace-tab-menu { position: fixed; width: 168px; }
 .tool-add-menu button {

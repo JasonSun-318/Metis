@@ -5,12 +5,13 @@ import type { UniversalPreviewTarget } from "./components/preview/UniversalFileP
 export interface ChatTab {
 	readonly kind: "chat";
 	readonly id: string;
-	readonly title: string;
+	readonly sessionId: string | null;
 }
 
 export interface TerminalTab {
 	readonly kind: "terminal";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly cwd: string;
 }
@@ -18,6 +19,7 @@ export interface TerminalTab {
 export interface BrowserTab {
 	readonly kind: "browser";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly url: string;
 	readonly profileId: string;
@@ -29,6 +31,7 @@ export interface BrowserTab {
 export interface FileTab {
 	readonly kind: "file";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly cwd: string;
 	readonly relativePath: string | null;
@@ -38,18 +41,21 @@ export interface FileTab {
 export interface ReviewTab {
 	readonly kind: "review";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 }
 
 export interface AgentTab {
 	readonly kind: "agent";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 }
 
 export interface PlanTab {
 	readonly kind: "plan";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly plan: PlanView;
 }
@@ -57,6 +63,7 @@ export interface PlanTab {
 export interface PreviewTab {
 	readonly kind: "preview";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly file: UniversalPreviewTarget;
 }
@@ -64,6 +71,7 @@ export interface PreviewTab {
 export interface ProcessTab {
 	readonly kind: "process";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 	readonly process: SessionProcessView;
 }
@@ -71,6 +79,7 @@ export interface ProcessTab {
 export interface KnowledgeTab {
 	readonly kind: "knowledge";
 	readonly id: string;
+	readonly sessionId: string;
 	readonly title: string;
 }
 
@@ -98,19 +107,27 @@ export interface SessionWorkspace {
 	readonly nextNumber: number;
 }
 
-export const CHAT_TAB_ID = "chat";
-
-export function chatTab(): ChatTab {
-	return { kind: "chat", id: CHAT_TAB_ID, title: "" };
+export function chatTab(sessionId: string | null): ChatTab {
+	return { kind: "chat", id: `chat-${crypto.randomUUID()}`, sessionId };
 }
 
 export function defaultWorkspace(): SessionWorkspace {
 	const paneId = "pane-1";
 	return {
-		panes: [{ id: paneId, tabs: [chatTab()], activeId: CHAT_TAB_ID }],
+		panes: [{ id: paneId, tabs: [], activeId: "" }],
 		activePaneId: paneId,
 		nextNumber: 1,
 	};
+}
+
+export function findChatTab(workspace: SessionWorkspace, sessionId: string | null): ChatTab | undefined {
+	return workspaceTabs(workspace).find((tab): tab is ChatTab => tab.kind === "chat" && tab.sessionId === sessionId);
+}
+
+export function focusedChatTab(workspace: SessionWorkspace): ChatTab | undefined {
+	const pane = activePane(workspace);
+	const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
+	return tab?.kind === "chat" ? tab : undefined;
 }
 
 export function workspaceTabs(workspace: SessionWorkspace): readonly WorkspaceTab[] {

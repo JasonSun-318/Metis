@@ -63,16 +63,21 @@ function fixture() {
 	void act(() =>
 		root.render(
 			<SessionWorkspaceView
-				activeSession={{ sessionId: SESSION_ID, cwd: null }}
 				api={api}
 				chat={<div />}
-				chatTitle="Chat"
+				chatCwd={null}
+				chatFocusRequest={null}
+				chatIsDraft={false}
+				chatSessionId={SESSION_ID}
 				cleanupSessionIds={[]}
 				mode="chat"
 				onActivateSession={onActivateSession}
+				onChatSession={vi.fn()}
 				onCleanupSessionIdsHandled={vi.fn()}
 				onDirtySessionIdsChange={vi.fn()}
 				onError={vi.fn()}
+				sessionsById={new Map([[SESSION_ID, { sessionId: SESSION_ID, cwd: null, mode: "chat" }]])}
+				sessionTitleFor={() => "Chat"}
 				store={{} as AppStore}
 				theme="dark"
 				visible

@@ -28,19 +28,29 @@ const onError = vi.fn();
 const command = (id: string, output = "", state: SessionProcessView["state"] = "running"): SessionProcessView => ({ processId: id, command: `echo ${id}`, output, state, truncated: false });
 const activeProcessTab = () => container.querySelector('[role="tab"][aria-label="Process"][aria-selected="true"]');
 
+const sessionsById = new Map([
+	[sessionId, { sessionId, cwd: "/tmp/project", mode: "chat" as const }],
+	["other", { sessionId: "other", cwd: "/tmp/other", mode: "chat" as const }],
+]);
+
 async function render(process?: SessionProcessView, owner = sessionId, mode: "chat" | "code" = "chat") {
 	await act(async () => root.render(<SessionWorkspaceView
-		activeSession={{ sessionId: owner, cwd: "/tmp/project" }}
 		api={api}
 		chat={<div />}
-		chatTitle="Chat"
+		chatCwd="/tmp/project"
+		chatFocusRequest={null}
+		chatIsDraft={false}
+		chatSessionId={owner}
 		cleanupSessionIds={[]}
 		mode={mode}
 		onActivateSession={vi.fn()}
+		onChatSession={vi.fn()}
 		onCleanupSessionIdsHandled={vi.fn()}
 		onDirtySessionIdsChange={vi.fn()}
 		onError={onError}
 		process={process}
+		sessionsById={sessionsById}
+		sessionTitleFor={(id) => id}
 		store={{} as AppStore}
 		theme="dark"
 		visible
@@ -91,11 +101,15 @@ describe("Process workspace tab", () => {
 		await render({ ...command("one", "new tail"), truncated: true });
 		expect(terminals.at(-1)?.output).toBe("new tail");
 		expect(container.textContent).toContain("earlier output was truncated");
+		// Tool tabs stay live for any session; switching the chat projection
+		// does not hide the other session's process panel.
 		await render(undefined, "other");
-		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-panel')).toBeNull();
+		expect(container.querySelector('.process-panel:not([hidden]) .process-command')?.textContent).toContain("echo one");
 		await render(command("two", "failure", "failed"), "other");
-		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-panel')?.textContent).toContain("Command stopped with an error");
+		const otherPanel = [...container.querySelectorAll(".process-panel")]
+			.find((panel) => panel.textContent?.includes("echo two"));
+		expect(otherPanel?.textContent).toContain("Command stopped with an error");
 		await render(command("one", "new tail", "completed"));
-		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-command')?.textContent).toContain("echo one");
+		expect(container.querySelector('.process-panel .process-command')?.textContent).toContain("echo one");
 	});
 });

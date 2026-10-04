@@ -4484,9 +4484,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "chat-existing" });
-		expect(container.textContent).toContain("Chat project task");
-		expect(container.textContent).not.toContain("Code project task");
-		expect(container.textContent).not.toContain("Side tasks");
+		const visiblePanel = activeWorkspace(container).querySelector(".workspace-pane-body > div:not([hidden])")!;
+		expect(visiblePanel.className).toContain("workspace-chat-panel");
+		const modeTabs = [...activeWorkspace(container).querySelectorAll('[role="tab"]')];
+		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Chat project task")?.getAttribute("aria-selected")).toBe("true");
+		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Code project task")?.getAttribute("aria-selected")).not.toBe("true");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 		await act(async () => activeWorkspace(container).querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
 		const chatToolMenu = activeWorkspace(container).querySelector<HTMLElement>(".tool-add-menu")!;
@@ -4617,7 +4619,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
 		const tabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
 		await act(async () => button(tabbar, "Chat project task").click());
@@ -4625,20 +4627,20 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".terminal-panel.is-visible")).toBeNull();
 		await act(async () => button(tabbar, "Terminal").click());
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
 		await act(async () => button(activeWorkspace(container), "Add tool").click());
 		const addMenu = activeWorkspace(container).querySelector<HTMLElement>(".tool-add-menu")!;
 		await act(async () => button(addMenu, "Terminal").click());
 		await flush();
 		expect(api.createTerminal).toHaveBeenCalledTimes(2);
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
 
 		await act(async () => button(container, "Close Terminal 2").click());
 		expect(api.closeTerminal).toHaveBeenCalledTimes(1);
 		await act(async () => button(container, "Close Terminal").click());
 		expect(api.closeTerminal).toHaveBeenCalledTimes(2);
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
 		expect(container.querySelector(".workspace-tabbar")).not.toBeNull();
 
 		await act(async () => root.unmount());
@@ -4831,11 +4833,11 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="notes.txt"]')!.click());
 		await flush();
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
 		expect(container.querySelectorAll(".tool-tab.is-preview")).toHaveLength(1);
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
 		await flush();
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
 
 		await act(async () => button(container, "Copy path").click());
 		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "/work/code-project/README.md" });
@@ -4861,7 +4863,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
 		await act(async () => button(container, "Code").click());
 		await flush();
-		expect(container.querySelectorAll(".cm-editor")).toHaveLength(1);
+		await act(async () => button(activeWorkspace(container), "README.md").click());
+		await flush();
+		expect(codeEditor(container, "Edit README.md").state.doc.toString()).toBe("# README.md\n\nWorkspace preview.");
 		await act(async () => root.unmount());
 
 		root = createRoot(container);
@@ -4871,7 +4875,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await addTool(container, "Files");
 		await flush();
-		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
+		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("README.md");
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		await act(async () => root.unmount());
@@ -4954,14 +4958,16 @@ describe("Chat desktop shell", () => {
 		expect(editor.state.doc.toString()).toBe("# Edited README");
 		const fileTabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
 		await act(async () => button(fileTabbar, "Code project task").click());
-		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(0);
 		await act(async () => button(fileTabbar, "README.md").click());
 		editor = codeEditor(container, "Edit README.md");
 		expect(editor.state.doc.toString()).toBe("# Edited README");
 		await act(async () => button(container, "Chat").click());
 		await flush();
-		expect(container.querySelectorAll(".cm-editor")).toHaveLength(0);
+		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(0);
 		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(fileTabbar, "README.md").click());
 		await flush();
 		editor = codeEditor(container, "Edit README.md");
 		expect(editor.state.doc.toString()).toBe("# Edited README");
