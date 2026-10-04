@@ -271,15 +271,18 @@ textarea { resize: none; }
 .session-workspace-root[hidden] { display: none; }
 .session-workspace-instance { display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
 .session-workspace-instance[hidden] { display: none; }
-.session-workspace-panes { display: flex; min-width: 0; min-height: 0; flex: 1; }
+.session-workspace-panes { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; }
 .workspace-pane { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; container-type: inline-size; }
 .workspace-pane + .workspace-pane { border-left: 1px solid var(--border); }
 .workspace-pane.is-split-target { outline: 1px solid var(--focus-ring); outline-offset: -1px; }
 .workspace-pane-body { position: relative; min-height: 0; flex: 1; }
-.workspace-pane-body > * { position: absolute; inset: 0; }
-.workspace-pane-body > [hidden] { display: none; }
+.workspace-panel-layer { position: absolute; inset: 0; pointer-events: none; }
+.workspace-panel { position: absolute; top: 0; left: 0; pointer-events: auto; container-type: inline-size; }
+.workspace-panel > * { position: absolute; inset: 0; }
+.workspace-panel[hidden] { display: none; }
+.session-workspace-panes.is-dragging .workspace-panel-layer, .session-workspace-panes.is-dragging .workspace-panel { pointer-events: none; }
 .workspace-chat-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
-.workspace-session-placeholder, .workspace-empty { display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--text-14); font-size: 13px; text-align: center; padding: 24px; }
+.workspace-session-placeholder, .workspace-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--text-14); font-size: 13px; text-align: center; padding: 24px; }
 .workspace-session-placeholder .button-secondary { height: 30px; padding: 0 12px; }
 .workspace-add-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 .workspace-tab-menu { position: fixed; width: 168px; }
@@ -337,7 +340,7 @@ textarea { resize: none; }
 .tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"] { background: var(--surface-04); color: var(--text); }
 .tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 5px); right: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
 .tool-add-menu button { height: 30px; background: transparent; font-size: 12px; }
-.workspace-pane-body > *:not([hidden]) { animation: tool-panel-in 140ms ease both; }
+.workspace-panel:not([hidden]) { animation: tool-panel-in 140ms ease both; }
 @keyframes tool-panel-in {
 	from { opacity: 0.7; }
 	to { opacity: 1; }
@@ -3005,7 +3008,7 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] .settings-backdrop, :root[data-motion="reduced"] .settings-backdrop.is-closing, :root[data-motion="reduced"] .settings-page-mount { animation: none; transition: none; }
 :root[data-motion="reduced"] .modal-backdrop, :root[data-motion="reduced"] .interaction-dialog, :root[data-motion="reduced"] .project-dialog, :root[data-motion="reduced"] .code-project-dialog, :root[data-motion="reduced"] .mcp-dialog, :root[data-motion="reduced"] .system-notice { animation: none; transition: none; }
 :root[data-motion="reduced"] .context-usage-ring-meter, :root[data-motion="reduced"] .composer-code .composer-file-card, :root[data-motion="reduced"] .composer-image-preview, :root[data-motion="reduced"] .composer-file-card, :root[data-motion="reduced"] .slash-command-menu { animation: none; transition: none; }
-:root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .workspace-pane-body > * { animation: none; transition: none; }
+:root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .workspace-panel { animation: none; transition: none; }
 :root[data-motion="reduced"] .plugins-section-indicator { transition: none; }
 :root[data-motion="reduced"] .code-execution-title-leave { display: none; }
 

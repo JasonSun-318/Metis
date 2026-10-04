@@ -4484,7 +4484,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "chat-existing" });
-		const visiblePanel = activeWorkspace(container).querySelector(".workspace-pane-body > div:not([hidden])")!;
+		const visiblePanel = activeWorkspace(container).querySelector<HTMLElement>(".workspace-panel:not([hidden]) > *")!;
 		expect(visiblePanel.className).toContain("workspace-chat-panel");
 		const modeTabs = [...activeWorkspace(container).querySelectorAll('[role="tab"]')];
 		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Chat project task")?.getAttribute("aria-selected")).toBe("true");
@@ -4642,6 +4642,47 @@ describe("Chat desktop shell", () => {
 		expect(api.closeTerminal).toHaveBeenCalledTimes(2);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
 		expect(container.querySelector(".workspace-tabbar")).not.toBeNull();
+
+		await act(async () => root.unmount());
+	});
+
+	it("keeps tab contents mounted when tabs are split or moved between panes", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await addTool(container, "Terminal");
+		await flush();
+		expect(api.createTerminal).toHaveBeenCalledTimes(1);
+		const terminalPanel = container.querySelector<HTMLElement>(".terminal-panel")!;
+		expect(terminalPanel).not.toBeNull();
+		const composer = container.querySelector<HTMLElement>("#composer-input")!;
+		expect(composer).not.toBeNull();
+
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Terminal").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
+		expect(api.createTerminal).toHaveBeenCalledTimes(1);
+		expect(terminalPanel.isConnected).toBe(true);
+
+		await act(async () => tabFor("Chat project task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		const moveItem = [...container.querySelectorAll<HTMLButtonElement>('.workspace-tab-menu [role="menuitem"]')]
+			.find((candidate) => candidate.textContent?.includes("Move to pane"))!;
+		await act(async () => moveItem.click());
+		await flush();
+		expect(container.querySelector("#composer-input")).toBe(composer);
 
 		await act(async () => root.unmount());
 	});

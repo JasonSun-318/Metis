@@ -619,10 +619,11 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		presentRef.current = send;
 		const observer = new ResizeObserver(schedule);
 		const anchor = anchorRef.current;
-		if (anchor) {
-			observer.observe(anchor);
-			const sidebar = anchor.closest(".workspace-pane");
-			if (sidebar) observer.observe(sidebar);
+		const panel = anchor?.closest(".workspace-panel");
+		if (anchor) observer.observe(anchor);
+		if (panel) {
+			observer.observe(panel);
+			panel.addEventListener("workspace-panel-layout", schedule);
 		}
 		const viewport = window.visualViewport;
 		window.addEventListener("resize", schedule);
@@ -638,6 +639,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			cancelAnimationFrame(frame);
 			cancelAnimationFrame(followup);
 			observer.disconnect();
+			panel?.removeEventListener("workspace-panel-layout", schedule);
 			window.removeEventListener("resize", schedule);
 			window.removeEventListener("animationend", schedule);
 			window.removeEventListener("transitionend", schedule);

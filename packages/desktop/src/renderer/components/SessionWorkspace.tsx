@@ -11,7 +11,7 @@ import {
 	X,
 } from "@phosphor-icons/react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
@@ -256,6 +256,10 @@ export function SessionWorkspaceView({
 	const browserProfilesRevision = useRef(0);
 	const preferredBrowserProfileId = useRef(localStorage.getItem(BROWSER_PROFILE_STORAGE_KEY));
 	const menuRef = useRef<HTMLDivElement>(null);
+	const panesRef = useRef<HTMLDivElement>(null);
+	const panelLayerRef = useRef<HTMLDivElement>(null);
+	const paneBodiesRef = useRef(new Map<string, HTMLElement>());
+	const panelRectsRef = useRef(new WeakMap<HTMLElement, { x: number; y: number; width: number; height: number }>());
 	const dirtySessionIds = useMemo(
 		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => {
 			if (tab.sessionId === null) return [];
@@ -1113,6 +1117,45 @@ export function SessionWorkspaceView({
 		);
 	};
 
+	const layoutPanels = useCallback(() => {
+		const root = panesRef.current;
+		const layer = panelLayerRef.current;
+		if (!root || !layer) return;
+		const rootRect = root.getBoundingClientRect();
+		for (const panel of layer.querySelectorAll<HTMLElement>(".workspace-panel")) {
+			const body = paneBodiesRef.current.get(panel.dataset.paneId ?? "");
+			if (!body) continue;
+			const rect = body.getBoundingClientRect();
+			const next = {
+				x: rect.left - rootRect.left,
+				y: rect.top - rootRect.top,
+				width: rect.width,
+				height: rect.height,
+			};
+			const previous = panelRectsRef.current.get(panel);
+			if (
+				previous?.x === next.x && previous.y === next.y
+				&& previous.width === next.width && previous.height === next.height
+			) continue;
+			panelRectsRef.current.set(panel, next);
+			panel.style.transform = `translate(${next.x}px, ${next.y}px)`;
+			panel.style.width = `${next.width}px`;
+			panel.style.height = `${next.height}px`;
+			panel.dispatchEvent(new Event("workspace-panel-layout"));
+		}
+	}, []);
+
+	useLayoutEffect(() => {
+		layoutPanels();
+	}, [layoutPanels, workspace, chatSessionId, chatIsDraft, visible]);
+
+	useEffect(() => {
+		const observer = new ResizeObserver(layoutPanels);
+		if (panesRef.current) observer.observe(panesRef.current);
+		for (const body of paneBodiesRef.current.values()) observer.observe(body);
+		return () => observer.disconnect();
+	}, [layoutPanels, workspace, chatSessionId, visible]);
+
 	const renderTabStrip = (pane: WorkspacePane) => (
 		<div
 			className={`workspace-tabbar${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
@@ -1219,51 +1262,71 @@ export function SessionWorkspaceView({
 		</div>
 	);
 
-	const renderPanePanels = (pane: WorkspacePane) => {
-		const paneFileTabs = pane.tabs.filter((tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file");
-		const fileSessionIds = [...new Set(paneFileTabs.map((tab) => tab.sessionId))];
-		const chatHost = pane.tabs.find((tab) =>
-			tab.kind === "chat" && (tab.sessionId === chatSessionId || (chatIsDraft && tab.sessionId === null)));
-		const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
-		const panelVisible = (tabId: string) =>
-			visible && pane.activeId === tabId
-			&& menuTarget?.paneId !== pane.id
-			&& tabMenu?.paneId !== pane.id;
-		return (
-			<>
-				{chatHost && (
-					<div className="workspace-chat-panel" hidden={pane.activeId !== chatHost.id || !visible}>
-						{chat}
+	const renderPanels = () => {
+		let chatHost: { pane: WorkspacePane; tab: WorkspaceTab } | null = null;
+		for (const pane of workspace.panes) {
+			const tab = pane.tabs.find((candidate) =>
+				candidate.kind === "chat"
+				&& (candidate.sessionId === chatSessionId || (chatIsDraft && candidate.sessionId === null)));
+			if (tab) {
+				chatHost = { pane, tab };
+				break;
+			}
+		}
+		return workspace.panes.flatMap((pane) => {
+			const paneFileTabs = pane.tabs.filter((tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file");
+			const fileSessionIds = [...new Set(paneFileTabs.map((tab) => tab.sessionId))];
+			const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
+			const panelVisible = (tabId: string) =>
+				visible && pane.activeId === tabId
+				&& menuTarget?.paneId !== pane.id
+				&& tabMenu?.paneId !== pane.id;
+			const host = chatHost && chatHost.pane === pane ? chatHost : null;
+			const wrap = (tabId: string, content: ReactNode) => (
+				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId}>
+					{content}
+				</div>
+			);
+			return [
+				host ? (
+					<div
+						className="workspace-panel"
+						data-pane-id={pane.id}
+						hidden={pane.activeId !== host.tab.id || !visible}
+						key={host.tab.id}
+					>
+						<div className="workspace-chat-panel">{chat}</div>
 					</div>
-				)}
-				{activeTab?.kind === "chat" && activeTab !== chatHost && sessionPlaceholder(activeTab)}
-				{pane.tabs.flatMap((tab) =>
-					tab.kind === "process" ? (
+				) : null,
+				activeTab?.kind === "chat" && activeTab !== host?.tab ? (
+					<div className="workspace-panel" data-pane-id={pane.id} key={activeTab.id}>
+						{sessionPlaceholder(activeTab)}
+					</div>
+				) : null,
+				...pane.tabs.flatMap((tab) =>
+					tab.kind === "process" ? wrap(tab.id,
 						<ProcessPanel
-							key={tab.id}
 							panelId={`process-panel-${tab.id}`}
 							process={tab.process}
 							theme={theme}
 							onError={onError}
 							visible={panelVisible(tab.id)}
-						/>
-					) : tab.kind === "terminal" ? (
+						/>,
+					) : tab.kind === "terminal" ? wrap(tab.id,
 						<TerminalPanel
 							api={api}
 							cwd={tab.cwd}
-							key={tab.id}
 							terminalId={tab.id}
 							theme={theme}
 							visible={panelVisible(tab.id)}
-						/>
-					) : tab.kind === "browser" ? (
+						/>,
+					) : tab.kind === "browser" ? wrap(tab.id,
 						<BrowserPanel
 							api={api}
 							browserId={tab.id}
 							controlState={tab.controlState}
 							handoffReason={tab.handoffReason}
 							sessionId={tab.sessionId}
-							key={tab.id}
 							onError={onError}
 							onOpenProfile={(profile) => {
 								const selected = browserProfiles.find((candidate) => candidate.profileId === profile.profileId);
@@ -1274,44 +1337,38 @@ export function SessionWorkspaceView({
 							profile={{ profileId: tab.profileId, name: tab.profileName }}
 							profiles={browserProfiles}
 							visible={panelVisible(tab.id)}
-						/>
-					) : tab.kind === "knowledge" ? (
-						<KnowledgePanel api={api} key={tab.id} sessionId={tab.sessionId} visible={panelVisible(tab.id)} />
-					) : tab.kind === "review" ? (
+						/>,
+					) : tab.kind === "knowledge" ? wrap(tab.id,
+						<KnowledgePanel api={api} sessionId={tab.sessionId} visible={panelVisible(tab.id)} />,
+					) : tab.kind === "review" ? wrap(tab.id,
 						<ReviewPanel
 							api={api}
-							key={tab.id}
 							sessionId={tab.sessionId}
 							theme={theme}
 							visible={panelVisible(tab.id)}
-						/>
-					) : tab.kind === "agent" ? (
+						/>,
+					) : tab.kind === "agent" ? wrap(tab.id,
 						tab.sessionId === chatSessionId ? (
 							<AgentTreePanel
 								api={api}
-								key={tab.id}
 								onError={onError}
 								sessionId={tab.sessionId}
 								store={store}
 								visible={panelVisible(tab.id)}
 							/>
-						) : panelVisible(tab.id) ? sessionPlaceholder(tab) : null
-					) : tab.kind === "plan" ? (
+						) : sessionPlaceholder(tab),
+					) : tab.kind === "plan" ? wrap(tab.id,
 						<div
 							className="tool-panel plan-panel"
-							hidden={!panelVisible(tab.id)}
 							id={`plan-panel-${tab.id}`}
-							key={tab.id}
 							role="tabpanel"
 						>
 							<PlanPreview plan={tab.plan} />
-						</div>
-					) : tab.kind === "preview" ? (
+						</div>,
+					) : tab.kind === "preview" ? wrap(tab.id,
 						<div
 							className="tool-panel preview-panel"
-							hidden={!panelVisible(tab.id)}
 							id={`preview-panel-${tab.id}`}
-							key={tab.id}
 							role="tabpanel"
 						>
 							<UniversalFilePreviewer
@@ -1321,10 +1378,10 @@ export function SessionWorkspaceView({
 								onClose={() => closeTab(tab.id)}
 								onError={onError}
 							/>
-						</div>
+						</div>,
 					) : [],
-				)}
-				{fileSessionIds.map((fileSessionId) => {
+				),
+				...fileSessionIds.map((fileSessionId) => {
 					const groupTabs = paneFileTabs.filter((tab) => tab.sessionId === fileSessionId);
 					const groupActiveTab = activeTab?.kind === "file" && activeTab.sessionId === fileSessionId ? activeTab : groupTabs.at(-1);
 					const cwd = groupTabs[0]!.cwd;
@@ -1338,36 +1395,42 @@ export function SessionWorkspaceView({
 					const groupVisible = visible && activeTab?.kind === "file" && activeTab.sessionId === fileSessionId
 						&& menuTarget?.paneId !== pane.id && tabMenu?.paneId !== pane.id;
 					return (
-						<FilePanel
-							activePath={groupActiveTab?.relativePath ?? null}
-							api={api}
-							cwd={cwd}
-							draft={groupActiveTab ? fileDrafts.get(groupActiveTab.id) ?? null : null}
-							dirtyPaths={dirtyPaths}
-							expandedPaths={expandedBySession.get(fileSessionId) ?? []}
+						<div
+							className="workspace-panel"
+							data-pane-id={pane.id}
+							hidden={!groupVisible}
 							key={`files-${fileSessionId}-${pane.id}`}
-							onDraftChange={(text) => { if (groupActiveTab) updateFileDraft(fileSessionId, groupActiveTab.id, text); }}
-							onDraftLoaded={(file) => { if (groupActiveTab) loadFileDraft(groupActiveTab.id, file); }}
-							onError={onError}
-							onExpandedPathsChange={(paths) => updateExpandedPaths(fileSessionId, cwd, paths)}
-							onOpenFile={(relativePath, fix) => openFile(fileSessionId, cwd, relativePath, fix, pane.id)}
-							onSave={async () => { if (groupActiveTab) await saveFileTab(fileSessionId, groupActiveTab.id); }}
-							onWorkspaceMutation={(result) => applyWorkspaceMutation(fileSessionId, cwd, result, pane.id)}
-							saving={groupActiveTab ? savingFileTabIds.has(groupActiveTab.id) : false}
-							savingPaths={savingPaths}
-							sessionId={fileSessionId}
-							visible={groupVisible}
-						/>
+						>
+							<FilePanel
+								activePath={groupActiveTab?.relativePath ?? null}
+								api={api}
+								cwd={cwd}
+								draft={groupActiveTab ? fileDrafts.get(groupActiveTab.id) ?? null : null}
+								dirtyPaths={dirtyPaths}
+								expandedPaths={expandedBySession.get(fileSessionId) ?? []}
+								onDraftChange={(text) => { if (groupActiveTab) updateFileDraft(fileSessionId, groupActiveTab.id, text); }}
+								onDraftLoaded={(file) => { if (groupActiveTab) loadFileDraft(groupActiveTab.id, file); }}
+								onError={onError}
+								onExpandedPathsChange={(paths) => updateExpandedPaths(fileSessionId, cwd, paths)}
+								onOpenFile={(relativePath, fix) => openFile(fileSessionId, cwd, relativePath, fix, pane.id)}
+								onSave={async () => { if (groupActiveTab) await saveFileTab(fileSessionId, groupActiveTab.id); }}
+								onWorkspaceMutation={(result) => applyWorkspaceMutation(fileSessionId, cwd, result, pane.id)}
+								saving={groupActiveTab ? savingFileTabIds.has(groupActiveTab.id) : false}
+								savingPaths={savingPaths}
+								sessionId={fileSessionId}
+								visible={groupVisible}
+							/>
+						</div>
 					);
-				})}
-			</>
-		);
+				}),
+			];
+		});
 	};
 
 	return (
 		<div className="session-workspace-root" hidden={!visible}>
 			<div className="session-workspace-instance">
-				<div className="session-workspace-panes">
+				<div className={`session-workspace-panes${dragState ? " is-dragging" : ""}`} ref={panesRef}>
 					{workspace.panes.map((pane) => (
 						<section
 							className={`workspace-pane${dropTarget && "splitBeside" in dropTarget && dropTarget.splitBeside === pane.id ? " is-split-target" : ""}`}
@@ -1397,15 +1460,24 @@ export function SessionWorkspaceView({
 							}}
 						>
 							{renderTabStrip(pane)}
-							<div className="workspace-pane-body">
-								{pane.tabs.length === 0 ? (
+							<div
+								className="workspace-pane-body"
+								ref={(element) => {
+									if (element) paneBodiesRef.current.set(pane.id, element);
+									else paneBodiesRef.current.delete(pane.id);
+								}}
+							>
+								{pane.tabs.length === 0 && (
 									<div className="workspace-empty" role="tabpanel">
 										<p>{t("Pick a session from the sidebar or use + to open a tool.")}</p>
 									</div>
-								) : renderPanePanels(pane)}
+								)}
 							</div>
 						</section>
 					))}
+					<div className="workspace-panel-layer" ref={panelLayerRef}>
+						{renderPanels()}
+					</div>
 				</div>
 			</div>
 			{tabMenu && (() => {
