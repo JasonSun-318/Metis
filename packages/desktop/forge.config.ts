@@ -159,6 +159,8 @@ const config: ForgeConfig = {
 		tmpdir: process.env.METIS_ELECTRON_PACKAGER_TMPDIR,
 		appBundleId: "ai.metis.desktop",
 		appCategoryType: "public.app-category.developer-tools",
+		// macOS uses extraResource + CFBundleIconFile below instead of this option.
+		icon: process.platform === "win32" ? path.join(desktopRoot, "assets", "metis.ico") : undefined,
 		extraResource: process.platform === "darwin" ? [path.join(desktopRoot, "assets", "metis.icns")] : [],
 		name: "Metis",
 		executableName: "Metis",
@@ -197,7 +199,12 @@ const config: ForgeConfig = {
 		// nuspec path from `name`, and a scoped name (@metis/desktop) turns the
 		// slash into a directory separator on Windows, failing with ENOENT.
 		// `authors` is required because nuget refuses to pack a nuspec without it.
-		new MakerSquirrel({ windowsSign, name: "Metis", authors: "Metis" }),
+		new MakerSquirrel({
+			windowsSign,
+			name: "Metis",
+			authors: "Metis",
+			setupIcon: path.join(desktopRoot, "assets", "metis.ico"),
+		}),
 		new MakerZIP({}),
 		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
 		// an x64 Node process runs under Rosetta on Apple Silicon.
@@ -205,8 +212,8 @@ const config: ForgeConfig = {
 		// `bin` must match packagerConfig.executableName: the deb/rpm makers
 		// otherwise derive the binary path from the scoped package name
 		// (@metis/desktop), which does not exist inside the packaged app.
-		new MakerDeb({ options: { bin: "Metis" } }),
-		new MakerRpm({ options: { bin: "Metis", license: "MIT" } }),
+		new MakerDeb({ options: { bin: "Metis", icon: path.join(desktopRoot, "assets", "metis.png") } }),
+		new MakerRpm({ options: { bin: "Metis", license: "MIT", icon: path.join(desktopRoot, "assets", "metis.png") } }),
 	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),
