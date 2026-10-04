@@ -41,7 +41,7 @@ export class ScheduleStore {
 
 	applyBatch(batch: ConnectionEventsParams): void {
 		if (this.syncStatus !== "ready") return;
-		if (batch.serverEpoch !== this.serverEpoch || batch.fromCursor !== this.cursor + 1) {
+		if (batch.serverEpoch !== this.serverEpoch || batch.fromCursor <= this.cursor) {
 			this.syncStatus = "resnapshot_required";
 			this.commit();
 			return;

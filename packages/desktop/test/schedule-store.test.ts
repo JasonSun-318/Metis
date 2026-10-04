@@ -52,7 +52,7 @@ describe("ScheduleStore", () => {
 		expect(listener).toHaveBeenCalledTimes(3);
 	});
 
-	it("requires a new snapshot after an epoch or cursor gap", () => {
+	it("requires a new snapshot after a refresh notice", () => {
 		const store = new ScheduleStore();
 		store.applySnapshot({ serverEpoch: EPOCH, tasks: [], unreadCount: 0, cursor: 2 });
 		store.applyBatch({
@@ -62,5 +62,27 @@ describe("ScheduleStore", () => {
 			events: [{ type: "schedule/refreshed" }],
 		});
 		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
+	});
+
+	it("applies a forward cursor gap and requires a snapshot for a duplicate batch", () => {
+		const store = new ScheduleStore();
+		store.applySnapshot({ serverEpoch: EPOCH, tasks: [], unreadCount: 0, cursor: 2 });
+		store.applyBatch({
+			serverEpoch: EPOCH,
+			fromCursor: 4,
+			toCursor: 4,
+			events: [{ type: "schedule/updated", task: task("Gap task") }],
+		});
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+		expect(store.getSnapshot().tasksById.get(TASK_ID)?.name).toBe("Gap task");
+		expect(store.getSnapshot().cursor).toBe(4);
+		store.applyBatch({
+			serverEpoch: EPOCH,
+			fromCursor: 4,
+			toCursor: 4,
+			events: [{ type: "schedule/deleted", taskId: TASK_ID }],
+		});
+		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
+		expect(store.getSnapshot().tasksById.has(TASK_ID)).toBe(true);
 	});
 });
