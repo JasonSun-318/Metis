@@ -72,7 +72,7 @@ import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 import { SystemNotice, systemErrorNotice, type SystemNoticeTone } from "./SystemNotice.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
-import { clampToolsSidebarWidth, ToolsSidebar } from "./ToolsSidebar.tsx";
+import { SessionWorkspaceView } from "./SessionWorkspace.tsx";
 import { Transcript } from "./Transcript.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import { WorkspaceSessionHeader } from "./WorkspaceSessionHeader.tsx";
@@ -143,7 +143,6 @@ export function latestAssistantUsageKey(
 	return "";
 }
 
-const TOOLS_SIDEBAR_WIDTH_PREFIX = "metis.tools-sidebar-width.v2:";
 const SESSION_SIDEBAR_WIDTH_KEY = "metis.session-sidebar-width.v1";
 const selectSidebarRevision = (snapshot: AppStoreSnapshot) => snapshot.sidebarRevision;
 
@@ -155,11 +154,6 @@ function loadSessionSidebarPreferredWidth(): number {
 	} catch {
 		return sessionSidebarDefaultWidth();
 	}
-}
-
-function loadToolsSidebarPreferredWidth(sessionId: string, workspaceWidth: number): number {
-	const value = Number.parseInt(localStorage.getItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${sessionId}`) ?? "", 10);
-	return Number.isInteger(value) && value >= 280 ? value : Math.round(workspaceWidth * 0.44);
 }
 
 export function App({ api, store }: AppProps) {
@@ -221,15 +215,6 @@ export function App({ api, store }: AppProps) {
 	const [sessionSidebarPreferredWidth, setSessionSidebarPreferredWidth] = useState(loadSessionSidebarPreferredWidth);
 	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
 	const [knowledgeRequest, setKnowledgeRequest] = useState<{ id: number; sessionId: string }>();
-	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
-	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(393);
-	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
-	const processAutoOpenSuppressed = useRef(new Set<string>());
-	const processAutoOpenedSessionId = useRef<string | null>(null);
-	const previousRunningSession = useRef<{ readonly sessionId: string | null; readonly running: boolean }>({
-		sessionId: null,
-		running: false,
-	});
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
 	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
@@ -307,37 +292,6 @@ export function App({ api, store }: AppProps) {
 	}, [api]);
 	const mcpListGeneration = useRef(0);
 	const modelSettingsGeneration = useRef(0);
-	const updateToolsSidebarWidth = useCallback((width: number, persist = true) => {
-		setToolsSidebarWidth(width);
-		if (persist && state.activeSessionId) {
-			setToolsSidebarPreferredWidth(width);
-			localStorage.setItem(`${TOOLS_SIDEBAR_WIDTH_PREFIX}${state.activeSessionId}`, String(width));
-		}
-	}, [state.activeSessionId]);
-	const openToolsSidebar = useCallback(() => {
-		if (state.activeSessionId) {
-			const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth ?? window.innerWidth;
-			const preferredWidth = loadToolsSidebarPreferredWidth(state.activeSessionId, workspaceWidth);
-			setToolsSidebarPreferredWidth(preferredWidth);
-			setToolsSidebarWidth(clampToolsSidebarWidth(preferredWidth, workspaceWidth));
-		}
-		setToolsSidebarOpen(true);
-	}, [state.activeSessionId]);
-	const showToolsSidebar = useCallback(() => {
-		if (state.activeSessionId) processAutoOpenSuppressed.current.delete(state.activeSessionId);
-		openToolsSidebar();
-	}, [openToolsSidebar, state.activeSessionId]);
-	const openProcessSidebar = useCallback((sessionId: string) => {
-		if (processAutoOpenSuppressed.current.has(sessionId)) return;
-		if (!toolsSidebarOpen) processAutoOpenedSessionId.current = sessionId;
-		openToolsSidebar();
-	}, [openToolsSidebar, toolsSidebarOpen]);
-	const hideToolsSidebar = useCallback(() => {
-		const sessionId = state.activeSessionId;
-		if (sessionId && state.process?.state === "running") processAutoOpenSuppressed.current.add(sessionId);
-		if (processAutoOpenedSessionId.current === sessionId) processAutoOpenedSessionId.current = null;
-		setToolsSidebarOpen(false);
-	}, [state.activeSessionId, state.process?.state]);
 	const handlePreviewDeliveredFile = useCallback(
 		(file: SessionDeliveredFileView) => {
 			if (!state.activeSessionId) return;
@@ -347,9 +301,8 @@ export function App({ api, store }: AppProps) {
 				fileId: file.fileId,
 				name: file.name,
 			});
-			showToolsSidebar();
 		},
-		[showToolsSidebar, state.activeSessionId],
+		[state.activeSessionId],
 	);
 	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
 		const clamped = clampSessionSidebarWidth(width);
@@ -394,13 +347,6 @@ export function App({ api, store }: AppProps) {
 		resize();
 		return () => window.removeEventListener("resize", resize);
 	}, [sessionSidebarPreferredWidth, updateSessionSidebarWidth]);
-	useEffect(() => {
-		if (!toolsSidebarOpen || !state.activeSessionId) return;
-		const workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth || window.innerWidth;
-		const preferredWidth = loadToolsSidebarPreferredWidth(state.activeSessionId, workspaceWidth);
-		setToolsSidebarPreferredWidth(preferredWidth);
-		setToolsSidebarWidth(clampToolsSidebarWidth(preferredWidth, workspaceWidth));
-	}, [state.activeSessionId, toolsSidebarOpen]);
 	const skillListGeneration = useRef(0);
 	const scheduleSubscriptionGeneration = useRef(0);
 	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
@@ -527,7 +473,6 @@ export function App({ api, store }: AppProps) {
 			}
 			cancelHomeTransition();
 			setDestination("tasks");
-			setToolsSidebarOpen(true);
 			if (store.getSnapshot().activeSessionId === sessionId) {
 				workspaceWorkflow.cancelNewTask();
 				return;
@@ -850,26 +795,18 @@ export function App({ api, store }: AppProps) {
 		: undefined;
 	const toolsSession = visibleActiveSession ?? (visibleNewTaskDraft?.sessionId
 		? state.sessionsById.get(visibleNewTaskDraft.sessionId)
+			?? { sessionId: visibleNewTaskDraft.sessionId, cwd: visibleNewTaskDraft.folder }
 		: undefined);
-	const toolsSidebarAvailable = toolsSession !== undefined;
 	const openKnowledge = (sessionId: string) => {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
-		showToolsSidebar();
 	};
+	const projectContext = visibleActiveSession?.cwd
+		? { mode: visibleActiveSession.mode, cwd: visibleActiveSession.cwd }
+		: undefined;
+	const openNewSessionInProject = projectContext
+		? () => void createEmptySessionInProject(projectContext.mode, projectContext.cwd)
+		: undefined;
 	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
-	useEffect(() => {
-		const sessionId = visibleActiveSession?.sessionId ?? null;
-		const previous = previousRunningSession.current;
-		previousRunningSession.current = { sessionId, running };
-		if (previous.sessionId !== sessionId) {
-			if (processAutoOpenedSessionId.current !== sessionId) processAutoOpenedSessionId.current = null;
-			return;
-		}
-		if (sessionId && previous.running && !running && processAutoOpenedSessionId.current === sessionId) {
-			processAutoOpenedSessionId.current = null;
-			setToolsSidebarOpen(false);
-		}
-	}, [running, visibleActiveSession?.sessionId]);
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
 		if (destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
@@ -915,7 +852,7 @@ export function App({ api, store }: AppProps) {
 	useEffect(() => {
 		homeTransitionAnimation.current?.cancel();
 		homeTransitionAnimation.current = null;
-	}, [sessionSidebarWidth, toolsSidebarWidth]);
+	}, [sessionSidebarWidth]);
 	useEffect(() => {
 		statusGeneration.current += 1;
 		contextStatusRef.current = null;
@@ -1256,8 +1193,7 @@ export function App({ api, store }: AppProps) {
 
 	const openPlan = useCallback((plan: PlanView) => {
 		setPlanPreviewRequest(plan);
-		showToolsSidebar();
-	}, [showToolsSidebar]);
+	}, []);
 
 	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
 	const isCompacting = compactingSession !== null;
@@ -1843,8 +1779,7 @@ export function App({ api, store }: AppProps) {
 				workspace={sidebarWorkspace}
 			/>}
 			<main
-				className={`workspace${toolsSidebarAvailable && toolsSidebarOpen ? " tools-sidebar-open" : ""}`}
-				style={{ "--tool-sidebar-width": `${toolsSidebarWidth}px` } as CSSProperties}
+				className="workspace"
 			>
 				<div className="workspace-titlebar-actions">
 					{api.platform !== "win32" && (
@@ -1858,26 +1793,12 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					{toolsSidebarAvailable && (
+					{toolsSession !== undefined && (
 						<div className="workspace-titlebar-end">
-							{!toolsSidebarOpen && (
-								<ReleaseNotesPopover
-									loadChangelog={api.getChangelog}
-									availableVersion={"version" in updateState ? updateState.version : null}
-								/>
-							)}
-							<button
-								aria-label={t(toolsSidebarOpen ? "Hide tools sidebar" : "Show tools sidebar")}
-								aria-pressed={toolsSidebarOpen}
-								className="details-sidebar-toggle"
-								onClick={() => {
-									if (toolsSidebarOpen) hideToolsSidebar();
-									else showToolsSidebar();
-								}}
-								type="button"
-							>
-								<SidebarSimple aria-hidden="true" size={17} />
-							</button>
+							<ReleaseNotesPopover
+								loadChangelog={api.getChangelog}
+								availableVersion={"version" in updateState ? updateState.version : null}
+							/>
 						</div>
 					)}
 				</div>
@@ -1927,10 +1848,13 @@ export function App({ api, store }: AppProps) {
 					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
 				) : destination === "schedules" && mode === "chat" ? (
 					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
-				) : newTaskOpen ? (
-					homePage
-				) : visibleActiveSession ? (
-					<div className="workspace-body">
+				) : null}
+				{bootstrapped ? (
+					<SessionWorkspaceView
+						activeSession={toolsSession ?? null}
+						api={api}
+						chat={newTaskOpen || !visibleActiveSession ? homePage : (
+							<div className="workspace-body">
 						<div className="conversation-column" data-mode={visibleActiveSession.mode}>
 							<Transcript
 								showNavigation
@@ -2016,29 +1940,24 @@ export function App({ api, store }: AppProps) {
 							</div>
 						</div>
 					</div>
+						)}
+						chatTitle={visibleActiveSession ? sessionDisplayTitle(visibleActiveSession) : t("New task")}
+						cleanupSessionIds={toolCleanupSessionIds}
+						mode={mode}
+						onActivateSession={activateBrowserSession}
+						onCleanupSessionIdsHandled={handleToolCleanupHandled}
+						onDirtySessionIdsChange={handleDirtySessionIdsChange}
+						onError={reportError}
+						onNewSession={openNewSessionInProject}
+						planPreviewRequest={planPreviewRequest}
+						previewRequest={previewRequest}
+						knowledgeRequest={knowledgeRequest}
+						process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
+						store={store}
+						theme={resolvedTheme}
+						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}
+					/>
 				) : null}
-				<ToolsSidebar
-					knowledgeRequest={knowledgeRequest}
-					activeSession={toolsSession ?? null}
-					api={api}
-					cleanupSessionIds={toolCleanupSessionIds}
-					mode={mode}
-					onActivateSession={activateBrowserSession}
-					onOpen={openProcessSidebar}
-					process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
-					onClose={hideToolsSidebar}
-					onCleanupSessionIdsHandled={handleToolCleanupHandled}
-					onDirtySessionIdsChange={handleDirtySessionIdsChange}
-					onError={reportError}
-					onWidthChange={updateToolsSidebarWidth}
-					open={toolsSidebarAvailable && toolsSidebarOpen && !settingsOpen}
-					planPreviewRequest={planPreviewRequest}
-					preferredWidth={toolsSidebarPreferredWidth}
-					previewRequest={previewRequest}
-					store={store}
-					theme={resolvedTheme}
-					width={toolsSidebarWidth}
-				/>
 					<div className="sr-only" aria-live="polite">{t(message)}</div>
 			</main>
 			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} sandboxHealth={state.sandboxHealth} />

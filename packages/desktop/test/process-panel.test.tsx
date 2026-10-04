@@ -3,7 +3,7 @@ import type { SessionProcessView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ToolsSidebar } from "../src/renderer/components/ToolsSidebar.tsx";
+import { SessionWorkspaceView } from "../src/renderer/components/SessionWorkspace.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
@@ -24,12 +24,27 @@ const sessionId = "11111111-1111-4111-8111-111111111111";
 let root: Root;
 let container: HTMLDivElement;
 const api = { listBrowserProfiles: vi.fn().mockResolvedValue([]), subscribeBrowser: vi.fn(() => () => {}), createTerminal: vi.fn() } as unknown as MetisDesktopApi;
-const onOpen = vi.fn();
 const onError = vi.fn();
 const command = (id: string, output = "", state: SessionProcessView["state"] = "running"): SessionProcessView => ({ processId: id, command: `echo ${id}`, output, state, truncated: false });
+const activeProcessTab = () => container.querySelector('[role="tab"][aria-label="Process"][aria-selected="true"]');
 
 async function render(process?: SessionProcessView, owner = sessionId, mode: "chat" | "code" = "chat") {
-	await act(async () => root.render(<ToolsSidebar activeSession={{ sessionId: owner, cwd: "/tmp/project" }} api={api} cleanupSessionIds={[]} mode={mode} onActivateSession={vi.fn()} onClose={vi.fn()} onOpen={onOpen} process={process} onCleanupSessionIdsHandled={vi.fn()} onDirtySessionIdsChange={vi.fn()} onError={onError} onWidthChange={vi.fn()} open preferredWidth={393} store={{} as AppStore} theme="dark" width={393} />));
+	await act(async () => root.render(<SessionWorkspaceView
+		activeSession={{ sessionId: owner, cwd: "/tmp/project" }}
+		api={api}
+		chat={<div />}
+		chatTitle="Chat"
+		cleanupSessionIds={[]}
+		mode={mode}
+		onActivateSession={vi.fn()}
+		onCleanupSessionIdsHandled={vi.fn()}
+		onDirtySessionIdsChange={vi.fn()}
+		onError={onError}
+		process={process}
+		store={{} as AppStore}
+		theme="dark"
+		visible
+	/>));
 }
 
 beforeEach(async () => {
@@ -43,41 +58,31 @@ beforeEach(async () => {
 });
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
 
-describe("Process sidebar", () => {
+describe("Process workspace tab", () => {
 	it.each(["chat", "code"] as const)("opens one read-only tab in %s, streams output and clears it for the next command", async (mode) => {
 		await render(undefined, sessionId, mode);
 		expect(container.querySelector('[role="tab"][aria-label="Process"]')).toBeNull();
-		expect(container.querySelector('.tool-sidebar-menu button[aria-label="Process"]')).toBeNull();
-		if (mode === "code") {
-			expect(container.querySelector('.tool-sidebar-menu button[aria-label="Files"] .animated-nav-icon')).toBeNull();
-			expect(container.querySelector('.tool-sidebar-menu button[aria-label="Files"] svg')).not.toBeNull();
-		}
 		await render(command("one"), sessionId, mode);
-		expect(onOpen).toHaveBeenCalledOnce();
-		expect(container.querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
+		expect(activeProcessTab()).not.toBeNull();
 		expect(terminals.at(-1)?.options.disableStdin).toBe(true);
 		await render(command("one", "first\n"), sessionId, mode);
 		await render(command("one", "first\nsecond\n", "completed"), sessionId, mode);
 		expect(terminals.at(-1)?.output).toBe("first\nsecond\n");
 		expect(container.querySelector('[role="status"]')?.textContent).toBe("Command completed");
-		expect(onOpen).toHaveBeenCalledOnce();
 		await render(command("two"), sessionId, mode);
-		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
 		expect(terminals[0]?.disposed).toBe(true);
 		expect(terminals.at(-1)?.output).toBe("");
-		expect(onOpen).toHaveBeenCalledTimes(2);
 		expect(api.createTerminal).not.toHaveBeenCalled();
 	});
 
 	it("respects closing the tab, then opens for a new command even when it completed within one batch", async () => {
 		await render(command("one"));
 		await act(async () => (container.querySelector('[aria-label="Close Process"]') as HTMLButtonElement).click());
-		expect(container.querySelector('.tool-sidebar-menu button[aria-label="Process"]')).toBeNull();
 		await render(command("one", "late"));
 		expect(container.querySelector('[role="tab"][aria-label="Process"]')).toBeNull();
-		expect(onOpen).toHaveBeenCalledOnce();
 		await render(command("fast", "", "completed"));
-		expect(onOpen).toHaveBeenCalledTimes(2);
+		expect(container.querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
 		expect(container.textContent).toContain("This command produced no output.");
 	});
 
@@ -87,10 +92,10 @@ describe("Process sidebar", () => {
 		expect(terminals.at(-1)?.output).toBe("new tail");
 		expect(container.textContent).toContain("earlier output was truncated");
 		await render(undefined, "other");
-		expect(container.querySelector('.process-panel:not([hidden])')).toBeNull();
+		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-panel')).toBeNull();
 		await render(command("two", "failure", "failed"), "other");
-		expect(container.querySelector('.process-panel:not([hidden])')?.textContent).toContain("Command stopped with an error");
+		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-panel')?.textContent).toContain("Command stopped with an error");
 		await render(command("one", "new tail", "completed"));
-		expect(container.querySelector('.process-panel:not([hidden]) .process-command')?.textContent).toContain("echo one");
+		expect(container.querySelector('.session-workspace-instance:not([hidden]) .process-command')?.textContent).toContain("echo one");
 	});
 });

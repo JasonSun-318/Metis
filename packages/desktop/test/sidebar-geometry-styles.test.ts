@@ -63,9 +63,6 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(actionButtons.width).toBe("30px");
 		expect(actionButtons.height).toBe("30px");
 		expect(actionButtons.borderRadius).toBe("7px");
-
-		const toolSidebarCollapse = rule(".tool-sidebar-collapse");
-		expect(toolSidebarCollapse.top).toBe("0px");
 	});
 
 	it("keeps the release bell and tools toggle in one right-aligned group", () => {

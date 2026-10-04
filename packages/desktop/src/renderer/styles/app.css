@@ -189,8 +189,7 @@ textarea { resize: none; }
 .account-menu-item:hover, .account-menu-item:focus-visible { background: var(--menu-hover); color: var(--text-strong); outline: 0; }
 .account-menu-popover button:hover:not(:disabled) { background: var(--menu-hover); }
 
-.workspace { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--app-bg); transition: padding-right 200ms cubic-bezier(.16, 1, .3, 1); }
-.workspace.tools-sidebar-open { padding-right: calc(var(--tool-sidebar-width, 393px) + 7px); }
+.workspace { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--app-bg); }
 .workspace-titlebar-actions { position: absolute; z-index: 50; top: 7px; right: 20px; left: 18px; display: flex; pointer-events: none; -webkit-app-region: drag; }
 /* macOS: when the sessions sidebar is collapsed the reveal button lands under the traffic lights; keep it clear. */
 :root[data-platform="darwin"] .sessions-sidebar-collapsed .workspace-titlebar-actions { left: 76px; }
@@ -213,7 +212,6 @@ textarea { resize: none; }
 	pointer-events: none;
 	-webkit-app-region: no-drag;
 }
-.workspace-titlebar-end .details-sidebar-toggle { margin-left: 0; }
 .release-notes-control { pointer-events: auto; -webkit-app-region: no-drag; }
 .release-notes-trigger { position: relative; }
 .release-notes-unread-dot {
@@ -267,86 +265,20 @@ textarea { resize: none; }
 .release-notes-markdown :not(pre) > code { border-radius: 4px; background: var(--surface-07); padding: 1px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .release-notes-status { margin: 0; padding: 12px 8px; color: var(--text-12); font-size: 12px; line-height: 1.45; }
 .release-notes-status.is-error { color: var(--danger-soft-text); }
-.details-sidebar-toggle svg { transform: scaleX(-1); }
-.tool-sidebar[hidden] { display: none; }
-.tool-sidebar { position: absolute; z-index: 6; top: 7px; right: 7px; bottom: 7px; min-width: 280px; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--sidebar); container-type: inline-size; animation: tool-sidebar-slide-in 200ms cubic-bezier(.16, 1, .3, 1); }
-@keyframes tool-sidebar-slide-in { from { transform: translateX(calc(100% + 14px)); } to { transform: translateX(0); } }
-.tool-sidebar-resizer { position: absolute; z-index: 9; top: 0; bottom: 0; left: -4px; width: 8px; cursor: col-resize; outline: 0; }
-.tool-sidebar-menu {
-	position: absolute;
-	inset: 40px 0 0 0;
-	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	align-content: center;
-	gap: 10px;
-	padding: 24px 16px;
-	max-width: 360px;
-	margin: 0 auto;
-	overflow-y: auto;
-}
-.tool-sidebar-menu button {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	height: 78px;
-	gap: 8px;
-	border: 1px solid var(--border);
-	border-radius: 10px;
-	background: var(--surface-03);
-	color: var(--text-24);
-	padding: 8px 6px;
-	text-align: center;
-	transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
-}
-.tool-sidebar-menu button:hover:not(:disabled),
-.tool-sidebar-menu button:focus-visible {
-	background: var(--surface-06);
-	border-color: var(--border-strong);
-	color: var(--text);
-	transform: translateY(-1px);
-	box-shadow: var(--shadow);
-	outline: 0;
-}
-.tool-sidebar-menu button:disabled {
-	opacity: 0.42;
-	cursor: default;
-	background: var(--surface-02);
-	border-color: var(--border);
-	transform: none;
-	box-shadow: none;
-}
-.tool-sidebar-menu .tool-menu-icon {
-	display: grid;
-	width: 36px;
-	height: 36px;
-	flex: none;
-	place-items: center;
-	border-radius: 8px;
-	background: var(--surface-05);
-	border: 1px solid var(--border);
-	color: var(--text-20);
-	transition: color 140ms ease, background-color 140ms ease;
-}
-.tool-sidebar-menu button:hover:not(:disabled) .tool-menu-icon {
-	background: var(--surface-08);
-	color: var(--text);
-}
-.tool-sidebar-menu button:disabled .tool-menu-icon {
-	color: var(--text-04);
-}
-.tool-sidebar-menu button span {
-	font-size: 12px;
-	font-weight: 550;
-	letter-spacing: -0.01em;
-	color: var(--text);
-}
-.tool-sidebar-menu button:last-child:nth-child(odd) {
-	grid-column: 1 / -1;
-	max-width: calc(50% - 5px);
-	margin: 0 auto;
-	width: 100%;
-}
+.session-workspace-root { display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.session-workspace-root[hidden] { display: none; }
+.session-workspace-instance { display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.session-workspace-instance[hidden] { display: none; }
+.session-workspace-panes { display: flex; min-width: 0; min-height: 0; flex: 1; gap: 7px; padding: 0 7px 7px; }
+.workspace-pane { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; flex-direction: column; overflow: hidden; border: 1px solid var(--border); border-radius: 9px; background: var(--sidebar); container-type: inline-size; }
+.workspace-pane.is-split-target { border-color: var(--focus-ring); }
+.workspace-pane-body { position: relative; min-height: 0; flex: 1; }
+.workspace-pane-body > * { position: absolute; inset: 0; }
+.workspace-pane-body > [hidden] { display: none; }
+.workspace-chat-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
+.workspace-add-menu { right: 0; left: auto; }
+.workspace-add-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
+.workspace-tab-menu { position: fixed; width: 168px; }
 .tool-add-menu button {
 	display: flex;
 	width: 100%;
@@ -382,10 +314,9 @@ textarea { resize: none; }
 .tool-add-menu .tool-menu-title {
 	font-size: 12px;
 }
-.tool-sidebar-header { position: relative; z-index: 50; display: flex; height: 40px; align-items: center; border-bottom: 1px solid var(--border); -webkit-app-region: no-drag; }
-.tool-sidebar-header.is-empty { border-bottom-color: transparent; }
-.tool-tabbar { display: flex; height: 40px; min-width: 0; max-width: calc(100% - 48px); flex: 1; align-items: center; gap: 3px; padding: 4px 0 4px 8px; font-size: 12px; -webkit-app-region: no-drag; }
-.tool-tabs-scroll { display: flex; min-width: 0; max-width: calc(100% - 30px); flex: 0 1 auto; gap: 3px; overflow-x: auto; scrollbar-width: none; }
+.workspace-tabbar { position: relative; z-index: 50; display: flex; height: 40px; flex: none; align-items: center; border-bottom: 1px solid var(--border); -webkit-app-region: no-drag; }
+.workspace-tabbar.is-drop-target { background: var(--surface-04); }
+.tool-tabs-scroll { display: flex; min-width: 0; flex: 1; gap: 3px; overflow-x: auto; padding: 4px 0 4px 8px; scrollbar-width: none; }
 .tool-tabs-scroll::-webkit-scrollbar { display: none; }
 .tool-tab { display: flex; min-width: 0; max-width: 168px; height: 28px; flex: 0 1 auto; align-items: center; border-radius: 7px; border: 1px solid transparent; color: var(--text-08); transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
 .tool-tab.is-active { border-color: var(--border); background: var(--surface-05); box-shadow: var(--shadow); color: var(--text-24); font-weight: 500; }
@@ -402,11 +333,7 @@ textarea { resize: none; }
 .tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"] { background: var(--surface-04); color: var(--text); }
 .tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 5px); left: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
 .tool-add-menu button { height: 30px; background: transparent; font-size: 12px; }
-.tool-sidebar-collapse { position: absolute; top: 0; right: 10px; display: grid; width: 30px; height: 30px; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
-.tool-sidebar-collapse:hover { background: var(--surface-04); color: var(--text); }
-.tool-sidebar-collapse svg { transform: scaleX(-1); }
-.tool-stage { position: absolute; top: 40px; right: 0; bottom: 0; left: 0; }
-.tool-stage > [aria-hidden="false"] { animation: tool-panel-in 140ms ease both; }
+.workspace-pane-body > *:not([hidden]) { animation: tool-panel-in 140ms ease both; }
 @keyframes tool-panel-in {
 	from { opacity: 0.7; }
 	to { opacity: 1; }
@@ -3076,20 +3003,20 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 :root[data-motion="reduced"] .session-button-title i.running, :root[data-motion="reduced"] .session-button-title i.completed, :root[data-motion="reduced"] .session-button-title i.failed, :root[data-motion="reduced"] .session-button-title i.attention { animation: none; opacity: 1; transform: none; }
 :root[data-motion="reduced"] .profile-loading-avatar, :root[data-motion="reduced"] .profile-loading-line, :root[data-motion="reduced"] .profile-loading-card, :root[data-motion="reduced"] .profile-loading-chart, :root[data-motion="reduced"] .settings-loading, :root[data-motion="reduced"] .profile-heatmap-cell, :root[data-motion="reduced"] .browser-toolbar-button .is-spinning, :root[data-motion="reduced"] .file-panel .is-spinning, :root[data-motion="reduced"] .review-panel .is-spinning, :root[data-motion="reduced"] .subagent-panel .is-spinning { animation: none; }
-:root[data-motion="reduced"] .composer:hover, :root[data-motion="reduced"] .composer:focus-within, :root[data-motion="reduced"] .mode-switch button:hover:not(:disabled), :root[data-motion="reduced"] .new-task-button:hover:not(:disabled), :root[data-motion="reduced"] .sidebar-nav-button:hover:not(:disabled), :root[data-motion="reduced"] .project-heading:hover, :root[data-motion="reduced"] .session-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-plain-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-icon-button:hover:not(:disabled), :root[data-motion="reduced"] .workspace-titlebar-actions button:hover, :root[data-motion="reduced"] .tool-sidebar-collapse:hover, :root[data-motion="reduced"] .tool-sidebar-menu button:hover { transform: none; }
+:root[data-motion="reduced"] .composer:hover, :root[data-motion="reduced"] .composer:focus-within, :root[data-motion="reduced"] .mode-switch button:hover:not(:disabled), :root[data-motion="reduced"] .new-task-button:hover:not(:disabled), :root[data-motion="reduced"] .sidebar-nav-button:hover:not(:disabled), :root[data-motion="reduced"] .project-heading:hover, :root[data-motion="reduced"] .session-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-plain-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-icon-button:hover:not(:disabled), :root[data-motion="reduced"] .workspace-titlebar-actions button:hover { transform: none; }
 :root[data-motion="reduced"] .turn-runtime-spinner, :root[data-motion="reduced"] .turn-runtime-spinner > span { animation: none; }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(2) { transform: rotate(60deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(3) { transform: rotate(120deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(4) { transform: rotate(180deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(5) { transform: rotate(240deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(6) { transform: rotate(300deg); }
-:root[data-motion="reduced"] .session-sidebar, :root[data-motion="reduced"] .session-sidebar.is-closing, :root[data-motion="reduced"] .tool-sidebar, :root[data-motion="reduced"] .model-selector-popover, :root[data-motion="reduced"] .model-selector-submenu, :root[data-motion="reduced"] .permission-selector-popover, :root[data-motion="reduced"] .effort-popover, :root[data-motion="reduced"] .account-menu-popover, :root[data-motion="reduced"] .effort-label, :root[data-motion="reduced"] .effort-highest-field, :root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div, :root[data-motion="reduced"] .task-list-spinner, :root[data-motion="reduced"] .task-list-slot, :root[data-motion="reduced"] .ask-user-slot, :root[data-motion="reduced"] .permission-approval-slot, :root[data-motion="reduced"] .code-execution-title-enter, :root[data-motion="reduced"] .code-execution-title-leave { animation: none; }
+:root[data-motion="reduced"] .session-sidebar, :root[data-motion="reduced"] .session-sidebar.is-closing, :root[data-motion="reduced"] .model-selector-popover, :root[data-motion="reduced"] .model-selector-submenu, :root[data-motion="reduced"] .permission-selector-popover, :root[data-motion="reduced"] .effort-popover, :root[data-motion="reduced"] .account-menu-popover, :root[data-motion="reduced"] .effort-label, :root[data-motion="reduced"] .effort-highest-field, :root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div, :root[data-motion="reduced"] .task-list-spinner, :root[data-motion="reduced"] .task-list-slot, :root[data-motion="reduced"] .ask-user-slot, :root[data-motion="reduced"] .permission-approval-slot, :root[data-motion="reduced"] .code-execution-title-enter, :root[data-motion="reduced"] .code-execution-title-leave { animation: none; }
 :root[data-motion="reduced"] .usage-bar, :root[data-motion="reduced"] .usage-tooltip, :root[data-motion="reduced"] .profile-activity-view, :root[data-motion="reduced"] .profile-usage-view { animation: none; transition: none; }
 :root[data-motion="reduced"] .usage-bar > i { transition: none; }
 :root[data-motion="reduced"] .settings-backdrop, :root[data-motion="reduced"] .settings-backdrop.is-closing, :root[data-motion="reduced"] .settings-page-mount { animation: none; transition: none; }
 :root[data-motion="reduced"] .modal-backdrop, :root[data-motion="reduced"] .interaction-dialog, :root[data-motion="reduced"] .project-dialog, :root[data-motion="reduced"] .code-project-dialog, :root[data-motion="reduced"] .mcp-dialog, :root[data-motion="reduced"] .system-notice { animation: none; transition: none; }
 :root[data-motion="reduced"] .context-usage-ring-meter, :root[data-motion="reduced"] .composer-code .composer-file-card, :root[data-motion="reduced"] .composer-image-preview, :root[data-motion="reduced"] .composer-file-card, :root[data-motion="reduced"] .slash-command-menu { animation: none; transition: none; }
-:root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .tool-stage > [aria-hidden="false"] { animation: none; transition: none; }
+:root[data-motion="reduced"] .file-tree-caret, :root[data-motion="reduced"] .session-button, :root[data-motion="reduced"] .workspace-pane-body > * { animation: none; transition: none; }
 :root[data-motion="reduced"] .plugins-section-indicator { transition: none; }
 :root[data-motion="reduced"] .code-execution-title-leave { display: none; }
 

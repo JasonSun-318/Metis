@@ -621,7 +621,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		const anchor = anchorRef.current;
 		if (anchor) {
 			observer.observe(anchor);
-			const sidebar = anchor.closest(".tool-sidebar");
+			const sidebar = anchor.closest(".workspace-pane");
 			if (sidebar) observer.observe(sidebar);
 		}
 		const viewport = window.visualViewport;

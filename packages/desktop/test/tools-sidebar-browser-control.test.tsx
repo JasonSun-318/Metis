@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ToolsSidebar } from "../src/renderer/components/ToolsSidebar.tsx";
+import { SessionWorkspaceView } from "../src/renderer/components/SessionWorkspace.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type { AppStore } from "../src/renderer/store/app-store.ts";
 import {
@@ -62,22 +62,20 @@ function fixture() {
 	roots.push(root);
 	void act(() =>
 		root.render(
-			<ToolsSidebar
+			<SessionWorkspaceView
 				activeSession={{ sessionId: SESSION_ID, cwd: null }}
 				api={api}
+				chat={<div />}
+				chatTitle="Chat"
 				cleanupSessionIds={[]}
 				mode="chat"
 				onActivateSession={onActivateSession}
 				onCleanupSessionIdsHandled={vi.fn()}
-				onClose={vi.fn()}
 				onDirtySessionIdsChange={vi.fn()}
 				onError={vi.fn()}
-				onWidthChange={vi.fn()}
-				open
-				preferredWidth={393}
 				store={{} as AppStore}
 				theme="dark"
-				width={393}
+				visible
 			/>,
 		),
 	);
@@ -107,8 +105,8 @@ afterEach(async () => {
 	vi.restoreAllMocks();
 });
 
-describe("ToolsSidebar browser lifecycle", () => {
-	it("uses profile updates emitted by imports outside the sidebar", async () => {
+describe("Session workspace browser lifecycle", () => {
+	it("uses profile updates emitted by imports outside the workspace", async () => {
 		const { container, emit } = fixture();
 		const importedProfileId = "33333333-3333-4333-8333-333333333333";
 		await emit({
@@ -147,7 +145,7 @@ describe("ToolsSidebar browser lifecycle", () => {
 		};
 		await emit(opened);
 		await emit(opened);
-		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
 		expect(onActivateSession).not.toHaveBeenCalled();
 
 		await emit({ type: "activity", sessionId: SESSION_ID, browserId: BROWSER_ID, active: true });
