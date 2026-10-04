@@ -140,7 +140,7 @@ function mcpCredentialChange(input?: McpCredentialInput): McpCredentialChange {
 }
 
 function queuedTurnView(draft: QueuedTurnDraft): QueuedTurnView {
-	const { text, attachments } = splitSessionAttachmentPrompt(draft.input.text, { stripEditorContext: true });
+	const { text, attachments } = splitSessionAttachmentPrompt(draft.input.text);
 	return {
 		queueItemId: opaqueId(draft.queueItemId, "queue"),
 		revision: opaqueId(draft.revision, "entry"),
