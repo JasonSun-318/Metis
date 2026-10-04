@@ -109,7 +109,7 @@ describe("renderer reconnect behavior", () => {
 
 		const recovered = new AppStore();
 		recovered.applySnapshot(snapshot(EPOCH_A, 0, "A"));
-		recovered.markResubscribing();
+		recovered.beginSubscription("session-1");
 		expect(recovered.applyBatch(delta(EPOCH_A, 1, "lost"))).toBe("applied");
 		recovered.applySnapshot(snapshot(EPOCH_B, 1, "AB"));
 

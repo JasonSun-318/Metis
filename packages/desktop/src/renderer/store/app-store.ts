@@ -11,12 +11,15 @@ import type {
 } from "@metis/app-protocol";
 import type { SupervisorView } from "../../shared/desktop-api.ts";
 import {
+	activeProjection,
 	addPendingInteraction,
 	applyConnectionEvents,
 	type BatchApplyResult,
+	beginProjectionSubscription,
+	cancelProjectionSubscription,
 	createProjectionState,
-	eventSessionId,
-	markProjectionResubscribing,
+	derivedSyncStatus,
+	type MutableSessionProjection,
 	prependAgentItems,
 	prependProjectionItems,
 	type RendererNotification,
@@ -26,8 +29,6 @@ import {
 	replaceAgentItems,
 	replaceProjectionSnapshot,
 	replaceSessionList,
-	replayProjectionEvents,
-	restoreProjectionSyncStatus,
 	selectAgentTranscript,
 } from "./reducer.ts";
 
@@ -78,6 +79,7 @@ export interface AppStoreSnapshot {
 	readonly process: SessionSnapshot["process"];
 	readonly queuedTurns: readonly QueuedTurnView[];
 	readonly agentTranscript: AgentTranscriptState;
+	readonly sessions: ReadonlyMap<string, MutableSessionProjection>;
 	readonly supervisor: SupervisorView;
 }
 
@@ -115,8 +117,10 @@ export class AppStore {
 	}
 
 	setOptimisticThinkingSelection(selection: SessionSnapshot["thinkingSelection"]): void {
-		if (this.state.thinkingSelection === selection) return;
-		this.state.thinkingSelection = selection;
+		const session = activeProjection(this.state);
+		if (!session || session.thinkingSelection === selection) return;
+		session.thinkingSelection = selection;
+		session.revision += 1;
 		this.commit();
 	}
 
@@ -156,7 +160,7 @@ export class AppStore {
 	}
 
 	applyBatch(batch: ConnectionEventsParams): BatchApplyResult {
-		const previousStatus = this.state.syncStatus;
+		const previousStatus = derivedSyncStatus(this.state);
 		const result = applyConnectionEvents(this.state, batch);
 		if (result === "applied" && batch.events.some((event) => event.type === "agent/deleted")) {
 			this.agentCollectionRevision += 1;
@@ -175,7 +179,7 @@ export class AppStore {
 		) {
 			this.sidebarRevision += 1;
 		}
-		if (result === "applied" || previousStatus !== this.state.syncStatus) {
+		if (result === "applied" || previousStatus !== derivedSyncStatus(this.state)) {
 			const streamingOnly =
 				result === "applied" &&
 				batch.events.length > 0 &&
@@ -202,35 +206,14 @@ export class AppStore {
 		if (prependAgentItems(this.state, agentId, taskId, page)) this.commit();
 	}
 
-	markResubscribing(): void {
-		this.state.resubscribeBuffer = [];
-		if (this.state.syncStatus === "resubscribing") return;
-		markProjectionResubscribing(this.state);
+	beginSubscription(sessionId: string, options?: { focus?: boolean }): number {
+		const token = beginProjectionSubscription(this.state, sessionId, options?.focus ?? true);
 		this.commit();
+		return token;
 	}
 
-	restoreSyncStatusAfterFailedOpen(
-		previous: Pick<AppStoreSnapshot, "activeSessionId" | "serverEpoch" | "syncStatus">,
-	): void {
-		const buffered = this.state.resubscribeBuffer;
-		this.state.resubscribeBuffer = null;
-		if (!restoreProjectionSyncStatus(this.state, previous)) return;
-		if (this.state.syncStatus === "ready") {
-			if (buffered === "overflowed") {
-				this.state.syncStatus = "resnapshot_required";
-			} else if (buffered) {
-				const replay = buffered
-					.filter((entry) => {
-						const eventSession = eventSessionId(entry.event);
-						return eventSession === undefined || eventSession === previous.activeSessionId;
-					})
-					.map((entry) => entry.event);
-				replayProjectionEvents(this.state, replay);
-			}
-		} else if (this.state.syncStatus === "resubscribing") {
-			this.state.syncStatus = "resnapshot_required";
-		}
-		this.commit();
+	cancelSubscription(sessionId: string, token: number): void {
+		if (cancelProjectionSubscription(this.state, sessionId, token)) this.commit();
 	}
 
 	setSupervisor(view: SupervisorView): void {
@@ -298,44 +281,46 @@ export class AppStore {
 	}
 
 	private createSnapshot(): AppStoreSnapshot {
+		const projection = activeProjection(this.state) ?? this.state.fallbackProjection;
 		return {
 			version: this.version,
 			sidebarRevision: this.sidebarRevision,
 			sessionsById: this.state.sessionsById,
 			sessionOrder: this.state.sessionOrder,
 			activeSessionId: this.state.activeSessionId,
-			turnsById: this.state.turnsById,
-			turnOrder: this.state.turnOrder,
-			itemsById: this.state.itemsById,
-			itemOrder: this.state.itemOrder,
+			turnsById: projection.turnsById,
+			turnOrder: projection.turnOrder,
+			itemsById: projection.itemsById,
+			itemOrder: projection.itemOrder,
 			interactionsById: this.state.interactionsById,
 			interactionOrder: this.state.interactionOrder,
 			notifications: this.state.notifications,
-			nextBeforeItemId: this.state.nextBeforeItemId,
-			activeTurnId: this.state.activeTurnId,
+			nextBeforeItemId: projection.nextBeforeItemId,
+			activeTurnId: projection.activeTurnId,
 			serverEpoch: this.state.serverEpoch,
 			cursor: this.state.cursor,
-			syncStatus: this.state.syncStatus,
-			collaborationMode: this.state.collaborationMode,
-			permissionPreset: this.state.permissionPreset,
-			effectiveSettings: this.state.effectiveSettings,
-			constrainedByParent: this.state.constrainedByParent,
-			sandboxHealth: this.state.sandboxHealth,
-			activeReview: this.state.activeReview,
-			thinkingSelection: this.state.thinkingSelection,
-			actualThinkingLevel: this.state.actualThinkingLevel,
-			availableThinkingSelections: this.state.availableThinkingSelections,
-			model: this.state.model,
-			availableModels: this.state.availableModels,
-			agents: this.state.agents,
-			nextAgentAfterId: this.state.nextAgentAfterId,
+			syncStatus: derivedSyncStatus(this.state),
+			collaborationMode: projection.collaborationMode,
+			permissionPreset: projection.permissionPreset,
+			effectiveSettings: projection.effectiveSettings,
+			constrainedByParent: projection.constrainedByParent,
+			sandboxHealth: projection.sandboxHealth,
+			activeReview: projection.activeReview,
+			thinkingSelection: projection.thinkingSelection,
+			actualThinkingLevel: projection.actualThinkingLevel,
+			availableThinkingSelections: projection.availableThinkingSelections,
+			model: projection.model,
+			availableModels: projection.availableModels,
+			agents: projection.agents,
+			nextAgentAfterId: projection.nextAgentAfterId,
 			agentCollectionRevision: this.agentCollectionRevision,
-			tasks: this.state.tasks,
-			deliveredFiles: this.state.deliveredFiles,
-			goal: this.state.goal,
-			process: this.state.process,
-			queuedTurns: this.state.queuedTurns,
+			tasks: projection.tasks,
+			deliveredFiles: projection.deliveredFiles,
+			goal: projection.goal,
+			process: projection.process,
+			queuedTurns: projection.queuedTurns,
 			agentTranscript: this.state.agentTranscript,
+			sessions: this.state.sessions,
 			supervisor: this.supervisor,
 		};
 	}

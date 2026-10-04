@@ -264,10 +264,13 @@ export class SessionWorkspaceWorkflow {
 		const lifecycle = this.lifecycleGeneration;
 		this.invalidateSessionLists();
 		this.commit({ openingSessionId: sessionId, failure: null });
-		this.store.markResubscribing();
+		const subscription = this.store.beginSubscription(sessionId);
 		try {
 			const snapshot = await this.api.openSession({ sessionId });
-			if (!this.isCurrentOpen(generation, lifecycle)) return snapshot;
+			if (!this.isCurrentOpen(generation, lifecycle)) {
+				this.store.cancelSubscription(sessionId, subscription);
+				return snapshot;
+			}
 			this.invalidateSessionLists();
 			this.store.applySnapshot(snapshot);
 			if (snapshot.session.unread) await this.markSessionRead(sessionId);
@@ -276,8 +279,8 @@ export class SessionWorkspaceWorkflow {
 			this.commit({ mode: snapshot.session.mode, message: "Session ready" });
 			return snapshot;
 		} catch (cause) {
+			this.store.cancelSubscription(sessionId, subscription);
 			if (this.isCurrentOpen(generation, lifecycle)) {
-				this.store.restoreSyncStatusAfterFailedOpen(projectionBeforeOpen);
 				await this.recoverProjectionAfterFailedOpen(projectionBeforeOpen, generation, lifecycle);
 				this.commit({ failure: failure("open-session", cause) });
 			}
@@ -996,17 +999,18 @@ export class SessionWorkspaceWorkflow {
 		const afterFailure = this.store.getSnapshot();
 		if (afterFailure.syncStatus !== "resnapshot_required" || !before.activeSessionId) return;
 		this.invalidateSessionLists();
-		this.store.markResubscribing();
+		const subscription = this.store.beginSubscription(before.activeSessionId);
 		try {
 			const recovered = await this.api.openSession({ sessionId: before.activeSessionId });
 			if (this.isCurrentOpen(generation, lifecycle)) {
 				this.invalidateSessionLists();
 				this.store.applySnapshot(recovered);
+				return;
 			}
 		} catch {
 			// Preserve resnapshot_required so a later server event retries recovery.
-			this.store.restoreSyncStatusAfterFailedOpen(afterFailure);
 		}
+		this.store.cancelSubscription(before.activeSessionId, subscription);
 	}
 
 	private queueCleanup(sessionIds: readonly string[]): void {

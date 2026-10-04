@@ -2,12 +2,6 @@ import type { ConnectionEventsParams, ItemView, SessionSnapshot, SessionSummary 
 import { describe, expect, it, vi } from "vitest";
 import { buildSessionTree } from "../src/renderer/components/SessionSidebar.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
-import {
-	applyConnectionEvents,
-	createProjectionState,
-	markProjectionResubscribing,
-	replaceProjectionSnapshot,
-} from "../src/renderer/store/reducer.ts";
 
 const EPOCH_A = "11111111-1111-4111-8111-111111111111";
 const EPOCH_B = "22222222-2222-4222-8222-222222222222";
@@ -836,7 +830,7 @@ describe("renderer projection reducer", () => {
 		expect(state.cursor).toBe(8);
 		expect(state.itemOrder).toEqual(["new-item"]);
 		expect(state.itemsById.has("old-item")).toBe(false);
-		expect(state.notifications).toEqual([]);
+		expect(state.notifications).toHaveLength(1);
 		expect(state.syncStatus).toBe("ready");
 	});
 
@@ -988,7 +982,7 @@ describe("renderer projection reducer", () => {
 	it("replays buffered events for a session that was still opening", () => {
 		const store = new AppStore();
 		store.applySnapshot({ ...snapshot(), cursor: 10 });
-		store.markResubscribing();
+		store.beginSubscription("session-2");
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
@@ -1023,7 +1017,7 @@ describe("renderer projection reducer", () => {
 	it("does not adopt the snapshot cursor when it is ahead of buffered events", () => {
 		const store = new AppStore();
 		store.applySnapshot({ ...snapshot(), cursor: 10 });
-		store.markResubscribing();
+		store.beginSubscription("session-2");
 		store.applyBatch({
 			serverEpoch: EPOCH_A,
 			fromCursor: 11,
@@ -1061,10 +1055,10 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().sessionsById.has("session-3")).toBe(true);
 	});
 
-	it("preserves session summaries but not active projection events while resubscribing", () => {
+	it("keeps applying active session events while another session subscribes", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
-		store.markResubscribing();
+		store.beginSubscription("session-2");
 		expect(
 			store.applyBatch({
 				...batch(EPOCH_A, 1, 2),
@@ -1077,7 +1071,8 @@ describe("renderer projection reducer", () => {
 				],
 			}),
 		).toBe("applied");
-		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "AB" }]);
+		expect(store.getSnapshot().syncStatus).toBe("resubscribing");
 		expect(store.getSnapshot().cursor).toBe(2);
 		expect(store.getSnapshot().sessionsById.get("session-1")).toEqual(
 			expect.objectContaining({
@@ -1091,19 +1086,17 @@ describe("renderer projection reducer", () => {
 	it("restores the previous projection status after an unchanged open fails", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
-		const previous = store.getSnapshot();
-		store.markResubscribing();
+		const subscription = store.beginSubscription("session-1");
 		expect(store.getSnapshot().syncStatus).toBe("resubscribing");
 
-		store.restoreSyncStatusAfterFailedOpen(previous);
+		store.cancelSubscription("session-1", subscription);
 		expect(store.getSnapshot().syncStatus).toBe("ready");
 	});
 
-	it("replays the active session's buffered events once after a failed open", () => {
+	it("keeps applying the active session's events while another session opens", () => {
 		const store = new AppStore();
 		store.applySnapshot({ ...snapshot(), cursor: 10 });
-		const previous = store.getSnapshot();
-		store.markResubscribing();
+		const subscription = store.beginSubscription("session-2");
 		store.applyBatch({
 			serverEpoch: EPOCH_A,
 			fromCursor: 11,
@@ -1123,32 +1116,103 @@ describe("renderer projection reducer", () => {
 				},
 			],
 		});
-		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
-		store.restoreSyncStatusAfterFailedOpen(previous);
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-keep" }]);
+		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("subscribing");
+		store.cancelSubscription("session-2", subscription);
+		expect(store.getSnapshot().sessions.has("session-2")).toBe(false);
 		expect(store.getSnapshot().syncStatus).toBe("ready");
 		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-keep" }]);
 		expect(store.getSnapshot().itemsById.has("item-2")).toBe(false);
 		expect(store.getSnapshot().cursor).toBe(12);
 	});
 
-	it("requires a resnapshot when a superseded open fails while resubscribing", () => {
+	it("replays a reopened session's buffered events when its open is cancelled", () => {
 		const store = new AppStore();
-		store.applySnapshot(snapshot());
-		store.markResubscribing();
-		const previous = store.getSnapshot();
-		store.markResubscribing();
-		store.restoreSyncStatusAfterFailedOpen(previous);
-		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
-		expect(store.applyBatch(batch(EPOCH_A, 1, 1))).toBe("resnapshot_required");
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		const subscription = store.beginSubscription("session-1");
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 11,
+			toCursor: 11,
+			events: [
+				{
+					type: "item/delta",
+					sessionId: "session-1",
+					itemId: "item-1",
+					delta: { type: "text", text: "-more" },
+				},
+			],
+		});
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
+		store.cancelSubscription("session-1", subscription);
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-more" }]);
+		expect(store.getSnapshot().cursor).toBe(11);
 	});
 
-	it("rejects batches while resubscribing without a buffer", () => {
-		const state = createProjectionState();
-		replaceProjectionSnapshot(state, snapshot());
-		markProjectionResubscribing(state);
-		expect(applyConnectionEvents(state, batch(EPOCH_A, 1, 1))).toBe("resnapshot_required");
-		expect(state.cursor).toBe(0);
-		expect(state.syncStatus).toBe("resnapshot_required");
+	it("ignores a stale cancel after the same session is reopened", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		const first = store.beginSubscription("session-1");
+		store.beginSubscription("session-1");
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 11,
+			toCursor: 11,
+			events: [
+				{
+					type: "item/delta",
+					sessionId: "session-1",
+					itemId: "item-1",
+					delta: { type: "text", text: "-live" },
+				},
+			],
+		});
+		store.cancelSubscription("session-1", first);
+		expect(store.getSnapshot().sessions.get("session-1")?.syncStatus).toBe("subscribing");
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-live" }]);
+	});
+
+	it("keeps only the newest open's focus claim", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		store.beginSubscription("session-2");
+		store.beginSubscription("session-3");
+		store.applySnapshot({ ...snapshot(), session: session("session-3"), recentItems: [], cursor: 3 });
+		const state = store.getSnapshot();
+		expect(state.activeSessionId).toBe("session-3");
+		expect(state.syncStatus).toBe("ready");
+		expect(state.sessions.get("session-2")?.syncStatus).toBe("subscribing");
+		expect(state.sessions.get("session-2")?.focusOnSnapshot).toBe(false);
+	});
+
+	it("ignores a cancel token once the subscription landed", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		const subscription = store.beginSubscription("session-2");
+		store.applySnapshot({ ...snapshot(), session: session("session-2"), recentItems: [], cursor: 5 });
+		const before = store.getSnapshot();
+		store.cancelSubscription("session-2", subscription);
+		const state = store.getSnapshot();
+		expect(state).toBe(before);
+		expect(state.sessions.get("session-2")?.syncStatus).toBe("ready");
+		expect(state.activeSessionId).toBe("session-2");
+	});
+
+	it("cancelling a superseded open keeps the in-flight subscription alive", () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot());
+		const superseded = store.beginSubscription("session-2");
+		const current = store.beginSubscription("session-3");
+		store.cancelSubscription("session-3", current);
+		expect(store.getSnapshot().sessions.has("session-3")).toBe(false);
+		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("subscribing");
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+		store.cancelSubscription("session-2", superseded);
+		expect(store.getSnapshot().sessions.has("session-2")).toBe(false);
+		expect(store.getSnapshot().syncStatus).toBe("ready");
 	});
 
 	it("keeps demanding a resnapshot once one is required", () => {
@@ -1162,7 +1226,7 @@ describe("renderer projection reducer", () => {
 	it("requires a resnapshot when the resubscribe buffer overflows", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
-		store.markResubscribing();
+		store.beginSubscription("session-2");
 		expect(
 			store.applyBatch({
 				serverEpoch: EPOCH_A,
@@ -1180,10 +1244,10 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
 	});
 
-	it("replays buffered session-less events after the snapshot", () => {
+	it("applies session-less events immediately while another session subscribes", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot());
-		store.markResubscribing();
+		store.beginSubscription("session-2");
 		store.applyBatch({
 			serverEpoch: EPOCH_A,
 			fromCursor: 1,
@@ -1202,10 +1266,124 @@ describe("renderer projection reducer", () => {
 				},
 			],
 		});
-		expect(store.getSnapshot().notifications).toHaveLength(0);
+		expect(store.getSnapshot().notifications).toHaveLength(1);
 		store.applySnapshot({ ...snapshot(), session: session("session-2"), recentItems: [], cursor: 3 });
 		expect(store.getSnapshot().syncStatus).toBe("ready");
 		expect(store.getSnapshot().notifications).toHaveLength(1);
+	});
+
+	it("routes interleaved events to their own session buckets", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		store.beginSubscription("session-2", { focus: false });
+		store.applySnapshot({
+			...snapshot(),
+			session: session("session-2"),
+			recentItems: [{ ...item("item-2", "s2"), sessionId: "session-2" }],
+			cursor: 10,
+		});
+		const revisionBefore = store.getSnapshot().sessions.get("session-2")!.revision;
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 11,
+				toCursor: 12,
+				events: [
+					{
+						type: "item/delta",
+						sessionId: "session-2",
+						itemId: "item-2",
+						delta: { type: "text", text: "-bg" },
+					},
+					{
+						type: "item/delta",
+						sessionId: "session-1",
+						itemId: "item-1",
+						delta: { type: "text", text: "-fg" },
+					},
+				],
+			}),
+		).toBe("applied");
+		const state = store.getSnapshot();
+		expect(state.activeSessionId).toBe("session-1");
+		expect(state.itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-fg" }]);
+		expect(state.itemsById.has("item-2")).toBe(false);
+		const background = state.sessions.get("session-2")!;
+		expect(background.syncStatus).toBe("ready");
+		expect(background.itemsById.get("item-2")?.content).toEqual([{ type: "text", text: "s2-bg" }]);
+		expect(background.revision).toBeGreaterThan(revisionBefore);
+	});
+
+	it("marks only the offending session bucket when a delta cannot be applied", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		store.beginSubscription("session-2", { focus: false });
+		store.applySnapshot({
+			...snapshot(),
+			session: session("session-2"),
+			recentItems: [{ ...item("item-2", "s2", "completed"), sessionId: "session-2" }],
+			cursor: 10,
+		});
+		expect(
+			store.applyBatch({
+				serverEpoch: EPOCH_A,
+				fromCursor: 11,
+				toCursor: 12,
+				events: [
+					{
+						type: "item/delta",
+						sessionId: "session-2",
+						itemId: "item-2",
+						delta: { type: "text", text: "-bad" },
+					},
+					{
+						type: "item/delta",
+						sessionId: "session-1",
+						itemId: "item-1",
+						delta: { type: "text", text: "-ok" },
+					},
+				],
+			}),
+		).toBe("applied");
+		const state = store.getSnapshot();
+		expect(state.syncStatus).toBe("ready");
+		expect(state.itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A-ok" }]);
+		expect(state.sessions.get("session-2")?.syncStatus).toBe("resnapshot_required");
+		expect(state.sessions.get("session-2")?.itemsById.get("item-2")?.content).toEqual([{ type: "text", text: "s2" }]);
+	});
+
+	it("replays a matching project invalidation buffered while subscribing", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		store.upsertSession({ ...session("session-2"), cwd: "/tmp/other" });
+		store.beginSubscription("session-2", { focus: false });
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 11,
+			toCursor: 11,
+			events: [{ type: "project/invalidated", mode: "code", cwd: "/tmp/other", reason: "reload_required" }],
+		});
+		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("subscribing");
+		store.applySnapshot({
+			...snapshot(),
+			session: { ...session("session-2"), cwd: "/tmp/other" },
+			recentItems: [],
+			cursor: 10,
+		});
+		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("resnapshot_required");
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+	});
+
+	it("marks other buckets stale when a snapshot changes the server epoch", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 5 });
+		store.beginSubscription("session-2", { focus: false });
+		store.applySnapshot({ ...snapshot(), session: session("session-2"), recentItems: [], cursor: 5 });
+		store.applySnapshot({ ...snapshot(EPOCH_B, 20), session: session("session-3"), recentItems: [] });
+		expect(store.getSnapshot().sessions.get("session-1")?.syncStatus).toBe("resnapshot_required");
+		expect(store.getSnapshot().sessions.get("session-2")?.syncStatus).toBe("resnapshot_required");
+		expect(store.getSnapshot().sessions.get("session-3")?.syncStatus).toBe("ready");
+		expect(store.getSnapshot().serverEpoch).toBe(EPOCH_B);
 	});
 
 	it("projects model changes with the selected model's real effort levels", () => {

@@ -28,23 +28,19 @@ export type RendererNotification = Extract<DomainEvent, { type: "interaction/not
 	readonly translation?: { readonly key: string; readonly values: Record<string, string | number> };
 };
 
-export interface MutableProjectionState {
-	readonly sessionsById: Map<string, SessionSummary>;
-	sessionOrder: string[];
-	activeSessionId: string | null;
+export interface MutableSessionProjection {
 	readonly turnsById: Map<string, TurnView>;
 	turnOrder: string[];
 	readonly itemsById: Map<string, ItemView>;
 	itemOrder: string[];
-	readonly interactionsById: Map<string, InteractionView>;
-	interactionOrder: string[];
-	notifications: RendererNotification[];
 	nextBeforeItemId: string | null;
 	activeTurnId: string | null;
-	serverEpoch: string | null;
-	cursor: number;
-	syncStatus: ProjectionSyncStatus;
-	resubscribeBuffer: { readonly cursor: number; readonly event: DomainEvent }[] | "overflowed" | null;
+	syncStatus: "subscribing" | "ready" | "resnapshot_required";
+	buffer: { readonly cursor: number; readonly event: DomainEvent }[] | "overflowed" | null;
+	focusOnSnapshot: boolean;
+	statusBeforeSubscribe: "ready" | "resnapshot_required" | null;
+	subscriptionToken: number;
+	revision: number;
 	collaborationMode: SessionSnapshot["collaborationMode"];
 	permissionPreset: SessionSnapshot["permissionPreset"];
 	effectiveSettings: SessionSnapshot["effectiveSettings"];
@@ -63,6 +59,20 @@ export interface MutableProjectionState {
 	goal: SessionSnapshot["goal"];
 	process: SessionSnapshot["process"];
 	queuedTurns: QueuedTurnView[];
+}
+
+export interface MutableProjectionState {
+	readonly sessionsById: Map<string, SessionSummary>;
+	sessionOrder: string[];
+	activeSessionId: string | null;
+	readonly interactionsById: Map<string, InteractionView>;
+	interactionOrder: string[];
+	notifications: RendererNotification[];
+	serverEpoch: string | null;
+	cursor: number;
+	readonly sessions: Map<string, MutableSessionProjection>;
+	nextSubscriptionToken: number;
+	readonly fallbackProjection: MutableSessionProjection;
 	readonly agentTranscript: MutableAgentTranscriptState;
 }
 
@@ -79,42 +89,63 @@ function clearAgentTranscript(
 	state.journalRevision = 0;
 }
 
+export function emptyProjection() {
+	return {
+		turnsById: new Map<string, TurnView>(),
+		turnOrder: [] as string[],
+		itemsById: new Map<string, ItemView>(),
+		itemOrder: [] as string[],
+		nextBeforeItemId: null as string | null,
+		activeTurnId: null as string | null,
+		collaborationMode: "default" as SessionSnapshot["collaborationMode"],
+		permissionPreset: "auto" as SessionSnapshot["permissionPreset"],
+		effectiveSettings: {
+			sandboxPolicy: "workspace-write",
+			approvalPolicy: "auto-review",
+		} as SessionSnapshot["effectiveSettings"],
+		constrainedByParent: false,
+		sandboxHealth: "healthy" as SessionSnapshot["sandboxHealth"],
+		activeReview: undefined as SessionSnapshot["activeReview"],
+		thinkingSelection: "off" as ThinkingSelectionView,
+		actualThinkingLevel: "off" as SessionSnapshot["actualThinkingLevel"],
+		availableThinkingSelections: ["off"] as ThinkingSelectionView[],
+		model: undefined as SessionSnapshot["model"],
+		availableModels: [] as NonNullable<SessionSnapshot["availableModels"]>,
+		agents: [] as AgentSummaryView[],
+		nextAgentAfterId: null as string | null,
+		tasks: [] as SessionSnapshot["tasks"],
+		deliveredFiles: [] as SessionSnapshot["deliveredFiles"],
+		goal: null as SessionSnapshot["goal"],
+		process: undefined as SessionSnapshot["process"],
+		queuedTurns: [] as QueuedTurnView[],
+	};
+}
+
+function createSessionProjection(): MutableSessionProjection {
+	return {
+		...emptyProjection(),
+		syncStatus: "subscribing",
+		buffer: null,
+		focusOnSnapshot: false,
+		statusBeforeSubscribe: null,
+		subscriptionToken: 0,
+		revision: 0,
+	};
+}
+
 export function createProjectionState(): MutableProjectionState {
 	return {
 		sessionsById: new Map(),
 		sessionOrder: [],
 		activeSessionId: null,
-		turnsById: new Map(),
-		turnOrder: [],
-		itemsById: new Map(),
-		itemOrder: [],
 		interactionsById: new Map(),
 		interactionOrder: [],
 		notifications: [],
-		nextBeforeItemId: null,
-		activeTurnId: null,
 		serverEpoch: null,
 		cursor: 0,
-		syncStatus: "empty",
-		resubscribeBuffer: null,
-		collaborationMode: "default",
-		permissionPreset: "auto",
-		effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" },
-		constrainedByParent: false,
-		sandboxHealth: "healthy",
-		activeReview: undefined,
-		thinkingSelection: "off",
-		actualThinkingLevel: "off",
-		availableThinkingSelections: ["off"],
-		model: undefined,
-		availableModels: [],
-		agents: [],
-		nextAgentAfterId: null,
-		tasks: [],
-		deliveredFiles: [],
-		goal: null,
-		process: undefined,
-		queuedTurns: [],
+		sessions: new Map(),
+		nextSubscriptionToken: 0,
+		fallbackProjection: createSessionProjection(),
 		agentTranscript: {
 			agentId: null,
 			taskId: null,
@@ -124,6 +155,21 @@ export function createProjectionState(): MutableProjectionState {
 			journalRevision: 0,
 		},
 	};
+}
+
+export function activeProjection(state: MutableProjectionState): MutableSessionProjection | undefined {
+	return state.activeSessionId === null ? undefined : state.sessions.get(state.activeSessionId);
+}
+
+export function derivedSyncStatus(state: MutableProjectionState): ProjectionSyncStatus {
+	for (const session of state.sessions.values()) {
+		if (session.syncStatus === "subscribing" && session.focusOnSnapshot) return "resubscribing";
+	}
+	const active = activeProjection(state);
+	if (!active) return "empty";
+	if (active.syncStatus === "ready") return "ready";
+	if (active.syncStatus === "resnapshot_required") return "resnapshot_required";
+	return "resubscribing";
 }
 
 export function replaceSessionList(state: MutableProjectionState, sessions: readonly SessionSummary[]): void {
@@ -140,8 +186,20 @@ export function replaceSessionList(state: MutableProjectionState, sessions: read
 	}
 }
 
+function retainProjectionFallback(state: MutableProjectionState, session: MutableSessionProjection): void {
+	state.fallbackProjection.model = session.model;
+	state.fallbackProjection.availableModels = session.availableModels;
+	state.fallbackProjection.thinkingSelection = session.thinkingSelection;
+	state.fallbackProjection.actualThinkingLevel = session.actualThinkingLevel;
+	state.fallbackProjection.availableThinkingSelections = session.availableThinkingSelections;
+	state.fallbackProjection.deliveredFiles = session.deliveredFiles;
+}
+
 export function removeSession(state: MutableProjectionState, sessionId: string): boolean {
-	if (!state.sessionsById.delete(sessionId)) return false;
+	const removedSummary = state.sessionsById.delete(sessionId);
+	const projection = state.sessions.get(sessionId);
+	const removedProjection = state.sessions.delete(sessionId);
+	if (!removedSummary && !removedProjection) return false;
 	state.sessionOrder = state.sessionOrder.filter((candidate) => candidate !== sessionId);
 	state.notifications = state.notifications.filter((notification) => notification.sessionId !== sessionId);
 	for (const interactionId of state.interactionOrder) {
@@ -153,27 +211,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	if (state.activeSessionId !== sessionId) return true;
 
 	state.activeSessionId = null;
-	state.turnsById.clear();
-	state.turnOrder = [];
-	state.itemsById.clear();
-	state.itemOrder = [];
-	state.nextBeforeItemId = null;
-	state.activeTurnId = null;
-	state.serverEpoch = null;
-	state.cursor = 0;
-	state.syncStatus = "empty";
-	state.collaborationMode = "default";
-	state.permissionPreset = "auto";
-	state.effectiveSettings = { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" };
-	state.constrainedByParent = false;
-	state.sandboxHealth = "healthy";
-	state.activeReview = undefined;
-	state.agents = [];
-	state.nextAgentAfterId = null;
-	state.tasks = [];
-	state.goal = null;
-	state.process = undefined;
-	state.queuedTurns = [];
+	if (projection) retainProjectionFallback(state, projection);
 	clearAgentTranscript(state.agentTranscript);
 	return true;
 }
@@ -186,142 +224,185 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 		}),
 	);
 	if (removed.size === 0) return false;
+	const active =
+		state.activeSessionId !== null && removed.has(state.activeSessionId)
+			? state.sessions.get(state.activeSessionId)
+			: undefined;
 	for (const sessionId of removed) {
 		state.sessionsById.delete(sessionId);
+		state.sessions.delete(sessionId);
 	}
 	state.sessionOrder = state.sessionOrder.filter((sessionId) => !removed.has(sessionId));
 	state.notifications = state.notifications.filter(
 		(notification) => notification.sessionId === undefined || !removed.has(notification.sessionId),
 	);
+	for (const interactionId of state.interactionOrder) {
+		const interaction = state.interactionsById.get(interactionId);
+		if (interaction?.sessionId !== undefined && removed.has(interaction.sessionId)) {
+			state.interactionsById.delete(interactionId);
+		}
+	}
+	state.interactionOrder = state.interactionOrder.filter((interactionId) => state.interactionsById.has(interactionId));
 	if (!state.activeSessionId || !removed.has(state.activeSessionId)) return true;
 
 	state.activeSessionId = null;
-	state.turnsById.clear();
-	state.turnOrder = [];
-	state.itemsById.clear();
-	state.itemOrder = [];
-	state.interactionsById.clear();
-	state.interactionOrder = [];
-	state.nextBeforeItemId = null;
-	state.activeTurnId = null;
-	state.serverEpoch = null;
-	state.cursor = 0;
-	state.syncStatus = "empty";
-	state.collaborationMode = "default";
-	state.permissionPreset = "auto";
-	state.effectiveSettings = { sandboxPolicy: "workspace-write", approvalPolicy: "auto-review" };
-	state.constrainedByParent = false;
-	state.sandboxHealth = "healthy";
-	state.activeReview = undefined;
-	state.agents = [];
-	state.nextAgentAfterId = null;
-	state.tasks = [];
-	state.goal = null;
-	state.process = undefined;
-	state.queuedTurns = [];
+	if (active) retainProjectionFallback(state, active);
 	clearAgentTranscript(state.agentTranscript);
+	return true;
+}
+
+export function beginProjectionSubscription(state: MutableProjectionState, sessionId: string, focus: boolean): number {
+	let session = state.sessions.get(sessionId);
+	if (!session) {
+		session = createSessionProjection();
+		state.sessions.set(sessionId, session);
+	}
+	if (focus) {
+		for (const other of state.sessions.values()) {
+			if (other !== session && other.syncStatus === "subscribing" && other.focusOnSnapshot) {
+				other.focusOnSnapshot = false;
+				other.revision += 1;
+			}
+		}
+	}
+	if (session.syncStatus !== "subscribing") session.statusBeforeSubscribe = session.syncStatus;
+	session.syncStatus = "subscribing";
+	session.buffer = [];
+	session.focusOnSnapshot = focus;
+	session.subscriptionToken = ++state.nextSubscriptionToken;
+	session.revision += 1;
+	return session.subscriptionToken;
+}
+
+export function cancelProjectionSubscription(state: MutableProjectionState, sessionId: string, token: number): boolean {
+	const session = state.sessions.get(sessionId);
+	if (!session || session.syncStatus !== "subscribing" || session.subscriptionToken !== token) return false;
+	const buffered = session.buffer;
+	session.buffer = null;
+	if (session.statusBeforeSubscribe === null) {
+		if (state.activeSessionId === sessionId) {
+			session.syncStatus = "resnapshot_required";
+		} else {
+			state.sessions.delete(sessionId);
+			return true;
+		}
+	} else {
+		session.syncStatus = session.statusBeforeSubscribe;
+		if (session.syncStatus === "ready") {
+			if (buffered === "overflowed") {
+				session.syncStatus = "resnapshot_required";
+			} else if (buffered && buffered.length > 0) {
+				const replay = buffered.map((entry) => entry.event);
+				if (!canApplyEvents(session, replay)) {
+					session.syncStatus = "resnapshot_required";
+				} else {
+					for (const event of replay) applyEvent(state, session, event);
+				}
+			}
+		}
+	}
+	session.statusBeforeSubscribe = null;
+	session.focusOnSnapshot = false;
+	session.revision += 1;
 	return true;
 }
 
 export function replaceProjectionSnapshot(state: MutableProjectionState, snapshotValue: SessionSnapshot): void {
 	const snapshot = structuredClone(snapshotValue);
 	const sessionId = snapshot.session.sessionId;
-	const sessionChanged = state.activeSessionId !== sessionId;
+	const existed = state.sessions.has(sessionId);
+	let session = state.sessions.get(sessionId);
+	if (!session) {
+		session = createSessionProjection();
+		state.sessions.set(sessionId, session);
+	}
 	state.sessionsById.set(sessionId, snapshot.session);
 	if (!state.sessionOrder.includes(sessionId)) state.sessionOrder.unshift(sessionId);
-	state.activeSessionId = sessionId;
 
-	state.turnsById.clear();
-	state.turnOrder = [];
+	session.turnsById.clear();
+	session.turnOrder = [];
 	for (const turn of snapshot.turns) {
-		state.turnsById.set(turn.turnId, turn);
-		state.turnOrder.push(turn.turnId);
+		session.turnsById.set(turn.turnId, turn);
+		session.turnOrder.push(turn.turnId);
 	}
 
-	state.itemsById.clear();
-	state.itemOrder = [];
+	session.itemsById.clear();
+	session.itemOrder = [];
 	for (const item of snapshot.recentItems) {
-		state.itemsById.set(item.itemId, item);
-		state.itemOrder.push(item.itemId);
+		session.itemsById.set(item.itemId, item);
+		session.itemOrder.push(item.itemId);
 	}
 
-	state.interactionsById.clear();
-	state.interactionOrder = [];
+	for (const interactionId of state.interactionOrder) {
+		if (state.interactionsById.get(interactionId)?.sessionId === sessionId) {
+			state.interactionsById.delete(interactionId);
+		}
+	}
+	state.interactionOrder = state.interactionOrder.filter((interactionId) => state.interactionsById.has(interactionId));
 	for (const interaction of snapshot.pendingInteractions) {
+		if (!state.interactionsById.has(interaction.interactionId))
+			state.interactionOrder.push(interaction.interactionId);
 		state.interactionsById.set(interaction.interactionId, interaction);
-		state.interactionOrder.push(interaction.interactionId);
 	}
-	state.notifications = [];
 
-	state.nextBeforeItemId = snapshot.nextBeforeItemId;
-	state.activeTurnId = snapshot.activeTurnId;
+	session.nextBeforeItemId = snapshot.nextBeforeItemId;
+	session.activeTurnId = snapshot.activeTurnId;
 	if (snapshot.serverEpoch !== state.serverEpoch || state.cursor === 0) {
+		const epochChanged = snapshot.serverEpoch !== state.serverEpoch;
 		state.serverEpoch = snapshot.serverEpoch;
 		state.cursor = snapshot.cursor;
+		if (epochChanged) {
+			for (const [otherId, other] of state.sessions) {
+				if (otherId === sessionId || other.syncStatus === "resnapshot_required") continue;
+				other.syncStatus = "resnapshot_required";
+				other.buffer = null;
+				other.revision += 1;
+			}
+		}
 	}
-	state.syncStatus = "ready";
-	state.collaborationMode = snapshot.collaborationMode;
-	state.permissionPreset = snapshot.permissionPreset;
-	state.effectiveSettings = snapshot.effectiveSettings;
-	state.constrainedByParent = snapshot.constrainedByParent;
-	state.sandboxHealth = snapshot.sandboxHealth;
-	state.activeReview = snapshot.activeReview;
-	state.thinkingSelection = snapshot.thinkingSelection;
-	state.actualThinkingLevel = snapshot.actualThinkingLevel;
-	state.availableThinkingSelections = snapshot.availableThinkingSelections;
-	state.model = snapshot.model;
-	state.availableModels = snapshot.availableModels ?? [];
-	state.agents = snapshot.agents;
-	state.nextAgentAfterId =
+	session.collaborationMode = snapshot.collaborationMode;
+	session.permissionPreset = snapshot.permissionPreset;
+	session.effectiveSettings = snapshot.effectiveSettings;
+	session.constrainedByParent = snapshot.constrainedByParent;
+	session.sandboxHealth = snapshot.sandboxHealth;
+	session.activeReview = snapshot.activeReview;
+	session.thinkingSelection = snapshot.thinkingSelection;
+	session.actualThinkingLevel = snapshot.actualThinkingLevel;
+	session.availableThinkingSelections = snapshot.availableThinkingSelections;
+	session.model = snapshot.model;
+	session.availableModels = snapshot.availableModels ?? [];
+	session.agents = snapshot.agents;
+	session.nextAgentAfterId =
 		snapshot.nextAgentAfterId ?? (snapshot.agents.length >= 100 ? (snapshot.agents.at(-1)?.agentId ?? null) : null);
-	state.tasks = snapshot.tasks;
-	state.deliveredFiles = snapshot.deliveredFiles;
-	state.goal = snapshot.goal;
-	state.process = snapshot.process;
-	state.queuedTurns = snapshot.queuedTurns;
-	if (sessionChanged) clearAgentTranscript(state.agentTranscript);
-	else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
-	const buffered = state.resubscribeBuffer;
-	state.resubscribeBuffer = null;
+	session.tasks = snapshot.tasks;
+	session.deliveredFiles = snapshot.deliveredFiles;
+	session.goal = snapshot.goal;
+	session.process = snapshot.process;
+	session.queuedTurns = snapshot.queuedTurns;
+
+	if (!existed || session.syncStatus !== "subscribing" || session.focusOnSnapshot) {
+		const sessionChanged = state.activeSessionId !== sessionId;
+		state.activeSessionId = sessionId;
+		if (sessionChanged) clearAgentTranscript(state.agentTranscript);
+		else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
+	}
+
+	const buffered = session.buffer;
+	session.buffer = null;
 	if (buffered === "overflowed") {
-		state.syncStatus = "resnapshot_required";
-	} else if (buffered) {
-		const replay = buffered
-			.filter((entry) => {
-				if (entry.event.type === "session/updated") return false;
-				const eventSession = eventSessionId(entry.event);
-				return eventSession === undefined || (eventSession === sessionId && entry.cursor > snapshot.cursor);
-			})
-			.map((entry) => entry.event);
-		replayProjectionEvents(state, replay);
+		session.syncStatus = "resnapshot_required";
+	} else {
+		const replay = (buffered ?? []).filter((entry) => entry.cursor > snapshot.cursor).map((entry) => entry.event);
+		if (!canApplyEvents(session, replay)) {
+			session.syncStatus = "resnapshot_required";
+		} else {
+			session.syncStatus = "ready";
+			for (const event of replay) applyEvent(state, session, event);
+		}
 	}
-}
-
-export function markProjectionResubscribing(state: MutableProjectionState): void {
-	state.syncStatus = "resubscribing";
-}
-
-export function replayProjectionEvents(state: MutableProjectionState, events: readonly DomainEvent[]): void {
-	if (!canApplyEvents(state, events)) {
-		state.syncStatus = "resnapshot_required";
-		return;
-	}
-	for (const event of events) applyEvent(state, event);
-}
-
-export function restoreProjectionSyncStatus(
-	state: MutableProjectionState,
-	previous: Pick<MutableProjectionState, "activeSessionId" | "serverEpoch" | "syncStatus">,
-): boolean {
-	if (
-		state.syncStatus !== "resubscribing" ||
-		state.activeSessionId !== previous.activeSessionId ||
-		state.serverEpoch !== previous.serverEpoch
-	) {
-		return false;
-	}
-	state.syncStatus = previous.syncStatus;
-	return true;
+	session.statusBeforeSubscribe = null;
+	session.focusOnSnapshot = false;
+	session.revision += 1;
 }
 
 export function eventSessionId(event: DomainEvent): string | undefined {
@@ -367,36 +448,38 @@ export function eventSessionId(event: DomainEvent): string | undefined {
 	}
 }
 
-function targetsActiveProject(
-	state: MutableProjectionState,
+function targetsSessionProject(
+	session: SessionSummary | undefined,
 	event: Extract<DomainEvent, { type: "project/invalidated" }>,
 ): boolean {
-	const active = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
-	return active?.scheduled === undefined && active?.mode === event.mode && active.cwd === event.cwd;
+	return session?.scheduled === undefined && session?.mode === event.mode && session.cwd === event.cwd;
 }
 
-function isSelectedAgentLiveTask(state: MutableProjectionState, agentId: string, taskId?: string): boolean {
+function isSelectedAgentLiveTask(
+	state: MutableProjectionState,
+	session: MutableSessionProjection,
+	agentId: string,
+	taskId?: string,
+): boolean {
 	if (state.agentTranscript.agentId !== agentId) return false;
 	if (state.agentTranscript.taskId === null) return true;
 	if (taskId !== undefined) return taskId === state.agentTranscript.taskId;
-	return state.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === state.agentTranscript.taskId;
+	return (
+		session.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === state.agentTranscript.taskId
+	);
 }
 
-function canApplyEvents(state: MutableProjectionState, events: readonly DomainEvent[]): boolean {
-	const activeSessionId = state.activeSessionId;
-	if (!activeSessionId) return false;
+function canApplyEvents(session: MutableSessionProjection, events: readonly DomainEvent[]): boolean {
 	const itemStates = new Map<string, ItemView["state"]>();
 	for (const event of events) {
-		const sessionId = eventSessionId(event);
 		if (event.type === "session/invalidated") continue;
-		if (sessionId !== undefined && sessionId !== activeSessionId && event.type !== "session/updated") return false;
 		switch (event.type) {
 			case "item/started":
 			case "item/completed":
 				itemStates.set(event.item.itemId, event.item.state);
 				break;
 			case "item/delta": {
-				const stateBeforeDelta = itemStates.get(event.itemId) ?? state.itemsById.get(event.itemId)?.state;
+				const stateBeforeDelta = itemStates.get(event.itemId) ?? session.itemsById.get(event.itemId)?.state;
 				if (stateBeforeDelta !== "streaming") return false;
 				break;
 			}
@@ -425,10 +508,10 @@ function appendItemDelta(
 	return { ...item, content };
 }
 
-function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
+function applyEvent(state: MutableProjectionState, session: MutableSessionProjection | null, event: DomainEvent): void {
 	switch (event.type) {
 		case "session/processChanged":
-			state.process = structuredClone(event.process);
+			session!.process = structuredClone(event.process);
 			return;
 		case "server/state":
 			return;
@@ -437,11 +520,11 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		case "session/invalidated":
 			if (event.reason === "deleted") removeSession(state, event.sessionId);
-			else if (state.activeSessionId === event.sessionId) state.syncStatus = "resnapshot_required";
+			else if (session) session.syncStatus = "resnapshot_required";
 			return;
 		case "project/invalidated":
 			if (event.reason === "deleted") removeModeProjectSessions(state, event.mode, event.cwd);
-			else if (targetsActiveProject(state, event)) state.syncStatus = "resnapshot_required";
+			else if (session) session.syncStatus = "resnapshot_required";
 			return;
 		case "session/updated":
 			state.sessionOrder = upsertOrdered(
@@ -452,68 +535,72 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			);
 			return;
 		case "session/permissionPresetChanged":
-			state.permissionPreset = event.permissionPreset;
-			state.effectiveSettings = event.effectiveSettings;
-			state.constrainedByParent = event.constrainedByParent;
-			state.sandboxHealth = event.sandboxHealth;
+			session!.permissionPreset = event.permissionPreset;
+			session!.effectiveSettings = event.effectiveSettings;
+			session!.constrainedByParent = event.constrainedByParent;
+			session!.sandboxHealth = event.sandboxHealth;
 			return;
 		case "session/permissionReviewStarted":
-			state.activeReview = {
+			session!.activeReview = {
 				actionId: event.actionId,
 				reviewer: event.reviewer,
 				riskLevel: event.riskLevel,
 			};
 			return;
 		case "session/permissionReviewCompleted":
-			if (state.activeReview?.actionId === event.actionId) state.activeReview = undefined;
+			if (session!.activeReview?.actionId === event.actionId) session!.activeReview = undefined;
 			return;
 		case "session/collaborationModeChanged":
-			state.collaborationMode = event.collaborationMode;
+			session!.collaborationMode = event.collaborationMode;
 			return;
 		case "session/thinkingSelectionChanged":
-			state.thinkingSelection = event.thinkingSelection;
-			state.actualThinkingLevel = event.actualThinkingLevel;
-			state.availableThinkingSelections = event.availableThinkingSelections;
+			session!.thinkingSelection = event.thinkingSelection;
+			session!.actualThinkingLevel = event.actualThinkingLevel;
+			session!.availableThinkingSelections = event.availableThinkingSelections;
 			return;
 		case "session/modelChanged":
-			state.model = event.model;
-			state.thinkingSelection = event.thinkingSelection;
-			state.actualThinkingLevel = event.actualThinkingLevel;
-			state.availableThinkingSelections = event.availableThinkingSelections;
+			session!.model = event.model;
+			session!.thinkingSelection = event.thinkingSelection;
+			session!.actualThinkingLevel = event.actualThinkingLevel;
+			session!.availableThinkingSelections = event.availableThinkingSelections;
 			return;
 		case "session/tasksChanged":
-			state.tasks = structuredClone(event.tasks);
+			session!.tasks = structuredClone(event.tasks);
 			return;
 		case "session/deliveredFilesChanged":
-			state.deliveredFiles = structuredClone(event.deliveredFiles);
+			session!.deliveredFiles = structuredClone(event.deliveredFiles);
 			return;
 		case "session/goalChanged":
-			state.goal = structuredClone(event.goal);
+			session!.goal = structuredClone(event.goal);
 			return;
 		case "turn/queueChanged":
-			state.queuedTurns = structuredClone(event.queuedTurns);
+			session!.queuedTurns = structuredClone(event.queuedTurns);
 			return;
 		case "agent/updated": {
-			const index = state.agents.findIndex((candidate) => candidate.agentId === event.agent.agentId);
-			state.agents =
+			const index = session!.agents.findIndex((candidate) => candidate.agentId === event.agent.agentId);
+			session!.agents =
 				index < 0
-					? [...state.agents, structuredClone(event.agent)]
-					: state.agents.map((candidate, current) =>
+					? [...session!.agents, structuredClone(event.agent)]
+					: session!.agents.map((candidate, current) =>
 							current === index ? structuredClone(event.agent) : candidate,
 						);
 			return;
 		}
 		case "agent/deleted": {
 			const deleted = new Set(event.deletedAgentIds);
-			state.agents = state.agents.filter((agent) => !deleted.has(agent.agentId));
-			if (state.agentTranscript.agentId && deleted.has(state.agentTranscript.agentId)) {
+			session!.agents = session!.agents.filter((agent) => !deleted.has(agent.agentId));
+			if (
+				session === activeProjection(state) &&
+				state.agentTranscript.agentId &&
+				deleted.has(state.agentTranscript.agentId)
+			) {
 				clearAgentTranscript(state.agentTranscript);
 			}
 			return;
 		}
 		case "agent/item/started":
 		case "agent/item/completed":
-			if (isSelectedAgentLiveTask(state, event.agentId)) {
+			if (session === activeProjection(state) && isSelectedAgentLiveTask(state, session, event.agentId)) {
 				state.agentTranscript.itemOrder = upsertOrdered(
 					state.agentTranscript.itemsById,
 					state.agentTranscript.itemOrder,
@@ -523,7 +610,7 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			}
 			return;
 		case "agent/item/delta": {
-			if (!isSelectedAgentLiveTask(state, event.agentId)) return;
+			if (session !== activeProjection(state) || !isSelectedAgentLiveTask(state, session, event.agentId)) return;
 			const item = state.agentTranscript.itemsById.get(event.itemId);
 			if (item?.state === "streaming") {
 				state.agentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
@@ -531,33 +618,36 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 			return;
 		}
 		case "agent/itemsChanged":
-			if (isSelectedAgentLiveTask(state, event.agentId, event.taskId)) {
+			if (
+				session === activeProjection(state) &&
+				isSelectedAgentLiveTask(state, session, event.agentId, event.taskId)
+			) {
 				state.agentTranscript.journalRevision += 1;
 			}
 			return;
 		case "turn/started":
 		case "turn/completed":
 		case "turn/interrupted":
-			state.turnOrder = upsertOrdered(
-				state.turnsById,
-				state.turnOrder,
+			session!.turnOrder = upsertOrdered(
+				session!.turnsById,
+				session!.turnOrder,
 				event.turn.turnId,
 				structuredClone(event.turn),
 			);
-			if (event.turn.state === "running") state.activeTurnId = event.turn.turnId;
-			else if (state.activeTurnId === event.turn.turnId) state.activeTurnId = null;
+			if (event.turn.state === "running") session!.activeTurnId = event.turn.turnId;
+			else if (session!.activeTurnId === event.turn.turnId) session!.activeTurnId = null;
 			return;
 		case "item/started":
 		case "item/completed":
-			state.itemOrder = upsertOrdered(
-				state.itemsById,
-				state.itemOrder,
+			session!.itemOrder = upsertOrdered(
+				session!.itemsById,
+				session!.itemOrder,
 				event.item.itemId,
 				structuredClone(event.item),
 			);
 			return;
 		case "item/delta":
-			state.itemsById.set(event.itemId, appendItemDelta(state.itemsById.get(event.itemId)!, event.delta));
+			session!.itemsById.set(event.itemId, appendItemDelta(session!.itemsById.get(event.itemId)!, event.delta));
 			return;
 		case "memory/changed": {
 			// Vault writes are connection-level; surface them like the agent's
@@ -612,14 +702,27 @@ function applyEvent(state: MutableProjectionState, event: DomainEvent): void {
 	}
 }
 
+function bufferSessionEvent(session: MutableSessionProjection, cursor: number, event: DomainEvent): void {
+	if (session.buffer === "overflowed") return;
+	if (session.buffer === null) session.buffer = [];
+	const buffer = session.buffer;
+	buffer.push({ cursor, event });
+	if (buffer.length > 5000) session.buffer = "overflowed";
+	session.revision += 1;
+}
+
+function bufferOrInvalidate(session: MutableSessionProjection, cursor: number, event: DomainEvent): void {
+	if (session.syncStatus === "subscribing") {
+		bufferSessionEvent(session, cursor, event);
+	} else if (session.syncStatus === "ready") {
+		session.syncStatus = "resnapshot_required";
+		session.revision += 1;
+	}
+}
+
 export function applyConnectionEvents(state: MutableProjectionState, batch: ConnectionEventsParams): BatchApplyResult {
 	const invalid =
-		batch.serverEpoch !== state.serverEpoch ||
-		batch.fromCursor <= state.cursor ||
-		batch.toCursor < batch.fromCursor ||
-		state.syncStatus === "empty" ||
-		state.syncStatus === "resnapshot_required" ||
-		(state.syncStatus === "resubscribing" && state.resubscribeBuffer === null);
+		batch.serverEpoch !== state.serverEpoch || batch.fromCursor <= state.cursor || batch.toCursor < batch.fromCursor;
 	if (invalid) {
 		if (
 			batch.serverEpoch === state.serverEpoch &&
@@ -627,61 +730,75 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 			batch.toCursor >= batch.fromCursor
 		) {
 			for (const event of batch.events) {
-				if (event.type === "session/updated") applyEvent(state, event);
+				if (event.type === "session/updated") applyEvent(state, null, event);
 			}
 		}
-		state.syncStatus = "resnapshot_required";
+		const active = activeProjection(state);
+		if (active?.syncStatus === "ready") {
+			active.syncStatus = "resnapshot_required";
+			active.revision += 1;
+		}
 		return "resnapshot_required";
 	}
 
-	if (state.syncStatus === "resubscribing") {
-		const buffer = state.resubscribeBuffer === "overflowed" ? null : state.resubscribeBuffer;
-		for (let index = 0; index < batch.events.length; index += 1) {
-			const event = batch.events[index]!;
-			if (event.type === "session/updated") applyEvent(state, event);
-			else if (buffer) {
-				buffer.push({ cursor: batch.fromCursor + index, event });
-				if (buffer.length > 5000) {
-					state.resubscribeBuffer = "overflowed";
-					break;
-				}
-			}
-		}
-		state.cursor = batch.toCursor;
-		return "applied";
-	}
-
-	const applicable: DomainEvent[] = [];
-	for (const event of batch.events) {
+	const pending = new Map<MutableSessionProjection, DomainEvent[]>();
+	for (let index = 0; index < batch.events.length; index += 1) {
+		const event = batch.events[index]!;
+		const cursor = batch.fromCursor + index;
 		const sessionId = eventSessionId(event);
-		if (sessionId === undefined || sessionId === state.activeSessionId || event.type === "session/updated") {
-			applicable.push(event);
+		if (sessionId === undefined) {
+			if (event.type === "project/invalidated" && event.reason === "reload_required") {
+				for (const [bucketId, bucket] of state.sessions) {
+					if (targetsSessionProject(state.sessionsById.get(bucketId), event)) {
+						bufferOrInvalidate(bucket, cursor, event);
+					}
+				}
+			} else {
+				applyEvent(state, null, event);
+			}
+			continue;
 		}
-	}
-	if (!canApplyEvents(state, applicable)) {
-		for (const event of batch.events) {
-			if (event.type === "session/updated") applyEvent(state, event);
+		if (event.type === "session/updated") {
+			applyEvent(state, null, event);
+			continue;
 		}
-		state.syncStatus = "resnapshot_required";
-		return "resnapshot_required";
+		if (event.type === "interaction/notify") {
+			if (sessionId === state.activeSessionId) applyEvent(state, null, event);
+			continue;
+		}
+		if (event.type === "session/invalidated") {
+			if (event.reason === "deleted") {
+				removeSession(state, sessionId);
+			} else {
+				const session = state.sessions.get(sessionId);
+				if (session) bufferOrInvalidate(session, cursor, event);
+			}
+			continue;
+		}
+		const session = state.sessions.get(sessionId);
+		if (!session) continue;
+		if (session.syncStatus === "subscribing") {
+			bufferSessionEvent(session, cursor, event);
+			continue;
+		}
+		if (session.syncStatus !== "ready") continue;
+		const list = pending.get(session);
+		if (list) list.push(event);
+		else pending.set(session, [event]);
 	}
-
-	const reloadRequired = batch.events.some(
-		(event) =>
-			(event.type === "session/invalidated" &&
-				event.reason === "reload_required" &&
-				event.sessionId === state.activeSessionId) ||
-			(event.type === "project/invalidated" &&
-				event.reason === "reload_required" &&
-				targetsActiveProject(state, event)),
-	);
-	for (const event of applicable) applyEvent(state, event);
-	if (reloadRequired) {
-		state.syncStatus = "resnapshot_required";
-		return "resnapshot_required";
+	for (const [session, events] of pending) {
+		if (!canApplyEvents(session, events)) {
+			session.syncStatus = "resnapshot_required";
+			session.revision += 1;
+			continue;
+		}
+		for (const event of events) {
+			applyEvent(state, session, event);
+			session.revision += 1;
+		}
 	}
 	state.cursor = batch.toCursor;
-	return "applied";
+	return activeProjection(state)?.syncStatus === "resnapshot_required" ? "resnapshot_required" : "applied";
 }
 
 export function prependProjectionItems(
@@ -689,16 +806,18 @@ export function prependProjectionItems(
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): void {
 	const activeSessionId = state.activeSessionId;
-	if (!activeSessionId || page.items.some((item) => item.sessionId !== activeSessionId)) {
+	const session = activeProjection(state);
+	if (!activeSessionId || !session || page.items.some((item) => item.sessionId !== activeSessionId)) {
 		throw new TypeError("History page does not belong to the active session");
 	}
 	const added: string[] = [];
 	for (const item of page.items) {
-		if (!state.itemsById.has(item.itemId)) added.push(item.itemId);
-		state.itemsById.set(item.itemId, structuredClone(item));
+		if (!session.itemsById.has(item.itemId)) added.push(item.itemId);
+		session.itemsById.set(item.itemId, structuredClone(item));
 	}
-	state.itemOrder = [...added, ...state.itemOrder];
-	state.nextBeforeItemId = page.nextBeforeItemId;
+	session.itemOrder = [...added, ...session.itemOrder];
+	session.nextBeforeItemId = page.nextBeforeItemId;
+	session.revision += 1;
 }
 
 export function selectAgentTranscript(
