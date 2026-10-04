@@ -226,3 +226,84 @@ test("a file tab keeps workspace authorization after another session is opened",
 		await stopWorkspace(workspace);
 	}
 });
+
+test("splits panes into a two-row grid and blocks splits beyond the caps", async () => {
+	test.setTimeout(120_000);
+	const sessionId = "81000000-0000-4000-8000-0000000000e1";
+	const workspace = await launchWorkspace({
+		sessions: [{ id: sessionId, mode: "chat", name: "Grid Alpha" }],
+	});
+	const { consoleErrors, diagnostics, page } = workspace;
+	try {
+		await page.locator('.session-button[aria-label="Grid Alpha"]').click();
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
+
+		const addTool = async (name: string) => {
+			await page.locator(".tool-add-trigger").first().click();
+			await page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true }).click();
+		};
+		const openTabMenu = async (name: string) => {
+			await page.locator(".tool-tab", { has: page.getByRole("tab", { name, exact: true }) }).first().click({ button: "right" });
+		};
+		const menuItem = (name: string) =>
+			page.locator(".workspace-tab-menu").getByRole("menuitem", { name, exact: true });
+
+		await addTool("Terminal");
+		const terminalPanel = page.locator(".terminal-panel").first();
+		await expect(terminalPanel).toBeVisible();
+		const terminalHandle = await terminalPanel.elementHandle();
+		await addTool("Knowledge");
+		await addTool("Terminal");
+		await addTool("Terminal");
+
+		await openTabMenu("Terminal");
+		await menuItem("Split right").click();
+		await expect(page.locator(".workspace-pane")).toHaveCount(2);
+
+		// At 1200x800 with the sidebar visible a third column is too narrow.
+		await openTabMenu("Knowledge");
+		await expect(menuItem("Split right")).toBeDisabled();
+		await expect(menuItem("Split right")).toHaveAttribute("title", "Not enough room to split");
+		await page.keyboard.press("Escape");
+
+		await page.setViewportSize({ width: 1600, height: 900 });
+		await page.waitForFunction(
+			() => document.querySelector(".session-workspace-panes")!.getBoundingClientRect().width > 1200,
+		);
+		await openTabMenu("Knowledge");
+		await menuItem("Split right").click();
+		await expect(page.locator(".workspace-row").first().locator(".workspace-pane")).toHaveCount(3);
+
+		for (const tab of ["Terminal 2", "Terminal 3"]) {
+			await openTabMenu(tab);
+			await menuItem("Split down").click();
+		}
+		await addTool("Terminal");
+		await openTabMenu("Terminal 4");
+		await menuItem("Split down").click();
+
+		const rows = page.locator(".workspace-row");
+		await expect(rows).toHaveCount(2);
+		await expect(rows.nth(0).locator(".workspace-pane")).toHaveCount(3);
+		await expect(rows.nth(1).locator(".workspace-pane")).toHaveCount(3);
+
+		await openTabMenu("Grid Alpha");
+		await expect(menuItem("Split right")).toBeDisabled();
+		await expect(menuItem("Split right")).toHaveAttribute("title", "Up to 6 panes");
+		await expect(menuItem("Split down")).toBeDisabled();
+		await expect(menuItem("Split down")).toHaveAttribute("title", "Up to 6 panes");
+		await page.keyboard.press("Escape");
+
+		expect(await terminalHandle?.evaluate((element) => element.isConnected)).toBe(true);
+
+		if (process.env.METIS_AUDIT_DIR) {
+			await mkdir(process.env.METIS_AUDIT_DIR, { recursive: true });
+			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "grid.png") });
+		}
+		expect(consoleErrors).toEqual([]);
+	} catch (error) {
+		throw await rendererFailure(error, page, diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
+	}
+});

@@ -95,8 +95,13 @@ export type WorkspaceTab =
 	| PreviewTab
 	| PlanTab;
 
+export const MAX_WORKSPACE_ROWS = 2;
+export const MAX_ROW_PANES = 3;
+export type SplitDirection = "left" | "right" | "up" | "down";
+
 export interface WorkspacePane {
 	readonly id: string;
+	readonly row: 0 | 1;
 	readonly tabs: readonly WorkspaceTab[];
 	readonly activeId: string;
 }
@@ -114,7 +119,7 @@ export function chatTab(sessionId: string | null): ChatTab {
 export function defaultWorkspace(): SessionWorkspace {
 	const paneId = "pane-1";
 	return {
-		panes: [{ id: paneId, tabs: [], activeId: "" }],
+		panes: [{ id: paneId, row: 0, tabs: [], activeId: "" }],
 		activePaneId: paneId,
 		nextNumber: 1,
 	};
@@ -157,7 +162,8 @@ export function paneForTab(workspace: SessionWorkspace, tabId: string): Workspac
 
 function collapseEmptyPanes(workspace: SessionWorkspace): SessionWorkspace {
 	const nonEmpty = workspace.panes.filter((pane) => pane.tabs.length > 0);
-	const panes = nonEmpty.length > 0 ? nonEmpty : [workspace.panes[0]!];
+	const kept = nonEmpty.length > 0 ? nonEmpty : [workspace.panes[0]!];
+	const panes = kept.some((pane) => pane.row === 0) ? kept : kept.map((pane) => ({ ...pane, row: 0 as const }));
 	const activePaneId = panes.some((pane) => pane.id === workspace.activePaneId)
 		? workspace.activePaneId
 		: panes.at(-1)!.id;
@@ -257,30 +263,55 @@ export function moveTab(
 	return collapseEmptyPanes({ ...workspace, panes, activePaneId: targetPaneId });
 }
 
-export function splitTabRight(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
-	const location = findTabLocation(workspace, tabId);
-	if (!location) return workspace;
-	return splitTabBeside(workspace, tabId, workspace.panes[location.paneIndex]!.id);
+export function canSplit(workspace: SessionWorkspace, targetPaneId: string, direction: SplitDirection): boolean {
+	const target = workspace.panes.find((pane) => pane.id === targetPaneId);
+	if (!target) return false;
+	if (direction === "left" || direction === "right") {
+		return workspace.panes.filter((pane) => pane.row === target.row).length < MAX_ROW_PANES;
+	}
+	const targetRow = direction === "down" ? 0 : 1;
+	const otherRow = direction === "down" ? 1 : 0;
+	return target.row === targetRow && workspace.panes.filter((pane) => pane.row === otherRow).length < MAX_ROW_PANES;
 }
 
-export function splitTabBeside(workspace: SessionWorkspace, tabId: string, besidePaneId: string): SessionWorkspace {
+export function splitTab(
+	workspace: SessionWorkspace,
+	tabId: string,
+	targetPaneId: string,
+	direction: SplitDirection,
+): SessionWorkspace {
 	const location = findTabLocation(workspace, tabId);
-	const besideIndex = workspace.panes.findIndex((pane) => pane.id === besidePaneId);
-	if (!location || besideIndex < 0) return workspace;
+	const targetIndex = workspace.panes.findIndex((pane) => pane.id === targetPaneId);
+	if (!location || targetIndex < 0 || !canSplit(workspace, targetPaneId, direction)) return workspace;
+	const target = workspace.panes[targetIndex]!;
+	const source = workspace.panes[location.paneIndex]!;
+	const tab = source.tabs[location.tabIndex]!;
+	const without = source.tabs.filter((candidate) => candidate.id !== tabId);
+	const sourceActiveId = source.activeId === tabId ? (without.at(-1)?.id ?? "") : source.activeId;
 	const paneId = `pane-${crypto.randomUUID()}`;
-	const tab = workspace.panes[location.paneIndex]!.tabs[location.tabIndex]!;
-	const panes = workspace.panes.flatMap((pane, index) => {
-		if (index === location.paneIndex) {
-			const without = pane.tabs.filter((candidate) => candidate.id !== tabId);
-			const activeId = pane.activeId === tabId ? (without.at(-1)?.id ?? "") : pane.activeId;
-			const source = { ...pane, tabs: without, activeId };
-			return index === besideIndex ? [source, { id: paneId, tabs: [tab], activeId: tabId }] : [source];
-		}
-		if (index === besideIndex) {
-			return [pane, { id: paneId, tabs: [tab], activeId: tabId }];
-		}
-		return [pane];
-	});
+	const row: 0 | 1 = direction === "down" ? 1 : direction === "up" ? 0 : target.row;
+	const targetColumn = workspace.panes.slice(0, targetIndex + 1).filter((pane) => pane.row === target.row).length - 1;
+	let insertIndex: number;
+	if (direction === "right") insertIndex = targetIndex + 1;
+	else if (direction === "left") insertIndex = targetIndex;
+	else if (direction === "down") {
+		const rowPanes = workspace.panes.filter((pane) => pane.row === 1);
+		const firstRowIndex = workspace.panes.findIndex((pane) => pane.row === 1);
+		insertIndex =
+			(firstRowIndex < 0 ? workspace.panes.length : firstRowIndex) + Math.min(targetColumn, rowPanes.length);
+	} else {
+		const rowPanes = workspace.panes.filter((pane) => pane.row === 0);
+		insertIndex = Math.min(targetColumn, rowPanes.length);
+	}
+	const panes = [
+		...workspace.panes.slice(0, insertIndex),
+		{ id: paneId, row, tabs: [tab], activeId: tabId },
+		...workspace.panes.slice(insertIndex),
+	].map((pane, index) =>
+		index === (location.paneIndex >= insertIndex ? location.paneIndex + 1 : location.paneIndex)
+			? { ...pane, tabs: without, activeId: sourceActiveId }
+			: pane,
+	);
 	return collapseEmptyPanes({ ...workspace, panes, activePaneId: paneId });
 }
 

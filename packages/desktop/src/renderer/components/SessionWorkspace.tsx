@@ -29,12 +29,13 @@ import {
 	findChatTab,
 	findTabLocation,
 	focusedChatTab,
+	canSplit,
 	moveTab,
 	removeTab,
 	removeTabs,
 	type SessionWorkspace,
-	splitTabBeside,
-	splitTabRight,
+	type SplitDirection,
+	splitTab,
 	type WorkspacePane,
 	type WorkspaceTab,
 	workspaceTabs,
@@ -74,7 +75,10 @@ interface DragState {
 
 type DropTarget =
 	| { readonly paneId: string; readonly index: number }
-	| { readonly splitBeside: string };
+	| { readonly split: { readonly paneId: string; readonly direction: SplitDirection } };
+
+const MIN_PANE_WIDTH = 360;
+const MIN_PANE_HEIGHT = 280;
 
 interface SessionWorkspaceViewProps {
 	readonly api: MetisDesktopApi;
@@ -1052,12 +1056,46 @@ export function SessionWorkspaceView({
 		mutateWorkspace((workspace) => moveTab(workspace, drag.tabId, paneId, index));
 	};
 
-	const handleDropSplit = (besidePaneId: string) => {
+	const handleDropSplit = (paneId: string, direction: SplitDirection) => {
 		const drag = dragState;
 		setDragState(null);
 		setDropTarget(null);
 		if (!drag) return;
-		mutateWorkspace((workspace) => splitTabBeside(workspace, drag.tabId, besidePaneId));
+		mutateWorkspace((workspace) => splitTab(workspace, drag.tabId, paneId, direction));
+	};
+
+	const rowCount = (row: 0 | 1) => workspace.panes.filter((pane) => pane.row === row).length;
+
+	const fitsSplit = (paneId: string, direction: SplitDirection): boolean => {
+		const root = panesRef.current;
+		const target = workspace.panes.find((pane) => pane.id === paneId);
+		if (!root || !target) return false;
+		const rect = root.getBoundingClientRect();
+		if (direction === "left" || direction === "right") {
+			return rect.width / (rowCount(target.row) + 1) >= MIN_PANE_WIDTH;
+		}
+		const otherRow = direction === "down" ? 1 : 0;
+		const otherRowCount = rowCount(otherRow);
+		return otherRowCount === 0
+			? rect.height / 2 >= MIN_PANE_HEIGHT
+			: rect.width / (otherRowCount + 1) >= MIN_PANE_WIDTH;
+	};
+
+	const splitDropDirection = (event: DragEvent<HTMLElement>, paneId: string): SplitDirection | null => {
+		const rect = event.currentTarget.getBoundingClientRect();
+		const horizontal = Math.min(120, rect.width * 0.25);
+		const vertical = Math.min(120, rect.height * 0.25);
+		const nearest = ([
+			{ direction: "left" as const, distance: event.clientX - rect.left, edge: horizontal },
+			{ direction: "right" as const, distance: rect.right - event.clientX, edge: horizontal },
+			{ direction: "up" as const, distance: event.clientY - rect.top, edge: vertical },
+			{ direction: "down" as const, distance: rect.bottom - event.clientY, edge: vertical },
+		])
+			.filter((candidate) => candidate.distance >= 0 && candidate.distance <= candidate.edge)
+			.sort((a, b) => a.distance - b.distance)[0];
+		return nearest && canSplit(workspace, paneId, nearest.direction) && fitsSplit(paneId, nearest.direction)
+			? nearest.direction
+			: null;
 	};
 
 	const stripDropIndex = (event: DragEvent<HTMLElement>): number => {
@@ -1435,54 +1473,63 @@ export function SessionWorkspaceView({
 		});
 	};
 
+	const splitTarget = dropTarget && "split" in dropTarget ? dropTarget.split : null;
+
 	return (
 		<div className="session-workspace-root" hidden={!visible}>
 			<div className="session-workspace-instance">
 				<div className={`session-workspace-panes${dragState ? " is-dragging" : ""}`} ref={panesRef}>
-					{workspace.panes.map((pane) => (
-						<section
-							className={`workspace-pane${dropTarget && "splitBeside" in dropTarget && dropTarget.splitBeside === pane.id ? " is-split-target" : ""}`}
-							key={pane.id}
-							onDragLeave={(event) => {
-								if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-								setDropTarget((current) => current && "splitBeside" in current && current.splitBeside === pane.id ? null : current);
-							}}
-							onDragOver={(event) => {
-								if (!dragState) return;
-								event.preventDefault();
-								const rect = event.currentTarget.getBoundingClientRect();
-								const edge = Math.min(120, rect.width * 0.25);
-								if (rect.right - event.clientX <= edge) {
-									event.dataTransfer.dropEffect = "move";
-									setDropTarget({ splitBeside: pane.id });
-								} else {
-									setDropTarget({ paneId: pane.id, index: pane.tabs.length });
-								}
-							}}
-							onDrop={(event) => {
-								event.preventDefault();
-								const rect = event.currentTarget.getBoundingClientRect();
-								const edge = Math.min(120, rect.width * 0.25);
-								if (rect.right - event.clientX <= edge) handleDropSplit(pane.id);
-								else handleDropOnStrip(pane.id, pane.tabs.length);
-							}}
-						>
-							{renderTabStrip(pane)}
-							<div
-								className="workspace-pane-body"
-								ref={(element) => {
-									if (element) paneBodiesRef.current.set(pane.id, element);
-									else paneBodiesRef.current.delete(pane.id);
-								}}
-							>
-								{pane.tabs.length === 0 && (
-									<div className="workspace-empty" role="tabpanel">
-										<p>{t("Pick a session from the sidebar or use + to open a tool.")}</p>
-									</div>
-								)}
+					{([0, 1] as const).map((row) => {
+						const rowPanes = workspace.panes.filter((pane) => pane.row === row);
+						if (rowPanes.length === 0) return null;
+						return (
+							<div className="workspace-row" key={row}>
+								{rowPanes.map((pane) => (
+									<section
+										className={`workspace-pane${splitTarget?.paneId === pane.id ? " is-split-target" : ""}`}
+										data-split-direction={splitTarget?.paneId === pane.id ? splitTarget.direction : undefined}
+										key={pane.id}
+										onDragLeave={(event) => {
+											if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+											setDropTarget((current) => current && "split" in current && current.split.paneId === pane.id ? null : current);
+										}}
+										onDragOver={(event) => {
+											if (!dragState) return;
+											event.preventDefault();
+											const direction = splitDropDirection(event, pane.id);
+											if (direction) {
+												event.dataTransfer.dropEffect = "move";
+												setDropTarget({ split: { paneId: pane.id, direction } });
+											} else {
+												setDropTarget({ paneId: pane.id, index: pane.tabs.length });
+											}
+										}}
+										onDrop={(event) => {
+											event.preventDefault();
+											const direction = splitDropDirection(event, pane.id);
+											if (direction) handleDropSplit(pane.id, direction);
+											else handleDropOnStrip(pane.id, pane.tabs.length);
+										}}
+									>
+										{renderTabStrip(pane)}
+										<div
+											className="workspace-pane-body"
+											ref={(element) => {
+												if (element) paneBodiesRef.current.set(pane.id, element);
+												else paneBodiesRef.current.delete(pane.id);
+											}}
+										>
+											{pane.tabs.length === 0 && (
+												<div className="workspace-empty" role="tabpanel">
+													<p>{t("Pick a session from the sidebar or use + to open a tool.")}</p>
+												</div>
+											)}
+										</div>
+									</section>
+								))}
 							</div>
-						</section>
-					))}
+						);
+					})}
 					<div className="workspace-panel-layer" ref={panelLayerRef}>
 						{renderPanels()}
 					</div>
@@ -1493,9 +1540,25 @@ export function SessionWorkspaceView({
 				const menuStyle: CSSProperties = { left: `${tabMenu.x}px`, top: `${tabMenu.y}px` };
 				return (
 					<nav aria-label={t("Tab actions")} className="tool-add-menu workspace-tab-menu" role="menu" style={menuStyle}>
-						<button onClick={() => { mutateWorkspace((ws) => splitTabRight(ws, tabMenu.tabId)); setTabMenu(null); }} role="menuitem" type="button">
-							<span>{t("Split right")}</span>
-						</button>
+						{(["right", "down"] as const).map((direction) => {
+							const reason = !canSplit(workspace, tabMenu.paneId, direction)
+								? t("Up to 6 panes")
+								: !fitsSplit(tabMenu.paneId, direction)
+									? t("Not enough room to split")
+									: undefined;
+							return (
+								<button
+									disabled={reason !== undefined}
+									key={direction}
+									onClick={() => { mutateWorkspace((ws) => splitTab(ws, tabMenu.tabId, tabMenu.paneId, direction)); setTabMenu(null); }}
+									role="menuitem"
+									title={reason}
+									type="button"
+								>
+									<span>{direction === "right" ? t("Split right") : t("Split down")}</span>
+								</button>
+							);
+						})}
 						{otherPanes.map((pane, index) => (
 							<button key={pane.id} onClick={() => { mutateWorkspace((ws) => moveTab(ws, tabMenu.tabId, pane.id)); setTabMenu(null); }} role="menuitem" type="button">
 								<span>{t("Move to pane {{index}}", { index: index + 1 })}</span>

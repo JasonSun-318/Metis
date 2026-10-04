@@ -4649,6 +4649,10 @@ describe("Chat desktop shell", () => {
 
 	it("keeps tab contents mounted when tabs are split or moved between panes", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		const container = document.createElement("div");
@@ -4715,6 +4719,86 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Close Terminal").click());
 		await flush();
 		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-other"] });
+
+		await act(async () => root.unmount());
+	});
+
+	it("splits panes into a second row and reports when a split is blocked", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		const openMenu = async (label: string) => {
+			await act(async () => tabFor(label).dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			));
+		};
+
+		await addTool(container, "Terminal");
+		await addTool(container, "Knowledge");
+		await flush();
+
+		await openMenu("Knowledge");
+		await act(async () => button(container, "Split down").click());
+		await flush();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-row")).toHaveLength(2);
+
+		await openMenu("Terminal");
+		await act(async () => button(container, "Split right").click());
+		await addTool(container, "Terminal");
+		await flush();
+		await openMenu("Terminal 2");
+		await act(async () => button(container, "Split right").click());
+		await flush();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-row")[0]!.querySelectorAll(".workspace-pane")).toHaveLength(3);
+
+		await openMenu("Chat project task");
+		const splitRight = button(container, "Split right");
+		expect(splitRight.disabled).toBe(true);
+		expect(splitRight.title).toBe("Up to 6 panes");
+		expect(button(container, "Split down").disabled).toBe(false);
+
+		await act(async () => root.unmount());
+	});
+
+	it("disables splits when the workspace is too small", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 600, bottom: 500, left: 0, width: 600, height: 500,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await addTool(container, "Terminal");
+		await flush();
+		const tab = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector('[role="tab"][aria-label="Terminal"]'))!;
+		await act(async () => tab.dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		const splitRight = button(container, "Split right");
+		expect(splitRight.disabled).toBe(true);
+		expect(splitRight.title).toBe("Not enough room to split");
+		const splitDown = button(container, "Split down");
+		expect(splitDown.disabled).toBe(true);
+		expect(splitDown.title).toBe("Not enough room to split");
 
 		await act(async () => root.unmount());
 	});
