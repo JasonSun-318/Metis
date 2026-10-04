@@ -54,3 +54,4 @@ docs/
 
 # Local agent reviews and execution artifacts
 .devin/
+artifacts/
