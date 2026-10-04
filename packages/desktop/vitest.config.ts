@@ -5,5 +5,5 @@ const appProtocolSrc = fileURLToPath(new URL("../app-protocol/src/index.ts", imp
 
 export default defineConfig({
 	resolve: { alias: [{ find: /^@metis\/app-protocol$/, replacement: appProtocolSrc }] },
-	test: { exclude: [...configDefaults.exclude, "e2e/**"], setupFiles: ["./test/setup.ts"] },
+	test: { exclude: [...configDefaults.exclude, "e2e/**", "out/**"], setupFiles: ["./test/setup.ts"] },
 });
