@@ -933,6 +933,7 @@ describe("renderer projection reducer", () => {
 	it.each([
 		["old epoch", batch(EPOCH_B, 1, 1)],
 		["duplicate cursor", batch(EPOCH_A, 0, 0)],
+		["cursor gap", batch(EPOCH_A, 2, 2)],
 		["out of order", batch(EPOCH_A, -1, -1)],
 	])("requires a fresh snapshot for %s events", (_label, events) => {
 		const store = new AppStore();
@@ -940,14 +941,6 @@ describe("renderer projection reducer", () => {
 		expect(store.applyBatch(events)).toBe("resnapshot_required");
 		expect(store.getSnapshot().syncStatus).toBe("resnapshot_required");
 		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "A" }]);
-	});
-
-	it("applies a batch that skips ahead in the cursor stream", () => {
-		const store = new AppStore();
-		store.applySnapshot(snapshot());
-		expect(store.applyBatch(batch(EPOCH_A, 3, 3))).toBe("applied");
-		expect(store.getSnapshot().itemsById.get("item-1")?.content).toEqual([{ type: "text", text: "AB" }]);
-		expect(store.getSnapshot().cursor).toBe(3);
 	});
 
 	it("preserves session summaries but not active projection events while resubscribing", () => {

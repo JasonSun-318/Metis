@@ -590,7 +590,7 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 	const invalid =
 		state.syncStatus !== "ready" ||
 		batch.serverEpoch !== state.serverEpoch ||
-		batch.fromCursor <= state.cursor ||
+		batch.fromCursor !== state.cursor + 1 ||
 		batch.toCursor < batch.fromCursor ||
 		!canApplyEvents(state, batch.events);
 	if (invalid) {
