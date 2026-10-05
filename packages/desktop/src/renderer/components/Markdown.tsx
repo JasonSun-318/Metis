@@ -1,7 +1,8 @@
 import type { TFunction } from "i18next";
 import { marked, type Token, type Tokens } from "marked";
-import { createElement, Fragment, type ReactNode, useMemo } from "react";
+import { createElement, Fragment, type ReactNode, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { lexMarkdownBlocks, type MarkdownLexCache } from "./markdown-lexer.ts";
 
 function safeHref(href: string): string | undefined {
 	if (href.startsWith("#")) return href;
@@ -159,22 +160,56 @@ export function Markdown({
 	readonly sourcePositions?: boolean;
 }) {
 	const { t, i18n } = useTranslation();
+	// Streaming deltas re-render for every append, so the lexed tokens and the
+	// rendered node of each top-level block are kept across frames. Token reuse
+	// is proven inside lexMarkdownBlocks; node reuse keys on the block's
+	// position, type and raw, and both caches reset when the language changes
+	// or a link definition alters earlier inline resolution.
+	const renderCache = useRef<{
+		lex: MarkdownLexCache | null;
+		defSalt: string;
+		nodes: ReadonlyMap<string, ReactNode>;
+		language: string | undefined;
+		t: TFunction | null;
+	}>({ lex: null, defSalt: "", nodes: new Map(), language: undefined, t: null });
 	const content = useMemo(() => {
 		try {
-			const normalized = sourcePositions ? text.replace(/\r\n?/gu, "\n") : text;
-			const tokens = marked.lexer(normalized);
-			if (!sourcePositions || tokens.map((token) => token.raw).join("") !== normalized) return blocks(tokens, t);
-			let offset = 0;
-			return tokens.map((token, index) => {
-				const start = offset;
-				offset += token.raw.length;
-				const content = block(token, index, t);
-				return content === null ? null : (
-					<div className="markdown-source-block" data-source-start={start} data-source-end={offset} key={index}>
-						{content}
-					</div>
-				);
+			if (sourcePositions) {
+				const normalized = text.replace(/\r\n?/gu, "\n");
+				const tokens = marked.lexer(normalized);
+				if (tokens.map((token) => token.raw).join("") !== normalized) return blocks(tokens, t);
+				let offset = 0;
+				return tokens.map((token, index) => {
+					const start = offset;
+					offset += token.raw.length;
+					const content = block(token, index, t);
+					return content === null ? null : (
+						<div className="markdown-source-block" data-source-start={start} data-source-end={offset} key={index}>
+							{content}
+						</div>
+					);
+				});
+			}
+			const cached = renderCache.current;
+			if (cached.t !== t || cached.language !== i18n.resolvedLanguage) {
+				cached.nodes = new Map();
+				cached.t = t;
+				cached.language = i18n.resolvedLanguage;
+			}
+			const { tokens, cache, defSalt } = lexMarkdownBlocks(text, cached.lex);
+			cached.lex = cache;
+			if (defSalt !== cached.defSalt) cached.nodes = new Map();
+			cached.defSalt = defSalt;
+			const previous = cached.nodes;
+			const next = new Map<string, ReactNode>();
+			const rendered = tokens.map((token, index) => {
+				const key = `${index}:${token.type}:${token.raw}`;
+				const node = previous.get(key) ?? block(token, index, t);
+				next.set(key, node);
+				return node;
 			});
+			cached.nodes = next;
+			return rendered;
 		} catch {
 			return <p>{text}</p>;
 		}
