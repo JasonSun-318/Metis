@@ -144,7 +144,9 @@ test("a session keeps streaming intact across background switches and reopen", a
 
 		await page.locator("#composer-input").fill("go");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
-		await expect(page.locator(".transcript-scroll")).toContainText("w20 ", { timeout: 20_000 });
+		// Inactive chat views stay mounted, so scope to the visible pane's transcript.
+		const transcript = page.locator(".workspace-panel:not([hidden]) .transcript-scroll");
+		await expect(transcript).toContainText("w20 ", { timeout: 20_000 });
 
 		await page.locator('.session-button[aria-label="Stream A"]').click();
 		await page.locator(`[data-active-session-id="${ALPHA_ID}"]`).waitFor({ state: "visible" });
@@ -152,9 +154,9 @@ test("a session keeps streaming intact across background switches and reopen", a
 
 		await page.locator('.session-button[aria-label="Stream B"]').click();
 		await page.locator(`[data-active-session-id="${BETA_ID}"]`).waitFor({ state: "visible" });
-		await expect(page.locator(".transcript-scroll")).toContainText("stream-end", { timeout: 30_000 });
+		await expect(transcript).toContainText("stream-end", { timeout: 30_000 });
 
-		const transcriptText = (await page.locator(".transcript-scroll").innerText()).replace(/\s+/g, " ");
+		const transcriptText = (await transcript.innerText()).replace(/\s+/g, " ");
 		const expected = `${Array.from({ length: 300 }, (_, index) => `w${index}`).join(" ")} stream-end`;
 		expect(transcriptText).toContain(expected);
 

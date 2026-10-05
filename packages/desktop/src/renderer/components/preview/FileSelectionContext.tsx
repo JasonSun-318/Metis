@@ -15,26 +15,22 @@ const FileSelectionContext = createContext<FileSelectionActions | null>(null);
 export const useFileSelections = () => useContext(FileSelectionContext);
 
 export function FileSelectionProvider({
-	sessionId,
 	enabled,
 	onSubmit,
 	children,
 }: {
-	sessionId: string | null;
 	enabled: boolean;
-	onSubmit: (input: ConversationSubmission) => Promise<void>;
+	onSubmit: (sessionId: string, input: ConversationSubmission) => Promise<void>;
 	children: ReactNode;
 }) {
 	const { t } = useTranslation();
-	const [draft, setDraft] = useState<{ sessionId: string | null; selections: readonly DraftFileSelection[] }>({
-		sessionId,
-		selections: [],
-	});
-	const generation = useMemo(() => ({}), [sessionId]);
-	const current = useRef({ sessionId, enabled, generation });
-	current.current = { sessionId, enabled, generation };
-	const draftRef = useRef(draft);
-	draftRef.current = draft;
+	// Selections are keyed by the owning tab's session so each session's
+	// composer stages and submits only its own references.
+	const [drafts, setDrafts] = useState<ReadonlyMap<string, readonly DraftFileSelection[]>>(new Map());
+	const current = useRef({ enabled });
+	current.current = { enabled };
+	const draftsRef = useRef(drafts);
+	draftsRef.current = drafts;
 	const mounted = useRef(true);
 	useLayoutEffect(() => {
 		mounted.current = true;
@@ -42,19 +38,14 @@ export function FileSelectionProvider({
 			mounted.current = false;
 		};
 	}, []);
-	useLayoutEffect(() => {
-		setDraft({ sessionId, selections: [] });
-	}, [sessionId]);
-	const selections = draft.sessionId === sessionId ? draft.selections : [];
-	const assertCurrent = (selection: DraftFileSelection) => {
-		if (
-			!mounted.current ||
-			!current.current.enabled ||
-			!sessionId ||
-			current.current.generation !== generation ||
-			selection.sessionId !== sessionId
-		)
+	const selections = useMemo(() => [...drafts.values()].flat(), [drafts]);
+	const assertReady = () => {
+		if (!mounted.current || !current.current.enabled)
 			throw new Error(t("This conversation is not ready to send"));
+	};
+	const replaceDrafts = (next: ReadonlyMap<string, readonly DraftFileSelection[]>) => {
+		draftsRef.current = next;
+		setDrafts(next);
 	};
 	return (
 		<FileSelectionContext.Provider
@@ -62,26 +53,31 @@ export function FileSelectionProvider({
 				enabled,
 				selections,
 				add(selection) {
-					assertCurrent(selection);
-					const existing = draftRef.current.sessionId === sessionId ? draftRef.current.selections : [];
+					assertReady();
+					const existing = draftsRef.current.get(selection.sessionId) ?? [];
 					if (existing.some((item) => item.id === selection.id)) return;
 					const next = [...existing, selection];
 					validateSelectionSize(next.map((item) => item.input));
-					draftRef.current = { sessionId, selections: next };
-					setDraft(draftRef.current);
+					replaceDrafts(new Map(draftsRef.current).set(selection.sessionId, next));
 				},
 				remove(ids) {
-					if (!mounted.current || current.current.generation !== generation) return;
-					const value = draftRef.current;
-					if (value.sessionId !== sessionId) return;
-					draftRef.current = { ...value, selections: value.selections.filter((item) => !ids.includes(item.id)) };
-					setDraft(draftRef.current);
+					if (!mounted.current) return;
+					let changed = false;
+					const next = new Map(draftsRef.current);
+					for (const [sessionId, items] of next) {
+						const kept = items.filter((item) => !ids.includes(item.id));
+						if (kept.length === items.length) continue;
+						changed = true;
+						if (kept.length === 0) next.delete(sessionId);
+						else next.set(sessionId, kept);
+					}
+					if (changed) replaceDrafts(next);
 				},
 				async requestChange(selection, instruction) {
-					assertCurrent(selection);
+					assertReady();
 					if (!instruction.trim()) throw new Error(t("Describe the change first"));
 					validateSelectionSize([selection.input]);
-					await onSubmit({
+					await onSubmit(selection.sessionId, {
 						text: t("Request changes to {{name}}: {{instruction}}", {
 							name: selection.input.target
 								? `${selection.name} · ${selectionTargetLabel(selection.input.target)}`
@@ -99,7 +95,7 @@ export function FileSelectionProvider({
 	);
 }
 
-export function FileSelectionChips({ sessionId }: { readonly sessionId?: string }) {
+export function FileSelectionChips({ sessionId }: { readonly sessionId?: string | null }) {
 	const context = useFileSelections();
 	const { t } = useTranslation();
 	const selections = sessionId === undefined

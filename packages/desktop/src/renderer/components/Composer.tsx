@@ -313,7 +313,7 @@ interface ComposerProps {
 	readonly contextUsagePercent?: number | null;
 	readonly onOpenContextUsage?: () => void;
 	readonly inputId?: string;
-	readonly selectionSessionId?: string;
+	readonly selectionSessionId?: string | null;
 }
 
 export function Composer({

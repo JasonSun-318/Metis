@@ -126,6 +126,9 @@ async function launchWorkspace(): Promise<{
 		env: { METIS_UPDATE_BASE_URL: "", ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
 	});
 	const { browser, page } = await connectToApp(debuggingPort, app, diagnostics);
+	// The CDP target appears before the app's initial navigation commits, so a
+	// reload issued immediately can abort the in-flight load. Settle first.
+	await page.waitForLoadState("domcontentloaded");
 	page.setDefaultTimeout(20_000);
 	page.on("console", (message) => {
 		if (message.type() === "error") consoleErrors.push(message.text());

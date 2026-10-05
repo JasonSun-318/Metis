@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
+import type { AgentSummaryView, ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -4844,6 +4844,378 @@ describe("Chat desktop shell", () => {
 		expect(backgroundComposer.id).toBe("composer-input");
 		expect(backgroundPanel.textContent).toContain("background reply");
 		expect(focusedPanel.querySelector("#composer-input-chat-other")).not.toBeNull();
+
+		await act(async () => root.unmount());
+	});
+
+	it("keeps a hidden chat tab's composer draft mounted across tab switches", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Other task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+		// Focus the first pane's chat so the second pane's composer is the
+		// non-focused view exercised below.
+		await act(async () => tabFor("Chat project task").querySelector<HTMLElement>('[role="tab"]')!.click());
+		await flush();
+		await flush();
+
+		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-pane")]
+			.find((pane) => pane.querySelector('[role="tab"][aria-label="Other task"]'))!;
+		const editor = container.querySelector<HTMLElement>("#composer-input-chat-other")!;
+		expect(editor).not.toBeNull();
+		await act(async () => {
+			editor.textContent = "unsent pane draft";
+			editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
+		});
+
+		await act(async () => otherPane.querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
+		const menu = otherPane.querySelector<HTMLElement>(".tool-add-menu")!;
+		expect(menu).not.toBeNull();
+		await act(async () => button(menu, "Terminal").click());
+		await flush();
+		expect(otherPane.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
+
+		await act(async () => tabFor("Other task").querySelector<HTMLElement>('[role="tab"]')!.click());
+		await flush();
+		await flush();
+
+		// The hidden view never unmounted: the same editor node kept its draft
+		// and only gained the canonical id once its session was focused again.
+		expect(container.querySelector("#composer-input")).toBe(editor);
+		expect(editor.textContent).toBe("unsent pane draft");
+		await act(async () => root.unmount());
+	});
+
+	it("renders a pending modal interaction for a session without a chat pane in the global host", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		act(() => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				id: "00000000-0000-4000-8000-000000000207",
+				method: "interaction/request",
+				params: {
+					serverEpoch: EPOCH,
+					interaction: {
+						interactionId: "00000000-0000-4000-8000-000000000208",
+						sessionId: "chat-other",
+						title: "Purge old logs?",
+						message: "The hidden session asks for confirmation.",
+						createdAt: "2026-07-20T00:00:00.000Z",
+						kind: "confirm",
+					},
+				},
+			},
+		}));
+		await flush();
+
+		const backdrop = container.querySelector<HTMLElement>(".modal-backdrop")!;
+		expect(backdrop).not.toBeNull();
+		expect(backdrop.closest(".workspace-panel")).toBeNull();
+		expect(backdrop.textContent).toContain("Purge old logs?");
+		await act(async () => button(backdrop, "Confirm").click());
+		await flush();
+		expect(api.respondToInteraction).toHaveBeenCalledWith({
+			interactionId: "00000000-0000-4000-8000-000000000208",
+			kind: "confirm",
+			confirmed: true,
+		});
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("renders a pending modal interaction inside the live session's own pane", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api, emitEvent } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Other task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+
+		act(() => emitEvent({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				id: "00000000-0000-4000-8000-000000000209",
+				method: "interaction/request",
+				params: {
+					serverEpoch: EPOCH,
+					interaction: {
+						interactionId: "00000000-0000-4000-8000-000000000210",
+						sessionId: "chat-existing",
+						title: "Purge old logs?",
+						message: "The unfocused live session asks for confirmation.",
+						createdAt: "2026-07-20T00:00:00.000Z",
+						kind: "confirm",
+					},
+				},
+			},
+		}));
+		// The unfocused pane coalesces store notifications (~150ms throttle).
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 220)));
+		await flush();
+
+		const backdrops = [...container.querySelectorAll<HTMLElement>(".modal-backdrop")];
+		expect(backdrops).toHaveLength(1);
+		const backdrop = backdrops[0]!;
+		const hostPanel = backdrop.closest<HTMLElement>(".workspace-panel");
+		expect(hostPanel).not.toBeNull();
+		// The dialog is hosted by the pane that owns this session's chat view —
+		// not by the global host and not by the focused pane.
+		expect(hostPanel!.querySelector("#composer-input-chat-existing")).not.toBeNull();
+		await act(async () => button(backdrop, "Confirm").click());
+		await flush();
+		expect(api.respondToInteraction).toHaveBeenCalledWith({
+			interactionId: "00000000-0000-4000-8000-000000000210",
+			kind: "confirm",
+			confirmed: true,
+		});
+		// The unfocused pane's throttled subscription removes the dialog a beat later.
+		await act(async () => new Promise((resolve) => setTimeout(resolve, 220)));
+		expect(container.querySelector(".modal-backdrop")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("routes a file selection change request through the owning session's composer", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("code-existing", "code", "/work/code-project", "Code project task"),
+				session("code-other", "code", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Other task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+
+		// Open the workspace tree in the pane that targets the other session.
+		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-pane")]
+			.find((pane) => pane.querySelector('[role="tab"][aria-label="Other task"]'))!;
+		await act(async () => otherPane.querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
+		await act(async () => button(otherPane.querySelector<HTMLElement>(".tool-add-menu")!, "Files").click());
+		await flush();
+		const filesPanel = container.querySelector<HTMLElement>("#file-panel-code-other")!;
+		expect(filesPanel).not.toBeNull();
+		await act(async () => filesPanel.querySelector<HTMLButtonElement>('.file-tree-row [title="notes.txt"]')!.click());
+		await flush();
+		expect(api.readWorkspaceFile).toHaveBeenCalledWith({ sessionId: "code-other", relativePath: "notes.txt" });
+
+		const selectText = async (from: number, to: number) => {
+			const view = codeEditor(filesPanel, "Edit notes.txt");
+			await act(async () => view.dispatch({ selection: { anchor: from, head: to } }));
+			const content = filesPanel.querySelector<HTMLElement>(".cm-content")!;
+			const textNode = content.firstChild!.firstChild!;
+			const range = document.createRange();
+			range.setStart(textNode, from);
+			range.setEnd(textNode, to);
+			const selection = window.getSelection()!;
+			selection.removeAllRanges();
+			selection.addRange(range);
+			await act(async () => {
+				filesPanel.querySelector<HTMLElement>(".file-code-editor")!.dispatchEvent(
+					new MouseEvent("mouseup", { bubbles: true, button: 0 }),
+				);
+				await new Promise((resolve) => requestAnimationFrame(resolve));
+			});
+		};
+		const popover = () => container.querySelector<HTMLElement>(".file-selection-popover");
+		const otherChatPanel = () => container.querySelector<HTMLElement>("#composer-input")!.closest<HTMLElement>(".workspace-panel")!;
+		const focusedChatPanel = () => container.querySelector<HTMLElement>("#composer-input-code-existing")!.closest<HTMLElement>(".workspace-panel")!;
+
+		await selectText(0, 8);
+		expect(popover()).not.toBeNull();
+		await act(async () => button(popover()!, "Add to conversation").click());
+		await flush();
+
+		// The reference lands only on the owning session's staged selections;
+		// that composer's chat view stays mounted while its pane shows Files.
+		expect(otherChatPanel().hidden).toBe(true);
+		expect(otherChatPanel().querySelector(".composer-selections")?.textContent).toContain("notes.txt");
+		expect(focusedChatPanel().querySelector(".composer-selections")).toBeNull();
+
+		await selectText(9, 19);
+		expect(popover()).not.toBeNull();
+		await act(async () => button(popover()!, "Request changes").click());
+		const instruction = popover()!.querySelector<HTMLTextAreaElement>('[aria-label="Describe the change"]')!;
+		await act(async () => changeTextarea(instruction, "please tidy"));
+		await act(async () => popover()!.querySelector<HTMLButtonElement>('[aria-label="Send change request"]')!.click());
+		await flush();
+
+		expect(api.startTurn).toHaveBeenCalledOnce();
+		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
+			sessionId: "code-other",
+			text: expect.stringContaining("please tidy"),
+		}));
+		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].fileSelections).toHaveLength(1);
+		await act(async () => root.unmount());
+	});
+
+	it("renders a live agent tree for a session that is not the focused chat", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const workerTask = {
+			taskId: "task-1",
+			status: "done" as const,
+			taskSummary: "Analyze code",
+			createdAt: "2026-07-20T00:00:00.000Z",
+			updatedAt: "2026-07-20T00:00:00.000Z",
+		};
+		const worker: AgentSummaryView = {
+			agentId: "worker-1",
+			name: "Code worker",
+			agentType: "worker",
+			depth: 1,
+			status: "done",
+			archived: false,
+			parentSessionId: "code-existing",
+			rootSessionId: "code-existing",
+			agentPath: ["worker-1"],
+			tasks: [workerTask],
+			latestTask: workerTask,
+			createdAt: "2026-07-20T00:00:00.000Z",
+			updatedAt: "2026-07-20T00:00:00.000Z",
+		};
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("code-existing", "code", "/work/code-project", "Code project task"),
+				session("code-other", "code", "/work/other-project", "Other code task"),
+			],
+		});
+		const summaries: Record<string, SessionSummary> = {
+			"chat-existing": session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			"code-existing": session("code-existing", "code", "/work/code-project", "Code project task"),
+			"code-other": session("code-other", "code", "/work/other-project", "Other code task"),
+		};
+		vi.mocked(api.openSession).mockImplementation(async ({ sessionId }) => ({
+			...snapshot(summaries[sessionId]!),
+			agents: sessionId === "code-existing" ? [worker] : [],
+		}));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Code").click());
+		await flush();
+		await addTool(container, "Agents");
+		await flush();
+
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Agents").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
+
+		await act(async () => button(container, "Other code task").click());
+		await flush();
+		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-other" });
+
+		// Re-activating the agent tab leaves the other session's chat projected.
+		await act(async () => tabFor("Agents").querySelector<HTMLElement>('[role="tab"]')!.click());
+		await flush();
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: ["code-existing"] }),
+		);
+
+		const visiblePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])")];
+		const agentPanel = visiblePanels.find((panel) => panel.querySelector(".subagent-panel"));
+		expect(agentPanel).toBeTruthy();
+		expect(agentPanel!.textContent).toContain("Code worker");
+		expect(activeWorkspace(container).textContent).not.toContain("This session is not in focus.");
+
+		await act(async () => button(agentPanel!, "View transcript for Code worker").click());
+		await flush();
+		expect(api.readAgentItems).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: "code-existing", agentId: "worker-1" }),
+		);
 
 		await act(async () => root.unmount());
 	});

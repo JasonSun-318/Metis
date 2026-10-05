@@ -74,7 +74,12 @@ export function TextViewer({
 	};
 	const focusComposer = () => {
 		if (expansion?.expanded) expansion.toggle();
-		requestAnimationFrame(() => document.getElementById("composer-input")?.focus());
+		requestAnimationFrame(() =>
+			(
+				document.getElementById(`composer-input-${selection?.draft.sessionId}`) ??
+				document.getElementById("composer-input")
+			)?.focus(),
+		);
 	};
 
 	return (

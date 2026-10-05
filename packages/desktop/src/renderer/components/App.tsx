@@ -377,11 +377,18 @@ export function App({ api, store }: AppProps) {
 
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
 	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
-	// The projected session's SessionChatView publishes its submit here so the
-	// shared file-selection provider can route "request change" actions to it.
-	const conversationSubmitRef = useRef<SessionChatSubmit | null>(null);
-	const submitFileSelection = useCallback((input: ConversationSubmission) => {
-		const submit = conversationSubmitRef.current;
+	// Every mounted SessionChatView registers its own submit here so the shared
+	// file-selection provider can route "request change" actions to the owning
+	// session's composer.
+	const conversationSubmitsRef = useRef(new Map<string, SessionChatSubmit>());
+	const registerChatSubmit = useCallback((sessionId: string, submit: SessionChatSubmit) => {
+		conversationSubmitsRef.current.set(sessionId, submit);
+	}, []);
+	const unregisterChatSubmit = useCallback((sessionId: string, submit: SessionChatSubmit) => {
+		if (conversationSubmitsRef.current.get(sessionId) === submit) conversationSubmitsRef.current.delete(sessionId);
+	}, []);
+	const submitFileSelection = useCallback((sessionId: string, input: ConversationSubmission) => {
+		const submit = conversationSubmitsRef.current.get(sessionId);
 		return submit
 			? submit(input)
 			: Promise.reject(new Error("This conversation is not ready to send"));
@@ -871,10 +878,33 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
-	const inlineInteraction =
-		visibleInteraction?.kind === "ask_user" || visibleInteraction?.kind === "session_permission_approval"
-			? visibleInteraction
-			: undefined;
+	// Sessions with a pane-active chat tab host their own modal interactions;
+	// the global host below picks the first pending modal for any other
+	// session. The array-equality guard keeps the workspace's per-render
+	// reports from looping React state.
+	const [chatPaneSessionIds, setChatPaneSessionIds] = useState<readonly string[]>([]);
+	const handleLiveSessionsChange = useCallback(
+		(sessionIds: readonly string[], chatSessionIds: readonly string[]) => {
+			workspaceWorkflow.setLiveSessions(sessionIds);
+			setChatPaneSessionIds((current) =>
+				current.length === chatSessionIds.length &&
+					current.every((id, index) => id === chatSessionIds[index])
+					? current
+					: chatSessionIds,
+			);
+		},
+		[workspaceWorkflow],
+	);
+	const chatPaneSessions = new Set(chatPaneSessionIds);
+	const globalInteraction = state.interactionOrder
+		.map((interactionId) => state.interactionsById.get(interactionId))
+		.find(
+			(interaction) =>
+				interaction !== undefined &&
+				interaction.kind !== "ask_user" &&
+				interaction.kind !== "session_permission_approval" &&
+				!chatPaneSessions.has(interaction.sessionId),
+		);
 	const visibleNotifications = state.notifications.filter(
 		(notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId,
 	);
@@ -1274,7 +1304,8 @@ export function App({ api, store }: AppProps) {
 		api,
 		bootstrapped,
 		composerFormRef: conversationComposerFormRef,
-		composerSubmitRef: conversationSubmitRef,
+		registerSubmit: registerChatSubmit,
+		unregisterSubmit: unregisterChatSubmit,
 		onChangeModel: changeModel,
 		onChangePermissionPreset: changePermissionPreset,
 		onChangeThinking: changeThinking,
@@ -1309,11 +1340,13 @@ export function App({ api, store }: AppProps) {
 		openSkillsDestination,
 		pickAttachmentFiles,
 		reducedMotion,
+		registerChatSubmit,
 		reportError,
 		respond,
 		setupWindowsSandbox,
 		skillCatalogEpoch,
 		store,
+		unregisterChatSubmit,
 	]);
 
 	const homePage = visibleNewTaskDraft ? (
@@ -1358,6 +1391,7 @@ export function App({ api, store }: AppProps) {
 				onSlashCommand={handleSlashCommand}
 				onSubmit={submitNewTaskDraft}
 				recentProjects={recentCodeProjects}
+				selectionSessionId={visibleNewTaskDraft.sessionId}
 				skills={skills}
 				thinkingControl={thinkingControl}
 			/>
@@ -1381,10 +1415,7 @@ export function App({ api, store }: AppProps) {
 
 	return (
 		<FileSelectionProvider
-			sessionId={writableSessionId ?? null}
-			enabled={Boolean(
-				writableSessionId && serverReady && state.syncStatus === "ready" && !visibleInteraction
-			)}
+			enabled={Boolean(serverReady && !visibleInteraction)}
 			onSubmit={submitFileSelection}
 		>
 
@@ -1523,7 +1554,7 @@ export function App({ api, store }: AppProps) {
 						onCleanupSessionIdsHandled={handleToolCleanupHandled}
 						onDirtySessionIdsChange={handleDirtySessionIdsChange}
 						onError={reportError}
-						onLiveSessionsChange={workspaceWorkflow.setLiveSessions}
+						onLiveSessionsChange={handleLiveSessionsChange}
 						onNewSession={(target) => {
 							if (target) void createEmptySessionInProject(target.mode, target.cwd);
 							else startNewTask();
@@ -1541,7 +1572,12 @@ export function App({ api, store }: AppProps) {
 				) : null}
 					<div className="sr-only" aria-live="polite">{t(message)}</div>
 			</main>
-			<InteractionHost interaction={inlineInteraction ? undefined : visibleInteraction} key={inlineInteraction ? "none" : visibleInteraction?.interactionId ?? "none"} onRespond={respond} sandboxHealth={state.sandboxHealth} />
+			<InteractionHost
+				interaction={globalInteraction}
+				key={globalInteraction?.interactionId ?? "none"}
+				onRespond={respond}
+				sandboxHealth={globalInteraction ? state.sessions.get(globalInteraction.sessionId)?.sandboxHealth : state.sandboxHealth}
+			/>
 		</div>
 		{settingsOpen ? (
 			<SettingsDialog

@@ -21,7 +21,7 @@ const selection: DraftFileSelection = {
 		endLine: 3,
 	},
 };
-it("stages removable references, preserves drafts on failure, and rejects stale task callbacks", async () => {
+it("stages references per session, preserves drafts on failure, and routes change requests", async () => {
 	const node = document.createElement("div");
 	document.body.append(node);
 	const root = createRoot(node);
@@ -29,50 +29,83 @@ it("stages removable references, preserves drafts on failure, and rejects stale 
 	let actions!: NonNullable<ReturnType<typeof useFileSelections>>;
 	function Capture() {
 		actions = useFileSelections()!;
-		return <Composer disabled={false} running={false} onInterrupt={async () => {}} onSubmit={submit} />;
+		return (
+			<>
+				<div data-composer="one">
+					<Composer
+						disabled={false}
+						inputId="composer-one"
+						running={false}
+						selectionSessionId="one"
+						onInterrupt={async () => {}}
+						onSubmit={vi.fn()}
+					/>
+				</div>
+				<div data-composer="two">
+					<Composer
+						disabled={false}
+						inputId="composer-two"
+						running={false}
+						selectionSessionId="two"
+						onInterrupt={async () => {}}
+						onSubmit={vi.fn()}
+					/>
+				</div>
+			</>
+		);
 	}
-	const render = (sessionId: string) =>
+	const render = (enabled: boolean) =>
 		root.render(
-			<FileSelectionProvider sessionId={sessionId} enabled onSubmit={submit}>
-				<Capture key={sessionId} />
+			<FileSelectionProvider enabled={enabled} onSubmit={submit}>
+				<Capture />
 			</FileSelectionProvider>,
 		);
 	try {
-		await act(async () => render("one"));
+		await act(async () => render(true));
+		const other = {
+			...selection,
+			id: "second",
+			sessionId: "two",
+			name: "code.ts",
+			input: { ...selection.input, relativePath: "code.ts" },
+		};
 		act(() => {
 			actions.add(selection);
 			actions.add(selection);
+			actions.add(other);
 		});
-		expect(actions.selections).toHaveLength(1);
-		const editor = node.querySelector<HTMLElement>("#composer-input")!;
+		expect(actions.selections).toHaveLength(2);
+		const chips = (session: string) =>
+			node.querySelector(`[data-composer="${session}"] .composer-selection-list`)?.textContent ?? "";
+		expect(chips("one")).toContain("notes.md");
+		expect(chips("one")).not.toContain("code.ts");
+		expect(chips("two")).toContain("code.ts");
+		expect(chips("two")).not.toContain("notes.md");
+		const editor = node.querySelector<HTMLElement>("#composer-one")!;
 		act(() => {
 			editor.textContent = "unsent chat draft";
 			editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
 		});
 		await expect(act(async () => actions.requestChange(selection, "shorter"))).rejects.toThrow("offline");
-		expect(actions.selections).toHaveLength(1);
+		expect(actions.selections).toHaveLength(2);
 		expect(editor.textContent).toBe("unsent chat draft");
 		await act(async () => actions.requestChange(selection, "shorter"));
-		expect(submit.mock.lastCall?.[0]).toMatchObject({ fileSelections: [selection.input], attachments: [] });
+		expect(submit.mock.lastCall?.[0]).toBe("one");
+		expect(submit.mock.lastCall?.[1]).toMatchObject({ fileSelections: [selection.input], attachments: [] });
 		expect(editor.textContent).toBe("unsent chat draft");
+		await act(async () => actions.requestChange(other, "longer"));
+		expect(submit.mock.lastCall?.[0]).toBe("two");
+		act(() => actions.remove(["second"]));
+		expect(actions.selections.map((item) => item.id)).toEqual(["first"]);
+		expect(chips("two")).toBe("");
+		await act(async () => render(false));
+		expect(() => actions.add(selection)).toThrow();
+		await expect(actions.requestChange(selection, "old task")).rejects.toThrow();
 		const stale = actions;
-		await act(async () => render("two"));
-		expect(actions.selections).toHaveLength(0);
+		await act(async () => root.unmount());
 		expect(() => stale.add(selection)).toThrow();
 		await expect(stale.requestChange(selection, "old task")).rejects.toThrow();
-		act(() => actions.add({ ...selection, id: "second", sessionId: "two" }));
-		expect(actions.selections).toHaveLength(1);
-		act(() => stale.remove(["second"]));
-		expect(actions.selections).toHaveLength(1);
-		act(() => actions.remove(["second"]));
-		expect(actions.selections).toHaveLength(0);
-		await act(async () => render("one"));
-		act(() => actions.add(selection));
-		expect(() => stale.add(selection)).toThrow();
-		act(() => stale.remove(["first"]));
-		expect(actions.selections).toHaveLength(1);
 	} finally {
-		await act(async () => root.unmount());
 		node.remove();
 	}
 });
@@ -101,7 +134,7 @@ it("clears only the submitted reference snapshot after the composer is accepted"
 	try {
 		await act(async () =>
 			root.render(
-				<FileSelectionProvider sessionId="one" enabled onSubmit={submit}>
+				<FileSelectionProvider enabled onSubmit={vi.fn()}>
 					<Capture />
 				</FileSelectionProvider>,
 			),

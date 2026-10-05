@@ -49,7 +49,10 @@ export interface SessionChatViewContext {
 	readonly api: MetisDesktopApi;
 	readonly bootstrapped: boolean;
 	readonly composerFormRef: RefObject<HTMLFormElement | null>;
-	readonly composerSubmitRef: RefObject<SessionChatSubmit | null>;
+	// Every mounted view registers its own submit so the shared file-selection
+	// provider can route "request change" actions to the owning session.
+	readonly registerSubmit: (sessionId: string, submit: SessionChatSubmit) => void;
+	readonly unregisterSubmit: (sessionId: string, submit: SessionChatSubmit) => void;
 	readonly onChangeModel: (sessionId: string, model: ModelOptionView) => Promise<void>;
 	readonly onChangePermissionPreset: (sessionId: string, preset: PermissionPresetView) => Promise<void>;
 	readonly onChangeThinking: (sessionId: string, selection: ThinkingSelectionView) => Promise<void>;
@@ -73,8 +76,8 @@ export interface SessionChatViewContext {
 
 export interface SessionChatViewProps extends SessionChatViewContext {
 	// The projected session's composer keeps the canonical "composer-input" id
-	// and owns the shared form/submit refs so the file-selection provider and
-	// the draft->session transition keep targeting it.
+	// and owns the shared form ref so the draft->session transition keeps
+	// targeting it.
 	readonly canonicalComposer: boolean;
 	readonly focused: boolean;
 	readonly sessionId: string;
@@ -86,7 +89,6 @@ export const SessionChatView = memo(function SessionChatView({
 	bootstrapped,
 	canonicalComposer,
 	composerFormRef,
-	composerSubmitRef,
 	focused,
 	onChangeModel,
 	onChangePermissionPreset,
@@ -105,9 +107,11 @@ export const SessionChatView = memo(function SessionChatView({
 	onRespond,
 	onSetupSandbox,
 	reducedMotion,
+	registerSubmit,
 	sessionId,
 	skillCatalogEpoch,
 	store,
+	unregisterSubmit,
 	visible,
 }: SessionChatViewProps) {
 	const { t } = useTranslation();
@@ -146,6 +150,9 @@ export const SessionChatView = memo(function SessionChatView({
 		chat.interaction?.kind === "ask_user" || chat.interaction?.kind === "session_permission_approval"
 			? chat.interaction
 			: undefined;
+	// Modal kinds render from this pane while it is visible; sessions without a
+	// visible chat pane are covered by the App-level host instead.
+	const modalInteraction = inlineInteraction === undefined ? chat.interaction : undefined;
 	const waitingForAnswer = chat.interaction?.kind === "ask_user";
 	const compactBlocked = running || inlineInteraction !== undefined || compactingStartedAt !== null;
 
@@ -196,15 +203,12 @@ export const SessionChatView = memo(function SessionChatView({
 		composerInputId,
 	});
 
-	// The shared file-selection provider submits through the projected session's
-	// composer; only the canonical view publishes its submit here.
+	// The shared file-selection provider resolves "request change" actions to
+	// the owning session's composer through this registry.
 	useEffect(() => {
-		if (!canonicalComposer) return undefined;
-		composerSubmitRef.current = submit;
-		return () => {
-			if (composerSubmitRef.current === submit) composerSubmitRef.current = null;
-		};
-	}, [canonicalComposer, composerSubmitRef, submit]);
+		registerSubmit(sessionId, submit);
+		return () => unregisterSubmit(sessionId, submit);
+	}, [registerSubmit, sessionId, submit, unregisterSubmit]);
 
 	const deleteQueuedTurn = useCallback(
 		async (turn: QueuedTurnView) => {
@@ -762,6 +766,14 @@ export const SessionChatView = memo(function SessionChatView({
 					/>
 				</div>
 			</div>
+			{visible && modalInteraction !== undefined && (
+				<InteractionHost
+					interaction={modalInteraction}
+					key={modalInteraction.interactionId}
+					onRespond={onRespond}
+					sandboxHealth={projection.sandboxHealth}
+				/>
+			)}
 		</div>
 	);
 });

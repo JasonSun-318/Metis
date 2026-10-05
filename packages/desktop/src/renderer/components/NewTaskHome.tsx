@@ -115,6 +115,7 @@ interface NewTaskHomeProps {
 	readonly onSubmit: (input: ComposerSubmission) => Promise<void>;
 	readonly projectControl?: ReactNode;
 	readonly recentProjects?: readonly NewTaskRecentProject[];
+	readonly selectionSessionId?: string | null;
 	readonly skills: readonly SkillSummaryView[];
 	readonly thinkingControl?: ReactNode;
 }
@@ -146,6 +147,7 @@ export function NewTaskHome({
 	onSubmit,
 	projectControl,
 	recentProjects = [],
+	selectionSessionId,
 	skills,
 	thinkingControl,
 }: NewTaskHomeProps) {
@@ -251,6 +253,7 @@ export function NewTaskHome({
 									placeholder={t("Describe your task, or drop in files…")}
 									prefillRequest={prefillRequest}
 									running={false}
+									selectionSessionId={selectionSessionId}
 									skills={skills}
 									knowledge={knowledge}
 									submitDisabled={mode === "code" && folder === null}

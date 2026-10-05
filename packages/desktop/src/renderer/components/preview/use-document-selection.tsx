@@ -69,7 +69,12 @@ export function useDocumentSelection(file: UniversalPreviewTarget | undefined, b
 						onDismiss={clear}
 						onAccepted={() => {
 							if (expansion?.expanded) expansion.toggle();
-							requestAnimationFrame(() => document.getElementById("composer-input")?.focus());
+							requestAnimationFrame(() =>
+								(
+									document.getElementById(`composer-input-${selected.draft.sessionId}`) ??
+									document.getElementById("composer-input")
+								)?.focus(),
+							);
 						}}
 					/>
 				)}
