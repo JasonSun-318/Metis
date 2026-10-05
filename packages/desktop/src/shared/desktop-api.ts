@@ -86,6 +86,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	deleteProject: "metis:delete-project",
 	deleteSession: "metis:delete-session",
 	openSession: "metis:open-session",
+	subscribeSession: "metis:subscribe-session",
 	readDeliveredFile: "metis:read-delivered-file",
 	readPreviewFile: "metis:read-preview-file",
 	interruptTurn: "metis:interrupt-turn",
@@ -542,6 +543,7 @@ export interface DesktopWorkspaceEditState {
 
 export interface DesktopRetainWorkspaceSessions {
 	readonly sessionIds: readonly string[];
+	readonly liveSessionIds: readonly string[];
 }
 
 export interface DesktopCreateProjectFolderInput {
@@ -566,6 +568,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
 	deleteSession(input: ClientParams<"session/delete">): Promise<ClientResult<"session/delete">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
+	subscribeSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readDeliveredFile(
 		input: ClientParams<"session/readDeliveredFile">,
 	): Promise<ClientResult<"session/readDeliveredFile">>;
@@ -871,15 +874,24 @@ export function validateWorkspaceEditState(value: unknown): DesktopWorkspaceEdit
 }
 
 export function validateRetainWorkspaceSessions(value: unknown): DesktopRetainWorkspaceSessions {
-	const input = exactRecord(value, ["sessionIds"], "workspace session retention");
+	const input = exactRecord(value, ["sessionIds", "liveSessionIds"], "workspace session retention");
 	if (!Array.isArray(input.sessionIds) || input.sessionIds.length > 256) {
+		throw new TypeError("Invalid workspace session retention");
+	}
+	if (!Array.isArray(input.liveSessionIds) || input.liveSessionIds.length > 6) {
 		throw new TypeError("Invalid workspace session retention");
 	}
 	const sessionIds = input.sessionIds.map((sessionId) => {
 		assertSchema(sessionIdValidator, sessionId, "invalid_params", "workspace session id");
 		return sessionId as string;
 	});
-	return { sessionIds };
+	const retained = new Set(sessionIds);
+	const liveSessionIds = input.liveSessionIds.map((sessionId) => {
+		assertSchema(sessionIdValidator, sessionId, "invalid_params", "workspace session id");
+		if (!retained.has(sessionId as string)) throw new TypeError("Invalid workspace session retention");
+		return sessionId as string;
+	});
+	return { sessionIds, liveSessionIds };
 }
 
 const STABLE_DESKTOP_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;

@@ -75,6 +75,7 @@ function harness(sessions: readonly SessionSummary[] = [], onDesktopEvent?: (eve
 		}),
 		listSessions: vi.fn().mockResolvedValue({ sessions, nextAfterSessionId: null }),
 		openSession: vi.fn(),
+		subscribeSession: vi.fn(),
 		markSessionRead: vi.fn(async ({ sessionId }: { sessionId: string }) => ({
 			session: {
 				...(sessions.find((candidate) => candidate.sessionId === sessionId) ?? summary(sessionId)),
@@ -983,5 +984,108 @@ describe("SessionWorkspaceWorkflow", () => {
 		]);
 		expect(workflow.getSnapshot().pinnedSessionIds.has(target.sessionId)).toBe(true);
 		expect(localStorage.getItem("metis.sessionPins.v1")).toContain(target.sessionId);
+	});
+
+	it("subscribes a live background session without taking focus and routes its events", async () => {
+		const active = summary("live-active");
+		const background = summary("live-background");
+		const { api, emit, store, workflow } = harness([active, background]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue(snapshot(background.sessionId));
+
+		workflow.setLiveSessions([active.sessionId, background.sessionId]);
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
+		expect(api.subscribeSession).toHaveBeenCalledWith({ sessionId: background.sessionId });
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(background.sessionId)?.syncStatus).toBe("ready"));
+		expect(store.getSnapshot().activeSessionId).toBe(active.sessionId);
+
+		emit({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [
+						{
+							type: "session/permissionPresetChanged",
+							sessionId: background.sessionId,
+							permissionPreset: "full",
+							effectiveSettings: { sandboxPolicy: "workspace-write", approvalPolicy: "user" },
+							constrainedByParent: false,
+							sandboxHealth: "healthy",
+						},
+					],
+				},
+			},
+		});
+
+		expect(store.getSnapshot().sessions.get(background.sessionId)?.permissionPreset).toBe("full");
+		expect(store.getSnapshot().permissionPreset).toBe("ask");
+	});
+
+	it("drops the projection of a session that leaves the live set", async () => {
+		const active = summary("live-stay");
+		const leaving = summary("live-leaving");
+		const { api, store, workflow } = harness([active, leaving]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue(snapshot(leaving.sessionId));
+		workflow.setLiveSessions([active.sessionId, leaving.sessionId]);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(leaving.sessionId)?.syncStatus).toBe("ready"));
+
+		workflow.setLiveSessions([active.sessionId]);
+
+		expect(store.getSnapshot().sessions.has(leaving.sessionId)).toBe(false);
+		expect(store.getSnapshot().activeSessionId).toBe(active.sessionId);
+	});
+
+	it("resubscribes a live background session when its projection goes stale", async () => {
+		const active = summary("live-front");
+		const stale = summary("live-stale");
+		const { api, emit, store, workflow } = harness([active, stale]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue(snapshot(stale.sessionId));
+		workflow.setLiveSessions([active.sessionId, stale.sessionId]);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(stale.sessionId)?.syncStatus).toBe("ready"));
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
+
+		emit({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [{ type: "session/invalidated", sessionId: stale.sessionId, reason: "reload_required" }],
+				},
+			},
+		});
+
+		expect(api.subscribeSession).toHaveBeenCalledTimes(2);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(stale.sessionId)?.syncStatus).toBe("ready"));
+	});
+
+	it("does not duplicate background subscriptions while one is in flight", async () => {
+		const active = summary("live-open");
+		const background = summary("live-pending");
+		const { api, store, workflow } = harness([active, background]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue(snapshot(background.sessionId));
+
+		workflow.setLiveSessions([active.sessionId, background.sessionId]);
+		workflow.setLiveSessions([active.sessionId, background.sessionId]);
+
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(background.sessionId)?.syncStatus).toBe("ready"));
+		workflow.setLiveSessions([active.sessionId, background.sessionId]);
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
 	});
 });

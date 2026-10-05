@@ -326,16 +326,48 @@ describe("desktop trust boundaries", () => {
 	});
 
 	it("accepts only exact workspace session retention reports", () => {
-		expect(validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"] })).toEqual({
+		expect(validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"], liveSessionIds: [] })).toEqual({
 			sessionIds: ["valid-session-id"],
+			liveSessionIds: [],
 		});
-		expect(validateRetainWorkspaceSessions({ sessionIds: [] })).toEqual({ sessionIds: [] });
-		expect(() => validateRetainWorkspaceSessions({ sessionIds: "not-an-array" })).toThrow();
-		expect(() => validateRetainWorkspaceSessions({ sessionIds: ["bad id"] })).toThrow();
+		expect(
+			validateRetainWorkspaceSessions({
+				sessionIds: ["valid-session-id"],
+				liveSessionIds: ["valid-session-id"],
+			}),
+		).toEqual({ sessionIds: ["valid-session-id"], liveSessionIds: ["valid-session-id"] });
+		expect(validateRetainWorkspaceSessions({ sessionIds: [], liveSessionIds: [] })).toEqual({
+			sessionIds: [],
+			liveSessionIds: [],
+		});
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: "not-an-array", liveSessionIds: [] })).toThrow();
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: ["bad id"], liveSessionIds: [] })).toThrow();
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"] })).toThrow();
 		expect(() =>
-			validateRetainWorkspaceSessions({ sessionIds: Array.from({ length: 257 }, (_, index) => `s-${index}`) }),
+			validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"], liveSessionIds: "not-an-array" }),
 		).toThrow();
-		expect(() => validateRetainWorkspaceSessions({ sessionIds: [], extra: true })).toThrow();
+		expect(() =>
+			validateRetainWorkspaceSessions({ sessionIds: ["valid-session-id"], liveSessionIds: ["bad id"] }),
+		).toThrow();
+		expect(() =>
+			validateRetainWorkspaceSessions({
+				sessionIds: Array.from({ length: 257 }, (_, index) => `s-${index}`),
+				liveSessionIds: [],
+			}),
+		).toThrow();
+		expect(() =>
+			validateRetainWorkspaceSessions({
+				sessionIds: ["s-0", "s-1", "s-2", "s-3", "s-4", "s-5", "s-6"],
+				liveSessionIds: ["s-0", "s-1", "s-2", "s-3", "s-4", "s-5", "s-6"],
+			}),
+		).toThrow();
+		expect(() =>
+			validateRetainWorkspaceSessions({
+				sessionIds: ["valid-session-id"],
+				liveSessionIds: ["valid-session-id", "other-session-id"],
+			}),
+		).toThrow();
+		expect(() => validateRetainWorkspaceSessions({ sessionIds: [], liveSessionIds: [], extra: true })).toThrow();
 	});
 
 	it("validates release notes on every versioned desktop update state", () => {
@@ -1262,7 +1294,7 @@ describe("desktop trust boundaries", () => {
 
 		await openSession(event, { sessionId: alphaId });
 		expect(workspaceFiles.authorize).toHaveBeenCalledWith(alphaId, "/work/alpha");
-		await retain(event, { sessionIds: [alphaId] });
+		await retain(event, { sessionIds: [alphaId], liveSessionIds: [alphaId] });
 		await openSession(event, { sessionId: betaId });
 		expect(workspaceFiles.authorize).toHaveBeenCalledWith(betaId, "/work/beta");
 		expect(workspaceFiles.revoke).not.toHaveBeenCalledWith(alphaId);
@@ -1274,11 +1306,11 @@ describe("desktop trust boundaries", () => {
 		).resolves.toEqual([{ name: "src", relativePath: "src", kind: "directory" }]);
 		expect(workspaceFiles.listDirectory).toHaveBeenCalledWith({ sessionId: alphaId, relativePath: "" });
 
-		await retain(event, { sessionIds: [betaId] });
+		await retain(event, { sessionIds: [betaId], liveSessionIds: [betaId] });
 		expect(workspaceFiles.revoke).toHaveBeenCalledWith(alphaId);
-		await retain(event, { sessionIds: [betaId, neverOpenedId] });
+		await retain(event, { sessionIds: [betaId, neverOpenedId], liveSessionIds: [betaId] });
 		expect(workspaceFiles.authorize).not.toHaveBeenCalledWith(neverOpenedId, expect.anything());
-		await retain(event, { sessionIds: [betaId] });
+		await retain(event, { sessionIds: [betaId], liveSessionIds: [betaId] });
 		expect(workspaceFiles.revoke).toHaveBeenCalledWith(neverOpenedId);
 
 		await openSession(event, { sessionId: gammaId });
@@ -1294,8 +1326,217 @@ describe("desktop trust boundaries", () => {
 		});
 		expect(workspaceFiles.revoke).toHaveBeenCalledWith(betaId);
 		const betaRevokes = workspaceFiles.revoke.mock.calls.filter(([id]) => id === betaId).length;
-		await retain(event, { sessionIds: [] });
+		await retain(event, { sessionIds: [], liveSessionIds: [] });
 		expect(workspaceFiles.revoke.mock.calls.filter(([id]) => id === betaId)).toHaveLength(betaRevokes);
+		broker.dispose();
+	});
+
+	it("rejects background subscriptions for sessions that are not live", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? { snapshot: { session: { sessionId: request.params.sessionId } } }
+					: {},
+		}));
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const subscribeSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribeSession)!;
+		await expect(subscribeSession(event, { sessionId: "10000000-0000-4000-8000-0000000000a1" })).rejects.toThrow(
+			"Session is not live in the workspace",
+		);
+		expect(supervisor.request).not.toHaveBeenCalled();
+		broker.dispose();
+	});
+
+	it("keeps every live session subscribed and releases sessions that leave the workspace", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const alphaId = "10000000-0000-4000-8000-0000000000a1";
+		const betaId = "10000000-0000-4000-8000-0000000000b2";
+		const gammaId = "10000000-0000-4000-8000-0000000000c3";
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? { snapshot: { session: { sessionId: request.params.sessionId } } }
+					: {},
+		}));
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		const subscribeSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribeSession)!;
+		const retain = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions)!;
+		const subscriptions = () =>
+			supervisor.request.mock.calls
+				.filter(([request]) => request.method === "session/subscribe")
+				.map(([request]) => request.params.sessionId);
+
+		await openSession(event, { sessionId: alphaId });
+		await retain(event, { sessionIds: [alphaId, betaId], liveSessionIds: [alphaId, betaId] });
+		await subscribeSession(event, { sessionId: betaId });
+		expect(subscriptions()).toEqual([alphaId, betaId]);
+
+		await retain(event, {
+			sessionIds: [alphaId, betaId, gammaId],
+			liveSessionIds: [betaId, gammaId],
+		});
+		supervisor.request.mockClear();
+		await openSession(event, { sessionId: gammaId });
+		expect(supervisor.request).toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: alphaId } }),
+		);
+		expect(supervisor.request).not.toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: betaId } }),
+		);
+		broker.dispose();
+	});
+
+	it("keeps a retained background session while an approval is pending and releases it with its last tab", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const alphaId = "10000000-0000-4000-8000-0000000000a1";
+		const betaId = "10000000-0000-4000-8000-0000000000b2";
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? { snapshot: { session: { sessionId: request.params.sessionId } } }
+					: {},
+		}));
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		const retain = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions)!;
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!(event);
+		await openSession(event, { sessionId: alphaId });
+		await retain(event, { sessionIds: [alphaId], liveSessionIds: [alphaId] });
+		const approval = {
+			jsonrpc: "2.0" as const,
+			id: "approval-alpha",
+			method: "interaction/request" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId: "33333333-3333-4333-8333-333333333321",
+					sessionId: alphaId,
+					title: "Approve",
+					message: "Allow?",
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "confirm" as const,
+				},
+			},
+		};
+		emitMessage(approval);
+
+		await openSession(event, { sessionId: betaId });
+		await retain(event, { sessionIds: [alphaId, betaId], liveSessionIds: [betaId] });
+		expect(supervisor.request).not.toHaveBeenCalledWith(
+			expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: alphaId } }),
+		);
+		expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+
+		await retain(event, { sessionIds: [betaId], liveSessionIds: [betaId] });
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.respondToInteraction)!(event, {
+			interactionId: approval.params.interaction.interactionId,
+			kind: "confirm",
+			confirmed: true,
+		});
+		await vi.waitFor(() =>
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({ method: "session/unsubscribe", params: { sessionId: alphaId } }),
+			),
+		);
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(
+			approval,
+			expect.objectContaining({ result: expect.objectContaining({ confirmed: true }) }),
+		);
+		broker.dispose();
+	});
+
+	it("delivers non-question interactions to a retained background session", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { emitMessage, supervisor } = supervisorHarness();
+		const alphaId = "10000000-0000-4000-8000-0000000000a1";
+		const betaId = "10000000-0000-4000-8000-0000000000b2";
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? { snapshot: { session: { sessionId: request.params.sessionId } } }
+					: {},
+		}));
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		const retain = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions)!;
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribe)!(event);
+		await openSession(event, { sessionId: alphaId });
+		await retain(event, { sessionIds: [alphaId], liveSessionIds: [alphaId] });
+		const question = {
+			jsonrpc: "2.0" as const,
+			id: "question-alpha",
+			method: "interaction/request" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId: "33333333-3333-4333-8333-333333333322",
+					sessionId: alphaId,
+					title: "Question",
+					message: "Choose",
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "ask_user" as const,
+					questions: [
+						{
+							id: "q1",
+							question: "Which option?",
+							multiple: false,
+							choices: [
+								{ id: "a", label: "Option A" },
+								{ id: "b", label: "Option B" },
+							],
+						},
+					],
+				},
+			},
+		};
+		emitMessage(question);
+		await openSession(event, { sessionId: betaId });
+		await retain(event, { sessionIds: [alphaId, betaId], liveSessionIds: [betaId] });
+		const approval = {
+			jsonrpc: "2.0" as const,
+			id: "approval-alpha",
+			method: "interaction/request" as const,
+			params: {
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				interaction: {
+					interactionId: "33333333-3333-4333-8333-333333333323",
+					sessionId: alphaId,
+					title: "Approve",
+					message: "Allow?",
+					createdAt: "2026-07-16T00:00:00.000Z",
+					kind: "confirm" as const,
+				},
+			},
+		};
+		emitMessage(approval);
+
+		expect(supervisor.respondToServerRequest).not.toHaveBeenCalled();
+		expect(webContents.sent).toContainEqual(["metis:event", { type: "app-server", envelope: approval }]);
 		broker.dispose();
 	});
 

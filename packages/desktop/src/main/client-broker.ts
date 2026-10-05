@@ -12,6 +12,7 @@ import {
 	type RpcErrorResponse,
 	type ServerRpcRequest,
 	type ServerRpcSuccessResponse,
+	type SessionSnapshot,
 	type SessionSummary,
 	validateClientRequest,
 	validateServerNotification,
@@ -318,6 +319,8 @@ export class ClientBroker {
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
 	private readonly subscribedSessions = new Set<string>();
 	private readonly retainedWorkspaceSessions = new Set<string>();
+	private readonly liveSessions = new Set<string>();
+	private focusedSessionId: string | null = null;
 	private readonly backgroundQuestionSessions = new Set<string>();
 	private readonly subscribedSessionScopes = new Map<string, { readonly mode: string; readonly cwd?: string }>();
 	private scheduleSubscribed = false;
@@ -488,6 +491,7 @@ export class ClientBroker {
 					this.subscribedSessions.clear();
 					this.backgroundQuestionSessions.clear();
 					this.subscribedSessionScopes.clear();
+					this.focusedSessionId = null;
 					this.scheduleSubscribed = false;
 				}
 				this.sendEvent({ type: "supervisor", view });
@@ -612,51 +616,23 @@ export class ClientBroker {
 					const previousSessionIds = [...this.subscribedSessions].filter(
 						(sessionId) => sessionId !== params.sessionId,
 					);
-					await this.clientCall("session/open", params);
-					const subscribed = await this.clientCall("session/subscribe", { sessionId: params.sessionId });
-					this.subscribedSessions.add(params.sessionId);
-					this.backgroundQuestionSessions.delete(params.sessionId);
-					const session = subscribed.snapshot.session;
-					this.subscribedSessionScopes.set(session.sessionId, {
-						mode: session.mode,
-						...(session.cwd ? { cwd: session.cwd } : {}),
-					});
-					if (session.mode === "code" && session.cwd)
-						this.workspaceFiles.authorize(session.sessionId, session.cwd);
-					else this.workspaceFiles.revoke(params.sessionId);
-					for (const previousSessionId of previousSessionIds) {
-						if (!this.retainedWorkspaceSessions.has(previousSessionId))
-							this.workspaceFiles.revoke(previousSessionId);
-					}
-					const previousSessions = new Set(previousSessionIds);
-					// Keep the owner of an unanswered question alive while the user visits another task.
-					// Permission approvals still cancel when their task is hidden.
-					for (const sessionId of previousSessionIds) {
-						if (this.hasPendingQuestion(sessionId)) this.backgroundQuestionSessions.add(sessionId);
-					}
-					this.cancelPendingInteractionsForSessions(previousSessions, true);
-					const releasedSessions = previousSessionIds.filter(
-						(sessionId) => !this.backgroundQuestionSessions.has(sessionId),
-					);
-					await this.unsubscribeSessions(releasedSessions, true);
-					// A request can cross the process boundary while unsubscribe is in flight.
-					this.cancelPendingInteractionsForSessions(new Set(releasedSessions));
-					for (const event of this.browserManager.replayEvents(params.sessionId)) this.sendBrowserEvent(event);
+					const snapshot = await this.subscribeAndAuthorize(params.sessionId);
+					this.focusedSessionId = params.sessionId;
 					this.onSessionOpened?.(params.sessionId);
-					const questions = [...this.pendingInteractions.values()]
-						.map(({ request }) => request.params.interaction)
-						.filter(
-							(interaction) => interaction.sessionId === params.sessionId && interaction.kind === "ask_user",
-						);
-					if (questions.length === 0) return subscribed.snapshot;
-					const pending = new Map(
-						(subscribed.snapshot.pendingInteractions ?? []).map((interaction) => [
-							interaction.interactionId,
-							interaction,
-						]),
-					);
-					for (const question of questions) pending.set(question.interactionId, question);
-					return { ...subscribed.snapshot, pendingInteractions: [...pending.values()] };
+					await this.releaseHiddenSessions(previousSessionIds);
+					return this.mergePendingQuestions(params.sessionId, snapshot);
+				}),
+			);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.subscribeSession, 1, async (_event, [input]) => {
+			const params = this.validatedParams("session/open", input);
+			return this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					if (!this.liveSessions.has(params.sessionId)) {
+						throw new Error("Session is not live in the workspace");
+					}
+					const snapshot = await this.subscribeAndAuthorize(params.sessionId);
+					return this.mergePendingQuestions(params.sessionId, snapshot);
 				}),
 			);
 		});
@@ -806,7 +782,8 @@ export class ClientBroker {
 			this.setWorkspaceEditState(validateWorkspaceEditState(input));
 		});
 		this.register(DESKTOP_IPC_CHANNELS.retainWorkspaceSessions, 1, async (_event, [input]) => {
-			const next = new Set(validateRetainWorkspaceSessions(input).sessionIds);
+			const retention = validateRetainWorkspaceSessions(input);
+			const next = new Set(retention.sessionIds);
 			for (const sessionId of this.retainedWorkspaceSessions) {
 				if (!next.has(sessionId) && !this.subscribedSessions.has(sessionId)) {
 					this.workspaceFiles.revoke(sessionId);
@@ -814,6 +791,12 @@ export class ClientBroker {
 			}
 			this.retainedWorkspaceSessions.clear();
 			for (const sessionId of next) this.retainedWorkspaceSessions.add(sessionId);
+			const previouslyLive = [...this.liveSessions];
+			this.liveSessions.clear();
+			for (const sessionId of retention.liveSessionIds) this.liveSessions.add(sessionId);
+			await this.enqueueSubscriptionMutation(() =>
+				this.releaseHiddenSessions(previouslyLive.filter((sessionId) => !this.liveSessions.has(sessionId))),
+			);
 		});
 	}
 
@@ -921,7 +904,11 @@ export class ClientBroker {
 				throw new Error("App-server reused a pending interaction id");
 			}
 			const interaction = interactionRequest.params.interaction;
-			if (this.backgroundQuestionSessions.has(interaction.sessionId) && interaction.kind !== "ask_user") {
+			if (
+				this.backgroundQuestionSessions.has(interaction.sessionId) &&
+				interaction.kind !== "ask_user" &&
+				!this.retainedWorkspaceSessions.has(interaction.sessionId)
+			) {
 				this.cancelServerInteraction(interactionRequest);
 				return;
 			}
@@ -1064,6 +1051,67 @@ export class ClientBroker {
 		this.releaseAnsweredBackgroundSession(pending.request.params.interaction.sessionId);
 	}
 
+	private async subscribeAndAuthorize(sessionId: string): Promise<SessionSnapshot> {
+		await this.clientCall("session/open", { sessionId });
+		const subscribed = await this.clientCall("session/subscribe", { sessionId });
+		this.subscribedSessions.add(sessionId);
+		this.backgroundQuestionSessions.delete(sessionId);
+		const session = subscribed.snapshot.session;
+		this.subscribedSessionScopes.set(session.sessionId, {
+			mode: session.mode,
+			...(session.cwd ? { cwd: session.cwd } : {}),
+		});
+		if (session.mode === "code" && session.cwd) this.workspaceFiles.authorize(session.sessionId, session.cwd);
+		else this.workspaceFiles.revoke(sessionId);
+		for (const event of this.browserManager.replayEvents(sessionId)) this.sendBrowserEvent(event);
+		return subscribed.snapshot;
+	}
+
+	private mergePendingQuestions(sessionId: string, snapshot: SessionSnapshot): SessionSnapshot {
+		const questions = [...this.pendingInteractions.values()]
+			.map(({ request }) => request.params.interaction)
+			.filter((interaction) => interaction.sessionId === sessionId && interaction.kind === "ask_user");
+		if (questions.length === 0) return snapshot;
+		const pending = new Map(
+			(snapshot.pendingInteractions ?? []).map((interaction) => [interaction.interactionId, interaction]),
+		);
+		for (const question of questions) pending.set(question.interactionId, question);
+		return { ...snapshot, pendingInteractions: [...pending.values()] };
+	}
+
+	private async releaseHiddenSessions(candidates: readonly string[]): Promise<void> {
+		const hidden = new Set(
+			candidates.filter(
+				(sessionId) =>
+					this.subscribedSessions.has(sessionId) &&
+					sessionId !== this.focusedSessionId &&
+					!this.liveSessions.has(sessionId),
+			),
+		);
+		for (const sessionId of hidden) {
+			if (!this.retainedWorkspaceSessions.has(sessionId)) this.workspaceFiles.revoke(sessionId);
+		}
+		const retainedWithPending = new Set<string>();
+		// Keep the owner of an unanswered question alive while the user visits another task.
+		// Permission approvals still cancel when their task is hidden.
+		for (const sessionId of hidden) {
+			if (this.retainedWorkspaceSessions.has(sessionId) && this.hasPendingInteraction(sessionId)) {
+				retainedWithPending.add(sessionId);
+				this.backgroundQuestionSessions.add(sessionId);
+			} else if (this.hasPendingQuestion(sessionId)) {
+				this.backgroundQuestionSessions.add(sessionId);
+			}
+		}
+		this.cancelPendingInteractionsForSessions(
+			new Set([...hidden].filter((sessionId) => !retainedWithPending.has(sessionId))),
+			true,
+		);
+		const releasedSessions = [...hidden].filter((sessionId) => !this.backgroundQuestionSessions.has(sessionId));
+		await this.unsubscribeSessions(releasedSessions, true);
+		// A request can cross the process boundary while unsubscribe is in flight.
+		this.cancelPendingInteractionsForSessions(new Set(releasedSessions));
+	}
+
 	private hasPendingQuestion(sessionId: string): boolean {
 		return [...this.pendingInteractions.values()].some(
 			({ request }) =>
@@ -1071,10 +1119,19 @@ export class ClientBroker {
 		);
 	}
 
+	private hasPendingInteraction(sessionId: string): boolean {
+		return [...this.pendingInteractions.values()].some(
+			({ request }) => request.params.interaction.sessionId === sessionId,
+		);
+	}
+
 	private releaseAnsweredBackgroundSession(sessionId: string): void {
 		void this.enqueueSubscriptionMutation(async () => {
 			if (!this.backgroundQuestionSessions.has(sessionId) || this.hasPendingQuestion(sessionId)) return;
+			if (sessionId === this.focusedSessionId || this.liveSessions.has(sessionId)) return;
+			if (this.retainedWorkspaceSessions.has(sessionId) && this.hasPendingInteraction(sessionId)) return;
 			await this.unsubscribeSessions([sessionId], true);
+			if (!this.retainedWorkspaceSessions.has(sessionId)) this.workspaceFiles.revoke(sessionId);
 			this.cancelPendingInteractionsForSessions(new Set([sessionId]));
 		});
 	}
@@ -1108,6 +1165,10 @@ export class ClientBroker {
 			() => this.browserManager.closeAll(),
 			() => this.workspaceFiles.clear(),
 			() => this.retainedWorkspaceSessions.clear(),
+			() => this.liveSessions.clear(),
+			() => {
+				this.focusedSessionId = null;
+			},
 			() => this.cancelPendingInteractions(),
 			() => this.releaseSessionSubscriptions(),
 			() => this.setWorkspaceEditState({ dirty: false, language: "en", visibleSessionId: null }),
@@ -1122,6 +1183,10 @@ export class ClientBroker {
 			() => this.browserManager.suspendRenderer(),
 			() => this.workspaceFiles.clear(),
 			() => this.retainedWorkspaceSessions.clear(),
+			() => this.liveSessions.clear(),
+			() => {
+				this.focusedSessionId = null;
+			},
 			() => this.cancelPendingInteractions(),
 			() => this.releaseSessionSubscriptions(),
 		]);
@@ -1157,6 +1222,8 @@ export class ClientBroker {
 			this.workspaceFiles.revoke(sessionId);
 			this.subscribedSessions.delete(sessionId);
 			this.retainedWorkspaceSessions.delete(sessionId);
+			this.liveSessions.delete(sessionId);
+			if (this.focusedSessionId === sessionId) this.focusedSessionId = null;
 			this.backgroundQuestionSessions.delete(sessionId);
 			this.subscribedSessionScopes.delete(sessionId);
 		}

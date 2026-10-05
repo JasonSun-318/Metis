@@ -1976,6 +1976,7 @@ export function App({ api, store }: AppProps) {
 						onCleanupSessionIdsHandled={handleToolCleanupHandled}
 						onDirtySessionIdsChange={handleDirtySessionIdsChange}
 						onError={reportError}
+						onLiveSessionsChange={workspaceWorkflow.setLiveSessions}
 						onNewSession={(target) => {
 							if (target) void createEmptySessionInProject(target.mode, target.cwd);
 							else startNewTask();

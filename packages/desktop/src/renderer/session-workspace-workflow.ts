@@ -32,6 +32,7 @@ type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinki
 		| "listSessions"
 		| "markSessionRead"
 		| "openSession"
+		| "subscribeSession"
 		| "previewProjectDelete"
 		| "renameSession"
 		| "selectProjectFolder"
@@ -172,6 +173,8 @@ export class SessionWorkspaceWorkflow {
 	>();
 	private newTaskCreateRequest: { key: string; requestId: string } | null = null;
 	private newTaskTurnRequest: { key: string; requestId: string } | null = null;
+	private readonly liveSessions = new Set<string>();
+	private readonly liveSubscriptions = new Map<string, Promise<void>>();
 	private unsubscribe: (() => void) | null = null;
 	private startRequest: Promise<void> | null = null;
 	private lifecycleGeneration = 0;
@@ -250,6 +253,8 @@ export class SessionWorkspaceWorkflow {
 		this.startRequest = null;
 		this.resnapshots.clear();
 		this.markReadRequests.clear();
+		this.liveSubscriptions.clear();
+		this.liveSessions.clear();
 		this.projectCreateRequests.clear();
 		this.projectDeleteRequests.clear();
 		this.sessionRenameRequests.clear();
@@ -273,6 +278,7 @@ export class SessionWorkspaceWorkflow {
 			}
 			this.invalidateSessionLists();
 			this.store.applySnapshot(snapshot);
+			this.reconcileLiveSessions();
 			if (snapshot.session.unread) await this.markSessionRead(sessionId);
 			if (!this.isCurrentOpen(generation, lifecycle)) return snapshot;
 			this.writeRememberedSession(snapshot.session.mode, sessionId);
@@ -301,6 +307,60 @@ export class SessionWorkspaceWorkflow {
 
 	resnapshotSession(sessionId: string): Promise<void> {
 		return this.requestResnapshot(sessionId);
+	}
+
+	readonly setLiveSessions = (sessionIds: readonly string[]): void => {
+		this.liveSessions.clear();
+		for (const sessionId of sessionIds) this.liveSessions.add(sessionId);
+		this.reconcileLiveSessions();
+	};
+
+	private reconcileLiveSessions(): void {
+		const snapshot = this.store.getSnapshot();
+		for (const sessionId of this.liveSessions) {
+			if (sessionId === snapshot.activeSessionId) continue;
+			const bucket = snapshot.sessions.get(sessionId);
+			if (!bucket || bucket.syncStatus === "resnapshot_required") this.subscribeLive(sessionId);
+		}
+		for (const [sessionId, bucket] of snapshot.sessions) {
+			if (
+				sessionId === snapshot.activeSessionId ||
+				this.liveSessions.has(sessionId) ||
+				bucket.syncStatus === "subscribing"
+			) {
+				continue;
+			}
+			this.store.dropProjection(sessionId);
+		}
+	}
+
+	private subscribeLive(sessionId: string): void {
+		if (!this.liveSessions.has(sessionId) || this.liveSubscriptions.has(sessionId)) return;
+		const lifecycle = this.lifecycleGeneration;
+		const token = this.store.beginSubscription(sessionId, { focus: false });
+		let pending!: Promise<void>;
+		pending = this.api
+			.subscribeSession({ sessionId })
+			.then((snapshot) => {
+				if (!this.isCurrentLifecycle(lifecycle)) return;
+				const bucket = this.store.getSnapshot().sessions.get(sessionId);
+				if (
+					this.liveSessions.has(sessionId) &&
+					bucket?.syncStatus === "subscribing" &&
+					bucket.subscriptionToken === token
+				) {
+					this.store.applySnapshot(snapshot);
+					return;
+				}
+				this.store.cancelSubscription(sessionId, token);
+			})
+			.catch(() => {
+				if (this.isCurrentLifecycle(lifecycle)) this.store.cancelSubscription(sessionId, token);
+			})
+			.finally(() => {
+				if (this.liveSubscriptions.get(sessionId) === pending) this.liveSubscriptions.delete(sessionId);
+			});
+		this.liveSubscriptions.set(sessionId, pending);
 	}
 
 	async selectMode(mode: AgentMode): Promise<void> {
@@ -888,6 +948,7 @@ export class SessionWorkspaceWorkflow {
 			for (const event of events) if (event.type === "session/updated") this.store.upsertSession(event.session);
 			for (const event of deletedSessions) this.store.removeSession(event.sessionId);
 			for (const event of deletedProjects) this.store.removeModeProject(event.mode, event.cwd);
+			this.reconcileLiveSessions();
 			return;
 		}
 
@@ -909,6 +970,7 @@ export class SessionWorkspaceWorkflow {
 		const projectInvalidation =
 			projectInvalidations.find((event) => event.reason === "deleted") ?? projectInvalidations[0];
 		const applyResult = this.store.applyBatch(batch);
+		this.reconcileLiveSessions();
 		for (const event of deletedSessions) this.store.removeSession(event.sessionId);
 		for (const event of deletedProjects) this.store.removeModeProject(event.mode, event.cwd);
 
@@ -1005,6 +1067,7 @@ export class SessionWorkspaceWorkflow {
 			if (this.isCurrentOpen(generation, lifecycle)) {
 				this.invalidateSessionLists();
 				this.store.applySnapshot(recovered);
+				this.reconcileLiveSessions();
 				return;
 			}
 		} catch {

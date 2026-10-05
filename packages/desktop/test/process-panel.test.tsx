@@ -48,6 +48,7 @@ async function render(process?: SessionProcessView, owner = sessionId, mode: "ch
 		onCleanupSessionIdsHandled={vi.fn()}
 		onDirtySessionIdsChange={vi.fn()}
 		onError={onError}
+		onLiveSessionsChange={vi.fn()}
 		process={process}
 		sessionsById={sessionsById}
 		sessionTitleFor={(id) => id}

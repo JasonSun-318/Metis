@@ -94,6 +94,7 @@ interface SessionWorkspaceViewProps {
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
 	readonly onDirtySessionIdsChange: (sessionIds: readonly string[]) => void;
 	readonly onError: (cause: unknown) => void;
+	readonly onLiveSessionsChange: (sessionIds: readonly string[]) => void;
 	readonly onNewSession?: (target: { readonly mode: AgentMode; readonly cwd: string } | null) => void;
 	readonly planPreviewRequest?: PlanView | null;
 	readonly previewRequest?: UniversalPreviewTarget | null;
@@ -228,6 +229,7 @@ export function SessionWorkspaceView({
 	onCleanupSessionIdsHandled,
 	onDirtySessionIdsChange,
 	onError,
+	onLiveSessionsChange,
 	onNewSession,
 	planPreviewRequest,
 	previewRequest,
@@ -276,6 +278,13 @@ export function SessionWorkspaceView({
 	const retainedKey = useMemo(
 		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => (tab.sessionId === null ? [] : [tab.sessionId])))]
 			.sort().join("\n"),
+		[workspace],
+	);
+	const liveKey = useMemo(
+		() => [...new Set(workspace.panes.flatMap((pane) => {
+			const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
+			return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
+		}))].sort().join("\n"),
 		[workspace],
 	);
 
@@ -496,8 +505,16 @@ export function SessionWorkspaceView({
 	}, [mode, chatSessionId]);
 	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
 	useEffect(() => {
-		void api.retainWorkspaceSessions({ sessionIds: retainedKey === "" ? [] : retainedKey.split("\n") }).catch(onError);
-	}, [api, retainedKey, onError]);
+		void api
+			.retainWorkspaceSessions({
+				sessionIds: retainedKey === "" ? [] : retainedKey.split("\n"),
+				liveSessionIds: liveKey === "" ? [] : liveKey.split("\n"),
+			})
+			.catch(onError);
+	}, [api, retainedKey, liveKey, onError]);
+	useEffect(() => {
+		onLiveSessionsChange(liveKey === "" ? [] : liveKey.split("\n"));
+	}, [liveKey, onLiveSessionsChange]);
 	useEffect(() => {
 		if (cleanupSessionIds.length === 0) return;
 		const removedSessions = new Set(cleanupSessionIds);

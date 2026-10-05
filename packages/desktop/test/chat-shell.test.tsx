@@ -537,6 +537,11 @@ function createHarness(options: {
 			if (!summary) throw new Error("missing session");
 			return snapshot(summary);
 		}),
+		subscribeSession: vi.fn(async ({ sessionId }) => {
+			const summary = sessions.find((candidate) => candidate.sessionId === sessionId);
+			if (!summary) throw new Error("missing session");
+			return snapshot(summary);
+		}),
 		markSessionRead: vi.fn(async ({ sessionId }) => {
 			const current = sessions.find((candidate) => candidate.sessionId === sessionId);
 			if (!current) throw new Error("missing session");
@@ -4711,16 +4716,66 @@ describe("Chat desktop shell", () => {
 
 		await addTool(container, "Terminal");
 		await flush();
-		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-existing"] });
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
+			sessionIds: ["chat-existing"],
+			liveSessionIds: [],
+		});
 
 		await act(async () => button(container, "Other task").click());
 		await flush();
-		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-existing", "chat-other"] });
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
+			sessionIds: ["chat-existing", "chat-other"],
+			liveSessionIds: ["chat-other"],
+		});
 
 		await act(async () => button(container, "Close Chat project task").click());
 		await act(async () => button(container, "Close Terminal").click());
 		await flush();
-		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({ sessionIds: ["chat-other"] });
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
+			sessionIds: ["chat-other"],
+			liveSessionIds: ["chat-other"],
+		});
+
+		await act(async () => root.unmount());
+	});
+
+	it("subscribes a second session when its chat tab is split into another pane", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		expect(api.subscribeSession).not.toHaveBeenCalled();
+
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Other task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+
+		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
+		expect(api.subscribeSession).toHaveBeenCalledWith({ sessionId: "chat-existing" });
+		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
+			sessionIds: ["chat-existing", "chat-other"],
+			liveSessionIds: ["chat-existing", "chat-other"],
+		});
 
 		await act(async () => root.unmount());
 	});

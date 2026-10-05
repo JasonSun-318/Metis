@@ -108,6 +108,10 @@ const api = {
 		>,
 	openSession: (input: ClientParams<"session/open">) =>
 		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<MetisDesktopApi["openSession"]>,
+	subscribeSession: (input: ClientParams<"session/open">) =>
+		invoke(DESKTOP_IPC_CHANNELS.subscribeSession, "session/open", input) as ReturnType<
+			MetisDesktopApi["subscribeSession"]
+		>,
 	readDeliveredFile: (input: ClientParams<"session/readDeliveredFile">) =>
 		invoke(DESKTOP_IPC_CHANNELS.readDeliveredFile, "session/readDeliveredFile", input) as ReturnType<
 			MetisDesktopApi["readDeliveredFile"]

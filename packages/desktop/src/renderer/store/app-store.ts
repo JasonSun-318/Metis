@@ -216,6 +216,11 @@ export class AppStore {
 		if (cancelProjectionSubscription(this.state, sessionId, token)) this.commit();
 	}
 
+	dropProjection(sessionId: string): void {
+		if (this.state.activeSessionId === sessionId) return;
+		if (this.state.sessions.delete(sessionId)) this.commit();
+	}
+
 	setSupervisor(view: SupervisorView): void {
 		if (
 			view.state === this.supervisor.state &&

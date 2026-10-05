@@ -77,6 +77,7 @@ function fixture() {
 				onCleanupSessionIdsHandled={vi.fn()}
 				onDirtySessionIdsChange={vi.fn()}
 				onError={vi.fn()}
+				onLiveSessionsChange={vi.fn()}
 				sessionsById={new Map([[SESSION_ID, { sessionId: SESSION_ID, cwd: null, mode: "chat" }]])}
 				sessionTitleFor={() => "Chat"}
 				store={{} as AppStore}
