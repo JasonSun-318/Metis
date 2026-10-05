@@ -71,6 +71,7 @@ export interface MutableProjectionState {
 	serverEpoch: string | null;
 	cursor: number;
 	readonly sessions: Map<string, MutableSessionProjection>;
+	readonly retiredSessions: Map<string, MutableSessionProjection>;
 	nextSubscriptionToken: number;
 	readonly fallbackProjection: MutableSessionProjection;
 	readonly agentTranscript: MutableAgentTranscriptState;
@@ -144,6 +145,7 @@ export function createProjectionState(): MutableProjectionState {
 		serverEpoch: null,
 		cursor: 0,
 		sessions: new Map(),
+		retiredSessions: new Map(),
 		nextSubscriptionToken: 0,
 		fallbackProjection: createSessionProjection(),
 		agentTranscript: {
@@ -199,6 +201,7 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 	const removedSummary = state.sessionsById.delete(sessionId);
 	const projection = state.sessions.get(sessionId);
 	const removedProjection = state.sessions.delete(sessionId);
+	state.retiredSessions.delete(sessionId);
 	if (!removedSummary && !removedProjection) return false;
 	state.sessionOrder = state.sessionOrder.filter((candidate) => candidate !== sessionId);
 	state.notifications = state.notifications.filter((notification) => notification.sessionId !== sessionId);
@@ -231,6 +234,7 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	for (const sessionId of removed) {
 		state.sessionsById.delete(sessionId);
 		state.sessions.delete(sessionId);
+		state.retiredSessions.delete(sessionId);
 	}
 	state.sessionOrder = state.sessionOrder.filter((sessionId) => !removed.has(sessionId));
 	state.notifications = state.notifications.filter(
@@ -251,8 +255,38 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 	return true;
 }
 
+// A hidden projection is retired instead of destroyed, so a pane that becomes
+// visible again repaints its last known content while the new subscription
+// resnapshots. retiredSessions holds at most RETIRED_PROJECTION_LIMIT buckets
+// in recency order (Map insertion order); epoch changes clear it entirely, so
+// anything still present is compatible with the current server generation.
+const RETIRED_PROJECTION_LIMIT = 8;
+
+export function retireProjection(state: MutableProjectionState, sessionId: string): boolean {
+	const session = state.sessions.get(sessionId);
+	if (!session || state.activeSessionId === sessionId) return false;
+	state.sessions.delete(sessionId);
+	state.retiredSessions.delete(sessionId);
+	state.retiredSessions.set(sessionId, session);
+	while (state.retiredSessions.size > RETIRED_PROJECTION_LIMIT) {
+		const oldest = state.retiredSessions.keys().next().value;
+		if (oldest === undefined) break;
+		state.retiredSessions.delete(oldest);
+	}
+	return true;
+}
+
 export function beginProjectionSubscription(state: MutableProjectionState, sessionId: string, focus: boolean): number {
 	let session = state.sessions.get(sessionId);
+	if (!session) {
+		// Adopt a retired bucket so stale content stays painted until the
+		// snapshot lands; only same-epoch buckets survive to this point.
+		session = state.retiredSessions.get(sessionId);
+		if (session) {
+			state.retiredSessions.delete(sessionId);
+			state.sessions.set(sessionId, session);
+		}
+	}
 	if (!session) {
 		session = createSessionProjection();
 		state.sessions.set(sessionId, session);
@@ -343,6 +377,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	const sessionId = snapshot.session.sessionId;
 	const existed = state.sessions.has(sessionId);
 	let session = state.sessions.get(sessionId);
+	state.retiredSessions.delete(sessionId);
 	if (!session) {
 		session = createSessionProjection();
 		state.sessions.set(sessionId, session);
@@ -383,6 +418,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 		state.serverEpoch = snapshot.serverEpoch;
 		state.cursor = snapshot.cursor;
 		if (epochChanged) {
+			state.retiredSessions.clear();
 			for (const [otherId, other] of state.sessions) {
 				if (otherId === sessionId || other.syncStatus === "resnapshot_required") continue;
 				other.syncStatus = "resnapshot_required";
@@ -755,6 +791,8 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 	const invalid =
 		batch.serverEpoch !== state.serverEpoch || batch.fromCursor <= state.cursor || batch.toCursor < batch.fromCursor;
 	if (invalid) {
+		// Retired projections only ever repaint same-epoch content.
+		if (batch.serverEpoch !== state.serverEpoch) state.retiredSessions.clear();
 		if (
 			batch.serverEpoch === state.serverEpoch &&
 			batch.fromCursor > state.cursor &&

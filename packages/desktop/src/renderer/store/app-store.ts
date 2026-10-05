@@ -31,6 +31,7 @@ import {
 	replaceProjectionSnapshot,
 	replaceSessionList,
 	requireProjectionResnapshot,
+	retireProjection,
 	selectAgentTranscript,
 } from "./reducer.ts";
 
@@ -82,6 +83,7 @@ export interface AppStoreSnapshot {
 	readonly queuedTurns: readonly QueuedTurnView[];
 	readonly agentTranscript: AgentTranscriptState;
 	readonly sessions: ReadonlyMap<string, MutableSessionProjection>;
+	readonly retiredSessions: ReadonlyMap<string, MutableSessionProjection>;
 	readonly supervisor: SupervisorView;
 }
 
@@ -229,8 +231,7 @@ export class AppStore {
 	}
 
 	dropProjection(sessionId: string): void {
-		if (this.state.activeSessionId === sessionId) return;
-		if (this.state.sessions.delete(sessionId)) this.commit();
+		if (retireProjection(this.state, sessionId)) this.commit();
 	}
 
 	setSupervisor(view: SupervisorView): void {
@@ -338,6 +339,7 @@ export class AppStore {
 			queuedTurns: projection.queuedTurns,
 			agentTranscript: this.state.agentTranscript,
 			sessions: this.state.sessions,
+			retiredSessions: this.state.retiredSessions,
 			supervisor: this.supervisor,
 		};
 	}

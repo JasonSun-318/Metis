@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { RPC_ERROR_CODES, type SessionSnapshot, type SessionSummary } from "@metis/app-protocol";
+import { type ItemView, RPC_ERROR_CODES, type SessionSnapshot, type SessionSummary } from "@metis/app-protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionWorkspaceWorkflow } from "../src/renderer/session-workspace-workflow.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
@@ -21,6 +21,17 @@ function summary(sessionId: string, mode: "chat" | "code" = "chat", unread = fal
 		unread,
 		useMemory: true,
 		contributeMemory: true,
+	};
+}
+
+function item(itemId: string, sessionId: string, text: string): ItemView {
+	return {
+		itemId,
+		sessionId,
+		role: "assistant",
+		state: "completed",
+		content: [{ type: "text", text }],
+		createdAt: "2026-08-30T00:00:00.000Z",
 	};
 }
 
@@ -1041,6 +1052,41 @@ describe("SessionWorkspaceWorkflow", () => {
 
 		expect(store.getSnapshot().sessions.has(leaving.sessionId)).toBe(false);
 		expect(store.getSnapshot().activeSessionId).toBe(active.sessionId);
+	});
+
+	it("retires a hidden projection and repaints its stale content while resubscribing", async () => {
+		const active = summary("live-stay");
+		const returning = summary("live-returning");
+		const { api, store, workflow } = harness([active, returning]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue({
+			...snapshot(returning.sessionId),
+			recentItems: [item("old-item", returning.sessionId, "stale paint")],
+		});
+		workflow.setLiveSessions([active.sessionId, returning.sessionId]);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(returning.sessionId)?.syncStatus).toBe("ready"));
+
+		workflow.setLiveSessions([active.sessionId]);
+		expect(store.getSnapshot().sessions.has(returning.sessionId)).toBe(false);
+		expect(store.getSnapshot().retiredSessions.get(returning.sessionId)?.itemOrder).toEqual(["old-item"]);
+
+		const pending = deferred<SessionSnapshot>();
+		vi.mocked(api.subscribeSession).mockReturnValue(pending.promise);
+		workflow.setLiveSessions([active.sessionId, returning.sessionId]);
+
+		const adopted = store.getSnapshot().sessions.get(returning.sessionId);
+		expect(store.getSnapshot().retiredSessions.has(returning.sessionId)).toBe(false);
+		expect(adopted?.syncStatus).toBe("subscribing");
+		expect(adopted?.itemOrder).toEqual(["old-item"]);
+		expect(adopted?.itemsById.get("old-item")?.content).toEqual([{ type: "text", text: "stale paint" }]);
+
+		pending.resolve({
+			...snapshot(returning.sessionId),
+			recentItems: [item("fresh-item", returning.sessionId, "fresh paint")],
+		});
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(returning.sessionId)?.syncStatus).toBe("ready"));
+		expect(store.getSnapshot().sessions.get(returning.sessionId)?.itemOrder).toEqual(["fresh-item"]);
 	});
 
 	it("resubscribes a live background session when its projection goes stale", async () => {

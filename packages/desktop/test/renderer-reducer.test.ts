@@ -1425,4 +1425,112 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().itemsById.get("item-200")?.content).toEqual([{ type: "text", text: "updated" }]);
 		expect(store.getSnapshot().nextBeforeItemId).toBeNull();
 	});
+
+	function hiddenSnapshot(sessionId: string, text: string): SessionSnapshot {
+		return {
+			...snapshot(),
+			session: session(sessionId),
+			recentItems: [{ ...item(`item-${sessionId}`, text), sessionId }],
+		};
+	}
+
+	describe("retired projection cache", () => {
+		function subscribeHidden(store: AppStore, sessionId: string, text = "hidden"): void {
+			store.beginSubscription(sessionId, { focus: false });
+			store.applySnapshot(hiddenSnapshot(sessionId, text));
+		}
+
+		it("retires a hidden bucket and adopts it back with stale content while subscribing", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			subscribeHidden(store, "session-2", "stale text");
+
+			store.dropProjection("session-2");
+			expect(store.getSnapshot().sessions.has("session-2")).toBe(false);
+			expect(store.getSnapshot().retiredSessions.get("session-2")?.itemOrder).toEqual(["item-session-2"]);
+
+			store.beginSubscription("session-2", { focus: false });
+			const adopted = store.getSnapshot().sessions.get("session-2");
+			expect(store.getSnapshot().retiredSessions.has("session-2")).toBe(false);
+			expect(adopted?.syncStatus).toBe("subscribing");
+			expect(adopted?.itemOrder).toEqual(["item-session-2"]);
+			expect(adopted?.itemsById.get("item-session-2")?.content).toEqual([{ type: "text", text: "stale text" }]);
+		});
+
+		it("replaces adopted content when the fresh snapshot lands", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			subscribeHidden(store, "session-2", "stale text");
+			store.dropProjection("session-2");
+			store.beginSubscription("session-2", { focus: false });
+
+			store.applySnapshot(hiddenSnapshot("session-2", "fresh text"));
+			const bucket = store.getSnapshot().sessions.get("session-2");
+			expect(bucket?.syncStatus).toBe("ready");
+			expect(bucket?.itemOrder).toEqual(["item-session-2"]);
+			expect(bucket?.itemsById.get("item-session-2")?.content).toEqual([{ type: "text", text: "fresh text" }]);
+		});
+
+		it("evicts the oldest retired bucket past the capacity of eight", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			for (let index = 1; index <= 9; index += 1) {
+				subscribeHidden(store, `session-${index + 1}`, `text ${index}`);
+			}
+			for (let index = 1; index <= 9; index += 1) {
+				store.dropProjection(`session-${index + 1}`);
+			}
+			const retired = store.getSnapshot().retiredSessions;
+			expect(retired.size).toBe(8);
+			expect(retired.has("session-2")).toBe(false);
+			expect(retired.has("session-10")).toBe(true);
+			expect([...retired.keys()]).toEqual([
+				"session-3",
+				"session-4",
+				"session-5",
+				"session-6",
+				"session-7",
+				"session-8",
+				"session-9",
+				"session-10",
+			]);
+		});
+
+		it("does not retire the active session or a missing bucket", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			store.dropProjection("session-1");
+			expect(store.getSnapshot().sessions.has("session-1")).toBe(true);
+			expect(store.getSnapshot().retiredSessions.size).toBe(0);
+			store.dropProjection("missing");
+			expect(store.getSnapshot().retiredSessions.size).toBe(0);
+		});
+
+		it("discards retired buckets when the server epoch changes", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			subscribeHidden(store, "session-2", "stale text");
+			store.dropProjection("session-2");
+
+			store.applySnapshot({ ...snapshot(EPOCH_B, 8), session: session("session-3") });
+			expect(store.getSnapshot().retiredSessions.size).toBe(0);
+
+			store.beginSubscription("session-2", { focus: false });
+			const bucket = store.getSnapshot().sessions.get("session-2");
+			expect(bucket?.syncStatus).toBe("subscribing");
+			expect(bucket?.itemOrder).toEqual([]);
+		});
+
+		it("discards retired buckets when the session is removed", () => {
+			const store = new AppStore();
+			store.applySnapshot(snapshot());
+			subscribeHidden(store, "session-2", "stale text");
+			store.dropProjection("session-2");
+
+			store.removeSession("session-2");
+			expect(store.getSnapshot().retiredSessions.size).toBe(0);
+			store.beginSubscription("session-2", { focus: false });
+			expect(store.getSnapshot().sessions.get("session-2")?.itemOrder).toEqual([]);
+		});
+	});
 });
