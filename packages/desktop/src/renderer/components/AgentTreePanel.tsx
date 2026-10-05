@@ -25,6 +25,7 @@ import {
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { AppStore } from "../store/app-store.ts";
+import { emptyProjection } from "../store/reducer.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { Transcript } from "./Transcript.tsx";
 
@@ -38,6 +39,7 @@ interface AgentTreePanelProps {
 
 const ACTIVE_STATUSES = new Set<AgentSummaryView["status"]>(["queued", "running"]);
 const NOOP_SUBSCRIBE = () => () => undefined;
+const EMPTY_PROJECTION = emptyProjection();
 
 export interface AgentTreeNode {
 	readonly agent: AgentSummaryView;
@@ -154,15 +156,17 @@ function StatusIcon({ status }: { readonly status: AgentSummaryView["status"] })
 export function AgentTreePanel({ api, onError, sessionId, store, visible }: AgentTreePanelProps) {
 	const { t } = useTranslation();
 	const snapshot = useSyncExternalStore(visible ? store.subscribe : NOOP_SUBSCRIBE, store.getSnapshot);
-	const baseAgents = visible && snapshot.activeSessionId === sessionId ? snapshot.agents : [];
-	const selectedAgentId = snapshot.agentTranscript.agentId;
-	const selectedTaskId = snapshot.agentTranscript.taskId;
+	const projection = snapshot.sessions.get(sessionId) ?? EMPTY_PROJECTION;
+	const transcript = projection.agentTranscript;
+	const baseAgents = visible ? projection.agents : EMPTY_PROJECTION.agents;
+	const selectedAgentId = transcript.agentId;
+	const selectedTaskId = transcript.taskId;
 	const [olderAgents, setOlderAgents] = useState<readonly AgentSummaryView[]>([]);
 	const [archivedAgents, setArchivedAgents] = useState<readonly AgentSummaryView[]>([]);
 	const [showArchived, setShowArchived] = useState(false);
 	const [collapsedAgents, setCollapsedAgents] = useState<ReadonlySet<string>>(new Set());
 	const [nextAgentCursor, setNextAgentCursor] = useState<string | null>(() =>
-		snapshot.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
+		projection.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
 	);
 	const [nextArchivedCursor, setNextArchivedCursor] = useState<string | null>(null);
 	const [loadingAgents, setLoadingAgents] = useState(false);
@@ -242,16 +246,16 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 		activeCursorTrail.current = baseAgents.map((agent) => agent.agentId);
 		archivedCursorTrail.current = [];
 		setNextAgentCursor(
-			snapshot.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
+			projection.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
 		);
 		setNextArchivedCursor(null);
 		setLoadingAgents(false);
 		setStopping(new Set());
 		setMutating(new Set());
 		if (selectedAgentId && !baseAgents.some((agent) => agent.agentId === selectedAgentId)) {
-			store.selectAgentTranscript(null);
+			store.selectAgentTranscript(sessionId, null);
 		}
-	}, [baseAgents, selectedAgentId, sessionId, snapshot.agentCollectionRevision, snapshot.nextAgentAfterId, store]);
+	}, [baseAgents, selectedAgentId, sessionId, snapshot.agentCollectionRevision, projection.nextAgentAfterId, store]);
 
 	useEffect(() => {
 		if (focusedAgentId && visibleTreeAgents.some((agent) => agent.agentId === focusedAgentId)) return;
@@ -263,17 +267,17 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			activeCursorTrail.current = [
 				...new Set([...activeCursorTrail.current, ...baseAgents.map((agent) => agent.agentId)]),
 			];
-			if (nextAgentCursor === null && (snapshot.nextAgentAfterId || baseAgents.length >= 100)) {
-				setNextAgentCursor(snapshot.nextAgentAfterId ?? baseAgents.at(-1)?.agentId ?? null);
+			if (nextAgentCursor === null && (projection.nextAgentAfterId || baseAgents.length >= 100)) {
+				setNextAgentCursor(projection.nextAgentAfterId ?? baseAgents.at(-1)?.agentId ?? null);
 			}
 		}
-	}, [baseAgents, nextAgentCursor, olderAgents.length, snapshot.nextAgentAfterId]);
+	}, [baseAgents, nextAgentCursor, olderAgents.length, projection.nextAgentAfterId]);
 
 	useEffect(() => {
-		if (!visible && snapshot.activeSessionId === sessionId && selectedAgentId) {
-			store.selectAgentTranscript(null);
+		if (!visible && selectedAgentId) {
+			store.selectAgentTranscript(sessionId, null);
 		}
-	}, [selectedAgentId, sessionId, snapshot.activeSessionId, store, visible]);
+	}, [selectedAgentId, sessionId, store, visible]);
 
 	useEffect(() => {
 		if (!visible || !agents.some(isActive)) return;
@@ -303,7 +307,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							limit: 200,
 						});
 						if (request.generation === selection.current.generation) {
-							store.replaceAgentItems(request.agentId, request.taskId, page);
+							store.replaceAgentItems(request.sessionId, request.agentId, request.taskId, page);
 						}
 					} catch (cause) {
 						if (request.generation === selection.current.generation) onError(cause);
@@ -335,11 +339,11 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 	useEffect(() => {
 		const key = visible && readableSelectedAgentId ? `${sessionId}\0${readableSelectedAgentId}` : "";
 		const previous = lastRevision.current;
-		lastRevision.current = { key, revision: snapshot.agentTranscript.journalRevision };
-		if (key && previous.key === key && previous.revision !== snapshot.agentTranscript.journalRevision) {
+		lastRevision.current = { key, revision: transcript.journalRevision };
+		if (key && previous.key === key && previous.revision !== transcript.journalRevision) {
 			requestLatest();
 		}
-	}, [readableSelectedAgentId, requestLatest, sessionId, snapshot.agentTranscript.journalRevision, visible]);
+	}, [readableSelectedAgentId, requestLatest, sessionId, transcript.journalRevision, visible]);
 
 	useEffect(() => {
 		if (selectedAgentId) backRef.current?.focus();
@@ -351,7 +355,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 
 	const openTranscript = (agentId: string) => {
 		returnFocusAgentId.current = agentId;
-		store.selectAgentTranscript(agentId, null);
+		store.selectAgentTranscript(sessionId, agentId, null);
 	};
 
 	const stop = async (agentId: string) => {
@@ -379,7 +383,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 
 	const loadOlder = async () => {
 		const request = { ...selection.current };
-		const beforeItemId = snapshot.agentTranscript.nextBeforeItemId;
+		const beforeItemId = transcript.nextBeforeItemId;
 		if (!request.agentId || !beforeItemId || readInFlight.current || olderInFlight.current) return;
 		olderInFlight.current = true;
 		setLoadingOlder(true);
@@ -392,7 +396,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 				limit: 200,
 			});
 			if (request.generation === selection.current.generation) {
-				store.prependAgentItems(request.agentId, request.taskId, page);
+				store.prependAgentItems(request.sessionId, request.agentId, request.taskId, page);
 			}
 		} catch (cause) {
 			if (request.generation === selection.current.generation) onError(cause);
@@ -451,7 +455,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			setOlderAgents((current) =>
 				archived ? current.filter((entry) => entry.agentId !== agent.agentId) : mergeAgents(current, [result.agent]),
 			);
-			if (archived && selectedAgentId === agent.agentId && !showArchived) store.selectAgentTranscript(null);
+			if (archived && selectedAgentId === agent.agentId && !showArchived) store.selectAgentTranscript(sessionId, null);
 		});
 
 	const remove = (agent: AgentSummaryView) => {
@@ -477,7 +481,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			);
 			setOlderAgents((current) => current.filter((candidate) => !ids.has(candidate.agentId)));
 			setArchivedAgents((current) => current.filter((candidate) => !ids.has(candidate.agentId)));
-			if (selectedAgentId && ids.has(selectedAgentId)) store.selectAgentTranscript(null);
+			if (selectedAgentId && ids.has(selectedAgentId)) store.selectAgentTranscript(sessionId, null);
 		});
 	};
 
@@ -734,7 +738,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						<button
 							aria-label={t("Back to agents")}
 							className="subagent-back"
-							onClick={() => store.selectAgentTranscript(null)}
+							onClick={() => store.selectAgentTranscript(sessionId, null)}
 							ref={backRef}
 							type="button"
 						>
@@ -799,7 +803,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							<MenuSelect
 								ariaLabel={t("Task")}
 								className="subagent-task-menu"
-								onChange={(taskId) => store.selectAgentTranscript(selectedAgent.agentId, taskId || null)}
+								onChange={(taskId) => store.selectAgentTranscript(sessionId, selectedAgent.agentId, taskId || null)}
 								options={[
 									{ value: "", label: t("Latest task") },
 									...[...selectedAgent.tasks].reverse().map((task) => ({
@@ -812,13 +816,13 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							/>
 						</div>
 					)}
-					{snapshot.agentTranscript.itemOrder.length > 0 ? (
+					{transcript.itemOrder.length > 0 ? (
 						<Transcript
 							appearance="code"
 							ariaLabel="Agent transcript"
-							hasOlder={snapshot.agentTranscript.nextBeforeItemId !== null}
-							itemIds={snapshot.agentTranscript.itemOrder}
-							itemsById={snapshot.agentTranscript.itemsById}
+							hasOlder={transcript.nextBeforeItemId !== null}
+							itemIds={transcript.itemOrder}
+							itemsById={transcript.itemsById}
 							latestLabel="New activity"
 							loadingOlder={loadingOlder || loadingLatest}
 							onLoadOlder={loadOlder}

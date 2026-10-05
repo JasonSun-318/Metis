@@ -102,7 +102,7 @@ interface SessionWorkspaceViewProps {
 	readonly onCleanupSessionIdsHandled: (sessionIds: readonly string[]) => void;
 	readonly onDirtySessionIdsChange: (sessionIds: readonly string[]) => void;
 	readonly onError: (cause: unknown) => void;
-	readonly onLiveSessionsChange: (sessionIds: readonly string[]) => void;
+	readonly onLiveSessionsChange: (sessionIds: readonly string[], chatSessionIds: readonly string[]) => void;
 	readonly onNewSession?: (target: { readonly mode: AgentMode; readonly cwd: string } | null) => void;
 	readonly chatView: SessionChatViewContext;
 	readonly planPreviewRequest?: { readonly sessionId: string; readonly plan: PlanView } | null;
@@ -236,6 +236,15 @@ export function SessionWorkspaceView({
 		[workspace],
 	);
 	const liveKey = useMemo(
+		() => [...new Set(workspace.panes.flatMap((pane) => {
+			const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
+			return (tab?.kind === "chat" || tab?.kind === "agent") && tab.sessionId !== null ? [tab.sessionId] : [];
+		}))].sort().join("\n"),
+		[workspace],
+	);
+	// Sessions with a pane-active chat tab host their own modal interactions;
+	// the App-level host covers sessions without a visible chat pane.
+	const chatLiveKey = useMemo(
 		() => [...new Set(workspace.panes.flatMap((pane) => {
 			const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
 			return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
@@ -468,8 +477,11 @@ export function SessionWorkspaceView({
 			.catch(onError);
 	}, [api, retainedKey, liveKey, onError]);
 	useEffect(() => {
-		onLiveSessionsChange(liveKey === "" ? [] : liveKey.split("\n"));
-	}, [liveKey, onLiveSessionsChange]);
+		onLiveSessionsChange(
+			liveKey === "" ? [] : liveKey.split("\n"),
+			chatLiveKey === "" ? [] : chatLiveKey.split("\n"),
+		);
+	}, [chatLiveKey, liveKey, onLiveSessionsChange]);
 	useEffect(() => {
 		if (cleanupSessionIds.length === 0) return;
 		const removedSessions = new Set(cleanupSessionIds);
@@ -954,7 +966,7 @@ export function SessionWorkspaceView({
 		if (!closing) return;
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
 		else if (closing.kind === "browser") void api.closeBrowser({ sessionId: closing.sessionId, browserId: id }).catch(onError);
-		else if (closing.kind === "agent" && closing.sessionId === chatSessionId) store.selectAgentTranscript(null);
+		else if (closing.kind === "agent") store.selectAgentTranscript(closing.sessionId, null);
 		setFileDrafts((current) => {
 			if (!current.has(id)) return current;
 			const next = new Map(current);
@@ -1268,17 +1280,6 @@ export function SessionWorkspaceView({
 		</div>
 	);
 
-	// Agent tree tabs still project only the focused session; every other tool
-	// talks to the desktop API by sessionId and stays live for any session.
-	const sessionPlaceholder = (tab: WorkspaceTab) => (
-		<div className="workspace-session-placeholder" role="tabpanel">
-			<p>{t("This session is not in focus.")}</p>
-			<button className="button-secondary" onClick={() => onChatSession(tab.sessionId)} type="button">
-				{t("Focus this session")}
-			</button>
-		</div>
-	);
-
 	const renderPanels = () => {
 		let chatHost: { pane: WorkspacePane; tab: WorkspaceTab } | null = null;
 		for (const pane of workspace.panes) {
@@ -1310,13 +1311,14 @@ export function SessionWorkspaceView({
 				// over — including the projected session the host tab belongs to.
 				if (isHost && (chat !== null || tab.sessionId === null)) return chat;
 				if (tab.sessionId === null) return null;
+				const tabVisible = panelVisible(tab.id);
 				return (
 					<SessionChatView
 						{...chatView}
 						canonicalComposer={chat === null && tab.sessionId === chatSessionId}
-						focused={tab.sessionId === chatSessionId}
+						focused={tab.sessionId === chatSessionId && tabVisible}
 						sessionId={tab.sessionId}
-						visible={panelVisible(tab.id)}
+						visible={tabVisible}
 					/>
 				);
 			};
@@ -1331,11 +1333,6 @@ export function SessionWorkspaceView({
 						<div className="workspace-chat-panel">{chatViewFor(host.tab, true)}</div>
 					</div>
 				) : null,
-				activeTab?.kind === "chat" && activeTab !== host?.tab ? (
-					<div className="workspace-panel" data-pane-id={pane.id} key={activeTab.id}>
-						<div className="workspace-chat-panel">{chatViewFor(activeTab, false)}</div>
-					</div>
-				) : null,
 				...pane.tabs.flatMap((tab) =>
 					tab.kind === "process" ? wrap(tab.id,
 						<ProcessPanel
@@ -1345,6 +1342,13 @@ export function SessionWorkspaceView({
 							onError={onError}
 							visible={panelVisible(tab.id)}
 						/>,
+					) : tab.kind === "chat" ? (
+						// Every chat tab keeps its own view mounted so composer drafts
+						// and transcript scroll survive tab switches; the host tab
+						// renders through the host panel above.
+						tab === host?.tab || tab.sessionId === null
+							? []
+							: wrap(tab.id, <div className="workspace-chat-panel">{chatViewFor(tab, false)}</div>)
 					) : tab.kind === "terminal" ? wrap(tab.id,
 						<TerminalPanel
 							api={api}
@@ -1381,15 +1385,13 @@ export function SessionWorkspaceView({
 							visible={panelVisible(tab.id)}
 						/>,
 					) : tab.kind === "agent" ? wrap(tab.id,
-						tab.sessionId === chatSessionId ? (
-							<AgentTreePanel
-								api={api}
-								onError={onError}
-								sessionId={tab.sessionId}
-								store={store}
-								visible={panelVisible(tab.id)}
-							/>
-						) : sessionPlaceholder(tab),
+						<AgentTreePanel
+							api={api}
+							onError={onError}
+							sessionId={tab.sessionId}
+							store={store}
+							visible={panelVisible(tab.id)}
+						/>,
 					) : tab.kind === "plan" ? wrap(tab.id,
 						<div
 							className="tool-panel plan-panel"

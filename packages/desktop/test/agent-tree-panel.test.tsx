@@ -134,11 +134,11 @@ async function flush() {
 	await act(async () => { await Promise.resolve(); });
 }
 
-function renderPanel(store: AppStore, api: MetisDesktopApi, onError = vi.fn()) {
+function renderPanel(store: AppStore, api: MetisDesktopApi, onError = vi.fn(), sessionId = "parent") {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
-	void act(() => root.render(<AgentTreePanel api={api} onError={onError} sessionId="parent" store={store} visible />));
+	void act(() => root.render(<AgentTreePanel api={api} onError={onError} sessionId={sessionId} store={store} visible />));
 	return { container, onError, root };
 }
 
@@ -655,7 +655,7 @@ describe("AgentTreePanel", () => {
 		expect(rendered.onError).toHaveBeenCalledWith(expect.objectContaining({ message: "delete failed" }));
 		expect(button(rendered.container, "View transcript for Disposable")).toBeTruthy();
 	});
-	it("ignores a stale child read after the active session changes", async () => {
+	it("keeps its own transcript live after the active session changes", async () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "done")]));
 		const pending = deferred<{ items: ItemView[]; nextBeforeItemId: null }>();
@@ -665,9 +665,37 @@ describe("AgentTreePanel", () => {
 		await act(async () => store.applySnapshot(snapshot("other", [])));
 		await act(async () => pending.resolve({ items: [item("child", "stale")], nextBeforeItemId: null }));
 		await flush();
+		// The compat mirror tracks the focused session; the parent bucket keeps
+		// its own selection and received the page for its own transcript.
 		expect(store.getSnapshot().agentTranscript.agentId).toBeNull();
-		expect(rendered.container.textContent).not.toContain("stale");
+		expect(store.getSnapshot().sessions.get("parent")?.agentTranscript.agentId).toBe("child");
+		expect(rendered.container.textContent).toContain("stale");
 		expect(rendered.onError).not.toHaveBeenCalled();
+	});
+
+	it("renders the tree and transcript from a non-focused session bucket", async () => {
+		const store = new AppStore();
+		store.applySnapshot(snapshot("parent", [agentSummary("child-a", "Focused task", "done")]));
+		store.beginSubscription("other", { focus: false });
+		store.applySnapshot(snapshot("other", [agentSummary("child-b", "Background task", "done")]));
+		const read = vi.fn().mockResolvedValue({
+			items: [item("child-b", "background activity")],
+			nextBeforeItemId: null,
+		});
+		const rendered = renderPanel(store, api(read), vi.fn(), "other");
+		roots.push(rendered.root);
+		await flush();
+
+		expect(rendered.container.textContent).toContain("Background task");
+		expect(rendered.container.textContent).not.toContain("Focused task");
+		await act(async () => button(rendered.container, "View transcript for Background task").click());
+		await flush();
+		expect(read).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "other", agentId: "child-b" }));
+		expect(rendered.container.textContent).toContain("background activity");
+		expect(store.getSnapshot().sessions.get("other")?.agentTranscript.agentId).toBe("child-b");
+		// The focused session's own transcript selection is untouched.
+		expect(store.getSnapshot().sessions.get("parent")?.agentTranscript.agentId).toBeNull();
+		expect(store.getSnapshot().agentTranscript.agentId).toBeNull();
 	});
 
 	it("ignores stale list and archive responses after switching sessions", async () => {
@@ -746,8 +774,8 @@ describe("AgentTreePanel", () => {
 	it("keeps the current transcript visible when a refresh fails", async () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "done")]));
-		store.selectAgentTranscript("child");
-		store.replaceAgentItems("child", null, { items: [item("child", "retained activity")], nextBeforeItemId: null });
+		store.selectAgentTranscript("parent", "child");
+		store.replaceAgentItems("parent", "child", null, { items: [item("child", "retained activity")], nextBeforeItemId: null });
 		const rendered = renderPanel(store, api(vi.fn().mockRejectedValue(new Error("read failed"))));
 		roots.push(rendered.root);
 		await flush();

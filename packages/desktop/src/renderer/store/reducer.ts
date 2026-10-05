@@ -54,6 +54,7 @@ export interface MutableSessionProjection {
 	availableModels: NonNullable<SessionSnapshot["availableModels"]>;
 	agents: AgentSummaryView[];
 	nextAgentAfterId: string | null;
+	readonly agentTranscript: MutableAgentTranscriptState;
 	tasks: SessionSnapshot["tasks"];
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
@@ -74,7 +75,6 @@ export interface MutableProjectionState {
 	readonly retiredSessions: Map<string, MutableSessionProjection>;
 	nextSubscriptionToken: number;
 	readonly fallbackProjection: MutableSessionProjection;
-	readonly agentTranscript: MutableAgentTranscriptState;
 }
 
 function clearAgentTranscript(
@@ -114,6 +114,14 @@ export function emptyProjection() {
 		availableModels: [] as NonNullable<SessionSnapshot["availableModels"]>,
 		agents: [] as AgentSummaryView[],
 		nextAgentAfterId: null as string | null,
+		agentTranscript: {
+			agentId: null as string | null,
+			taskId: null as string | null,
+			itemsById: new Map<string, ItemView>(),
+			itemOrder: [] as string[],
+			nextBeforeItemId: null as string | null,
+			journalRevision: 0,
+		},
 		tasks: [] as SessionSnapshot["tasks"],
 		deliveredFiles: [] as SessionSnapshot["deliveredFiles"],
 		goal: null as SessionSnapshot["goal"],
@@ -148,14 +156,6 @@ export function createProjectionState(): MutableProjectionState {
 		retiredSessions: new Map(),
 		nextSubscriptionToken: 0,
 		fallbackProjection: createSessionProjection(),
-		agentTranscript: {
-			agentId: null,
-			taskId: null,
-			itemsById: new Map(),
-			itemOrder: [],
-			nextBeforeItemId: null,
-			journalRevision: 0,
-		},
 	};
 }
 
@@ -215,7 +215,6 @@ export function removeSession(state: MutableProjectionState, sessionId: string):
 
 	state.activeSessionId = null;
 	if (projection) retainProjectionFallback(state, projection);
-	clearAgentTranscript(state.agentTranscript);
 	return true;
 }
 
@@ -251,7 +250,6 @@ export function removeModeProjectSessions(state: MutableProjectionState, mode: A
 
 	state.activeSessionId = null;
 	if (active) retainProjectionFallback(state, active);
-	clearAgentTranscript(state.agentTranscript);
 	return true;
 }
 
@@ -357,7 +355,6 @@ export function activateProjection(
 	}
 	if (state.activeSessionId === sessionId) return true;
 	state.activeSessionId = sessionId;
-	clearAgentTranscript(state.agentTranscript);
 	session.revision += 1;
 	return true;
 }
@@ -448,11 +445,10 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 	session.queuedTurns = snapshot.queuedTurns;
 
 	if (!existed || session.syncStatus !== "subscribing" || session.focusOnSnapshot) {
-		const sessionChanged = state.activeSessionId !== sessionId;
 		state.activeSessionId = sessionId;
-		if (sessionChanged) clearAgentTranscript(state.agentTranscript);
-		else if (state.agentTranscript.agentId) state.agentTranscript.journalRevision += 1;
 	}
+	// The snapshot replaced this bucket's contents; a selected transcript must refetch.
+	if (session.agentTranscript.agentId) session.agentTranscript.journalRevision += 1;
 
 	const buffered = session.buffer;
 	session.buffer = null;
@@ -522,18 +518,12 @@ function targetsSessionProject(
 	return session?.scheduled === undefined && session?.mode === event.mode && session.cwd === event.cwd;
 }
 
-function isSelectedAgentLiveTask(
-	state: MutableProjectionState,
-	session: MutableSessionProjection,
-	agentId: string,
-	taskId?: string,
-): boolean {
-	if (state.agentTranscript.agentId !== agentId) return false;
-	if (state.agentTranscript.taskId === null) return true;
-	if (taskId !== undefined) return taskId === state.agentTranscript.taskId;
-	return (
-		session.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === state.agentTranscript.taskId
-	);
+function isSelectedAgentLiveTask(session: MutableSessionProjection, agentId: string, taskId?: string): boolean {
+	const transcript = session.agentTranscript;
+	if (transcript.agentId !== agentId) return false;
+	if (transcript.taskId === null) return true;
+	if (taskId !== undefined) return taskId === transcript.taskId;
+	return session.agents.find((agent) => agent.agentId === agentId)?.currentTask?.taskId === transcript.taskId;
 }
 
 function canApplyEvents(session: MutableSessionProjection, events: readonly DomainEvent[]): boolean {
@@ -656,40 +646,33 @@ function applyEvent(state: MutableProjectionState, session: MutableSessionProjec
 		case "agent/deleted": {
 			const deleted = new Set(event.deletedAgentIds);
 			session!.agents = session!.agents.filter((agent) => !deleted.has(agent.agentId));
-			if (
-				session === activeProjection(state) &&
-				state.agentTranscript.agentId &&
-				deleted.has(state.agentTranscript.agentId)
-			) {
-				clearAgentTranscript(state.agentTranscript);
-			}
+			const transcript = session!.agentTranscript;
+			if (transcript.agentId && deleted.has(transcript.agentId)) clearAgentTranscript(transcript);
 			return;
 		}
 		case "agent/item/started":
 		case "agent/item/completed":
-			if (session === activeProjection(state) && isSelectedAgentLiveTask(state, session, event.agentId)) {
-				state.agentTranscript.itemOrder = upsertOrdered(
-					state.agentTranscript.itemsById,
-					state.agentTranscript.itemOrder,
+			if (isSelectedAgentLiveTask(session!, event.agentId)) {
+				session!.agentTranscript.itemOrder = upsertOrdered(
+					session!.agentTranscript.itemsById,
+					session!.agentTranscript.itemOrder,
 					event.item.itemId,
 					structuredClone(event.item),
 				);
 			}
 			return;
 		case "agent/item/delta": {
-			if (session !== activeProjection(state) || !isSelectedAgentLiveTask(state, session, event.agentId)) return;
-			const item = state.agentTranscript.itemsById.get(event.itemId);
+			if (!isSelectedAgentLiveTask(session!, event.agentId)) return;
+			const transcript = session!.agentTranscript;
+			const item = transcript.itemsById.get(event.itemId);
 			if (item?.state === "streaming") {
-				state.agentTranscript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
+				transcript.itemsById.set(event.itemId, appendItemDelta(item, event.delta));
 			}
 			return;
 		}
 		case "agent/itemsChanged":
-			if (
-				session === activeProjection(state) &&
-				isSelectedAgentLiveTask(state, session, event.agentId, event.taskId)
-			) {
-				state.agentTranscript.journalRevision += 1;
+			if (isSelectedAgentLiveTask(session!, event.agentId, event.taskId)) {
+				session!.agentTranscript.journalRevision += 1;
 			}
 			return;
 		case "turn/started":
@@ -891,49 +874,64 @@ export function prependProjectionItems(
 
 export function selectAgentTranscript(
 	state: MutableProjectionState,
+	sessionId: string,
 	agentId: string | null,
 	taskId: string | null = null,
 ): boolean {
-	if (state.agentTranscript.agentId === agentId && state.agentTranscript.taskId === taskId) return false;
-	clearAgentTranscript(state.agentTranscript, agentId, taskId);
+	const session = state.sessions.get(sessionId);
+	if (!session) return false;
+	const transcript = session.agentTranscript;
+	if (transcript.agentId === agentId && transcript.taskId === taskId) return false;
+	clearAgentTranscript(transcript, agentId, taskId);
+	session.revision += 1;
 	return true;
 }
 
 export function replaceAgentItems(
 	state: MutableProjectionState,
+	sessionId: string,
 	agentId: string,
 	taskId: string | null,
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): boolean {
-	if (state.agentTranscript.agentId !== agentId || state.agentTranscript.taskId !== taskId) return false;
+	const session = state.sessions.get(sessionId);
+	if (!session) return false;
+	const transcript = session.agentTranscript;
+	if (transcript.agentId !== agentId || transcript.taskId !== taskId) return false;
 	if (page.items.some((item) => item.sessionId !== agentId))
 		throw new TypeError("History page does not belong to child");
-	state.agentTranscript.itemsById.clear();
-	state.agentTranscript.itemOrder = [];
+	transcript.itemsById.clear();
+	transcript.itemOrder = [];
 	for (const item of page.items) {
-		state.agentTranscript.itemsById.set(item.itemId, structuredClone(item));
-		state.agentTranscript.itemOrder.push(item.itemId);
+		transcript.itemsById.set(item.itemId, structuredClone(item));
+		transcript.itemOrder.push(item.itemId);
 	}
-	state.agentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	transcript.nextBeforeItemId = page.nextBeforeItemId;
+	session.revision += 1;
 	return true;
 }
 
 export function prependAgentItems(
 	state: MutableProjectionState,
+	sessionId: string,
 	agentId: string,
 	taskId: string | null,
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): boolean {
-	if (state.agentTranscript.agentId !== agentId || state.agentTranscript.taskId !== taskId) return false;
+	const session = state.sessions.get(sessionId);
+	if (!session) return false;
+	const transcript = session.agentTranscript;
+	if (transcript.agentId !== agentId || transcript.taskId !== taskId) return false;
 	if (page.items.some((item) => item.sessionId !== agentId))
 		throw new TypeError("History page does not belong to child");
 	const added: string[] = [];
 	for (const item of page.items) {
-		if (!state.agentTranscript.itemsById.has(item.itemId)) added.push(item.itemId);
-		state.agentTranscript.itemsById.set(item.itemId, structuredClone(item));
+		if (!transcript.itemsById.has(item.itemId)) added.push(item.itemId);
+		transcript.itemsById.set(item.itemId, structuredClone(item));
 	}
-	state.agentTranscript.itemOrder = [...added, ...state.agentTranscript.itemOrder];
-	state.agentTranscript.nextBeforeItemId = page.nextBeforeItemId;
+	transcript.itemOrder = [...added, ...transcript.itemOrder];
+	transcript.nextBeforeItemId = page.nextBeforeItemId;
+	session.revision += 1;
 	return true;
 }
 

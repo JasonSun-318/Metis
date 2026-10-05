@@ -208,16 +208,26 @@ export class AppStore {
 		if (requireProjectionResnapshot(this.state, sessionId)) this.commit();
 	}
 
-	selectAgentTranscript(agentId: string | null, taskId: string | null = null): void {
-		if (selectAgentTranscript(this.state, agentId, taskId)) this.commit();
+	selectAgentTranscript(sessionId: string, agentId: string | null, taskId: string | null = null): void {
+		if (selectAgentTranscript(this.state, sessionId, agentId, taskId)) this.commit();
 	}
 
-	replaceAgentItems(agentId: string, taskId: string | null, page: ClientResult<"agent/readItems">): void {
-		if (replaceAgentItems(this.state, agentId, taskId, page)) this.commit();
+	replaceAgentItems(
+		sessionId: string,
+		agentId: string,
+		taskId: string | null,
+		page: ClientResult<"agent/readItems">,
+	): void {
+		if (replaceAgentItems(this.state, sessionId, agentId, taskId, page)) this.commit();
 	}
 
-	prependAgentItems(agentId: string, taskId: string | null, page: ClientResult<"agent/readItems">): void {
-		if (prependAgentItems(this.state, agentId, taskId, page)) this.commit();
+	prependAgentItems(
+		sessionId: string,
+		agentId: string,
+		taskId: string | null,
+		page: ClientResult<"agent/readItems">,
+	): void {
+		if (prependAgentItems(this.state, sessionId, agentId, taskId, page)) this.commit();
 	}
 
 	beginSubscription(sessionId: string, options?: { focus?: boolean }): number {
@@ -337,7 +347,7 @@ export class AppStore {
 			goal: projection.goal,
 			process: projection.process,
 			queuedTurns: projection.queuedTurns,
-			agentTranscript: this.state.agentTranscript,
+			agentTranscript: projection.agentTranscript,
 			sessions: this.state.sessions,
 			retiredSessions: this.state.retiredSessions,
 			supervisor: this.supervisor,
