@@ -99,21 +99,24 @@ export function FileSelectionProvider({
 	);
 }
 
-export function FileSelectionChips() {
+export function FileSelectionChips({ sessionId }: { readonly sessionId?: string }) {
 	const context = useFileSelections();
 	const { t } = useTranslation();
-	if (!context?.selections.length) return null;
+	const selections = sessionId === undefined
+		? (context?.selections ?? [])
+		: (context?.selections ?? []).filter((selection) => selection.sessionId === sessionId);
+	if (!selections.length) return null;
 	return (
-		<DrawerDetails className="composer-selections" summary={t("{{count}} selected text fragments", { count: context.selections.length })}>
+		<DrawerDetails className="composer-selections" summary={t("{{count}} selected text fragments", { count: selections.length })}>
 			<div className="composer-selection-list">
-				{context.selections.map((selection) => (
+				{selections.map((selection) => (
 					<div className="composer-selection" key={selection.id}>
 						<div>
 							<strong title={selection.name}>{selection.name}</strong>
 							<button
 								type="button"
 								aria-label={t("Remove reference {{name}}", { name: selection.name })}
-								onClick={() => context.remove([selection.id])}
+								onClick={() => context?.remove([selection.id])}
 							>
 								×
 							</button>

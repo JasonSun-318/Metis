@@ -269,15 +269,34 @@ export class SessionWorkspaceWorkflow {
 		const lifecycle = this.lifecycleGeneration;
 		this.invalidateSessionLists();
 		this.commit({ openingSessionId: sessionId, failure: null });
-		const subscription = this.store.beginSubscription(sessionId);
+		// A live bucket that is already ready skips the local subscription
+		// cycle — no subscribing flag, no snapshot rebuild, so the pane never
+		// flashes. The broker call still moves focus, authorizes the
+		// workspace, and releases hidden sessions; its snapshot is discarded
+		// because the bucket already merged everything it contains.
+		const subscription =
+			projectionBeforeOpen.activeSessionId !== sessionId &&
+			projectionBeforeOpen.sessions.get(sessionId)?.syncStatus === "ready"
+				? null
+				: this.store.beginSubscription(sessionId);
 		try {
 			const snapshot = await this.api.openSession({ sessionId });
 			if (!this.isCurrentOpen(generation, lifecycle)) {
-				this.store.cancelSubscription(sessionId, subscription);
+				if (subscription !== null) this.store.cancelSubscription(sessionId, subscription);
 				return snapshot;
 			}
 			this.invalidateSessionLists();
-			this.store.applySnapshot(snapshot);
+			const bucket = this.store.getSnapshot().sessions.get(sessionId);
+			if (subscription === null && bucket?.syncStatus === "ready") {
+				this.store.activateProjection(sessionId, snapshot.session);
+			} else {
+				// A concurrent live re-subscribe may hold the bucket without focus;
+				// claim focus so applySnapshot projects this session.
+				if (subscription === null && bucket?.syncStatus === "subscribing") {
+					this.store.beginSubscription(sessionId);
+				}
+				this.store.applySnapshot(snapshot);
+			}
 			this.reconcileLiveSessions();
 			if (snapshot.session.unread) await this.markSessionRead(sessionId);
 			if (!this.isCurrentOpen(generation, lifecycle)) return snapshot;
@@ -285,7 +304,7 @@ export class SessionWorkspaceWorkflow {
 			this.commit({ mode: snapshot.session.mode, message: "Session ready" });
 			return snapshot;
 		} catch (cause) {
-			this.store.cancelSubscription(sessionId, subscription);
+			if (subscription !== null) this.store.cancelSubscription(sessionId, subscription);
 			if (this.isCurrentOpen(generation, lifecycle)) {
 				await this.recoverProjectionAfterFailedOpen(projectionBeforeOpen, generation, lifecycle);
 				this.commit({ failure: failure("open-session", cause) });
@@ -306,7 +325,14 @@ export class SessionWorkspaceWorkflow {
 	}
 
 	resnapshotSession(sessionId: string): Promise<void> {
-		return this.requestResnapshot(sessionId);
+		if (this.store.getSnapshot().activeSessionId === sessionId) return this.requestResnapshot(sessionId);
+		// A non-active bucket resyncs through the live-session reconcile loop
+		// instead of a focus-changing open.
+		if (this.store.getSnapshot().sessions.get(sessionId)?.syncStatus === "ready") {
+			this.store.requireProjectionResnapshot(sessionId);
+			this.reconcileLiveSessions();
+		}
+		return Promise.resolve();
 	}
 
 	readonly setLiveSessions = (sessionIds: readonly string[]): void => {
@@ -790,8 +816,10 @@ export class SessionWorkspaceWorkflow {
 		return pending;
 	}
 
-	forkSession(entryId: string): Promise<SessionSummary | undefined> {
-		const sessionId = this.store.getSnapshot().activeSessionId;
+	forkSession(
+		entryId: string,
+		sessionId = this.store.getSnapshot().activeSessionId,
+	): Promise<SessionSummary | undefined> {
 		if (!sessionId) return Promise.resolve(undefined);
 		const lifecycle = this.lifecycleGeneration;
 		const intent = this.intentGeneration;

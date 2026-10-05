@@ -3,9 +3,10 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionChatViewContext } from "../src/renderer/components/SessionChatView.tsx";
 import { SessionWorkspaceView } from "../src/renderer/components/SessionWorkspace.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
-import type { AppStore } from "../src/renderer/store/app-store.ts";
+import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
 	type DesktopBrowserEvent,
@@ -57,6 +58,30 @@ function fixture() {
 		retainWorkspaceSessions: vi.fn().mockResolvedValue(undefined),
 	} as unknown as MetisDesktopApi;
 	const onActivateSession = vi.fn();
+	const chatView: SessionChatViewContext = {
+		api,
+		bootstrapped: false,
+		composerFormRef: { current: null },
+		composerSubmitRef: { current: null },
+		onChangeModel: vi.fn(),
+		onChangePermissionPreset: vi.fn(),
+		onChangeThinking: vi.fn(),
+		onClearError: vi.fn(),
+		onError: vi.fn(),
+		onFork: vi.fn(),
+		onManageMcp: vi.fn(),
+		onManageSkills: vi.fn(),
+		onNotice: vi.fn(),
+		onOpenKnowledge: vi.fn(),
+		onOpenPlan: vi.fn(),
+		onPickFiles: vi.fn(async () => []),
+		onPreviewDeliveredFile: vi.fn(),
+		onResolveDroppedFiles: vi.fn(() => []),
+		onRespond: vi.fn(async () => {}),
+		reducedMotion: true,
+		skillCatalogEpoch: 0,
+		store: new AppStore(),
+	};
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -66,6 +91,7 @@ function fixture() {
 			<SessionWorkspaceView
 				api={api}
 				chat={<div />}
+				chatView={chatView}
 				chatCwd={null}
 				chatFocusRequest={null}
 				chatIsDraft={false}

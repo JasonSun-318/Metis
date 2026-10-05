@@ -312,6 +312,8 @@ interface ComposerProps {
 	readonly contextUsageExpanded?: boolean;
 	readonly contextUsagePercent?: number | null;
 	readonly onOpenContextUsage?: () => void;
+	readonly inputId?: string;
+	readonly selectionSessionId?: string;
 }
 
 export function Composer({
@@ -339,6 +341,8 @@ export function Composer({
 	contextUsageExpanded = false,
 	contextUsagePercent,
 	onOpenContextUsage,
+	inputId = "composer-input",
+	selectionSessionId,
 	interactionControl,
 	goalControl,
 	queuedTurnControl,
@@ -704,7 +708,9 @@ export function Composer({
 		}
 
 		// 4. Standard submission
-		const selected = fileSelections?.selections ?? [];
+		const selected = (fileSelections?.selections ?? []).filter(
+			(item) => selectionSessionId === undefined || item.sessionId === selectionSessionId,
+		);
 		if (selected.length && !prompt.trim()) return;
 		setSubmitting(true);
 		try {
@@ -763,9 +769,9 @@ export function Composer({
 				onPaste={handlePaste}
 				onSubmit={(event) => void submit(event).catch(() => undefined)}
 			>
-				<label className="sr-only" htmlFor="composer-input">{t("Message Metis")}</label>
+				<label className="sr-only" htmlFor={inputId}>{t("Message Metis")}</label>
 				<div className="composer-box">
-					<FileSelectionChips />
+					<FileSelectionChips sessionId={selectionSessionId} />
 					{attachments.length > 0 && (
 						<div aria-label={t("Message additions")} className="composer-attachments">
 							{attachments.map((attachment) => attachment.previewDataUrl ? (
@@ -798,7 +804,7 @@ export function Composer({
 							contentEditable={!disabled && !awaitingAnswer && !submitting}
 							data-empty={!hasInput ? "true" : undefined}
 							data-placeholder={placeholder ?? (isCode ? t("Describe a task or ask a question") : t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…"))}
-							id="composer-input"
+							id={inputId}
 							onInput={syncEditorState}
 							onKeyDown={handleKeyDown}
 							onSelect={() => {

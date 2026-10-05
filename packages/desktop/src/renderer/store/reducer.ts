@@ -307,6 +307,37 @@ export function cancelProjectionSubscription(state: MutableProjectionState, sess
 	return true;
 }
 
+// Moves the projected session onto an already-subscribed bucket. Used by the
+// open fast path, which skips beginSubscription/applySnapshot so the bucket's
+// live state is never blanked or rebuilt during a focus switch.
+export function activateProjection(
+	state: MutableProjectionState,
+	sessionId: string,
+	summary?: SessionSummary,
+): boolean {
+	const session = state.sessions.get(sessionId);
+	if (!session || session.syncStatus !== "ready") return false;
+	if (summary) {
+		state.sessionsById.set(sessionId, structuredClone(summary));
+		if (!state.sessionOrder.includes(sessionId)) state.sessionOrder.unshift(sessionId);
+	}
+	if (state.activeSessionId === sessionId) return true;
+	state.activeSessionId = sessionId;
+	clearAgentTranscript(state.agentTranscript);
+	session.revision += 1;
+	return true;
+}
+
+// Marks a non-active bucket stale so the live-session reconcile loop
+// resubscribes it. Used when a mutation failed against a background session.
+export function requireProjectionResnapshot(state: MutableProjectionState, sessionId: string): boolean {
+	const session = state.sessions.get(sessionId);
+	if (!session || session.syncStatus === "resnapshot_required") return false;
+	session.syncStatus = "resnapshot_required";
+	session.revision += 1;
+	return true;
+}
+
 export function replaceProjectionSnapshot(state: MutableProjectionState, snapshotValue: SessionSnapshot): void {
 	const snapshot = structuredClone(snapshotValue);
 	const sessionId = snapshot.session.sessionId;
@@ -803,12 +834,12 @@ export function applyConnectionEvents(state: MutableProjectionState, batch: Conn
 
 export function prependProjectionItems(
 	state: MutableProjectionState,
+	sessionId: string,
 	page: { readonly items: readonly ItemView[]; readonly nextBeforeItemId: string | null },
 ): void {
-	const activeSessionId = state.activeSessionId;
-	const session = activeProjection(state);
-	if (!activeSessionId || !session || page.items.some((item) => item.sessionId !== activeSessionId)) {
-		throw new TypeError("History page does not belong to the active session");
+	const session = state.sessions.get(sessionId);
+	if (!session || page.items.some((item) => item.sessionId !== sessionId)) {
+		throw new TypeError("History page does not belong to the session");
 	}
 	const added: string[] = [];
 	for (const item of page.items) {

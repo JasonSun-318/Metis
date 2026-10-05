@@ -7,9 +7,9 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	App,
-	firstInteractionForSession,
 	sessionDisplayTitle,
 } from "../src/renderer/components/App.tsx";
+import { firstInteractionForSession } from "../src/renderer/session-view-utils.ts";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesPopover.tsx";
@@ -4776,6 +4776,74 @@ describe("Chat desktop shell", () => {
 			sessionIds: ["chat-existing", "chat-other"],
 			liveSessionIds: ["chat-existing", "chat-other"],
 		});
+
+		await act(async () => root.unmount());
+	});
+
+	it("renders a live chat view in every visible chat pane and keeps it mounted across focus", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			toJSON: () => ({}),
+		});
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-other", "chat", "/work/other-project", "Other task"),
+			],
+		});
+		vi.mocked(api.subscribeSession).mockResolvedValue({
+			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+			recentItems: [{
+				itemId: "item-background",
+				sessionId: "chat-existing",
+				role: "assistant",
+				state: "completed",
+				content: [{ type: "text", text: "background reply" }],
+				createdAt: "2026-07-20T00:00:00.000Z",
+			}],
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<App api={api} store={new AppStore()} />));
+		await flush();
+
+		await act(async () => button(container, "Other task").click());
+		await flush();
+		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
+			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		await act(async () => tabFor("Other task").dispatchEvent(
+			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+		));
+		await act(async () => button(container, "Split right").click());
+		await flush();
+		await flush();
+
+		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
+		// Both panes render a live conversation — no focus placeholder remains.
+		const livePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])")];
+		expect(livePanels).toHaveLength(2);
+		expect(livePanels.every((panel) => panel.querySelector(".conversation-column"))).toBe(true);
+		expect(activeWorkspace(container).textContent).not.toContain("This session is not in focus.");
+		// Only the projected session's composer keeps the canonical id.
+		const focusedPanel = livePanels.find((panel) => panel.querySelector("#composer-input"))!;
+		const backgroundPanel = livePanels.find((panel) => panel !== focusedPanel)!;
+		const backgroundComposer = backgroundPanel.querySelector<HTMLElement>("#composer-input-chat-existing")!;
+		expect(backgroundComposer).not.toBeNull();
+		expect(backgroundPanel.textContent).toContain("background reply");
+
+		await act(async () => tabFor("Chat project task").querySelector<HTMLElement>('[role="tab"]')!.click());
+		await flush();
+
+		// The already-live bucket takes focus without a resubscribe, so the pane
+		// keeps its DOM — the composer gains the canonical id in place.
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
+		expect(backgroundComposer.isConnected).toBe(true);
+		expect(backgroundComposer.id).toBe("composer-input");
+		expect(backgroundPanel.textContent).toContain("background reply");
+		expect(focusedPanel.querySelector("#composer-input-chat-other")).not.toBeNull();
 
 		await act(async () => root.unmount());
 	});

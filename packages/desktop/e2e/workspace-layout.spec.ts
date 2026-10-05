@@ -184,6 +184,80 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 	}
 });
 
+test("two visible chat panes each run their own live session", async () => {
+	test.setTimeout(120_000);
+	const alphaId = "81000000-0000-4000-8000-0000000000f1";
+	const betaId = "81000000-0000-4000-8000-0000000000f2";
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: alphaId, mode: "chat", name: "Live Alpha" },
+			{ id: betaId, mode: "chat", name: "Live Beta" },
+		],
+	});
+	const { consoleErrors, diagnostics, page } = workspace;
+	try {
+		await page.locator('.session-button[aria-label="Live Alpha"]').click();
+		await page.locator(`[data-active-session-id="${alphaId}"]`).waitFor({ state: "visible" });
+		await page.locator("#composer-input").fill("alpha ping");
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.locator(".transcript-scroll")).toContainText("alpha ping", { timeout: 20_000 });
+		await expect(page.locator(".transcript-scroll")).toContainText("layout-reply", { timeout: 20_000 });
+
+		await page.locator('.session-button[aria-label="Live Beta"]').click();
+		await page.locator(`[data-active-session-id="${betaId}"]`).waitFor({ state: "visible" });
+
+		// Split Alpha's chat tab into a second pane; the gesture focuses that
+		// pane, so Alpha becomes the projected session and Beta stays live in
+		// the background pane.
+		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Live Alpha", exact: true }) })
+			.click({ button: "right" });
+		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: "Split right", exact: true }).click();
+		await expect(page.locator(".workspace-pane")).toHaveCount(2);
+		await page.locator(`[data-active-session-id="${alphaId}"]`).waitFor({ state: "visible" });
+
+		const livePanels = page.locator(".workspace-panel:not([hidden])");
+		await expect(livePanels).toHaveCount(2);
+		await expect(livePanels.locator(".conversation-column")).toHaveCount(2);
+		await expect(page.getByText("This session is not in focus.", { exact: true })).toHaveCount(0);
+
+		const alphaPanel = livePanels.filter({ hasText: "alpha ping" });
+		const betaPanel = livePanels.filter({ hasNotText: "alpha ping" });
+		const alphaComposer = alphaPanel.locator("#composer-input");
+		await expect(alphaComposer).toBeVisible();
+		const alphaComposerHandle = await alphaComposer.elementHandle();
+
+		// The background pane submits to its own session through its own
+		// session-scoped composer id.
+		const betaComposer = betaPanel.locator(`#composer-input-${betaId}`);
+		await expect(betaComposer).toBeVisible();
+		await betaComposer.fill("beta ping");
+		await betaPanel.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(betaPanel.locator(".transcript-scroll")).toContainText("beta ping", { timeout: 20_000 });
+		await expect(betaPanel.locator(".transcript-scroll")).toContainText("layout-reply", { timeout: 20_000 });
+		await expect(alphaPanel.locator(".transcript-scroll")).not.toContainText("beta ping");
+
+		// Focusing the background pane's session activates its already-live
+		// bucket without remounting or blanking the pane.
+		await page.getByRole("tab", { name: "Live Beta", exact: true }).click();
+		await page.locator(`[data-active-session-id="${betaId}"]`).waitFor({ state: "visible" });
+		await expect(betaPanel.locator("#composer-input")).toBeVisible();
+		await expect(betaPanel.locator(".transcript-scroll")).toContainText("beta ping");
+		await expect(alphaPanel.locator(".transcript-scroll")).toContainText("alpha ping");
+		expect(await alphaComposerHandle?.evaluate((element) => element.isConnected)).toBe(true);
+		await expect(alphaPanel.locator(`#composer-input-${alphaId}`)).toBeVisible();
+
+		if (process.env.METIS_AUDIT_DIR) {
+			await mkdir(process.env.METIS_AUDIT_DIR, { recursive: true });
+			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "two-live.png") });
+		}
+		expect(consoleErrors).toEqual([]);
+	} catch (error) {
+		throw await rendererFailure(error, page, diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
+	}
+});
+
 test("a file tab keeps workspace authorization after another session is opened", async () => {
 	test.setTimeout(120_000);
 	const alphaId = "81000000-0000-4000-8000-0000000000d1";

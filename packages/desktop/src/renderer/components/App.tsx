@@ -1,49 +1,38 @@
 import {
 	type AgentMode,
 	type InteractionResponseInput,
-	type InteractionView,
-	type ItemView,
-	type McpServerSummaryView,
 	type ModelOptionView,
 	type ModelSettingsView,
 	type PermissionPresetView,
 	type PlanView,
-	type QueuedTurnView,
-	RPC_ERROR_CODES,
 	type ScheduleTaskView,
 	type SessionDeliveredFileView,
-	type SessionStatusView,
 	type SessionSummary,
 	type SkillSummaryView,
 	type ThinkingSelectionView,
 } from "@metis/app-protocol";
-import { ArrowLeft, ArrowRight, Lightbulb, SidebarSimple, XCircle } from "@phosphor-icons/react";
+import { ArrowLeft, ArrowRight, SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
-import { contextUsagePercent } from "../context-usage.ts";
 import {
 	applyGeneralPreferencesToDocument,
 	loadGeneralPreferences,
 	resolveReducedMotion,
 	saveGeneralPreferences,
 } from "../general-preferences.ts";
-import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
 import { useAppStore } from "../hooks/use-app-store.ts";
-import { useConversationPlanFlow } from "../hooks/use-conversation-plan-flow.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
 import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
-import { rpcErrorCode } from "../rpc-error.ts";
+import { firstInteractionForSession } from "../session-view-utils.ts";
 import { SessionWorkspaceWorkflow, sessionProjectKey, type NewTaskDraft } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
-import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
-import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
-import { GoalBar } from "./GoalBar.tsx";
+import type { ComposerSubmission } from "./Composer.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome, recentProjectsFromGroups } from "./NewTaskHome.tsx";
@@ -51,7 +40,6 @@ import { PermissionSelector } from "./PermissionSelector.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
-import { QueuedTurnList } from "./QueuedTurnList.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
 import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
@@ -66,15 +54,13 @@ import {
 	type SidebarDestination,
 	sessionSidebarDefaultWidth,
 } from "./SessionSidebar.tsx";
-import { SessionStatusPanel } from "./SessionStatusPanel.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
+import type { SessionChatSubmit, SessionChatViewContext } from "./SessionChatView.tsx";
 import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 import { SystemNotice, systemErrorNotice, type SystemNoticeTone } from "./SystemNotice.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
 import { SessionWorkspaceView } from "./SessionWorkspace.tsx";
-import { Transcript } from "./Transcript.tsx";
-import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -89,8 +75,6 @@ type WindowsNavigationLocation =
 
 const ASSISTED_SCHEDULE_PROMPT =
 	"I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.";
-const MCP_STATUS_POLL_MS = 500;
-const MCP_RECONNECT_POLL_MS = 4_000;
 
 interface CodeProjectSetupRequest {
 	readonly draft: NewTaskDraft;
@@ -103,43 +87,8 @@ interface TransientSystemNotice {
 	readonly message?: string;
 }
 
-function queuedTurnActionError(cause: unknown): Error {
-	const code = rpcErrorCode(cause);
-	if (code === RPC_ERROR_CODES.CONFLICT) return new Error("This queued message changed. Review it and try again.");
-	if (code === RPC_ERROR_CODES.BUSY) return new Error("The task state changed before this message could be sent.");
-	if (code === RPC_ERROR_CODES.OVERLOADED) return new Error("The message queue is full.");
-	if (code === RPC_ERROR_CODES.READ_ONLY_SESSION) return new Error("Scheduled sessions are read-only.");
-	return cause instanceof Error ? cause : new Error("The queued message could not be changed.");
-}
-
 export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOrigin" | "name">): string {
 	return session.name || (session.cwdOrigin === "managed" ? "Chat" : session.cwd) || "Metis";
-}
-
-export function firstInteractionForSession(
-	interactionOrder: readonly string[],
-	interactionsById: ReadonlyMap<string, InteractionView>,
-	sessionId: string | undefined,
-): InteractionView | undefined {
-	if (!sessionId) return undefined;
-	for (const interactionId of interactionOrder) {
-		const interaction = interactionsById.get(interactionId);
-		if (interaction?.sessionId === sessionId) return interaction;
-	}
-	return undefined;
-}
-
-export function latestAssistantUsageKey(
-	itemOrder: readonly string[],
-	itemsById: ReadonlyMap<string, ItemView>,
-): string {
-	for (let i = itemOrder.length - 1; i >= 0; i--) {
-		const item = itemsById.get(itemOrder[i]!);
-		if (item?.role !== "assistant" || item.state !== "completed" || !item.usage) continue;
-		const usage = item.usage;
-		return `${item.itemId}:${usage.inputTokens ?? 0}:${usage.outputTokens ?? 0}:${usage.cacheReadTokens ?? 0}:${usage.cacheWriteTokens ?? 0}`;
-	}
-	return "";
 }
 
 const SESSION_SIDEBAR_WIDTH_KEY = "metis.session-sidebar-width.v1";
@@ -201,7 +150,6 @@ export function App({ api, store }: AppProps) {
 	const bootstrapped = workspaceState.bootstrapped;
 	const draftBusy = workspaceState.draftBusy;
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
-	const askUserDrafts = useRef(new Map<string, AskUserDraft>());
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const [codeProjectSetupOpen, setCodeProjectSetupOpen] = useState(false);
 	const codeProjectSetupGeneration = useRef(0);
@@ -215,7 +163,7 @@ export function App({ api, store }: AppProps) {
 	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
 	const [knowledgeRequest, setKnowledgeRequest] = useState<{ id: number; sessionId: string }>();
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
-	const [planPreviewRequest, setPlanPreviewRequest] = useState<PlanView | null>(null);
+	const [planPreviewRequest, setPlanPreviewRequest] = useState<{ readonly sessionId: string; readonly plan: PlanView } | null>(null);
 	const chatFocusNonce = useRef(0);
 	const [chatFocusRequest, setChatFocusRequest] = useState<{ nonce: number; sessionId: string | null } | null>(null);
 	const requestChatFocus = useCallback((sessionId: string | null) => {
@@ -233,9 +181,7 @@ export function App({ api, store }: AppProps) {
 		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
 	);
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
-	const [loadingOlder, setLoadingOlder] = useState(false);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
-	const [mcpServers, setMcpServers] = useState<readonly McpServerSummaryView[]>([]);
 	const [pluginSection, setPluginSection] = useState<"skills" | "mcp">("skills");
 	const [navigationBack, setNavigationBack] = useState<WindowsNavigationLocation[]>([]);
 	const [navigationForward, setNavigationForward] = useState<WindowsNavigationLocation[]>([]);
@@ -245,17 +191,7 @@ export function App({ api, store }: AppProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [updateNotice, setUpdateNotice] = useState<TransientSystemNotice | null>(null);
-	const [conversationPrefillRequest, setConversationPrefillRequest] = useState<ComposerPrefillRequest>();
 	const [composerControl, setComposerControl] = useState<{ readonly id: number; readonly target: "model" | "thinking" | "mcp" | null }>({ id: 0, target: null });
-	const [sessionStatusPanel, setSessionStatusPanel] = useState<{
-		readonly sessionId: string;
-		readonly loading: boolean;
-		readonly closing?: boolean;
-		readonly status?: SessionStatusView;
-		readonly error?: string;
-	} | null>(null);
-	const [contextStatus, setContextStatus] = useState<SessionStatusView | null>(null);
-	const [compactingSession, setCompactingSession] = useState<{ readonly sessionId: string; readonly startedAt: string } | null>(null);
 	const dirtyToolSessionIds = [...workspaceState.dirtySessionIds];
 	const toolCleanupSessionIds = workspaceState.cleanupSessionIds;
 	const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -294,19 +230,17 @@ export function App({ api, store }: AppProps) {
 			unsubscribe?.();
 		};
 	}, [api]);
-	const mcpListGeneration = useRef(0);
 	const modelSettingsGeneration = useRef(0);
 	const handlePreviewDeliveredFile = useCallback(
-		(file: SessionDeliveredFileView) => {
-			if (!state.activeSessionId) return;
+		(sessionId: string, file: SessionDeliveredFileView) => {
 			setPreviewRequest({
 				source: "delivered",
-				sessionId: state.activeSessionId,
+				sessionId,
 				fileId: file.fileId,
 				name: file.name,
 			});
 		},
-		[state.activeSessionId],
+		[],
 	);
 	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
 		const clamped = clampSessionSidebarWidth(width);
@@ -354,8 +288,6 @@ export function App({ api, store }: AppProps) {
 	const skillListGeneration = useRef(0);
 	const scheduleSubscriptionGeneration = useRef(0);
 	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
-	const statusGeneration = useRef(0);
-	const contextStatusRef = useRef<SessionStatusView | null>(null);
 	const visibleSessionId = !settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
 	workspaceVisibleSession.current = visibleSessionId;
 	const reportError = useCallback((cause: unknown) => {
@@ -372,18 +304,6 @@ export function App({ api, store }: AppProps) {
 	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
 		setComposerControl((current) => ({ id: current.id + 1, target }));
 	}, []);
-	const closeSessionStatus = useCallback(() => {
-		statusGeneration.current += 1;
-		setSessionStatusPanel((current) => current ? { ...current, closing: true } : null);
-	}, []);
-	useEffect(() => {
-		if (!sessionStatusPanel?.closing) return undefined;
-		const timer = setTimeout(
-			() => setSessionStatusPanel((current) => current?.closing ? null : current),
-			reducedMotion ? 0 : 160,
-		);
-		return () => clearTimeout(timer);
-	}, [reducedMotion, sessionStatusPanel?.closing]);
 	useEffect(() => {
 		let disposed = false;
 		let receivedEvent = false;
@@ -457,6 +377,15 @@ export function App({ api, store }: AppProps) {
 
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
 	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
+	// The projected session's SessionChatView publishes its submit here so the
+	// shared file-selection provider can route "request change" actions to it.
+	const conversationSubmitRef = useRef<SessionChatSubmit | null>(null);
+	const submitFileSelection = useCallback((input: ConversationSubmission) => {
+		const submit = conversationSubmitRef.current;
+		return submit
+			? submit(input)
+			: Promise.reject(new Error("This conversation is not ready to send"));
+	}, []);
 	const pendingHomeTransition = useRef<{
 		source: DOMRectReadOnly;
 		home: HTMLFormElement;
@@ -664,13 +593,16 @@ export function App({ api, store }: AppProps) {
 			// The workflow reports the error while preserving the current projection.
 		}
 	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, requestChatFocus, workspaceWorkflow]);
-	const forkFromReply = async (entryId: string) => {
-		try {
-			await workspaceWorkflow.forkSession(entryId);
-		} catch (cause) {
-			reportError(cause);
-		}
-	};
+	const forkFromReply = useCallback(
+		async (sessionId: string, entryId: string) => {
+			try {
+				await workspaceWorkflow.forkSession(entryId, sessionId);
+			} catch (cause) {
+				reportError(cause);
+			}
+		},
+		[reportError, workspaceWorkflow],
+	);
 	const openScheduledSession = (sessionId: string) => {
 		setDestination("tasks");
 		void openVisibleSession(sessionId);
@@ -826,9 +758,9 @@ export function App({ api, store }: AppProps) {
 		? state.sessionsById.get(visibleNewTaskDraft.sessionId)
 			?? { sessionId: visibleNewTaskDraft.sessionId, cwd: visibleNewTaskDraft.folder }
 		: undefined);
-	const openKnowledge = (sessionId: string) => {
+	const openKnowledge = useCallback((sessionId: string) => {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
-	};
+	}, []);
 	const workspaceProjectName = (() => {
 		const cwd = visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null;
 		const contextMode = visibleActiveSession?.mode ?? visibleNewTaskDraft?.mode ?? mode;
@@ -836,7 +768,7 @@ export function App({ api, store }: AppProps) {
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
 	})();
-	const running = visibleActiveSession?.state === "running" || (visibleActiveSession !== undefined && state.activeTurnId !== null);
+
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
 		if (destination !== "tasks" || settingsOpen || reducedMotion || workspaceState.failure) {
@@ -884,17 +816,13 @@ export function App({ api, store }: AppProps) {
 		homeTransitionAnimation.current = null;
 	}, [sessionSidebarWidth]);
 	useEffect(() => {
-		statusGeneration.current += 1;
-		contextStatusRef.current = null;
-		setSessionStatusPanel(null);
-		setContextStatus(null);
 		requestComposerControl(null);
-		setCompactingSession((current) => current?.sessionId === visibleActiveSession?.sessionId ? current : null);
 		setPlanPreviewRequest(null);
-		setConversationPrefillRequest(undefined);
 	}, [requestComposerControl, visibleActiveSession?.sessionId]);
-	const skillSessionId = visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId;
-	const shouldListSkills = destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined);
+	// The projected session's chat view fetches its own catalog; this list only
+	// feeds the new-task draft composer.
+	const skillSessionId = visibleNewTaskDraft?.sessionId;
+	const shouldListSkills = destination === "tasks" && newTaskOpen;
 	useEffect(() => {
 		const generation = ++skillListGeneration.current;
 		if (!bootstrapped || !serverReady || !shouldListSkills) {
@@ -934,37 +862,6 @@ export function App({ api, store }: AppProps) {
 			if (generation === modelSettingsGeneration.current) modelSettingsGeneration.current += 1;
 		};
 	}, [api, bootstrapped, reportError, serverReady, settingsOpen]);
-	const visibleMcpSessionId = destination === "tasks" ? visibleActiveSession?.sessionId : undefined;
-	useEffect(() => {
-		const generation = ++mcpListGeneration.current;
-		let timer: ReturnType<typeof setTimeout> | undefined;
-		if (!bootstrapped || !serverReady || !visibleMcpSessionId) {
-			setMcpServers([]);
-			return;
-		}
-		setMcpServers([]);
-		const refresh = () => {
-			void api.listMcpServers({ sessionId: visibleMcpSessionId }).then(
-				(result) => {
-					if (generation !== mcpListGeneration.current) return;
-					setMcpServers(result.servers);
-					const connecting = result.servers.some((server) => server.effective && server.enabled && server.state === "connecting");
-					const reconnecting = result.servers.some((server) => server.effective && server.enabled && server.state === "reconnecting");
-					if (connecting || reconnecting) timer = setTimeout(refresh, connecting ? MCP_STATUS_POLL_MS : MCP_RECONNECT_POLL_MS);
-				},
-				(cause) => {
-					if (generation !== mcpListGeneration.current) return;
-					setMcpServers([]);
-					reportError(cause);
-				},
-			);
-		};
-		refresh();
-		return () => {
-			if (generation === mcpListGeneration.current) mcpListGeneration.current += 1;
-			if (timer) clearTimeout(timer);
-		};
-	}, [api, bootstrapped, reportError, serverReady, visibleMcpSessionId]);
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
@@ -974,14 +871,6 @@ export function App({ api, store }: AppProps) {
 		state.interactionsById,
 		interactiveSessionId,
 	);
-	const waitingForAnswer = visibleInteraction?.kind === "ask_user";
-	useEffect(() => {
-		if (state.syncStatus !== "ready") return;
-		for (const id of askUserDrafts.current.keys()) {
-			const draft = askUserDrafts.current.get(id)!;
-			if (!state.sessionsById.has(draft.sessionId) || (draft.sessionId === state.activeSessionId && !state.interactionsById.has(id))) askUserDrafts.current.delete(id);
-		}
-	}, [state.activeSessionId, state.interactionOrder, state.sessionOrder, state.syncStatus]);
 	const inlineInteraction =
 		visibleInteraction?.kind === "ask_user" || visibleInteraction?.kind === "session_permission_approval"
 			? visibleInteraction
@@ -995,140 +884,52 @@ export function App({ api, store }: AppProps) {
 		: undefined;
 	const errorNotice = error ? systemErrorNotice(error) : undefined;
 	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
-	const {
-		collaborationMode: collaborationModeValue,
-		collaborationModeBlocked,
-		collaborationModeChanging,
-		currentProposedPlan,
-		planActionsBusy,
-		planRevisionTarget,
-		submit,
-		changeCollaborationMode,
-		revisePlan,
-		clearPlanRevision,
-		startPlan,
-		cancelPlan,
-	} = useConversationPlanFlow({
-		api,
-		sessionId: visibleActiveSession?.sessionId,
-		writableSessionId,
-		running,
-		queuedTurnCount: state.queuedTurns.length,
-		serverReady,
-		syncReady: state.syncStatus === "ready",
-		compacting: compactingSession !== null,
-		interactionPending: inlineInteraction !== undefined,
-		collaborationMode: state.collaborationMode,
-		itemOrder: state.itemOrder,
-		itemsById: state.itemsById,
-		clearError,
-		reportError,
-	});
 
-	const deleteQueuedTurn = async (turn: QueuedTurnView) => {
-		if (!visibleActiveSession) return;
-		setError(null);
-		try {
-			await api.deleteQueuedTurn({
-				sessionId: visibleActiveSession.sessionId,
-				requestId: crypto.randomUUID(),
-				queueItemId: turn.queueItemId,
-				expectedRevision: turn.revision,
-			});
-		} catch (cause) {
-			const error = queuedTurnActionError(cause);
-			reportError(error);
-			throw error;
-		}
-	};
-
-	const editQueuedTurn = async (turn: QueuedTurnView) => {
-		await deleteQueuedTurn(turn);
-		setConversationPrefillRequest((current) => ({
-			id: (current?.id ?? 0) + 1,
-			text: turn.text,
-		}));
-		if (turn.attachments.length > 0) {
-			setNotice("The message was returned to the composer. Add its attachments again before sending.");
-		}
-	};
-
-	const sendQueuedTurn = async (turn: QueuedTurnView, delivery: "steer" | "start") => {
-		if (!visibleActiveSession) return;
-		setError(null);
-		try {
-			await api.sendQueuedTurn({
-				sessionId: visibleActiveSession.sessionId,
-				requestId: crypto.randomUUID(),
-				queueItemId: turn.queueItemId,
-				expectedRevision: turn.revision,
-				delivery,
-			});
-		} catch (cause) {
-			const error = queuedTurnActionError(cause);
-			reportError(error);
-			throw error;
-		}
-	};
-
-	const interrupt = async () => {
-		if (!visibleActiveSession) return;
-		try {
-			await api.interruptTurn({ sessionId: visibleActiveSession.sessionId, requestId: crypto.randomUUID() });
-		} catch (cause) {
-			reportError(cause);
-			throw cause;
-		}
-	};
-
-	const loadOlder = async () => {
-		if (!visibleActiveSession || !state.nextBeforeItemId || loadingOlder) return;
-		setLoadingOlder(true);
-		try {
-			store.prependItems(await api.readItems({ sessionId: visibleActiveSession.sessionId, beforeItemId: state.nextBeforeItemId, limit: 200 }));
-		} catch (cause) {
-			reportError(cause);
-		} finally {
-			setLoadingOlder(false);
-		}
-	};
-
-	const respond = async (response: InteractionResponseInput) => {
-		try {
-			await api.respondToInteraction(response);
-			store.removeInteraction(response.interactionId);
-		} catch (cause) {
-			const message = cause instanceof Error ? cause.message : String(cause);
-			if (/stale|unavailable|cancelled|no longer/iu.test(message)) {
+	const respond = useCallback(
+		async (response: InteractionResponseInput) => {
+			try {
+				await api.respondToInteraction(response);
 				store.removeInteraction(response.interactionId);
-				reportError(new Error("This interaction is no longer available."));
+			} catch (cause) {
+				const message = cause instanceof Error ? cause.message : String(cause);
+				if (/stale|unavailable|cancelled|no longer/iu.test(message)) {
+					store.removeInteraction(response.interactionId);
+					reportError(new Error("This interaction is no longer available."));
+				}
+				throw cause;
 			}
-			throw cause;
-		}
-	};
+		},
+		[api, reportError, store],
+	);
 
-	const changeThinking = async (sessionId: string, selection: AppStoreSnapshot["thinkingSelection"]) => {
-		store.setOptimisticThinkingSelection(selection);
-		try {
-			await api.setThinkingSelection({ sessionId, requestId: crypto.randomUUID(), selection });
-		} catch (cause) {
-			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
-			reportError(cause);
-		}
-	};
+	const changeThinking = useCallback(
+		async (sessionId: string, selection: AppStoreSnapshot["thinkingSelection"]) => {
+			store.setOptimisticThinkingSelection(sessionId, selection);
+			try {
+				await api.setThinkingSelection({ sessionId, requestId: crypto.randomUUID(), selection });
+			} catch (cause) {
+				await workspaceWorkflow.resnapshotSession(sessionId);
+				reportError(cause);
+			}
+		},
+		[api, reportError, store, workspaceWorkflow],
+	);
 
-	const changeModel = async (sessionId: string, model: AppStoreSnapshot["availableModels"][number]) => {
-		try {
-			await api.setModel({
-				sessionId,
-				requestId: crypto.randomUUID(),
-				provider: model.provider,
-				modelId: model.modelId,
-			});
-		} catch (cause) {
-			reportError(cause);
-		}
-	};
+	const changeModel = useCallback(
+		async (sessionId: string, model: AppStoreSnapshot["availableModels"][number]) => {
+			try {
+				await api.setModel({
+					sessionId,
+					requestId: crypto.randomUUID(),
+					provider: model.provider,
+					modelId: model.modelId,
+				});
+			} catch (cause) {
+				reportError(cause);
+			}
+		},
+		[api, reportError],
+	);
 
 	// New sessions inherit the global defaults, so the new-task page edits them
 	// directly instead of requiring an existing configuration session.
@@ -1187,18 +988,21 @@ export function App({ api, store }: AppProps) {
 		[modelSettings],
 	);
 
-	const changePermissionPreset = async (sessionId: string, permissionPreset: PermissionPresetView) => {
-		try {
-			await api.setPermissionPreset({ sessionId, requestId: crypto.randomUUID(), permissionPreset });
-			if (store.getSnapshot().activeSessionId === sessionId)
-				setNotice(t("Permissions updated. Applies to subsequent tools; running operations continue."));
-		} catch (cause) {
-			if (store.getSnapshot().activeSessionId === sessionId) await workspaceWorkflow.resnapshotSession(sessionId);
-			reportError(cause);
-			throw cause;
-		}
-	};
-	const setupWindowsSandbox = async () => {
+	const changePermissionPreset = useCallback(
+		async (sessionId: string, permissionPreset: PermissionPresetView) => {
+			try {
+				await api.setPermissionPreset({ sessionId, requestId: crypto.randomUUID(), permissionPreset });
+				if (store.getSnapshot().activeSessionId === sessionId)
+					setNotice(t("Permissions updated. Applies to subsequent tools; running operations continue."));
+			} catch (cause) {
+				await workspaceWorkflow.resnapshotSession(sessionId);
+				reportError(cause);
+				throw cause;
+			}
+		},
+		[api, reportError, store, t, workspaceWorkflow],
+	);
+	const setupWindowsSandbox = useCallback(async () => {
 		try {
 			const result = await api.installWorkspaceSandbox();
 			if (result === "cancelled") {
@@ -1215,80 +1019,18 @@ export function App({ api, store }: AppProps) {
 		} catch (cause) {
 			reportError(cause);
 		}
-	};
+	}, [api, reportError, store, t, workspaceWorkflow]);
 
 	const configurationSession = visibleActiveSession ?? (
 		newTaskOpen && visibleNewTaskDraft?.sessionId && activeSession?.sessionId === visibleNewTaskDraft.sessionId ? activeSession : undefined
 	);
 
-	const openPlan = useCallback((plan: PlanView) => {
-		setPlanPreviewRequest(plan);
+	const openPlan = useCallback((sessionId: string, plan: PlanView) => {
+		setPlanPreviewRequest({ sessionId, plan });
 	}, []);
 
-	const compactBlocked = running || inlineInteraction !== undefined || compactingSession !== null;
-	const isCompacting = compactingSession !== null;
-	const assistantUsageKey = latestAssistantUsageKey(state.itemOrder, state.itemsById);
-	const activeModelKey = state.model ? `${state.model.provider}/${state.model.modelId}` : "";
-	const mcpContextKey = mcpServers
-		.map((server) =>
-			`${server.name}:${server.revision}:${server.effective}:${server.enabled}:${server.state}:${server.toolCount}`,
-		)
-		.sort()
-		.join("|");
-
-	const loadContextStatus = useCallback(async (
-		sessionId: string,
-		options: { readonly showPanel?: boolean } = {},
-	) => {
-		const generation = ++statusGeneration.current;
-		if (options.showPanel) {
-			const cached = contextStatusRef.current;
-			setSessionStatusPanel(
-				cached?.sessionId === sessionId
-					? { sessionId, loading: false, status: cached }
-					: { sessionId, loading: true },
-			);
-		}
-		try {
-			const status = await api.getSessionStatus({ sessionId });
-			if (generation !== statusGeneration.current) return;
-			if (store.getSnapshot().activeSessionId !== sessionId) return;
-			contextStatusRef.current = status;
-			setContextStatus(status);
-			setSessionStatusPanel((current) =>
-				current?.sessionId === sessionId
-					? { sessionId, loading: false, status }
-					: current,
-			);
-		} catch (cause) {
-			if (generation !== statusGeneration.current) return;
-			if (store.getSnapshot().activeSessionId !== sessionId) return;
-			if (options.showPanel) {
-				setSessionStatusPanel({
-					sessionId,
-					loading: false,
-					error: cause instanceof Error ? cause.message : "Session status could not be loaded.",
-				});
-			} else {
-				contextStatusRef.current = null;
-				setContextStatus(null);
-			}
-		}
-	}, [api, store]);
-
-	useEffect(() => {
-		if (!writableSessionId || !serverReady || isCompacting) return;
-		void loadContextStatus(writableSessionId);
-	}, [
-		activeModelKey,
-		assistantUsageKey,
-		isCompacting,
-		loadContextStatus,
-		mcpContextKey,
-		serverReady,
-		skillCatalogEpoch,
-		writableSessionId,
-	]);
+	// The draft composer only serves commands that do not need a session;
+	// session-bound commands live inside each SessionChatView.
 	const { disabledSlashCommands, disabledSlashReasons } = useMemo(() => {
 		const commands = new Set<ComposerSlashCommand>();
 		const reasons: Partial<Record<ComposerSlashCommand, string>> = {};
@@ -1301,19 +1043,6 @@ export function App({ api, store }: AppProps) {
 			reasons.goal = "Open a task to use this command";
 			reasons.plan = "Open a task to use this command";
 			reasons.status = "Open a task to use this command";
-		} else if (compactBlocked) {
-			commands.add("compact");
-			reasons.compact = compactingSession
-				? "Conversation compaction is already running"
-				: "Stop the active task before compacting";
-		}
-		if (writableSessionId && (collaborationModeValue === "plan" || collaborationModeBlocked)) {
-			commands.add("plan");
-			reasons.plan = currentProposedPlan
-				? "Start or cancel the current plan first"
-				: collaborationModeValue === "plan"
-					? "Plan mode is already active"
-					: "Plan mode is unavailable while this task is busy";
 		}
 		if (!configurationSession && !newTaskOpen) {
 			commands.add("model");
@@ -1322,104 +1051,11 @@ export function App({ api, store }: AppProps) {
 			reasons.thinking = "Open a task to use this command";
 		}
 		return { disabledSlashCommands: commands, disabledSlashReasons: reasons };
-	}, [collaborationModeBlocked, collaborationModeValue, compactBlocked, compactingSession, configurationSession, currentProposedPlan, writableSessionId]);
-
-	const openSessionStatus = useCallback(async () => {
-		if (!writableSessionId) return;
-		requestComposerControl(null);
-		await loadContextStatus(writableSessionId, { showPanel: true });
-	}, [loadContextStatus, requestComposerControl, writableSessionId]);
-	const toggleSessionStatus = useCallback(() => {
-		if (!writableSessionId) return;
-		if (sessionStatusPanel?.sessionId === writableSessionId && !sessionStatusPanel.closing) {
-			closeSessionStatus();
-			return;
-		}
-		void openSessionStatus();
-	}, [closeSessionStatus, openSessionStatus, sessionStatusPanel, writableSessionId]);
-
-	const compactConversation = useCallback(async () => {
-		if (!writableSessionId || compactBlocked) return;
-		closeSessionStatus();
-		requestComposerControl(null);
-		setError(null);
-		setNotice(null);
-		setCompactingSession({ sessionId: writableSessionId, startedAt: new Date().toISOString() });
-		try {
-			const result = await api.compactSession({ sessionId: writableSessionId, requestId: crypto.randomUUID() });
-			if (result.message) setNotice(result.message);
-		} catch (cause) {
-			reportError(cause);
-		} finally {
-			setCompactingSession((current) => current?.sessionId === writableSessionId ? null : current);
-		}
-	}, [api, closeSessionStatus, compactBlocked, reportError, requestComposerControl, writableSessionId]);
-
-	const mutateSessionGoal = useCallback(
-		async (input: { objective?: string; status?: "active" | "paused" } | { clear: true }) => {
-			if (!writableSessionId) return;
-			try {
-				if ("clear" in input) {
-					await api.clearSessionGoal({ sessionId: writableSessionId, requestId: crypto.randomUUID() });
-					return;
-				}
-				await api.setSessionGoal({
-					sessionId: writableSessionId,
-					requestId: crypto.randomUUID(),
-					...(input.objective === undefined ? {} : { objective: input.objective }),
-					...(input.status === undefined ? {} : { status: input.status }),
-				});
-			} catch (cause) {
-				reportError(cause);
-			}
-		},
-		[api, reportError, writableSessionId],
-	);
-
-	const handleGoalCommand = useCallback(
-		async (command: GoalSlashCommand) => {
-			if (!writableSessionId) return;
-			if (command.kind === "usage") {
-				setNotice(GOAL_SLASH_USAGE);
-				return;
-			}
-			if (command.kind === "clear") {
-				await mutateSessionGoal({ clear: true });
-				return;
-			}
-			if (command.kind === "pause") {
-				await mutateSessionGoal({ status: "paused" });
-				return;
-			}
-			if (command.kind === "resume") {
-				await mutateSessionGoal({ status: "active" });
-				return;
-			}
-			await mutateSessionGoal({ objective: command.objective });
-		},
-		[mutateSessionGoal, writableSessionId],
-	);
+	}, [configurationSession, newTaskOpen, writableSessionId]);
 
 	const handleSlashCommand = useCallback(async (command: ComposerSlashCommand) => {
-		if (command === "status") {
-			await openSessionStatus();
-			return;
-		}
-		closeSessionStatus();
-		if (command === "compact") {
-			await compactConversation();
-			return;
-		}
-		if (command === "goal") {
-			setNotice(GOAL_SLASH_USAGE);
-			return;
-		}
-		if (command === "plan") {
-			if (collaborationModeValue !== "plan") await changeCollaborationMode("plan");
-			return;
-		}
-		requestComposerControl(command);
-	}, [changeCollaborationMode, closeSessionStatus, collaborationModeValue, compactConversation, openSessionStatus, requestComposerControl]);
+		if (command === "model" || command === "thinking" || command === "mcp") requestComposerControl(command);
+	}, [requestComposerControl]);
 	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
@@ -1459,7 +1095,7 @@ export function App({ api, store }: AppProps) {
 			value={globalThinkingSelection}
 		/>
 	) : undefined;
-	const permissionSessionId = visibleNewTaskDraft?.sessionId ?? visibleActiveSession?.sessionId;
+	const permissionSessionId = visibleNewTaskDraft?.sessionId;
 	const permissionSessionOpen = permissionSessionId === undefined || state.activeSessionId === permissionSessionId;
 	const draftCreatePending = workspaceState.draftCreatePending;
 	const permissionView = permissionSessionId && permissionSessionOpen
@@ -1485,70 +1121,20 @@ export function App({ api, store }: AppProps) {
 			sandboxHealth={permissionView.sandboxHealth}
 			value={permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset}
 		/>
-	) : visibleActiveSession ? (
-		<PermissionSelector
-			activeReview={state.activeReview}
-			constrainedByParent={state.constrainedByParent}
-			disabled={!serverReady}
-			onChange={(permissionPreset) => changePermissionPreset(visibleActiveSession.sessionId, permissionPreset)}
-			onSetupSandbox={api.platform === "win32" ? setupWindowsSandbox : undefined}
-			sandboxHealth={state.sandboxHealth}
-			value={state.permissionPreset}
-		/>
 	) : undefined;
-	const collaborationControl = visibleActiveSession && collaborationModeValue === "plan" ? (
-		<div className="collaboration-mode-control">
-			<span aria-hidden="true" className="collaboration-mode-separator" />
-			<button
-				aria-label={t("Exit Plan mode")}
-				className="collaboration-mode-indicator"
-				disabled={collaborationModeBlocked}
-				onClick={() => void changeCollaborationMode("default").catch(() => undefined)}
-				type="button"
-			>
-				<span aria-hidden="true" className="collaboration-mode-icon">
-					<Lightbulb className="collaboration-mode-active-icon" size={14} />
-					<XCircle className="collaboration-mode-exit-icon" size={14} weight="fill" />
-				</span>
-				<span>{t("Plan")}</span>
-			</button>
-		</div>
-	) : undefined;
-	const planRevisionChip = planRevisionTarget ? (
-		<div className="composer-plan-context">
-			<span className="composer-plan-revision-chip">
-				{t("Revise plan")}: {planRevisionTarget.title} · r{planRevisionTarget.revision}
-			</span>
-			<button aria-label={t("Remove revision context")} onClick={clearPlanRevision} type="button">
-				×
-			</button>
-		</div>
-	) : null;
-	const connectedMcpServers = mcpServers.filter((server) => server.effective && server.enabled && server.state === "connected");
-	const mcpConnectionState = mcpServers.some((server) =>
-		server.effective && server.enabled && (
-			server.state === "auth_required" ||
-			server.state === "error" ||
-			(server.state === "reconnecting" && Boolean(server.lastError))
-		)
-	)
-		? "failed" as const
-		: mcpServers.some((server) => server.effective && server.enabled && (server.state === "connecting" || server.state === "reconnecting"))
-			? "connecting" as const
-			: undefined;
-	const openMcpManagement = () => {
+	const openMcpManagement = useCallback(() => {
 		rememberCurrentNavigation();
 		setPluginSection("mcp");
 		setDestination("skills");
-	};
-	const pickAttachmentFiles = async () => {
+	}, [rememberCurrentNavigation]);
+	const pickAttachmentFiles = useCallback(async () => {
 		try {
 			return await api.selectAttachmentFiles();
 		} catch (cause) {
 			reportError(cause);
 			return [];
 		}
-	};
+	}, [api, reportError]);
 	const openSettings = useCallback(() => {
 		settingsReturnFocusRef.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
 			? document.activeElement : document.querySelector<HTMLElement>(".account-menu-trigger");
@@ -1682,6 +1268,54 @@ export function App({ api, store }: AppProps) {
 		else showSessionSidebar();
 	};
 
+	// Shared context handed to every visible SessionChatView. Kept referentially
+	// stable so memoized chat views only re-render on their own bucket changes.
+	const chatView = useMemo<SessionChatViewContext>(() => ({
+		api,
+		bootstrapped,
+		composerFormRef: conversationComposerFormRef,
+		composerSubmitRef: conversationSubmitRef,
+		onChangeModel: changeModel,
+		onChangePermissionPreset: changePermissionPreset,
+		onChangeThinking: changeThinking,
+		onClearError: clearError,
+		onError: reportError,
+		onFork: forkFromReply,
+		onManageMcp: openMcpManagement,
+		onManageSkills: openSkillsDestination,
+		onNotice: setNotice,
+		onOpenKnowledge: openKnowledge,
+		onOpenPlan: openPlan,
+		onPickFiles: pickAttachmentFiles,
+		onPreviewDeliveredFile: handlePreviewDeliveredFile,
+		onResolveDroppedFiles: api.resolveDroppedFiles,
+		onRespond: respond,
+		onSetupSandbox: api.platform === "win32" ? setupWindowsSandbox : undefined,
+		reducedMotion,
+		skillCatalogEpoch,
+		store,
+	}), [
+		api,
+		bootstrapped,
+		changeModel,
+		changePermissionPreset,
+		changeThinking,
+		clearError,
+		forkFromReply,
+		handlePreviewDeliveredFile,
+		openKnowledge,
+		openMcpManagement,
+		openPlan,
+		openSkillsDestination,
+		pickAttachmentFiles,
+		reducedMotion,
+		reportError,
+		respond,
+		setupWindowsSandbox,
+		skillCatalogEpoch,
+		store,
+	]);
+
 	const homePage = visibleNewTaskDraft ? (
 		<>
 			<NewTaskHome
@@ -1749,10 +1383,9 @@ export function App({ api, store }: AppProps) {
 		<FileSelectionProvider
 			sessionId={writableSessionId ?? null}
 			enabled={Boolean(
-				writableSessionId && serverReady && state.syncStatus === "ready" &&
-				compactingSession === null && !collaborationModeChanging && !visibleInteraction
+				writableSessionId && serverReady && state.syncStatus === "ready" && !visibleInteraction
 			)}
-			onSubmit={submit}
+			onSubmit={submitFileSelection}
 		>
 
 		{api.platform === "win32" && (
@@ -1877,94 +1510,8 @@ export function App({ api, store }: AppProps) {
 				{bootstrapped ? (
 					<SessionWorkspaceView
 						api={api}
-						chat={newTaskOpen || !visibleActiveSession ? homePage : (
-							<div className="workspace-body">
-						<div className="conversation-column" data-mode={visibleActiveSession.mode}>
-							<Transcript
-								showNavigation
-								activeTurnId={state.activeTurnId}
-								waitingForAnswer={waitingForAnswer}
-								activeTurnStartedAt={state.activeTurnId ? state.turnsById.get(state.activeTurnId)?.startedAt : undefined}
-								appearance={visibleActiveSession.mode}
-								autoLoadOlder
-								hasOlder={state.nextBeforeItemId !== null}
-								itemIds={state.itemOrder}
-								itemsById={state.itemsById}
-								loadingOlder={loadingOlder}
-								onCancelPlan={(plan) => void cancelPlan(plan)}
-								onCopy={(text) => void api.writeClipboardText({ text }).catch(reportError)}
-								onFork={forkFromReply}
-								onLoadOlder={loadOlder}
-								onOpenDeliveredFile={(fileId, action) => void api.openDeliveredFile({ sessionId: visibleActiveSession.sessionId, fileId, action }).catch(reportError)}
-								onOpenPlan={openPlan}
-								onPreviewDeliveredFile={handlePreviewDeliveredFile}
-								onRevisePlan={revisePlan}
-								onStartPlan={(plan) => void startPlan(plan)}
-								planActionsBusy={planActionsBusy}
-							/>
-							{compactingSession?.sessionId === visibleActiveSession.sessionId && (
-								<TurnRuntimeStatus items={[]} running startedAt={compactingSession.startedAt} variant="compaction" />
-							)}
-							<div className="conversation-composer">
-								<Composer
-									knowledge={serverReady && writableSessionId ? { api, sessionId: writableSessionId, onOpen: openKnowledge } : undefined}
-									appearance={visibleActiveSession.mode}
-									collaborationControl={collaborationControl}
-									contextControl={planRevisionChip}
-									contextUsageExpanded={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId && !sessionStatusPanel.closing}
-									contextUsagePercent={contextStatus && contextStatus.sessionId === visibleActiveSession.sessionId
-										? contextUsagePercent(contextStatus)
-										: null}
-									onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
-								commandPanel={sessionStatusPanel?.sessionId === visibleActiveSession.sessionId ? <SessionStatusPanel closing={sessionStatusPanel.closing} error={sessionStatusPanel.error} loading={sessionStatusPanel.loading} onClose={closeSessionStatus} status={sessionStatusPanel.status} /> : undefined}
-								commandRequest={{ id: composerControl.id, open: composerControl.target === "mcp" }}
-								disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null || collaborationModeChanging}
-								disabledSlashCommands={disabledSlashCommands}
-								disabledSlashReasons={disabledSlashReasons}
-								formRef={conversationComposerFormRef}
-								interactionControl={inlineInteraction ? <InteractionHost interaction={inlineInteraction} key={inlineInteraction.interactionId} onRespond={respond} sandboxHealth={state.sandboxHealth} askUserDrafts={askUserDrafts.current} disabled={!serverReady || state.syncStatus !== "ready"} /> : undefined}
-								awaitingAnswer={waitingForAnswer}
-								goalControl={
-									<GoalBar
-										goal={state.goal}
-										onClear={() => void mutateSessionGoal({ clear: true })}
-										onPause={() => void mutateSessionGoal({ status: "paused" })}
-										onResume={() => void mutateSessionGoal({ status: "active" })}
-									/>
-								}
-								key={visibleActiveSession.sessionId}
-								mcpConnectionState={mcpConnectionState}
-								mcpServers={connectedMcpServers}
-								modelControl={modelControl}
-								onGoalCommand={handleGoalCommand}
-								onInterrupt={interrupt}
-								onManageMcp={openMcpManagement}
-								onManageSkills={openSkillsDestination}
-								onPickFiles={pickAttachmentFiles}
-								onResolveDroppedFiles={api.resolveDroppedFiles}
-								onSlashCommand={handleSlashCommand}
-								onSubmit={submit}
-								permissionControl={permissionControl}
-								placeholder={t(
-									waitingForAnswer ? "Answer the questions above to continue." : planRevisionTarget
-										? "Describe what should change in this plan…"
-										: running || state.queuedTurns.length > 0
-											? "Add a queued message…"
-											: "Write a message…",
-								)}
-								prefillRequest={conversationPrefillRequest}
-								queuedTurnControl={<QueuedTurnList disabled={!serverReady || state.syncStatus !== "ready" || compactingSession !== null} onDelete={deleteQueuedTurn} onEdit={editQueuedTurn} onSend={sendQueuedTurn} running={running} turns={state.queuedTurns} />}
-								queueing={state.queuedTurns.length > 0}
-								running={running}
-								skills={skills}
-								taskListEpoch={state.serverEpoch}
-								tasks={state.tasks}
-								thinkingControl={thinkingControl}
-							/>
-							</div>
-						</div>
-					</div>
-						)}
+						chat={newTaskOpen || !visibleActiveSession ? homePage : null}
+						chatView={chatView}
 						chatCwd={toolsSession?.cwd ?? null}
 						chatFocusRequest={chatFocusRequest}
 						chatIsDraft={newTaskOpen}

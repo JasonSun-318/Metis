@@ -1416,7 +1416,7 @@ describe("renderer projection reducer", () => {
 			...snapshot(EPOCH_A, 0, [item("item-200", "newer", "completed")]),
 			nextBeforeItemId: "item-200",
 		});
-		store.prependItems({
+		store.prependItems("session-1", {
 			items: [item("item-0", "oldest", "completed"), item("item-200", "updated", "completed")],
 			nextBeforeItemId: null,
 		});

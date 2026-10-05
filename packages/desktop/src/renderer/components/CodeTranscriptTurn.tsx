@@ -1,7 +1,7 @@
 import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -181,16 +181,7 @@ function CodeExecution({ calls, results, orphanResults }: {
 	);
 }
 
-export function CodeTranscriptTurn({
-	items,
-	waitingForAnswer = false,
-	running = false,
-	startedAt,
-	onFork,
-	onCopy,
-	onOpenDeliveredFile,
-	onPreviewDeliveredFile,
-}: {
+interface CodeTranscriptTurnProps {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly waitingForAnswer?: boolean;
@@ -199,7 +190,34 @@ export function CodeTranscriptTurn({
 	readonly onCopy?: (text: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
-}) {
+}
+
+function sameTurnProps(left: CodeTranscriptTurnProps, right: CodeTranscriptTurnProps): boolean {
+	return (
+		left.running === right.running &&
+		left.waitingForAnswer === right.waitingForAnswer &&
+		left.startedAt === right.startedAt &&
+		left.onFork === right.onFork &&
+		left.onCopy === right.onCopy &&
+		left.onOpenDeliveredFile === right.onOpenDeliveredFile &&
+		left.onPreviewDeliveredFile === right.onPreviewDeliveredFile &&
+		left.items.length === right.items.length &&
+		left.items.every((item, index) => item === right.items[index])
+	);
+}
+
+// Items are rebuilt per render, so compare element-wise — the reducer replaces
+// item objects instead of mutating them.
+export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
+	items,
+	waitingForAnswer = false,
+	running = false,
+	startedAt,
+	onFork,
+	onCopy,
+	onOpenDeliveredFile,
+	onPreviewDeliveredFile,
+}: CodeTranscriptTurnProps) {
 	const { t } = useTranslation();
 	const { users, segments, results, final, deliveredFiles } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
@@ -282,4 +300,4 @@ export function CodeTranscriptTurn({
 			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />}
 		</>
 	);
-}
+}, sameTurnProps);

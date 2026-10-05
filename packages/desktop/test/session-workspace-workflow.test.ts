@@ -1088,4 +1088,54 @@ describe("SessionWorkspaceWorkflow", () => {
 		workflow.setLiveSessions([active.sessionId, background.sessionId]);
 		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
 	});
+
+	it("focuses an already-live session without rebuilding its bucket", async () => {
+		const active = summary("open-front");
+		const live = summary("open-live");
+		const { api, emit, store, workflow } = harness([active, live]);
+		await workflow.start();
+		store.applySnapshot(snapshot(active.sessionId));
+		vi.mocked(api.subscribeSession).mockResolvedValue(snapshot(live.sessionId));
+		workflow.setLiveSessions([active.sessionId, live.sessionId]);
+		await vi.waitFor(() => expect(store.getSnapshot().sessions.get(live.sessionId)?.syncStatus).toBe("ready"));
+
+		// Seed the live bucket with an item the open snapshot does not contain.
+		emit({
+			type: "app-server",
+			envelope: {
+				jsonrpc: "2.0",
+				method: "connection/events",
+				params: {
+					serverEpoch: EPOCH,
+					fromCursor: 1,
+					toCursor: 1,
+					events: [
+						{
+							type: "item/started",
+							item: {
+								itemId: "live-item",
+								sessionId: live.sessionId,
+								role: "assistant",
+								state: "completed",
+								content: [{ type: "text", text: "still here" }],
+								createdAt: "2026-08-30T00:00:00.000Z",
+							},
+						},
+					],
+				},
+			},
+		});
+		expect(store.getSnapshot().sessions.get(live.sessionId)?.itemsById.has("live-item")).toBe(true);
+
+		vi.mocked(api.openSession).mockResolvedValue(snapshot(live.sessionId));
+		await workflow.openVisibleSession(live.sessionId);
+
+		expect(api.openSession).toHaveBeenCalledWith({ sessionId: live.sessionId });
+		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
+		expect(store.getSnapshot().activeSessionId).toBe(live.sessionId);
+		expect(store.getSnapshot().syncStatus).toBe("ready");
+		// The fast path keeps the bucket instead of replacing it with the open
+		// snapshot, so the live event survives the focus switch.
+		expect(store.getSnapshot().itemsById.get("live-item")).toBeDefined();
+	});
 });

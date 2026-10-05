@@ -11,6 +11,7 @@ import type {
 } from "@metis/app-protocol";
 import type { SupervisorView } from "../../shared/desktop-api.ts";
 import {
+	activateProjection,
 	activeProjection,
 	addPendingInteraction,
 	applyConnectionEvents,
@@ -29,6 +30,7 @@ import {
 	replaceAgentItems,
 	replaceProjectionSnapshot,
 	replaceSessionList,
+	requireProjectionResnapshot,
 	selectAgentTranscript,
 } from "./reducer.ts";
 
@@ -116,8 +118,8 @@ export class AppStore {
 		this.commit();
 	}
 
-	setOptimisticThinkingSelection(selection: SessionSnapshot["thinkingSelection"]): void {
-		const session = activeProjection(this.state);
+	setOptimisticThinkingSelection(sessionId: string, selection: SessionSnapshot["thinkingSelection"]): void {
+		const session = this.state.sessions.get(sessionId);
 		if (!session || session.thinkingSelection === selection) return;
 		session.thinkingSelection = selection;
 		session.revision += 1;
@@ -189,9 +191,19 @@ export class AppStore {
 		return result;
 	}
 
-	prependItems(page: ClientResult<"session/readItems">): void {
-		prependProjectionItems(this.state, page);
+	prependItems(sessionId: string, page: ClientResult<"session/readItems">): void {
+		prependProjectionItems(this.state, sessionId, page);
 		this.commit();
+	}
+
+	// Focuses an already-subscribed bucket without rebuilding it. Returns false
+	// when the bucket is not ready, so callers fall back to a full snapshot.
+	activateProjection(sessionId: string, summary?: SessionSummary): void {
+		if (activateProjection(this.state, sessionId, summary)) this.commit();
+	}
+
+	requireProjectionResnapshot(sessionId: string): void {
+		if (requireProjectionResnapshot(this.state, sessionId)) this.commit();
 	}
 
 	selectAgentTranscript(agentId: string | null, taskId: string | null = null): void {

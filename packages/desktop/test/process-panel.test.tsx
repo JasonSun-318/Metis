@@ -3,9 +3,10 @@ import type { SessionProcessView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionChatViewContext } from "../src/renderer/components/SessionChatView.tsx";
 import { SessionWorkspaceView } from "../src/renderer/components/SessionWorkspace.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
-import type { AppStore } from "../src/renderer/store/app-store.ts";
+import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const terminals = vi.hoisted(() => [] as Array<{ options: Record<string, unknown>; output: string; disposed: boolean }>);
@@ -33,10 +34,36 @@ const sessionsById = new Map([
 	["other", { sessionId: "other", cwd: "/tmp/other", mode: "chat" as const }],
 ]);
 
+const chatView: SessionChatViewContext = {
+	api,
+	bootstrapped: false,
+	composerFormRef: { current: null },
+	composerSubmitRef: { current: null },
+	onChangeModel: vi.fn(),
+	onChangePermissionPreset: vi.fn(),
+	onChangeThinking: vi.fn(),
+	onClearError: vi.fn(),
+	onError,
+	onFork: vi.fn(),
+	onManageMcp: vi.fn(),
+	onManageSkills: vi.fn(),
+	onNotice: vi.fn(),
+	onOpenKnowledge: vi.fn(),
+	onOpenPlan: vi.fn(),
+	onPickFiles: vi.fn(async () => []),
+	onPreviewDeliveredFile: vi.fn(),
+	onResolveDroppedFiles: vi.fn(() => []),
+	onRespond: vi.fn(async () => {}),
+	reducedMotion: true,
+	skillCatalogEpoch: 0,
+	store: new AppStore(),
+};
+
 async function render(process?: SessionProcessView, owner = sessionId, mode: "chat" | "code" = "chat") {
 	await act(async () => root.render(<SessionWorkspaceView
 		api={api}
 		chat={<div />}
+		chatView={chatView}
 		chatCwd="/tmp/project"
 		chatFocusRequest={null}
 		chatIsDraft={false}

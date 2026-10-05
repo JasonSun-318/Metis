@@ -50,6 +50,7 @@ import { PlanPreview } from "./PlanPreview.tsx";
 import { ReviewPanel } from "./ReviewPanel.tsx";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { ProcessPanel } from "./ProcessPanel.tsx";
+import { SessionChatView, type SessionChatViewContext } from "./SessionChatView.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -96,7 +97,8 @@ interface SessionWorkspaceViewProps {
 	readonly onError: (cause: unknown) => void;
 	readonly onLiveSessionsChange: (sessionIds: readonly string[]) => void;
 	readonly onNewSession?: (target: { readonly mode: AgentMode; readonly cwd: string } | null) => void;
-	readonly planPreviewRequest?: PlanView | null;
+	readonly chatView: SessionChatViewContext;
+	readonly planPreviewRequest?: { readonly sessionId: string; readonly plan: PlanView } | null;
 	readonly previewRequest?: UniversalPreviewTarget | null;
 	readonly knowledgeRequest?: { readonly id: number; readonly sessionId: string };
 	readonly process?: SessionProcessView;
@@ -231,6 +233,7 @@ export function SessionWorkspaceView({
 	onError,
 	onLiveSessionsChange,
 	onNewSession,
+	chatView,
 	planPreviewRequest,
 	previewRequest,
 	knowledgeRequest,
@@ -596,12 +599,12 @@ export function SessionWorkspaceView({
 	}, [previewRequest, updateWorkspace]);
 
 	useEffect(() => {
-		if (!planPreviewRequest || !chatSessionId) return;
-		const sessionId = chatSessionId;
+		if (!planPreviewRequest) return;
+		const { sessionId, plan } = planPreviewRequest;
 		updateWorkspace((workspace) => {
 			const existing = workspaceTabs(workspace).find(
 				(tab): tab is Extract<WorkspaceTab, { kind: "plan" }> =>
-					tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === planPreviewRequest.planId,
+					tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === plan.planId,
 			);
 			if (existing) {
 				return activateTab({
@@ -609,8 +612,8 @@ export function SessionWorkspaceView({
 					panes: workspace.panes.map((pane) => ({
 						...pane,
 						tabs: pane.tabs.map((tab) =>
-							tab.kind === "plan" && tab.plan.planId === planPreviewRequest.planId
-								? { ...tab, title: planPreviewRequest.title, plan: planPreviewRequest }
+							tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === plan.planId
+								? { ...tab, title: plan.title, plan }
 								: tab,
 						),
 					})),
@@ -618,13 +621,13 @@ export function SessionWorkspaceView({
 			}
 			return addTab(workspace, {
 				kind: "plan",
-				id: planPreviewRequest.planId,
+				id: plan.planId,
 				sessionId,
-				title: planPreviewRequest.title,
-				plan: planPreviewRequest,
+				title: plan.title,
+				plan,
 			});
 		});
-	}, [planPreviewRequest, chatSessionId, updateWorkspace]);
+	}, [planPreviewRequest, updateWorkspace]);
 
 	// A pane's tool target is the session of its current tab, falling back to
 	// the projected session when the pane is empty.
@@ -1313,9 +1316,8 @@ export function SessionWorkspaceView({
 		</div>
 	);
 
-	// Tabs bound to the transcript projection (chat, agent tree) show a focus
-	// prompt while another session is projected; every other tool talks to the
-	// desktop API by sessionId and stays live for any session.
+	// Agent tree tabs still project only the focused session; every other tool
+	// talks to the desktop API by sessionId and stays live for any session.
 	const sessionPlaceholder = (tab: WorkspaceTab) => (
 		<div className="workspace-session-placeholder" role="tabpanel">
 			<p>{t("This session is not in focus.")}</p>
@@ -1350,6 +1352,22 @@ export function SessionWorkspaceView({
 					{content}
 				</div>
 			);
+			const chatViewFor = (tab: WorkspaceTab, isHost: boolean): ReactNode => {
+				// The host pane keeps showing the draft/loading node while it is
+				// provided; once App hands down null, the pane's own live view takes
+				// over — including the projected session the host tab belongs to.
+				if (isHost && (chat !== null || tab.sessionId === null)) return chat;
+				if (tab.sessionId === null) return null;
+				return (
+					<SessionChatView
+						{...chatView}
+						canonicalComposer={chat === null && tab.sessionId === chatSessionId}
+						focused={tab.sessionId === chatSessionId}
+						sessionId={tab.sessionId}
+						visible={panelVisible(tab.id)}
+					/>
+				);
+			};
 			return [
 				host ? (
 					<div
@@ -1358,12 +1376,12 @@ export function SessionWorkspaceView({
 						hidden={pane.activeId !== host.tab.id || !visible}
 						key={host.tab.id}
 					>
-						<div className="workspace-chat-panel">{chat}</div>
+						<div className="workspace-chat-panel">{chatViewFor(host.tab, true)}</div>
 					</div>
 				) : null,
 				activeTab?.kind === "chat" && activeTab !== host?.tab ? (
 					<div className="workspace-panel" data-pane-id={pane.id} key={activeTab.id}>
-						{sessionPlaceholder(activeTab)}
+						<div className="workspace-chat-panel">{chatViewFor(activeTab, false)}</div>
 					</div>
 				) : null,
 				...pane.tabs.flatMap((tab) =>

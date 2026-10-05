@@ -22,6 +22,7 @@ interface ConversationPlanFlowOptions {
 	readonly itemsById: ReadonlyMap<string, ItemView>;
 	readonly clearError: () => void;
 	readonly reportError: (cause: unknown) => void;
+	readonly composerInputId?: string;
 }
 
 export interface ConversationPlanFlow {
@@ -89,6 +90,7 @@ export function useConversationPlanFlow({
 	itemsById,
 	clearError,
 	reportError,
+	composerInputId = "composer-input",
 }: ConversationPlanFlowOptions): ConversationPlanFlow {
 	const activeTurnRequest = useRef<{
 		readonly key: string;
@@ -220,10 +222,13 @@ export function useConversationPlanFlow({
 		[api, currentProposedPlan, pendingCollaborationMode, planActionsBusy, reportError, writableSessionId],
 	);
 
-	const revisePlan = useCallback((plan: PlanView) => {
-		setPlanRevisionTarget(plan);
-		requestAnimationFrame(() => document.getElementById("composer-input")?.focus());
-	}, []);
+	const revisePlan = useCallback(
+		(plan: PlanView) => {
+			setPlanRevisionTarget(plan);
+			requestAnimationFrame(() => document.getElementById(composerInputId)?.focus());
+		},
+		[composerInputId],
+	);
 
 	const startPlan = useCallback(
 		async (plan: PlanView) => {

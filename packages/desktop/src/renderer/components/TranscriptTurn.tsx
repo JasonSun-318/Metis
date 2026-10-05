@@ -12,7 +12,7 @@ import {
 	TerminalWindow,
 	Wrench,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -281,7 +281,7 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 	);
 }
 
-export function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: {
+interface TranscriptTurnProps {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
 	readonly waitingForAnswer?: boolean;
@@ -290,7 +290,25 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 	readonly onCopy?: (text: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
-}) {
+}
+
+function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnProps): boolean {
+	return (
+		left.running === right.running &&
+		left.waitingForAnswer === right.waitingForAnswer &&
+		left.startedAt === right.startedAt &&
+		left.onFork === right.onFork &&
+		left.onCopy === right.onCopy &&
+		left.onOpenDeliveredFile === right.onOpenDeliveredFile &&
+		left.onPreviewDeliveredFile === right.onPreviewDeliveredFile &&
+		left.items.length === right.items.length &&
+		left.items.every((item, index) => item === right.items[index])
+	);
+}
+
+// Rows are re-created per render, so items compare element-wise — item objects
+// are replaced (never mutated) when the reducer applies an event.
+export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: TranscriptTurnProps) {
 	const { t } = useTranslation();
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
@@ -390,4 +408,4 @@ export function TranscriptTurn({ waitingForAnswer = false, items, running: runti
 			)}
 		</>
 	);
-}
+}, sameTurnProps);
