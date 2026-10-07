@@ -35,8 +35,8 @@ describe("Sidebar geometry and workspace grid styles", () => {
 			).left,
 		).toBe("76px");
 		const actionButton = rule(".workspace-titlebar button");
-		expect(actionButton.width).toBe("30px");
-		expect(actionButton.height).toBe("30px");
+		expect(actionButton.width).toBe("28px");
+		expect(actionButton.height).toBe("28px");
 
 		expect(css).not.toContain("sidebar-titlebar-controls");
 	});
@@ -54,21 +54,25 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(sidebar.borderRadius).toBe("0 0 9px 9px");
 	});
 
-	it("renders the titlebar as a centered in-flow drag row", () => {
+	it("renders the titlebar as an in-flow drag row hosting the merged tab strip", () => {
 		const titlebar = rule(".workspace-titlebar");
 		expect(titlebar.height).toBe("40px");
-		expect(titlebar.justifyContent).toBe("center");
+		expect(titlebar.borderBottom).toBe("1px solid var(--border)");
 
 		const actionButtons = rule(".workspace-titlebar button");
-		expect(actionButtons.width).toBe("30px");
-		expect(actionButtons.height).toBe("30px");
+		expect(actionButtons.width).toBe("28px");
+		expect(actionButtons.height).toBe("28px");
 		expect(actionButtons.borderRadius).toBe("7px");
+
+		expect(css).toMatch(
+			/\.workspace-tabbar--titlebar\s*\{[^}]*border-bottom:\s*none[^}]*-webkit-app-region:\s*drag/u,
+		);
 	});
 
 	it("keeps the release bell anchored to the titlebar's right edge", () => {
 		const end = rule(".workspace-titlebar-end");
-		expect(end.position).toBe("absolute");
-		expect(end.right).toBe("10px");
+		expect(end.position).toBe("relative");
+		expect(end.marginLeft).toBe("8px");
 		expect(end.display).toBe("flex");
 
 		const popover = rule(".release-notes-popover");

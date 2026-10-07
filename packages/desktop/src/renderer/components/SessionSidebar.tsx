@@ -61,6 +61,7 @@ interface SessionSidebarProps {
 	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
+	readonly projectName: string;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
 	readonly updateState: DesktopUpdateState;
@@ -299,6 +300,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 	onOpenSchedule,
 	onDeleteSchedule,
 	onWidthChange,
+	projectName,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
@@ -391,7 +393,9 @@ export const SessionSidebar = memo(function SessionSidebar({
 
 	return (
 		<aside className={`session-sidebar${isClosing ? " is-closing" : ""}`} aria-label={t("Tasks")}>
-			<div className="window-drag-region" />
+			<div className="window-drag-region">
+				<span className="sidebar-project-name" title={projectName}>{projectName}</span>
+			</div>
 			<div className="mode-switch" data-mode={mode} aria-label={t("Workspace mode")} role="group">
 				<span aria-hidden="true" className="mode-switch-indicator" />
 				<button aria-pressed={mode === "chat"} className={mode === "chat" ? "active" : ""} disabled={busy} onClick={() => onModeChange("chat")} type="button">

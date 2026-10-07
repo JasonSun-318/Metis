@@ -144,7 +144,9 @@ function button(container: HTMLElement, label: string): HTMLButtonElement {
 }
 
 function activeWorkspace(container: HTMLElement): HTMLElement {
-	const instance = container.querySelector<HTMLElement>(".session-workspace-instance:not([hidden])");
+	// The lone pane's tab strip and shared add trigger are portaled into the
+	// titlebar, so tab strip queries scope to the whole workspace column.
+	const instance = container.querySelector<HTMLElement>("main.workspace");
 	if (!instance) throw new Error("Missing visible workspace");
 	return instance;
 }
@@ -1073,7 +1075,7 @@ describe("Chat desktop shell", () => {
 
 		const end = container.querySelector<HTMLElement>(".workspace-titlebar-end")!;
 		expect(end).not.toBeNull();
-		expect([...end.children].map((child) => child.className)).toEqual(["release-notes-control"]);
+		expect([...end.children].map((child) => child.className)).toEqual(["release-notes-control", "workspace-titlebar-add"]);
 		expect(button(container, "Open unread release notes")).toBeTruthy();
 		await act(async () => root.unmount());
 	});
@@ -4619,7 +4621,6 @@ describe("Chat desktop shell", () => {
 		expect(activeWorkspace(container).querySelector<HTMLElement>('[aria-selected="true"]')?.getAttribute("aria-label")).toBe("Terminal");
 		expect([...activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!.children].map((child) => child.className)).toEqual([
 			"tool-tabs-scroll",
-			"tool-add",
 		]);
 
 		await act(async () => button(container, "Code").click());

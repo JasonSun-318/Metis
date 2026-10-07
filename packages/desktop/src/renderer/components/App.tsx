@@ -377,6 +377,10 @@ export function App({ api, store }: AppProps) {
 
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
 	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
+	// The workspace portals its lone pane's tab strip and the shared add-tool
+	// trigger into these titlebar slots; null until the header mounts.
+	const [titlebarTabsSlot, setTitlebarTabsSlot] = useState<HTMLDivElement | null>(null);
+	const [titlebarAddSlot, setTitlebarAddSlot] = useState<HTMLDivElement | null>(null);
 	// Every mounted SessionChatView registers its own submit here so the shared
 	// file-selection provider can route "request change" actions to the owning
 	// session's composer.
@@ -775,6 +779,10 @@ export function App({ api, store }: AppProps) {
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
 	})();
+
+	useEffect(() => {
+		document.title = workspaceProjectName === "Metis" ? "Metis" : `${workspaceProjectName} — Metis`;
+	}, [workspaceProjectName]);
 
 	const serverReady = state.supervisor.state === "ready";
 	useLayoutEffect(() => {
@@ -1467,6 +1475,7 @@ export function App({ api, store }: AppProps) {
 				onSchedules={openSchedulesDestination}
 				onOpenSchedule={openSchedule}
 				onWidthChange={updateSessionSidebarWidth}
+				projectName={workspaceProjectName}
 				scheduleTasks={sidebarScheduleTasks}
 				selectedScheduleTaskId={selectedScheduleTaskId}
 				state={sidebarState}
@@ -1492,15 +1501,16 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					<span className="workspace-project-name">{workspaceProjectName}</span>
-					{toolsSession !== undefined && (
-						<div className="workspace-titlebar-end">
+					<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} />
+					<div className="workspace-titlebar-end">
+						{toolsSession !== undefined && (
 							<ReleaseNotesPopover
 								loadChangelog={api.getChangelog}
 								availableVersion={"version" in updateState ? updateState.version : null}
 							/>
-						</div>
-					)}
+						)}
+						<div className="workspace-titlebar-add" ref={setTitlebarAddSlot} />
+					</div>
 				</header>
 				<div className="system-notice-stack">
 					{state.supervisor.state === "failed" && (
@@ -1567,6 +1577,8 @@ export function App({ api, store }: AppProps) {
 						sessionTitleFor={sessionTitleFor}
 						store={store}
 						theme={resolvedTheme}
+						titlebarAddSlot={titlebarAddSlot}
+						titlebarTabsSlot={titlebarTabsSlot}
 						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}
 					/>
 				) : null}

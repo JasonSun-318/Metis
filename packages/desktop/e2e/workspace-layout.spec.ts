@@ -313,7 +313,14 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 
 		const addTool = async (name: string) => {
-			await page.locator(".tool-add-trigger").first().click();
+			// A lone pane's strip merges into the titlebar so its own trigger is
+			// absent; multi-pane layouts keep one per pane — always target the
+			// top row's first pane so added tabs land somewhere deterministic.
+			const paneTrigger = page.locator(".workspace-row").first().locator(".workspace-pane").first().locator(".tool-add-trigger");
+			const trigger = (await paneTrigger.count()) > 0
+				? paneTrigger
+				: page.locator(".workspace-titlebar-add .tool-add-trigger");
+			await trigger.click();
 			await page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true }).click();
 		};
 		const openTabMenu = async (name: string) => {

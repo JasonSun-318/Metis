@@ -12,6 +12,7 @@ import {
 } from "@phosphor-icons/react";
 import type { CSSProperties, DragEvent, ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
@@ -85,6 +86,14 @@ type DropTarget =
 	| { readonly paneId: string; readonly index: number }
 	| { readonly split: { readonly paneId: string; readonly direction: SplitDirection } };
 
+// The add menu opens either from a pane strip ("pane") or from the shared
+// titlebar trigger ("titlebar"); the stored paneId is the target captured at
+// open time so the menu keeps acting on it if focus moves while open.
+interface MenuTarget {
+	readonly paneId: string;
+	readonly location: "pane" | "titlebar";
+}
+
 const MIN_PANE_WIDTH = 360;
 const MIN_PANE_HEIGHT = 280;
 
@@ -113,6 +122,8 @@ interface SessionWorkspaceViewProps {
 	readonly sessionTitleFor: (sessionId: string) => string;
 	readonly store: AppStore;
 	readonly theme: "dark" | "light";
+	readonly titlebarAddSlot?: HTMLElement | null;
+	readonly titlebarTabsSlot?: HTMLElement | null;
 	readonly visible: boolean;
 }
 
@@ -194,6 +205,8 @@ export function SessionWorkspaceView({
 	sessionTitleFor,
 	store,
 	theme,
+	titlebarAddSlot,
+	titlebarTabsSlot,
 	visible,
 }: SessionWorkspaceViewProps) {
 	const { t } = useTranslation();
@@ -202,7 +215,7 @@ export function SessionWorkspaceView({
 	const [fileDrafts, setFileDrafts] = useState<ReadonlyMap<string, WorkspaceFileDraft>>(new Map());
 	const [savingFileTabIds, setSavingFileTabIds] = useState<ReadonlySet<string>>(new Set());
 	const [pendingFileClose, setPendingFileClose] = useState<PendingFileClose | null>(null);
-	const [menuTarget, setMenuTarget] = useState<{ readonly paneId: string } | null>(null);
+	const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
 	const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
 	const [dragState, setDragState] = useState<DragState | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -1186,9 +1199,15 @@ export function SessionWorkspaceView({
 		return () => observer.disconnect();
 	}, [layoutPanels, workspace, chatSessionId, visible]);
 
-	const renderTabStrip = (pane: WorkspacePane) => (
+	// The pane strip trigger only owns menus opened from its own strip; the
+	// titlebar trigger renders its menu beside itself instead. Either kind of
+	// open menu still hides the target pane's panels — native webviews ignore
+	// z-index and would paint over the dropdown.
+	const paneMenuTarget = menuTarget?.location === "pane" ? menuTarget.paneId : null;
+
+	const renderTabStrip = (pane: WorkspacePane, merged = false) => (
 		<div
-			className={`workspace-tabbar${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
+			className={`workspace-tabbar${merged ? " workspace-tabbar--titlebar" : ""}${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
 			onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === pane.id ? null : current)}
 			onDragOver={(event) => {
 				if (!dragState) return;
@@ -1249,7 +1268,6 @@ export function SessionWorkspaceView({
 									: tab.kind === "plan" ? <FileText aria-hidden="true" size={13} />
 									: tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}
 								<span>{displayTitle}</span>
-								{dirty && <span aria-hidden="true" className="tool-tab-dirty" />}
 							</button>
 							<button
 								aria-label={t("Close {{name}}", { name: displayTitle })}
@@ -1264,19 +1282,21 @@ export function SessionWorkspaceView({
 					);
 				})}
 			</div>
-			<div className="tool-add" ref={menuTarget?.paneId === pane.id ? menuRef : undefined}>
+			{!merged && (
+			<div className="tool-add" ref={paneMenuTarget === pane.id ? menuRef : undefined}>
 				<button
-					aria-expanded={menuTarget?.paneId === pane.id}
+					aria-expanded={paneMenuTarget === pane.id}
 					aria-haspopup="menu"
 					aria-label={t("Add tool")}
 					className="tool-add-trigger"
-					onClick={() => setMenuTarget((current) => current?.paneId === pane.id ? null : { paneId: pane.id })}
+					onClick={() => setMenuTarget((current) => current?.location === "pane" && current.paneId === pane.id ? null : { paneId: pane.id, location: "pane" })}
 					type="button"
 				>
 					<Plus aria-hidden="true" size={13} />
 				</button>
-				{menuTarget?.paneId === pane.id && toolMenu(pane.id)}
+				{paneMenuTarget === pane.id && toolMenu(pane.id)}
 			</div>
+			)}
 		</div>
 	);
 
@@ -1464,8 +1484,36 @@ export function SessionWorkspaceView({
 
 	const splitTarget = dropTarget && "split" in dropTarget ? dropTarget.split : null;
 
+	// A lone pane's tab strip rides inside the window titlebar so the chrome
+	// stays one row tall; any split falls back to per-pane strips. When no
+	// titlebar slot is provided (standalone rendering/tests) the strip stays
+	// in the pane.
+	const mergedPane = workspace.panes.length === 1 ? workspace.panes[0]! : null;
+	const stripInTitlebar = mergedPane !== null && titlebarTabsSlot != null;
+	const titlebarAdd = (
+		<div className="tool-add" ref={menuTarget?.location === "titlebar" ? menuRef : undefined}>
+			<button
+				aria-expanded={menuTarget?.location === "titlebar"}
+				aria-haspopup="menu"
+				aria-label={t("Add tool")}
+				className="tool-add-trigger"
+				onClick={() => setMenuTarget((current) => current?.location === "titlebar" ? null : { paneId: activePane(workspace).id, location: "titlebar" })}
+				type="button"
+			>
+				<Plus aria-hidden="true" size={13} />
+			</button>
+			{menuTarget?.location === "titlebar" && toolMenu(menuTarget.paneId)}
+		</div>
+	);
+
 	return (
 		<div className="session-workspace-root" hidden={!visible}>
+			{visible && stripInTitlebar && mergedPane
+				? createPortal(renderTabStrip(mergedPane, true), titlebarTabsSlot!)
+				: null}
+			{visible && titlebarAddSlot && workspace.panes.length > 0
+				? createPortal(titlebarAdd, titlebarAddSlot)
+				: null}
 			<div className="session-workspace-instance">
 				<div className={`session-workspace-panes${dragState ? " is-dragging" : ""}`} ref={panesRef}>
 					{([0, 1] as const).map((row) => {
@@ -1500,7 +1548,7 @@ export function SessionWorkspaceView({
 											else handleDropOnStrip(pane.id, pane.tabs.length);
 										}}
 									>
-										{renderTabStrip(pane)}
+										{stripInTitlebar ? null : renderTabStrip(pane)}
 										<div
 											className="workspace-pane-body"
 											ref={(element) => {
