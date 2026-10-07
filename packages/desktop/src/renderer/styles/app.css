@@ -397,7 +397,7 @@ textarea { resize: none; }
 .subagent-card[data-status="queued"] .subagent-status, .subagent-card[data-status="running"] .subagent-status { background: var(--warning-banner-bg); color: var(--warning-soft); }
 .subagent-type-tag { display: inline-flex; align-items: center; padding: 1px 5px; border-radius: 4px; background: var(--surface-05); color: var(--text-24); font-size: 11px; font-family: inherit; }
 .subagent-meta-item { display: inline-flex; align-items: center; color: var(--text-muted); font-size: 11px; }
-.subagent-card-summary { width: 100%; margin-top: 2px; color: var(--text-22); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+.subagent-card-summary { width: 100%; margin-top: 2px; color: var(--text-22); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
 .subagent-stop, .subagent-detail-stop, .subagent-back { display: grid; width: 26px; height: 26px; flex: none; place-items: center; border-radius: 6px; border: 1px solid var(--border); background: var(--surface-04); color: var(--muted); transition: all 140ms ease; }
 .subagent-stop { margin: -2px -2px 0 6px; color: var(--warning); }
 .subagent-stop:hover:not(:disabled) { background: var(--danger-soft-bg); color: var(--danger); border-color: var(--danger-soft-border); }
@@ -1188,7 +1188,7 @@ textarea { resize: none; }
 .scheduled-task-card { display: flex; min-width: 0; flex-direction: column; gap: 8px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--text); padding: 14px; text-align: left; transition: background-color 140ms ease, border-color 140ms ease; }
 .scheduled-task-card:hover:not(:disabled), .scheduled-task-card:focus-visible { border-color: var(--border-strong); background: var(--surface-04); }
 .scheduled-task-card-heading { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.scheduled-task-card-heading strong { display: -webkit-box; overflow: hidden; font-size: 13px; font-weight: 550; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.scheduled-task-card-heading strong { display: -webkit-box; overflow: hidden; font-size: 13px; font-weight: 550; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .scheduled-task-card-heading .scheduled-task-state { flex: none; margin-top: 1px; }
 .scheduled-task-card > p { overflow: hidden; margin: 0; color: var(--text-12); font-size: 12px; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .scheduled-task-card-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: auto; color: var(--text-19); font-size: 11px; }
@@ -1289,7 +1289,7 @@ textarea { resize: none; }
 .scheduled-task-history button:hover:not(:disabled) { background: var(--surface-04); }
 .scheduled-task-history button > span:nth-child(2) { display: grid; min-width: 0; gap: 5px; }
 .scheduled-task-history strong { font-size: 12px; font-weight: 500; text-transform: capitalize; }
-.scheduled-task-history small { display: -webkit-box; overflow: hidden; color: var(--text-12); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.scheduled-task-history small { display: -webkit-box; overflow: hidden; color: var(--text-12); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
 .scheduled-task-history-heading { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; }
 .scheduled-task-history time { color: var(--text-10); font-size: 11px; }
 @container (max-width: 680px) {
@@ -1993,7 +1993,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .composer-skill-token.composer-goal-token { color: var(--accent, var(--chip-skill-text)); }
 .composer-skill-token:hover { background: transparent; }
 .composer-token-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; flex: none; }
-.composer-token-icon svg { display: block; width: 14px; height: 14px; vertical-align: -0.15em; }
+.composer-token-icon svg { display: block; width: 14px; height: 14px; }
 .composer-token-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .composer-attachments { display: flex; flex-wrap: wrap; gap: 8px; padding: 1px 4px 5px; }
 .composer-image-preview { position: relative; width: 64px; height: 64px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-03); animation: pill-pop-in 160ms cubic-bezier(.16, 1, .3, 1) both; transition: opacity 140ms ease, transform 140ms ease; }
