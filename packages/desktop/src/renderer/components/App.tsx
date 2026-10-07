@@ -773,8 +773,13 @@ export function App({ api, store }: AppProps) {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
 	}, []);
 	const workspaceProjectName = (() => {
-		const cwd = visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null;
 		const contextMode = visibleActiveSession?.mode ?? visibleNewTaskDraft?.mode ?? mode;
+		// Managed sessions live under uuid-named directories, so the cwd
+		// basename is not a project name — fall back to the app name like the
+		// sidebar's task grouping does.
+		const cwd = visibleActiveSession?.cwdOrigin === "managed"
+			? null
+			: (visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null);
 		if (!cwd) return "Metis";
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;

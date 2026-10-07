@@ -34,7 +34,9 @@ describe("Sidebar geometry and workspace grid styles", () => {
 				':root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar .sessions-sidebar-toggle-fixed',
 			).left,
 		).toBe("76px");
-		const actionButton = rule(".workspace-titlebar button");
+		const actionButton = rule(
+			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger",
+		);
 		expect(actionButton.width).toBe("28px");
 		expect(actionButton.height).toBe("28px");
 
@@ -59,7 +61,9 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(titlebar.height).toBe("40px");
 		expect(titlebar.borderBottom).toBe("1px solid var(--border)");
 
-		const actionButtons = rule(".workspace-titlebar button");
+		const actionButtons = rule(
+			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger",
+		);
 		expect(actionButtons.width).toBe("28px");
 		expect(actionButtons.height).toBe("28px");
 		expect(actionButtons.borderRadius).toBe("7px");
