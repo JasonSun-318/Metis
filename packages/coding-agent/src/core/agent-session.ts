@@ -3790,10 +3790,7 @@ export class AgentSession {
 			}
 		}
 
-		userPromptContext = appendKnowledgeContext(
-			userPromptContext,
-			readKnowledgeLinks(this.sessionManager.getBranch()),
-		);
+		userPromptContext = this._withKnowledgeContext(userPromptContext);
 		let text = this._expandSkillCommand(currentText, true);
 		text = expandPromptTemplate(text, [...this.promptTemplates], MAX_DURABLE_PROMPT_TEXT_BYTES);
 		const textBytes = Buffer.byteLength(text, "utf8");
@@ -4198,10 +4195,8 @@ export class AgentSession {
 				}
 			}
 
-			userPromptContext = appendKnowledgeContext(
-				userPromptContext,
-				readKnowledgeLinks(this.sessionManager.getBranch()),
-			);
+			// Prepared durable prompts already decided their knowledge context when accepted.
+			if (!options?.hookEvaluated) userPromptContext = this._withKnowledgeContext(userPromptContext);
 
 			// Expand skill commands (/skill:name args) and prompt templates (/template args)
 			let expandedText = currentText;
@@ -4503,6 +4498,14 @@ export class AgentSession {
 		await this._queueFollowUp(expandedText, images);
 	}
 
+	private _withKnowledgeContext(context: string | undefined): string | undefined {
+		return appendKnowledgeContext(
+			context,
+			readKnowledgeLinks(this.sessionManager.getBranch()),
+			this.agent.state.messages,
+		);
+	}
+
 	/**
 	 * Internal: Queue a steering message (already expanded, no extension command check).
 	 */
@@ -4522,13 +4525,9 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
+		const context = this._withKnowledgeContext(hookContext);
 		this.agent.steer(
-			{
-				role: "user",
-				content,
-				timestamp: Date.now(),
-				hookContext: appendKnowledgeContext(hookContext, readKnowledgeLinks(this.sessionManager.getBranch())),
-			},
+			{ role: "user", content, timestamp: Date.now(), ...(context ? { hookContext: context } : {}) },
 			identity,
 		);
 	}
@@ -4552,13 +4551,9 @@ export class AgentSession {
 		if (images) {
 			content.push(...images);
 		}
+		const context = this._withKnowledgeContext(hookContext);
 		this.agent.followUp(
-			{
-				role: "user",
-				content,
-				timestamp: Date.now(),
-				hookContext: appendKnowledgeContext(hookContext, readKnowledgeLinks(this.sessionManager.getBranch())),
-			},
+			{ role: "user", content, timestamp: Date.now(), ...(context ? { hookContext: context } : {}) },
 			identity,
 		);
 	}
