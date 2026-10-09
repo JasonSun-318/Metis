@@ -1234,6 +1234,36 @@ describe("renderer projection reducer", () => {
 		expect(store.getSnapshot().cursor).toBe(11);
 	});
 
+	it("keeps events buffered by a background resubscribe when the same session is focused", () => {
+		const store = new AppStore();
+		store.applySnapshot({ ...snapshot(), cursor: 10 });
+		const background = {
+			...snapshot(),
+			session: session("session-2"),
+			recentItems: [{ ...item("item-2", "s2"), sessionId: "session-2" }],
+			cursor: 10,
+		};
+		store.beginSubscription("session-2", { focus: false });
+		store.applySnapshot(background);
+		// The live pane resubscribes in the background, and a delta arrives while it waits.
+		store.beginSubscription("session-2", { focus: false });
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 11,
+			toCursor: 11,
+			events: [
+				{ type: "item/delta", sessionId: "session-2", itemId: "item-2", delta: { type: "text", text: "-live" } },
+			],
+		});
+		// Focusing the pane claims the in-flight subscription with an open snapshot taken before that delta.
+		store.beginSubscription("session-2");
+		store.applySnapshot(background);
+		const state = store.getSnapshot();
+		expect(state.activeSessionId).toBe("session-2");
+		expect(state.syncStatus).toBe("ready");
+		expect(state.itemsById.get("item-2")?.content).toEqual([{ type: "text", text: "s2-live" }]);
+	});
+
 	it("ignores a stale cancel after the same session is reopened", () => {
 		const store = new AppStore();
 		store.applySnapshot({ ...snapshot(), cursor: 10 });

@@ -297,9 +297,16 @@ export function beginProjectionSubscription(state: MutableProjectionState, sessi
 			}
 		}
 	}
-	if (session.syncStatus !== "subscribing") session.statusBeforeSubscribe = session.syncStatus;
+	// A bucket that is already subscribing keeps what it buffered: a newer claim
+	// (e.g. focusing a pane mid-resubscribe) may apply a snapshot taken before
+	// those events, and the replay drops whatever the snapshot already covers.
+	if (session.syncStatus !== "subscribing") {
+		session.statusBeforeSubscribe = session.syncStatus;
+		session.buffer = [];
+	} else {
+		session.buffer ??= [];
+	}
 	session.syncStatus = "subscribing";
-	session.buffer = [];
 	session.focusOnSnapshot = focus;
 	session.subscriptionToken = ++state.nextSubscriptionToken;
 	session.revision += 1;
