@@ -32,15 +32,19 @@ import {
 	focusedChatTab,
 	canSplit,
 	moveTab,
+	relatedInsertIndex,
 	removeTab,
 	removeTabs,
 	type SessionWorkspace,
+	setActivePane,
 	type SplitDirection,
 	splitTab,
+	tabGroupRuns,
 	type WorkspacePane,
 	type WorkspaceTab,
 	workspaceTabs,
 } from "../workspace-tabs.ts";
+import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import {
 	displayFileName,
@@ -86,13 +90,27 @@ type DropTarget =
 	| { readonly paneId: string; readonly index: number }
 	| { readonly split: { readonly paneId: string; readonly direction: SplitDirection } };
 
-// The add menu opens either from a pane strip ("pane") or from the shared
-// titlebar trigger ("titlebar"); the stored paneId is the target captured at
-// open time so the menu keeps acting on it if focus moves while open.
+// The add menu belongs to one pane strip; the stored paneId is the target
+// captured at open time so the menu keeps acting on it if focus moves while
+// open. `align` flips the menu leftward when the trigger sits near the edge.
 interface MenuTarget {
 	readonly paneId: string;
-	readonly location: "pane" | "titlebar";
+	readonly align: "start" | "end";
 }
+
+/** The project a tab belongs to; tabs of one project share a labelled group in the strip. */
+export interface WorkspaceProject {
+	readonly key: string;
+	readonly name: string;
+	readonly cwd: string;
+}
+
+// Group accents stay legible on both themes.
+const TAB_GROUP_COLORS = ["#5b8def", "#3fb68b", "#d9963b", "#b77ae0", "#e0707a", "#45b0c4"] as const;
+
+const noProject = (): WorkspaceProject | null => null;
+
+type PlaceTab = (workspace: SessionWorkspace, tab: WorkspaceTab, paneId?: string, activate?: boolean) => SessionWorkspace;
 
 const MIN_PANE_WIDTH = 360;
 const MIN_PANE_HEIGHT = 280;
@@ -105,6 +123,8 @@ interface SessionWorkspaceViewProps {
 	readonly chatIsDraft: boolean;
 	readonly chatSessionId: string | null;
 	readonly cleanupSessionIds: readonly string[];
+	/** Bumped by the Cmd/Ctrl+W shortcut to close the focused tab. */
+	readonly closeTabRequest?: number;
 	readonly mode: AgentMode;
 	readonly onActivateSession: (sessionId: string) => void;
 	readonly onChatSession: (sessionId: string | null) => void;
@@ -118,11 +138,16 @@ interface SessionWorkspaceViewProps {
 	readonly previewRequest?: UniversalPreviewTarget | null;
 	readonly knowledgeRequest?: { readonly id: number; readonly sessionId: string };
 	readonly process?: SessionProcessView;
-	readonly sessionsById: ReadonlyMap<string, Pick<SessionSummary, "sessionId" | "cwd" | "mode">>;
+	/** Resolves a session's project for tab grouping; without it tabs are ungrouped. */
+	readonly projectFor?: (sessionId: string) => WorkspaceProject | null;
+	readonly sessionsById: ReadonlyMap<
+		string,
+		Pick<SessionSummary, "sessionId" | "cwd" | "mode">
+			& Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>
+	>;
 	readonly sessionTitleFor: (sessionId: string) => string;
 	readonly store: AppStore;
 	readonly theme: "dark" | "light";
-	readonly titlebarAddSlot?: HTMLElement | null;
 	readonly titlebarTabsSlot?: HTMLElement | null;
 	readonly visible: boolean;
 }
@@ -145,6 +170,7 @@ function syncChatTabs(
 	chatSessionId: string | null,
 	chatIsDraft: boolean,
 	pendingSessionId: string | null | undefined,
+	place: PlaceTab,
 ): SessionWorkspace {
 	const pane = activePane(workspace);
 	const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
@@ -153,7 +179,7 @@ function syncChatTabs(
 	if (chatIsDraft) {
 		const draftTab = findChatTab(workspace, null);
 		if (chatSessionId === null) {
-			let next = draftTab ? workspace : addTab(workspace, chatTab(null), workspace.activePaneId, false);
+			let next = draftTab ? workspace : place(workspace, chatTab(null), workspace.activePaneId, false);
 			if (shouldFocus) next = activateTab(next, findChatTab(next, null)!.id);
 			return next;
 		}
@@ -167,7 +193,7 @@ function syncChatTabs(
 				})),
 			};
 		}
-		if (!findChatTab(next, chatSessionId)) next = addTab(next, chatTab(chatSessionId), next.activePaneId, false);
+		if (!findChatTab(next, chatSessionId)) next = place(next, chatTab(chatSessionId), next.activePaneId, false);
 		if (shouldFocus) next = activateTab(next, findChatTab(next, chatSessionId)!.id);
 		return next;
 	}
@@ -175,7 +201,7 @@ function syncChatTabs(
 	let next = workspace;
 	const staleDraft = findChatTab(next, null);
 	if (staleDraft) next = removeTab(next, staleDraft.id);
-	if (!findChatTab(next, chatSessionId)) next = addTab(next, chatTab(chatSessionId), next.activePaneId, false);
+	if (!findChatTab(next, chatSessionId)) next = place(next, chatTab(chatSessionId), next.activePaneId, false);
 	if (shouldFocus) next = activateTab(next, findChatTab(next, chatSessionId)!.id);
 	return next;
 }
@@ -188,6 +214,7 @@ export function SessionWorkspaceView({
 	chatIsDraft,
 	chatSessionId,
 	cleanupSessionIds,
+	closeTabRequest,
 	mode,
 	onActivateSession,
 	onChatSession,
@@ -201,11 +228,11 @@ export function SessionWorkspaceView({
 	previewRequest,
 	knowledgeRequest,
 	process,
+	projectFor = noProject,
 	sessionsById,
 	sessionTitleFor,
 	store,
 	theme,
-	titlebarAddSlot,
 	titlebarTabsSlot,
 	visible,
 }: SessionWorkspaceViewProps) {
@@ -280,6 +307,9 @@ export function SessionWorkspaceView({
 	// sync pass treats that tab as the desired focus.
 	const pendingChatFocus = useRef<string | null | undefined>(undefined);
 	const handledFocusNonce = useRef(0);
+	// Shortcut and browser-view handlers outlive renders, so they close tabs through the latest closeTab.
+	const closeTabRef = useRef<(id: string) => void>(() => undefined);
+	const handledCloseTabRequest = useRef(closeTabRequest);
 
 	const updateWorkspace = useCallback(
 		(update: (workspace: SessionWorkspace) => SessionWorkspace) => {
@@ -290,6 +320,44 @@ export function SessionWorkspaceView({
 			});
 		},
 		[],
+	);
+
+	// A project keeps its group color while it has tabs open; new projects take
+	// the first free color so groups on screen never share one.
+	const groupColors = useRef(new Map<string, number>());
+	const tabGroupColor = (key: string): string => {
+		let index = groupColors.current.get(key);
+		if (index === undefined) {
+			const used = new Set(groupColors.current.values());
+			index = TAB_GROUP_COLORS.findIndex((_, candidate) => !used.has(candidate));
+			if (index < 0) index = groupColors.current.size % TAB_GROUP_COLORS.length;
+			groupColors.current.set(key, index);
+		}
+		return TAB_GROUP_COLORS[index]!;
+	};
+	const openGroupKeys = new Set(workspaceTabs(workspace).flatMap((tab) => {
+		const project = tab.sessionId === null ? null : projectFor(tab.sessionId);
+		return project ? [project.key] : [];
+	}));
+	for (const key of groupColors.current.keys()) {
+		if (!openGroupKeys.has(key)) groupColors.current.delete(key);
+	}
+
+	const projectForRef = useRef(projectFor);
+	projectForRef.current = projectFor;
+	const groupOf = useCallback(
+		(tab: WorkspaceTab): string | null =>
+			tab.sessionId === null ? null : (projectForRef.current(tab.sessionId)?.key ?? null),
+		[],
+	);
+	// New tabs join their session's (or project's) tabs so every group stays one labelled run.
+	const placeTab = useCallback<PlaceTab>(
+		(workspace, tab, paneId = workspace.activePaneId, activate = true) => {
+			const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+			if (!pane) return workspace;
+			return addTab(workspace, tab, paneId, activate, relatedInsertIndex(pane, tab, groupOf));
+		},
+		[groupOf],
 	);
 
 	// User gestures (tab click, close, drag, pane pick) report the resulting
@@ -315,8 +383,8 @@ export function SessionWorkspaceView({
 	// adopt the draft's real sessionId when it materializes so the chat subtree
 	// (and the composer's editable DOM) survives the draft -> session transition.
 	useEffect(() => {
-		updateWorkspace((current) => syncChatTabs(current, chatSessionId, chatIsDraft, pendingChatFocus.current));
-	}, [chatIsDraft, chatSessionId, updateWorkspace]);
+		updateWorkspace((current) => syncChatTabs(current, chatSessionId, chatIsDraft, pendingChatFocus.current, placeTab));
+	}, [chatIsDraft, chatSessionId, placeTab, updateWorkspace]);
 
 	// Once the projected session's tab is focused, the pending focus request is
 	// satisfied and gesture reporting is free to observe the next divergence.
@@ -339,10 +407,10 @@ export function SessionWorkspaceView({
 			const existing = findChatTab(current, chatFocusRequest.sessionId);
 			if (existing) return activateTab(current, existing.id);
 			return chatFocusRequest.sessionId === chatSessionId
-				? addTab(current, chatTab(chatFocusRequest.sessionId))
+				? placeTab(current, chatTab(chatFocusRequest.sessionId))
 				: current;
 		});
-	}, [chatFocusRequest, chatSessionId, updateWorkspace]);
+	}, [chatFocusRequest, chatSessionId, placeTab, updateWorkspace]);
 
 	const openProcess = useCallback(() => {
 		if (!chatSessionId || !process) return;
@@ -354,10 +422,10 @@ export function SessionWorkspaceView({
 				? { ...current, panes: current.panes.map((pane, index) => index === existing.paneIndex
 						? { ...pane, tabs: pane.tabs.map((item, tabIndex) => tabIndex === existing.tabIndex ? tab : item) }
 						: pane) }
-				: addTab(current, tab);
+				: placeTab(current, tab);
 			return activateTab(replaced, id);
 		});
-	}, [process, chatSessionId, updateWorkspace]);
+	}, [process, chatSessionId, placeTab, updateWorkspace]);
 
 	useEffect(() => {
 		if (!chatSessionId) return;
@@ -413,6 +481,11 @@ export function SessionWorkspaceView({
 	useEffect(
 		() =>
 			api.subscribeBrowser((event) => {
+				if (event.type === "command") {
+					// Cmd/Ctrl+W inside a page view closes that browser tab, like the shortcut elsewhere.
+					if (event.command === "close-tab") closeTabRef.current(event.browserId);
+					return;
+				}
 				if (event.type === "profiles") {
 					if (event.profiles.length > 0) {
 						browserProfilesRevision.current += 1;
@@ -424,7 +497,7 @@ export function SessionWorkspaceView({
 					const profile = browserProfilesRef.current.find(({ profileId }) => profileId === event.profileId);
 					updateWorkspace((workspace) => {
 						if (workspaceTabs(workspace).some(({ id }) => id === event.browserId)) return workspace;
-						return addTab(workspace, {
+						return placeTab(workspace, {
 							kind: "browser",
 							id: event.browserId,
 							sessionId: event.sessionId,
@@ -473,7 +546,7 @@ export function SessionWorkspaceView({
 					onActivateSession(event.sessionId);
 				}
 			}),
-		[api, onActivateSession, t, updateWorkspace],
+		[api, onActivateSession, placeTab, t, updateWorkspace],
 	);
 
 	useEffect(() => {
@@ -571,9 +644,9 @@ export function SessionWorkspaceView({
 				title: previewRequest.name,
 				file: previewRequest,
 			};
-			return addTab(workspace, tab);
+			return placeTab(workspace, tab);
 		});
-	}, [previewRequest, updateWorkspace]);
+	}, [placeTab, previewRequest, updateWorkspace]);
 
 	useEffect(() => {
 		if (!planPreviewRequest) return;
@@ -596,7 +669,7 @@ export function SessionWorkspaceView({
 					})),
 				}, existing.id);
 			}
-			return addTab(workspace, {
+			return placeTab(workspace, {
 				kind: "plan",
 				id: plan.planId,
 				sessionId,
@@ -604,7 +677,7 @@ export function SessionWorkspaceView({
 				plan,
 			});
 		});
-	}, [planPreviewRequest, updateWorkspace]);
+	}, [placeTab, planPreviewRequest, updateWorkspace]);
 
 	// A pane's tool target is the session of its current tab, falling back to
 	// the projected session when the pane is empty.
@@ -629,7 +702,7 @@ export function SessionWorkspaceView({
 				cwd,
 				title: number === 1 ? t("Terminal") : t("Terminal {{number}}", { number }),
 			};
-			return { ...addTab(workspace, tab, paneId), nextNumber: number + 1 };
+			return { ...placeTab(workspace, tab, paneId), nextNumber: number + 1 };
 		});
 		setMenuTarget(null);
 	};
@@ -658,7 +731,7 @@ export function SessionWorkspaceView({
 			profileName: profile.name,
 			controlState: "idle",
 		};
-		updateWorkspace((workspace) => addTab(workspace, tab, paneId));
+		updateWorkspace((workspace) => placeTab(workspace, tab, paneId));
 		setMenuTarget(null);
 	};
 
@@ -700,7 +773,7 @@ export function SessionWorkspaceView({
 				relativePath: null,
 				fixed: false,
 			}];
-			const withAll = files.reduce((acc, tab) => addTab(acc, tab, paneId), workspace);
+			const withAll = files.reduce((acc, tab) => placeTab(acc, tab, paneId), workspace);
 			return activateTab(withAll, files[0]!.id);
 		});
 		setMenuTarget(null);
@@ -713,7 +786,7 @@ export function SessionWorkspaceView({
 			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "review" && tab.sessionId === ownerSessionId);
 			if (existing) return activateTab(workspace, existing.id);
 			const tab: WorkspaceTab = { kind: "review", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Review") };
-			return addTab(workspace, tab, paneId);
+			return placeTab(workspace, tab, paneId);
 		});
 		setMenuTarget(null);
 	};
@@ -724,7 +797,7 @@ export function SessionWorkspaceView({
 		updateWorkspace((workspace) => {
 			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "agent" && tab.sessionId === ownerSessionId);
 			const tab: WorkspaceTab = existing ?? { kind: "agent", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Agents") };
-			return existing ? activateTab(workspace, existing.id) : addTab(workspace, tab, paneId);
+			return existing ? activateTab(workspace, existing.id) : placeTab(workspace, tab, paneId);
 		});
 		setMenuTarget(null);
 	};
@@ -736,10 +809,10 @@ export function SessionWorkspaceView({
 			const tab: WorkspaceTab = existing ?? { kind: "knowledge", id: crypto.randomUUID(), sessionId: targetSessionId, title: t("Knowledge") };
 			return existing
 				? activateTab(workspace, existing.id)
-				: addTab(workspace, tab, paneId ?? workspace.activePaneId);
+				: placeTab(workspace, tab, paneId ?? workspace.activePaneId);
 		});
 		setMenuTarget(null);
-	}, [t, updateWorkspace]);
+	}, [placeTab, t, updateWorkspace]);
 	const handledKnowledgeRequest = useRef<number | undefined>(undefined);
 	useEffect(() => {
 		if (!knowledgeRequest || knowledgeRequest.id === handledKnowledgeRequest.current) return;
@@ -783,7 +856,7 @@ export function SessionWorkspaceView({
 					};
 					next = activateTab(next, nextTab.id);
 				} else {
-					next = addTab(workspace, nextTab, paneId);
+					next = placeTab(workspace, nextTab, paneId);
 				}
 			}
 			saveStoredFiles(
@@ -974,6 +1047,12 @@ export function SessionWorkspaceView({
 		mutateWorkspace((workspace) => activateTab(workspace, id));
 	};
 
+	// Working inside a pane (typing, scrolling a terminal) focuses it, so shortcuts
+	// and the projected session follow the pane the user is actually using.
+	const focusPane = (paneId: string) => {
+		mutateWorkspace((workspace) => setActivePane(workspace, paneId));
+	};
+
 	const removeTabInternal = (id: string) => {
 		const closing = workspaceTabs(workspace).find((tab) => tab.id === id);
 		if (!closing) return;
@@ -1012,6 +1091,33 @@ export function SessionWorkspaceView({
 		}
 		removeTabInternal(id);
 	};
+
+	closeTabRef.current = closeTab;
+
+	useEffect(() => {
+		if (closeTabRequest === undefined || closeTabRequest === handledCloseTabRequest.current) return;
+		handledCloseTabRequest.current = closeTabRequest;
+		if (!visible) return;
+		const pane = activePane(workspaceRef.current);
+		if (pane.activeId) closeTabRef.current(pane.activeId);
+	}, [closeTabRequest, visible]);
+
+	// Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's tabs.
+	useEffect(() => {
+		if (!visible) return;
+		const cycle = (event: KeyboardEvent) => {
+			if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
+			const pane = activePane(workspaceRef.current);
+			if (pane.tabs.length < 2) return;
+			event.preventDefault();
+			const index = pane.tabs.findIndex((tab) => tab.id === pane.activeId);
+			const next = pane.tabs[(index + (event.shiftKey ? -1 : 1) + pane.tabs.length) % pane.tabs.length]!;
+			mutateWorkspace((current) => activateTab(current, next.id));
+		};
+		// Capture phase: terminals and editors stop keydown propagation inside their panes.
+		document.addEventListener("keydown", cycle, true);
+		return () => document.removeEventListener("keydown", cycle, true);
+	}, [mutateWorkspace, visible]);
 
 	const discardPendingFile = () => {
 		if (!pendingFileClose) return;
@@ -1109,7 +1215,7 @@ export function SessionWorkspaceView({
 		return index;
 	};
 
-	const toolMenu = (paneId: string) => {
+	const toolMenu = (paneId: string, align: MenuTarget["align"]) => {
 		const target = paneTarget(paneId);
 		const targetMode = target.sessionId === null ? mode : (sessionsById.get(target.sessionId)?.mode ?? mode);
 		const sessionTarget = target.sessionId === null || target.cwd === null
@@ -1118,7 +1224,7 @@ export function SessionWorkspaceView({
 		return (
 		<nav
 			aria-label={t("Available tools")}
-			className="tool-add-menu"
+			className={`tool-add-menu${align === "end" ? " is-align-end" : ""}`}
 			role="menu"
 		>
 			<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId, paneId)} role="menuitem" type="button">
@@ -1199,106 +1305,158 @@ export function SessionWorkspaceView({
 		return () => observer.disconnect();
 	}, [layoutPanels, workspace, chatSessionId, visible]);
 
-	// The pane strip trigger only owns menus opened from its own strip; the
-	// titlebar trigger renders its menu beside itself instead. Either kind of
-	// open menu still hides the target pane's panels — native webviews ignore
-	// z-index and would paint over the dropdown.
-	const paneMenuTarget = menuTarget?.location === "pane" ? menuTarget.paneId : null;
+	const openToolMenu = (paneId: string, trigger: HTMLElement) => {
+		const rect = trigger.getBoundingClientRect();
+		setTabMenu(null);
+		setMenuTarget((current) => current?.paneId === paneId
+			? null
+			: { paneId, align: rect.left + 216 > window.innerWidth ? "end" : "start" });
+	};
 
-	const renderTabStrip = (pane: WorkspacePane, merged = false) => (
-		<div
-			className={`workspace-tabbar${merged ? " workspace-tabbar--titlebar" : ""}${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
-			onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === pane.id ? null : current)}
-			onDragOver={(event) => {
-				if (!dragState) return;
-				event.preventDefault();
-				event.stopPropagation();
-				event.dataTransfer.dropEffect = "move";
-				setDropTarget({ paneId: pane.id, index: stripDropIndex(event) });
-			}}
-			onDrop={(event) => {
-				event.preventDefault();
-				event.stopPropagation();
-				handleDropOnStrip(pane.id, stripDropIndex(event));
-			}}
-			role="tablist"
-		>
-			<div className="tool-tabs-scroll">
-				{pane.tabs.map((tab) => {
-					const displayTitle = tab.kind === "chat"
-						? (tab.sessionId === null ? t("New task") : sessionTitleFor(tab.sessionId))
-						: tab.kind === "browser" && tab.url === ""
-							? t("New tab")
-							: tab.kind === "file" && tab.relativePath === null ? t("Open file") : tab.title;
-					const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
-					const dirty = draft !== undefined && draft.text !== draft.savedText;
-					const saving = savingFileTabIds.has(tab.id);
-					return (
-						<div
-							className={`tool-tab${pane.activeId === tab.id ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`}
-							draggable
-							key={tab.id}
-							onDragEnd={() => { setDragState(null); setDropTarget(null); }}
-							onDragStart={(event) => {
-								event.dataTransfer.setData("text/plain", tab.id);
-								event.dataTransfer.effectAllowed = "move";
-								setDragState({ tabId: tab.id });
-							}}
-							onContextMenu={(event) => {
-								event.preventDefault();
-								setMenuTarget(null);
-								setTabMenu({ paneId: pane.id, tabId: tab.id, x: event.clientX, y: event.clientY });
-							}}
-						>
-							<button
-								aria-selected={pane.activeId === tab.id}
-								aria-label={dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle}
-								className="tool-tab-select"
-								onClick={() => selectTab(tab.id)}
-								role="tab"
-								type="button"
-							>
-								{tab.kind === "chat" ? <ChatCircle aria-hidden="true" size={13} />
-									: tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} />
-									: tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} />
-									: tab.kind === "browser" ? <Globe aria-hidden="true" size={13} />
-									: tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />)
-									: tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} />
-									: tab.kind === "agent" ? <Robot aria-hidden="true" size={13} />
-									: tab.kind === "plan" ? <FileText aria-hidden="true" size={13} />
-									: tab.kind === "preview" ? <WorkspaceFileIcon path={tab.title} size={13} /> : null}
-								<span>{displayTitle}</span>
-							</button>
-							<button
-								aria-label={t("Close {{name}}", { name: displayTitle })}
-								className="tool-tab-close"
-								disabled={saving}
-								onClick={() => closeTab(tab.id)}
-								type="button"
-							>
-								<X aria-hidden="true" size={11} />
-							</button>
-						</div>
-					);
-				})}
-			</div>
-			{!merged && (
-			<div className="tool-add" ref={paneMenuTarget === pane.id ? menuRef : undefined}>
+	const tabIcon = (tab: WorkspaceTab): ReactNode =>
+		tab.kind === "chat" ? <ChatCircle aria-hidden="true" size={13} />
+			: tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} />
+			: tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} />
+			: tab.kind === "browser" ? <Globe aria-hidden="true" size={13} />
+			: tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />)
+			: tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} />
+			: tab.kind === "agent" ? <Robot aria-hidden="true" size={13} />
+			: tab.kind === "plan" ? <FileText aria-hidden="true" size={13} />
+			: <WorkspaceFileIcon path={tab.title} size={13} />;
+
+	const renderTab = (pane: WorkspacePane, tab: WorkspaceTab, project: WorkspaceProject | null) => {
+		const displayTitle = tab.kind === "chat"
+			? (tab.sessionId === null ? t("New task") : sessionTitleFor(tab.sessionId))
+			: tab.kind === "browser" && tab.url === ""
+				? t("New tab")
+				: tab.kind === "file" && tab.relativePath === null ? t("Open file") : tab.title;
+		const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
+		const dirty = draft !== undefined && draft.text !== draft.savedText;
+		const saving = savingFileTabIds.has(tab.id);
+		const active = pane.activeId === tab.id;
+		// Chat tabs carry their session's live status so background panes stay readable at a glance.
+		const session = tab.kind === "chat" && tab.sessionId !== null ? sessionsById.get(tab.sessionId) : undefined;
+		const indicator = session
+			? sessionIndicator(session, visible && active && tab.sessionId === chatSessionId)
+			: undefined;
+		const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
+		const label = [displayTitle, dirty ? t("Unsaved") : null, indicatorLabel ? t(indicatorLabel) : null]
+			.filter(Boolean)
+			.join(", ");
+		return (
+			<div
+				className={`tool-tab${active ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`}
+				draggable
+				key={tab.id}
+				onAuxClick={(event) => {
+					// Middle-click closes, matching browsers and editors.
+					if (event.button !== 1) return;
+					event.preventDefault();
+					closeTab(tab.id);
+				}}
+				onDragEnd={() => { setDragState(null); setDropTarget(null); }}
+				onDragStart={(event) => {
+					event.dataTransfer.setData("text/plain", tab.id);
+					event.dataTransfer.effectAllowed = "move";
+					setDragState({ tabId: tab.id });
+				}}
+				onContextMenu={(event) => {
+					event.preventDefault();
+					setMenuTarget(null);
+					setTabMenu({ paneId: pane.id, tabId: tab.id, x: event.clientX, y: event.clientY });
+				}}
+			>
 				<button
-					aria-expanded={paneMenuTarget === pane.id}
-					aria-haspopup="menu"
-					aria-label={t("Add tool")}
-					className="tool-add-trigger"
-					onClick={() => setMenuTarget((current) => current?.location === "pane" && current.paneId === pane.id ? null : { paneId: pane.id, location: "pane" })}
+					aria-selected={active}
+					aria-label={label}
+					className="tool-tab-select"
+					onClick={() => selectTab(tab.id)}
+					role="tab"
+					title={project ? `${displayTitle} · ${project.name}` : displayTitle}
 					type="button"
 				>
-					<Plus aria-hidden="true" size={13} />
+					{tabIcon(tab)}
+					<span>{displayTitle}</span>
+					{indicator && <i aria-hidden="true" className="tool-tab-status" data-status={indicator} />}
 				</button>
-				{paneMenuTarget === pane.id && toolMenu(pane.id)}
+				<button
+					aria-label={t("Close {{name}}", { name: displayTitle })}
+					className="tool-tab-close"
+					disabled={saving}
+					onClick={() => closeTab(tab.id)}
+					tabIndex={active ? 0 : -1}
+					type="button"
+				>
+					<X aria-hidden="true" size={11} />
+				</button>
 			</div>
-			)}
-		</div>
-	);
+		);
+	};
+
+	const renderTabStrip = (pane: WorkspacePane, inTitlebar = false) => {
+		const runs = tabGroupRuns(
+			pane.tabs,
+			(tab) => (tab.sessionId === null ? null : projectFor(tab.sessionId)),
+			(project) => project.key,
+		);
+		// With several panes, the focused pane's active tab stays bright and the others dim.
+		const split = workspace.panes.length > 1;
+		const focused = split && pane.id === workspace.activePaneId;
+		const menuOpen = menuTarget?.paneId === pane.id;
+		return (
+			<div
+				className={`workspace-tabbar${inTitlebar ? " workspace-tabbar--titlebar" : ""}${focused ? " is-focused" : ""}${split && !focused ? " is-unfocused" : ""}${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
+				data-pane-id={pane.id}
+				onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === pane.id ? null : current)}
+				onDragOver={(event) => {
+					if (!dragState) return;
+					event.preventDefault();
+					event.stopPropagation();
+					event.dataTransfer.dropEffect = "move";
+					setDropTarget({ paneId: pane.id, index: stripDropIndex(event) });
+				}}
+				onDrop={(event) => {
+					event.preventDefault();
+					event.stopPropagation();
+					handleDropOnStrip(pane.id, stripDropIndex(event));
+				}}
+				role="tablist"
+			>
+				<div className="tool-tabs-scroll">
+					{runs.map((run, index) => {
+						const tabs = run.tabs.map((tab) => renderTab(pane, tab, run.group));
+						if (!run.group) return index === 0 ? tabs : [<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${run.tabs[0]!.id}`} />, ...tabs];
+						const color = tabGroupColor(run.group.key);
+						return (
+							<div
+								className="tool-tab-group"
+								key={`group-${run.tabs[0]!.id}`}
+								role="presentation"
+								style={{ "--tab-group-color": color } as CSSProperties}
+							>
+								<span className="tool-tab-group-label" title={run.group.cwd}>{run.group.name}</span>
+								{tabs}
+							</div>
+						);
+					})}
+				</div>
+				<div className="tool-add" ref={menuOpen ? menuRef : undefined}>
+					<button
+						aria-expanded={menuOpen}
+						aria-haspopup="menu"
+						aria-label={t("Add tool")}
+						className="tool-add-trigger"
+						onClick={(event) => openToolMenu(pane.id, event.currentTarget)}
+						type="button"
+					>
+						<Plus aria-hidden="true" size={13} />
+					</button>
+					{menuOpen && toolMenu(pane.id, menuTarget.align)}
+				</div>
+				<div aria-hidden="true" className="workspace-tabbar-fill" />
+			</div>
+		);
+	};
 
 	const renderPanels = () => {
 		let chatHost: { pane: WorkspacePane; tab: WorkspaceTab } | null = null;
@@ -1321,7 +1479,7 @@ export function SessionWorkspaceView({
 				&& tabMenu?.paneId !== pane.id;
 			const host = chatHost && chatHost.pane === pane ? chatHost : null;
 			const wrap = (tabId: string, content: ReactNode) => (
-				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId}>
+				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId} onPointerDownCapture={() => focusPane(pane.id)}>
 					{content}
 				</div>
 			);
@@ -1349,6 +1507,7 @@ export function SessionWorkspaceView({
 						data-pane-id={pane.id}
 						hidden={pane.activeId !== host.tab.id || !visible}
 						key={host.tab.id}
+						onPointerDownCapture={() => focusPane(pane.id)}
 					>
 						<div className="workspace-chat-panel">{chatViewFor(host.tab, true)}</div>
 					</div>
@@ -1455,6 +1614,7 @@ export function SessionWorkspaceView({
 							data-pane-id={pane.id}
 							hidden={!groupVisible}
 							key={`files-${fileSessionId}-${pane.id}`}
+							onPointerDownCapture={() => focusPane(pane.id)}
 						>
 							<FilePanel
 								activePath={groupActiveTab?.relativePath ?? null}
@@ -1484,35 +1644,25 @@ export function SessionWorkspaceView({
 
 	const splitTarget = dropTarget && "split" in dropTarget ? dropTarget.split : null;
 
-	// A lone pane's tab strip rides inside the window titlebar so the chrome
-	// stays one row tall; any split falls back to per-pane strips. When no
-	// titlebar slot is provided (standalone rendering/tests) the strip stays
-	// in the pane.
-	const mergedPane = workspace.panes.length === 1 ? workspace.panes[0]! : null;
-	const stripInTitlebar = mergedPane !== null && titlebarTabsSlot != null;
-	const titlebarAdd = (
-		<div className="tool-add" ref={menuTarget?.location === "titlebar" ? menuRef : undefined}>
-			<button
-				aria-expanded={menuTarget?.location === "titlebar"}
-				aria-haspopup="menu"
-				aria-label={t("Add tool")}
-				className="tool-add-trigger"
-				onClick={() => setMenuTarget((current) => current?.location === "titlebar" ? null : { paneId: activePane(workspace).id, location: "titlebar" })}
-				type="button"
-			>
-				<Plus aria-hidden="true" size={13} />
-			</button>
-			{menuTarget?.location === "titlebar" && toolMenu(menuTarget.paneId)}
-		</div>
-	);
+	// The top row's strips ride inside the window titlebar, one cell per pane,
+	// so the chrome stays a single row whether or not the workspace is split;
+	// cells share the panes' flex sizing and borders, so they line up with the
+	// columns below. A second row keeps its strips inside its panes. Without a
+	// titlebar slot (standalone rendering/tests) every strip stays in its pane.
+	const stripsInTitlebar = titlebarTabsSlot != null;
+	const topPanes = workspace.panes.filter((pane) => pane.row === 0);
 
 	return (
 		<div className="session-workspace-root" hidden={!visible}>
-			{visible && stripInTitlebar && mergedPane
-				? createPortal(renderTabStrip(mergedPane, true), titlebarTabsSlot!)
-				: null}
-			{visible && titlebarAddSlot && workspace.panes.length > 0
-				? createPortal(titlebarAdd, titlebarAddSlot)
+			{visible && stripsInTitlebar
+				? createPortal(
+					<div className="workspace-titlebar-strips">
+						{topPanes.map((pane) => (
+							<div className="workspace-titlebar-cell" key={pane.id}>{renderTabStrip(pane, true)}</div>
+						))}
+					</div>,
+					titlebarTabsSlot!,
+				)
 				: null}
 			<div className="session-workspace-instance">
 				<div className={`session-workspace-panes${dragState ? " is-dragging" : ""}`} ref={panesRef}>
@@ -1548,7 +1698,7 @@ export function SessionWorkspaceView({
 											else handleDropOnStrip(pane.id, pane.tabs.length);
 										}}
 									>
-										{stripInTitlebar ? null : renderTabStrip(pane)}
+										{stripsInTitlebar && pane.row === 0 ? null : renderTabStrip(pane)}
 										<div
 											className="workspace-pane-body"
 											ref={(element) => {
@@ -1559,6 +1709,12 @@ export function SessionWorkspaceView({
 											{pane.tabs.length === 0 && (
 												<div className="workspace-empty" role="tabpanel">
 													<p>{t("Pick a session from the sidebar or use + to open a tool.")}</p>
+													{onNewSession && (
+														<button className="button-secondary" onClick={() => onNewSession(null)} type="button">
+															<Plus aria-hidden="true" size={13} />
+															{t("Start a new task")}
+														</button>
+													)}
 												</div>
 											)}
 										</div>

@@ -11,11 +11,14 @@ import {
 	focusedChatTab,
 	moveTab,
 	paneForTab,
+	relatedInsertIndex,
 	removeTab,
 	removeTabs,
 	type SessionWorkspace,
 	splitTab,
 	type TerminalTab,
+	tabGroupRuns,
+	type WorkspaceTab,
 	workspaceTabs,
 } from "../src/renderer/workspace-tabs.ts";
 
@@ -253,5 +256,48 @@ describe("removeTabs", () => {
 		workspace = addTab(workspace, terminal("t2"));
 		workspace = removeTabs(workspace, new Set(["t1", "t2"]));
 		expect(workspaceTabs(workspace).map((tab) => tab.kind)).toEqual(["chat"]);
+	});
+});
+
+describe("project tab groups", () => {
+	const projects: Record<string, string> = { a: "/work/alpha", b: "/work/beta", c: "/work/alpha" };
+	const groupOf = (tab: WorkspaceTab) => (tab.sessionId === null ? null : (projects[tab.sessionId] ?? null));
+	const chat = (sessionId: string): WorkspaceTab => ({ ...chatTab(sessionId), id: `chat-${sessionId}` });
+	const tool = (sessionId: string, id: string): WorkspaceTab => ({
+		kind: "terminal",
+		id,
+		sessionId,
+		title: id,
+		cwd: projects[sessionId]!,
+	});
+
+	it("inserts at an index and clamps out-of-range positions", () => {
+		const base = addTab(addTab(defaultWorkspace(), chat("a")), chat("b"));
+		const middle = addTab(base, chat("c"), base.activePaneId, true, 1);
+		expect(middle.panes[0]!.tabs.map((tab) => tab.id)).toEqual(["chat-a", "chat-c", "chat-b"]);
+		const clamped = addTab(base, chat("c"), base.activePaneId, true, 99);
+		expect(clamped.panes[0]!.tabs.map((tab) => tab.id)).toEqual(["chat-a", "chat-b", "chat-c"]);
+	});
+
+	it("places a tab after its own session, then after its project, then at the end", () => {
+		let workspace = addTab(addTab(defaultWorkspace(), chat("a")), chat("b"));
+		const pane = () => workspace.panes[0]!;
+		expect(relatedInsertIndex(pane(), tool("a", "term-a"), groupOf)).toBe(1);
+		workspace = addTab(workspace, tool("a", "term-a"), pane().id, true, 1);
+		// Session c shares alpha with a, so it joins after a's terminal rather than after beta.
+		expect(relatedInsertIndex(pane(), chat("c"), groupOf)).toBe(2);
+		expect(relatedInsertIndex(pane(), chat("z"), groupOf)).toBe(3);
+		expect(relatedInsertIndex(pane(), chatTab(null), groupOf)).toBe(3);
+	});
+
+	it("labels each run of adjacent tabs that share a project once", () => {
+		const tabs = [chat("a"), tool("a", "term-a"), chat("b"), chatTab(null), chat("c")];
+		const runs = tabGroupRuns(tabs, groupOf, (group) => group);
+		expect(runs.map((run) => [run.group, run.tabs.length])).toEqual([
+			["/work/alpha", 2],
+			["/work/beta", 1],
+			[null, 1],
+			["/work/alpha", 1],
+		]);
 	});
 });

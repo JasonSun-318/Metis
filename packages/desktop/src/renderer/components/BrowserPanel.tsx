@@ -402,7 +402,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		if (zoomPercent !== state.zoomPercent) runZoomAction({ type: "set-zoom", zoomPercent });
 	}
 
-	function runPageAction(type: Exclude<DesktopBrowserCommand, "find"> | "capture-page") {
+	function runPageAction(type: Exclude<DesktopBrowserCommand, "find" | "close-tab"> | "capture-page") {
 		setMoreOpen(false);
 		setNotice(null);
 		setStatus(null);
@@ -431,6 +431,8 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	}
 
 	function runCommand(command: DesktopBrowserCommand) {
+		// The workspace owns tab closing; the panel only reacts to in-page commands.
+		if (command === "close-tab") return;
 		if (command === "find") openFind();
 		else if (command === "zoom-in" || command === "zoom-out" || command === "zoom-reset") {
 			runZoomAction({ type: command });

@@ -60,7 +60,7 @@ import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 import { SystemNotice, systemErrorNotice, type SystemNoticeTone } from "./SystemNotice.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
-import { SessionWorkspaceView } from "./SessionWorkspace.tsx";
+import { SessionWorkspaceView, type WorkspaceProject } from "./SessionWorkspace.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -377,10 +377,11 @@ export function App({ api, store }: AppProps) {
 
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
 	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
-	// The workspace portals its lone pane's tab strip and the shared add-tool
-	// trigger into these titlebar slots; null until the header mounts.
+	// The workspace portals its top-row tab strips into this titlebar slot;
+	// null until the header mounts.
 	const [titlebarTabsSlot, setTitlebarTabsSlot] = useState<HTMLDivElement | null>(null);
-	const [titlebarAddSlot, setTitlebarAddSlot] = useState<HTMLDivElement | null>(null);
+	// Bumped by the Cmd/Ctrl+W shortcut that the main process forwards.
+	const [closeTabRequest, setCloseTabRequest] = useState(0);
 	// Every mounted SessionChatView registers its own submit here so the shared
 	// file-selection provider can route "request change" actions to the owning
 	// session's composer.
@@ -453,6 +454,10 @@ export function App({ api, store }: AppProps) {
 	);
 
 	workspaceEventObserver.current = (event) => {
+		if (event.type === "close-tab") {
+			setCloseTabRequest((request) => request + 1);
+			return;
+		}
 		if (event.type === "open-session") {
 			setDestination("tasks");
 			return;
@@ -693,6 +698,17 @@ export function App({ api, store }: AppProps) {
 		const session = store.getSnapshot().sessionsById.get(sessionId);
 		return session ? sessionDisplayTitle(session) : t("New task");
 	}, [store, t]);
+
+	// Tabs are grouped by project in the strip. Managed sessions live under
+	// uuid-named directories, so they have no project to show.
+	const projectFor = useCallback((sessionId: string): WorkspaceProject | null => {
+		const session = store.getSnapshot().sessionsById.get(sessionId);
+		if (!session?.cwd || session.cwdOrigin === "managed") return null;
+		// One folder is one group across modes; the alias still follows the session's mode.
+		const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
+		const alias = projectPreferences.get(sessionProjectKey(session.mode, session.cwd))?.alias;
+		return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
+	}, [projectPreferences, store]);
 
 	const changeMode = useCallback((nextMode: AgentMode) => {
 		if (nextMode === mode) return;
@@ -1480,7 +1496,6 @@ export function App({ api, store }: AppProps) {
 				onSchedules={openSchedulesDestination}
 				onOpenSchedule={openSchedule}
 				onWidthChange={updateSessionSidebarWidth}
-				projectName={workspaceProjectName}
 				scheduleTasks={sidebarScheduleTasks}
 				selectedScheduleTaskId={selectedScheduleTaskId}
 				state={sidebarState}
@@ -1514,7 +1529,6 @@ export function App({ api, store }: AppProps) {
 								availableVersion={"version" in updateState ? updateState.version : null}
 							/>
 						)}
-						<div className="workspace-titlebar-add" ref={setTitlebarAddSlot} />
 					</div>
 				</header>
 				<div className="system-notice-stack">
@@ -1563,6 +1577,7 @@ export function App({ api, store }: AppProps) {
 						chatIsDraft={newTaskOpen}
 						chatSessionId={toolsSession?.sessionId ?? null}
 						cleanupSessionIds={toolCleanupSessionIds}
+						closeTabRequest={closeTabRequest}
 						mode={mode}
 						onActivateSession={activateBrowserSession}
 						onChatSession={focusWorkspaceSession}
@@ -1578,11 +1593,11 @@ export function App({ api, store }: AppProps) {
 						previewRequest={previewRequest}
 						knowledgeRequest={knowledgeRequest}
 						process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
+						projectFor={projectFor}
 						sessionsById={state.sessionsById}
 						sessionTitleFor={sessionTitleFor}
 						store={store}
 						theme={resolvedTheme}
-						titlebarAddSlot={titlebarAddSlot}
 						titlebarTabsSlot={titlebarTabsSlot}
 						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}
 					/>

@@ -72,6 +72,7 @@ export type DesktopApiEvent =
 			readonly type: "app-server";
 			readonly envelope: ServerRpcRequest<"interaction/request"> | ServerRpcNotification<"connection/events">;
 	  }
+	| { readonly type: "close-tab" }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
 	| { readonly type: "open-session"; readonly sessionId: string; readonly mode: "chat" | "code" }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
@@ -192,7 +193,7 @@ export interface DesktopCloseBrowserInput {
 	readonly browserId: string;
 }
 
-export type DesktopBrowserCommand = "find" | "print" | "zoom-in" | "zoom-out" | "zoom-reset";
+export type DesktopBrowserCommand = "find" | "print" | "zoom-in" | "zoom-out" | "zoom-reset" | "close-tab";
 
 export interface DesktopBrowserState {
 	readonly browserId: string;
@@ -1370,7 +1371,7 @@ export function validateDesktopBrowserEvent(value: unknown): DesktopBrowserEvent
 	if (type === "command") {
 		const event = exactRecord(value, ["type", "browserId", "command"], "browser command event");
 		if (
-			!(["find", "print", "zoom-in", "zoom-out", "zoom-reset"] as const).includes(
+			!(["find", "print", "zoom-in", "zoom-out", "zoom-reset", "close-tab"] as const).includes(
 				event.command as DesktopBrowserCommand,
 			)
 		) {
@@ -1582,6 +1583,7 @@ export function validateDesktopApiEvent(value: unknown): DesktopApiEvent {
 	if (event.type === "supervisor" && Object.keys(event).length === 2 && isSupervisorView(event.view)) {
 		return { type: "supervisor", view: event.view };
 	}
+	if (event.type === "close-tab" && Object.keys(event).length === 1) return { type: "close-tab" };
 	if (event.type === "interaction-cancelled" && Object.keys(event).length === 2) {
 		assertSchema(interactionIdValidator, event.interactionId, "invalid_params", "interaction id");
 		return { type: "interaction-cancelled", interactionId: event.interactionId as string };

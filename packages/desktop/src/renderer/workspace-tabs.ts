@@ -191,13 +191,59 @@ export function addTab(
 	tab: WorkspaceTab,
 	paneId = workspace.activePaneId,
 	activate = true,
+	index?: number,
 ): SessionWorkspace {
 	const paneIndex = workspace.panes.findIndex((pane) => pane.id === paneId);
 	if (paneIndex < 0) return workspace;
-	const panes = workspace.panes.map((pane, index) =>
-		index === paneIndex ? { ...pane, tabs: [...pane.tabs, tab], activeId: activate ? tab.id : pane.activeId } : pane,
-	);
+	const panes = workspace.panes.map((pane, current) => {
+		if (current !== paneIndex) return pane;
+		const at = index === undefined ? pane.tabs.length : Math.min(Math.max(index, 0), pane.tabs.length);
+		const tabs = [...pane.tabs.slice(0, at), tab, ...pane.tabs.slice(at)];
+		return { ...pane, tabs, activeId: activate ? tab.id : pane.activeId };
+	});
 	return { ...workspace, panes, activePaneId: activate ? paneId : workspace.activePaneId };
+}
+
+/**
+ * Where a new tab joins a pane: after the last tab of its own session, else after the last tab of
+ * its group (project), else at the end. Keeping related tabs adjacent lets the strip label each group once.
+ */
+export function relatedInsertIndex(
+	pane: WorkspacePane,
+	tab: WorkspaceTab,
+	groupOf: (tab: WorkspaceTab) => string | null,
+): number {
+	const afterLast = (matches: (candidate: WorkspaceTab) => boolean): number | null => {
+		for (let index = pane.tabs.length - 1; index >= 0; index -= 1) {
+			if (matches(pane.tabs[index]!)) return index + 1;
+		}
+		return null;
+	};
+	const group = groupOf(tab);
+	return (
+		(tab.sessionId === null ? null : afterLast((candidate) => candidate.sessionId === tab.sessionId)) ??
+		(group === null ? null : afterLast((candidate) => groupOf(candidate) === group)) ??
+		pane.tabs.length
+	);
+}
+
+/** Splits a strip into runs of adjacent tabs that share a group, for rendering one label per run. */
+export function tabGroupRuns<T>(
+	tabs: readonly WorkspaceTab[],
+	groupOf: (tab: WorkspaceTab) => T | null,
+	keyOf: (group: T) => string,
+): { readonly group: T | null; readonly tabs: readonly WorkspaceTab[] }[] {
+	const runs: { group: T | null; tabs: WorkspaceTab[] }[] = [];
+	for (const tab of tabs) {
+		const group = groupOf(tab);
+		const last = runs.at(-1);
+		const sameGroup =
+			last !== undefined &&
+			(last.group === null || group === null ? last.group === group : keyOf(last.group) === keyOf(group));
+		if (sameGroup) last.tabs.push(tab);
+		else runs.push({ group, tabs: [tab] });
+	}
+	return runs;
 }
 
 export function removeTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {

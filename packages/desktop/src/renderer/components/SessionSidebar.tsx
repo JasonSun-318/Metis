@@ -5,6 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
 import {
@@ -61,7 +62,6 @@ interface SessionSidebarProps {
 	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
-	readonly projectName: string;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
 	readonly updateState: DesktopUpdateState;
@@ -164,27 +164,9 @@ function SessionButton({ busy, deleteDisabled, onCopy, onDelete, onPin, onRename
 	const { t, i18n } = useTranslation();
 	const title = taskTitle(session, localeForIntl(i18n.resolvedLanguage), t("Task"));
 	const running = session.state === "running";
-	const notification = !selected && session.unread;
-	const indicator = notification && session.attentionRequired
-		? "attention"
-		: notification && session.lastTurnOutcome === "failed"
-			? "failed"
-			: notification && session.lastTurnOutcome === "completed"
-				? "completed"
-				: running
-					? "running"
-					: notification
-						? "unread"
-						: undefined;
-	const indicatorDescription = indicator === "attention"
-		? t("Needs attention")
-		: indicator === "running"
-			? t("Running")
-			: indicator === "failed"
-				? t("Failed")
-				: indicator === "completed"
-					? t("Completed")
-					: undefined;
+	const indicator = sessionIndicator(session, selected);
+	const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
+	const indicatorDescription = indicatorLabel ? t(indicatorLabel) : undefined;
 	return (
 		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
 			<button
@@ -300,7 +282,6 @@ export const SessionSidebar = memo(function SessionSidebar({
 	onOpenSchedule,
 	onDeleteSchedule,
 	onWidthChange,
-	projectName,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
@@ -393,9 +374,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 
 	return (
 		<aside className={`session-sidebar${isClosing ? " is-closing" : ""}`} aria-label={t("Tasks")}>
-			<div className="window-drag-region">
-				<span className="sidebar-project-name" title={projectName}>{projectName}</span>
-			</div>
+			<div className="window-drag-region" />
 			<div className="mode-switch" data-mode={mode} aria-label={t("Workspace mode")} role="group">
 				<span aria-hidden="true" className="mode-switch-indicator" />
 				<button aria-pressed={mode === "chat"} className={mode === "chat" ? "active" : ""} disabled={busy} onClick={() => onModeChange("chat")} type="button">

@@ -75,8 +75,8 @@ describe("Sidebar geometry and workspace grid styles", () => {
 
 	it("keeps the release bell anchored to the titlebar's right edge", () => {
 		const end = rule(".workspace-titlebar-end");
-		expect(end.position).toBe("relative");
-		expect(end.marginLeft).toBe("8px");
+		expect(end.position).toBe("absolute");
+		expect(end.right).toBe("8px");
 		expect(end.display).toBe("flex");
 
 		const popover = rule(".release-notes-popover");

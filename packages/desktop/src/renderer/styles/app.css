@@ -33,10 +33,6 @@ textarea { resize: none; }
 .session-sidebar button:disabled { opacity: 1; }
 .window-drag-region { position: relative; height: 47px; flex: 0 0 47px; -webkit-app-region: drag; }
 :root[data-platform="win32"] .window-drag-region { height: 6px; flex-basis: 6px; }
-.sidebar-project-name { position: absolute; top: 0; right: 14px; left: 56px; display: block; height: 30px; overflow: hidden; color: var(--text-14); font-size: 12px; font-weight: 500; letter-spacing: -0.005em; line-height: 30px; text-overflow: ellipsis; white-space: nowrap; }
-:root[data-platform="darwin"]:not([data-fullscreen="true"]) .sidebar-project-name { left: 114px; }
-:root[data-platform="darwin"][data-fullscreen="true"] .sidebar-project-name { left: 54px; }
-:root[data-platform="win32"] .sidebar-project-name { display: none; }
 .session-sidebar button, .session-sidebar summary { -webkit-app-region: no-drag; }
 .mode-switch { position: relative; display: grid; height: 30px; flex: 0 0 30px; isolation: isolate; grid-template-columns: 1fr 1fr; border-radius: 8px; background: var(--surface-06); box-shadow: var(--mode-switch-track-shadow); padding: 2px; }
 .mode-switch-indicator { position: absolute; z-index: 0; top: 2px; bottom: 2px; left: 2px; width: calc((100% - 4px) / 2); border-radius: 6px; background: var(--mode-switch-active); box-shadow: var(--mode-switch-shadow); pointer-events: none; transition: transform 190ms cubic-bezier(.22, .8, .24, 1); }
@@ -194,27 +190,35 @@ textarea { resize: none; }
 .account-menu-popover button:hover:not(:disabled) { background: var(--menu-hover); }
 
 .workspace { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; background: var(--app-bg); }
-.workspace-titlebar { position: relative; display: flex; height: 40px; flex: none; align-items: center; border-bottom: 1px solid var(--border); padding: 0 14px; transition: padding-left 200ms cubic-bezier(.16, 1, .3, 1); -webkit-app-region: drag; }
-.sessions-sidebar-collapsed .workspace-titlebar { padding-left: 56px; }
-/* macOS: when the sessions sidebar is collapsed the traffic lights and reveal button cover the titlebar's leading edge; keep the tab strip clear of them. */
-:root[data-platform="darwin"]:not([data-fullscreen="true"]) .sessions-sidebar-collapsed .workspace-titlebar { padding-left: 116px; }
+.workspace-titlebar { position: relative; display: flex; height: 40px; flex: none; align-items: center; border-bottom: 1px solid var(--border); -webkit-app-region: drag; }
+/* When the sessions sidebar is collapsed the reveal button (and the macOS traffic lights) cover the titlebar's leading edge; keep the first strip clear of them. */
+.sessions-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar { padding-left: 52px; }
+:root[data-platform="darwin"]:not([data-fullscreen="true"]) .sessions-sidebar-collapsed .workspace-titlebar-cell:first-child .workspace-tabbar { padding-left: 112px; }
 .workspace-titlebar .sessions-sidebar-toggle-fixed { position: fixed; top: 7px; left: 18px; z-index: 60; }
 :root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar .sessions-sidebar-toggle-fixed { left: 76px; }
 :root[data-platform="darwin"][data-fullscreen="true"] .workspace-titlebar .sessions-sidebar-toggle-fixed { left: 16px; }
 .workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
 .workspace-titlebar .sessions-sidebar-toggle-fixed:hover, .workspace-titlebar .release-notes-trigger:hover, .workspace-titlebar .tool-add-trigger:hover { background: var(--surface-04); color: var(--text); }
-.workspace-titlebar-tabs { display: flex; height: 100%; flex: 1; min-width: 0; align-items: center; }
-.workspace-titlebar-add { pointer-events: auto; }
+/* One strip cell per top-row pane; cells reuse the panes' flex sizing and
+   borders so each strip sits exactly above its pane. */
+.workspace-titlebar-tabs { position: absolute; inset: 0; display: flex; min-width: 0; }
+.workspace-titlebar-strips { display: flex; min-width: 0; flex: 1; }
+.workspace-titlebar-cell { display: flex; min-width: 0; flex: 1; }
+.workspace-titlebar-cell + .workspace-titlebar-cell { border-left: 1px solid var(--border); }
+.workspace-titlebar:has(.release-notes-control) .workspace-titlebar-cell:last-child .workspace-tabbar { padding-right: 40px; }
 .windows-titlebar-navigation { position: fixed; z-index: 10040; top: 0; left: 8px; display: flex; height: 32px; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-14); -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button:hover:not(:disabled) { color: var(--text); }
 .windows-titlebar-navigation button:disabled { opacity: .3; }
 .workspace-titlebar-end {
-	position: relative;
+	position: absolute;
+	z-index: 55;
+	top: 0;
+	right: 8px;
+	bottom: 0;
 	display: flex;
 	align-items: center;
 	gap: 2px;
-	margin-left: 8px;
 	pointer-events: none;
 	-webkit-app-region: no-drag;
 }
@@ -294,6 +298,8 @@ textarea { resize: none; }
 .session-workspace-panes.is-dragging .workspace-panel-layer, .session-workspace-panes.is-dragging .workspace-panel { pointer-events: none; }
 .workspace-chat-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: hidden; }
 .workspace-empty { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 10px; color: var(--text-14); font-size: 13px; text-align: center; padding: 24px; }
+.workspace-empty p { margin: 0; }
+.workspace-empty button { display: inline-flex; height: 30px; align-items: center; gap: 6px; padding: 0 12px; font-size: 12px; }
 .workspace-add-menu-separator { height: 1px; margin: 4px 6px; background: var(--border); }
 .workspace-tab-menu { position: fixed; width: 168px; }
 .tool-add-menu button {
@@ -331,36 +337,61 @@ textarea { resize: none; }
 .tool-add-menu .tool-menu-title {
 	font-size: 12px;
 }
-.workspace-tabbar { position: relative; z-index: 50; display: flex; height: 40px; flex: none; align-items: center; border-bottom: 1px solid var(--border); -webkit-app-region: no-drag; }
-.workspace-tabbar.is-drop-target { background: var(--surface-04); }
-/* In the merged single-pane layout the strip lives inside the draggable
-   titlebar: the strip's gaps and empty tail drag the window, only the tabs
-   themselves opt out. */
+.workspace-tabbar { position: relative; z-index: 50; display: flex; height: 40px; min-width: 0; flex: none; align-items: center; gap: 2px; border-bottom: 1px solid var(--border); padding: 0 6px 0 8px; transition: padding-left 200ms cubic-bezier(.16, 1, .3, 1); -webkit-app-region: no-drag; }
+.workspace-tabbar.is-drop-target { background: var(--surface-03); }
+/* Strips in the titlebar stay draggable: the gaps and the empty tail move the
+   window, only tabs, group labels and the add button opt out. */
 .workspace-tabbar--titlebar { width: 100%; height: 100%; border-bottom: none; background: transparent; -webkit-app-region: drag; }
-.workspace-tabbar--titlebar .tool-tab { -webkit-app-region: no-drag; }
-.tool-tabs-scroll { display: flex; min-width: 0; flex: 1; gap: 4px; overflow-x: auto; padding: 4px 0 4px 8px; scrollbar-width: none; }
+.workspace-tabbar--titlebar :is(.tool-tab, .tool-tab-group-label, .tool-add) { -webkit-app-region: no-drag; }
+.tool-tabs-scroll { display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tool-tabs-scroll::-webkit-scrollbar { display: none; }
-.tool-tab { display: flex; min-width: 0; max-width: 200px; height: 28px; flex: 0 1 auto; align-items: center; gap: 2px; border-radius: 7px; border: 1px solid transparent; color: var(--text-10); transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease; }
-.tool-tab.is-active { border-color: var(--border); background: var(--surface-05); box-shadow: var(--shadow); color: var(--text-24); font-weight: 500; }
+.workspace-tabbar-fill { min-width: 0; flex: 1; align-self: stretch; }
+/* Tabs of one project form a labelled group, so the strip shows which
+   project every conversation and tool belongs to. */
+.tool-tab-group { position: relative; display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; }
+.tool-tab-group + .tool-tab-group { margin-left: 9px; }
+.tool-tab-group + .tool-tab-group::before { content: ""; position: absolute; top: 13px; bottom: 13px; left: -5px; width: 1px; background: var(--border); }
+.tool-tab-group-gap { width: 1px; height: 14px; flex: none; margin: 0 4px; background: var(--border); }
+.tool-tab-group-label { display: block; max-width: 132px; height: 22px; flex: none; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--tab-group-color) 14%, transparent); color: var(--text-16); padding: 0 8px 0 7px; font-size: 11px; font-weight: 600; letter-spacing: -0.005em; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
+.tool-tab-group-label::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--tab-group-color); vertical-align: 1px; }
+.tool-tab { position: relative; display: flex; min-width: 76px; max-width: 220px; height: 28px; flex: 0 1 auto; align-items: center; border-radius: 8px; color: var(--text-11); transition: background-color 140ms ease, color 140ms ease; }
+.tool-tab:hover:not(.is-active), .tool-tab:focus-within:not(.is-active) { background: var(--surface-03); color: var(--text-19); }
+.tool-tab.is-active { background: var(--surface-05); color: var(--text-24); font-weight: 500; }
+/* The active tab is underlined at the strip's edge in its group color. */
+.tool-tab.is-active::after { content: ""; position: absolute; right: 10px; bottom: -6px; left: 10px; height: 2px; border-radius: 2px; background: var(--tab-group-color, var(--text-14)); }
+.workspace-tabbar.is-unfocused .tool-tab.is-active { background: var(--surface-03); color: var(--text-19); }
+.workspace-tabbar.is-unfocused .tool-tab.is-active::after { opacity: .4; }
 .tool-tab.is-preview .tool-tab-select span { font-style: italic; }
-.tool-tab:hover:not(.is-active), .tool-tab:focus-within:not(.is-active) { background: var(--surface-04); color: var(--text-19); }
-.tool-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 4px 0 10px; text-align: left; }
+.tool-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px; text-align: left; }
+/* Only the active (or dirty) tab reserves room for its close button; an
+   inactive tab shows it on hover over the end of its title, so the strip
+   stays compact and never reflows under the pointer. */
+.tool-tab.is-active .tool-tab-select, .tool-tab.is-dirty .tool-tab-select { padding-right: 28px; }
 .tool-tab-select > svg { flex: none; }
-.tool-tab-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.tool-tab-close { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border-radius: 5px; color: var(--text-05); margin-right: 6px; opacity: 0; transition: opacity 120ms ease, background-color 140ms ease, color 140ms ease; }
-.tool-tab:hover .tool-tab-close, .tool-tab:focus-within .tool-tab-close, .tool-tab.is-active .tool-tab-close { opacity: 1; }
+.tool-tab-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tab-status { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-14); }
+.tool-tab-status[data-status="running"] { background: var(--run-running); animation: session-running-pulse 1.4s ease-in-out infinite; }
+.tool-tab-status[data-status="completed"] { background: var(--success-dot); }
+.tool-tab-status[data-status="failed"] { background: var(--run-failed); }
+.tool-tab-status[data-status="attention"] { background: var(--attention); animation: session-running-pulse 1.4s ease-in-out infinite; }
+:root[data-motion="reduced"] .tool-tab-status { animation: none; }
+.tool-tab-close { position: absolute; top: 5px; right: 5px; display: grid; width: 18px; height: 18px; place-items: center; border-radius: 5px; background: var(--surface-03); color: var(--text-08); opacity: 0; pointer-events: none; transition: opacity 120ms ease, background-color 140ms ease, color 140ms ease; }
+.tool-tab.is-active .tool-tab-close { background: transparent; }
+.tool-tab:hover .tool-tab-close, .tool-tab:focus-within .tool-tab-close, .tool-tab.is-active .tool-tab-close { opacity: 1; pointer-events: auto; }
 .tool-tab-close:hover { background: var(--surface-08); color: var(--text); }
 /* A dirty tab carries its dot in the close slot; hovering swaps it back to
    the close affordance. */
-.tool-tab.is-dirty .tool-tab-close { opacity: 1; }
+.tool-tab.is-dirty .tool-tab-close { opacity: 1; pointer-events: auto; background: transparent; }
 .tool-tab.is-dirty .tool-tab-close svg { display: none; }
 .tool-tab.is-dirty .tool-tab-close::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-14); }
 .tool-tab.is-dirty:hover .tool-tab-close svg, .tool-tab.is-dirty:focus-within .tool-tab-close svg { display: block; }
 .tool-tab.is-dirty:hover .tool-tab-close::before, .tool-tab.is-dirty:focus-within .tool-tab-close::before { content: none; }
-.tool-add { position: relative; flex: none; }
-.tool-add-trigger { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-14); transition: background-color 140ms ease, color 140ms ease; }
+/* The add button follows the last tab, like a browser's new-tab button. */
+.tool-add { position: relative; flex: none; margin-left: 2px; }
+.tool-add-trigger { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 7px; color: var(--text-12); transition: background-color 140ms ease, color 140ms ease; }
 .tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"] { background: var(--surface-04); color: var(--text); }
-.tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 5px); right: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
+.tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 6px); left: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
+.tool-add-menu.is-align-end { right: 0; left: auto; }
 .tool-add-menu button { height: 30px; background: transparent; font-size: 12px; }
 .workspace-panel:not([hidden]) { animation: tool-panel-in 140ms ease both; }
 @keyframes tool-panel-in {
@@ -776,7 +807,8 @@ textarea { resize: none; }
 	.new-task-home-scroll { padding-right: 16px; padding-left: 16px; }
 }
 @container new-task-content (width < 600px) {
-	.new-task-home-heading h1 { font-size: clamp(32px, 6cqw, 36px); }
+	/* Narrow panes wrap the greeting onto two lines instead of truncating it. */
+	.new-task-home-heading h1 { display: -webkit-box; font-size: clamp(26px, 5.4cqw, 36px); white-space: normal; text-wrap: balance; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 	.new-task-home .home-project-picker-browse { margin-left: 0; }
 	.new-task-home .home-project-picker-create span { display: none; }
 	.new-task-recent-project { grid-template-columns: 18px minmax(0, 1fr) 16px; }

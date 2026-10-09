@@ -37,7 +37,9 @@ describe("Terminal sidebar shell", () => {
 		const pane = rule(".workspace-pane");
 		expect(pane.overflow).toBe("hidden");
 		expect(rule(".workspace-tabbar").height).toBe("40px");
-		expect(rule(".tool-tabs-scroll").flex).toBe("1 1 0%");
+		// Tabs take their own width so the add button follows the last tab; the fill drags the window.
+		expect(rule(".tool-tabs-scroll").flex).toBe("0 1 auto");
+		expect(rule(".workspace-tabbar-fill").flex).toBe("1 1 0%");
 		expect(rule(".tool-add").position).toBe("relative");
 		expect(rule(".tool-add-menu").width).toBe("200px");
 		expect(rule(".workspace-pane-body").position).toBe("relative");
@@ -51,16 +53,19 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".browser-view-anchor").top).toBe("42px");
 	});
 
-	it("visually raises the active tool tab above the sidebar header", () => {
-		const activeTab = rule(".tool-tab.is-active");
-		expect(activeTab.background).toBe("var(--surface-05)");
-		expect(activeTab.boxShadow).toBe("var(--shadow)");
+	it("marks the active tool tab with a fill and a group-colored underline", () => {
+		expect(rule(".tool-tab.is-active").background).toBe("var(--surface-05)");
+		expect(css).toMatch(
+			/\.tool-tab\.is-active::after\s*\{[^}]*background:\s*var\(--tab-group-color, var\(--text-14\)\)/u,
+		);
+		expect(rule(".workspace-tabbar.is-unfocused .tool-tab.is-active").background).toBe("var(--surface-03)");
 	});
 
 	it("anchors the tool-add menu to the plus trigger button", () => {
 		expect(rule(".tool-add").position).toBe("relative");
 		expect(rule(".tool-add-menu").position).toBe("absolute");
-		expect(rule(".tool-add-menu").right).toBe("0px");
+		expect(rule(".tool-add-menu").left).toBe("0px");
+		expect(rule(".tool-add-menu.is-align-end").right).toBe("0px");
 	});
 
 	it("keeps the file tree beside the preview until the sidebar reaches its minimum width", () => {

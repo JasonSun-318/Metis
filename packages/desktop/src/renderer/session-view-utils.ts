@@ -1,5 +1,28 @@
-import { type InteractionView, type ItemView, RPC_ERROR_CODES } from "@metis/app-protocol";
+import { type InteractionView, type ItemView, RPC_ERROR_CODES, type SessionSummary } from "@metis/app-protocol";
 import { rpcErrorCode } from "./rpc-error.ts";
+
+export type SessionIndicator = "attention" | "failed" | "completed" | "running" | "unread";
+
+/** The status dot shown beside a session; notifications are suppressed while the user is looking at it. */
+export function sessionIndicator(
+	session: Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>,
+	viewing: boolean,
+): SessionIndicator | undefined {
+	const notification = !viewing && session.unread;
+	if (notification && session.attentionRequired) return "attention";
+	if (notification && session.lastTurnOutcome === "failed") return "failed";
+	if (notification && session.lastTurnOutcome === "completed") return "completed";
+	if (session.state === "running") return "running";
+	return notification ? "unread" : undefined;
+}
+
+export const SESSION_INDICATOR_LABELS: Readonly<Record<SessionIndicator, string | undefined>> = {
+	attention: "Needs attention",
+	failed: "Failed",
+	completed: "Completed",
+	running: "Running",
+	unread: undefined,
+};
 
 export function firstInteractionForSession(
 	interactionOrder: readonly string[],

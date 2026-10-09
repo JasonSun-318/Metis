@@ -53,6 +53,7 @@ import { BrowserController } from "./browser-controller.ts";
 import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
 import { BrowserTabRuntime } from "./browser-tab-runtime.ts";
 import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
+import { isCloseTabShortcut } from "./close-tab-shortcut.ts";
 
 const BLANK_URL = "about:blank";
 const DEFAULT_BROWSER_BOUNDS: DesktopBrowserBounds = { x: 0, y: 0, width: 1_024, height: 768 };
@@ -1124,6 +1125,7 @@ export class BrowserManager {
 			else if (input.key === "-") command = "zoom-out";
 			else if (input.key === "+" || input.key === "=") command = "zoom-in";
 			else if (input.key === "0") command = "zoom-reset";
+			else if (isCloseTabShortcut(input)) command = "close-tab";
 			if (!command) return;
 			event.preventDefault();
 			this.emit({ type: "command", browserId, command });

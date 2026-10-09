@@ -28,6 +28,7 @@ import { createBackgroundCompletionTracker } from "./background-completion.ts";
 import { BrowserManager } from "./browser-manager.ts";
 import { loadDesktopChangelog } from "./changelog.ts";
 import { ClientBroker } from "./client-broker.ts";
+import { isCloseTabShortcut } from "./close-tab-shortcut.ts";
 import { DiagnosticLog } from "./diagnostic-log.ts";
 import { createProjectFolder } from "./project-folder.ts";
 import { createScheduleKeepAwake } from "./schedule-keep-awake.ts";
@@ -262,6 +263,12 @@ async function launch(): Promise<void> {
 		const window = createMainWindow();
 		broker.attach(window);
 		mainWindow = window;
+		// Tabs own Cmd/Ctrl+W; the default menu would otherwise close the whole window.
+		window.webContents.on("before-input-event", (event, input) => {
+			if (!isCloseTabShortcut(input)) return;
+			event.preventDefault();
+			broker.requestRendererCloseTab();
+		});
 		window.on("enter-full-screen", () => {
 			if (!window.isDestroyed()) window.webContents.send(DESKTOP_FULLSCREEN_CHANNEL, true);
 		});

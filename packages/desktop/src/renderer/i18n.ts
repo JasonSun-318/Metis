@@ -59,6 +59,7 @@ const zhCN = {
 	"Not enough room to split": "窗口太小，无法拆分",
 	"Move to pane {{index}}": "移动到窗格 {{index}}",
 	"Pick a session from the sidebar or use + to open a tool.": "从侧边栏选择一个会话，或使用 + 打开工具。",
+	"Start a new task": "开始新任务",
 	"Tab actions": "标签页操作",
 	"Toggle AI chat": "切换 AI 对话侧栏",
 	"Start a new Code session…": "开始新的 Code 会话…",

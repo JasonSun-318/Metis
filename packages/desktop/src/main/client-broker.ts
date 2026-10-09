@@ -545,6 +545,11 @@ export class ClientBroker {
 		]);
 	}
 
+	/** Asks the renderer to close its focused workspace tab; returns false when no renderer is listening. */
+	requestRendererCloseTab(): boolean {
+		return this.sendEvent({ type: "close-tab" });
+	}
+
 	requestRendererOpenSession(sessionId: string, mode: "chat" | "code"): boolean {
 		const event = { type: "open-session", sessionId, mode } as const;
 		this.pendingRendererOpenSession = undefined;
