@@ -10,6 +10,9 @@ import {
 } from "@metis/coding-agent/host";
 
 const MAX_NOTE_BYTES = 4 * 1024 * 1024;
+// A library is polled while visible, so a broad directory such as a home folder must not walk forever.
+const MAX_SCAN_ENTRIES = 50_000;
+const MAX_SCAN_NOTES = 5_000;
 const SKIP_DIRECTORIES = new Set(["node_modules", "vendor"]);
 type ParsedNote = ReturnType<typeof parseKnowledgeNote>;
 
@@ -96,8 +99,15 @@ export class KnowledgeService {
 		const notes = new Map<string, ParsedNote>();
 		const live = new Set<string>();
 		const warnings: string[] = [];
+		let entries = 0;
+		let truncated = false;
 		const visit = async (directory: string): Promise<void> => {
 			for (const entry of await readdir(directory, { withFileTypes: true })) {
+				if (truncated) return;
+				if (++entries > MAX_SCAN_ENTRIES) {
+					truncated = true;
+					return;
+				}
 				if (entry.name.startsWith(".")) continue;
 				const absolute = join(directory, entry.name);
 				const path = relative(root, absolute).split(sep).join("/");
@@ -108,6 +118,10 @@ export class KnowledgeService {
 						warnings.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
 					}
 				} else if (entry.isFile() && /\.md$/i.test(entry.name)) {
+					if (live.size >= MAX_SCAN_NOTES) {
+						truncated = true;
+						return;
+					}
 					live.add(absolute);
 					try {
 						const info = await stat(absolute);
@@ -127,7 +141,13 @@ export class KnowledgeService {
 			}
 		};
 		await visit(root);
-		for (const path of this.cache.keys()) {
+		if (truncated) {
+			warnings.push(
+				`Scan stopped after ${MAX_SCAN_NOTES.toLocaleString("en-US")} notes or ${MAX_SCAN_ENTRIES.toLocaleString("en-US")} entries; choose a narrower directory`,
+			);
+		}
+		// A truncated walk did not see every note, so it keeps cached entries it never reached.
+		for (const path of truncated ? [] : this.cache.keys()) {
 			const within = relative(root, path);
 			if (!within.startsWith(`..${sep}`) && !isAbsolute(within) && !live.has(path)) this.cache.delete(path);
 		}

@@ -80,6 +80,26 @@ describe("Markdown knowledge directories", () => {
 			{ target: "topic/Note.md", kind: "markdown", path: "topic/topic/Note.md" },
 		]);
 	});
+	it("keeps links after an unmatched backtick and treats info-string fences as code", async () => {
+		await writeFile(join(vault, "Target.md"), "# Target");
+		await writeFile(join(vault, "Other.md"), "# Other");
+		await writeFile(
+			join(vault, "Home.md"),
+			"It`s a stray backtick.\n\n[[Target]]\n\n````md\n```js\n[[Fake]]\n```\n````\n\n`[[Hidden]]` [[Other]]",
+		);
+		const library = await service.register(vault);
+		const home = (await service.scan(library.id)).notes.find((note) => note.path === "Home.md")!;
+		expect(home.links.map((link) => link.target)).toEqual(["Target", "Other"]);
+	});
+	it("stops scanning oversized directories with a warning", async () => {
+		await Promise.all(
+			Array.from({ length: 5_001 }, (_, index) => writeFile(join(vault, `Note ${index}.md`), `# ${index}`)),
+		);
+		const library = await service.register(vault);
+		const result = await service.scan(library.id);
+		expect(result.notes).toHaveLength(5_000);
+		expect(result.warnings).toEqual([expect.stringContaining("Scan stopped")]);
+	});
 	it("reuses unchanged metadata and observes edited/deleted files", async () => {
 		await writeFile(join(vault, "Note.md"), "# Before");
 		const library = await service.register(vault);

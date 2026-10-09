@@ -13,17 +13,20 @@ export function parseKnowledgeNote(path: string, content: string): ParsedKnowled
 	const prose = body
 		.split("\n")
 		.filter((line) => {
-			const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-			if (match) {
-				if (!fence) fence = { marker: match[1][0], length: match[1].length };
-				else if (match[1][0] === fence.marker && match[1].length >= fence.length) fence = undefined;
-				return false;
-			}
-			return !fence;
+			const match = /^\s{0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+			if (!match) return !fence;
+			if (!fence) fence = { marker: match[1][0], length: match[1].length };
+			// A closing fence cannot carry an info string, so "```js" inside a block stays code.
+			else if (match[1][0] === fence.marker && match[1].length >= fence.length && !match[2].trim())
+				fence = undefined;
+			return false;
 		})
 		.join("\n")
 		.replace(/%%[\s\S]*?%%/g, "")
-		.replace(/(`+)[\s\S]*?\1/g, "");
+		// Code spans never cross a blank line, so an unmatched backtick cannot swallow later paragraphs.
+		.split(/\n[ \t]*\n/)
+		.map((paragraph) => paragraph.replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, ""))
+		.join("\n\n");
 	const links: ParsedKnowledgeNote["links"] = [...prose.matchAll(/!?\[\[([^\]\n]+)\]\]/g)].map((match) => ({
 		target: match[1].split("|")[0].split("#")[0].trim(),
 		kind: "wiki",
