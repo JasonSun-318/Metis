@@ -91,6 +91,8 @@ export function KnowledgePanel({
 	const [loading, setLoading] = useState(false);
 	const [adding, setAdding] = useState(false);
 	const [refresh, setRefresh] = useState(0);
+	// Bumped by every successful poll so the open note re-reads without replacing an unchanged graph.
+	const [scanRevision, setScanRevision] = useState(0);
 	const requestRevision = useRef(0);
 	const contentPath = useRef("");
 	const library = libraries.find((item) => item.id === selectedId);
@@ -123,7 +125,9 @@ export function KnowledgePanel({
 			try {
 				const result = await api.scanKnowledgeLibrary({ libraryId: library.id });
 				if (active) {
-					setGraph(result);
+					// Keep the previous object when nothing changed so the graph layout is not restarted.
+					setGraph((current) => (JSON.stringify(current) === JSON.stringify(result) ? current : result));
+					setScanRevision((revision) => revision + 1);
 					setSelectedPath((path) => (result.notes.some((item) => item.path === path) ? path : null));
 					setError(undefined);
 				}
@@ -172,7 +176,7 @@ export function KnowledgePanel({
 		return () => {
 			++requestRevision.current;
 		};
-	}, [api, library?.id, selectedPath, visible, graph]);
+	}, [api, library?.id, selectedPath, visible, scanRevision]);
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLocaleLowerCase();
 		const notes = graph.notes.filter(
