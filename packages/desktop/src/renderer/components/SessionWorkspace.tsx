@@ -25,6 +25,7 @@ import {
 	activateTab,
 	activePane,
 	addTab,
+	collapsedTabIds,
 	chatTab,
 	defaultWorkspace,
 	findChatTab,
@@ -32,6 +33,8 @@ import {
 	focusedChatTab,
 	canSplit,
 	moveTab,
+	moveTabGroup,
+	normalizeTabGroups,
 	relatedInsertIndex,
 	removeTab,
 	revealTab,
@@ -41,6 +44,7 @@ import {
 	type SplitDirection,
 	splitTab,
 	tabGroupRuns,
+	toggleTabGroup,
 	type WorkspacePane,
 	type WorkspaceTab,
 	workspaceTabs,
@@ -83,9 +87,10 @@ interface TabMenuState {
 	readonly y: number;
 }
 
-interface DragState {
-	readonly tabId: string;
-}
+// A drag carries one tab, or a whole project group when it starts on the group's label.
+type DragState =
+	| { readonly tabId: string }
+	| { readonly group: { readonly paneId: string; readonly key: string } };
 
 type DropTarget =
 	| { readonly paneId: string; readonly index: number }
@@ -316,15 +321,25 @@ export function SessionWorkspaceView({
 	const closeTabRef = useRef<(id: string) => void>(() => undefined);
 	const handledCloseTabRequest = useRef(closeTabRequest);
 
+	const projectForRef = useRef(projectFor);
+	projectForRef.current = projectFor;
+	const groupOf = useCallback(
+		(tab: WorkspaceTab): string | null =>
+			tab.sessionId === null ? null : (projectForRef.current(tab.sessionId)?.key ?? null),
+		[],
+	);
+
+	// Every mutation lands grouped, so each project shows up once per strip
+	// however its tabs were opened, dragged or moved between panes.
 	const updateWorkspace = useCallback(
 		(update: (workspace: SessionWorkspace) => SessionWorkspace) => {
 			setWorkspace((current) => {
-				const next = update(current);
+				const next = normalizeTabGroups(update(current), groupOf);
 				workspaceRef.current = next;
 				return next === current ? current : next;
 			});
 		},
-		[],
+		[groupOf],
 	);
 
 	// A project keeps its group color while it has tabs open; new projects take
@@ -348,13 +363,6 @@ export function SessionWorkspaceView({
 		if (!openGroupKeys.has(key)) groupColors.current.delete(key);
 	}
 
-	const projectForRef = useRef(projectFor);
-	projectForRef.current = projectFor;
-	const groupOf = useCallback(
-		(tab: WorkspaceTab): string | null =>
-			tab.sessionId === null ? null : (projectForRef.current(tab.sessionId)?.key ?? null),
-		[],
-	);
 	// New tabs join their session's (or project's) tabs so every group stays one labelled run.
 	const placeTab = useCallback<PlaceTab>(
 		(workspace, tab, paneId = workspace.activePaneId, activate = true) => {
@@ -371,7 +379,7 @@ export function SessionWorkspaceView({
 	// through updateWorkspace and stay silent.
 	const mutateWorkspace = useCallback(
 		(update: (workspace: SessionWorkspace) => SessionWorkspace) => {
-			const next = update(workspaceRef.current);
+			const next = normalizeTabGroups(update(workspaceRef.current), groupOf);
 			if (next === workspaceRef.current) return;
 			workspaceRef.current = next;
 			setWorkspace(next);
@@ -381,8 +389,17 @@ export function SessionWorkspaceView({
 				onChatSessionRef.current(focused.sessionId);
 			}
 		},
-		[],
+		[groupOf],
 	);
+
+	// A tab's project can resolve after the tab opens (the session list loads
+	// later); regroup whenever the project behind any tab changes.
+	const groupSignature = workspace.panes
+		.map((pane) => pane.tabs.map((tab) => groupOf(tab) ?? "").join("\n"))
+		.join("\0");
+	useEffect(() => {
+		updateWorkspace((current) => current);
+	}, [groupSignature, updateWorkspace]);
 
 	// Keep one chat tab per session in sync with the projected session. Tabs
 	// adopt the draft's real sessionId when it materializes so the chat subtree
@@ -1128,22 +1145,25 @@ export function SessionWorkspaceView({
 		if (pane.activeId) closeTabRef.current(pane.activeId);
 	}, [closeTabRequest, visible]);
 
-	// Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's tabs.
+	// Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's visible tabs; tabs
+	// folded into a collapsed group are skipped, as in a browser.
 	useEffect(() => {
 		if (!visible) return;
 		const cycle = (event: KeyboardEvent) => {
 			if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
 			const pane = activePane(workspaceRef.current);
-			if (pane.tabs.length < 2) return;
+			const hidden = collapsedTabIds(pane, groupOf);
+			const tabs = pane.tabs.filter((tab) => !hidden.has(tab.id));
+			if (tabs.length < 2) return;
 			event.preventDefault();
-			const index = pane.tabs.findIndex((tab) => tab.id === pane.activeId);
-			const next = pane.tabs[(index + (event.shiftKey ? -1 : 1) + pane.tabs.length) % pane.tabs.length]!;
+			const index = tabs.findIndex((tab) => tab.id === pane.activeId);
+			const next = tabs[(index + (event.shiftKey ? -1 : 1) + tabs.length) % tabs.length]!;
 			mutateWorkspace((current) => activateTab(current, next.id));
 		};
 		// Capture phase: terminals and editors stop keydown propagation inside their panes.
 		document.addEventListener("keydown", cycle, true);
 		return () => document.removeEventListener("keydown", cycle, true);
-	}, [mutateWorkspace, visible]);
+	}, [groupOf, mutateWorkspace, visible]);
 
 	const discardPendingFile = () => {
 		if (!pendingFileClose) return;
@@ -1182,14 +1202,16 @@ export function SessionWorkspaceView({
 		setDragState(null);
 		setDropTarget(null);
 		if (!drag) return;
-		mutateWorkspace((workspace) => moveTab(workspace, drag.tabId, paneId, index));
+		mutateWorkspace((workspace) => "group" in drag
+			? moveTabGroup(workspace, drag.group.paneId, drag.group.key, groupOf, paneId, index)
+			: moveTab(workspace, drag.tabId, paneId, index));
 	};
 
 	const handleDropSplit = (paneId: string, direction: SplitDirection) => {
 		const drag = dragState;
 		setDragState(null);
 		setDropTarget(null);
-		if (!drag) return;
+		if (!drag || "group" in drag) return;
 		mutateWorkspace((workspace) => splitTab(workspace, drag.tabId, paneId, direction));
 	};
 
@@ -1211,6 +1233,8 @@ export function SessionWorkspaceView({
 	};
 
 	const splitDropDirection = (event: DragEvent<HTMLElement>, paneId: string): SplitDirection | null => {
+		// A dragged group lands in a strip; only single tabs open a new split.
+		if (dragState && "group" in dragState) return null;
 		const rect = event.currentTarget.getBoundingClientRect();
 		const horizontal = Math.min(120, rect.width * 0.25);
 		const vertical = Math.min(120, rect.height * 0.25);
@@ -1227,18 +1251,15 @@ export function SessionWorkspaceView({
 			: null;
 	};
 
-	const stripDropIndex = (event: DragEvent<HTMLElement>): number => {
-		const strip = event.currentTarget;
-		const tabs = [...strip.querySelectorAll<HTMLElement>(".tool-tab")];
-		let index = tabs.length;
-		for (let i = 0; i < tabs.length; i += 1) {
-			const rect = tabs[i]!.getBoundingClientRect();
-			if (event.clientX < rect.left + rect.width / 2) {
-				index = i;
-				break;
-			}
+	// Drop slots are the visible tabs and group labels; each carries its index
+	// in the pane's tabs, since a collapsed group's tabs are not on screen.
+	const stripDropIndex = (event: DragEvent<HTMLElement>, pane: WorkspacePane): number => {
+		const slots = [...event.currentTarget.querySelectorAll<HTMLElement>("[data-drop-index]")];
+		for (const slot of slots) {
+			const rect = slot.getBoundingClientRect();
+			if (event.clientX < rect.left + rect.width / 2) return Number(slot.dataset.dropIndex);
 		}
-		return index;
+		return pane.tabs.length;
 	};
 
 	const toolMenu = (paneId: string, align: MenuTarget["align"]) => {
@@ -1371,6 +1392,7 @@ export function SessionWorkspaceView({
 		return (
 			<div
 				className={`tool-tab${active ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`}
+				data-drop-index={pane.tabs.indexOf(tab)}
 				draggable
 				key={tab.id}
 				onAuxClick={(event) => {
@@ -1398,7 +1420,7 @@ export function SessionWorkspaceView({
 					className="tool-tab-select"
 					onClick={() => selectTab(tab.id)}
 					role="tab"
-					title={project ? `${displayTitle} · ${project.name}` : displayTitle}
+					title={project ? `${displayTitle}\n${project.cwd}` : displayTitle}
 					type="button"
 				>
 					{tabIcon(tab)}
@@ -1425,6 +1447,10 @@ export function SessionWorkspaceView({
 			(tab) => (tab.sessionId === null ? null : projectFor(tab.sessionId)),
 			(project) => project.key,
 		);
+		// A pane holding one project needs no labels; with several, each project
+		// is one labelled, collapsible group.
+		const grouped = new Set(runs.flatMap((run) => (run.group ? [run.group.key] : []))).size > 1;
+		const hidden = grouped ? collapsedTabIds(pane, groupOf) : new Set<string>();
 		// With several panes, the focused pane's active tab stays bright and the others dim.
 		const split = workspace.panes.length > 1;
 		const focused = split && pane.id === workspace.activePaneId;
@@ -1439,32 +1465,58 @@ export function SessionWorkspaceView({
 					event.preventDefault();
 					event.stopPropagation();
 					event.dataTransfer.dropEffect = "move";
-					setDropTarget({ paneId: pane.id, index: stripDropIndex(event) });
+					setDropTarget({ paneId: pane.id, index: stripDropIndex(event, pane) });
 				}}
 				onDrop={(event) => {
 					event.preventDefault();
 					event.stopPropagation();
-					handleDropOnStrip(pane.id, stripDropIndex(event));
+					handleDropOnStrip(pane.id, stripDropIndex(event, pane));
 				}}
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll">
-					{runs.map((run, index) => {
-						const tabs = run.tabs.map((tab) => renderTab(pane, tab, run.group));
-						if (!run.group) return index === 0 ? tabs : [<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${run.tabs[0]!.id}`} />, ...tabs];
-						const color = tabGroupColor(run.group.key);
+					{grouped ? runs.map((run, index) => {
+						const first = run.tabs[0]!;
+						if (!run.group) {
+							const tabs = run.tabs.map((tab) => renderTab(pane, tab, null));
+							return index === 0 ? tabs : [<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${first.id}`} />, ...tabs];
+						}
+						const group = run.group;
+						const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
+						const groupLabel = t("{{name}} tab group", { name: group.name });
 						return (
 							<div
-								className="tool-tab-group"
-								key={`group-${run.tabs[0]!.id}`}
+								className={`tool-tab-group${collapsed ? " is-collapsed" : ""}`}
+								key={`group-${group.key}`}
 								role="presentation"
-								style={{ "--tab-group-color": color } as CSSProperties}
+								style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
 							>
-								<span className="tool-tab-group-label" title={run.group.cwd}>{run.group.name}</span>
-								{tabs}
+								<button
+									aria-description={collapsed
+										? t("{{count}} tabs hidden", { count: run.tabs.length })
+										: undefined}
+									aria-expanded={!collapsed}
+									aria-label={groupLabel}
+									className="tool-tab-group-label"
+									data-drop-index={pane.tabs.indexOf(first)}
+									draggable
+									onClick={() => mutateWorkspace((current) => toggleTabGroup(current, pane.id, group.key, groupOf))}
+									onDragEnd={() => { setDragState(null); setDropTarget(null); }}
+									onDragStart={(event) => {
+										event.dataTransfer.setData("text/plain", group.key);
+										event.dataTransfer.effectAllowed = "move";
+										setDragState({ group: { paneId: pane.id, key: group.key } });
+									}}
+									title={group.cwd}
+									type="button"
+								>
+									<span className="tool-tab-group-name">{group.name}</span>
+									{collapsed && <span aria-hidden="true" className="tool-tab-group-count">{run.tabs.length}</span>}
+								</button>
+								{!collapsed && run.tabs.map((tab) => renderTab(pane, tab, group))}
 							</div>
 						);
-					})}
+					}) : pane.tabs.map((tab) => renderTab(pane, tab, tab.sessionId === null ? null : projectFor(tab.sessionId)))}
 				</div>
 				<div className="tool-add" ref={menuOpen ? menuRef : undefined}>
 					<button

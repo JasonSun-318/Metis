@@ -1654,6 +1654,8 @@ const zhCN = {
 	"{{count}} visits": "{{count}} 条记录",
 	"Add tool": "添加工具",
 	"Close {{name}}": "关闭{{name}}",
+	"{{name}} tab group": "{{name}} 标签组",
+	"{{count}} tabs hidden": "已收起 {{count}} 个标签",
 	"Command running": "运行中",
 	"Command completed": "已完成",
 	"Command stopped with an error": "已停止 · 未成功",

@@ -24,6 +24,8 @@ interface SeedSession {
 	readonly id: string;
 	readonly mode: "chat" | "code";
 	readonly name: string;
+	/** A sibling project folder for the session, instead of the shared project. */
+	readonly project?: string;
 }
 
 interface LaunchedWorkspace {
@@ -69,16 +71,20 @@ async function launchWorkspace(options: {
 		await writeFile(path.join(projectDir, name), contents);
 	}
 
+	const trustStore = new trust.ProjectTrustStore(agentDir);
 	for (const seed of options.sessions) {
+		const cwd = seed.project === undefined ? projectDir : path.join(tempRoot, seed.project);
+		await mkdir(cwd, { recursive: true });
 		const manager = sessions.SessionManager.create(
-			projectDir,
-			sessions.getDefaultSessionDir(projectDir, agentDir),
+			cwd,
+			sessions.getDefaultSessionDir(cwd, agentDir),
 			{ id: seed.id, mode: seed.mode, permissionPreset: "full" },
 		);
 		manager.appendSessionInfo(seed.name);
 		manager.close();
+		trustStore.set(cwd, true);
 	}
-	new trust.ProjectTrustStore(agentDir).set(projectDir, true);
+	trustStore.set(projectDir, true);
 
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
@@ -176,6 +182,72 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 			await mkdir(process.env.METIS_AUDIT_DIR, { recursive: true });
 			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "split.png") });
 		}
+		expect(consoleErrors).toEqual([]);
+	} catch (error) {
+		throw await rendererFailure(error, page, diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
+	}
+});
+
+test("project tab groups collapse from their label and move as one", async () => {
+	test.setTimeout(120_000);
+	const alphaOne = "81000000-0000-4000-8000-0000000000a1";
+	const alphaTwo = "81000000-0000-4000-8000-0000000000a2";
+	const beta = "81000000-0000-4000-8000-0000000000b1";
+	const workspace = await launchWorkspace({
+		sessions: [
+			{ id: alphaOne, mode: "chat", name: "Group Alpha One" },
+			{ id: alphaTwo, mode: "chat", name: "Group Alpha Two" },
+			{ id: beta, mode: "chat", name: "Group Beta", project: "beta-project" },
+		],
+	});
+	const { consoleErrors, diagnostics, page } = workspace;
+	const tabNames = () => page.locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label")));
+	const label = (name: string) => page.getByRole("button", { name: `${name} tab group`, exact: true });
+	try {
+		const open = async (name: string, id: string) => {
+			await page.locator(`.session-button[aria-label="${name}"]`).click();
+			await page.locator(`[data-active-session-id="${id}"]`).waitFor({ state: "visible" });
+		};
+		await open("Group Alpha One", alphaOne);
+		await open("Group Alpha Two", alphaTwo);
+		// One project in the pane: no labels.
+		await expect(page.locator(".tool-tab-group-label")).toHaveCount(0);
+
+		await open("Group Beta", beta);
+		await expect(page.locator(".tool-tab-group-label")).toHaveCount(2);
+		await expect.poll(tabNames).toEqual(["Group Alpha One", "Group Alpha Two", "Group Beta"]);
+		if (process.env.METIS_AUDIT_DIR) {
+			await mkdir(process.env.METIS_AUDIT_DIR, { recursive: true });
+			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "tab-groups.png") });
+		}
+
+		// Keyboard: the label is a button that toggles its group.
+		await label("project").focus();
+		await page.keyboard.press("Enter");
+		await expect(label("project")).toHaveAttribute("aria-expanded", "false");
+		await expect.poll(tabNames).toEqual(["Group Beta"]);
+		if (process.env.METIS_AUDIT_DIR) {
+			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "tab-groups-collapsed.png") });
+		}
+		await page.keyboard.press("Space");
+		await expect(label("project")).toHaveAttribute("aria-expanded", "true");
+		await expect.poll(tabNames).toEqual(["Group Alpha One", "Group Alpha Two", "Group Beta"]);
+
+		// Collapsing the active tab's group moves focus to the nearest tab outside it.
+		await page.getByRole("tab", { name: "Group Alpha Two", exact: true }).click();
+		await label("project").click();
+		await expect(page.getByRole("tab", { name: "Group Beta", exact: true })).toHaveAttribute("aria-selected", "true");
+		await page.locator(`[data-active-session-id="${beta}"]`).waitFor({ state: "visible" });
+		// Opening a folded session from the sidebar reopens its group.
+		await open("Group Alpha One", alphaOne);
+		await expect(label("project")).toHaveAttribute("aria-expanded", "true");
+
+		// Dragging a label moves its whole group.
+		await label("beta-project").dragTo(label("project"), { targetPosition: { x: 2, y: 8 } });
+		await expect.poll(tabNames).toEqual(["Group Beta", "Group Alpha One", "Group Alpha Two"]);
+		await expect(page.locator(".tool-tab-group-label")).toHaveCount(2);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		throw await rendererFailure(error, page, diagnostics);

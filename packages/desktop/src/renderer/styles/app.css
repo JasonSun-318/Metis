@@ -346,14 +346,24 @@ textarea { resize: none; }
 .tool-tabs-scroll { display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tool-tabs-scroll::-webkit-scrollbar { display: none; }
 .workspace-tabbar-fill { min-width: 0; flex: 1; align-self: stretch; }
-/* Tabs of one project form a labelled group, so the strip shows which
-   project every conversation and tool belongs to. */
+/* With several projects in a pane, a project's tabs form one group: its
+   label sits flush against them and a thin line in the group color runs
+   under the whole group. The label collapses the group to a counted chip. */
 .tool-tab-group { position: relative; display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; }
+/* Same baseline as the active tab underline (28px tab centered, 6px below). */
+.tool-tab-group::after { content: ""; position: absolute; top: calc(50% + 18px); right: 2px; left: 2px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--tab-group-color) 38%, transparent); pointer-events: none; }
+.tool-tab-group.is-collapsed::after { display: none; }
 .tool-tab-group + .tool-tab-group { margin-left: 9px; }
 .tool-tab-group + .tool-tab-group::before { content: ""; position: absolute; top: 13px; bottom: 13px; left: -5px; width: 1px; background: var(--border); }
 .tool-tab-group-gap { width: 1px; height: 14px; flex: none; margin: 0 4px; background: var(--border); }
-.tool-tab-group-label { display: block; max-width: 132px; height: 22px; flex: none; overflow: hidden; border-radius: 6px; background: color-mix(in srgb, var(--tab-group-color) 14%, transparent); color: var(--text-16); padding: 0 8px 0 7px; font-size: 11px; font-weight: 600; letter-spacing: -0.005em; line-height: 22px; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
-.tool-tab-group-label::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--tab-group-color); vertical-align: 1px; }
+.tool-tab-group-label { display: flex; max-width: 140px; height: 28px; flex: none; align-items: center; gap: 6px; border-radius: 8px; color: color-mix(in srgb, var(--tab-group-color) 72%, var(--text-24)); padding: 0 6px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: -0.005em; transition: background-color 140ms ease; }
+.tool-tab-group-label:hover { background: var(--surface-03); }
+/* Inset ring: the scrolling strip clips anything drawn outside the label. */
+.tool-tab-group-label:focus-visible { outline-offset: -2px; }
+.tool-tab-group.is-collapsed .tool-tab-group-label { height: 22px; background: color-mix(in srgb, var(--tab-group-color) 16%, transparent); }
+.tool-tab-group.is-collapsed .tool-tab-group-label:hover { background: color-mix(in srgb, var(--tab-group-color) 24%, transparent); }
+.tool-tab-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-tab-group-count { min-width: 16px; height: 16px; flex: none; border-radius: 8px; background: color-mix(in srgb, var(--tab-group-color) 22%, transparent); padding: 0 4px; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; }
 .tool-tab { position: relative; display: flex; min-width: 76px; max-width: 220px; height: 28px; flex: 0 1 auto; align-items: center; border-radius: 8px; color: var(--text-11); transition: background-color 140ms ease, color 140ms ease; }
 .tool-tab:hover:not(.is-active), .tool-tab:focus-within:not(.is-active) { background: var(--surface-03); color: var(--text-19); }
 .tool-tab.is-active { background: var(--surface-05); color: var(--text-24); font-weight: 500; }

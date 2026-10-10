@@ -104,6 +104,64 @@ describe("workspace tab strip", () => {
 		expect(view.container.querySelector(".tool-tab-group-label")?.getAttribute("title")).toBe("/work/alpha");
 	});
 
+	it("shows no project labels while a pane holds a single project", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: ALPHA_2 });
+		expect(view.tabs()).toEqual(["Alpha one", "Alpha two*"]);
+		expect(view.groups()).toEqual([]);
+		expect(view.container.querySelector('[role="tab"]')?.getAttribute("title")).toBe("Alpha one\n/work/alpha");
+	});
+
+	it("collapses and expands a project group from its label", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		await view.render({ chatSessionId: ALPHA_2 });
+		const label = (name: string) =>
+			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find(
+				(candidate) => candidate.textContent?.startsWith(name),
+			)!;
+		expect(label("alpha").tagName).toBe("BUTTON");
+		expect(label("alpha").getAttribute("aria-expanded")).toBe("true");
+		expect(label("alpha").getAttribute("aria-label")).toBe("alpha tab group");
+
+		// Collapsing the active tab's group hands focus to the nearest tab outside it.
+		await act(async () => label("alpha").click());
+		expect(view.tabs()).toEqual(["Beta*"]);
+		expect(label("alpha").getAttribute("aria-expanded")).toBe("false");
+		expect(label("alpha").getAttribute("aria-description")).toBe("2 tabs hidden");
+		expect(label("alpha").textContent).toBe("alpha2");
+		expect(view.onChatSession).toHaveBeenLastCalledWith(BETA);
+
+		await act(async () => label("alpha").click());
+		expect(view.tabs()).toEqual(["Alpha one", "Alpha two", "Beta*"]);
+		expect(label("alpha").getAttribute("aria-expanded")).toBe("true");
+	});
+
+	it("skips collapsed tabs when cycling and reopens a group whose tab is focused", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		await view.render({ chatSessionId: ALPHA_2 });
+		const betaLabel = () =>
+			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find(
+				(candidate) => candidate.textContent?.startsWith("beta"),
+			)!;
+		await act(async () => betaLabel().click());
+		expect(view.tabs()).toEqual(["Alpha one", "Alpha two*"]);
+
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true }));
+		});
+		expect(view.tabs()).toEqual(["Alpha one*", "Alpha two"]);
+
+		// Opening a session whose tab is folded away expands its group.
+		await view.render({ chatSessionId: BETA, chatFocusRequest: { nonce: 1, sessionId: BETA } });
+		expect(view.tabs()).toEqual(["Alpha one", "Alpha two", "Beta*"]);
+		expect(betaLabel().getAttribute("aria-expanded")).toBe("true");
+	});
+
 	it("shows a running session's live status on its tab", async () => {
 		const view = mount();
 		await view.render({ chatSessionId: BETA });

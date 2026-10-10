@@ -5,11 +5,14 @@ import {
 	addTab,
 	canSplit,
 	chatTab,
+	collapsedTabIds,
 	defaultWorkspace,
 	findChatTab,
 	findTabLocation,
 	focusedChatTab,
 	moveTab,
+	moveTabGroup,
+	normalizeTabGroups,
 	paneForTab,
 	relatedInsertIndex,
 	removeTab,
@@ -19,6 +22,7 @@ import {
 	splitTab,
 	type TerminalTab,
 	tabGroupRuns,
+	toggleTabGroup,
 	type WorkspaceTab,
 	workspaceTabs,
 } from "../src/renderer/workspace-tabs.ts";
@@ -300,6 +304,95 @@ describe("project tab groups", () => {
 			[null, 1],
 			["/work/alpha", 1],
 		]);
+	});
+
+	const ids = (workspace: SessionWorkspace, paneIndex = 0) => workspace.panes[paneIndex]!.tabs.map((tab) => tab.id);
+	const strip = (...tabs: WorkspaceTab[]): SessionWorkspace =>
+		tabs.reduce((workspace, tab) => addTab(workspace, tab), defaultWorkspace());
+
+	it("keeps each project's tabs together, groups in first-seen order and ungrouped tabs last", () => {
+		const draft = { ...chatTab(null), id: "chat-draft" };
+		const workspace = strip(chat("a"), draft, chat("b"), tool("a", "term-a"), chat("c"));
+		const grouped = normalizeTabGroups(workspace, groupOf);
+		expect(ids(grouped)).toEqual(["chat-a", "term-a", "chat-c", "chat-b", "chat-draft"]);
+		expect(tabGroupRuns(grouped.panes[0]!.tabs, groupOf, (group) => group).map((run) => run.group)).toEqual([
+			"/work/alpha",
+			"/work/beta",
+			null,
+		]);
+		// An already grouped workspace is returned as is, so updates stay cheap no-ops.
+		expect(normalizeTabGroups(grouped, groupOf)).toBe(grouped);
+	});
+
+	it("snaps a tab dropped inside another project back to its own group", () => {
+		const workspace = normalizeTabGroups(strip(chat("a"), chat("c"), chat("b"), tool("b", "term-b")), groupOf);
+		const dropped = normalizeTabGroups(moveTab(workspace, "chat-a", workspace.activePaneId, 3), groupOf);
+		expect(ids(dropped)).toEqual(["chat-c", "chat-a", "chat-b", "term-b"]);
+	});
+
+	it("collapses a group, moving off its active tab, and expands it again", () => {
+		let workspace = normalizeTabGroups(strip(chat("a"), chat("b"), chat("c")), groupOf);
+		const paneId = workspace.activePaneId;
+		expect(workspace.panes[0]!.activeId).toBe("chat-c");
+
+		workspace = normalizeTabGroups(toggleTabGroup(workspace, paneId, "/work/alpha", groupOf), groupOf);
+		expect(workspace.panes[0]!.collapsedGroups).toEqual(["/work/alpha"]);
+		// The nearest tab outside the group takes over.
+		expect(workspace.panes[0]!.activeId).toBe("chat-b");
+		expect([...collapsedTabIds(workspace.panes[0]!, groupOf)]).toEqual(["chat-a", "chat-c"]);
+
+		workspace = normalizeTabGroups(toggleTabGroup(workspace, paneId, "/work/alpha", groupOf), groupOf);
+		expect(workspace.panes[0]!.collapsedGroups).toBeUndefined();
+		expect(collapsedTabIds(workspace.panes[0]!, groupOf).size).toBe(0);
+	});
+
+	it("keeps a group open when it holds every tab of the pane", () => {
+		const workspace = normalizeTabGroups(strip(chat("a"), chat("c")), groupOf);
+		expect(toggleTabGroup(workspace, workspace.activePaneId, "/work/alpha", groupOf)).toBe(workspace);
+	});
+
+	it("expands a collapsed group when one of its tabs becomes active", () => {
+		let workspace = normalizeTabGroups(strip(chat("a"), chat("b")), groupOf);
+		workspace = normalizeTabGroups(
+			toggleTabGroup(workspace, workspace.activePaneId, "/work/alpha", groupOf),
+			groupOf,
+		);
+		expect(workspace.panes[0]!.collapsedGroups).toEqual(["/work/alpha"]);
+		workspace = normalizeTabGroups(activateTab(workspace, "chat-a"), groupOf);
+		expect(workspace.panes[0]!.collapsedGroups).toBeUndefined();
+	});
+
+	it("forgets a collapsed group once its tabs are gone or the pane holds a single project", () => {
+		let workspace = normalizeTabGroups(strip(chat("a"), chat("b"), tool("b", "term-b")), groupOf);
+		workspace = normalizeTabGroups(
+			toggleTabGroup(workspace, workspace.activePaneId, "/work/alpha", groupOf),
+			groupOf,
+		);
+		const closedGroup = normalizeTabGroups(removeTab(workspace, "chat-a"), groupOf);
+		expect(closedGroup.panes[0]!.collapsedGroups).toBeUndefined();
+		const singleProject = normalizeTabGroups(removeTabs(workspace, new Set(["chat-b", "term-b"])), groupOf);
+		expect(singleProject.panes[0]!.collapsedGroups).toBeUndefined();
+	});
+
+	it("moves a whole group within a pane and across panes, keeping it collapsed", () => {
+		let workspace = normalizeTabGroups(strip(chat("a"), chat("c"), chat("b")), groupOf);
+		const paneId = workspace.activePaneId;
+		// Drag alpha's label past beta: the index counts tabs before the move.
+		const reordered = normalizeTabGroups(moveTabGroup(workspace, paneId, "/work/alpha", groupOf, paneId, 3), groupOf);
+		expect(ids(reordered)).toEqual(["chat-b", "chat-a", "chat-c"]);
+		expect(reordered.panes[0]!.activeId).toBe("chat-b");
+
+		workspace = addTab(workspace, tool("b", "term-b"));
+		workspace = splitTab(workspace, "term-b", paneId, "right");
+		workspace = addTab(workspace, chat("z"), workspace.activePaneId);
+		workspace = normalizeTabGroups(toggleTabGroup(workspace, paneId, "/work/alpha", groupOf), groupOf);
+		const targetId = workspace.panes[1]!.id;
+		const moved = normalizeTabGroups(moveTabGroup(workspace, paneId, "/work/alpha", groupOf, targetId, 0), groupOf);
+		expect(ids(moved, 0)).toEqual(["chat-b"]);
+		expect(ids(moved, 1)).toEqual(["chat-a", "chat-c", "term-b", "chat-z"]);
+		expect(moved.panes[1]!.collapsedGroups).toEqual(["/work/alpha"]);
+		expect(moved.panes[0]!.collapsedGroups).toBeUndefined();
+		expect(moved.activePaneId).toBe(targetId);
 	});
 });
 

@@ -104,6 +104,8 @@ export interface WorkspacePane {
 	readonly row: 0 | 1;
 	readonly tabs: readonly WorkspaceTab[];
 	readonly activeId: string;
+	/** Project groups whose tabs this pane's strip folds behind their label. */
+	readonly collapsedGroups?: readonly string[];
 }
 
 export interface SessionWorkspace {
@@ -254,6 +256,141 @@ export function tabGroupRuns<T>(
 		else runs.push({ group, tabs: [tab] });
 	}
 	return runs;
+}
+
+/**
+ * Keeps every project's tabs adjacent in each pane (groups in order of first appearance, ungrouped tabs
+ * last) so a strip labels each project once, and drops collapse marks that no longer apply: groups with no
+ * tabs left, the active tab's group, and every group of a pane that holds a single project.
+ */
+export function normalizeTabGroups(
+	workspace: SessionWorkspace,
+	groupOf: (tab: WorkspaceTab) => string | null,
+): SessionWorkspace {
+	let changed = false;
+	const panes = workspace.panes.map((pane) => {
+		const groups = new Map<string, WorkspaceTab[]>();
+		const ungrouped: WorkspaceTab[] = [];
+		for (const tab of pane.tabs) {
+			const key = groupOf(tab);
+			if (key === null) ungrouped.push(tab);
+			else groups.set(key, [...(groups.get(key) ?? []), tab]);
+		}
+		const ordered = [...[...groups.values()].flat(), ...ungrouped];
+		const reordered = ordered.some((tab, index) => tab !== pane.tabs[index]);
+		const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
+		const activeGroup = activeTab ? groupOf(activeTab) : null;
+		const collapsed =
+			groups.size < 2 ? [] : (pane.collapsedGroups ?? []).filter((key) => groups.has(key) && key !== activeGroup);
+		const pruned = collapsed.length !== (pane.collapsedGroups?.length ?? 0);
+		if (!reordered && !pruned) return pane;
+		changed = true;
+		return {
+			...pane,
+			tabs: reordered ? ordered : pane.tabs,
+			collapsedGroups: collapsed.length > 0 ? collapsed : undefined,
+		};
+	});
+	return changed ? { ...workspace, panes } : workspace;
+}
+
+/** Tabs a pane's strip folds away: those of collapsed groups, never the active tab's group. */
+export function collapsedTabIds(
+	pane: WorkspacePane,
+	groupOf: (tab: WorkspaceTab) => string | null,
+): ReadonlySet<string> {
+	const collapsed = new Set(pane.collapsedGroups ?? []);
+	if (collapsed.size === 0) return new Set();
+	const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
+	const activeGroup = activeTab ? groupOf(activeTab) : null;
+	return new Set(
+		pane.tabs.flatMap((tab) => {
+			const key = groupOf(tab);
+			return key !== null && key !== activeGroup && collapsed.has(key) ? [tab.id] : [];
+		}),
+	);
+}
+
+/**
+ * Collapses or expands a project group in one pane. Collapsing the active tab's group activates the nearest
+ * tab outside it, like a browser; a group that holds every tab of the pane stays open.
+ */
+export function toggleTabGroup(
+	workspace: SessionWorkspace,
+	paneId: string,
+	key: string,
+	groupOf: (tab: WorkspaceTab) => string | null,
+): SessionWorkspace {
+	const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+	if (!pane || !pane.tabs.some((tab) => groupOf(tab) === key)) return workspace;
+	const collapsed = pane.collapsedGroups ?? [];
+	let next: WorkspacePane;
+	if (collapsed.includes(key)) {
+		const remaining = collapsed.filter((candidate) => candidate !== key);
+		next = { ...pane, collapsedGroups: remaining.length > 0 ? remaining : undefined };
+	} else {
+		let activeId = pane.activeId;
+		const activeIndex = pane.tabs.findIndex((tab) => tab.id === activeId);
+		if (activeIndex >= 0 && groupOf(pane.tabs[activeIndex]!) === key) {
+			const outside = (tab: WorkspaceTab) => groupOf(tab) !== key;
+			const replacement =
+				pane.tabs.slice(activeIndex + 1).find(outside) ?? pane.tabs.slice(0, activeIndex).reverse().find(outside);
+			if (!replacement) return workspace;
+			activeId = replacement.id;
+		}
+		next = { ...pane, activeId, collapsedGroups: [...collapsed, key] };
+	}
+	const panes = workspace.panes.map((candidate) => (candidate.id === paneId ? next : candidate));
+	return { ...workspace, panes, activePaneId: paneId };
+}
+
+/**
+ * Moves every tab of a project group from one pane to an index of another (or the same) pane. The index
+ * counts the target pane's tabs before the move; a collapsed group stays collapsed where it lands.
+ */
+export function moveTabGroup(
+	workspace: SessionWorkspace,
+	paneId: string,
+	key: string,
+	groupOf: (tab: WorkspaceTab) => string | null,
+	targetPaneId: string,
+	index: number,
+): SessionWorkspace {
+	const source = workspace.panes.find((pane) => pane.id === paneId);
+	const target = workspace.panes.find((pane) => pane.id === targetPaneId);
+	if (!source || !target) return workspace;
+	const moving = source.tabs.filter((tab) => groupOf(tab) === key);
+	if (moving.length === 0) return workspace;
+	const movingIds = new Set(moving.map((tab) => tab.id));
+	const carriesActive = movingIds.has(source.activeId);
+	const wasCollapsed = source.collapsedGroups?.includes(key) ?? false;
+	const panes = workspace.panes.map((pane) => {
+		if (pane.id !== source.id && pane.id !== target.id) return pane;
+		const remaining = pane.tabs.filter((tab) => !movingIds.has(tab.id));
+		if (pane.id === target.id) {
+			const movedBefore =
+				pane.id === source.id ? pane.tabs.slice(0, index).filter((tab) => movingIds.has(tab.id)).length : 0;
+			const at = Math.min(Math.max(index - movedBefore, 0), remaining.length);
+			const collapsedGroups =
+				pane.id !== source.id && wasCollapsed && !carriesActive
+					? [...(pane.collapsedGroups ?? []).filter((candidate) => candidate !== key), key]
+					: pane.collapsedGroups;
+			return {
+				...pane,
+				tabs: [...remaining.slice(0, at), ...moving, ...remaining.slice(at)],
+				activeId: carriesActive ? source.activeId : pane.activeId,
+				collapsedGroups,
+			};
+		}
+		const collapsedGroups = pane.collapsedGroups?.filter((candidate) => candidate !== key);
+		return {
+			...pane,
+			tabs: remaining,
+			activeId: carriesActive ? (remaining.at(-1)?.id ?? "") : pane.activeId,
+			collapsedGroups: collapsedGroups && collapsedGroups.length > 0 ? collapsedGroups : undefined,
+		};
+	});
+	return collapseEmptyPanes({ ...workspace, panes, activePaneId: target.id });
 }
 
 export function removeTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
