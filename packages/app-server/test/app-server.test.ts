@@ -629,7 +629,7 @@ describe("AppServer", () => {
 			sessionsRoot,
 			"copied-old-session",
 			projectDir,
-			`${JSON.stringify({ type: "session_info", id: "event", parentId: null, timestamp: eventAt, name: "Old session" })}\n`,
+			`${JSON.stringify({ type: "message", id: "event", parentId: null, timestamp: eventAt, message: { role: "user", content: "old", timestamp: Date.parse(eventAt) } })}\n`,
 		);
 		const copiedAt = new Date("2026-08-10T08:00:00.000Z");
 		utimesSync(path, copiedAt, copiedAt);

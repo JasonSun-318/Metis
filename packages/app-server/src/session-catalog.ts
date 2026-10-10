@@ -107,6 +107,27 @@ function safeIsoTimestamp(value: unknown): value is string {
 	);
 }
 
+// Settings bookkeeping (thinking level, model, rename, labels, permission
+// records, extension state) is also written when a session is merely opened or
+// configured; it must not move the session to the top of recency-sorted lists.
+const BOOKKEEPING_ENTRY_TYPES: ReadonlySet<string> = new Set([
+	"thinking_level_change",
+	"model_change",
+	"session_info",
+	"label",
+	"custom",
+	"session_permission_preset",
+	"session_permission_audit",
+	"session_collaboration_mode",
+]);
+
+/** Whether a journal entry reflects conversation activity and so updates a session's recency. */
+export function isSessionActivityEntry(entry: unknown): boolean {
+	if (typeof entry !== "object" || entry === null) return false;
+	const type = (entry as { type?: unknown }).type;
+	return typeof type !== "string" || !BOOKKEEPING_ENTRY_TYPES.has(type);
+}
+
 interface SessionTailMetadata {
 	readonly updatedAt?: string;
 	readonly lastTurnOutcome?: "completed" | "failed";
@@ -124,7 +145,7 @@ function eventMetadata(bytes: Buffer): SessionTailMetadata {
 					? "failed"
 					: undefined;
 		return {
-			...(safeIsoTimestamp(value.timestamp) ? { updatedAt: value.timestamp } : {}),
+			...(isSessionActivityEntry(value) && safeIsoTimestamp(value.timestamp) ? { updatedAt: value.timestamp } : {}),
 			...(lastTurnOutcome ? { lastTurnOutcome } : {}),
 		};
 	} catch {

@@ -110,6 +110,7 @@ import { openDeliveredFile as openDeliveredFileOnDisk } from "./open-delivered-f
 import { ProcessProjector } from "./process-projector.ts";
 import { SessionProjection } from "./projection/session-projection.ts";
 import { readDeliveredFile as readDeliveredFileOnDisk } from "./read-delivered-file.ts";
+import { isSessionActivityEntry } from "./session-catalog.ts";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -1414,7 +1415,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const manager = this.session.sessionManager;
 		const lastTurn = reduced.turns.at(-1);
 		const lastTerminalTurn = [...reduced.turns].reverse().find((turn) => turn.state !== "active");
-		const lastEntry = journal.at(-1) as Record<string, unknown> | undefined;
+		let lastActivity: Record<string, unknown> | undefined;
+		for (let index = journal.length - 1; index >= 0 && !lastActivity; index -= 1) {
+			if (isSessionActivityEntry(journal[index])) lastActivity = journal[index] as Record<string, unknown>;
+		}
 		const sessionName = optionalName(manager.getSessionName());
 		const {
 			name: _name,
@@ -1435,7 +1439,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return {
 			...base,
 			...(sessionName === undefined ? {} : { name: sessionName }),
-			updatedAt: timestamp(lastEntry?.timestamp, this.ref.summary.updatedAt),
+			updatedAt: timestamp(lastActivity?.timestamp, this.ref.summary.updatedAt),
 			state: this.isActive() ? "running" : lastTurn?.state === "interrupted" ? "interrupted" : "idle",
 			...(lastTurnOutcome ? { lastTurnOutcome } : {}),
 			attentionRequired: this.hasPendingInteractions(),
