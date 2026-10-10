@@ -112,7 +112,8 @@ describe("workspace tab strip", () => {
 			tab.textContent?.includes("Beta"),
 		)!;
 		expect(betaTab.querySelector(".tool-tab-status")?.getAttribute("data-status")).toBe("running");
-		expect(betaTab.querySelector('[role="tab"]')?.getAttribute("aria-label")).toBe("Beta, Running");
+		expect(betaTab.querySelector('[role="tab"]')?.getAttribute("aria-label")).toBe("Beta");
+		expect(betaTab.querySelector('[role="tab"]')?.getAttribute("aria-description")).toBe("Running");
 	});
 
 	it("closes the focused tab when the close shortcut arrives", async () => {
@@ -169,6 +170,23 @@ describe("workspace tab strip", () => {
 		await act(async () => alphaPanel.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
 		expect(strips().map((strip) => strip.classList.contains("is-focused"))).toEqual([true, false]);
 		expect(view.onChatSession).toHaveBeenLastCalledWith(ALPHA_1);
+	});
+
+	it("brings a covered conversation forward once when it asks for approval", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: BETA });
+		await view.render({ chatSessionId: ALPHA_1 });
+		expect(view.tabs()).toEqual(["Beta", "Alpha one*"]);
+
+		const approval = [{ interactionId: "approval-1", sessionId: BETA }];
+		await view.render({ chatSessionId: ALPHA_1, inlineInteractions: approval });
+		expect(view.tabs()).toEqual(["Beta*", "Alpha one"]);
+
+		// The user may switch away again; the same pending request does not pull the tab back.
+		const alphaTab = view.container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Alpha one"]')!;
+		await act(async () => alphaTab.click());
+		await view.render({ chatSessionId: ALPHA_1, inlineInteractions: [...approval] });
+		expect(view.tabs()).toEqual(["Beta", "Alpha one*"]);
 	});
 
 	it("puts the add button right after the tabs and leaves the rest of the strip empty", async () => {

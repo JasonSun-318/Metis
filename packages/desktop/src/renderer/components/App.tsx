@@ -704,9 +704,13 @@ export function App({ api, store }: AppProps) {
 	const projectFor = useCallback((sessionId: string): WorkspaceProject | null => {
 		const session = store.getSnapshot().sessionsById.get(sessionId);
 		if (!session?.cwd || session.cwdOrigin === "managed") return null;
-		// One folder is one group across modes; the alias still follows the session's mode.
+		// One folder is one group across modes, so its label must not depend on
+		// which mode's session happens to lead the group: prefer the Code alias,
+		// then the Chat alias, then the folder name.
 		const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
-		const alias = projectPreferences.get(sessionProjectKey(session.mode, session.cwd))?.alias;
+		const alias =
+			projectPreferences.get(sessionProjectKey("code", session.cwd))?.alias ??
+			projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
 		return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
 	}, [projectPreferences, store]);
 
@@ -923,6 +927,26 @@ export function App({ api, store }: AppProps) {
 			);
 		},
 		[workspaceWorkflow],
+	);
+	// Questions and approvals render inline in their conversation; the workspace
+	// brings a covered conversation to the front when one arrives.
+	const inlineInteractionKey = state.interactionOrder
+		.flatMap((interactionId) => {
+			const interaction = state.interactionsById.get(interactionId);
+			return interaction && (interaction.kind === "ask_user" || interaction.kind === "session_permission_approval")
+				? [`${interaction.interactionId}\n${interaction.sessionId}`]
+				: [];
+		})
+		.join("\n\n");
+	const inlineInteractions = useMemo(
+		() =>
+			inlineInteractionKey === ""
+				? []
+				: inlineInteractionKey.split("\n\n").map((entry) => {
+						const [interactionId, sessionId] = entry.split("\n") as [string, string];
+						return { interactionId, sessionId };
+					}),
+		[inlineInteractionKey],
 	);
 	const chatPaneSessions = new Set(chatPaneSessionIds);
 	const globalInteraction = state.interactionOrder
@@ -1574,6 +1598,7 @@ export function App({ api, store }: AppProps) {
 						chatView={chatView}
 						chatCwd={toolsSession?.cwd ?? null}
 						chatFocusRequest={chatFocusRequest}
+						inlineInteractions={inlineInteractions}
 						chatIsDraft={newTaskOpen}
 						chatSessionId={toolsSession?.sessionId ?? null}
 						cleanupSessionIds={toolCleanupSessionIds}

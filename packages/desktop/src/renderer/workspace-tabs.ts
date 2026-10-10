@@ -186,6 +186,16 @@ export function activateTab(workspace: SessionWorkspace, tabId: string): Session
 	return { ...workspace, panes, activePaneId: pane.id };
 }
 
+/** Brings a tab to the front of its own pane without moving focus to that pane. */
+export function revealTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
+	const location = findTabLocation(workspace, tabId);
+	if (!location || workspace.panes[location.paneIndex]!.activeId === tabId) return workspace;
+	const panes = workspace.panes.map((pane, index) =>
+		index === location.paneIndex ? { ...pane, activeId: tabId } : pane,
+	);
+	return { ...workspace, panes };
+}
+
 export function addTab(
 	workspace: SessionWorkspace,
 	tab: WorkspaceTab,

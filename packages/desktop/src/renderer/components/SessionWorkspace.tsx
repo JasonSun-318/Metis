@@ -34,6 +34,7 @@ import {
 	moveTab,
 	relatedInsertIndex,
 	removeTab,
+	revealTab,
 	removeTabs,
 	type SessionWorkspace,
 	setActivePane,
@@ -109,6 +110,7 @@ export interface WorkspaceProject {
 const TAB_GROUP_COLORS = ["#5b8def", "#3fb68b", "#d9963b", "#b77ae0", "#e0707a", "#45b0c4"] as const;
 
 const noProject = (): WorkspaceProject | null => null;
+const noInteractions: NonNullable<SessionWorkspaceViewProps["inlineInteractions"]> = [];
 
 type PlaceTab = (workspace: SessionWorkspace, tab: WorkspaceTab, paneId?: string, activate?: boolean) => SessionWorkspace;
 
@@ -134,6 +136,8 @@ interface SessionWorkspaceViewProps {
 	readonly onLiveSessionsChange: (sessionIds: readonly string[], chatSessionIds: readonly string[]) => void;
 	readonly onNewSession?: (target: { readonly mode: AgentMode; readonly cwd: string } | null) => void;
 	readonly chatView: SessionChatViewContext;
+	/** Pending questions and approvals; they render only inside their session's conversation. */
+	readonly inlineInteractions?: readonly { readonly interactionId: string; readonly sessionId: string }[];
 	readonly planPreviewRequest?: { readonly sessionId: string; readonly plan: PlanView } | null;
 	readonly previewRequest?: UniversalPreviewTarget | null;
 	readonly knowledgeRequest?: { readonly id: number; readonly sessionId: string };
@@ -224,6 +228,7 @@ export function SessionWorkspaceView({
 	onLiveSessionsChange,
 	onNewSession,
 	chatView,
+	inlineInteractions = noInteractions,
 	planPreviewRequest,
 	previewRequest,
 	knowledgeRequest,
@@ -411,6 +416,27 @@ export function SessionWorkspaceView({
 				: current;
 		});
 	}, [chatFocusRequest, chatSessionId, placeTab, updateWorkspace]);
+
+	// A question or approval blocks its session until answered, but it renders
+	// only inside that session's conversation. When another tab (an auto-opened
+	// Process tab, a terminal) covers the conversation, bring it to the front of
+	// its pane once per request; focus stays where the user is working.
+	const revealedInteractions = useRef(new Set<string>());
+	useEffect(() => {
+		const pending = new Set(inlineInteractions.map(({ interactionId }) => interactionId));
+		for (const interactionId of revealedInteractions.current) {
+			if (!pending.has(interactionId)) revealedInteractions.current.delete(interactionId);
+		}
+		const fresh = inlineInteractions.filter(({ interactionId }) => !revealedInteractions.current.has(interactionId));
+		if (fresh.length === 0) return;
+		for (const { interactionId } of fresh) revealedInteractions.current.add(interactionId);
+		updateWorkspace((current) =>
+			fresh.reduce((next, { sessionId }) => {
+				const chat = findChatTab(next, sessionId);
+				return chat ? revealTab(next, chat.id) : next;
+			}, current),
+		);
+	}, [inlineInteractions, updateWorkspace]);
 
 	const openProcess = useCallback(() => {
 		if (!chatSessionId || !process) return;
@@ -1340,9 +1366,8 @@ export function SessionWorkspaceView({
 			? sessionIndicator(session, visible && active && tab.sessionId === chatSessionId)
 			: undefined;
 		const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
-		const label = [displayTitle, dirty ? t("Unsaved") : null, indicatorLabel ? t(indicatorLabel) : null]
-			.filter(Boolean)
-			.join(", ");
+		// The status goes in the description, like the sidebar, so a tab keeps a stable name.
+		const label = dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle;
 		return (
 			<div
 				className={`tool-tab${active ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`}
@@ -1367,6 +1392,7 @@ export function SessionWorkspaceView({
 				}}
 			>
 				<button
+					aria-description={indicatorLabel ? t(indicatorLabel) : undefined}
 					aria-selected={active}
 					aria-label={label}
 					className="tool-tab-select"

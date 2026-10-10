@@ -14,6 +14,7 @@ import {
 	relatedInsertIndex,
 	removeTab,
 	removeTabs,
+	revealTab,
 	type SessionWorkspace,
 	splitTab,
 	type TerminalTab,
@@ -299,5 +300,19 @@ describe("project tab groups", () => {
 			[null, 1],
 			["/work/alpha", 1],
 		]);
+	});
+});
+
+describe("revealTab", () => {
+	it("fronts a tab in its own pane without moving focus there", () => {
+		const { workspace, chatId } = seededWorkspace();
+		const withTerminal = addTab(workspace, terminal("t1"));
+		const split = splitTab(withTerminal, "t1", withTerminal.activePaneId, "right");
+		const focusedPane = split.activePaneId;
+		const covered = addTab(split, terminal("t2"), split.panes[0]!.id, false);
+		const revealed = revealTab(covered, chatId);
+		expect(revealed.panes[0]!.activeId).toBe(chatId);
+		expect(revealed.activePaneId).toBe(focusedPane);
+		expect(revealTab(revealed, chatId)).toBe(revealed);
 	});
 });
