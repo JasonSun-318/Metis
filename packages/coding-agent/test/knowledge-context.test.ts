@@ -1,5 +1,5 @@
 import { fauxAssistantMessage } from "@metis/ai/compat";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	appendKnowledgeContext,
 	buildKnowledgeContext,
@@ -50,6 +50,32 @@ describe("Knowledge conversation context", () => {
 			expect(next.slice(0, previous.length)).toEqual(previous);
 			expect(harness.session.systemPrompt).toBe(systemPrompt);
 			expect(harness.session.getActiveToolNames()).toEqual(tools);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("re-attaches the links when compaction right before a prompt drops the last block", async () => {
+		const harness = await createHarness();
+		try {
+			harness.setResponses([fauxAssistantMessage("1"), fauxAssistantMessage("2")]);
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+			await harness.session.prompt("Linked A");
+			// Simulate the pre-prompt compaction replacing history with a summary.
+			const session = harness.session as unknown as {
+				_checkCompaction: () => Promise<boolean>;
+				agent: { state: { messages: unknown[] } };
+			};
+			// Only the pre-prompt check is replaced; later checks run for real.
+			vi.spyOn(session, "_checkCompaction").mockImplementationOnce(async () => {
+				session.agent.state.messages = [{ role: "compactionSummary", summary: "earlier work", timestamp: 1 }];
+				return false;
+			});
+			await harness.session.prompt("After compaction");
+			const message = harness.session.messages.find(
+				(candidate) => candidate.role === "user" && getMessageText(candidate) === "After compaction",
+			) as { hookContext?: string } | undefined;
+			expect(message?.hookContext).toBe(buildKnowledgeContext([a]));
 		} finally {
 			await harness.cleanup();
 		}

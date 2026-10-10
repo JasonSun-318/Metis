@@ -4259,7 +4259,9 @@ export class AgentSession {
 			// Build messages array (custom message if any, then user message)
 			messages = [];
 
-			let hookContext = userPromptContext;
+			// Compaction above may have dropped the newest knowledge block from the
+			// visible history; attach the current links again if so.
+			let hookContext = this._withKnowledgeContext(userPromptContext);
 			consumedSessionStart = false;
 			previousSessionStartContext = undefined;
 			if (this._pendingSessionStartContext) {
