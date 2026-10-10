@@ -1336,7 +1336,8 @@ describe("SubagentManager", () => {
 		});
 	});
 
-	it("rejects follow-up once the durable task history reaches its protocol bound", { timeout: 15_000 }, async () => {
+	// Hundreds of durable writes take ~6s alone and well over 15s when the whole suite runs in parallel.
+	it("rejects follow-up once the durable task history reaches its protocol bound", { timeout: 45_000 }, async () => {
 		const harness = setup();
 		const created = await harness.manager.spawn(ROOT_ID, {
 			name: "long-lived worker",

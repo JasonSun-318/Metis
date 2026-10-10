@@ -50,6 +50,7 @@ function createSession(options: {
 		},
 		sessionManager: {
 			getEntries: () => entries,
+			getBranch: () => entries,
 			getSessionName: () => options.sessionName,
 			getCwd: () => "/tmp/project",
 			getMode: () => options.mode ?? "code",

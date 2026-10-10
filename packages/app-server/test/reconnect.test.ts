@@ -450,11 +450,15 @@ describe("gap-free reconnect", () => {
 		});
 
 		host.runtime.emit({ type: "session/updated", session: { ...summary(), unread: true } });
-		await vi.waitFor(() => {
-			for (const connectionMessages of messages) {
-				expect(JSON.stringify(connectionMessages)).toContain('"unread":true');
-			}
-		});
+		// The default 1s wait is too tight when the whole suite runs in parallel.
+		await vi.waitFor(
+			() => {
+				for (const connectionMessages of messages) {
+					expect(JSON.stringify(connectionMessages)).toContain('"unread":true');
+				}
+			},
+			{ timeout: 5_000 },
+		);
 		expect(server.catalog.get(SESSION_ID).summary.unread).toBe(true);
 	});
 

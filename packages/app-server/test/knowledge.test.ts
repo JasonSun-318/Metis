@@ -99,7 +99,8 @@ describe("Markdown knowledge directories", () => {
 		const result = await service.scan(library.id);
 		expect(result.notes).toHaveLength(5_000);
 		expect(result.warnings).toEqual([expect.stringContaining("Scan stopped")]);
-	});
+		// Writing 5,001 files is slow when the whole suite runs in parallel.
+	}, 30_000);
 	it("reuses unchanged metadata and observes edited/deleted files", async () => {
 		await writeFile(join(vault, "Note.md"), "# Before");
 		const library = await service.register(vault);

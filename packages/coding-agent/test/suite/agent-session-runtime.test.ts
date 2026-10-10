@@ -1425,6 +1425,7 @@ describe("AgentSessionRuntime characterization", () => {
 		},
 	);
 
+	// 256 accepted operations take ~25s alone; parallel suite runs need well over the 60s it used to allow.
 	it("rejects a 257th durable operation before acceptance", async () => {
 		let releaseProvider!: () => void;
 		const providerGate = new Promise<void>((resolve) => {
@@ -1459,7 +1460,7 @@ describe("AgentSessionRuntime characterization", () => {
 
 		releaseProvider();
 		await vi.waitFor(() => expect(faux.state.callCount).toBe(2));
-	}, 60_000);
+	}, 120_000);
 
 	it("rejects an aggregate resident payload overflow before image IO or acceptance", async () => {
 		const { runtime, faux } = await createRuntimeForTest(() => {});

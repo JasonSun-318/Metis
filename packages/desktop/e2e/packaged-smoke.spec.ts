@@ -255,18 +255,29 @@ async function resolvedColor(page: Page, property: string): Promise<string> {
 	}, property);
 }
 
-async function resizeToolsSidebar(page: Page, targetWidth: number): Promise<void> {
-	const sidebar = page.locator(".tool-sidebar");
-	const resizer = page.getByRole("separator", { name: "Resize tools sidebar", exact: true });
-	if ((targetWidth - 280) % 16 !== 0) throw new Error(`Tools sidebar target ${targetWidth}px is not keyboard reachable`);
-	for (let index = 0; index < 80; index += 1) {
-		const width = Math.round((await sidebar.boundingBox())?.width ?? 0);
-		if (width === 280) break;
-		await resizer.press("ArrowRight");
-	}
-	await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(280);
-	for (let index = 0; index < (targetWidth - 280) / 16; index += 1) await resizer.press("ArrowLeft");
-	await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(targetWidth);
+/** The panel of the focused tab; tools are workspace tabs now, not a separate sidebar. */
+function visiblePanel(page: Page): Locator {
+	return page.locator(".workspace-panel:not([hidden])").first();
+}
+
+/** Opens a tool from the first titlebar strip's add menu. */
+async function openTool(page: Page, name: string): Promise<void> {
+	await page.locator(".workspace-titlebar .tool-add-trigger").first().click();
+	const item = page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true });
+	await expect(item).toBeEnabled();
+	await item.click();
+}
+
+/** A lone pane spans the workspace, so the window width sets the tool panel width. */
+async function resizeWorkspacePanel(page: Page, targetWidth: number): Promise<void> {
+	const height = page.viewportSize()?.height ?? 840;
+	// Collapsing the sessions sidebar animates the shell grid; measure once it settles.
+	await page.locator(".app-shell").evaluate(async (element) => {
+		await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
+	});
+	const workspaceX = Math.round((await page.locator(".workspace").boundingBox())?.x ?? 0);
+	await page.setViewportSize({ width: workspaceX + targetWidth, height });
+	await expect.poll(async () => Math.round((await visiblePanel(page).boundingBox())?.width ?? 0)).toBe(targetWidth);
 }
 
 async function codeEditorText(editor: Locator): Promise<string> {
@@ -434,7 +445,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		phase = "checking expanded Chat task list";
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 		await page.getByRole("button", { name: "Task list Chat fixture", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
 		const chatToolChain = page.locator(".execution-chain").last();
 		await expect(chatToolChain).not.toHaveAttribute("open", "");
 		await chatToolChain.locator(":scope > summary").click();
@@ -448,7 +459,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 				document.documentElement.style.setProperty("--content-font-size", `${fontSize}px`);
 			}, size);
 			await expect(page.locator(".turn-answer").first()).toHaveCSS("font-size", `${size}px`);
-			expect(await page.locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+			expect(await visiblePanel(page).locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 			await page.screenshot({
 				animations: "disabled",
 				path: path.join(qaDir, `chat-dark-${size}px-1280x840.png`),
@@ -475,7 +486,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		expect(slashLabels).toContain("/mcp");
 		expect(slashLabels).toContain("skill:e2e-skill");
 		await expect(slashMenu).not.toContainText("/usage");
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-command-menu.png"),
 		});
@@ -489,7 +500,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(statusPanel).toBeVisible();
 		await expect(statusPanel).toContainText("Context usage unavailable");
 		await expect(statusPanel).not.toContainText(CHAT_ACTIVE_ID);
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-status-panel.png"),
 		});
@@ -507,7 +518,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(page.getByRole("button", { name: "Remove skill e2e-skill", exact: true })).toBeVisible();
 		await composerInput.pressSequentially("Use the packaged fixture");
 		await expect(page.locator(".composer-skill-token")).toHaveCSS("color", "rgb(165, 214, 255)");
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("slash-skill-token.png"),
 		});
@@ -540,11 +551,11 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		expect(slotBox!.x - composerBox!.x).toBeCloseTo(16, 0);
 		expect(composerBox!.width - slotBox!.width).toBeCloseTo(32, 0);
 		expect(composerBox!.y - slotBox!.y - slotBox!.height).toBeCloseTo(0, 0);
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-expanded-chat.png"),
 		});
-		const transcriptScroll = page.locator(".transcript-scroll");
+		const transcriptScroll = visiblePanel(page).locator(".transcript-scroll");
 		const expandedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
 		await page.evaluate(() => {
 			const state = window as typeof window & { __taskListLongTasks?: number[]; __taskListLongTaskObserver?: PerformanceObserver };
@@ -570,7 +581,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(summary).not.toHaveAttribute("aria-label");
 		const collapsedTranscriptHeight = await transcriptScroll.evaluate((element) => element.clientHeight);
 		expect(collapsedTranscriptHeight).toBeGreaterThan(expandedTranscriptHeight);
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-collapsed-chat.png"),
 		});
@@ -598,7 +609,7 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		const codeSession = page.getByRole("button", { name: "Task list Code fixture", exact: true });
 		await expect(codeSession).toBeVisible();
 		await codeSession.click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		const codeExecution = page.locator(".code-execution").first();
 		await expect(codeExecution).not.toHaveAttribute("open", "");
 		await codeExecution.locator(":scope > summary").click();
@@ -609,13 +620,13 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(codeTask).not.toContainText('"tasks"');
 		await page.evaluate(() => document.documentElement.style.setProperty("--content-font-size", "20px"));
 		await expect(page.locator(".code-turn-answer").first()).toHaveCSS("font-size", "20px");
-		expect(await page.locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+		expect(await visiblePanel(page).locator(".transcript-scroll").evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 		await page.screenshot({ animations: "disabled", path: path.join(qaDir, "code-dark-20px-1280x840.png") });
 		await page.evaluate(() => document.documentElement.style.removeProperty("--content-font-size"));
 		panel = page.getByRole("region", { name: "Tasks", exact: true });
 		await expect(panel.locator(".task-list-row")).toHaveCount(6);
 		await expect(page.locator(".composer-dock > .task-list-slot + .composer-code")).toHaveCount(1);
-		await page.locator(".composer-dock").screenshot({
+		await visiblePanel(page).locator(".composer-dock").screenshot({
 			animations: "disabled",
 			path: testInfo.outputPath("task-list-expanded-code.png"),
 		});
@@ -623,13 +634,12 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		phase = "checking persisted completed task list stays closed";
 		await page.getByRole("button", { name: "Chat", exact: true }).click();
 		await page.getByRole("button", { name: "Completed task list fixture", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
 		await expect(page.getByRole("region", { name: "Tasks", exact: true })).toHaveCount(0);
 
 		phase = "checking packaged New Task side rays";
 		await page.getByRole("button", { name: "New task", exact: true }).click();
-		await expect(page.getByRole("button", { name: "Show tools sidebar", exact: true })).toHaveCount(0);
-		await expect(page.locator(".tool-sidebar:not([hidden])")).toHaveCount(0);
+		await expect(visiblePanel(page).locator(".new-task-home")).toBeVisible();
 		await expect(page.locator(".new-task-side-rays canvas")).toBeVisible();
 		await page.locator(".new-task-home").screenshot({ path: testInfo.outputPath("new-task-side-rays.png") });
 	} catch (error) {
@@ -788,10 +798,10 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await expect(guideRow).toContainText("guide-edited");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-left-radius", "21px");
 		await expect(page.locator(".composer")).toHaveCSS("border-top-right-radius", "21px");
-		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-edited.png") });
+		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-edited.png") });
 		await guideRow.getByRole("button", { name: "Guide with queued message", exact: true }).click();
 		await expect(guideRow).toContainText("Sending…");
-		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-guiding.png") });
+		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-guiding.png") });
 		release("guide-first");
 		await waitForMarker("guide-edited");
 		await expect(page.getByText("done:guide-edited", { exact: true })).toBeVisible();
@@ -833,7 +843,7 @@ test("packaged queued messages edit, guide, drain in order, and pause across App
 		await expect(pausedRow).toContainText("Paused", { timeout: 20_000 });
 		await expect(pausedRow).toContainText("restart-queued");
 		expect(requestMarkers.filter((marker) => marker.startsWith("restart-"))).toEqual(["restart-first"]);
-		await page.locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-paused-after-restart.png") });
+		await visiblePanel(page).locator(".composer-dock").screenshot({ animations: "disabled", path: testInfo.outputPath("queued-paused-after-restart.png") });
 		await pausedRow.getByRole("button", { name: "Send queued message", exact: true }).click();
 		await waitForMarker("restart-queued");
 		await expect(page.getByText("done:restart-queued", { exact: true })).toBeVisible();
@@ -1654,7 +1664,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
 		expect(sessionsBeforeDraft.sessions).toHaveLength(0);
-		await page.getByRole("button", { name: "New task" }).click();
+		await page.getByRole("button", { name: "New task", exact: true }).click();
 		const sessionsAfterNewTask = await page.evaluate(() =>
 			(globalThis as unknown as { metis: MetisDesktopApi }).metis.listSessions({ limit: 200 }),
 		);
@@ -1681,19 +1691,22 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		});
 		await expect(page.locator(".session-sidebar").getByRole("button", { name: "Packaged smoke title", exact: true })).toBeVisible();
 		await page.screenshot({ path: path.join(groupingQaDir, "generated-title-and-message.png") });
-		await page.getByRole("main").getByRole("button", { name: "Packaged smoke title", exact: true }).click();
+		// Session actions live on the sidebar row; the workspace has no title header any more.
+		const sessionSidebar = page.locator(".session-sidebar");
+		await sessionSidebar.getByRole("button", { name: "Actions for Packaged smoke title", exact: true }).click();
+		await page
+			.getByRole("menu", { name: "Packaged smoke title session actions", exact: true })
+			.getByRole("menuitem", { name: "Rename", exact: true })
+			.click();
 		const titleInput = page.getByRole("textbox", { name: "Session name", exact: true });
 		await titleInput.fill("Pinned packaged title");
 		await titleInput.press("Enter");
-		await expect(page.getByRole("main").getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
-		const titleActions = page.getByRole("main").getByRole("button", {
-			name: "Actions for Pinned packaged title",
-			exact: true,
-		});
+		await expect(sessionSidebar.getByRole("button", { name: "Pinned packaged title", exact: true })).toBeVisible();
+		const titleActions = sessionSidebar.getByRole("button", { name: "Actions for Pinned packaged title", exact: true });
 		await titleActions.click();
 		let titleMenu = page.getByRole("menu", { name: "Pinned packaged title session actions", exact: true });
-		await expect(titleMenu.getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Delete"]);
-		await page.screenshot({ path: path.join(groupingQaDir, "header-actions.png") });
+		await expect(titleMenu.getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Rename", "Delete"]);
+		await page.screenshot({ path: path.join(groupingQaDir, "session-actions.png") });
 		await titleMenu.getByRole("menuitem", { name: "Pin", exact: true }).click();
 		const pinnedSection = page.locator(".session-section").filter({
 			has: page.getByRole("button", { name: "Pinned", exact: true }),
@@ -1855,7 +1868,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 
 		phase = "answering packaged structured questions";
 		await page.setViewportSize({ width: 1097, height: 588 });
-		const transcriptScroll = page.locator(".transcript-scroll");
+		const transcriptScroll = visiblePanel(page).locator(".transcript-scroll");
 		const transcriptHeightBeforeQuestions = await transcriptScroll.evaluate((element) => element.clientHeight);
 		await page.locator("#composer-input").fill("request packaged questions");
 		await page.getByRole("button", { name: "Send" }).click();
@@ -1978,7 +1991,8 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await page.screenshot({ path: path.join(scheduleQaDir, "create-with-metis-workspace.png") });
 		await workspaceDialog.getByRole("button", { name: /Use default workspace/u }).click();
 		await expect.poll(() => providerRequests).toBe(10);
-		await expect(page.getByRole("heading", { name: "Set up a scheduled task", exact: true })).toBeVisible();
+		// The new session's title shows on its tab.
+		await expect(page.getByRole("tab", { name: "Set up a scheduled task", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Scheduled tasks", exact: true }).click();
 		await headerNewTaskTrigger.click();
 		await page.getByRole("option", { name: "Set up manually", exact: true }).click();
@@ -2014,7 +2028,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		})).toEqual({ backgroundColor: await resolvedColor(page, "--button-primary-bg"), opacity: "1" });
 		await page.screenshot({ path: path.join(scheduleQaDir, "task-detail.png") });
 		await page.locator(".scheduled-task-history").getByRole("button").click();
-		await expect(page.locator(".transcript-scroll").getByText("Summarize the current project status.", { exact: true })).toBeVisible();
+		await expect(visiblePanel(page).locator(".transcript-scroll").getByText("Summarize the current project status.", { exact: true })).toBeVisible();
 
 		phase = "retaining and deleting a packaged scheduled session from the sidebar";
 		await page.locator(".session-sidebar").getByRole("button", { name: "Scheduled tasks", exact: true }).click();
@@ -2044,7 +2058,7 @@ test("packaged Plugin Center, worker, WASM, trusted extension, and utility lifec
 		await retainedSessionRow.hover();
 		await page.locator(".session-sidebar").screenshot({ path: path.join(scheduleQaDir, "retained-session-sidebar-actions.png") });
 		await retainedSessionRow.getByRole("button", { name: `Actions for ${retainedSessionName}`, exact: true }).click();
-		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Pin", "Delete"]);
+		await expect(page.locator(".session-action-menu").getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Delete"]);
 		await page.locator(".session-action-menu").getByRole("menuitem", { name: "Delete" }).click();
 		await page.getByRole("dialog", { name: "Delete session?" }).getByRole("button", { name: "Move to Trash" }).click();
 		await expect(retainedSessionRow).toHaveCount(0);
@@ -2880,15 +2894,14 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		expect(await page.evaluate(() => typeof (window as Window & { metis?: { interruptAgent?: unknown } }).metis?.interruptAgent)).toBe("function");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
 		phase = "opening the Agents tool";
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
+		await openTool(page, "Agents");
 		await expect(page.locator(".subagent-panel-heading").getByText("Agents", { exact: true })).toBeVisible();
 		await expect(page.getByText("Inspect packaged project", { exact: true })).toBeVisible();
 		const agentTree = page.getByRole("tree", { name: "Agent tree", exact: true });
@@ -2912,15 +2925,15 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "Archive agent", exact: true }).click();
 		await expect(page.getByRole("button", { name: "Unarchive agent", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
-		await resizeToolsSidebar(page, 392);
+		await resizeWorkspacePanel(page, 392);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "Hide tools sidebar", exact: true })).toBeInViewport();
-		await page.locator(".tool-sidebar").screenshot({ path: path.join(qaDir, "list-392x986.png") });
-		await resizeToolsSidebar(page, 280);
+		await expect(page.getByRole("button", { name: "Add tool", exact: true }).first()).toBeInViewport();
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "list-392x986.png") });
+		await resizeWorkspacePanel(page, 280);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 		await expect(page.getByRole("button", { name: "Add tool", exact: true })).toBeInViewport();
-		await page.locator(".tool-sidebar").screenshot({ path: path.join(qaDir, "list-280x986.png") });
-		await resizeToolsSidebar(page, 392);
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "list-280x986.png") });
+		await resizeWorkspacePanel(page, 392);
 
 		phase = "opening the child transcript";
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
@@ -2943,17 +2956,17 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await transcript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(transcript.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		expect(await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow)).toBe("auto");
-		await page.locator(".tool-sidebar").screenshot({ path: path.join(qaDir, "detail-392x986.png") });
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "detail-392x986.png") });
 		await page.setViewportSize({ width: 1280, height: 938 });
-		await resizeToolsSidebar(page, 856);
+		await resizeWorkspacePanel(page, 856);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await page.locator(".tool-sidebar").screenshot({ path: path.join(qaDir, "detail-856x924.png") });
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "detail-856x924.png") });
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
 		phase = "reopening the Agents tab";
 		await page.getByRole("button", { name: "Close Agents", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
+		await openTool(page, "Agents");
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
@@ -2974,7 +2987,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		phase = "checking a narrow app window";
 		await page.setViewportSize({ width: 900, height: 640 });
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "Hide tools sidebar", exact: true })).toBeInViewport();
+		await expect(page.getByRole("button", { name: "Add tool", exact: true }).first()).toBeInViewport();
 		await page.screenshot({ path: path.join(qaDir, "narrow-window-900x640.png") });
 
 		phase = "restoring the child after app restart";
@@ -2995,8 +3008,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "Agent fixture", exact: true }).click();
 		await expect(page.locator(`[data-active-session-id="${CODE_ID}"]`)).toBeVisible();
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Agents", exact: true }).click();
+		await openTool(page, "Agents");
 		await expect(page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true })).toBeVisible();
 		await page.getByRole("button", { name: "View transcript for Packaged project inspector", exact: true }).click();
 		await expect(page.getByText("Packaged child completed", { exact: true })).toBeVisible();
@@ -3054,10 +3066,10 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		await createAndRestoreChatSession(page, projectDir);
 
 		phase = "opening the terminal tool";
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await expect(page.locator(".tool-sidebar-menu")).toBeVisible();
+		await page.locator(".workspace-titlebar .tool-add-trigger").first().click();
+		await expect(page.locator(".tool-add-menu")).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "tool-menu-1280x840.png") });
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true }).click();
+		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Terminal", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "Terminal", exact: true })).toBeVisible();
 		const firstTerminalId = await page.locator('.terminal-panel[aria-hidden="false"]').getAttribute("id");
 		if (!firstTerminalId?.startsWith("terminal-panel-")) throw new Error("Terminal panel id is missing");
@@ -3077,46 +3089,37 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 			});
 		}, terminalId);
 		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText("METIS_TERMINAL_E2E");
-		const sidebar = page.locator(".tool-sidebar");
-		const [sidebarBox, firstTabBox, addButtonBox] = await Promise.all([
-			sidebar.boundingBox(),
-			page.locator(".tool-tab").first().boundingBox(),
-			page.getByRole("button", { name: "Add tool", exact: true }).boundingBox(),
+		// The add button follows the last tab in the strip.
+		const strip = page.locator(".workspace-titlebar .workspace-tabbar").first();
+		const [lastTabBox, addButtonBox] = await Promise.all([
+			strip.locator(".tool-tab").last().boundingBox(),
+			strip.getByRole("button", { name: "Add tool", exact: true }).boundingBox(),
 		]);
-		if (!sidebarBox || !firstTabBox || !addButtonBox) throw new Error("Terminal sidebar geometry is missing");
-		expect(sidebarBox.y).toBe(7);
-		expect(1280 - sidebarBox.x - sidebarBox.width).toBe(7);
-		const addGap = addButtonBox.x - firstTabBox.x - firstTabBox.width;
+		if (!lastTabBox || !addButtonBox) throw new Error("Terminal tab strip geometry is missing");
+		const addGap = addButtonBox.x - lastTabBox.x - lastTabBox.width;
 		expect(addGap).toBeGreaterThanOrEqual(0);
 		expect(addGap).toBeLessThanOrEqual(4);
-		expect(await sidebar.evaluate((element) => getComputedStyle(element).borderRadius)).toBe("9px");
 		await page.screenshot({ path: path.join(qaDir, "single-terminal-1280x840.png") });
 
-		phase = "adding and resizing terminal tabs";
-		await clickCenter(page, page.getByRole("button", { name: "Add tool", exact: true }));
+		phase = "adding terminal tabs";
+		const tabsWithOneTerminal = await page.getByRole("tab").count();
+		await clickCenter(page, strip.getByRole("button", { name: "Add tool", exact: true }));
 		await page.screenshot({ path: path.join(qaDir, "add-tool-menu-1280x840.png") });
 		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Terminal", exact: true }).click();
-		await expect(page.getByRole("tab")).toHaveCount(2);
-		const before = await sidebar.boundingBox();
-		const handle = await page.getByRole("separator", { name: "Resize tools sidebar" }).boundingBox();
-		if (!before || !handle) throw new Error("Terminal sidebar resize handle is missing");
-		await page.mouse.move(handle.x + handle.width / 2, handle.y + 100);
-		await page.mouse.down();
-		await page.mouse.move(handle.x - 72, handle.y + 100);
-		await page.mouse.up();
-		await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeGreaterThan(before.width + 50);
-		await page.screenshot({ path: path.join(qaDir, "two-terminals-resized-1280x840.png") });
+		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal + 1);
+		await page.screenshot({ path: path.join(qaDir, "two-terminals-1280x840.png") });
 
-		phase = "preserving the tabs while collapsed";
-		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
-		await expect(sidebar).toBeHidden();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await expect(page.getByRole("tab")).toHaveCount(2);
+		phase = "preserving the tabs while another tab is active";
+		await strip.getByRole("tab").first().click();
+		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toHaveCount(0);
+		await page.getByRole("tab", { name: "Terminal 2", exact: true }).click();
+		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal + 1);
+		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toHaveCount(1);
 		await page.getByRole("button", { name: "Close Terminal 2", exact: true }).click();
-		await expect(page.getByRole("tab")).toHaveCount(1);
-		await sidebar.screenshot({ path: path.join(qaDir, "single-terminal-resized-panel.png") });
+		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal);
+		await visiblePanel(page).screenshot({ path: path.join(qaDir, "single-terminal-panel.png") });
 		await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
-		await expect(page.locator(".tool-sidebar-menu")).toBeVisible();
+		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal - 1);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
@@ -3179,53 +3182,47 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await page.getByRole("button", { name: "Code", exact: true }).click();
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "File browser fixture", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 
 		phase = "opening the Files tool";
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		// The app-shell grid collapse animates for 200ms; opening the tools sidebar
-		// mid-transition would read a mid-flight workspace width for its default size.
+		// The app-shell grid collapse animates for 200ms; measuring the tool panel
+		// mid-transition would read a mid-flight workspace width.
 		await page.locator(".app-shell").evaluate(async (element) => {
 			await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
 		});
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Files", exact: true }).click();
-		const sidebar = page.locator(".tool-sidebar");
+		await openTool(page, "Files");
+		const panel = visiblePanel(page);
+		// A lone pane's tool panel spans the whole workspace.
 		const workspaceWidth = Math.round((await page.locator(".workspace").boundingBox())?.width ?? 0);
-		await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(
-			Math.round(workspaceWidth * 0.44),
-		);
-		expect(await sidebar.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
-		await sidebar.screenshot({ path: path.join(qaDir, "open-file-default-width.png") });
+		await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(workspaceWidth);
+		expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+		await panel.screenshot({ path: path.join(qaDir, "open-file-default-width.png") });
 		const readme = page.locator('.file-tree-row [title="README.md"]');
 		await expect(readme.locator(".file-kind-icon.is-markdown")).toBeVisible();
 		await readme.click();
 		const editor = page.getByRole("textbox", { name: "Edit README.md", exact: true });
 		await expect.poll(() => codeEditorText(editor)).toBe("# Metis workspace\n\nA real Markdown preview.");
-		await sidebar.screenshot({ path: path.join(qaDir, "direct-editor-default-width.png") });
-		const resizeSidebar = (targetWidth: number) => resizeToolsSidebar(page!, targetWidth);
-		await resizeSidebar(520);
-		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(520);
-		await resizeSidebar(392);
+		await panel.screenshot({ path: path.join(qaDir, "direct-editor-default-width.png") });
+		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
+		await resizePanel(392);
 		let [previewBox, treeBox] = await Promise.all([
 			page.locator(".file-preview").boundingBox(),
 			page.locator(".file-tree").boundingBox(),
 		]);
 		if (!previewBox || !treeBox) throw new Error("Files split layout is missing");
 		expect(treeBox.x).toBeGreaterThanOrEqual(previewBox.x + previewBox.width - 1);
-		await sidebar.screenshot({ path: path.join(qaDir, "direct-editor-side-by-side-393x986.png") });
-		await resizeSidebar(280);
+		await panel.screenshot({ path: path.join(qaDir, "direct-editor-side-by-side-393x986.png") });
+		await resizePanel(280);
 		[previewBox, treeBox] = await Promise.all([
 			page.locator(".file-preview").boundingBox(),
 			page.locator(".file-tree").boundingBox(),
 		]);
 		if (!previewBox || !treeBox) throw new Error("Files stacked layout is missing");
 		expect(treeBox.y).toBeGreaterThanOrEqual(previewBox.y + previewBox.height - 1);
-		await sidebar.screenshot({ path: path.join(qaDir, "direct-editor-stacked-280x986.png") });
-		await resizeSidebar(856);
-		await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 0).toBeGreaterThan(800);
+		await panel.screenshot({ path: path.join(qaDir, "direct-editor-stacked-280x986.png") });
+		await resizePanel(856);
+		await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBeGreaterThan(800);
 		await expect(page.locator('.file-tree-row [title=".env"]')).toBeVisible();
 		await expect(page.locator('.file-tree-row [title="ignored.log"]')).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "open-file-1304x1000.png") });
@@ -3235,10 +3232,11 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await readme.dblclick();
 		await expect(page.locator(".tool-tab.is-preview")).toHaveCount(0);
 		await page.locator('.file-tree-row [title="notes.txt"]').click();
-		await expect(page.getByRole("tab")).toHaveCount(2);
+		// Two file tabs plus the session's own chat tab.
+		await expect(page.getByRole("tab")).toHaveCount(3);
 		await expect(page.locator(".tool-tab.is-preview")).toHaveCount(1);
 		await readme.click();
-		await expect(page.getByRole("tab")).toHaveCount(2);
+		await expect(page.getByRole("tab")).toHaveCount(3);
 		await editor.fill("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(1);
 		await editor.press("Meta+s");
@@ -3271,13 +3269,13 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(page.locator('.file-tree-row [title="scratch.ts"] .file-kind-icon.is-typescript')).toBeVisible();
 		await scratchEditor.press("Meta+f");
 		await expect(page.locator(".cm-search")).toBeVisible();
-		await sidebar.screenshot({ path: path.join(qaDir, "code-editor-find.png") });
+		await panel.screenshot({ path: path.join(qaDir, "code-editor-find.png") });
 		await scratchEditor.press("Escape");
 
 		await page.locator('.file-tree-row [title="scratch.ts"]').click({ button: "right" });
 		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Rename", exact: true }).click();
 		await page.getByRole("textbox", { name: "Name", exact: true }).fill("managed.ts");
-		await sidebar.screenshot({ path: path.join(qaDir, "rename-file-dialog.png") });
+		await panel.screenshot({ path: path.join(qaDir, "rename-file-dialog.png") });
 		await page.getByRole("textbox", { name: "Name", exact: true }).press("Enter");
 		scratchEditor = page.getByRole("textbox", { name: "Edit managed.ts", exact: true });
 		await expect.poll(() => codeEditorText(scratchEditor)).toBe("export const managed = true;\n");
@@ -3293,17 +3291,17 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await page.getByRole("menu", { name: "File actions", exact: true }).getByRole("menuitem", { name: "Move to Trash", exact: true }).click();
 		const mutationDialog = page.getByRole("dialog", { name: "Move managed.ts to Trash?" });
 		await expect(mutationDialog).toContainText("The saved version can be recovered from Trash.");
-		await sidebar.screenshot({ path: path.join(qaDir, "move-file-to-trash-dialog.png") });
+		await panel.screenshot({ path: path.join(qaDir, "move-file-to-trash-dialog.png") });
 		await mutationDialog.getByRole("button", { name: "Cancel", exact: true }).click();
 		expect(existsSync(path.join(projectDir, "managed.ts"))).toBe(true);
 		await page.getByRole("button", { name: "Close managed.ts", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "Edit managed.ts", exact: true })).toHaveCount(0);
 
-		await resizeSidebar(392);
-		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-392x986.png") });
-		await resizeSidebar(280);
-		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-stacked-280x986.png") });
-		await resizeSidebar(856);
+		await resizePanel(392);
+		await panel.screenshot({ path: path.join(qaDir, "markdown-tree-392x986.png") });
+		await resizePanel(280);
+		await panel.screenshot({ path: path.join(qaDir, "markdown-tree-stacked-280x986.png") });
+		await resizePanel(856);
 
 		phase = "loading nested files and searching with packaged ripgrep";
 		await page.locator('.file-tree-row [title="docs"]').click();
@@ -3320,10 +3318,13 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await expect(page.getByText("Binary file cannot be previewed", { exact: true })).toBeVisible();
 		await readme.click();
 		await expect.poll(() => codeEditorText(editor)).toBe("# Saved from Metis\n");
-		await page.getByRole("button", { name: "Close binary.bin", exact: true }).click();
-		await expect(page.getByRole("tab")).toHaveCount(1);
+		// An inactive tab reveals its close button on hover, as for a pointer user.
+		const closeBinary = page.getByRole("button", { name: "Close binary.bin", exact: true });
+		await page.locator(".tool-tab", { has: closeBinary }).hover();
+		await closeBinary.click();
+		await expect(page.getByRole("tab")).toHaveCount(2);
 		await page.setViewportSize({ width: 1220, height: 938 });
-		await resizeSidebar(904);
+		await resizePanel(904);
 		[previewBox, treeBox] = await Promise.all([
 			page.locator(".file-preview").boundingBox(),
 			page.locator(".file-tree").boundingBox(),
@@ -3331,12 +3332,12 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		if (!previewBox || !treeBox) throw new Error("Files split layout is missing");
 		expect(previewBox.width).toBeGreaterThan(treeBox.width);
 		expect(treeBox.width).toBeGreaterThanOrEqual(220);
-		await sidebar.screenshot({ path: path.join(qaDir, "markdown-tree-904x924.png") });
+		await panel.screenshot({ path: path.join(qaDir, "markdown-tree-904x924.png") });
 
 		phase = "protecting an external file change";
 		await writeFile(path.join(projectDir, "README.md"), "# External change\n");
 		await editor.fill("# Stale Metis draft\n");
-		await sidebar.screenshot({ path: path.join(qaDir, "dirty-editor-900x924.png") });
+		await panel.screenshot({ path: path.join(qaDir, "dirty-editor-900x924.png") });
 		await editor.press("Meta+s");
 		await expect(page.getByRole("alert")).toContainText("Workspace file changed on disk");
 		await expect.poll(() => readFile(path.join(projectDir, "README.md"), "utf8")).toBe("# External change\n");
@@ -3424,13 +3425,12 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await page.keyboard.press("Escape");
 		await page.getByRole("button", { name: "Review fixture", exact: true }).click();
 		page.on("pageerror", (error) => consoleErrors.push(error.stack ?? error.message));
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 
 		phase = "opening collapsed review files";
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu button").filter({ has: page.getByText("Review", { exact: true }) }).click();
-		const sidebar = page.locator(".tool-sidebar");
+		await openTool(page, "Review");
+		const panel = visiblePanel(page);
 		const fileHeaders = page.locator(".review-file-header");
 		await expect(page.locator(".review-details")).toHaveCount(0);
 		await expect(fileHeaders).toHaveCount(178);
@@ -3457,7 +3457,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 				state.__reviewLongTaskObserver.observe({ entryTypes: ["longtask"] });
 			}
 		});
-		await sidebar.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
+		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-closed.png") });
 
 		phase = "opening complete information from the folder button";
 		await page.getByRole("button", { name: "Show review details", exact: true }).click();
@@ -3469,28 +3469,19 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		await expect(page.locator('.review-details button[aria-expanded="false"]')).toHaveCount(0);
 		await expect(page.locator(".review-tree button").filter({ hasText: ".gitignore" })).toBeVisible();
 		await expect(page.locator(".review-tree button").filter({ hasText: "current.ts" })).toBeVisible();
-		await sidebar.screenshot({ path: path.join(qaDir, "context-expanded-folder-open.png") });
+		await panel.screenshot({ path: path.join(qaDir, "context-expanded-folder-open.png") });
 
-		const resizeHandle = page.getByRole("separator", { name: "Resize tools sidebar", exact: true });
-		const resizeSidebar = async (targetWidth: number) => {
-			const [box, handle] = await Promise.all([sidebar.boundingBox(), resizeHandle.boundingBox()]);
-			if (!box || !handle) throw new Error("Review sidebar resize geometry is missing");
-			await page!.mouse.move(handle.x + handle.width / 2, handle.y + 100);
-			await page!.mouse.down();
-			await page!.mouse.move(handle.x + handle.width / 2 - (targetWidth - box.width), handle.y + 100);
-			await page!.mouse.up();
-			await expect.poll(async () => Math.round((await sidebar.boundingBox())?.width ?? 0)).toBe(targetWidth);
-		};
-		await resizeSidebar(720);
+		const resizePanel = (targetWidth: number) => resizeWorkspacePanel(page!, targetWidth);
+		await resizePanel(720);
 		let [detailsBox, contentBox] = await Promise.all([
 			page.locator(".review-details").boundingBox(),
 			page.locator(".review-content").boundingBox(),
 		]);
 		if (!detailsBox || !contentBox) throw new Error("Wide review layout is missing");
 		expect(contentBox.x).toBeGreaterThanOrEqual(detailsBox.x + detailsBox.width - 1);
-		await sidebar.screenshot({ path: path.join(qaDir, "details-wide.png") });
+		await panel.screenshot({ path: path.join(qaDir, "details-wide.png") });
 
-		await resizeSidebar(500);
+		await resizePanel(500);
 		[detailsBox, contentBox] = await Promise.all([
 			page.locator(".review-details").boundingBox(),
 			page.locator(".review-content").boundingBox(),
@@ -3499,7 +3490,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		expect(Math.abs(detailsBox.x - contentBox.x)).toBeLessThanOrEqual(1);
 		await expect(page.getByRole("button", { name: "Hide review details", exact: true })).toHaveAttribute("aria-expanded", "true");
 		await expect(fileHeaders.filter({ hasText: "context.md" })).toHaveAttribute("aria-expanded", "true");
-		await sidebar.screenshot({ path: path.join(qaDir, "details-narrow-drawer.png") });
+		await panel.screenshot({ path: path.join(qaDir, "details-narrow-drawer.png") });
 
 		phase = "preserving state and switching revisions";
 		await page.getByRole("button", { name: "Hide review details", exact: true }).click();
@@ -3635,26 +3626,21 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const sessionId = await createAndRestoreChatSession(page, projectDir);
 
 		phase = "opening the browser tool";
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		const browserButton = page.locator(".tool-sidebar-menu button").filter({
-			has: page.getByText("Browser", { exact: true }),
-		});
-		await expect(browserButton).toBeEnabled();
-		await browserButton.click();
+		await openTool(page, "Browser");
 		await expect(page.getByRole("tab", { name: "New tab", exact: true })).toBeVisible();
 		await expect(page.getByRole("textbox", { name: "Browser address", exact: true })).toBeVisible();
 		await expect(page.getByText("Start browsing", { exact: true })).toBeVisible();
-		const sidebar = page.locator(".tool-sidebar");
-		expect(await sidebar.evaluate((element) => getComputedStyle(element).borderRadius)).toBe("9px");
-		expect(await sidebar.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+		const panel = visiblePanel(page);
+		expect(await panel.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 		await page.screenshot({ path: path.join(qaDir, "empty-1280x840.png") });
-		const resizer = page.getByRole("separator", { name: "Resize tools sidebar", exact: true });
-		for (let index = 0; index < 6; index += 1) await resizer.press("ArrowRight");
-		await expect.poll(async () => (await sidebar.boundingBox())?.width ?? 1_000).toBeLessThan(340);
+		// A narrow panel drops the Forward button without overflowing.
+		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
+		await resizeWorkspacePanel(page, 330);
 		await expect(page.getByRole("button", { name: "Forward", exact: true })).toBeHidden();
-		expect(await sidebar.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
-		await page.screenshot({ path: path.join(qaDir, "empty-narrow-1280x840.png") });
-		for (let index = 0; index < 6; index += 1) await resizer.press("ArrowLeft");
+		expect(await panel.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
+		await page.screenshot({ path: path.join(qaDir, "empty-narrow-330x840.png") });
+		await page.setViewportSize({ width: 1280, height: 840 });
+		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
 
 		phase = "navigating a real WebContentsView";
 		const address = page.getByRole("textbox", { name: "Browser address", exact: true });
@@ -3671,12 +3657,19 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const embeddedWidth = await embeddedPage.evaluate(() => window.innerWidth);
 		const anchorWidth = await anchor.evaluate((element) => Math.round(element.getBoundingClientRect().width));
 		expect(Math.abs(embeddedWidth - anchorWidth)).toBeLessThanOrEqual(1);
-		await resizer.press("ArrowLeft");
+		// Widening the workspace (sessions sidebar hidden) must resize the native page view with its panel.
+		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await expect.poll(() => embeddedPage!.evaluate(() => window.innerWidth)).toBeGreaterThan(embeddedWidth);
-		const resizedEmbeddedWidth = await embeddedPage.evaluate(() => window.innerWidth);
-		const resizedAnchorWidth = await anchor.evaluate((element) => Math.round(element.getBoundingClientRect().width));
-		expect(Math.abs(resizedEmbeddedWidth - resizedAnchorWidth)).toBeLessThanOrEqual(1);
-		await resizer.press("ArrowRight");
+		// The shell animates the collapse; once it settles the native view must match its anchor exactly.
+		await page.locator(".app-shell").evaluate(async (element) => {
+			await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
+		});
+		await expect.poll(async () => {
+			const resizedEmbeddedWidth = await embeddedPage!.evaluate(() => window.innerWidth);
+			const resizedAnchorWidth = await anchor.evaluate((element) => Math.round(element.getBoundingClientRect().width));
+			return Math.abs(resizedEmbeddedWidth - resizedAnchorWidth);
+		}).toBeLessThanOrEqual(1);
+		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "First fixture page", exact: true })).toBeVisible();
 
 		phase = "covering the native page with a global modal";
@@ -3709,9 +3702,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await embeddedPage.screenshot({ path: path.join(qaDir, "loaded-page-1280x840.png") });
 
 		phase = "preserving the browser while collapsed";
-		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
-		await expect(sidebar).toBeHidden();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
+		await page.locator(".workspace-titlebar").getByRole("tab").first().click();
+		await expect(page.getByRole("textbox", { name: "Browser address", exact: true })).toBeHidden();
+		await page.getByRole("tab", { name: "Metis Browser Fixture", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "Metis Browser Fixture", exact: true })).toBeVisible();
 		expect(embeddedPage.isClosed()).toBe(false);
 		await expect(embeddedPage).toHaveURL(`${fixtureOrigin}/set-cookie`);
@@ -3738,8 +3731,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await waitForServerReady(page);
 		await expect(page.locator(`[data-active-session-id="${sessionId}"]`)).toBeVisible();
-		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
-		await page.locator(".tool-sidebar-menu button").filter({ has: page.getByText("Browser", { exact: true }) }).click();
+		await openTool(page, "Browser");
 		const restartedAddress = page.getByRole("textbox", { name: "Browser address", exact: true });
 		await restartedAddress.fill(`${fixtureOrigin}/cookie`);
 		await restartedAddress.press("Enter");
@@ -3762,15 +3754,15 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const actionsMenu = page.locator(".browser-more-menu");
 		await expect(actionsMenu).toBeVisible();
 		await expect(page.locator(".browser-view-preview")).toBeVisible();
-		const [actionsMenuBox, restartedSidebarBox] = await Promise.all([
+		const [actionsMenuBox, restartedPanelBox] = await Promise.all([
 			actionsMenu.boundingBox(),
-			page.locator(".tool-sidebar").boundingBox(),
+			visiblePanel(page).boundingBox(),
 		]);
 		expect(actionsMenuBox).not.toBeNull();
-		expect(restartedSidebarBox).not.toBeNull();
-		expect(actionsMenuBox!.x).toBeGreaterThanOrEqual(restartedSidebarBox!.x);
+		expect(restartedPanelBox).not.toBeNull();
+		expect(actionsMenuBox!.x).toBeGreaterThanOrEqual(restartedPanelBox!.x);
 		expect(actionsMenuBox!.x + actionsMenuBox!.width).toBeLessThanOrEqual(
-			restartedSidebarBox!.x + restartedSidebarBox!.width,
+			restartedPanelBox!.x + restartedPanelBox!.width,
 		);
 		await page.screenshot({ path: path.join(qaDir, "actions-menu-1280x840.png"), animations: "disabled" });
 		await page.getByRole("menuitem", { name: /Find in page/u }).click();
@@ -3829,7 +3821,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await page.screenshot({ path: path.join(qaDir, "page-actions-1280x840.png"), animations: "disabled" });
 
 		await page.getByRole("button", { name: "Close Inspect State", exact: true }).click();
-		await expect(page.locator(".tool-sidebar-menu")).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Inspect State", exact: true })).toHaveCount(0);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
@@ -4618,14 +4610,14 @@ test("packaged mode project actions preserve the other mode and shared project d
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-inactive.png") });
 		await page.keyboard.press("Escape");
 		await sessionActionRow.getByRole("button", { name: "Session action target", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", SESSION_ACTION_ID);
 		await sessionActionButton.focus();
 		await expect(sessionButton).toHaveCSS("background-color", await resolvedColor(page, "--panel-selected"));
 		await sessionActionButton.click();
 		await expect(sessionActionButton).toHaveCSS("background-color", await resolvedColor(page, "--surface-18"));
 		await page.locator(".session-sidebar").screenshot({ path: path.join(qaDir, "session-row-hover-current.png") });
 		const sessionActionMenu = page.getByRole("menu", { name: "Session action target session actions" });
-		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Rename", "Delete"]);
+		await expect(sessionActionMenu.getByRole("menuitem")).toHaveText(["Pin", "Copy title", "Rename", "Delete"]);
 		await expect(sessionActionRow.locator(".session-action-menu")).toHaveCount(0);
 		const sessionMenuBox = await sessionActionMenu.boundingBox();
 		const viewportHeight = await page.evaluate(() => window.innerHeight);
@@ -4653,7 +4645,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		group = projectGroup(page, projectName);
 		phase = "changing persisted session permissions";
 		await group.locator(".session-button").first().click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CHAT_ACTIVE_ID);
 		await page.getByRole("button", { name: "Select permissions, current Auto" }).click();
 		await page.getByRole("menuitemradio", { name: /Full/u }).click();
 		await expect(page.getByRole("button", { name: "Select permissions, current Full" })).toBeVisible();
@@ -4706,7 +4698,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		phase = "checking mode-scoped preferences";
 		await page.evaluate((sessionId) => localStorage.setItem("metis.activeSessionId.code", sessionId), CODE_ID);
 		await page.getByRole("button", { name: "Code", exact: true }).click();
-		await expect(page.locator(".workspace-header")).toHaveAttribute("data-active-session-id", CODE_ID);
+		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", CODE_ID);
 		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
 		await expect(page.getByRole("menuitem", { name: "Group by Date", exact: true })).toBeVisible();
 		await page.keyboard.press("Escape");
@@ -4724,7 +4716,7 @@ test("packaged mode project actions preserve the other mode and shared project d
 		group = projectGroup(page, "Pinned Chat Project");
 		await showProjectActions(group);
 		await group.getByRole("button", { name: "New task in Pinned Chat Project" }).click();
-		const workspaceHeader = page.locator(".workspace-header");
+		const workspaceHeader = page.locator(".workspace-titlebar");
 		await expect.poll(
 			() => workspaceHeader.getAttribute("data-active-session-id"),
 		).not.toBe(CHAT_ACTIVE_ID);
