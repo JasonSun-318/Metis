@@ -86,6 +86,7 @@ function harness(sessions: readonly SessionSummary[] = [], onDesktopEvent?: (eve
 		}),
 		listSessions: vi.fn().mockResolvedValue({ sessions, nextAfterSessionId: null }),
 		openSession: vi.fn(),
+		focusSession: vi.fn().mockResolvedValue(undefined),
 		subscribeSession: vi.fn(),
 		markSessionRead: vi.fn(async ({ sessionId }: { sessionId: string }) => ({
 			session: {
@@ -1176,7 +1177,9 @@ describe("SessionWorkspaceWorkflow", () => {
 		vi.mocked(api.openSession).mockResolvedValue(snapshot(live.sessionId));
 		await workflow.openVisibleSession(live.sessionId);
 
-		expect(api.openSession).toHaveBeenCalledWith({ sessionId: live.sessionId });
+		// Focus moves without rebuilding a snapshot on either side.
+		expect(api.focusSession).toHaveBeenCalledWith({ sessionId: live.sessionId });
+		expect(api.openSession).not.toHaveBeenCalledWith({ sessionId: live.sessionId });
 		expect(api.subscribeSession).toHaveBeenCalledTimes(1);
 		expect(store.getSnapshot().activeSessionId).toBe(live.sessionId);
 		expect(store.getSnapshot().syncStatus).toBe("ready");

@@ -108,6 +108,9 @@ const api = {
 		>,
 	openSession: (input: ClientParams<"session/open">) =>
 		invoke(DESKTOP_IPC_CHANNELS.openSession, "session/open", input) as ReturnType<MetisDesktopApi["openSession"]>,
+	focusSession: async (input: ClientParams<"session/open">) => {
+		await invoke(DESKTOP_IPC_CHANNELS.focusSession, "session/open", input);
+	},
 	subscribeSession: (input: ClientParams<"session/open">) =>
 		invoke(DESKTOP_IPC_CHANNELS.subscribeSession, "session/open", input) as ReturnType<
 			MetisDesktopApi["subscribeSession"]

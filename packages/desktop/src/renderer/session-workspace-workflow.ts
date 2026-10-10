@@ -1,11 +1,4 @@
-import type {
-	AgentMode,
-	ClientResult,
-	DomainEvent,
-	PermissionPresetView,
-	SessionSnapshot,
-	SessionSummary,
-} from "@metis/app-protocol";
+import type { AgentMode, ClientResult, DomainEvent, PermissionPresetView, SessionSummary } from "@metis/app-protocol";
 import { RPC_ERROR_CODES as ERROR_CODES } from "@metis/app-protocol";
 import type { DesktopApiEvent, MetisDesktopApi, SupervisorView } from "../shared/desktop-api.ts";
 import { type ConversationSubmission, composerPayload, composerRequestKey } from "./composer-submission.ts";
@@ -32,6 +25,7 @@ type SessionWorkspaceApi = Partial<Pick<MetisDesktopApi, "setModel" | "setThinki
 		| "listSessions"
 		| "markSessionRead"
 		| "openSession"
+		| "focusSession"
 		| "subscribeSession"
 		| "previewProjectDelete"
 		| "renameSession"
@@ -263,46 +257,54 @@ export class SessionWorkspaceWorkflow {
 		this.clearDraftRequests();
 	}
 
-	async openSession(sessionId: string): Promise<SessionSnapshot> {
+	async openSession(sessionId: string): Promise<void> {
 		const projectionBeforeOpen = this.store.getSnapshot();
 		const generation = ++this.openGeneration;
 		const lifecycle = this.lifecycleGeneration;
 		this.invalidateSessionLists();
 		this.commit({ openingSessionId: sessionId, failure: null });
-		// A live bucket that is already ready skips the local subscription
-		// cycle — no subscribing flag, no snapshot rebuild, so the pane never
-		// flashes. The broker call still moves focus, authorizes the
-		// workspace, and releases hidden sessions; its snapshot is discarded
-		// because the bucket already merged everything it contains.
-		const subscription =
+		// A live bucket that is already ready only needs focus: no subscribing
+		// flag and no snapshot rebuild, so the pane never flashes. The broker
+		// moves focus and releases hidden sessions without building a snapshot.
+		const ready =
 			projectionBeforeOpen.activeSessionId !== sessionId &&
-			projectionBeforeOpen.sessions.get(sessionId)?.syncStatus === "ready"
-				? null
-				: this.store.beginSubscription(sessionId);
+			projectionBeforeOpen.sessions.get(sessionId)?.syncStatus === "ready";
+		let subscription = ready ? null : this.store.beginSubscription(sessionId);
 		try {
-			const snapshot = await this.api.openSession({ sessionId });
-			if (!this.isCurrentOpen(generation, lifecycle)) {
-				if (subscription !== null) this.store.cancelSubscription(sessionId, subscription);
-				return snapshot;
+			let session: SessionSummary | undefined;
+			if (subscription === null) {
+				// A conflict means the broker no longer streams this session; any other
+				// failure is a real open failure and surfaces like one.
+				const focused = await this.api.focusSession({ sessionId }).then(
+					() => true,
+					(cause: unknown) => {
+						if (rpcErrorCode(cause) === ERROR_CODES.CONFLICT) return false;
+						throw cause;
+					},
+				);
+				if (!this.isCurrentOpen(generation, lifecycle)) return;
+				// The bucket may have left the ready state while focus moved; then open it fully.
+				if (focused && this.store.activateProjection(sessionId)) {
+					session = this.store.getSnapshot().sessionsById.get(sessionId);
+				}
 			}
-			this.invalidateSessionLists();
-			const bucket = this.store.getSnapshot().sessions.get(sessionId);
-			if (subscription === null && bucket?.syncStatus === "ready") {
-				this.store.activateProjection(sessionId, snapshot.session);
-			} else {
-				// A concurrent live re-subscribe may hold the bucket without focus;
-				// claim focus so applySnapshot projects this session.
-				if (subscription === null && bucket?.syncStatus === "subscribing") {
-					this.store.beginSubscription(sessionId);
+			if (!session) {
+				// Claiming a bucket that a live resubscribe still holds keeps its buffered events.
+				subscription ??= this.store.beginSubscription(sessionId);
+				const snapshot = await this.api.openSession({ sessionId });
+				if (!this.isCurrentOpen(generation, lifecycle)) {
+					this.store.cancelSubscription(sessionId, subscription);
+					return;
 				}
 				this.store.applySnapshot(snapshot);
+				session = snapshot.session;
 			}
+			this.invalidateSessionLists();
 			this.reconcileLiveSessions();
-			if (snapshot.session.unread) await this.markSessionRead(sessionId);
-			if (!this.isCurrentOpen(generation, lifecycle)) return snapshot;
-			this.writeRememberedSession(snapshot.session.mode, sessionId);
-			this.commit({ mode: snapshot.session.mode, message: "Session ready" });
-			return snapshot;
+			if (session.unread) await this.markSessionRead(sessionId);
+			if (!this.isCurrentOpen(generation, lifecycle)) return;
+			this.writeRememberedSession(session.mode, sessionId);
+			this.commit({ mode: session.mode, message: "Session ready" });
 		} catch (cause) {
 			if (subscription !== null) this.store.cancelSubscription(sessionId, subscription);
 			if (this.isCurrentOpen(generation, lifecycle)) {

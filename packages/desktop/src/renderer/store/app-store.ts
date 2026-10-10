@@ -200,8 +200,10 @@ export class AppStore {
 
 	// Focuses an already-subscribed bucket without rebuilding it. Returns false
 	// when the bucket is not ready, so callers fall back to a full snapshot.
-	activateProjection(sessionId: string, summary?: SessionSummary): void {
-		if (activateProjection(this.state, sessionId, summary)) this.commit();
+	activateProjection(sessionId: string, summary?: SessionSummary): boolean {
+		const activated = activateProjection(this.state, sessionId, summary);
+		if (activated) this.commit();
+		return activated;
 	}
 
 	requireProjectionResnapshot(sessionId: string): void {

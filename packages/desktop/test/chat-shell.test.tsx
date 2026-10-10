@@ -539,6 +539,13 @@ function createHarness(options: {
 			if (!summary) throw new Error("missing session");
 			return snapshot(summary);
 		}),
+		focusSession: vi.fn(async ({ sessionId }) => {
+			order.push("focus");
+			if (failFirstOpen || failOpenSessionIds.delete(sessionId)) {
+				failFirstOpen = false;
+				throw new Error("open failed once");
+			}
+		}),
 		subscribeSession: vi.fn(async ({ sessionId }) => {
 			const summary = sessions.find((candidate) => candidate.sessionId === sessionId);
 			if (!summary) throw new Error("missing session");
@@ -2068,7 +2075,7 @@ describe("Chat desktop shell", () => {
 			sessionId: "chat-created",
 			text: "Analyze this repository\ncarefully",
 		}));
-		expect(order).toEqual(["create", "list", "open", "start"]);
+		expect(order).toEqual(["create", "list", "focus", "start"]);
 		expect(container.querySelector(".tool-add-trigger")).not.toBeNull();
 
 		await act(async () => root.unmount());
@@ -2676,7 +2683,7 @@ describe("Chat desktop shell", () => {
 			sessionId: "code-created",
 			text: "Inspect this codebase",
 		}));
-		expect(order).toEqual(["create", "list", "open", "start"]);
+		expect(order).toEqual(["create", "list", "focus", "start"]);
 		expect(container.querySelector(".new-task-home")).toBeNull();
 		await act(async () => root.unmount());
 	});

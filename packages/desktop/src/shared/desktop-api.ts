@@ -87,6 +87,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	deleteProject: "metis:delete-project",
 	deleteSession: "metis:delete-session",
 	openSession: "metis:open-session",
+	focusSession: "metis:focus-session",
 	subscribeSession: "metis:subscribe-session",
 	readDeliveredFile: "metis:read-delivered-file",
 	readPreviewFile: "metis:read-preview-file",
@@ -569,6 +570,8 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	deleteProject(input: ClientParams<"project/delete">): Promise<DesktopRpcOutcome<ClientResult<"project/delete">>>;
 	deleteSession(input: ClientParams<"session/delete">): Promise<ClientResult<"session/delete">>;
 	openSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
+	/** Moves focus to an already-subscribed session without rebuilding its snapshot. */
+	focusSession(input: ClientParams<"session/open">): Promise<void>;
 	subscribeSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
 	readDeliveredFile(
 		input: ClientParams<"session/readDeliveredFile">,

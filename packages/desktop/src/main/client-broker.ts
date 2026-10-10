@@ -9,6 +9,7 @@ import {
 	type ClientRpcSuccessResponse,
 	createRpcError,
 	type InteractionResponseInput,
+	RPC_ERROR_CODES,
 	type RpcErrorResponse,
 	type ServerRpcRequest,
 	type ServerRpcSuccessResponse,
@@ -629,12 +630,34 @@ export class ClientBroker {
 				}),
 			);
 		});
+		// Focusing a session the renderer already streams needs no snapshot: it only
+		// moves focus and releases sessions that are no longer visible.
+		this.register(DESKTOP_IPC_CHANNELS.focusSession, 1, async (_event, [input]) => {
+			const params = this.validatedParams("session/open", input);
+			return this.rpcIpcResult(() =>
+				this.enqueueSubscriptionMutation(async () => {
+					if (!this.subscribedSessions.has(params.sessionId)) {
+						return desktopRpcIpcFailure(RPC_ERROR_CODES.CONFLICT, "Session is not subscribed");
+					}
+					const previousSessionIds = [...this.subscribedSessions].filter(
+						(sessionId) => sessionId !== params.sessionId,
+					);
+					this.backgroundQuestionSessions.delete(params.sessionId);
+					this.focusedSessionId = params.sessionId;
+					this.onSessionOpened?.(params.sessionId);
+					await this.releaseHiddenSessions(previousSessionIds);
+					return undefined;
+				}),
+			);
+		});
 		this.register(DESKTOP_IPC_CHANNELS.subscribeSession, 1, async (_event, [input]) => {
 			const params = this.validatedParams("session/open", input);
 			return this.rpcIpcResult(() =>
 				this.enqueueSubscriptionMutation(async () => {
+					// The pane may have been hidden while this request waited in the queue;
+					// the renderer treats the conflict as a cancelled subscription.
 					if (!this.liveSessions.has(params.sessionId)) {
-						throw new Error("Session is not live in the workspace");
+						return desktopRpcIpcFailure(RPC_ERROR_CODES.CONFLICT, "Session is not live in the workspace");
 					}
 					const snapshot = await this.subscribeAndAuthorize(params.sessionId);
 					return this.mergePendingQuestions(params.sessionId, snapshot);

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
-import type { SessionSummary } from "@metis/app-protocol";
+import { RPC_ERROR_CODES, type SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
@@ -1347,10 +1347,51 @@ describe("desktop trust boundaries", () => {
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		const subscribeSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.subscribeSession)!;
-		await expect(subscribeSession(event, { sessionId: "10000000-0000-4000-8000-0000000000a1" })).rejects.toThrow(
-			"Session is not live in the workspace",
-		);
+		// A structured conflict, not a thrown error: the race is expected and must not log as a handler failure.
+		await expect(subscribeSession(event, { sessionId: "10000000-0000-4000-8000-0000000000a1" })).resolves.toEqual({
+			kind: "metis-rpc-failure-v1",
+			error: { code: RPC_ERROR_CODES.CONFLICT, message: "Session is not live in the workspace" },
+		});
 		expect(supervisor.request).not.toHaveBeenCalled();
+		broker.dispose();
+	});
+
+	it("focuses only sessions the broker already streams", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		supervisor.request.mockImplementation(async (request) => ({
+			jsonrpc: "2.0",
+			id: request.id,
+			result:
+				request.method === "session/subscribe"
+					? { snapshot: { session: { sessionId: request.params.sessionId, mode: "chat" } } }
+					: {},
+		}));
+		const opened: string[] = [];
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			onSessionOpened: (sessionId) => opened.push(sessionId),
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const focusSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.focusSession)!;
+		const openSession = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.openSession)!;
+		const sessionId = "10000000-0000-4000-8000-0000000000a2";
+
+		await expect(focusSession(event, { sessionId })).resolves.toEqual({
+			kind: "metis-rpc-failure-v1",
+			error: { code: RPC_ERROR_CODES.CONFLICT, message: "Session is not subscribed" },
+		});
+		expect(supervisor.request).not.toHaveBeenCalled();
+
+		await openSession(event, { sessionId });
+		const requestsAfterOpen = supervisor.request.mock.calls.length;
+		await expect(focusSession(event, { sessionId })).resolves.toBeUndefined();
+		// Focusing builds no snapshot: no further app-server requests.
+		expect(supervisor.request.mock.calls.length).toBe(requestsAfterOpen);
+		expect(opened).toEqual([sessionId, sessionId]);
 		broker.dispose();
 	});
 
