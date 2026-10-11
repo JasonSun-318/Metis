@@ -42,6 +42,7 @@ import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
+import { clampToolsSidebarWidth } from "./SessionWorkspace.tsx";
 import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import {
@@ -378,8 +379,40 @@ export function App({ api, store }: AppProps) {
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
 	const conversationComposerFormRef = useRef<HTMLFormElement>(null);
 	// The workspace portals its top-row tab strips into this titlebar slot;
-	// null until the header mounts.
+	// null until the header mounts. Tool tabs get their own right-side slot so
+	// the sidebar's header stays level with the session strips.
 	const [titlebarTabsSlot, setTitlebarTabsSlot] = useState<HTMLDivElement | null>(null);
+	const [titlebarToolsSlot, setTitlebarToolsSlot] = useState<HTMLDivElement | null>(null);
+	const [toolsSidebarOpen, setToolsSidebarOpen] = useState(false);
+	const [toolsSidebarClosing, setToolsSidebarClosing] = useState(false);
+	const toolsSidebarClosingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	// Closing runs the drawer slide-out first; tests skip the animation entirely.
+	const setToolsSidebar = useCallback((open: boolean) => {
+		const runtime = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; process?: { env?: { NODE_ENV?: string } } };
+		if (runtime.IS_REACT_ACT_ENVIRONMENT || runtime.process?.env?.NODE_ENV === "test") {
+			setToolsSidebarOpen(open);
+			return;
+		}
+		if (toolsSidebarClosingTimeoutRef.current) {
+			clearTimeout(toolsSidebarClosingTimeoutRef.current);
+			toolsSidebarClosingTimeoutRef.current = null;
+		}
+		if (open) {
+			setToolsSidebarOpen(true);
+			setToolsSidebarClosing(false);
+			return;
+		}
+		setToolsSidebarClosing(true);
+		toolsSidebarClosingTimeoutRef.current = setTimeout(() => {
+			setToolsSidebarOpen(false);
+			setToolsSidebarClosing(false);
+			toolsSidebarClosingTimeoutRef.current = null;
+		}, 200);
+	}, []);
+	useEffect(() => () => {
+		if (toolsSidebarClosingTimeoutRef.current) clearTimeout(toolsSidebarClosingTimeoutRef.current);
+	}, []);
+	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	// Bumped by the Cmd/Ctrl+W shortcut that the main process forwards.
 	const [closeTabRequest, setCloseTabRequest] = useState(0);
 	// Every mounted SessionChatView registers its own submit here so the shared
@@ -789,6 +822,36 @@ export function App({ api, store }: AppProps) {
 		? state.sessionsById.get(visibleNewTaskDraft.sessionId)
 			?? { sessionId: visibleNewTaskDraft.sessionId, cwd: visibleNewTaskDraft.folder }
 		: undefined);
+	const toolsSidebarAvailable = toolsSession !== undefined;
+	// The sidebar remembers its width per session, like the old tools sidebar.
+	const toolsSidebarSessionRef = useRef<string | undefined>(undefined);
+	const updateToolsSidebarWidth = useCallback((width: number) => {
+		const clamped = clampToolsSidebarWidth(width);
+		setToolsSidebarWidth(clamped);
+		const sessionId = toolsSession?.sessionId;
+		if (sessionId) {
+			try {
+				localStorage.setItem(`metis.tools-sidebar-width.v2:${sessionId}`, String(clamped));
+			} catch {
+				// Ignore storage failures; the width still applies in memory.
+			}
+		}
+	}, [toolsSession?.sessionId]);
+	useEffect(() => {
+		const sessionId = toolsSession?.sessionId;
+		if (sessionId === toolsSidebarSessionRef.current) return;
+		toolsSidebarSessionRef.current = sessionId;
+		let stored = 393;
+		try {
+			const parsed = sessionId === undefined ? NaN : Number(localStorage.getItem(`metis.tools-sidebar-width.v2:${sessionId}`));
+			if (Number.isFinite(parsed) && parsed > 0) stored = parsed;
+		} catch {
+			// Fall back to the default width when storage is unavailable.
+		}
+		setToolsSidebarWidth(clampToolsSidebarWidth(stored));
+	}, [toolsSession?.sessionId]);
+	// Session strips stop where the tools column starts so nothing slides under it.
+	const toolsTitlebarReserved = toolsSidebarAvailable ? (toolsSidebarOpen ? toolsSidebarWidth : 0) + 36 : 0;
 	const openKnowledge = useCallback((sessionId: string) => {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
 	}, []);
@@ -1520,6 +1583,12 @@ export function App({ api, store }: AppProps) {
 				onSchedules={openSchedulesDestination}
 				onOpenSchedule={openSchedule}
 				onWidthChange={updateSessionSidebarWidth}
+				footerExtra={(
+					<ReleaseNotesPopover
+						loadChangelog={api.getChangelog}
+						availableVersion={"version" in updateState ? updateState.version : null}
+					/>
+				)}
 				scheduleTasks={sidebarScheduleTasks}
 				selectedScheduleTaskId={selectedScheduleTaskId}
 				state={sidebarState}
@@ -1545,15 +1614,23 @@ export function App({ api, store }: AppProps) {
 							<SidebarSimple aria-hidden="true" size={17} />
 						</button>
 					)}
-					<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} />
-					<div className="workspace-titlebar-end">
-						{toolsSession !== undefined && (
-							<ReleaseNotesPopover
-								loadChangelog={api.getChangelog}
-								availableVersion={"version" in updateState ? updateState.version : null}
-							/>
-						)}
-					</div>
+					<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} style={{ right: toolsTitlebarReserved }} />
+					{toolsSidebarAvailable && (
+						<div
+							className={`workspace-titlebar-tools${toolsSidebarOpen ? " is-open" : ""}${toolsSidebarClosing ? " is-closing" : ""}`}
+						>
+							<div className="workspace-titlebar-tools-slot" ref={setTitlebarToolsSlot} style={toolsSidebarOpen ? { width: toolsSidebarWidth } : undefined} />
+							<button
+								aria-label={t(toolsSidebarOpen && !toolsSidebarClosing ? "Hide tools sidebar" : "Show tools sidebar")}
+								aria-pressed={toolsSidebarOpen && !toolsSidebarClosing}
+								className="details-sidebar-toggle"
+								onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
+								type="button"
+							>
+								<SidebarSimple aria-hidden="true" size={17} />
+							</button>
+						</div>
+					)}
 				</header>
 				<div className="system-notice-stack">
 					{state.supervisor.state === "failed" && (
@@ -1624,6 +1701,12 @@ export function App({ api, store }: AppProps) {
 						store={store}
 						theme={resolvedTheme}
 						titlebarTabsSlot={titlebarTabsSlot}
+						titlebarToolsSlot={toolsSidebarAvailable ? titlebarToolsSlot : null}
+						toolsSidebarOpen={toolsSidebarOpen}
+						toolsSidebarClosing={toolsSidebarClosing}
+						toolsSidebarWidth={toolsSidebarWidth}
+						onToolsSidebarOpenChange={setToolsSidebar}
+						onToolsSidebarWidthChange={updateToolsSidebarWidth}
 						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}
 					/>
 				) : null}

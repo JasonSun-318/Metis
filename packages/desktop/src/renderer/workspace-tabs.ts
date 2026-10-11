@@ -102,16 +102,25 @@ export type SplitDirection = "left" | "right" | "up" | "down";
 export interface WorkspacePane {
 	readonly id: string;
 	readonly row: 0 | 1;
+	/** Chat tabs only; tool tabs live in `tools` keyed by their session. */
 	readonly tabs: readonly WorkspaceTab[];
 	readonly activeId: string;
 	/** Project groups whose tabs this pane's strip folds behind their label. */
 	readonly collapsedGroups?: readonly string[];
 }
 
+/** One session's tool tabs (terminal, files, …) shown in the tools sidebar. */
+export interface ToolStrip {
+	readonly tabs: readonly WorkspaceTab[];
+	readonly activeId: string;
+}
+
 export interface SessionWorkspace {
 	readonly panes: readonly WorkspacePane[];
 	readonly activePaneId: string;
 	readonly nextNumber: number;
+	/** Tool tabs keyed by owning sessionId. */
+	readonly tools: ReadonlyMap<string, ToolStrip>;
 }
 
 export function chatTab(sessionId: string | null): ChatTab {
@@ -124,6 +133,7 @@ export function defaultWorkspace(): SessionWorkspace {
 		panes: [{ id: paneId, row: 0, tabs: [], activeId: "" }],
 		activePaneId: paneId,
 		nextNumber: 1,
+		tools: new Map(),
 	};
 }
 
@@ -138,7 +148,10 @@ export function focusedChatTab(workspace: SessionWorkspace): ChatTab | undefined
 }
 
 export function workspaceTabs(workspace: SessionWorkspace): readonly WorkspaceTab[] {
-	return workspace.panes.flatMap((pane) => pane.tabs);
+	return [
+		...workspace.panes.flatMap((pane) => pane.tabs),
+		...[...workspace.tools.values()].flatMap((strip) => strip.tabs),
+	];
 }
 
 export interface TabLocation {
@@ -152,6 +165,37 @@ export function findTabLocation(workspace: SessionWorkspace, tabId: string): Tab
 		if (tabIndex >= 0) return { paneIndex, tabIndex };
 	}
 	return null;
+}
+
+export interface ToolTabLocation {
+	readonly sessionId: string;
+	readonly tabIndex: number;
+}
+
+/** Where a tool tab sits in its session's sidebar strip. */
+export function findToolLocation(workspace: SessionWorkspace, tabId: string): ToolTabLocation | null {
+	for (const [sessionId, strip] of workspace.tools) {
+		const tabIndex = strip.tabs.findIndex((tab) => tab.id === tabId);
+		if (tabIndex >= 0) return { sessionId, tabIndex };
+	}
+	return null;
+}
+
+/** The tool strip of one session, always defined so callers can append freely. */
+export function toolStripOf(workspace: SessionWorkspace, sessionId: string): ToolStrip {
+	return workspace.tools.get(sessionId) ?? { tabs: [], activeId: "" };
+}
+
+function updateToolStrip(
+	workspace: SessionWorkspace,
+	sessionId: string,
+	update: (strip: ToolStrip) => ToolStrip,
+): SessionWorkspace {
+	const strip = update(toolStripOf(workspace, sessionId));
+	const tools = new Map(workspace.tools);
+	if (strip.tabs.length === 0) tools.delete(sessionId);
+	else tools.set(sessionId, strip);
+	return { ...workspace, tools };
 }
 
 export function activePane(workspace: SessionWorkspace): WorkspacePane {
@@ -179,7 +223,13 @@ export function setActivePane(workspace: SessionWorkspace, paneId: string): Sess
 
 export function activateTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
 	const location = findTabLocation(workspace, tabId);
-	if (!location) return workspace;
+	if (!location) {
+		const tool = findToolLocation(workspace, tabId);
+		if (!tool) return workspace;
+		return updateToolStrip(workspace, tool.sessionId, (strip) =>
+			strip.activeId === tabId ? strip : { ...strip, activeId: tabId },
+		);
+	}
 	const pane = workspace.panes[location.paneIndex]!;
 	if (pane.activeId === tabId && workspace.activePaneId === pane.id) return workspace;
 	const panes = workspace.panes.map((candidate, index) =>
@@ -191,7 +241,8 @@ export function activateTab(workspace: SessionWorkspace, tabId: string): Session
 /** Brings a tab to the front of its own pane without moving focus to that pane. */
 export function revealTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
 	const location = findTabLocation(workspace, tabId);
-	if (!location || workspace.panes[location.paneIndex]!.activeId === tabId) return workspace;
+	if (!location) return activateTab(workspace, tabId);
+	if (workspace.panes[location.paneIndex]!.activeId === tabId) return workspace;
 	const panes = workspace.panes.map((pane, index) =>
 		index === location.paneIndex ? { ...pane, activeId: tabId } : pane,
 	);
@@ -205,6 +256,13 @@ export function addTab(
 	activate = true,
 	index?: number,
 ): SessionWorkspace {
+	if (tab.kind !== "chat") {
+		// Tools live in their session's sidebar strip regardless of the pane hint.
+		return updateToolStrip(workspace, tab.sessionId, (strip) => ({
+			tabs: [...strip.tabs, tab],
+			activeId: activate || strip.activeId === "" ? tab.id : strip.activeId,
+		}));
+	}
 	const paneIndex = workspace.panes.findIndex((pane) => pane.id === paneId);
 	if (paneIndex < 0) return workspace;
 	const panes = workspace.panes.map((pane, current) => {
@@ -214,6 +272,18 @@ export function addTab(
 		return { ...pane, tabs, activeId: activate ? tab.id : pane.activeId };
 	});
 	return { ...workspace, panes, activePaneId: activate ? paneId : workspace.activePaneId };
+}
+
+/** Reorders a tool tab inside its own session strip (sidebar drag). */
+export function moveToolTab(workspace: SessionWorkspace, tabId: string, index: number): SessionWorkspace {
+	const location = findToolLocation(workspace, tabId);
+	if (!location) return workspace;
+	return updateToolStrip(workspace, location.sessionId, (strip) => {
+		const without = strip.tabs.filter((candidate) => candidate.id !== tabId);
+		const at = Math.min(Math.max(index, 0), without.length);
+		const tabs = [...without.slice(0, at), strip.tabs[location.tabIndex]!, ...without.slice(at)];
+		return { ...strip, tabs, activeId: tabId };
+	});
 }
 
 /**
@@ -395,7 +465,18 @@ export function moveTabGroup(
 
 export function removeTab(workspace: SessionWorkspace, tabId: string): SessionWorkspace {
 	const location = findTabLocation(workspace, tabId);
-	if (!location) return workspace;
+	if (!location) {
+		const tool = findToolLocation(workspace, tabId);
+		if (!tool) return workspace;
+		return updateToolStrip(workspace, tool.sessionId, (strip) => {
+			const remaining = strip.tabs.filter((tab) => tab.id !== tabId);
+			const activeId =
+				strip.activeId === tabId
+					? (remaining[Math.min(tool.tabIndex, remaining.length - 1)]?.id ?? "")
+					: strip.activeId;
+			return { ...strip, tabs: remaining, activeId };
+		});
+	}
 	const pane = workspace.panes[location.paneIndex]!;
 	const remaining = pane.tabs.filter((tab) => tab.id !== tabId);
 	const activeId =
@@ -412,15 +493,25 @@ export function mapTabs(
 	workspace: SessionWorkspace,
 	update: (tab: WorkspaceTab) => WorkspaceTab | null,
 ): SessionWorkspace {
-	const panes = workspace.panes.map((pane) => {
-		const tabs = pane.tabs.flatMap((tab) => {
+	const apply = (tabs: readonly WorkspaceTab[]) =>
+		tabs.flatMap((tab) => {
 			const next = update(tab);
 			return next === null ? [] : [next];
 		});
+	const panes = workspace.panes.map((pane) => {
+		const tabs = apply(pane.tabs);
 		const activeId = tabs.some((tab) => tab.id === pane.activeId) ? pane.activeId : (tabs.at(-1)?.id ?? "");
 		return { ...pane, tabs, activeId };
 	});
-	return collapseEmptyPanes({ ...workspace, panes });
+	const tools = new Map(
+		[...workspace.tools].flatMap(([sessionId, strip]) => {
+			const tabs = apply(strip.tabs);
+			if (tabs.length === 0) return [];
+			const activeId = tabs.some((tab) => tab.id === strip.activeId) ? strip.activeId : (tabs.at(-1)?.id ?? "");
+			return [[sessionId, { tabs, activeId }]];
+		}),
+	);
+	return collapseEmptyPanes({ ...workspace, panes, tools });
 }
 
 export function moveTab(
@@ -429,7 +520,9 @@ export function moveTab(
 	targetPaneId: string,
 	index?: number,
 ): SessionWorkspace {
+	// Tool tabs only reorder inside their own strip; they never enter a pane.
 	const location = findTabLocation(workspace, tabId);
+	if (location === null) return moveToolTab(workspace, tabId, index ?? Number.MAX_SAFE_INTEGER);
 	const targetIndex = workspace.panes.findIndex((pane) => pane.id === targetPaneId);
 	if (!location || targetIndex < 0) return workspace;
 	const source = workspace.panes[location.paneIndex]!;

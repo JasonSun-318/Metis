@@ -62,6 +62,8 @@ interface SessionSidebarProps {
 	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
+	/** Extra control rendered next to the update button in the footer (release notes bell). */
+	readonly footerExtra?: ReactNode;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
 	readonly updateState: DesktopUpdateState;
@@ -282,6 +284,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 	onOpenSchedule,
 	onDeleteSchedule,
 	onWidthChange,
+	footerExtra,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
@@ -485,7 +488,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					</button>
 				</div>
 			)}
-			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} onCheckUpdate={onCheckUpdate} checkingUpdate={checkingUpdate || updateState.status === "checking"} updateDownloading={updateState.status === "downloading"} /></div>
+			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} onCheckUpdate={onCheckUpdate} checkingUpdate={checkingUpdate || updateState.status === "checking"} updateDownloading={updateState.status === "downloading"} />{footerExtra}</div>
 			<div
 				aria-label={t("Resize sessions sidebar")}
 				aria-orientation="vertical"

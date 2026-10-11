@@ -172,6 +172,11 @@ textarea { resize: none; }
 	color: var(--text-03);
 	cursor: not-allowed;
 }
+/* Release-notes bell sits in the sidebar footer, next to the update check. */
+.sidebar-footer .release-notes-control { position: relative; flex: none; }
+.sidebar-footer .release-notes-trigger { display: grid; width: 26px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-09); transition: background-color 140ms ease, color 140ms ease; }
+.sidebar-footer .release-notes-trigger:hover { background: var(--surface-07); color: var(--text-21); }
+.sidebar-footer .release-notes-popover { top: auto; right: auto; bottom: calc(100% + 8px); left: 0; }
 .account-update-check svg.is-spinning {
 	animation: browser-spin 900ms linear infinite;
 }
@@ -197,31 +202,42 @@ textarea { resize: none; }
 .workspace-titlebar .sessions-sidebar-toggle-fixed { position: fixed; top: 7px; left: 18px; z-index: 60; }
 :root[data-platform="darwin"]:not([data-fullscreen="true"]) .workspace-titlebar .sessions-sidebar-toggle-fixed { left: 76px; }
 :root[data-platform="darwin"][data-fullscreen="true"] .workspace-titlebar .sessions-sidebar-toggle-fixed { left: 16px; }
-.workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
-.workspace-titlebar .sessions-sidebar-toggle-fixed:hover, .workspace-titlebar .release-notes-trigger:hover, .workspace-titlebar .tool-add-trigger:hover { background: var(--surface-04); color: var(--text); }
+.workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .tool-add-trigger, .workspace-titlebar .session-add-trigger { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease, transform 140ms ease; -webkit-app-region: no-drag; }
+.workspace-titlebar .sessions-sidebar-toggle-fixed:hover, .workspace-titlebar .tool-add-trigger:hover, .workspace-titlebar .session-add-trigger:hover { background: var(--surface-04); color: var(--text); }
 /* One strip cell per top-row pane; cells reuse the panes' flex sizing and
    borders so each strip sits exactly above its pane. */
 .workspace-titlebar-tabs { position: absolute; inset: 0; display: flex; min-width: 0; }
 .workspace-titlebar-strips { display: flex; min-width: 0; flex: 1; }
 .workspace-titlebar-cell { display: flex; min-width: 0; flex: 1; }
 .workspace-titlebar-cell + .workspace-titlebar-cell { border-left: 1px solid var(--border); }
-.workspace-titlebar:has(.release-notes-control) .workspace-titlebar-cell:last-child .workspace-tabbar { padding-right: 40px; }
+/* The tools column's header lives in the titlebar row, right-aligned with
+   the sidebar body below; it holds the tools strip slot and the toggle. */
+.workspace-titlebar-tools {
+	position: absolute;
+	z-index: 55;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	display: flex;
+	align-items: center;
+	-webkit-app-region: no-drag;
+}
+/* The divider between session tabs and tools rides on the slot so it slides with it. */
+/* The drawer animates the slot's width so the chat area reflows with it
+   instead of snapping; the toggle stays put and never flickers. overflow-x
+   clips the strip during the animation without hiding the add-tool menu. */
+.workspace-titlebar-tools-slot { display: flex; width: 0; height: 100%; min-width: 0; flex: none; overflow-x: clip; }
+.workspace-titlebar-tools.is-open .workspace-titlebar-tools-slot { animation: tool-sidebar-grow 200ms cubic-bezier(.16, 1, .3, 1); border-left: 1px solid var(--border); }
+.workspace-titlebar-tools.is-closing .workspace-titlebar-tools-slot { animation: tool-sidebar-shrink 200ms cubic-bezier(.16, 1, .3, 1) forwards; pointer-events: none; border-left: 1px solid var(--border); }
+.workspace-titlebar-tabs { transition: right 200ms cubic-bezier(.16, 1, .3, 1); }
+.workspace-titlebar-tools-slot .tool-sidebar-tabbar { width: 100%; padding: 0 0 0 6px; }
+.details-sidebar-toggle { display: grid; width: 28px; height: 28px; margin: 0 8px 0 2px; flex: none; place-items: center; border-radius: 7px; color: var(--text-14); transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease; -webkit-app-region: no-drag; }
+.details-sidebar-toggle:hover { background: var(--surface-04); color: var(--text); }
+.details-sidebar-toggle svg { transform: scaleX(-1); }
 .windows-titlebar-navigation { position: fixed; z-index: 10040; top: 0; left: 8px; display: flex; height: 32px; align-items: center; gap: 2px; -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-14); -webkit-app-region: no-drag; }
 .windows-titlebar-navigation button:hover:not(:disabled) { color: var(--text); }
 .windows-titlebar-navigation button:disabled { opacity: .3; }
-.workspace-titlebar-end {
-	position: absolute;
-	z-index: 55;
-	top: 0;
-	right: 8px;
-	bottom: 0;
-	display: flex;
-	align-items: center;
-	gap: 2px;
-	pointer-events: none;
-	-webkit-app-region: no-drag;
-}
 .release-notes-control { pointer-events: auto; -webkit-app-region: no-drag; }
 .release-notes-trigger { position: relative; }
 .release-notes-unread-dot {
@@ -275,7 +291,7 @@ textarea { resize: none; }
 .release-notes-markdown :not(pre) > code { border-radius: 4px; background: var(--surface-07); padding: 1px 4px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 .release-notes-status { margin: 0; padding: 12px 8px; color: var(--text-12); font-size: 12px; line-height: 1.45; }
 .release-notes-status.is-error { color: var(--danger-soft-text); }
-.session-workspace-root { display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
+.session-workspace-root { position: relative; display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
 .session-workspace-root[hidden] { display: none; }
 .session-workspace-instance { display: flex; min-width: 0; min-height: 0; flex: 1; overflow: hidden; }
 .session-workspace-instance[hidden] { display: none; }
@@ -293,6 +309,74 @@ textarea { resize: none; }
 .workspace-pane-body { position: relative; min-height: 0; flex: 1; }
 .workspace-panel-layer { position: absolute; inset: 0; pointer-events: none; }
 .workspace-panel { position: absolute; top: 0; left: 0; pointer-events: auto; container-type: inline-size; }
+/* Right-side tools sidebar: one fixed-width column next to the panes. Its
+   tab strip lives in the titlebar above (same row as the session strips). */
+/* The sidebar overlays the workspace edge and grows its own width, so the
+   pane reflow happens in one instant instead of every animation frame. */
+.tool-sidebar { position: absolute; z-index: 30; top: 0; right: 0; bottom: 0; display: flex; min-height: 0; flex: none; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); background: var(--app-bg); container-type: inline-size; animation: tool-sidebar-grow 200ms cubic-bezier(.16, 1, .3, 1); }
+.tool-sidebar.is-closing { animation: tool-sidebar-shrink 200ms cubic-bezier(.16, 1, .3, 1) forwards; pointer-events: none; }
+@keyframes tool-sidebar-grow { from { width: 0; } }
+@keyframes tool-sidebar-shrink { to { width: 0; } }
+.tool-sidebar-resizer { position: absolute; z-index: 9; top: 0; bottom: 0; left: 0; width: 8px; cursor: col-resize; outline: 0; -webkit-app-region: no-drag; }
+.tool-sidebar-head { display: flex; height: 40px; flex: none; align-items: center; border-bottom: 1px solid var(--border); }
+.tool-sidebar-head .tool-sidebar-tabbar { width: 100%; height: 100%; border-bottom: none; background: transparent; }
+.tool-sidebar-body { position: relative; min-height: 0; flex: 1; }
+.tool-sidebar-panel { position: absolute; inset: 0; display: flex; flex-direction: column; }
+.tool-sidebar-panel[hidden] { display: none; }
+.tool-sidebar-panel > * { min-width: 0; min-height: 0; flex: 1; }
+/* The empty sidebar shows the same tool entries as the add menu, as large
+   launch cards. */
+.tool-sidebar-menu {
+	display: grid;
+	height: 100%;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	align-content: center;
+	gap: 10px;
+	margin: 0 auto;
+	max-width: 360px;
+	overflow-y: auto;
+	padding: 24px 16px;
+}
+.tool-sidebar-menu button {
+	display: flex;
+	height: 78px;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	background: var(--surface-03);
+	color: var(--text-24);
+	padding: 8px 6px;
+	text-align: center;
+	transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+.tool-sidebar-menu button:hover:not(:disabled), .tool-sidebar-menu button:focus-visible {
+	background: var(--surface-06);
+	border-color: var(--border-strong);
+	color: var(--text);
+	transform: translateY(-1px);
+	box-shadow: var(--shadow);
+	outline: 0;
+}
+.tool-sidebar-menu button:disabled { opacity: 0.42; cursor: default; background: var(--surface-02); border-color: var(--border); transform: none; box-shadow: none; }
+.tool-sidebar-menu .tool-menu-icon {
+	display: grid;
+	width: 36px;
+	height: 36px;
+	flex: none;
+	place-items: center;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	background: var(--surface-05);
+	color: var(--text-20);
+	transition: color 140ms ease, background-color 140ms ease;
+}
+.tool-sidebar-menu button:hover:not(:disabled) .tool-menu-icon { background: var(--surface-08); color: var(--text); }
+.tool-sidebar-menu button:disabled .tool-menu-icon { color: var(--text-04); }
+.tool-sidebar-menu button span { font-size: 12px; font-weight: 550; letter-spacing: -0.01em; color: var(--text); }
+.tool-sidebar-menu button:last-child:nth-child(odd) { grid-column: 1 / -1; }
 .workspace-panel > * { position: absolute; inset: 0; }
 .workspace-panel[hidden] { display: none; }
 .session-workspace-panes.is-dragging .workspace-panel-layer, .session-workspace-panes.is-dragging .workspace-panel { pointer-events: none; }
@@ -402,8 +486,8 @@ textarea { resize: none; }
 .tool-tab.is-dirty:hover .tool-tab-close::before, .tool-tab.is-dirty:focus-within .tool-tab-close::before { content: none; }
 /* The add button follows the last tab, like a browser's new-tab button. */
 .tool-add { position: relative; flex: none; margin-left: 2px; }
-.tool-add-trigger { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 7px; color: var(--text-12); transition: background-color 140ms ease, color 140ms ease; }
-.tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"] { background: var(--surface-04); color: var(--text); }
+.tool-add-trigger, .session-add-trigger { display: grid; width: 26px; height: 26px; place-items: center; border-radius: 7px; color: var(--text-12); transition: background-color 140ms ease, color 140ms ease; }
+.tool-add-trigger:hover, .tool-add-trigger[aria-expanded="true"], .session-add-trigger:hover { background: var(--surface-04); color: var(--text); }
 .tool-add-menu { position: absolute; z-index: 100; top: calc(100% + 6px); left: 0; display: grid; width: 200px; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
 .tool-add-menu.is-align-end { right: 0; left: auto; }
 .tool-add-menu button { height: 30px; background: transparent; font-size: 12px; }
@@ -3063,14 +3147,14 @@ classes so their inline layout wins the cascade. */
 :root[data-motion="reduced"] *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }
 :root[data-motion="reduced"] .session-button-title i.running, :root[data-motion="reduced"] .session-button-title i.completed, :root[data-motion="reduced"] .session-button-title i.failed, :root[data-motion="reduced"] .session-button-title i.attention { animation: none; opacity: 1; transform: none; }
 :root[data-motion="reduced"] .profile-loading-avatar, :root[data-motion="reduced"] .profile-loading-line, :root[data-motion="reduced"] .profile-loading-card, :root[data-motion="reduced"] .profile-loading-chart, :root[data-motion="reduced"] .settings-loading, :root[data-motion="reduced"] .profile-heatmap-cell, :root[data-motion="reduced"] .browser-toolbar-button .is-spinning, :root[data-motion="reduced"] .file-panel .is-spinning, :root[data-motion="reduced"] .review-panel .is-spinning, :root[data-motion="reduced"] .subagent-panel .is-spinning { animation: none; }
-:root[data-motion="reduced"] .composer:hover, :root[data-motion="reduced"] .composer:focus-within, :root[data-motion="reduced"] .mode-switch button:hover:not(:disabled), :root[data-motion="reduced"] .new-task-button:hover:not(:disabled), :root[data-motion="reduced"] .sidebar-nav-button:hover:not(:disabled), :root[data-motion="reduced"] .project-heading:hover, :root[data-motion="reduced"] .session-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-plain-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-icon-button:hover:not(:disabled), :root[data-motion="reduced"] .workspace-titlebar-actions button:hover { transform: none; }
+:root[data-motion="reduced"] .composer:hover, :root[data-motion="reduced"] .composer:focus-within, :root[data-motion="reduced"] .mode-switch button:hover:not(:disabled), :root[data-motion="reduced"] .new-task-button:hover:not(:disabled), :root[data-motion="reduced"] .sidebar-nav-button:hover:not(:disabled), :root[data-motion="reduced"] .project-heading:hover, :root[data-motion="reduced"] .session-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-plain-button:hover:not(:disabled), :root[data-motion="reduced"] .composer-icon-button:hover:not(:disabled), :root[data-motion="reduced"] .workspace-titlebar-actions button:hover, :root[data-motion="reduced"] .tool-sidebar-menu button:hover { transform: none; }
 :root[data-motion="reduced"] .turn-runtime-spinner, :root[data-motion="reduced"] .turn-runtime-spinner > span { animation: none; }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(2) { transform: rotate(60deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(3) { transform: rotate(120deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(4) { transform: rotate(180deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(5) { transform: rotate(240deg); }
 :root[data-motion="reduced"] .turn-runtime-spinner > span:nth-child(6) { transform: rotate(300deg); }
-:root[data-motion="reduced"] .session-sidebar, :root[data-motion="reduced"] .session-sidebar.is-closing, :root[data-motion="reduced"] .model-selector-popover, :root[data-motion="reduced"] .model-selector-submenu, :root[data-motion="reduced"] .permission-selector-popover, :root[data-motion="reduced"] .effort-popover, :root[data-motion="reduced"] .account-menu-popover, :root[data-motion="reduced"] .effort-label, :root[data-motion="reduced"] .effort-highest-field, :root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div, :root[data-motion="reduced"] .task-list-spinner, :root[data-motion="reduced"] .task-list-slot, :root[data-motion="reduced"] .ask-user-slot, :root[data-motion="reduced"] .permission-approval-slot, :root[data-motion="reduced"] .code-execution-title-enter, :root[data-motion="reduced"] .code-execution-title-leave { animation: none; }
+:root[data-motion="reduced"] .session-sidebar, :root[data-motion="reduced"] .session-sidebar.is-closing, :root[data-motion="reduced"] .tool-sidebar, :root[data-motion="reduced"] .tool-sidebar.is-closing, :root[data-motion="reduced"] .workspace-titlebar-tools, :root[data-motion="reduced"] .workspace-titlebar-tools.is-closing, :root[data-motion="reduced"] .model-selector-popover, :root[data-motion="reduced"] .model-selector-submenu, :root[data-motion="reduced"] .permission-selector-popover, :root[data-motion="reduced"] .effort-popover, :root[data-motion="reduced"] .account-menu-popover, :root[data-motion="reduced"] .effort-label, :root[data-motion="reduced"] .effort-highest-field, :root[data-motion="reduced"] .turn-user.is-entering .message-user, :root[data-motion="reduced"] .transcript-code .code-turn-user.is-entering > div, :root[data-motion="reduced"] .task-list-spinner, :root[data-motion="reduced"] .task-list-slot, :root[data-motion="reduced"] .ask-user-slot, :root[data-motion="reduced"] .permission-approval-slot, :root[data-motion="reduced"] .code-execution-title-enter, :root[data-motion="reduced"] .code-execution-title-leave { animation: none; }
 :root[data-motion="reduced"] .usage-bar, :root[data-motion="reduced"] .usage-tooltip, :root[data-motion="reduced"] .profile-activity-view, :root[data-motion="reduced"] .profile-usage-view { animation: none; transition: none; }
 :root[data-motion="reduced"] .usage-bar > i { transition: none; }
 :root[data-motion="reduced"] .settings-backdrop, :root[data-motion="reduced"] .settings-backdrop.is-closing, :root[data-motion="reduced"] .settings-page-mount { animation: none; transition: none; }
