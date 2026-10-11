@@ -53,12 +53,21 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".browser-view-anchor").top).toBe("42px");
 	});
 
-	it("marks the active tool tab with a fill and a group-colored underline", () => {
+	it("keeps every tab the same size and slides one underline under the active tab", () => {
 		expect(rule(".tool-tab.is-active").background).toBe("var(--surface-05)");
-		expect(css).toMatch(
-			/\.tool-tab\.is-active::after\s*\{[^}]*background:\s*var\(--tab-group-color, var\(--text-14\)\)/u,
-		);
+		// No weight or padding change on selection: the close slot stays reserved.
+		expect(rule(".tool-tab.is-active").fontWeight).toBe("");
+		expect(rule(".tool-tab-select").paddingRight).toBe("28px");
+		expect(css).not.toMatch(/\.tool-tab\.is-active\s+\.tool-tab-select/u);
+		expect(css).not.toMatch(/\.tool-tab\.is-active::after/u);
+		expect(css).toMatch(/\.tool-tab-indicator\s*\{[^}]*transition:[^}]*transform[^}]*width/u);
+		expect(css).toMatch(/\.tool-tab-indicator\s*\{[^}]*background:\s*var\(--tab-group-color, var\(--text-14\)\)/u);
 		expect(rule(".workspace-tabbar.is-unfocused .tool-tab.is-active").background).toBe("var(--surface-03)");
+		// Overflowing strips scroll: tabs and groups never shrink or overlap.
+		expect(rule(".tool-tab").flex).toBe("0 0 auto");
+		expect(rule(".tool-tab-group").flex).toBe("0 0 auto");
+		expect(rule(".tool-tabs-scroll").overflowX).toBe("auto");
+		expect(rule(".tool-tab-group-body").overflow).toBe("hidden");
 	});
 
 	it("anchors the tool-add menu to the plus trigger button", () => {

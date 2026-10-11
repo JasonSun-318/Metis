@@ -343,40 +343,44 @@ textarea { resize: none; }
    window, only tabs, group labels and the add button opt out. */
 .workspace-tabbar--titlebar { width: 100%; height: 100%; border-bottom: none; background: transparent; -webkit-app-region: drag; }
 .workspace-tabbar--titlebar :is(.tool-tab, .tool-tab-group-label, .tool-add) { -webkit-app-region: no-drag; }
-.tool-tabs-scroll { display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.tool-tabs-scroll { position: relative; display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tool-tabs-scroll::-webkit-scrollbar { display: none; }
 .workspace-tabbar-fill { min-width: 0; flex: 1; align-self: stretch; }
 /* With several projects in a pane, a project's tabs form one group: its
    label sits flush against them and a thin line in the group color runs
    under the whole group. The label collapses the group to a counted chip. */
-.tool-tab-group { position: relative; display: flex; height: 100%; min-width: 0; flex: 0 1 auto; align-items: center; gap: 2px; }
+.tool-tab-group { position: relative; display: flex; height: 100%; min-width: 0; flex: 0 0 auto; align-items: center; gap: 2px; }
+/* Groups collapse and expand by animating this body's width like a drawer. */
+.tool-tab-group-body { display: flex; min-width: 0; flex: none; align-items: center; gap: 2px; overflow: hidden; }
 /* Same baseline as the active tab underline (28px tab centered, 6px below). */
-.tool-tab-group::after { content: ""; position: absolute; top: calc(50% + 18px); right: 2px; left: 2px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--tab-group-color) 38%, transparent); pointer-events: none; }
-.tool-tab-group.is-collapsed::after { display: none; }
+.tool-tab-group::after { content: ""; position: absolute; top: calc(50% + 18px); right: 2px; left: 2px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--tab-group-color) 38%, transparent); opacity: 1; pointer-events: none; transition: opacity 180ms ease; }
+.tool-tab-group.is-collapsed::after { opacity: 0; }
 .tool-tab-group + .tool-tab-group { margin-left: 9px; }
 .tool-tab-group + .tool-tab-group::before { content: ""; position: absolute; top: 13px; bottom: 13px; left: -5px; width: 1px; background: var(--border); }
 .tool-tab-group-gap { width: 1px; height: 14px; flex: none; margin: 0 4px; background: var(--border); }
-.tool-tab-group-label { display: flex; max-width: 140px; height: 28px; flex: none; align-items: center; gap: 6px; border-radius: 8px; color: color-mix(in srgb, var(--tab-group-color) 72%, var(--text-24)); padding: 0 6px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: -0.005em; transition: background-color 140ms ease; }
+.tool-tab-group-label { display: flex; max-width: 140px; height: 28px; flex: none; align-items: center; gap: 6px; border-radius: 8px; color: color-mix(in srgb, var(--tab-group-color) 72%, var(--text-24)); padding: 0 6px 0 8px; font-size: 11px; font-weight: 600; letter-spacing: -0.005em; transition: background-color 140ms ease, height 180ms cubic-bezier(.16, 1, .3, 1); }
 .tool-tab-group-label:hover { background: var(--surface-03); }
 /* Inset ring: the scrolling strip clips anything drawn outside the label. */
 .tool-tab-group-label:focus-visible { outline-offset: -2px; }
 .tool-tab-group.is-collapsed .tool-tab-group-label { height: 22px; background: color-mix(in srgb, var(--tab-group-color) 16%, transparent); }
 .tool-tab-group.is-collapsed .tool-tab-group-label:hover { background: color-mix(in srgb, var(--tab-group-color) 24%, transparent); }
 .tool-tab-group-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tool-tab-group-count { min-width: 16px; height: 16px; flex: none; border-radius: 8px; background: color-mix(in srgb, var(--tab-group-color) 22%, transparent); padding: 0 4px; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; }
-.tool-tab { position: relative; display: flex; min-width: 76px; max-width: 220px; height: 28px; flex: 0 1 auto; align-items: center; border-radius: 8px; color: var(--text-11); transition: background-color 140ms ease, color 140ms ease; }
+@keyframes tool-tab-count-in { from { opacity: 0; transform: scale(.6); } }
+.tool-tab-group-count { min-width: 16px; height: 16px; flex: none; border-radius: 8px; background: color-mix(in srgb, var(--tab-group-color) 22%, transparent); padding: 0 4px; font-size: 10px; font-variant-numeric: tabular-nums; line-height: 16px; text-align: center; animation: tool-tab-count-in 160ms cubic-bezier(.16, 1, .3, 1); }
+:root[data-motion="reduced"] .tool-tab-group-count { animation: none; }
+.tool-tab { position: relative; display: flex; min-width: 76px; max-width: 220px; height: 28px; flex: 0 0 auto; align-items: center; border-radius: 8px; color: var(--text-11); transition: background-color 140ms ease, color 140ms ease; }
 .tool-tab:hover:not(.is-active), .tool-tab:focus-within:not(.is-active) { background: var(--surface-03); color: var(--text-19); }
-.tool-tab.is-active { background: var(--surface-05); color: var(--text-24); font-weight: 500; }
-/* The active tab is underlined at the strip's edge in its group color. */
-.tool-tab.is-active::after { content: ""; position: absolute; right: 10px; bottom: -6px; left: 10px; height: 2px; border-radius: 2px; background: var(--tab-group-color, var(--text-14)); }
+.tool-tab.is-active { background: var(--surface-05); color: var(--text-24); }
+/* The underline is one shared element the strip slides under the active tab;
+   it stays hidden until measured so it never flies in from the edge. */
+.tool-tab-indicator { position: absolute; bottom: 0; left: 0; width: 0; height: 2px; border-radius: 2px; background: var(--tab-group-color, var(--text-14)); opacity: 0; pointer-events: none; transition: transform 180ms cubic-bezier(.16, 1, .3, 1), width 180ms cubic-bezier(.16, 1, .3, 1), opacity 140ms ease; }
+.tool-tab-indicator.is-set { opacity: 1; }
 .workspace-tabbar.is-unfocused .tool-tab.is-active { background: var(--surface-03); color: var(--text-19); }
-.workspace-tabbar.is-unfocused .tool-tab.is-active::after { opacity: .4; }
+.workspace-tabbar.is-unfocused .tool-tab-indicator.is-set { opacity: .4; }
+:root[data-motion="reduced"] .tool-tab-indicator { transition: opacity 140ms ease; }
 .tool-tab.is-preview .tool-tab-select span { font-style: italic; }
-.tool-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 10px; font-size: 12px; text-align: left; }
-/* Only the active (or dirty) tab reserves room for its close button; an
-   inactive tab shows it on hover over the end of its title, so the strip
-   stays compact and never reflows under the pointer. */
-.tool-tab.is-active .tool-tab-select, .tool-tab.is-dirty .tool-tab-select { padding-right: 28px; }
+/* The close-button slot is always reserved so selecting a tab never resizes it. */
+.tool-tab-select { display: flex; min-width: 0; height: 100%; flex: 1; align-items: center; gap: 7px; padding: 0 28px 0 10px; font-size: 12px; text-align: left; }
 .tool-tab-select > svg { flex: none; }
 .tool-tab-select span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-tab-status { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-14); }

@@ -102,6 +102,7 @@ describe("workspace tab strip", () => {
 		expect(view.tabs()).toEqual(["Alpha one", "Alpha two*", "Beta"]);
 		expect(view.groups()).toEqual(["alpha", "beta"]);
 		expect(view.container.querySelector(".tool-tab-group-label")?.getAttribute("title")).toBe("/work/alpha");
+		expect(view.container.querySelectorAll(".tool-tab-group-body")).toHaveLength(2);
 	});
 
 	it("shows no project labels while a pane holds a single project", async () => {
@@ -162,6 +163,42 @@ describe("workspace tab strip", () => {
 		expect(betaLabel().getAttribute("aria-expanded")).toBe("true");
 	});
 
+	it("slides one shared underline under the active tab", async () => {
+		// jsdom has no layout; give each tab a deterministic rect by position.
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+			const tabs = [...(this.parentElement?.children ?? [])].filter((el) => el.classList.contains("tool-tab"));
+			const index = Math.max(0, tabs.indexOf(this));
+			const left = this.classList.contains("tool-tab") ? index * 100 : 0;
+			const width = this.classList.contains("tool-tab") ? 100 : 1000;
+			return { x: left, y: 0, top: 0, left, right: left + width, bottom: 0, width, height: 0, toJSON: () => ({}) } as DOMRect;
+		});
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: ALPHA_2 });
+		expect(view.container.querySelectorAll(".tool-tab-indicator")).toHaveLength(1);
+		const indicator = view.container.querySelector<HTMLElement>(".tool-tab-indicator")!;
+		expect(indicator.classList.contains("is-set")).toBe(true);
+		expect(indicator.style.width).toBe("80px");
+		expect(indicator.style.transform).toBe("translateX(110px)");
+
+		// Selecting another tab retargets the same element instead of drawing a new one.
+		const firstTab = view.container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Alpha one"]')!;
+		await act(async () => firstTab.click());
+		expect(indicator.style.transform).toBe("translateX(10px)");
+	});
+
+	it("scrolls the strip sideways on the wheel instead of shrinking tabs", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: ALPHA_2 });
+		const scroll = view.container.querySelector<HTMLElement>(".tool-tabs-scroll")!;
+		await act(async () => scroll.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true, cancelable: true })));
+		expect(scroll.scrollLeft).toBe(40);
+		// A mostly-horizontal wheel gestures scrolls natively, untouched.
+		await act(async () => scroll.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 5, bubbles: true, cancelable: true })));
+		expect(scroll.scrollLeft).toBe(40);
+	});
+
 	it("shows a running session's live status on its tab", async () => {
 		const view = mount();
 		await view.render({ chatSessionId: BETA });
@@ -220,7 +257,7 @@ describe("workspace tab strip", () => {
 			(button) => button.textContent === "Split right",
 		)!;
 		await act(async () => split.click());
-		const strips = () => [...view.container.querySelectorAll<HTMLElement>(".workspace-tabbar")];
+		const strips = () => [...view.container.querySelectorAll<HTMLElement>(".workspace-tabbar[data-pane-id]")];
 		expect(strips().map((strip) => strip.classList.contains("is-focused"))).toEqual([false, true]);
 
 		const alphaPaneId = strips()[0]!.dataset.paneId!;

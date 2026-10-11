@@ -271,6 +271,76 @@ export function SessionWorkspaceView({
 	const panelLayerRef = useRef<HTMLDivElement>(null);
 	const paneBodiesRef = useRef(new Map<string, HTMLElement>());
 	const panelRectsRef = useRef(new WeakMap<HTMLElement, { x: number; y: number; width: number; height: number }>());
+	// Each strip's underline is one shared element slid under the active tab.
+	// Grouped tabs sit inside group wrappers, so it is positioned by measuring
+	// the tab's rect rather than a per-tab pseudo-element.
+	const tabStripEls = useRef(new Map<string, HTMLDivElement>());
+	const tabStripObserver = useRef<ResizeObserver | null>(null);
+	const tabStripRefCallbacks = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+	const tabStripActiveTab = useRef(new WeakMap<HTMLElement, Element>());
+	const syncTabIndicators = useCallback(() => {
+		for (const scrollEl of tabStripEls.current.values()) {
+			const indicator = scrollEl.querySelector<HTMLElement>(".tool-tab-indicator");
+			if (!indicator) continue;
+			const tabEl = scrollEl.querySelector<HTMLElement>(".tool-tab.is-active");
+			if (!tabEl) {
+				indicator.classList.remove("is-set");
+				continue;
+			}
+			if (tabStripActiveTab.current.get(scrollEl) !== tabEl) {
+				tabStripActiveTab.current.set(scrollEl, tabEl);
+				// Keep the new pick visible now that overflowing strips scroll.
+				tabEl.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+			}
+			const tabRect = tabEl.getBoundingClientRect();
+			indicator.style.width = `${Math.max(0, tabRect.width - 20)}px`;
+			indicator.style.transform = `translateX(${tabRect.left - scrollEl.getBoundingClientRect().left + scrollEl.scrollLeft + 10}px)`;
+			// Grouped strips tint the line with the tab's group accent color.
+			indicator.style.setProperty("--tab-group-color", getComputedStyle(tabEl).getPropertyValue("--tab-group-color"));
+			indicator.classList.add("is-set");
+		}
+	}, []);
+	useLayoutEffect(() => {
+		if (visible) syncTabIndicators();
+	});
+	useEffect(() => {
+		const observer = new ResizeObserver(syncTabIndicators);
+		tabStripObserver.current = observer;
+		for (const scrollEl of tabStripEls.current.values()) observer.observe(scrollEl);
+		return () => {
+			tabStripObserver.current = null;
+			observer.disconnect();
+		};
+	}, [syncTabIndicators]);
+	// Vertical wheel scrolls the strip horizontally; the listener is native
+	// because React's delegated wheel handlers cannot preventDefault.
+	const onTabStripWheel = useCallback((event: WheelEvent) => {
+		const el = event.currentTarget as HTMLElement;
+		if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+		event.preventDefault();
+		el.scrollLeft += event.deltaMode === 1 ? event.deltaY * 16 : event.deltaY;
+	}, []);
+	const tabStripRef = (paneId: string) => {
+		let callback = tabStripRefCallbacks.current.get(paneId);
+		if (!callback) {
+			callback = (el) => {
+				const previous = tabStripEls.current.get(paneId);
+				if (previous && previous !== el) {
+					tabStripObserver.current?.unobserve(previous);
+					previous.removeEventListener("wheel", onTabStripWheel);
+				}
+				if (el) {
+					tabStripEls.current.set(paneId, el);
+					tabStripObserver.current?.observe(el);
+					el.addEventListener("wheel", onTabStripWheel, { passive: false });
+				} else {
+					tabStripEls.current.delete(paneId);
+				}
+			};
+			tabStripRefCallbacks.current.set(paneId, callback);
+		}
+		return callback;
+	};
 	const dirtySessionIds = useMemo(
 		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => {
 			if (tab.sessionId === null) return [];
@@ -391,6 +461,88 @@ export function SessionWorkspaceView({
 		},
 		[groupOf],
 	);
+
+
+	// Collapsing a group animates its tab body shut like a drawer before the
+	// model commits; expanding commits first and the fresh body animates open.
+	// Reduced motion (or DOMs without Web Animations) toggles instantly.
+	const groupAnims = useRef(new Map<string, { anim: Animation; closing: boolean }>());
+	const expandingGroups = useRef(new Set<string>());
+	const groupBodyRefCallbacks = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
+	// While a drawer closes the label already looks collapsed, so the count and
+	// chip shape arrive with the animation instead of popping in at the commit.
+	const [closingGroups, setClosingGroups] = useState<ReadonlySet<string>>(new Set());
+	const groupsCanAnimate = () =>
+		typeof HTMLElement.prototype.animate === "function" &&
+		!(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)") ?? { matches: false }).matches;
+	const setGroupClosing = (id: string, closing: boolean) => {
+		setClosingGroups((current) => {
+			const next = new Set(current);
+			if (closing) next.add(id); else next.delete(id);
+			return next;
+		});
+	};
+
+	const collapseGroupBody = (body: HTMLElement, id: string, paneId: string, key: string) => {
+		const anim = body.animate(
+			[{ maxWidth: `${body.getBoundingClientRect().width}px`, opacity: 1 }, { maxWidth: "0px", opacity: 0 }],
+			{ duration: 220, easing: "cubic-bezier(.16,1,.3,1)", fill: "forwards" },
+		);
+		groupAnims.current.set(id, { anim, closing: true });
+		setGroupClosing(id, true);
+		anim.finished.then(() => {
+			if (groupAnims.current.get(id)?.anim === anim) {
+				groupAnims.current.delete(id);
+				mutateWorkspace((current) => toggleTabGroup(current, paneId, key, groupOf));
+				setGroupClosing(id, false);
+			}
+		}, () => {});
+	};
+
+	const toggleGroupAnimated = (label: HTMLElement, paneId: string, key: string, collapsed: boolean) => {
+		const id = `${paneId}${key}`;
+		const running = groupAnims.current.get(id);
+		if (running?.closing) {
+			// Second click mid-collapse plays the drawer back open and keeps it.
+			running.anim.reverse();
+			groupAnims.current.delete(id);
+			setGroupClosing(id, false);
+			void running.anim.finished.catch(() => {});
+			return;
+		}
+		running?.anim.cancel();
+		groupAnims.current.delete(id);
+		if (collapsed) {
+			if (groupsCanAnimate()) expandingGroups.current.add(id);
+		} else {
+			const body = label.parentElement?.querySelector<HTMLElement>(".tool-tab-group-body");
+			if (body && groupsCanAnimate()) {
+				collapseGroupBody(body, id, paneId, key);
+				return;
+			}
+		}
+		mutateWorkspace((current) => toggleTabGroup(current, paneId, key, groupOf));
+	};
+
+	const groupBodyRef = (paneId: string, key: string) => {
+		const id = `${paneId}${key}`;
+		let callback = groupBodyRefCallbacks.current.get(id);
+		if (!callback) {
+			callback = (el) => {
+				if (!el || !expandingGroups.current.delete(id)) return;
+				const anim = el.animate(
+					[{ maxWidth: "0px", opacity: 0 }, { maxWidth: `${el.scrollWidth}px`, opacity: 1 }],
+					{ duration: 220, easing: "cubic-bezier(.16,1,.3,1)" },
+				);
+				groupAnims.current.set(id, { anim, closing: false });
+				anim.finished.then(() => {
+					if (groupAnims.current.get(id)?.anim === anim) groupAnims.current.delete(id);
+				}, () => {});
+			};
+			groupBodyRefCallbacks.current.set(id, callback);
+		}
+		return callback;
+	};
 
 	// A tab's project can resolve after the tab opens (the session list loads
 	// later); regroup whenever the project behind any tab changes.
@@ -1474,7 +1626,7 @@ export function SessionWorkspaceView({
 				}}
 				role="tablist"
 			>
-				<div className="tool-tabs-scroll">
+				<div className="tool-tabs-scroll" ref={tabStripRef(pane.id)}>
 					{grouped ? runs.map((run, index) => {
 						const first = run.tabs[0]!;
 						if (!run.group) {
@@ -1483,24 +1635,26 @@ export function SessionWorkspaceView({
 						}
 						const group = run.group;
 						const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
+						// A drawer on its way shut already wears the collapsed look.
+						const shownCollapsed = collapsed || closingGroups.has(`${pane.id}${group.key}`);
 						const groupLabel = t("{{name}} tab group", { name: group.name });
 						return (
 							<div
-								className={`tool-tab-group${collapsed ? " is-collapsed" : ""}`}
+className={`tool-tab-group${shownCollapsed ? " is-collapsed" : ""}`}
 								key={`group-${group.key}`}
 								role="presentation"
 								style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
 							>
 								<button
-									aria-description={collapsed
+									aria-description={shownCollapsed
 										? t("{{count}} tabs hidden", { count: run.tabs.length })
 										: undefined}
-									aria-expanded={!collapsed}
+									aria-expanded={!shownCollapsed}
 									aria-label={groupLabel}
 									className="tool-tab-group-label"
 									data-drop-index={pane.tabs.indexOf(first)}
 									draggable
-									onClick={() => mutateWorkspace((current) => toggleTabGroup(current, pane.id, group.key, groupOf))}
+onClick={(event) => toggleGroupAnimated(event.currentTarget, pane.id, group.key, collapsed)}
 									onDragEnd={() => { setDragState(null); setDropTarget(null); }}
 									onDragStart={(event) => {
 										event.dataTransfer.setData("text/plain", group.key);
@@ -1511,12 +1665,17 @@ export function SessionWorkspaceView({
 									type="button"
 								>
 									<span className="tool-tab-group-name">{group.name}</span>
-									{collapsed && <span aria-hidden="true" className="tool-tab-group-count">{run.tabs.length}</span>}
+{shownCollapsed && <span aria-hidden="true" className="tool-tab-group-count">{run.tabs.length}</span>}
 								</button>
-								{!collapsed && run.tabs.map((tab) => renderTab(pane, tab, group))}
+								{!collapsed && (
+									<div className="tool-tab-group-body" ref={groupBodyRef(pane.id, group.key)}>
+										{run.tabs.map((tab) => renderTab(pane, tab, group))}
+									</div>
+								)}
 							</div>
 						);
 					}) : pane.tabs.map((tab) => renderTab(pane, tab, tab.sessionId === null ? null : projectFor(tab.sessionId)))}
+					<span aria-hidden="true" className="tool-tab-indicator" />
 				</div>
 				<div className="tool-add" ref={menuOpen ? menuRef : undefined}>
 					<button
