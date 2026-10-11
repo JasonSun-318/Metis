@@ -151,11 +151,23 @@ function activeWorkspace(container: HTMLElement): HTMLElement {
 	return instance;
 }
 
-async function addTool(container: HTMLElement, label: string): Promise<void> {
+async function openToolsMenu(container: HTMLElement): Promise<HTMLElement> {
 	const workspace = activeWorkspace(container);
+	// Tools live in the right sidebar; it starts closed, so open it first.
+	const toggle = workspace.querySelector<HTMLButtonElement>('.details-sidebar-toggle[aria-pressed="false"]');
+	if (toggle) await act(async () => toggle.click());
+	// An empty sidebar shows the tool launch cards inline; with tabs the
+	// add menu pops from the strip's "+" trigger instead.
+	const empty = workspace.querySelector<HTMLElement>(".tool-sidebar-menu");
+	if (empty) return empty;
 	await act(async () => workspace.querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
 	const menu = workspace.querySelector<HTMLElement>(".tool-add-menu");
 	if (!menu) throw new Error("Missing .tool-add-menu");
+	return menu;
+}
+
+async function addTool(container: HTMLElement, label: string): Promise<void> {
+	const menu = await openToolsMenu(container);
 	await act(async () => button(menu, label).click());
 }
 
@@ -1067,7 +1079,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("places release notes in the workspace titlebar", async () => {
+	it("places release notes beside the account footer update check", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
@@ -1080,9 +1092,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const end = container.querySelector<HTMLElement>(".workspace-titlebar-end")!;
-		expect(end).not.toBeNull();
-		expect([...end.children].map((child) => child.className)).toEqual(["release-notes-control"]);
+		const footer = container.querySelector<HTMLElement>(".sidebar-footer")!;
+		expect(footer).not.toBeNull();
+		expect(footer.querySelector(".release-notes-control")).not.toBeNull();
 		expect(button(container, "Open unread release notes")).toBeTruthy();
 		await act(async () => root.unmount());
 	});
@@ -2048,8 +2060,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector('.session-button[aria-current="page"]')).toBeNull();
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		expect(container.querySelector(".workspace-tabbar")).not.toBeNull();
-		await act(async () => activeWorkspace(container).querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		expect(container.querySelector<HTMLButtonElement>(".tool-add-menu button")!.disabled).toBe(true);
+		// Without a real session there is no tools sidebar to add a tool to.
+		expect(activeWorkspace(container).querySelector(".tool-add-trigger")).toBeNull();
+		expect(activeWorkspace(container).querySelector(".details-sidebar-toggle")).toBeNull();
 		expect(container.querySelector(".home-project-picker-select")).toBeNull();
 		expect(container.querySelectorAll<HTMLButtonElement>('.home-project-picker button[aria-label="Choose folder"]')).toHaveLength(1);
 
@@ -2076,7 +2089,7 @@ describe("Chat desktop shell", () => {
 			text: "Analyze this repository\ncarefully",
 		}));
 		expect(order).toEqual(["create", "list", "focus", "start"]);
-		expect(container.querySelector(".tool-add-trigger")).not.toBeNull();
+		expect(activeWorkspace(container).querySelector(".details-sidebar-toggle")).not.toBeNull();
 
 		await act(async () => root.unmount());
 	});
@@ -4479,8 +4492,7 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".session-sidebar")).toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')!.click());
 		expect(container.querySelector(".session-sidebar")).not.toBeNull();
-		await act(async () => activeWorkspace(container).querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		const toolMenu = activeWorkspace(container).querySelector<HTMLElement>(".tool-add-menu")!;
+		const toolMenu = await openToolsMenu(container);
 		expect(toolMenu.textContent).toContain("Review");
 		expect(toolMenu.textContent).toContain("Files");
 		expect(toolMenu.textContent).toContain("Agents");
@@ -4507,8 +4519,7 @@ describe("Chat desktop shell", () => {
 		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Chat project task")?.getAttribute("aria-selected")).toBe("true");
 		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Code project task")?.getAttribute("aria-selected")).not.toBe("true");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
-		await act(async () => activeWorkspace(container).querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		const chatToolMenu = activeWorkspace(container).querySelector<HTMLElement>(".tool-add-menu")!;
+		const chatToolMenu = await openToolsMenu(container);
 		expect(chatToolMenu.textContent).toContain("Terminal");
 		expect(chatToolMenu.textContent).toContain("Browser");
 		expect(chatToolMenu.textContent).not.toContain("Review");
@@ -4625,11 +4636,10 @@ describe("Chat desktop shell", () => {
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(api.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/chat-project" }));
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(2);
-		expect(activeWorkspace(container).querySelector<HTMLElement>('[aria-selected="true"]')?.getAttribute("aria-label")).toBe("Terminal");
-		expect([...activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!.children].map((child) => child.className)).toEqual([
+		expect(activeWorkspace(container).querySelector<HTMLElement>('.tool-sidebar-tabbar [aria-selected="true"]')?.getAttribute("aria-label")).toBe("Terminal");
+		expect([...activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!.children].map((child) => child.className)).toEqual([
 			"tool-tabs-scroll",
 			"tool-add",
-			"workspace-tabbar-fill",
 		]);
 
 		await act(async () => button(container, "Code").click());
@@ -4639,11 +4649,13 @@ describe("Chat desktop shell", () => {
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
-		const tabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
-		await act(async () => button(tabbar, "Chat project task").click());
+		const sessionStrip = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar[data-pane-id]")!;
+		await act(async () => button(sessionStrip, "Chat project task").click());
+		// The sidebar stays open: the terminal tab is still active there, so the
+		// panel stays mounted and visible while the chat shows in the pane.
 		expect(container.querySelector(".terminal-panel")).not.toBeNull();
-		expect(container.querySelector(".terminal-panel.is-visible")).toBeNull();
-		await act(async () => button(tabbar, "Terminal").click());
+		expect(container.querySelector(".terminal-panel.is-visible")).not.toBeNull();
+		await act(async () => button(activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!, "Terminal").click());
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
@@ -4671,7 +4683,12 @@ describe("Chat desktop shell", () => {
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
-		const { api } = createHarness();
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-second", "chat", "/work/second", "Second task"),
+			],
+		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -4686,9 +4703,13 @@ describe("Chat desktop shell", () => {
 		const composer = container.querySelector<HTMLElement>("#composer-input")!;
 		expect(composer).not.toBeNull();
 
+		// Splitting the only chat tab would collapse the source pane back to one,
+		// so open a second session first; only chat tabs can split.
+		await act(async () => button(container, "Second task").click());
+		await flush();
 		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
 			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Terminal").dispatchEvent(
+		await act(async () => tabFor("Second task").dispatchEvent(
 			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
 		));
 		await act(async () => button(container, "Split right").click());
@@ -4726,9 +4747,10 @@ describe("Chat desktop shell", () => {
 
 		await addTool(container, "Terminal");
 		await flush();
+		// The chat tab stays active in its pane while the tool lives in the sidebar.
 		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
 			sessionIds: ["chat-existing"],
-			liveSessionIds: [],
+			liveSessionIds: ["chat-existing"],
 		});
 
 		await act(async () => button(container, "Other task").click());
@@ -4738,8 +4760,11 @@ describe("Chat desktop shell", () => {
 			liveSessionIds: ["chat-other"],
 		});
 
-		await act(async () => button(container, "Close Chat project task").click());
+		// The sidebar shows the focused session's tools, so switch back before
+		// closing chat-existing's terminal.
+		await act(async () => button(container, "Chat project task").click());
 		await act(async () => button(container, "Close Terminal").click());
+		await act(async () => button(container, "Close Chat project task").click());
 		await flush();
 		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
 			sessionIds: ["chat-other"],
@@ -4902,12 +4927,14 @@ describe("Chat desktop shell", () => {
 			editor.dispatchEvent(new InputEvent("input", { bubbles: true }));
 		});
 
-		await act(async () => otherPane.querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		const menu = otherPane.querySelector<HTMLElement>(".tool-add-menu")!;
-		expect(menu).not.toBeNull();
+		// Tools attach to the focused pane's session: focus the other pane's tab
+		// first so the sidebar adopts it, then open its terminal.
+		await act(async () => otherPane.querySelector<HTMLElement>('[role="tab"][aria-label="Other task"]')!.click());
+		await flush();
+		const menu = await openToolsMenu(container);
 		await act(async () => button(menu, "Terminal").click());
 		await flush();
-		expect(otherPane.querySelector('[role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
 
 		await act(async () => tabFor("Other task").querySelector<HTMLElement>('[role="tab"]')!.click());
 		await flush();
@@ -5077,12 +5104,14 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Split right").click());
 		await flush();
 
-		// Open the workspace tree in the pane that targets the other session.
-		// Top-row strips live in the titlebar, so a pane is addressed through its strip.
+		// Open the workspace tree for the other session. Tools attach to the
+		// focused pane's session, so focus that pane's tab first.
 		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-tabbar")]
 			.find((strip) => strip.querySelector('[role="tab"][aria-label="Other task"]'))!;
-		await act(async () => otherPane.querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		await act(async () => button(otherPane.querySelector<HTMLElement>(".tool-add-menu")!, "Files").click());
+		await act(async () => otherPane.querySelector<HTMLElement>('[role="tab"][aria-label="Other task"]')!.click());
+		await flush();
+		const filesMenu = await openToolsMenu(container);
+		await act(async () => button(filesMenu, "Files").click());
 		await flush();
 		const filesPanel = container.querySelector<HTMLElement>("#file-panel-code-other")!;
 		expect(filesPanel).not.toBeNull();
@@ -5118,8 +5147,8 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		// The reference lands only on the owning session's staged selections;
-		// that composer's chat view stays mounted while its pane shows Files.
-		expect(otherChatPanel().hidden).toBe(true);
+		// Files opens in the sidebar so that composer's chat view stays visible.
+		expect(otherChatPanel().hidden).toBe(false);
 		expect(otherChatPanel().querySelector(".composer-selections")?.textContent).toContain("notes.txt");
 		expect(focusedChatPanel().querySelector(".composer-selections")).toBeNull();
 
@@ -5197,27 +5226,22 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Agents");
 		await flush();
 
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Agents").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
-		await act(async () => button(container, "Split right").click());
-		await flush();
-		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
-
+		// The sidebar follows the focused session: switching away hides this
+		// session's tool panels without unmounting them.
 		await act(async () => button(container, "Other code task").click());
 		await flush();
 		expect(api.openSession).toHaveBeenLastCalledWith({ sessionId: "code-other" });
+		expect(activeWorkspace(container).querySelector(".tool-sidebar-panel:not([hidden]) .subagent-panel")).toBeNull();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(1);
 
-		// Re-activating the agent tab leaves the other session's chat projected.
-		await act(async () => tabFor("Agents").querySelector<HTMLElement>('[role="tab"]')!.click());
+		// Switching back restores this session's strip with Agents still active.
+		await act(async () => button(container, "Code project task").click());
 		await flush();
 		expect(api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
 			expect.objectContaining({ liveSessionIds: ["code-existing"] }),
 		);
 
-		const visiblePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])")];
+		const visiblePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-sidebar-panel:not([hidden])")];
 		const agentPanel = visiblePanels.find((panel) => panel.querySelector(".subagent-panel"));
 		expect(agentPanel).toBeTruthy();
 		expect(agentPanel!.textContent).toContain("Code worker");
@@ -5239,7 +5263,14 @@ describe("Chat desktop shell", () => {
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
-		const { api } = createHarness();
+		const { api } = createHarness({
+			sessions: [
+				session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				session("chat-two", "chat", "/work/two", "Task two"),
+				session("chat-three", "chat", "/work/three", "Task three"),
+				session("chat-four", "chat", "/work/four", "Task four"),
+			],
+		});
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -5254,23 +5285,21 @@ describe("Chat desktop shell", () => {
 			));
 		};
 
-		await addTool(container, "Terminal");
-		await addTool(container, "Knowledge");
-		await flush();
-
-		await openMenu("Knowledge");
-		await act(async () => button(container, "Split down").click());
-		await flush();
-		expect(activeWorkspace(container).querySelectorAll(".workspace-row")).toHaveLength(2);
-
-		await openMenu("Terminal");
+		// Only chat tabs split; each new session lands in the focused pane.
+		await act(async () => button(container, "Task two").click());
+		await openMenu("Task two");
 		await act(async () => button(container, "Split right").click());
-		await addTool(container, "Terminal");
-		await flush();
-		await openMenu("Terminal 2");
+		await act(async () => button(container, "Task three").click());
+		await openMenu("Task three");
 		await act(async () => button(container, "Split right").click());
 		await flush();
 		expect(activeWorkspace(container).querySelectorAll(".workspace-row")[0]!.querySelectorAll(".workspace-pane")).toHaveLength(3);
+
+		await act(async () => button(container, "Task four").click());
+		await openMenu("Task four");
+		await act(async () => button(container, "Split down").click());
+		await flush();
+		expect(activeWorkspace(container).querySelectorAll(".workspace-row")).toHaveLength(2);
 
 		await openMenu("Chat project task");
 		const splitRight = button(container, "Split right");
@@ -5297,8 +5326,9 @@ describe("Chat desktop shell", () => {
 
 		await addTool(container, "Terminal");
 		await flush();
+		// Tool tabs cannot split, so the size check is exercised via the chat tab.
 		const tab = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector('[role="tab"][aria-label="Terminal"]'))!;
+			.find((candidate) => candidate.querySelector('[role="tab"][aria-label="Chat project task"]'))!;
 		await act(async () => tab.dispatchEvent(
 			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
 		));
@@ -5329,18 +5359,19 @@ describe("Chat desktop shell", () => {
 			activeTurnId: "turn-running",
 			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
 		}));
-		expect(activeWorkspace(container).querySelector('[role="tab"][aria-label="Process"][aria-selected="true"]')).not.toBeNull();
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [role="tab"][aria-label="Process"][aria-selected="true"]')).not.toBeNull();
 
 		await act(async () => store.applySnapshot({
 			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
 			process: { processId: "process-one", command: "echo one", output: "one\n", state: "completed", truncated: false },
 		}));
-		expect(activeWorkspace(container).querySelector<HTMLElement>('[aria-selected="true"]')?.getAttribute("aria-label")).toBe("Chat project task");
+		// The chat tab reactivates in the pane while Process stays in the sidebar.
+		expect(activeWorkspace(container).querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] [aria-selected="true"]')?.getAttribute("aria-label")).toBe("Chat project task");
 		expect(activeWorkspace(container).querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
 
-		const tabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
-		await act(async () => button(tabbar, "Process").click());
-		expect(container.querySelector(".process-panel:not([hidden])")?.textContent).toContain("Command completed");
+		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
+		await act(async () => button(toolsStrip, "Process").click());
+		expect(container.querySelector(".tool-sidebar-panel:not([hidden]) .process-panel")?.textContent).toContain("Command completed");
 		await act(async () => root.unmount());
 	});
 
@@ -5361,9 +5392,10 @@ describe("Chat desktop shell", () => {
 			activeTurnId: "turn-running",
 			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
 		}));
-		const tabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
-		const chatTab = () => button(tabbar, "Chat project task");
-		const processTab = () => button(tabbar, "Process");
+		const sessionStrip = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar[data-pane-id]")!;
+		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
+		const chatTab = () => button(sessionStrip, "Chat project task");
+		const processTab = () => button(toolsStrip, "Process");
 		await act(async () => chatTab().click());
 
 		await act(async () => store.applySnapshot({
@@ -5479,7 +5511,7 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Files");
 		await flush();
 		expect(api.listWorkspaceDirectory).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "" });
-		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("Open file");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("Open file");
 		expect(container.querySelector('.file-tree-row [title=".env"]')).not.toBeNull();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
@@ -5542,7 +5574,7 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Files");
 		await flush();
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
-		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("README.md");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("README.md");
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -5622,9 +5654,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "View source").click());
 		editor = codeEditor(container, "Edit README.md");
 		expect(editor.state.doc.toString()).toBe("# Edited README");
-		const fileTabbar = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar")!;
-		await act(async () => button(fileTabbar, "Code project task").click());
-		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(0);
+		const fileTabbar = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
+		const sessionStrip = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar[data-pane-id]")!;
+		// The file tab stays active in the sidebar while the pane shows chat.
+		await act(async () => button(sessionStrip, "Code project task").click());
+		expect([...container.querySelectorAll(".cm-editor")].filter((node) => !node.closest("[hidden]"))).toHaveLength(1);
 		await act(async () => button(fileTabbar, "README.md").click());
 		editor = codeEditor(container, "Edit README.md");
 		expect(editor.state.doc.toString()).toBe("# Edited README");
@@ -5808,7 +5842,7 @@ describe("Chat desktop shell", () => {
 		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
 			action: "create", sessionId: "code-existing", parentRelativePath: "", name: "scratch.ts", kind: "file",
 		});
-		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("scratch.ts");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("scratch.ts");
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		let editor = codeEditor(container, "Edit scratch.ts");
 		await act(async () => changeCodeEditor(editor, "export const draft = true;"));
@@ -5817,7 +5851,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
 		await submitTreeName(container, "renamed.ts");
 		await flush();
-		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("renamed.ts");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("renamed.ts");
 		editor = codeEditor(container, "Edit renamed.ts");
 		expect(editor.state.doc.toString()).toBe("export const draft = true;");
 
@@ -5923,9 +5957,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => activeWorkspace(container).querySelector<HTMLButtonElement>(".tool-add-trigger")!.click());
-		expect(activeWorkspace(container).querySelector(".tool-add-menu")?.textContent).toContain("Browser");
-		const browserButton = [...activeWorkspace(container).querySelectorAll<HTMLButtonElement>(".tool-add-menu button")]
+		const browserMenu = await openToolsMenu(container);
+		expect(browserMenu.textContent).toContain("Browser");
+		const browserButton = [...browserMenu.querySelectorAll<HTMLButtonElement>("button")]
 			.find((candidate) => candidate.querySelector("span")?.textContent === "Browser")!;
 		await act(async () => browserButton.click());
 		await flush();
@@ -5961,7 +5995,7 @@ describe("Chat desktop shell", () => {
 			},
 		}));
 		await flush();
-		expect(activeWorkspace(container).querySelector('[aria-selected="true"]')?.textContent).toContain("Example Domain");
+		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("Example Domain");
 		expect(button(container, "Back").disabled).toBe(false);
 		expect(button(container, "Forward").disabled).toBe(true);
 

@@ -80,7 +80,7 @@ describe("Project sidebar motion", () => {
 			".new-task-button:hover:not(:disabled), .sidebar-nav-button:hover:not(:disabled)",
 			".project-heading:hover:not(:disabled)",
 			".session-row:hover > .session-button:not(:disabled)",
-			".workspace-titlebar .sessions-sidebar-toggle-fixed:hover, .workspace-titlebar .release-notes-trigger:hover, .workspace-titlebar .tool-add-trigger:hover",
+			".workspace-titlebar .sessions-sidebar-toggle-fixed:hover, .workspace-titlebar .tool-add-trigger:hover, .workspace-titlebar .session-add-trigger:hover",
 		]) {
 			const start = css.indexOf(selector);
 			const hoverRule = css.slice(start, css.indexOf("}", start) + 1);
@@ -173,7 +173,9 @@ describe("Project sidebar motion", () => {
 
 	it("keeps the titlebar interactive controls outside the window drag region", () => {
 		expect(css).toMatch(/\.workspace-titlebar\s*\{[^}]*-webkit-app-region:\s*drag/u);
-		expect(css).toMatch(/\.workspace-titlebar \.tool-add-trigger\s*\{[^}]*-webkit-app-region:\s*no-drag/u);
+		expect(css).toMatch(
+			/\.workspace-titlebar \.tool-add-trigger, \.workspace-titlebar \.session-add-trigger\s*\{[^}]*-webkit-app-region:\s*no-drag/u,
+		);
 	});
 
 	it("reveals row actions on interaction and slides sessions into a collapsed drawer", () => {

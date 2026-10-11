@@ -35,7 +35,7 @@ describe("Sidebar geometry and workspace grid styles", () => {
 			).left,
 		).toBe("76px");
 		const actionButton = rule(
-			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger",
+			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .tool-add-trigger, .workspace-titlebar .session-add-trigger",
 		);
 		expect(actionButton.width).toBe("28px");
 		expect(actionButton.height).toBe("28px");
@@ -62,7 +62,7 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(titlebar.borderBottom).toBe("1px solid var(--border)");
 
 		const actionButtons = rule(
-			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .release-notes-trigger, .workspace-titlebar .tool-add-trigger",
+			".workspace-titlebar .sessions-sidebar-toggle-fixed, .workspace-titlebar .tool-add-trigger, .workspace-titlebar .session-add-trigger",
 		);
 		expect(actionButtons.width).toBe("28px");
 		expect(actionButtons.height).toBe("28px");
@@ -73,16 +73,16 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		);
 	});
 
-	it("keeps the release bell anchored to the titlebar's right edge", () => {
-		const end = rule(".workspace-titlebar-end");
-		expect(end.position).toBe("absolute");
-		expect(end.right).toBe("8px");
-		expect(end.display).toBe("flex");
+	it("keeps the release bell beside the account footer's update check", () => {
+		const control = rule(".sidebar-footer .release-notes-control");
+		expect(control.position).toBe("relative");
+		expect(control.flex).toBe("0 0 auto");
 
-		const popover = rule(".release-notes-popover");
-		expect(popover.top).toBe("36px");
-		expect(popover.right).toBe("0px");
-		expect(popover.maxHeight).toContain("480px");
-		expect(popover.boxShadow).toBe("var(--overlay-shadow)");
+		const popover = rule(".sidebar-footer .release-notes-popover");
+		expect(popover.bottom).toBe("calc(100% + 8px)");
+		expect(popover.left).toBe("0px");
+		const base = rule(".release-notes-popover");
+		expect(base.maxHeight).toContain("480px");
+		expect(base.boxShadow).toBe("var(--overlay-shadow)");
 	});
 });

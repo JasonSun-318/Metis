@@ -130,15 +130,15 @@ describe("Process workspace tab", () => {
 		await render({ ...command("one", "new tail"), truncated: true });
 		expect(terminals.at(-1)?.output).toBe("new tail");
 		expect(container.textContent).toContain("earlier output was truncated");
-		// Tool tabs stay live for any session; switching the chat projection
-		// does not hide the other session's process panel.
+		// The sidebar follows the focused session: switching the chat projection
+		// hides this session's process panel without unmounting it.
 		await render(undefined, "other");
-		expect(container.querySelector('.process-panel:not([hidden]) .process-command')?.textContent).toContain("echo one");
+		expect(container.querySelector('.process-panel[hidden] .process-command')?.textContent).toContain("echo one");
 		await render(command("two", "failure", "failed"), "other");
 		const otherPanel = [...container.querySelectorAll(".process-panel")]
 			.find((panel) => panel.textContent?.includes("echo two"));
 		expect(otherPanel?.textContent).toContain("Command stopped with an error");
 		await render(command("one", "new tail", "completed"));
-		expect(container.querySelector('.process-panel .process-command')?.textContent).toContain("echo one");
+		expect(container.querySelector('.process-panel:not([hidden]) .process-command')?.textContent).toContain("echo one");
 	});
 });

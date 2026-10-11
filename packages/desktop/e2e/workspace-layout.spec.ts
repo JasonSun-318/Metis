@@ -128,6 +128,20 @@ async function stopWorkspace(workspace: LaunchedWorkspace): Promise<void> {
 	await rm(workspace.tempRoot, { recursive: true, force: true }).catch(() => undefined);
 }
 
+/** Opens a tool: an empty sidebar shows launch cards, otherwise the "+" menu. */
+async function addTool(page: Page, name: string): Promise<void> {
+	if (await page.locator(".tool-sidebar").count() === 0) {
+		await page.locator(".details-sidebar-toggle").click();
+	}
+	const cards = page.locator(".tool-sidebar-menu");
+	if (await cards.count()) {
+		await cards.getByRole("button", { name, exact: true }).click();
+		return;
+	}
+	await page.locator(".tool-add-trigger").first().click();
+	await page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true }).click();
+}
+
 async function rendererFailure(error: unknown, page: Page, diagnostics: readonly string[]): Promise<Error> {
 	const bodyText = await page.locator("body").innerText().catch(() => "renderer unavailable");
 	return new Error(
@@ -135,19 +149,22 @@ async function rendererFailure(error: unknown, page: Page, diagnostics: readonly
 	);
 }
 
-test("terminal keeps its content when its tab is split into a second pane", async () => {
+test("terminal keeps its content in the sidebar while chat tabs split", async () => {
 	test.setTimeout(120_000);
 	const sessionId = "81000000-0000-4000-8000-0000000000c3";
+	const sessionTwo = "81000000-0000-4000-8000-0000000000c4";
 	const workspace = await launchWorkspace({
-		sessions: [{ id: sessionId, mode: "chat", name: "Layout Alpha" }],
+		sessions: [
+			{ id: sessionId, mode: "chat", name: "Layout Alpha" },
+			{ id: sessionTwo, mode: "chat", name: "Layout Beta" },
+		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
 	try {
 		await page.locator('.session-button[aria-label="Layout Alpha"]').click();
 		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 
-		await page.locator(".tool-add-trigger").first().click();
-		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Terminal", exact: true }).click();
+		await addTool(page, "Terminal");
 		await expect(page.getByRole("tab", { name: "Terminal", exact: true })).toBeVisible();
 
 		const panel = page.locator('.terminal-panel[aria-hidden="false"]');
@@ -169,7 +186,10 @@ test("terminal keeps its content when its tab is split into a second pane", asyn
 		}, terminalId);
 		await expect(panel.locator(".xterm-rows")).toContainText("p0a-marker");
 
-		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Terminal", exact: true }) })
+		// Only chat tabs split; the sidebar's terminal must survive pane changes.
+		await page.locator('.session-button[aria-label="Layout Beta"]').click();
+		await page.locator(`[data-active-session-id="${sessionTwo}"]`).waitFor({ state: "visible" });
+		await page.locator(".tool-tab", { has: page.getByRole("tab", { name: "Layout Beta", exact: true }) })
 			.click({ button: "right" });
 		await page.locator(".workspace-tab-menu").getByRole("menuitem", { name: "Split right", exact: true }).click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
@@ -203,7 +223,7 @@ test("project tab groups collapse from their label and move as one", async () =>
 		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
-	const tabNames = () => page.locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label")));
+	const tabNames = () => page.locator('.workspace-tabbar[data-pane-id] [role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute("aria-label")));
 	const label = (name: string) => page.getByRole("button", { name: `${name} tab group`, exact: true });
 	try {
 		const open = async (name: string, id: string) => {
@@ -347,8 +367,7 @@ test("a file tab keeps workspace authorization after another session is opened",
 		await page.locator('.session-button[aria-label="Files Alpha"]').click();
 		await page.locator(`[data-active-session-id="${alphaId}"]`).waitFor({ state: "visible" });
 
-		await page.locator(".tool-add-trigger").first().click();
-		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Files", exact: true }).click();
+		await addTool(page, "Files");
 		const readmeRow = page.locator('.file-tree-row-select[title="README.md"]');
 		await readmeRow.click();
 		await expect(page.getByRole("tab", { name: "README.md", exact: true })).toBeVisible();
@@ -375,41 +394,47 @@ test("a file tab keeps workspace authorization after another session is opened",
 
 test("splits panes into a two-row grid and blocks splits beyond the caps", async () => {
 	test.setTimeout(120_000);
-	const sessionId = "81000000-0000-4000-8000-0000000000e1";
+	const ids = Object.fromEntries(
+		["a", "b", "c", "d", "e", "f"].map((key, index) => [key, `81000000-0000-4000-8000-0000000000e${index + 2}`]),
+	);
 	const workspace = await launchWorkspace({
-		sessions: [{ id: sessionId, mode: "chat", name: "Grid Alpha" }],
+		sessions: [
+			{ id: ids.a, mode: "chat", name: "Grid Alpha" },
+			{ id: ids.b, mode: "chat", name: "Grid Bravo" },
+			{ id: ids.c, mode: "chat", name: "Grid Charlie" },
+			{ id: ids.d, mode: "chat", name: "Grid Delta" },
+			{ id: ids.e, mode: "chat", name: "Grid Echo" },
+			{ id: ids.f, mode: "chat", name: "Grid Foxtrot" },
+		],
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
 	try {
-		await page.locator('.session-button[aria-label="Grid Alpha"]').click();
-		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
-
-		const addTool = async (name: string) => {
-			// Top-row strips live in the titlebar, one cell per pane — always
-			// target the first pane's trigger so added tabs land somewhere deterministic.
-			await page.locator(".workspace-titlebar-cell").first().locator(".tool-add-trigger").click();
-			await page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true }).click();
+		const open = async (name: string, id: string) => {
+			await page.locator(`.session-button[aria-label="${name}"]`).click();
+			await page.locator(`[data-active-session-id="${id}"]`).waitFor({ state: "visible" });
 		};
+		await open("Grid Alpha", ids.a!);
+
 		const openTabMenu = async (name: string) => {
 			await page.locator(".tool-tab", { has: page.getByRole("tab", { name, exact: true }) }).first().click({ button: "right" });
 		};
 		const menuItem = (name: string) =>
 			page.locator(".workspace-tab-menu").getByRole("menuitem", { name, exact: true });
 
-		await addTool("Terminal");
+		// Only chat tabs split; keep a terminal mounted to prove panels survive.
+		await addTool(page, "Terminal");
 		const terminalPanel = page.locator(".terminal-panel").first();
 		await expect(terminalPanel).toBeVisible();
 		const terminalHandle = await terminalPanel.elementHandle();
-		await addTool("Knowledge");
-		await addTool("Terminal");
-		await addTool("Terminal");
 
-		await openTabMenu("Terminal");
+		await open("Grid Bravo", ids.b!);
+		await openTabMenu("Grid Bravo");
 		await menuItem("Split right").click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
 
 		// At 1200x800 with the sidebar visible a third column is too narrow.
-		await openTabMenu("Knowledge");
+		await open("Grid Charlie", ids.c!);
+		await openTabMenu("Grid Charlie");
 		await expect(menuItem("Split right")).toBeDisabled();
 		await expect(menuItem("Split right")).toHaveAttribute("title", "Not enough room to split");
 		await page.keyboard.press("Escape");
@@ -418,17 +443,15 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await page.waitForFunction(
 			() => document.querySelector(".session-workspace-panes")!.getBoundingClientRect().width > 1200,
 		);
-		await openTabMenu("Knowledge");
+		await openTabMenu("Grid Charlie");
 		await menuItem("Split right").click();
 		await expect(page.locator(".workspace-row").first().locator(".workspace-pane")).toHaveCount(3);
 
-		for (const tab of ["Terminal 2", "Terminal 3"]) {
-			await openTabMenu(tab);
+		for (const [name, id] of [["Grid Delta", ids.d], ["Grid Echo", ids.e], ["Grid Foxtrot", ids.f]] as const) {
+			await open(name, id!);
+			await openTabMenu(name);
 			await menuItem("Split down").click();
 		}
-		await addTool("Terminal");
-		await openTabMenu("Terminal 4");
-		await menuItem("Split down").click();
 
 		const rows = page.locator(".workspace-row");
 		await expect(rows).toHaveCount(2);

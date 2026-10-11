@@ -260,8 +260,16 @@ function visiblePanel(page: Page): Locator {
 	return page.locator(".workspace-panel:not([hidden])").first();
 }
 
-/** Opens a tool from the first titlebar strip's add menu. */
+/** Opens a tool: an empty sidebar shows launch cards, otherwise the "+" menu. */
 async function openTool(page: Page, name: string): Promise<void> {
+	if (await page.locator(".tool-sidebar").count() === 0) {
+		await page.locator(".details-sidebar-toggle").click();
+	}
+	const cards = page.locator(".tool-sidebar-menu");
+	if (await cards.count()) {
+		await cards.getByRole("button", { name, exact: true }).click();
+		return;
+	}
 	await page.locator(".workspace-titlebar .tool-add-trigger").first().click();
 	const item = page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true });
 	await expect(item).toBeEnabled();
@@ -3066,10 +3074,10 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		await createAndRestoreChatSession(page, projectDir);
 
 		phase = "opening the terminal tool";
-		await page.locator(".workspace-titlebar .tool-add-trigger").first().click();
-		await expect(page.locator(".tool-add-menu")).toBeVisible();
+		await page.locator(".details-sidebar-toggle").click();
+		await expect(page.locator(".tool-sidebar-menu")).toBeVisible();
 		await page.screenshot({ path: path.join(qaDir, "tool-menu-1280x840.png") });
-		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Terminal", exact: true }).click();
+		await page.locator(".tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "Terminal", exact: true })).toBeVisible();
 		const firstTerminalId = await page.locator('.terminal-panel[aria-hidden="false"]').getAttribute("id");
 		if (!firstTerminalId?.startsWith("terminal-panel-")) throw new Error("Terminal panel id is missing");
