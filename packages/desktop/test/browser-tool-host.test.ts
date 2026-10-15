@@ -81,15 +81,18 @@ function harness() {
 		executeTool: vi.fn(),
 		cancelSessionHandoffs: vi.fn(),
 	};
+	const onDiagnostic = vi.fn();
 	const host = new BrowserToolHost({
 		supervisor,
 		browserManager: browserManager as never,
 		isAvailable: () => available,
+		onDiagnostic,
 	});
 	return {
 		host,
 		supervisor,
 		browserManager,
+		onDiagnostic,
 		setAvailable: (next: boolean) => {
 			available = next;
 		},
@@ -100,6 +103,36 @@ function harness() {
 }
 
 describe("BrowserToolHost", () => {
+	it("preserves missing-tab errors and logs the original failure without exposing it in RPC", async () => {
+		const { host, supervisor, browserManager, onDiagnostic } = harness();
+		browserManager.executeTool.mockRejectedValueOnce(new BrowserToolError("NOT_FOUND", "Browser is not running"));
+		host.handleRequest(browserRequest());
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest.mock.calls[0]?.[1]).toMatchObject({
+			error: { data: { name: "NOT_FOUND" } },
+		});
+		expect(onDiagnostic).toHaveBeenCalledWith(expect.stringContaining("Browser is not running"));
+		expect(onDiagnostic.mock.calls[0]?.[0]).toContain("browser_observe");
+
+		browserManager.executeTool.mockRejectedValueOnce(new Error("private CDP failure detail"));
+		host.handleRequest(browserRequest({ id: "generic", toolCallId: "generic-call" }));
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledTimes(2));
+		expect(onDiagnostic).toHaveBeenLastCalledWith(expect.stringContaining("private CDP failure detail"));
+		expect(JSON.stringify(supervisor.respondToServerRequest.mock.calls[1])).not.toContain(
+			"private CDP failure detail",
+		);
+	});
+
+	it("settles a failed browser call even if the diagnostic observer throws", async () => {
+		const { host, supervisor, browserManager, onDiagnostic } = harness();
+		onDiagnostic.mockImplementation(() => {
+			throw new Error("Diagnostic sink unavailable");
+		});
+		browserManager.executeTool.mockRejectedValueOnce(new Error("Browser failure"));
+		host.handleRequest(browserRequest());
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+	});
+
 	it("rejects unavailable owners without starting browser work", () => {
 		const { host, supervisor, browserManager, setAvailable } = harness();
 		setAvailable(false);

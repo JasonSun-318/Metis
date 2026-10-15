@@ -430,6 +430,7 @@ export class ClientBroker {
 		this.browserToolHost = new BrowserToolHost({
 			supervisor: this.supervisor,
 			browserManager: this.browserManager,
+			onDiagnostic: (message) => this.onDiagnostic?.(message),
 			isAvailable: () => {
 				const owner = this.owner;
 				return owner !== undefined && !owner.isDestroyed();

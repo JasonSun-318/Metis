@@ -325,6 +325,12 @@ export async function createBrowserAgentFixture(): Promise<BrowserAgentFixture> 
 		}
 		response.setHeader("content-type", "text/html; charset=utf-8");
 		if (url.pathname === "/controls") response.end(controlsPage(frameOrigin));
+		else if (url.pathname === "/navigation") response.end(html(
+			`<main><h1>Navigation fixture</h1><a href="/navigation-done?from=visible">Open destination</a><div style="height:2400px" aria-hidden="true"></div><a href="/navigation-done?from=below-fold">Open lower destination</a></main>`,
+		));
+		else if (url.pathname === "/navigation-done") response.end(html(
+			`<main><h1>Navigation complete</h1><p id="navigation-source">${url.searchParams.get("from")}</p></main>`,
+		));
 		else if (url.pathname === "/popup-fixture") response.end(html(
 			`<main><h1>Popup fixture</h1><a id="oauth" href="/oauth" target="_blank" rel="opener">Open OAuth popup</a><output id="oauth-status">OAuth: pending</output></main>`,
 			`window.addEventListener('message',(event)=>{if(event.data==='oauth-complete')document.querySelector('#oauth-status').textContent='OAuth: complete'});`,

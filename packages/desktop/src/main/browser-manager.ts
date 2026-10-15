@@ -833,13 +833,14 @@ export class BrowserManager {
 
 	private record(browserId: string): BrowserRecord {
 		const record = this.records.get(browserId);
-		if (!record) throw new Error("Browser is not running");
+		if (!record) throw new BrowserToolError("NOT_FOUND", "Browser is not running");
 		return record;
 	}
 
 	private recordForSession(sessionId: string, browserId: string): BrowserRecord {
 		const record = this.record(browserId);
-		if (record.sessionId !== sessionId) throw new Error("Browser does not belong to this task");
+		if (record.sessionId !== sessionId)
+			throw new BrowserToolError("NOT_FOUND", "Browser does not belong to this task");
 		return record;
 	}
 
@@ -1052,7 +1053,7 @@ export class BrowserManager {
 			const url = contents.getURL();
 			record.state = {
 				...record.state,
-				url: url === BLANK_URL ? record.state.url : url,
+				url: url === "" || url === BLANK_URL ? record.state.url : url,
 				canGoBack: contents.navigationHistory.canGoBack(),
 				canGoForward: contents.navigationHistory.canGoForward(),
 			};

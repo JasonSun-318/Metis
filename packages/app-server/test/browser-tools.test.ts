@@ -17,6 +17,25 @@ const observation = {
 };
 
 describe("browser host tools", () => {
+	it("tells the model how to recover an expired task-owned browser tab", async () => {
+		const executor = vi.fn().mockRejectedValue(Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" }));
+		const tool = createBrowserToolDefinitions(executor).find(({ name }) => name === "browser_observe")!;
+		await expect(
+			tool.execute("expired-tab", { browserId: BROWSER_ID }, undefined, undefined, {} as never),
+		).rejects.toThrow('browser_tabs with {"action":"list"}');
+		expect(executor).toHaveBeenCalledOnce();
+	});
+
+	it("keeps unrelated executor errors unchanged", async () => {
+		const failure = Object.assign(new Error("OPERATION_FAILED"), { code: "OPERATION_FAILED" });
+		const tool = createBrowserToolDefinitions(vi.fn().mockRejectedValue(failure)).find(
+			({ name }) => name === "browser_observe",
+		)!;
+		await expect(
+			tool.execute("failed-observe", { browserId: BROWSER_ID }, undefined, undefined, {} as never),
+		).rejects.toBe(failure);
+	});
+
 	it("exposes exactly five sequential tools with safety guidance", () => {
 		const tools = createBrowserToolDefinitions(async () => ({
 			tool: "browser_tabs",
@@ -72,7 +91,7 @@ describe("browser host tools", () => {
 		expect(JSON.stringify(result.content[0])).not.toContain(data);
 	});
 
-	it("returns stale action state explicitly without duplicating screenshots", async () => {
+	it("rejects stale actions as unexecuted errors with fresh state and no screenshot bytes", async () => {
 		const data = "c3RhbGUtanBlZw==";
 		const tool = createBrowserToolDefinitions(async () => ({
 			tool: "browser_act",
@@ -82,31 +101,37 @@ describe("browser host tools", () => {
 				observation: { ...observation, revision: 2, screenshot: { mediaType: "image/jpeg", data } },
 			},
 		})).find(({ name }) => name === "browser_act")!;
-		const result = await tool.execute(
-			"tool-call-stale",
-			{
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "Click Continue",
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			},
-			undefined,
-			undefined,
-			{} as never,
-		);
-		expect(result.content[0]).toEqual({
-			type: "text",
-			text: JSON.stringify({
-				status: "stale",
-				reason: "revision_changed",
-				observation: { ...observation, revision: 2 },
-			}),
+		const failure = await tool
+			.execute(
+				"tool-call-stale",
+				{
+					browserId: BROWSER_ID,
+					documentId: DOCUMENT_ID,
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Click Continue",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
+				},
+				undefined,
+				undefined,
+				{} as never,
+			)
+			.then(
+				() => {
+					throw new Error("Stale browser action was reported as success");
+				},
+				(cause: Error) => cause,
+			);
+		const details = JSON.parse(failure.message);
+		expect(details).toMatchObject({
+			status: "stale",
+			reason: "revision_changed",
+			observation: { ...observation, revision: 2 },
 		});
-		expect(result.content[1]).toEqual({ type: "image", data, mimeType: "image/jpeg" });
-		expect(JSON.stringify(result.content[0])).not.toContain(data);
+		expect(details.message).toContain("not executed");
+		expect(details.message).toContain("browser_observe");
+		expect(failure.message).not.toContain(data);
 	});
 
 	it("returns only user takeover cancellation as a normal browser tool result", async () => {

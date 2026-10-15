@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { BrowserObservation } from "@metis/app-protocol";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
-import { BrowserManager } from "../src/main/browser-manager.ts";
+import { BrowserManager, BrowserToolError } from "../src/main/browser-manager.ts";
 import { BrowserProfileStore } from "../src/main/browser-profile-store.ts";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
@@ -434,6 +434,34 @@ describe("BrowserManager", () => {
 		expect(() => harness.manager.close(SESSION_ID, otherBrowserId)).toThrow("does not belong");
 	});
 
+	it("classifies unavailable and foreign browser IDs without exposing another task's tabs", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000072";
+		const otherId = "10000000-0000-4000-8000-000000000073";
+		harness.manager.create({
+			sessionId: OTHER_SESSION_ID,
+			browserId: otherId,
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+		});
+		for (const target of [browserId, otherId]) {
+			await expect(
+				harness.manager.executeTool(
+					SESSION_ID,
+					{ tool: "browser_observe", input: { browserId: target } },
+					new AbortController().signal,
+				),
+			).rejects.toMatchObject({ name: "BrowserToolError", rpcErrorName: "NOT_FOUND" });
+		}
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_tabs", input: { action: "list" } },
+				new AbortController().signal,
+			),
+		).resolves.toMatchObject({ details: { tabs: [] } });
+		expect(() => harness.manager.close(SESSION_ID, browserId)).toThrow(BrowserToolError);
+	});
+
 	it("closes native contents when controller teardown fails", () => {
 		const harness = browserHarness();
 		const browserId = "10000000-0000-4000-8000-000000000085";
@@ -752,6 +780,31 @@ describe("BrowserManager", () => {
 			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID }),
 		).toEqual(first);
 		expect(harness.controllers).toHaveLength(1);
+	});
+
+	it("keeps the requested URL while a new native tab still reports an empty page", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000078";
+		const events: unknown[] = [];
+		harness.manager.onEvent((event) => events.push(event));
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		harness.webContents.getURL.mockReturnValue("");
+		harness.webContents.loadURL.mockImplementation(async () => {
+			harness.emit("did-start-loading");
+		});
+		await harness.manager.control({
+			sessionId: SESSION_ID,
+			type: "navigate",
+			browserId,
+			url: "https://example.com/",
+		});
+		await vi.waitFor(() =>
+			expect(events).toContainEqual({
+				type: "state",
+				state: expect.objectContaining({ url: "https://example.com/", loading: true }),
+			}),
+		);
+		expect(events).not.toContainEqual({ type: "state", state: expect.objectContaining({ url: "" }) });
 	});
 
 	it("owns safe Chromium views through navigation, presentation, events, and cleanup", async () => {

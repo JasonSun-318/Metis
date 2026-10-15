@@ -16,6 +16,7 @@ interface BrowserToolHostOptions {
 	};
 	readonly browserManager: Pick<BrowserManager, "executeTool" | "cancelSessionHandoffs">;
 	readonly isAvailable: () => boolean;
+	readonly onDiagnostic?: (message: string) => void;
 }
 
 interface PendingBrowserCall {
@@ -116,10 +117,20 @@ export class BrowserToolHost {
 
 	private respondWithError(pending: PendingBrowserCall, cause: unknown): void {
 		if (!this.current(pending)) return;
+		const errorName = cause instanceof BrowserToolError ? cause.rpcErrorName : "OPERATION_FAILED";
+		const detail =
+			cause instanceof Error ? cause.message : typeof cause === "string" ? cause : "Unknown browser failure";
+		try {
+			this.options.onDiagnostic?.(
+				`Browser tool ${pending.request.params.call.tool} failed (${errorName}; session ${pending.request.params.sessionId}; call ${pending.request.params.toolCallId}): ${detail}`,
+			);
+		} catch {
+			// Diagnostic observers must not prevent the original request from settling.
+		}
 		this.options.supervisor.respondToServerRequest(pending.request, {
 			jsonrpc: "2.0",
 			id: pending.request.id,
-			error: createRpcError(cause instanceof BrowserToolError ? cause.rpcErrorName : "OPERATION_FAILED", {
+			error: createRpcError(errorName, {
 				sessionId: pending.request.params.sessionId,
 			}),
 		});

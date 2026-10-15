@@ -51,6 +51,37 @@ function tool(
 }
 
 describe("browser permission audit adapter", () => {
+	it("records stale actions only as denied and never as allowed or executed", async () => {
+		const value = fixture();
+		const stale = tool(
+			"browser_act",
+			async () => ({
+				tool: "browser_act",
+				details: { status: "stale", reason: "revision_changed", observation },
+			}),
+			value.audit,
+		);
+		await expect(
+			stale.execute(
+				"stale-click",
+				{
+					browserId: BROWSER_ID,
+					documentId: DOCUMENT_ID,
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Click Continue",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
+				},
+				undefined,
+				undefined,
+				{} as never,
+			),
+		).rejects.toThrow("not executed");
+		expect(value.events).toHaveLength(1);
+		expect(value.events[0]).toMatchObject({ stage: "decision", outcome: "deny", reasonCode: "browser.local.stale" });
+	});
+
 	it("emits one decision and one execution event for safe and cancelled local actions", async () => {
 		const value = fixture();
 		await tool("browser_observe", async () => ({ tool: "browser_observe", observation }), value.audit).execute(
