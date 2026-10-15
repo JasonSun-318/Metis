@@ -60,6 +60,74 @@ describe("validateToolArguments", () => {
 		}
 	});
 
+	it.each([false, true])(
+		"parses nested JSON containers against their schema (serialized schema: %s)",
+		(serialized) => {
+			const schema = Type.Object(
+				{
+					action: Type.Union([
+						Type.Object(
+							{
+								type: Type.Literal("click"),
+								target: Type.Object({ elementId: Type.String() }, { additionalProperties: false }),
+							},
+							{ additionalProperties: false },
+						),
+						Type.Object({ type: Type.Literal("press"), key: Type.String() }, { additionalProperties: false }),
+					]),
+					rows: Type.Array(Type.Object({ text: Type.String() })),
+				},
+				{ additionalProperties: false },
+			);
+			const parameters = serialized ? JSON.parse(JSON.stringify(schema)) : schema;
+			const { tool, toolCall } = createToolCallWithPlainSchema(parameters, {
+				action: JSON.stringify({ type: "click", target: JSON.stringify({ elementId: "e44" }) }),
+				rows: JSON.stringify([{ text: '{"keep":"as text"}' }]),
+			});
+			const original = structuredClone(toolCall.arguments);
+			expect(validateToolArguments(tool, toolCall)).toEqual({
+				value: {
+					action: { type: "click", target: { elementId: "e44" } },
+					rows: [{ text: '{"keep":"as text"}' }],
+				},
+			});
+			expect(toolCall.arguments).toEqual(original);
+		},
+	);
+
+	it("preserves JSON-looking strings when a union accepts strings", () => {
+		const schema = Type.Union([Type.Object({ text: Type.String() }), Type.String()]);
+		const value = '{"text":"keep me as a string"}';
+		const { tool, toolCall } = createToolCallWithPlainSchema(schema, value);
+		expect(validateToolArguments(tool, toolCall)).toEqual({ value });
+	});
+
+	it.each(['{"type":"click"', '{"type":"click","extra":true}', '{"type":"unknown"}', "[]", "null"])(
+		"rejects invalid encoded objects: %s",
+		(value) => {
+			const schema = Type.Object({ type: Type.Literal("click") }, { additionalProperties: false });
+			const { tool, toolCall } = createToolCallWithPlainSchema(schema, value);
+			expect(() => validateToolArguments(tool, toolCall)).toThrow("Validation failed");
+		},
+	);
+
+	it("reports repeated union validation errors once while preserving distinct paths", () => {
+		const schema = Type.Object({
+			action: Type.Union([Type.Object({ click: Type.String() }), Type.Object({ press: Type.String() })]),
+			count: Type.Integer(),
+		});
+		const { tool, toolCall } = createToolCallWithPlainSchema(schema, { action: "invalid JSON", count: "invalid" });
+		let message = "";
+		try {
+			validateToolArguments(tool, toolCall);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message.match(/value\.action: must be object/g)).toHaveLength(1);
+		expect(message).toContain("value.count");
+		expect(message).toContain("Received arguments");
+	});
+
 	it("coerces serialized plain JSON schemas with AJV-compatible primitive rules", () => {
 		const passingCases: Array<{
 			schema: Tool["parameters"];

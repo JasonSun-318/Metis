@@ -172,6 +172,10 @@ function applySchemaArrayCoercion(value: unknown[], schema: JsonSchemaObject): v
 }
 
 function coerceWithUnionSchema(value: unknown, schemas: JsonSchemaObject[]): unknown {
+	// A schema that accepts the original string must keep it as user text.
+	if (typeof value === "string" && schemas.some((schema) => getSubSchemaValidator(schema)?.Check(value))) {
+		return value;
+	}
 	for (const schema of schemas) {
 		const candidate = structuredClone(value);
 		const coerced = coerceWithJsonSchema(candidate, schema);
@@ -183,8 +187,30 @@ function coerceWithUnionSchema(value: unknown, schemas: JsonSchemaObject[]): unk
 	return value;
 }
 
+function containerSchemaTypes(schema: JsonSchemaObject): string[] {
+	const types = getSchemaTypes(schema);
+	if (types.length > 0) return types;
+	const union = schema.anyOf ?? schema.oneOf;
+	if (!union?.length) return [];
+	const members = union.map(containerSchemaTypes);
+	return members.every((member) => member.length > 0) ? members.flat() : [];
+}
+
+function parseJsonContainer(value: unknown, schema: JsonSchemaObject): unknown {
+	if (typeof value !== "string") return value;
+	const types = containerSchemaTypes(schema);
+	if (types.length === 0 || !types.every((type) => type === "object" || type === "array")) return value;
+	try {
+		const parsed: unknown = JSON.parse(value);
+		return types.some((type) => matchesJsonType(parsed, type)) ? parsed : value;
+	} catch {
+		// Leave malformed JSON intact so normal schema validation reports it.
+		return value;
+	}
+}
+
 function coerceWithJsonSchema(value: unknown, schema: JsonSchemaObject): unknown {
-	let nextValue = value;
+	let nextValue = parseJsonContainer(value, schema);
 
 	if (Array.isArray(schema.allOf)) {
 		for (const nested of schema.allOf) {
@@ -298,11 +324,8 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 		return args;
 	}
 
-	const errors =
-		validator
-			.Errors(args)
-			.map((error) => `  - ${formatValidationPath(error)}: ${error.message}`)
-			.join("\n") || "Unknown validation error";
+	const errorLines = validator.Errors(args).map((error) => `  - ${formatValidationPath(error)}: ${error.message}`);
+	const errors = [...new Set(errorLines)].join("\n") || "Unknown validation error";
 
 	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`;
 
