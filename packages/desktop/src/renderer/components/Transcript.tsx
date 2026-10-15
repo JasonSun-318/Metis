@@ -1,14 +1,17 @@
 import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
 import { messageText } from "./transcript-turn-model.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
+import { TranscriptQuoteSelection } from "./TranscriptQuoteSelection.tsx";
+import { useConversationQuotes } from "./ConversationQuoteContext.tsx";
 
 interface TranscriptProps {
+	readonly quoteSessionId?: string;
 	readonly showNavigation?: boolean;
 	readonly waitingForAnswer?: boolean;
 	readonly activeTurnId?: string | null;
@@ -67,11 +70,28 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ showNavigation = false, waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
+export function Transcript({ quoteSessionId, showNavigation = false, waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
 	const { t } = useTranslation();
+	const quoteContext = useConversationQuotes();
+	const rootRef = useRef<HTMLElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const [quoteJump, setQuoteJump] = useState<readonly string[] | null>(null);
+	const [quoteLoading, setQuoteLoading] = useState(false);
+	const [quoteNotice, setQuoteNotice] = useState("");
+	useEffect(() => {
+		if (!quoteNotice) return;
+		const timer = setTimeout(() => setQuoteNotice(""), 5000);
+		return () => clearTimeout(timer);
+	}, [quoteNotice]);
+	const quoteRequestedCount = useRef<number | null>(null);
 	const loadingOlderRef = useRef(false);
 	const followLatest = useRef(true);
+	useLayoutEffect(() => {
+		if (quoteContext?.lastAccepted?.sessionId !== quoteSessionId || !quoteSessionId) return;
+		followLatest.current = true;
+		const scroll = scrollRef.current;
+		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+	}, [quoteContext?.lastAccepted, quoteSessionId]);
 	const previousSessionId = useRef<string | undefined>(undefined);
 	const [hasNewItems, setHasNewItems] = useState(false);
 	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
@@ -111,8 +131,8 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 		const startedAt = performance.now();
 		const alignMessage = () => {
 			const scroll = scrollRef.current;
-			const target = Array.from(scroll?.querySelectorAll<HTMLElement>("[data-user-message]") ?? [])
-				.find((node) => node.dataset.userMessage === pendingJump);
+			const target = Array.from(scroll?.querySelectorAll<HTMLElement>("[data-user-message], [data-quote-item]") ?? [])
+				.find((node) => (node.dataset.userMessage ?? node.dataset.quoteItem) === pendingJump);
 			if (scroll && target) {
 				const desired = scroll.scrollTop + target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 56;
 				const offset = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, desired));
@@ -140,6 +160,10 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 			setHasNewItems(false);
 			setActiveNavigationIndex(0);
 			setPendingJump(null);
+			setQuoteJump(null);
+			setQuoteLoading(false);
+			setQuoteNotice("");
+			quoteRequestedCount.current = null;
 		}
 		const scroll = scrollRef.current;
 		if (!scroll || !lastItem || transcript.length === 0) return;
@@ -177,13 +201,50 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 		try {
 			await onLoadOlder();
 		} finally {
-			requestAnimationFrame(() => {
+			await new Promise<void>((resolve) => requestAnimationFrame(() => {
 				if (scrollRef.current === scroll)
 					scroll.scrollTop = previousTop + Math.max(0, scroll.scrollHeight - previousHeight);
 				loadingOlderRef.current = false;
-			});
+				resolve();
+			}));
 		}
 	};
+
+	const jumpToQuote = useCallback((itemId: string, liveItemId?: string) => {
+		followLatest.current = false;
+		setHasNewItems(false);
+		setQuoteNotice("");
+		quoteRequestedCount.current = null;
+		setQuoteJump(liveItemId && liveItemId !== itemId ? [itemId, liveItemId] : [itemId]);
+	}, []);
+	useEffect(() => {
+		if (!quoteJump) return;
+		const rowIndex = transcript.findIndex((row) => quoteJump.some((id) => row.itemIds.includes(id)));
+		if (rowIndex >= 0) {
+			setPendingJump(quoteJump.find((id) => transcript[rowIndex]!.itemIds.includes(id))!);
+			virtualizer.scrollToIndex(rowIndex, { align: "start" });
+			setQuoteJump(null);
+			return;
+		}
+		if (!hasOlder) {
+			setQuoteNotice(t("Original message is unavailable"));
+			setQuoteJump(null);
+			return;
+		}
+		const scroll = scrollRef.current;
+		if (!scroll || quoteLoading || loadingOlder || loadingOlderRef.current) return;
+		if (quoteRequestedCount.current === itemIds.length) return;
+		quoteRequestedCount.current = itemIds.length;
+		const sourceSession = previousSessionId.current;
+		setQuoteLoading(true);
+		void loadOlderAtTop(scroll, true).catch(() => {
+			if (sourceSession !== previousSessionId.current) return;
+			setQuoteNotice(t("Original message is unavailable"));
+			setQuoteJump(null);
+		}).finally(() => {
+			if (sourceSession === previousSessionId.current) setQuoteLoading(false);
+		});
+	}, [quoteJump, quoteLoading, hasOlder, loadingOlder, itemIds.length, transcript, virtualizer, t]);
 
 	const measuredRows = virtualizer.getVirtualItems();
 	const rows =
@@ -199,7 +260,7 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 				}));
 
 	return (
-		<section className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`} aria-label={t(ariaLabel)}>
+		<section ref={rootRef} className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`} aria-label={t(ariaLabel)}>
 			{showNavigation && <ConversationNavigation key={lastItem?.sessionId ?? "empty"} entries={navigation} activeIndex={activeNavigationIndex}
 				hasOlder={hasOlder} loadingOlder={loadingOlder} onLoadOlder={() => { const scroll = scrollRef.current; if (scroll) void loadOlderAtTop(scroll, true); }} onJump={jumpToMessage} />}
 			{hasOlder && !autoLoadOlder && (
@@ -210,7 +271,7 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 			<div
 				aria-busy={loadingOlder || undefined}
 				className="transcript-scroll"
-				onWheel={() => setPendingJump(null)}
+				onWheel={() => { setPendingJump(null); setQuoteJump(null); }}
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
 					if (!pendingJump) followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
@@ -274,13 +335,15 @@ export function Transcript({ showNavigation = false, waitingForAnswer = false, a
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
 								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
-									? <TranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />
-									: <CodeTranscriptTurn items={items} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />}
+									? <TranscriptTurn items={items} onJumpToQuote={jumpToQuote} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />
+									: <CodeTranscriptTurn items={items} onJumpToQuote={jumpToQuote} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />}
 							</article>
 						);
 					})}
 				</div>
 			</div>
+			<TranscriptQuoteSelection key={quoteSessionId ?? "readonly"} root={rootRef} sessionId={quoteSessionId} items={itemsById} onSelectText={() => { followLatest.current = false; setPendingJump(null); setQuoteJump(null); }} />
+			{(quoteJump || quoteNotice) && <div className="transcript-quote-notice" role="status">{quoteJump ? t("Finding original message…") : quoteNotice}</div>}
 			{latestLabel && hasNewItems && (
 				<button className="transcript-latest" onClick={scrollToLatest} type="button">{t(latestLabel)}</button>
 			)}

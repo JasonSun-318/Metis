@@ -18,6 +18,7 @@ import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
+import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -289,6 +290,7 @@ interface TranscriptTurnProps {
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
+	readonly onJumpToQuote?: (itemId: string, liveItemId?: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
 }
@@ -300,6 +302,7 @@ function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnProps): b
 		left.startedAt === right.startedAt &&
 		left.onFork === right.onFork &&
 		left.onCopy === right.onCopy &&
+		left.onJumpToQuote === right.onJumpToQuote &&
 		left.onOpenDeliveredFile === right.onOpenDeliveredFile &&
 		left.onPreviewDeliveredFile === right.onPreviewDeliveredFile &&
 		left.items.length === right.items.length &&
@@ -309,7 +312,7 @@ function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnProps): b
 
 // Rows are re-created per render, so items compare element-wise — item objects
 // are replaced (never mutated) when the reducer applies an event.
-export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onOpenDeliveredFile, onPreviewDeliveredFile }: TranscriptTurnProps) {
+export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onJumpToQuote, onOpenDeliveredFile, onPreviewDeliveredFile }: TranscriptTurnProps) {
 	const { t } = useTranslation();
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
@@ -335,9 +338,10 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
 								<MessageAttachments attachments={segment.item.attachments} />
 								<MessageFileSelections selections={segment.item.fileSelections} />
-								{segment.item.content.length > 0 && <div className="message message-user">
+								{segment.item.content.length > 0 && <div className="message message-user" data-quote-item={segment.item.itemId}>
 									{segment.item.content.map((block, blockIndex) => <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />)}
 								</div>}
+								<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
 								{onCopy && copyText.trim() !== "" && (
 									<div className="turn-actions">
 										<TurnCopyButton onCopy={onCopy} text={copyText} />
@@ -348,7 +352,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 					}
 					if (segment.type === "answer") {
 						return (
-							<div className="turn-answer" data-transcript-answer key={`answer-${segment.item.itemId}`}>
+							<div className="turn-answer" data-quote-item={segment.item.itemId} data-transcript-answer key={`answer-${segment.item.itemId}`}>
 								{segment.item.content.map((block, blockIndex) =>
 									block.type === "text"
 										? <Markdown key={`${block.type}-${blockIndex}`} text={block.text} />
@@ -360,7 +364,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 					if (segment.type === "intermediate") {
 						return (
 							<div className="turn-intermediate" key={`intermediate-${index}`}>
-								{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} />)}
+								{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} quoteItemId={items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId} />)}
 							</div>
 						);
 					}

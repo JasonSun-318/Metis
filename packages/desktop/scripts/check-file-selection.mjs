@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { validateClientRequest } from "@metis/app-protocol";
 import { AgentSessionRuntimeHost, InteractionBroker } from "@metis/app-server";
-import { SessionDeliveredArtifacts, SessionManager, splitSessionFileSelectionPrompt } from "@metis/coding-agent";
+import { SessionDeliveredArtifacts, SessionManager, splitSessionFileSelectionPrompt, splitSessionAttachmentPrompt } from "@metis/coding-agent";
 import { chromium, expect } from "@playwright/test";
 import { build } from "esbuild";
 import { selectionDeck, selectionPdf, selectionWorkbook } from "./document-selection-fixtures.mjs";
@@ -69,9 +69,12 @@ function modelResponse(res, tool, text) {
 	);
 }
 let opened, server, browser;
-let failNext = false,
-	loseNext = false,
-	modelDelay = 0;
+let failNext = false, loseNext = false;
+let modelGate = null, releaseModel = null;
+const holdModel = () => {
+	assert.equal(modelGate, null);
+	modelGate = new Promise((resolve) => { releaseModel = () => { modelGate = null; releaseModel = null; resolve(); }; });
+};
 try {
 	server = createServer((req, res) => {
 		void (async () => {
@@ -83,8 +86,8 @@ try {
 				const prompt = messageText(messages[index]?.content);
 				const parsed = splitSessionFileSelectionPrompt(prompt);
 				const file = parsed.fileSelections[0];
-				models.push({ prompt, files: parsed.fileSelections });
-				if (modelDelay) await new Promise((resolve) => setTimeout(resolve, modelDelay));
+				models.push({ prompt, files: parsed.fileSelections, quotes: splitSessionAttachmentPrompt(prompt).conversationQuotes ?? [], role: messages[index]?.role });
+				if (modelGate) await modelGate;
 				if (!file || !parsed.text.includes("REPLACE")) {
 					modelResponse(res, null, "Reference received.");
 					return;
@@ -530,7 +533,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await expect.poll(() => page.evaluate(() => Boolean(window.snapshot && !window.snapshot.activeTurnId))).toBe(true);
 	console.log("PASS expanded preview, task isolation, JSON and code");
 	// Queue during a slow ordinary turn, then edit its public text without losing context.
-	modelDelay = 700;
+	holdModel();
 	await page.locator("#composer-input").fill("Slow ordinary turn");
 	await page.locator("#composer-input").press("Enter");
 	await expect.poll(() => page.evaluate(() => window.running)).toBe(true);
@@ -548,6 +551,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 		expectedRevision: queue.revision,
 		text: "Explain edited queued selection",
 	});
+	releaseModel?.();
 	await expect
 		.poll(
 			() =>
@@ -559,7 +563,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 			{ timeout: 15000 },
 		)
 		.toBe(true);
-	modelDelay = 0;
+	releaseModel?.();
 	await expect.poll(() => opened.isActive(), { timeout: 15000 }).toBe(false);
 	console.log("PASS queue edit retains selected-file context");
 	// An accepted request whose response is lost retries with the original ID and is not executed twice.
@@ -736,6 +740,38 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await expect(page.locator(".cm-content")).toContainText("Unsaved local text.");
 	await page.screenshot({ path: join(directory, "workspace-file-selection.png") });
 	console.log("PASS file tree -> CodeMirror source and Markdown preview -> conversation");
+	// The same runtime sends literal conversation references as ordinary user context.
+	await expect.poll(() => opened.isActive()).toBe(false);
+	const beforeQuotes = await opened.snapshot(epoch, () => events.length);
+	const quoteSource = [...beforeQuotes.recentItems].reverse().find((item) => item.role === "assistant" && item.content.some((block) => block.type === "text"));
+	assert(quoteSource);
+	const quoteText = quoteSource.content.find((block) => block.type === "text").text;
+	const liveQuoteSource = [...events].reverse().find((event) => event.type === "item/completed" && event.item.role === "assistant" && event.item.itemId.startsWith("live:") && event.item.content.some((block) => block.text === quoteText))?.item;
+	assert(liveQuoteSource, "The runtime must exercise a live message ID before normalizing quote provenance");
+	const conversationQuotes = [{ sourceItemId: liveQuoteSource.itemId, sourceRole: "assistant", selectedText: quoteText }];
+	await assert.rejects(opened.startTurn({ sessionId, requestId: randomUUID(), text: "Reject a foreign origin", conversationQuotes: [{ ...conversationQuotes[0], sourceItemId: "missing-source" }] }));
+	await assert.rejects(opened.startTurn({ sessionId, requestId: randomUUID(), text: "Reject a false speaker", conversationQuotes: [{ ...conversationQuotes[0], sourceRole: "user" }] }));
+	await opened.startTurn({ sessionId, requestId: randomUUID(), text: "Explain this conversation quote", conversationQuotes });
+	await expect.poll(() => models.some((call) => call.prompt.includes("Explain this conversation quote") && call.quotes[0]?.selectedText === quoteText)).toBe(true);
+	assert.equal(models.find((call) => call.prompt.includes("Explain this conversation quote")).role, "user");
+	await expect.poll(() => opened.isActive()).toBe(false);
+	holdModel();
+	await opened.startTurn({ sessionId, requestId: randomUUID(), text: "Slow turn before quoted queue" });
+	const quoteQueue = await opened.queueTurn({ sessionId, requestId: randomUUID(), text: "Explain queued conversation quote", conversationQuotes });
+	await opened.updateQueuedTurn({ sessionId, requestId: randomUUID(), queueItemId: quoteQueue.queuedTurn.queueItemId, expectedRevision: quoteQueue.queuedTurn.revision, text: "Explain edited conversation quote" });
+	releaseModel?.();
+	await expect.poll(() => models.some((call) => call.prompt.includes("Explain edited conversation quote") && call.quotes[0]?.selectedText === quoteText), { timeout: 15000 }).toBe(true);
+	await expect.poll(() => opened.isActive(), { timeout: 15000 }).toBe(false);
+	holdModel();
+	await opened.startTurn({ sessionId, requestId: randomUUID(), text: "Slow turn before quoted steering" });
+	await opened.steer({ sessionId, requestId: randomUUID(), text: "Explain steered conversation quote", delivery: "follow_up", conversationQuotes });
+	releaseModel?.();
+	await expect.poll(() => models.some((call) => call.prompt.includes("Explain steered conversation quote") && call.quotes[0]?.selectedText === quoteText), { timeout: 15000 }).toBe(true);
+	releaseModel?.();
+	await expect.poll(() => opened.isActive(), { timeout: 15000 }).toBe(false);
+	const liveQuoteView = (await opened.snapshot(epoch, () => events.length)).recentItems.find((item) => item.role === "user" && item.content.some((block) => block.text === "Explain this conversation quote"));
+	assert.equal(liveQuoteView.conversationQuotes[0].sourceLiveItemId, liveQuoteSource.itemId);
+	console.log("PASS conversation quotes -> ordinary model context, validated source, queued edit and follow-up steering");
 	// Reopen the persisted session, retaining concise public messages and the durable quotes.
 	await page.close();
 	await opened.close();
@@ -750,7 +786,14 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 				item.role === "user" && item.content.some((block) => block.text?.includes("Explain retry reference")),
 		),
 	);
+	const restoredQuote = restored.recentItems.find((item) => item.role === "user" && item.content.some((block) => block.text === "Explain this conversation quote"));
+	assert.equal(restoredQuote.conversationQuotes[0].selectedText, quoteText);
+	assert.notEqual(restoredQuote.conversationQuotes[0].sourceItemId, liveQuoteSource.itemId);
+	assert(restored.recentItems.some((item) => item.itemId === restoredQuote.conversationQuotes[0].sourceItemId && item.role === "assistant"));
+	assert(!restoredQuote.content.some((block) => block.text?.includes("conversation_quotes")));
 	const journal = await readFile(sessionFile, "utf8");
+	assert(journal.includes("conversation_quotes"));
+	assert(!journal.includes("sourceLiveItemId"));
 	assert(journal.includes("file_selections"));
 	assert(
 		!restored.recentItems
@@ -780,6 +823,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 				"retry dedup",
 				"delivered revision",
 				"history restore",
+				"conversation quotes: model user context, source validation, queue edits, steering and stable restored source IDs",
 				"workspace file tree: source and Markdown",
 				"workspace clean draft refresh and unsaved edit guard",
 				"PPTX object, PDF text, XLSX cell target context without vision gating",
@@ -787,6 +831,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 		}),
 	);
 } finally {
+	releaseModel?.();
 	await browser?.close();
 	await opened?.close();
 	if (server) {

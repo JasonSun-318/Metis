@@ -17,6 +17,7 @@ import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
 import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
+import { ConversationQuoteChips, useConversationQuotes } from "./ConversationQuoteContext.tsx";
 import {
 	type ComposerSlashCommand,
 	composerSlashCommands,
@@ -262,6 +263,7 @@ function attachmentTypeLabel(name: string): string {
 
 export interface ComposerSubmission {
 	readonly fileSelections?: ClientParams<"turn/start">["fileSelections"];
+	readonly conversationQuotes?: ClientParams<"turn/start">["conversationQuotes"];
 	readonly text: string;
 	readonly attachments: readonly DesktopAttachmentSelection[];
 	readonly skill?: SkillSummaryView;
@@ -360,6 +362,7 @@ export function Composer({
 }: ComposerProps) {
 	const { t } = useTranslation();
 	const fileSelections = useFileSelections();
+	const conversationQuotes = useConversationQuotes();
 	const [hasInput, setHasInput] = useState(false);
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
 	const [submitting, setSubmitting] = useState(false);
@@ -711,7 +714,8 @@ export function Composer({
 		const selected = (fileSelections?.selections ?? []).filter(
 			(item) => selectionSessionId === undefined || item.sessionId === selectionSessionId,
 		);
-		if (selected.length && !prompt.trim()) return;
+		const quotes = selectionSessionId ? (conversationQuotes?.drafts ?? []).filter((item) => item.sessionId === selectionSessionId) : [];
+		if ((selected.length || quotes.length) && !prompt.trim()) return;
 		setSubmitting(true);
 		try {
 			const matchedSkills = parsed.tokenSkills
@@ -722,11 +726,14 @@ export function Composer({
 				text: prompt,
 				attachments,
 				...(selected.length ? { fileSelections: selected.map((item) => item.input) } : {}),
+				...(quotes.length ? { conversationQuotes: quotes.map((item) => item.input) } : {}),
 				...(matchedSkills.length > 0 ? { skill: matchedSkills[0], skills: matchedSkills } : {}),
 			});
 
 			if (editor) editor.replaceChildren();
 			fileSelections?.remove(selected.map((item) => item.id));
+			conversationQuotes?.remove(quotes.map((item) => item.id));
+			if (quotes.length) conversationQuotes?.accepted(quotes[0]!.sessionId);
 			setAttachments([]);
 			syncEditorState();
 		} finally {
@@ -772,6 +779,7 @@ export function Composer({
 				<label className="sr-only" htmlFor={inputId}>{t("Message Metis")}</label>
 				<div className="composer-box">
 					<FileSelectionChips sessionId={selectionSessionId} />
+					<ConversationQuoteChips sessionId={selectionSessionId} />
 					{attachments.length > 0 && (
 						<div aria-label={t("Message additions")} className="composer-attachments">
 							{attachments.map((attachment) => attachment.previewDataUrl ? (

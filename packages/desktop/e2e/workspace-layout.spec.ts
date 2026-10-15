@@ -38,6 +38,7 @@ interface LaunchedWorkspace {
 	readonly fakeProvider: Server;
 	readonly page: Page;
 	readonly projectDir: string;
+	readonly modelRequests: Awaited<ReturnType<typeof readOpenAiChatRequest>>[];
 	readonly tempRoot: string;
 }
 
@@ -88,6 +89,7 @@ async function launchWorkspace(options: {
 	}
 	trustStore.set(projectDir, true);
 
+	const modelRequests: Awaited<ReturnType<typeof readOpenAiChatRequest>>[] = [];
 	const fakeProvider = createServer(async (request, response) => {
 		if (request.method === "GET" && request.url === "/browser-page") {
 			response.writeHead(200, { "content-type": "text/html" }).end("<!doctype html><title>Sidebar page</title><h1>Browser sidebar page</h1>");
@@ -97,7 +99,7 @@ async function launchWorkspace(options: {
 			response.writeHead(404).end();
 			return;
 		}
-		await readOpenAiChatRequest(request);
+		modelRequests.push(await readOpenAiChatRequest(request));
 		respondWithText(response, "layout-reply");
 	});
 	const providerPort = await listen(fakeProvider);
@@ -124,7 +126,7 @@ async function launchWorkspace(options: {
 	});
 	await page.setViewportSize({ width: 1200, height: 800 });
 	await waitForServerReady(page);
-	return { app, browser, consoleErrors, diagnostics, fakeProvider, page, projectDir, tempRoot };
+	return { app, browser, consoleErrors, diagnostics, fakeProvider, page, projectDir, modelRequests, tempRoot };
 }
 
 async function stopWorkspace(workspace: LaunchedWorkspace): Promise<void> {
@@ -746,4 +748,74 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 	} finally {
 		await stopWorkspace(workspace);
 	}
+});
+
+
+test("packaged conversation quotes reach the model and restore as source-linked annotations", async ({}, testInfo) => {
+	test.setTimeout(90_000);
+	const workspace = await launchWorkspace({ sessions: [
+		{ id: "92000000-0000-4000-8000-000000000001", mode: "chat", name: "Quote Chat" },
+		{ id: "92000000-0000-4000-8000-000000000002", mode: "code", name: "Quote Code" },
+	] });
+	const { page } = workspace;
+	try {
+		for (const mode of ["chat", "code"] as const) {
+			const label = mode === "chat" ? "Chat" : "Code";
+			await page.getByRole("button", { name: label, exact: true }).click();
+			await page.getByRole("button", { name: `Quote ${label}`, exact: true }).click();
+			await expect(page.locator("[data-active-session-id]")).toHaveAttribute("data-active-session-id", mode === "chat" ? "92000000-0000-4000-8000-000000000001" : "92000000-0000-4000-8000-000000000002");
+			const editor = page.locator('.composer-editable-input[contenteditable="true"]:visible');
+			await editor.fill(`Start quote fixture in ${mode}`);
+			await editor.press("Enter");
+			await expect(page.locator(".transcript:visible").getByText("layout-reply", { exact: true }).last()).toBeVisible();
+			await expect(page.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
+			const activeTitle = await page.locator('.workspace-tabbar[data-pane-id] [role="tab"][aria-selected="true"]').first().getAttribute("aria-label");
+			if (!activeTitle) throw new Error("The packaged conversation did not activate a session tab");
+			const reply = page.locator(".transcript:visible").getByText("layout-reply", { exact: true }).last();
+			const renderedSourceId = await reply.evaluate((element) => element.closest<HTMLElement>("[data-quote-item]")?.dataset.quoteItem);
+			if (!renderedSourceId) throw new Error("Packaged reply has no quote source marker");
+			await reply.scrollIntoViewIfNeeded();
+			const rect = await reply.evaluate((element) => {
+				const range = document.createRange(); range.selectNodeContents(element);
+				const bounds = range.getBoundingClientRect();
+				return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width };
+			});
+			await page.mouse.move(rect.x + .2, rect.y); await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width - .2, rect.y, { steps: 10 }); await page.mouse.up();
+			await expect(page.getByRole("button", { name: "Add to conversation", exact: true })).toBeEnabled();
+			const selectedText = await page.evaluate(() => window.getSelection()?.toString() ?? "");
+			expect(selectedText.trim().length).toBeGreaterThan(0);
+			expect("layout-reply").toContain(selectedText.trim());
+			await page.getByRole("button", { name: "Add to conversation", exact: true }).click();
+			await expect(page.locator(".composer-conversation-quotes:visible")).toHaveCount(1);
+			await expect(editor).toBeFocused();
+			const question = `Explain quoted reply in ${mode}`;
+			await editor.fill(question); await editor.press("Enter");
+			const annotation = page.locator(".message-annotations-trigger:visible");
+			await expect(annotation).toHaveText("1 annotations");
+			await expect.poll(() => workspace.modelRequests.some((request) => JSON.stringify(request.messages ?? []).includes(question))).toBe(true);
+			const request = [...workspace.modelRequests].reverse().find((request) => JSON.stringify(request.messages ?? []).includes(question))!;
+			const user = [...(request.messages ?? [])].reverse().find((message) => message.role === "user");
+			if (!user) throw new Error("Packaged model request has no user message");
+			const content = typeof user.content === "string" ? user.content : Array.isArray(user.content) ? user.content.map((block: { text?: string }) => block.text ?? "").join("\n") : "";
+			const block = /<conversation_quotes>\n([^<]*)\n<\/conversation_quotes>/u.exec(content);
+			if (!block) throw new Error("Packaged model request lost the conversation quote");
+			const quote = JSON.parse(block[1]!).quotes[0];
+			expect(quote.sourceRole).toBe("assistant"); expect(quote.selectedText).toBe(selectedText);
+			await expect(page.getByRole("button", { name: "Stop task", exact: true })).toHaveCount(0);
+			await page.screenshot({ path: testInfo.outputPath(`packaged-annotation-${mode}.png`) });
+			await page.reload(); await waitForServerReady(page);
+			await page.getByRole("button", { name: label, exact: true }).click();
+			await page.locator(".session-button").filter({ hasText: activeTitle }).click();
+			await expect(annotation).toHaveText("1 annotations");
+			await annotation.click();
+			await expect(page.getByRole("dialog", { name: "Conversation annotations", exact: true })).toContainText(selectedText);
+			await page.screenshot({ path: testInfo.outputPath(`packaged-annotation-preview-${mode}.png`) });
+			await page.getByRole("button", { name: "Go to original message", exact: true }).click();
+			await expect(page.locator(`[data-quote-item="${quote.sourceItemId}"], [data-quote-item="${renderedSourceId}"]`).first()).toBeInViewport();
+			await expect(page.locator(".transcript-quote-notice")).toHaveCount(0);
+		}
+		expect(workspace.consoleErrors).toEqual([]);
+	} catch (error) { throw await rendererFailure(error, page, workspace.diagnostics); }
+	finally { await stopWorkspace(workspace); }
 });

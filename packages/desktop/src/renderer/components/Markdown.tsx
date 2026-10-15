@@ -1,6 +1,6 @@
 import type { TFunction } from "i18next";
 import { marked, type Token, type Tokens } from "marked";
-import { createElement, Fragment, type ReactNode, useMemo, useRef } from "react";
+import { cloneElement, createElement, Fragment, isValidElement, type ReactElement, type ReactNode, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { lexMarkdownBlocks, type MarkdownLexCache } from "./markdown-lexer.ts";
 
@@ -155,9 +155,11 @@ function blocks(tokens: readonly Token[], t: TFunction): ReactNode[] {
 export function Markdown({
 	text,
 	sourcePositions = false,
+	quoteItemId,
 }: {
 	readonly text: string;
 	readonly sourcePositions?: boolean;
+	readonly quoteItemId?: string;
 }) {
 	const { t, i18n } = useTranslation();
 	// Streaming deltas re-render for every append, so the lexed tokens and the
@@ -214,5 +216,9 @@ export function Markdown({
 			return <p>{text}</p>;
 		}
 	}, [i18n.resolvedLanguage, t, text, sourcePositions]);
-	return <>{content}</>;
+	const sourcedContent = useMemo(() => !quoteItemId ? content : (Array.isArray(content) ? content : [content]).map((node) =>
+		isValidElement(node) && typeof node.type === "string"
+			? cloneElement(node as ReactElement<Record<string, unknown>>, { "data-quote-item": quoteItemId }) : node,
+	), [content, quoteItemId]);
+	return <>{sourcedContent}</>;
 }

@@ -647,6 +647,7 @@ export const SessionChatView = memo(function SessionChatView({
 		<div className="workspace-body">
 			<div className="conversation-column" data-mode={session?.mode ?? "chat"}>
 				<Transcript
+					quoteSessionId={visible && serverReady ? writableSessionId : undefined}
 					showNavigation
 					activeTurnId={projection.activeTurnId}
 					waitingForAnswer={waitingForAnswer}

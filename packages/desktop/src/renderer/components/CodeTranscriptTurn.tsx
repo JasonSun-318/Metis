@@ -7,6 +7,7 @@ import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
+import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -23,11 +24,11 @@ import {
 	type ToolResultBlock,
 } from "./transcript-turn-model.ts";
 
-function VisibleBlock({ block, markdown = false }: { readonly block: ItemContentBlockView; readonly markdown?: boolean }) {
+function VisibleBlock({ block, markdown = false, quoteItemId }: { readonly block: ItemContentBlockView; readonly markdown?: boolean; readonly quoteItemId?: string }) {
 	const { t } = useTranslation();
 	switch (block.type) {
 		case "text":
-			return markdown ? <Markdown text={block.text} /> : <p>{block.text}</p>;
+			return markdown ? <Markdown text={block.text} quoteItemId={quoteItemId} /> : <p data-quote-item={quoteItemId}>{block.text}</p>;
 		case "image":
 			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={16} /> {t("Image")} · {block.image.mediaType}</p>;
 		case "notice":
@@ -189,6 +190,7 @@ interface CodeTranscriptTurnProps {
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
+	readonly onJumpToQuote?: (itemId: string, liveItemId?: string) => void;
 	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
 	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
 }
@@ -200,6 +202,7 @@ function sameTurnProps(left: CodeTranscriptTurnProps, right: CodeTranscriptTurnP
 		left.startedAt === right.startedAt &&
 		left.onFork === right.onFork &&
 		left.onCopy === right.onCopy &&
+		left.onJumpToQuote === right.onJumpToQuote &&
 		left.onOpenDeliveredFile === right.onOpenDeliveredFile &&
 		left.onPreviewDeliveredFile === right.onPreviewDeliveredFile &&
 		left.items.length === right.items.length &&
@@ -216,6 +219,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	startedAt,
 	onFork,
 	onCopy,
+	onJumpToQuote,
 	onOpenDeliveredFile,
 	onPreviewDeliveredFile,
 }: CodeTranscriptTurnProps) {
@@ -234,7 +238,8 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
 								<MessageAttachments attachments={segment.item.attachments} />
 								<MessageFileSelections selections={segment.item.fileSelections} />
-								{segment.item.content.length > 0 && <div className="code-turn-user-bubble">{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>}
+								{segment.item.content.length > 0 && <div className="code-turn-user-bubble" data-quote-item={segment.item.itemId}>{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>}
+								<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
 								{onCopy && copyText.trim() !== "" && (
 									<div className="turn-actions">
 										<TurnCopyButton onCopy={onCopy} text={copyText} />
@@ -269,7 +274,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 							key={`content-${segmentIndex}`}
 						>
 							{segment.blocks.map((block, blockIndex) => (
-								<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} markdown={segment.markdown} />
+								<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} markdown={segment.markdown} quoteItemId={items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId} />
 							))}
 						</div>
 					);

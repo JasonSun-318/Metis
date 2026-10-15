@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, type Page, test } from "@playwright/test";
+import { expect, type Page, type Locator, test } from "@playwright/test";
 import { build } from "esbuild";
 
 test.use({ channel: "chrome" });
@@ -36,7 +36,7 @@ test.beforeAll(async () => {
 	});
 	await writeFile(
 		path.join(directory, "index.html"),
-		`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><style>body{font-family:Inter,-apple-system,sans-serif}#root{height:100%}.fixture-workspace{height:100%;display:flex;flex-direction:column}.fixture-workspace>header{display:flex;align-items:center;justify-content:space-between;height:48px;padding:0 28px;border-bottom:1px solid var(--border);font-size:13px}.fixture-workspace>header button{margin-left:12px;color:var(--muted);font-size:11px}.fixture-workspace>footer{width:min(770px,calc(100% - 80px));height:100px;padding:18px;margin:12px auto 18px;border:1px solid var(--border);border-radius:18px;color:var(--muted);font-size:13px}.fixture-workspace>footer span{display:block;margin-top:20px}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`,
+		`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><style>body{font-family:Inter,-apple-system,sans-serif}#root{height:100%}.fixture-workspace{height:100%;display:flex;flex-direction:column}.fixture-workspace>header{display:flex;align-items:center;justify-content:space-between;height:48px;padding:0 28px;border-bottom:1px solid var(--border);font-size:13px}.fixture-workspace>header button{margin-left:12px;color:var(--muted);font-size:11px}.fixture-workspace>footer{width:min(770px,calc(100% - 80px));height:100px;padding:18px;margin:12px auto 18px;border:1px solid var(--border);border-radius:18px;color:var(--muted);font-size:13px}.fixture-workspace>footer span{display:block;margin-top:20px}.fixture-quote-composer{width:min(770px,calc(100% - 48px));margin:12px auto 18px;flex:none}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`,
 	);
 	server = createServer((request, response) => {
 		const name = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -70,6 +70,128 @@ function pageErrors(page: Page) {
 	page.on("pageerror", (error) => errors.push(error.message));
 	return errors;
 }
+
+async function selectQuote(page: Page, target: Locator, text: string) {
+	await target.scrollIntoViewIfNeeded();
+	// A click collapses an existing selection before a fresh drag (rather than dragging its text).
+	await target.click({ position: { x: 4, y: 4 } });
+	const rect = await target.evaluate((element, text) => {
+		const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+		let node: Text | null;
+		while ((node = walker.nextNode() as Text | null)) {
+			const start = node.data.indexOf(text);
+			if (start < 0) continue;
+			const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + text.length);
+			const bounds = range.getBoundingClientRect();
+			return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width };
+		}
+		throw new Error("Quote fixture text missing");
+	}, text);
+	await page.mouse.move(rect.x + .2, rect.y); await page.mouse.down();
+	await page.mouse.move(rect.x + rect.width - .2, rect.y, { steps: 12 }); await page.mouse.up();
+	await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(text);
+	await expect(page.locator(".conversation-selection-popover")).toBeVisible();
+}
+
+test("conversation selections become compact annotations and survive reload in both modes and themes", async ({ page }, info) => {
+	test.setTimeout(90_000);
+	const errors = pageErrors(page);
+	for (const mode of ["chat", "code"]) for (const theme of ["dark", "light"]) {
+		await page.setViewportSize({ width: 1000, height: 840 });
+		await page.goto(`${url}/?mode=${mode}&theme=${theme}&count=2&selection=1&quotes=1`);
+		const selected = "selectable conversation content.";
+		const paragraph = page.getByText("Selection paragraph: selectable conversation content.", { exact: true }).last();
+		await selectQuote(page, paragraph, selected);
+		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+		const editor = page.locator('[contenteditable="true"]');
+		await expect(editor).toBeFocused();
+		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
+		await editor.fill("详细解释引用的内容");
+		const userText = "请整理产品资料中的知识点";
+		await selectQuote(page, page.locator('[data-quote-item="user-1"]'), userText);
+		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+		await expect(editor).toHaveText("详细解释引用的内容");
+		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("2 段对话引用");
+		await page.locator(".composer-conversation-quotes summary").click();
+		await page.getByRole("button", { name: "移除对话引用", exact: true }).first().click();
+		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
+		await selectQuote(page, paragraph, selected);
+		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+		await editor.press("Enter");
+		const sent = page.locator('[data-user-message^="sent-"]');
+		const trigger = sent.locator(".message-annotations-trigger");
+		await expect(trigger).toHaveText("2 条注释");
+		await expect(trigger).toBeInViewport();
+		await expect(page.locator(".composer-conversation-quotes")).toHaveCount(0);
+		const submission = await page.evaluate(() => (globalThis as typeof globalThis & { quoteSubmission: { text: string; conversationQuotes: { sourceItemId: string; sourceRole: string; selectedText: string }[] } }).quoteSubmission);
+		expect(submission.text).toBe("详细解释引用的内容");
+		expect(submission.conversationQuotes).toEqual([
+			{ sourceItemId: "user-1", sourceRole: "user", selectedText: userText },
+			{ sourceItemId: "answer-1", sourceRole: "assistant", selectedText: selected },
+		]);
+		const bubble = sent.locator(".message-user, .code-turn-user-bubble");
+		expect((await trigger.boundingBox())!.y).toBeGreaterThanOrEqual((await bubble.boundingBox())!.y + (await bubble.boundingBox())!.height);
+		await page.screenshot({ path: info.outputPath(`annotations-${mode}-${theme}.png`) });
+		await trigger.click();
+		const popup = page.getByRole("dialog", { name: "对话注释", exact: true });
+		await expect(popup).toContainText(selected);
+		await expect(popup).toContainText("来自 Metis");
+		await page.screenshot({ path: info.outputPath(`annotation-preview-${mode}-${theme}.png`) });
+		await popup.locator("section").filter({ hasText: selected }).getByRole("button", { name: "跳转到原消息" }).click();
+		await expect(popup).toHaveCount(0);
+		await expect(page.locator('[data-quote-item="answer-1"]').first()).toBeInViewport();
+		await trigger.scrollIntoViewIfNeeded();
+		await trigger.focus(); await trigger.press("Enter");
+		await expect(popup).toBeVisible();
+		await page.keyboard.press("Escape"); await expect(popup).toHaveCount(0); await expect(trigger).toBeFocused();
+		await page.reload();
+		await expect(trigger).toHaveText("2 条注释");
+		await page.setViewportSize({ width: 420, height: 720 });
+		await trigger.click();
+		await expect(popup).toContainText(selected);
+		const bounds = (await popup.boundingBox())!;
+		expect(bounds.x).toBeGreaterThanOrEqual(7); expect(bounds.x + bounds.width).toBeLessThanOrEqual(413);
+		expect(bounds.y).toBeGreaterThanOrEqual(7); expect(bounds.y + bounds.height).toBeLessThanOrEqual(713);
+		await page.keyboard.press("Escape");
+	}
+	expect(errors).toEqual([]);
+});
+
+test("quote drafts stay in their session and selections in code remain usable", async ({ page }) => {
+	await page.setViewportSize({ width: 1000, height: 840 });
+	await page.goto(`${url}/?mode=code&theme=dark&count=1&selection=1&quotes=1`);
+	await selectQuote(page, page.locator("pre code"), "const selectable = true;");
+	await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+	await expect(page.locator(".composer-conversation-quotes")).toHaveCount(1);
+	await page.getByRole("button", { name: "Switch session" }).click();
+	await expect(page.locator(".composer-conversation-quotes")).toHaveCount(0);
+	await expect(page.locator(".conversation-selection-popover")).toHaveCount(0);
+	await page.getByRole("button", { name: "Switch session" }).click();
+	await expect(page.locator(".composer-conversation-quotes")).toHaveCount(1);
+});
+
+test("a quote waits for a streaming reply to finish before it can be added", async ({ page }) => {
+	await page.setViewportSize({ width: 1000, height: 840 });
+	await page.goto(`${url}/?mode=chat&theme=dark&count=1&selection=1&quotes=1&streaming=1`);
+	await selectQuote(page, page.getByText("Selection paragraph: selectable conversation content.", { exact: true }), "selectable conversation content.");
+	await expect(page.getByRole("button", { name: "添加到会话", exact: true })).toBeDisabled();
+	await expect(page.locator(".conversation-selection-notice")).toHaveText("回复完成后即可引用");
+	await page.getByRole("button", { name: "Finish reply" }).click();
+	await selectQuote(page, page.getByText("Selection paragraph: selectable conversation content.", { exact: true }), "selectable conversation content.");
+	await expect(page.getByRole("button", { name: "添加到会话", exact: true })).toBeEnabled();
+	await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+	await expect(page.locator(".composer-conversation-quotes")).toHaveCount(1);
+});
+
+test("annotation source navigation resolves live aliases while loading older virtualized history", async ({ page }) => {
+	await page.setViewportSize({ width: 1000, height: 840 });
+	await page.goto(`${url}/?mode=chat&theme=dark&count=70&quoteHistory=1&quotes=1`);
+	const trigger = page.locator('[data-user-message="user-69"] .message-annotations-trigger');
+	await trigger.click();
+	await page.getByRole("button", { name: "跳转到原消息" }).click();
+	await expect(page.locator('[data-quote-item="answer--1"]')).toBeInViewport();
+	await expect(page.locator(".transcript-quote-notice")).toHaveCount(0);
+});
 
 test("sent file references stay readable and expandable in Chat and Code", async ({ page }, info) => {
 	const errors = pageErrors(page);

@@ -39,6 +39,7 @@ import { NewTaskHome, recentProjectsFromGroups } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
+import { ConversationQuoteProvider } from "./ConversationQuoteContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
@@ -1548,6 +1549,7 @@ export function App({ api, store }: AppProps) {
 			enabled={Boolean(serverReady && !visibleInteraction)}
 			onSubmit={submitFileSelection}
 		>
+		<ConversationQuoteProvider enabled={Boolean(serverReady && !visibleInteraction)}>
 
 		{api.platform === "win32" && (
 			<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
@@ -1745,6 +1747,7 @@ export function App({ api, store }: AppProps) {
 				theme={theme}
 			/>
 		) : null}
+		</ConversationQuoteProvider>
 		</FileSelectionProvider>
 	);
 }
