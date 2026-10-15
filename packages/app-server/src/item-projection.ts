@@ -188,9 +188,10 @@ function assistantBlocks(
 function userContent(
 	content: unknown,
 	budget: TextBudget,
-): Pick<ItemView, "content" | "attachments" | "fileSelections"> {
+): Pick<ItemView, "content" | "attachments" | "fileSelections" | "conversationQuotes"> {
 	const attachments: NonNullable<ItemView["attachments"]> = [];
 	const fileSelections: NonNullable<ItemView["fileSelections"]> = [];
+	const conversationQuotes: NonNullable<ItemView["conversationQuotes"]> = [];
 	const publicText = (text: string): string => {
 		const prompt = splitSessionAttachmentPrompt(text);
 		for (const attachment of prompt.attachments) {
@@ -225,6 +226,16 @@ function userContent(
 						}),
 			});
 		}
+		for (const quote of prompt.conversationQuotes ?? []) {
+			if (conversationQuotes.length >= 8) break;
+			const selectedText = boundedText(quote.selectedText, 2048);
+			conversationQuotes.push({
+				sourceItemId: quote.sourceItemId,
+				sourceRole: quote.sourceRole,
+				selectedText,
+				...(selectedText === quote.selectedText ? {} : { selectedTextTruncated: true }),
+			});
+		}
 		// Keep editor display formatting while projecting uploads and quotes separately.
 		return formatSessionAttachmentDisplayText(prompt.text);
 	};
@@ -244,6 +255,7 @@ function userContent(
 		content: textBlocks(sanitized, budget).filter((block) => block.type !== "text" || block.text.trim() !== ""),
 		...(attachments.length > 0 ? { attachments } : {}),
 		...(fileSelections.length > 0 ? { fileSelections } : {}),
+		...(conversationQuotes.length > 0 ? { conversationQuotes } : {}),
 	};
 }
 

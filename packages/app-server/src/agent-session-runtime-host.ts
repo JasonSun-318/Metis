@@ -22,6 +22,7 @@ import {
 	type AgentSummary,
 	AuthStorage,
 	agentTaskWindow,
+	assertSessionConversationQuotes,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
@@ -30,6 +31,7 @@ import {
 	createAskUserToolDefinition,
 	DefaultResourceLoader,
 	formatSessionAttachments,
+	formatSessionConversationQuotes,
 	formatSessionFileSelections,
 	getLatestCacheHitPercent,
 	getProjectTrustOptions,
@@ -826,15 +828,36 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private projectLiveMessage(message: object, state: ItemView["state"]): ItemView | undefined {
 		const turnId = this.currentTurnId();
-		return projectLiveItemMessage({
-			itemId: this.itemIdFor(message),
-			sessionId: this.sessionId,
-			...(turnId === undefined ? {} : { turnId }),
-			message,
-			state,
-			deliveredFiles: this.deliveredFileMap(),
-			fallbackTimestamp: this.ref.summary.updatedAt,
-		});
+		return this.withQuoteSourceAliases(
+			projectLiveItemMessage({
+				itemId: this.itemIdFor(message),
+				sessionId: this.sessionId,
+				...(turnId === undefined ? {} : { turnId }),
+				message,
+				state,
+				deliveredFiles: this.deliveredFileMap(),
+				fallbackTimestamp: this.ref.summary.updatedAt,
+			}),
+		);
+	}
+
+	/** A live projection keeps its item IDs until the runtime closes. Quotes store
+	 * durable IDs, so expose a UI-only alias while those live rows still exist. */
+	private withQuoteSourceAliases(item: ItemView | undefined): ItemView | undefined {
+		if (!item?.conversationQuotes?.length) return item;
+		const aliases = new Map<string, string>();
+		for (const [liveId, entryId] of this.durableEntryIdsByLiveItemId) aliases.set(opaqueId(entryId, "item"), liveId);
+		for (const [liveId, message] of this.liveMessagesByItemId) {
+			const entryId = this.session.sessionManager.getMessageEntryId(message);
+			if (entryId) aliases.set(opaqueId(entryId, "item"), liveId);
+		}
+		return {
+			...item,
+			conversationQuotes: item.conversationQuotes.map((quote) => {
+				const liveId = aliases.get(quote.sourceItemId);
+				return liveId && liveId !== quote.sourceItemId ? { ...quote, sourceLiveItemId: liveId } : quote;
+			}),
+		};
 	}
 
 	private publishStartedItem(message: object): string | undefined {
@@ -875,14 +898,16 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			});
 		}
 		const reduced = this.reduced();
-		return projectSessionEntry({
-			entry,
-			sessionId: this.sessionId,
-			turnStates: new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
-			toolStates: new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
-			deliveredFiles: this.deliveredFileMap(),
-			fallbackTimestamp: this.ref.summary.createdAt,
-		});
+		return this.withQuoteSourceAliases(
+			projectSessionEntry({
+				entry,
+				sessionId: this.sessionId,
+				turnStates: new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
+				toolStates: new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
+				deliveredFiles: this.deliveredFileMap(),
+				fallbackTimestamp: this.ref.summary.createdAt,
+			}),
+		);
 	}
 
 	private itemsFromJournal(
@@ -1914,7 +1939,26 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return { libraries };
 	}
 
+	private conversationQuotePrompt(input: Pick<ClientParams<"turn/start">, "text" | "conversationQuotes">): string {
+		const quotes = input.conversationQuotes ?? [];
+		assertSessionConversationQuotes(quotes);
+		const manager = this.session.sessionManager;
+		const resolved = quotes.map((quote) => {
+			const liveMessage = this.liveMessagesByItemId.get(quote.sourceItemId);
+			const entryId =
+				this.durableEntryIdsByLiveItemId.get(quote.sourceItemId) ??
+				(liveMessage ? manager.getMessageEntryId(liveMessage) : undefined) ??
+				quote.sourceItemId;
+			const entry = manager.getEntry(entryId);
+			if (entry?.type !== "message" || entry.message.role !== quote.sourceRole)
+				throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+			return { ...quote, sourceItemId: opaqueId(entry.id, "item") };
+		});
+		return formatSessionConversationQuotes(input.text, resolved);
+	}
+
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
+		const prompt = this.conversationQuotePrompt(input);
 		const selections = await resolveFileSelections(input.fileSelections ?? [], {
 			cwd: this.runtime.cwd,
 			resolveDelivered: (id) => {
@@ -1933,12 +1977,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
+			text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 		});
 	}
 
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
+		const prompt = this.conversationQuotePrompt(input);
 		const selections = await resolveFileSelections(input.fileSelections ?? [], {
 			cwd: this.runtime.cwd,
 			resolveDelivered: (id) => {
@@ -1957,13 +2002,14 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			: [];
 		return await this.runtime.submitPrompt({
 			requestId: input.requestId,
-			text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
+			text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
 			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 			streamingBehavior: input.delivery === "follow_up" ? "followUp" : "steer",
 		});
 	}
 
 	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
+		const prompt = this.conversationQuotePrompt(input);
 		const selections = await resolveFileSelections(input.fileSelections ?? [], {
 			cwd: this.runtime.cwd,
 			resolveDelivered: (id) => {
@@ -1983,7 +2029,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		try {
 			const queuedTurn = this.runtime.enqueueQueuedTurn({
 				requestId: input.requestId,
-				text: formatSessionAttachments(formatSessionFileSelections(input.text, selections), attachments),
+				text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
 				...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
 			});
 			return { queuedTurn: queuedTurnView(queuedTurn) };
