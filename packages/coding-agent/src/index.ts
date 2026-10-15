@@ -641,6 +641,13 @@ export {
 	type SessionPermissionPresetEntry,
 } from "./core/session-control.ts";
 export {
+	assertSessionConversationQuotes,
+	formatSessionConversationQuoteDisplayText,
+	formatSessionConversationQuotes,
+	type SessionConversationQuote,
+	splitSessionConversationQuotePrompt,
+} from "./core/session-conversation-quotes.ts";
+export {
 	type DeliveredArtifactAvailability,
 	type ResolvedSessionDeliveredArtifact,
 	type SessionDeliveredArtifact,

@@ -142,6 +142,23 @@ describe("QueuedTurnQueue", () => {
 		});
 	});
 
+	it("preserves conversation quotes through queue edits and recovery", async () => {
+		const { formatSessionConversationQuotes } = await import("../src/core/session-conversation-quotes.ts");
+		const { splitSessionAttachmentPrompt } = await import("../src/core/session-attachments.ts");
+		const quotes = [{ sourceItemId: "answer-1", sourceRole: "assistant" as const, selectedText: "Keep this quote" }];
+		const first = queue.enqueue({
+			requestId: requestId(1),
+			input: { text: formatSessionConversationQuotes("explain", quotes) },
+			state: "paused",
+		});
+		queue.update({ queueItemId: first.queueItemId, expectedRevision: first.revision, text: "shorter explanation" });
+		const restored = new QueuedTurnQueue(manager).list()[0]!;
+		expect(splitSessionAttachmentPrompt(restored.input.text)).toMatchObject({
+			text: "shorter explanation",
+			conversationQuotes: quotes,
+		});
+	});
+
 	it("rejects empty edits without attachments", () => {
 		const first = queue.enqueue({ requestId: requestId(1), input: { text: "first" }, state: "enqueued" });
 		expect(() =>

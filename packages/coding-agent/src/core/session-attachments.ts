@@ -14,6 +14,11 @@ import {
 import { basename, dirname, extname, isAbsolute, join, relative, sep } from "node:path";
 import { canonicalizePath, canonicalizePathForCreation, resolvePath } from "../utils/paths.ts";
 import {
+	formatSessionConversationQuoteDisplayText,
+	type SessionConversationQuote,
+	splitSessionConversationQuotePrompt,
+} from "./session-conversation-quotes.ts";
+import {
 	formatSessionFileSelectionDisplayText,
 	type SessionFileSelection,
 	splitSessionFileSelectionPrompt,
@@ -614,18 +619,28 @@ export function splitSessionAttachmentPrompt(text: string): {
 	readonly text: string;
 	readonly attachments: readonly SessionAttachment[];
 	readonly fileSelections: readonly SessionFileSelection[];
+	readonly conversationQuotes?: readonly SessionConversationQuote[];
 } {
 	const attachments: SessionAttachment[] = [];
 	const publicText = replaceSessionAttachmentReferences(text, (found) => {
 		attachments.push(...found);
 		return "";
 	}).trim();
-	return { ...splitSessionFileSelectionPrompt(publicText), attachments };
+	const quotes = splitSessionConversationQuotePrompt(publicText);
+	return {
+		...splitSessionFileSelectionPrompt(quotes.text),
+		attachments,
+		...(quotes.conversationQuotes.length ? { conversationQuotes: quotes.conversationQuotes } : {}),
+	};
 }
 
 /** Replace private model-facing attachment metadata with compact CLI labels. */
 export function formatSessionAttachmentDisplayText(text: string): string {
-	return formatSessionFileSelectionDisplayText(
-		replaceSessionAttachmentReferences(text, (attachments) => attachments.map(({ name }) => `[${name}]`).join(" ")),
+	return formatSessionConversationQuoteDisplayText(
+		formatSessionFileSelectionDisplayText(
+			replaceSessionAttachmentReferences(text, (attachments) =>
+				attachments.map(({ name }) => `[${name}]`).join(" "),
+			),
+		),
 	);
 }
