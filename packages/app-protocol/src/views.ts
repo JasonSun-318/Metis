@@ -566,6 +566,14 @@ export const MessageFileSelectionViewSchema = StrictObject({
 	),
 });
 
+export const ConversationQuoteViewSchema = StrictObject({
+	sourceItemId: OpaqueIdSchema,
+	sourceLiveItemId: Type.Optional(OpaqueIdSchema),
+	sourceRole: Type.Union([Type.Literal("user"), Type.Literal("assistant")]),
+	selectedText: Utf8String(2048, { minLength: 1 }),
+	selectedTextTruncated: Type.Optional(Type.Boolean()),
+});
+
 export const ItemViewSchema = StrictObject({
 	itemId: OpaqueIdSchema,
 	sessionId: SessionIdSchema,
@@ -575,6 +583,7 @@ export const ItemViewSchema = StrictObject({
 	content: Type.Array(ItemContentBlockViewSchema, { maxItems: 256 }),
 	attachments: Type.Optional(Type.Array(MessageAttachmentViewSchema, { maxItems: 16 })),
 	fileSelections: Type.Optional(Type.Array(MessageFileSelectionViewSchema, { maxItems: 8 })),
+	conversationQuotes: Type.Optional(Type.Array(ConversationQuoteViewSchema, { maxItems: 8 })),
 	usage: Type.Optional(ItemUsageViewSchema),
 	createdAt: TimestampSchema,
 	completedAt: Type.Optional(TimestampSchema),

@@ -6858,6 +6858,45 @@
                         ]
                       },
                       "maxItems": 8
+                    },
+                    "conversationQuotes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sourceItemId",
+                          "sourceRole",
+                          "selectedText"
+                        ],
+                        "properties": {
+                          "sourceItemId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sourceRole": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "user"
+                              },
+                              {
+                                "type": "string",
+                                "const": "assistant"
+                              }
+                            ]
+                          },
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 8
                     }
                   },
                   "additionalProperties": false
@@ -7307,6 +7346,45 @@
                             "additionalProperties": false
                           }
                         ]
+                      },
+                      "maxItems": 8
+                    },
+                    "conversationQuotes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sourceItemId",
+                          "sourceRole",
+                          "selectedText"
+                        ],
+                        "properties": {
+                          "sourceItemId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sourceRole": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "user"
+                              },
+                              {
+                                "type": "string",
+                                "const": "assistant"
+                              }
+                            ]
+                          },
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "maxItems": 8
                     },
@@ -7769,6 +7847,45 @@
                             "additionalProperties": false
                           }
                         ]
+                      },
+                      "maxItems": 8
+                    },
+                    "conversationQuotes": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "sourceItemId",
+                          "sourceRole",
+                          "selectedText"
+                        ],
+                        "properties": {
+                          "sourceItemId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "sourceRole": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "user"
+                              },
+                              {
+                                "type": "string",
+                                "const": "assistant"
+                              }
+                            ]
+                          },
+                          "selectedText": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 8000,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
                       },
                       "maxItems": 8
                     }
@@ -12418,6 +12535,53 @@
                                     },
                                     "maxItems": 8
                                   },
+                                  "conversationQuotes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "sourceItemId",
+                                        "sourceRole",
+                                        "selectedText"
+                                      ],
+                                      "properties": {
+                                        "sourceItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceLiveItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceRole": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "user"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "assistant"
+                                            }
+                                          ]
+                                        },
+                                        "selectedText": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 2048
+                                        },
+                                        "selectedTextTruncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 8
+                                  },
                                   "usage": {
                                     "type": "object",
                                     "required": [
@@ -13164,6 +13328,53 @@
                                               "additionalProperties": false
                                             }
                                           ]
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 8
+                                  },
+                                  "conversationQuotes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "sourceItemId",
+                                        "sourceRole",
+                                        "selectedText"
+                                      ],
+                                      "properties": {
+                                        "sourceItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceLiveItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceRole": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "user"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "assistant"
+                                            }
+                                          ]
+                                        },
+                                        "selectedText": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 2048
+                                        },
+                                        "selectedTextTruncated": {
+                                          "type": "boolean"
                                         }
                                       },
                                       "additionalProperties": false
@@ -15373,6 +15584,53 @@
                                     },
                                     "maxItems": 8
                                   },
+                                  "conversationQuotes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "sourceItemId",
+                                        "sourceRole",
+                                        "selectedText"
+                                      ],
+                                      "properties": {
+                                        "sourceItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceLiveItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceRole": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "user"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "assistant"
+                                            }
+                                          ]
+                                        },
+                                        "selectedText": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 2048
+                                        },
+                                        "selectedTextTruncated": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 8
+                                  },
                                   "usage": {
                                     "type": "object",
                                     "required": [
@@ -16127,6 +16385,53 @@
                                               "additionalProperties": false
                                             }
                                           ]
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "maxItems": 8
+                                  },
+                                  "conversationQuotes": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "required": [
+                                        "sourceItemId",
+                                        "sourceRole",
+                                        "selectedText"
+                                      ],
+                                      "properties": {
+                                        "sourceItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceLiveItemId": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 128,
+                                          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                        },
+                                        "sourceRole": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string",
+                                              "const": "user"
+                                            },
+                                            {
+                                              "type": "string",
+                                              "const": "assistant"
+                                            }
+                                          ]
+                                        },
+                                        "selectedText": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "x-metis-maxUtf8Bytes": 2048
+                                        },
+                                        "selectedTextTruncated": {
+                                          "type": "boolean"
                                         }
                                       },
                                       "additionalProperties": false
@@ -23963,6 +24268,53 @@
                             },
                             "maxItems": 8
                           },
+                          "conversationQuotes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "sourceItemId",
+                                "sourceRole",
+                                "selectedText"
+                              ],
+                              "properties": {
+                                "sourceItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceLiveItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceRole": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "user"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "assistant"
+                                    }
+                                  ]
+                                },
+                                "selectedText": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-metis-maxUtf8Bytes": 2048
+                                },
+                                "selectedTextTruncated": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 8
+                          },
                           "usage": {
                             "type": "object",
                             "required": [
@@ -26645,6 +26997,53 @@
                                           "additionalProperties": false
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 8
+                              },
+                              "conversationQuotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "sourceItemId",
+                                    "sourceRole",
+                                    "selectedText"
+                                  ],
+                                  "properties": {
+                                    "sourceItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceLiveItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceRole": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "user"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "assistant"
+                                        }
+                                      ]
+                                    },
+                                    "selectedText": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 2048
+                                    },
+                                    "selectedTextTruncated": {
+                                      "type": "boolean"
                                     }
                                   },
                                   "additionalProperties": false
@@ -33861,6 +34260,53 @@
                                       "additionalProperties": false
                                     }
                                   ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 8
+                          },
+                          "conversationQuotes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "sourceItemId",
+                                "sourceRole",
+                                "selectedText"
+                              ],
+                              "properties": {
+                                "sourceItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceLiveItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceRole": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "user"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "assistant"
+                                    }
+                                  ]
+                                },
+                                "selectedText": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-metis-maxUtf8Bytes": 2048
+                                },
+                                "selectedTextTruncated": {
+                                  "type": "boolean"
                                 }
                               },
                               "additionalProperties": false
@@ -53259,6 +53705,45 @@
                     ]
                   },
                   "maxItems": 8
+                },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8000,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 8
                 }
               },
               "additionalProperties": false
@@ -53708,6 +54193,45 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "maxItems": 8
+                },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8000,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
                   },
                   "maxItems": 8
                 },
@@ -54170,6 +54694,45 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "maxItems": 8
+                },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 8000,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
                   },
                   "maxItems": 8
                 }
@@ -62385,6 +62948,53 @@
                         },
                         "maxItems": 8
                       },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -65067,6 +65677,53 @@
                                       "additionalProperties": false
                                     }
                                   ]
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 8
+                          },
+                          "conversationQuotes": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "sourceItemId",
+                                "sourceRole",
+                                "selectedText"
+                              ],
+                              "properties": {
+                                "sourceItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceLiveItemId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 128,
+                                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "sourceRole": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "const": "user"
+                                    },
+                                    {
+                                      "type": "string",
+                                      "const": "assistant"
+                                    }
+                                  ]
+                                },
+                                "selectedText": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "x-metis-maxUtf8Bytes": 2048
+                                },
+                                "selectedTextTruncated": {
+                                  "type": "boolean"
                                 }
                               },
                               "additionalProperties": false
@@ -72283,6 +72940,53 @@
                                   "additionalProperties": false
                                 }
                               ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -83813,6 +84517,53 @@
                         },
                         "maxItems": 8
                       },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -84559,6 +85310,53 @@
                                   "additionalProperties": false
                                 }
                               ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -86768,6 +87566,53 @@
                         },
                         "maxItems": 8
                       },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
                       "usage": {
                         "type": "object",
                         "required": [
@@ -87522,6 +88367,53 @@
                                   "additionalProperties": false
                                 }
                               ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 8
+                      },
+                      "conversationQuotes": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "sourceItemId",
+                            "sourceRole",
+                            "selectedText"
+                          ],
+                          "properties": {
+                            "sourceItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceLiveItemId": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 128,
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                            },
+                            "sourceRole": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "assistant"
+                                }
+                              ]
+                            },
+                            "selectedText": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 2048
+                            },
+                            "selectedTextTruncated": {
+                              "type": "boolean"
                             }
                           },
                           "additionalProperties": false
@@ -90253,6 +91145,53 @@
                   },
                   "maxItems": 8
                 },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceLiveItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 2048
+                      },
+                      "selectedTextTruncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 8
+                },
                 "usage": {
                   "type": "object",
                   "required": [
@@ -90999,6 +91938,53 @@
                             "additionalProperties": false
                           }
                         ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 8
+                },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceLiveItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 2048
+                      },
+                      "selectedTextTruncated": {
+                        "type": "boolean"
                       }
                     },
                     "additionalProperties": false
@@ -93208,6 +94194,53 @@
                   },
                   "maxItems": 8
                 },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceLiveItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 2048
+                      },
+                      "selectedTextTruncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 8
+                },
                 "usage": {
                   "type": "object",
                   "required": [
@@ -93962,6 +94995,53 @@
                             "additionalProperties": false
                           }
                         ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 8
+                },
+                "conversationQuotes": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sourceItemId",
+                      "sourceRole",
+                      "selectedText"
+                    ],
+                    "properties": {
+                      "sourceItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceLiveItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "sourceRole": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "user"
+                          },
+                          {
+                            "type": "string",
+                            "const": "assistant"
+                          }
+                        ]
+                      },
+                      "selectedText": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 2048
+                      },
+                      "selectedTextTruncated": {
+                        "type": "boolean"
                       }
                     },
                     "additionalProperties": false
@@ -96866,6 +97946,53 @@
                     "additionalProperties": false
                   }
                 ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "maxItems": 8
+        },
+        "conversationQuotes": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "sourceItemId",
+              "sourceRole",
+              "selectedText"
+            ],
+            "properties": {
+              "sourceItemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "sourceLiveItemId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 128,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+              },
+              "sourceRole": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "const": "user"
+                  },
+                  {
+                    "type": "string",
+                    "const": "assistant"
+                  }
+                ]
+              },
+              "selectedText": {
+                "type": "string",
+                "minLength": 1,
+                "x-metis-maxUtf8Bytes": 2048
+              },
+              "selectedTextTruncated": {
+                "type": "boolean"
               }
             },
             "additionalProperties": false
@@ -100470,6 +101597,53 @@
                                 },
                                 "maxItems": 8
                               },
+                              "conversationQuotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "sourceItemId",
+                                    "sourceRole",
+                                    "selectedText"
+                                  ],
+                                  "properties": {
+                                    "sourceItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceLiveItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceRole": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "user"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "assistant"
+                                        }
+                                      ]
+                                    },
+                                    "selectedText": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 2048
+                                    },
+                                    "selectedTextTruncated": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 8
+                              },
                               "usage": {
                                 "type": "object",
                                 "required": [
@@ -101216,6 +102390,53 @@
                                           "additionalProperties": false
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 8
+                              },
+                              "conversationQuotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "sourceItemId",
+                                    "sourceRole",
+                                    "selectedText"
+                                  ],
+                                  "properties": {
+                                    "sourceItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceLiveItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceRole": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "user"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "assistant"
+                                        }
+                                      ]
+                                    },
+                                    "selectedText": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 2048
+                                    },
+                                    "selectedTextTruncated": {
+                                      "type": "boolean"
                                     }
                                   },
                                   "additionalProperties": false
@@ -103425,6 +104646,53 @@
                                 },
                                 "maxItems": 8
                               },
+                              "conversationQuotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "sourceItemId",
+                                    "sourceRole",
+                                    "selectedText"
+                                  ],
+                                  "properties": {
+                                    "sourceItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceLiveItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceRole": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "user"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "assistant"
+                                        }
+                                      ]
+                                    },
+                                    "selectedText": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 2048
+                                    },
+                                    "selectedTextTruncated": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 8
+                              },
                               "usage": {
                                 "type": "object",
                                 "required": [
@@ -104179,6 +105447,53 @@
                                           "additionalProperties": false
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 8
+                              },
+                              "conversationQuotes": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "sourceItemId",
+                                    "sourceRole",
+                                    "selectedText"
+                                  ],
+                                  "properties": {
+                                    "sourceItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceLiveItemId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 128,
+                                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    },
+                                    "sourceRole": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "user"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "assistant"
+                                        }
+                                      ]
+                                    },
+                                    "selectedText": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 2048
+                                    },
+                                    "selectedTextTruncated": {
+                                      "type": "boolean"
                                     }
                                   },
                                   "additionalProperties": false
@@ -109380,6 +110695,53 @@
                           "additionalProperties": false
                         }
                       ]
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                "maxItems": 8
+              },
+              "conversationQuotes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "sourceItemId",
+                    "sourceRole",
+                    "selectedText"
+                  ],
+                  "properties": {
+                    "sourceItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceLiveItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "sourceRole": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "user"
+                        },
+                        {
+                          "type": "string",
+                          "const": "assistant"
+                        }
+                      ]
+                    },
+                    "selectedText": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 2048
+                    },
+                    "selectedTextTruncated": {
+                      "type": "boolean"
                     }
                   },
                   "additionalProperties": false

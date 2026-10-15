@@ -731,6 +731,12 @@ export const FileSelectionInputSchema = Type.Union([
 	}),
 ]);
 
+export const ConversationQuoteInputSchema = StrictObject({
+	sourceItemId: OpaqueIdSchema,
+	sourceRole: Type.Union([Type.Literal("user"), Type.Literal("assistant")]),
+	selectedText: Utf8String(32768, { minLength: 1, maxLength: 8000 }),
+});
+
 export const TurnInputSchema = StrictObject({
 	sessionId: SessionIdSchema,
 	// Turn request IDs are scoped to sessionId.
@@ -739,6 +745,7 @@ export const TurnInputSchema = StrictObject({
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
 	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
 	fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
+	conversationQuotes: Type.Optional(Type.Array(ConversationQuoteInputSchema, { maxItems: 8 })),
 });
 
 export const TurnSteerParamsSchema = StrictObject({
@@ -748,6 +755,7 @@ export const TurnSteerParamsSchema = StrictObject({
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
 	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
 	fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
+	conversationQuotes: Type.Optional(Type.Array(ConversationQuoteInputSchema, { maxItems: 8 })),
 	delivery: Type.Union([Type.Literal("steer"), Type.Literal("follow_up")]),
 });
 
