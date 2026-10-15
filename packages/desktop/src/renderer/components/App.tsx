@@ -413,6 +413,7 @@ export function App({ api, store }: AppProps) {
 		if (toolsSidebarClosingTimeoutRef.current) clearTimeout(toolsSidebarClosingTimeoutRef.current);
 	}, []);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
+	const toolsSidebarPreferredWidthRef = useRef(393);
 	// Bumped by the Cmd/Ctrl+W shortcut that the main process forwards.
 	const [closeTabRequest, setCloseTabRequest] = useState(0);
 	// Every mounted SessionChatView registers its own submit here so the shared
@@ -827,6 +828,7 @@ export function App({ api, store }: AppProps) {
 	const toolsSidebarSessionRef = useRef<string | undefined>(undefined);
 	const updateToolsSidebarWidth = useCallback((width: number) => {
 		const clamped = clampToolsSidebarWidth(width);
+		toolsSidebarPreferredWidthRef.current = clamped;
 		setToolsSidebarWidth(clamped);
 		const sessionId = toolsSession?.sessionId;
 		if (sessionId) {
@@ -848,10 +850,22 @@ export function App({ api, store }: AppProps) {
 		} catch {
 			// Fall back to the default width when storage is unavailable.
 		}
+		toolsSidebarPreferredWidthRef.current = stored;
 		setToolsSidebarWidth(clampToolsSidebarWidth(stored));
 	}, [toolsSession?.sessionId]);
+	useEffect(() => {
+		const workspace = document.querySelector<HTMLElement>(".workspace");
+		const sync = () => setToolsSidebarWidth(clampToolsSidebarWidth(toolsSidebarPreferredWidthRef.current));
+		const observer = new ResizeObserver(sync);
+		if (workspace) observer.observe(workspace);
+		window.addEventListener("resize", sync);
+		return () => {
+			observer.disconnect();
+			window.removeEventListener("resize", sync);
+		};
+	}, []);
 	// Session strips stop where the tools column starts so nothing slides under it.
-	const toolsTitlebarReserved = toolsSidebarAvailable ? (toolsSidebarOpen ? toolsSidebarWidth : 0) + 36 : 0;
+	const toolsTitlebarReserved = toolsSidebarAvailable ? (toolsSidebarOpen ? toolsSidebarWidth : 36) : 0;
 	const openKnowledge = useCallback((sessionId: string) => {
 		setKnowledgeRequest({ id: Date.now(), sessionId });
 	}, []);
@@ -1702,8 +1716,8 @@ export function App({ api, store }: AppProps) {
 						theme={resolvedTheme}
 						titlebarTabsSlot={titlebarTabsSlot}
 						titlebarToolsSlot={toolsSidebarAvailable ? titlebarToolsSlot : null}
-						toolsSidebarOpen={toolsSidebarOpen}
-						toolsSidebarClosing={toolsSidebarClosing}
+						toolsSidebarOpen={toolsSidebarAvailable && toolsSidebarOpen}
+						toolsSidebarClosing={toolsSidebarAvailable && toolsSidebarClosing}
 						toolsSidebarWidth={toolsSidebarWidth}
 						onToolsSidebarOpenChange={setToolsSidebar}
 						onToolsSidebarWidthChange={updateToolsSidebarWidth}

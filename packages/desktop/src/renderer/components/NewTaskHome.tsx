@@ -2,7 +2,6 @@ import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
 import {
 	CalendarBlank,
 	CaretDown,
-	CaretDoubleUp,
 	CaretRight,
 	ChartBar,
 	Bug,
@@ -12,7 +11,7 @@ import {
 	Gauge,
 	GitDiff,
 	ListChecks,
-	Lightbulb,
+	DotsThree,
 	MagnifyingGlass,
 	PencilSimple,
 	PresentationChart,
@@ -21,15 +20,14 @@ import {
 	TreeStructure,
 	Wrench,
 } from "@phosphor-icons/react";
-import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
-import { getHomeStarters, pickHomeGreeting, type HomeStarterId } from "../new-task-home-content.ts";
+import { getHomeStarters, pickHomeGreeting, type HomeStarter, type HomeStarterId } from "../new-task-home-content.ts";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import type { ProjectSessionGroup } from "./SessionSidebar.tsx";
-import { SideRays } from "./SideRays.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
@@ -49,6 +47,17 @@ const starterIcons: Record<HomeStarterId, typeof FileText> = {
 	review: GitDiff,
 	test: TestTube,
 	performance: Gauge,
+};
+
+const shortcutLabels: Partial<Record<HomeStarterId, string>> = {
+	report: "Report",
+	slides: "Slides",
+	spreadsheet: "Analyze",
+	research: "Research",
+	feature: "Build",
+	debug: "Debug",
+	explain: "Explore",
+	review: "Review",
 };
 
 let previousGreetingId: string | undefined;
@@ -161,61 +170,16 @@ export function NewTaskHome({
 	const [prefillRequest, setPrefillRequest] = useState<ComposerPrefillRequest>();
 	const prefillSequence = useRef(0);
 	const scrollRef = useRef<HTMLDivElement>(null);
-	const contentRef = useRef<HTMLDivElement>(null);
-	const heroRef = useRef<HTMLDivElement>(null);
-	const discoveryRef = useRef<HTMLButtonElement>(null);
-	const starterRef = useRef<HTMLElement>(null);
+	const moreRef = useRef<HTMLButtonElement>(null);
+	const [moreTasksOpen, setMoreTasksOpen] = useState(false);
+	const additionalTasksId = useId();
 	const starters = getHomeStarters(mode);
 	const scrollBehavior = reducedMotion ? "auto" : "smooth";
 
-	useLayoutEffect(() => {
-		const scroll = scrollRef.current;
-		const content = contentRef.current;
-		const hero = heroRef.current;
-		const discovery = discoveryRef.current;
-		const starters = starterRef.current;
-		if (!scroll || !content || !hero || !discovery || !starters) return;
-		let coverOffset = Number.POSITIVE_INFINITY;
-		let revealOffset = Number.POSITIVE_INFINITY;
-		const updateBackdrop = () => {
-			const covered = String(scroll.scrollTop > coverOffset);
-			if (hero.dataset.covered !== covered) hero.dataset.covered = covered;
-			const hidden = scroll.scrollTop > revealOffset;
-			if (discovery.inert !== hidden) {
-				discovery.inert = hidden;
-				discovery.dataset.hidden = String(hidden);
-			}
-		};
-		const measure = () => {
-			const height = Math.ceil(hero.getBoundingClientRect().height);
-			const startersHeight = Math.ceil(starters.getBoundingClientRect().height);
-			if (height > 0) content.style.setProperty("--home-hero-height", `${height}px`);
-			if (startersHeight > 0) content.style.setProperty("--home-starters-height", `${startersHeight}px`);
-			const stickyTop = Number.parseFloat(getComputedStyle(hero).top);
-			revealOffset = Math.max(0, Number.parseFloat(getComputedStyle(content).paddingTop) - stickyTop);
-			coverOffset = starters.getBoundingClientRect().top - scroll.getBoundingClientRect().top + scroll.scrollTop - stickyTop - height - 16;
-			updateBackdrop();
-		};
-		// Measure wrapping, editor growth and window resizing; CSS owns the scroll motion.
-		const observer = new ResizeObserver(measure);
-		observer.observe(hero);
-		observer.observe(starters);
-		observer.observe(scroll);
-		scroll.addEventListener("scroll", updateBackdrop, { passive: true });
-		measure();
-		return () => {
-			observer.disconnect();
-			scroll.removeEventListener("scroll", updateBackdrop);
-		};
-	}, []);
-
 	const handleStarterClick = (prompt: string) => {
+		setMoreTasksOpen(false);
 		setPrefillRequest({ id: ++prefillSequence.current, text: t(prompt) });
 		scrollRef.current?.scrollTo({ behavior: scrollBehavior, top: 0 });
-	};
-
-	const handleDiscoverClick = () => {
-		starterRef.current?.scrollIntoView({ behavior: scrollBehavior, block: "start" });
 	};
 
 	const handleRecentProjectClick = (cwd: string) => {
@@ -223,13 +187,36 @@ export function NewTaskHome({
 		scrollRef.current?.querySelector<HTMLElement>("#composer-input")?.focus();
 	};
 
+	const renderStarter = (starter: HomeStarter, additional = false) => {
+		const Icon = starterIcons[starter.id];
+		const title = t(starter.title);
+		const label = additional ? title : t(shortcutLabels[starter.id] ?? starter.title);
+		return (
+			<button
+				aria-label={label === title ? title : `${label}: ${title}`}
+				className={`new-task-starter${additional ? " new-task-starter-extra" : ""}`}
+				data-starter-id={starter.id}
+				disabled={busy}
+				key={starter.id}
+				onClick={() => handleStarterClick(starter.prompt)}
+				title={t(starter.description)}
+				type="button"
+			>
+				<Icon aria-hidden="true" size={additional ? 18 : 15} />
+				<span className="new-task-starter-copy">
+					<strong>{label}</strong>
+					{additional && <span>{t(starter.description)}</span>}
+				</span>
+			</button>
+		);
+	};
+
 	return (
 		<section className="new-task-home" data-mode={mode}>
-			<SideRays reducedMotion={reducedMotion} />
 			<div className="new-task-home-scroll" ref={scrollRef}>
-				<div className="new-task-home-content" ref={contentRef}>
+				<div className="new-task-home-content">
 					<div className="new-task-home-hero">
-						<div className="new-task-home-hero-main" ref={heroRef}>
+						<div className="new-task-home-hero-main">
 							<div className="new-task-home-heading">
 								<h1 title={t(greeting.key, { name })}>{t(greeting.key, { name })}</h1>
 							</div>
@@ -259,7 +246,7 @@ export function NewTaskHome({
 									submitDisabled={mode === "code" && folder === null}
 									thinkingControl={thinkingControl}
 								/>
-								<div className="new-task-home-project-control">
+								<div aria-label={t("Workspace")} className="new-task-home-project-control" role="group">
 									{projectControl ?? (
 										<button
 											className="folder-picker"
@@ -277,59 +264,62 @@ export function NewTaskHome({
 							</div>
 						</div>
 					</div>
-					<button className="new-task-home-discovery" onClick={handleDiscoverClick} ref={discoveryRef} type="button">
-						<Lightbulb aria-hidden="true" size={17} />
-						<span className="new-task-home-discovery-label">{t("Explore tasks")}</span>
-						<span>{t("Scroll to explore")}</span>
-						<CaretDoubleUp aria-hidden="true" size={14} />
-					</button>
-					<section className="new-task-starters" aria-label={t("Explore tasks")} ref={starterRef}>
-						{mode === "code" && recentProjects.length > 0 && onSelectRecentProject && (
-							<section className="new-task-recent-projects" aria-labelledby="new-task-recent-projects-title">
-								<h2 id="new-task-recent-projects-title">{t("Recent projects")}</h2>
-								<div className="new-task-recent-project-list">
-									{recentProjects.map((project) => (
-										<button
-											aria-pressed={folder === project.cwd}
-											className="new-task-recent-project"
-											data-selected={folder === project.cwd ? "true" : undefined}
-											disabled={busy || folderLocked}
-											key={project.cwd}
-											onClick={() => handleRecentProjectClick(project.cwd)}
-											title={project.cwd}
-											type="button"
-										>
-											<FolderSimple aria-hidden="true" size={17} />
-											<strong>{project.name}</strong>
-											<span>{project.cwd}</span>
-											<CaretRight aria-hidden="true" size={14} />
-										</button>
-									))}
-								</div>
-							</section>
-						)}
+					<section
+						aria-label={t("Explore tasks")}
+						className="new-task-starters"
+						onKeyDown={(event) => {
+							if (event.key !== "Escape" || !moreTasksOpen) return;
+							event.preventDefault();
+							setMoreTasksOpen(false);
+							moreRef.current?.focus();
+						}}
+					>
 						<div className="new-task-starter-grid">
-							{starters.map((starter) => {
-								const Icon = starterIcons[starter.id];
-								return (
-									<button
-										className="new-task-starter"
-										data-starter-id={starter.id}
-										key={starter.id}
-										type="button"
-										disabled={busy}
-										onClick={() => handleStarterClick(starter.prompt)}
-									>
-										<Icon aria-hidden="true" size={22} />
-										<span className="new-task-starter-copy">
-											<strong>{t(starter.title)}</strong>
-											<span>{t(starter.description)}</span>
-										</span>
-									</button>
-								);
-							})}
+							{starters.slice(0, 4).map((starter) => renderStarter(starter))}
+							<button
+								aria-controls={moreTasksOpen ? additionalTasksId : undefined}
+								aria-expanded={moreTasksOpen}
+								aria-label={t(moreTasksOpen ? "Fewer tasks" : "More tasks")}
+								className="new-task-more-trigger"
+								disabled={busy}
+								onClick={() => setMoreTasksOpen((open) => !open)}
+								ref={moreRef}
+								type="button"
+							>
+								<DotsThree aria-hidden="true" size={17} />
+								<span>{t(moreTasksOpen ? "Less" : "More")}</span>
+							</button>
 						</div>
+						{moreTasksOpen && (
+							<div className="new-task-additional-grid" id={additionalTasksId}>
+								{starters.slice(4).map((starter) => renderStarter(starter, true))}
+							</div>
+						)}
 					</section>
+					{mode === "code" && recentProjects.length > 0 && onSelectRecentProject && (
+						<section className="new-task-recent-projects" aria-labelledby="new-task-recent-projects-title">
+							<h2 id="new-task-recent-projects-title">{t("Recent projects")}</h2>
+							<div className="new-task-recent-project-list">
+								{recentProjects.map((project) => (
+									<button
+										aria-pressed={folder === project.cwd}
+										className="new-task-recent-project"
+										data-selected={folder === project.cwd ? "true" : undefined}
+										disabled={busy || folderLocked}
+										key={project.cwd}
+										onClick={() => handleRecentProjectClick(project.cwd)}
+										title={project.cwd}
+										type="button"
+									>
+										<FolderSimple aria-hidden="true" size={17} />
+										<strong>{project.name}</strong>
+										<span>{project.cwd}</span>
+										<CaretRight aria-hidden="true" size={14} />
+									</button>
+								))}
+							</div>
+						</section>
+					)}
 				</div>
 			</div>
 		</section>

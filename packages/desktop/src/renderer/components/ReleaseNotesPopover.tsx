@@ -1,5 +1,6 @@
 import { BellSimple, CaretDown, X } from "@phosphor-icons/react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
@@ -129,13 +130,31 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
+	const popoverRef = useRef<HTMLElement>(null);
+	const [position, setPosition] = useState<CSSProperties>({});
 	const close = useCallback(() => setOpen(false), []);
+	const updatePosition = useCallback(() => {
+		const rect = triggerRef.current?.getBoundingClientRect();
+		if (!rect) return;
+		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
+		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
+		const width = Math.min(360, Math.max(0, viewportWidth - 16));
+		const left = Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8));
+		const above = Math.max(0, rect.top - 16);
+		const below = Math.max(0, viewportHeight - rect.bottom - 16);
+		setPosition(above >= below
+			? { left, width, bottom: viewportHeight - rect.top + 8, maxHeight: Math.min(480, above) }
+			: { left, width, top: rect.bottom + 8, maxHeight: Math.min(480, below) });
+	}, []);
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		if (!open) return;
+		updatePosition();
+		popoverRef.current?.showPopover?.();
 		closeButtonRef.current?.focus();
 		const onPointerDown = (event: PointerEvent) => {
-			if (!rootRef.current?.contains(event.target as Node)) close();
+			const target = event.target as Node;
+			if (!rootRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
@@ -144,12 +163,16 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
+		window.addEventListener("resize", updatePosition);
+		window.addEventListener("scroll", updatePosition, true);
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
+			window.removeEventListener("resize", updatePosition);
+			window.removeEventListener("scroll", updatePosition, true);
 			if (triggerRef.current?.isConnected) triggerRef.current.focus();
 		};
-	}, [close, open]);
+	}, [close, open, updatePosition]);
 
 	const toggle = () => {
 		if (open) {
@@ -176,12 +199,15 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 				<BellSimple aria-hidden="true" size={17} />
 				{unread && <span aria-hidden="true" className="release-notes-unread-dot" />}
 			</button>
-			{open && (
+			{open && createPortal(
 				<section
 					aria-labelledby="release-notes-title"
 					className="release-notes-popover"
 					id="release-notes-popover"
+					popover="manual"
+					ref={popoverRef}
 					role="dialog"
+					style={position}
 				>
 					<header>
 						<strong id="release-notes-title">{t("What's new")}</strong>
@@ -202,7 +228,7 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 							/>
 						))}
 					</div>
-				</section>
+				</section>, document.body,
 			)}
 		</div>
 	);

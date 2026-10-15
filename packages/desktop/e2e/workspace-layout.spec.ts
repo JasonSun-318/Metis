@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Page } from "@playwright/test";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
 	connectToApp,
 	desktopRoot,
@@ -24,6 +25,7 @@ interface SeedSession {
 	readonly id: string;
 	readonly mode: "chat" | "code";
 	readonly name: string;
+	readonly cwdOrigin?: "managed" | "user-selected";
 	/** A sibling project folder for the session, instead of the shared project. */
 	readonly project?: string;
 }
@@ -50,7 +52,7 @@ async function launchWorkspace(options: {
 	const importEsm = Function("specifier", "return import(specifier)") as (specifier: string) => Promise<Record<string, unknown>>;
 	const sessions = (await importEsm(pathToFileURL(path.join(coreRoot, "session-manager.js")).href)) as unknown as {
 		SessionManager: {
-			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full" }): {
+			create(cwd: string, sessionDir: string, options: { id: string; mode: "chat" | "code"; permissionPreset: "full"; cwdOrigin?: "managed" | "user-selected" }): {
 				appendSessionInfo(name: string): void;
 				close(): void;
 			};
@@ -78,7 +80,7 @@ async function launchWorkspace(options: {
 		const manager = sessions.SessionManager.create(
 			cwd,
 			sessions.getDefaultSessionDir(cwd, agentDir),
-			{ id: seed.id, mode: seed.mode, permissionPreset: "full" },
+			{ id: seed.id, mode: seed.mode, permissionPreset: "full", ...(seed.cwdOrigin ? { cwdOrigin: seed.cwdOrigin } : {}) },
 		);
 		manager.appendSessionInfo(seed.name);
 		manager.close();
@@ -87,6 +89,10 @@ async function launchWorkspace(options: {
 	trustStore.set(projectDir, true);
 
 	const fakeProvider = createServer(async (request, response) => {
+		if (request.method === "GET" && request.url === "/browser-page") {
+			response.writeHead(200, { "content-type": "text/html" }).end("<!doctype html><title>Sidebar page</title><h1>Browser sidebar page</h1>");
+			return;
+		}
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.writeHead(404).end();
 			return;
@@ -108,6 +114,7 @@ async function launchWorkspace(options: {
 		agentDir,
 		homeDir,
 		diagnostics,
+		extraArguments: process.platform === "darwin" ? ["--use-mock-keychain"] : [],
 		env: { METIS_UPDATE_BASE_URL: "", ELECTRON_DISABLE_SECURITY_WARNINGS: "1" },
 	});
 	const { browser, page } = await connectToApp(debuggingPort, app, diagnostics);
@@ -128,18 +135,20 @@ async function stopWorkspace(workspace: LaunchedWorkspace): Promise<void> {
 	await rm(workspace.tempRoot, { recursive: true, force: true }).catch(() => undefined);
 }
 
-/** Opens a tool: an empty sidebar shows launch cards, otherwise the "+" menu. */
+/** Opens a tool from the focused session's browser start page. */
 async function addTool(page: Page, name: string): Promise<void> {
-	if (await page.locator(".tool-sidebar").count() === 0) {
+	if (!await page.locator(".tool-sidebar").isVisible()) {
 		await page.locator(".details-sidebar-toggle").click();
 	}
-	const cards = page.locator(".tool-sidebar-menu");
-	if (await cards.count()) {
-		await cards.getByRole("button", { name, exact: true }).click();
-		return;
+	const cards = page.locator(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu");
+	if (!await cards.count()) {
+		const startTab = page.locator('.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]').first();
+		if (await startTab.count()) await startTab.click();
+		else await page.getByRole("button", { name: "New browser tab", exact: true }).click();
 	}
-	await page.locator(".tool-add-trigger").first().click();
-	await page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true }).click();
+	await expect(cards).toBeVisible();
+	if (name === "Browser") return;
+	await cards.getByRole("button", { name, exact: true }).click();
 }
 
 async function rendererFailure(error: unknown, page: Page, diagnostics: readonly string[]): Promise<Error> {
@@ -148,6 +157,256 @@ async function rendererFailure(error: unknown, page: Page, diagnostics: readonly
 		`${error instanceof Error ? error.message : String(error)}\nrenderer body:\n${bodyText}\n${diagnostics.join("").slice(-8_000)}`,
 	);
 }
+
+async function expectTitlebarControlsAligned(page: Page, fullscreen = false): Promise<void> {
+	const platform = await page.locator("html").getAttribute("data-platform");
+	if (platform === "win32") return;
+	const expectedCenter = platform === "darwin" && !fullscreen ? 23 : 19.5;
+	const controls = await page.locator(".workspace-titlebar").evaluate((titlebar) => {
+		const selectors = [
+			".sessions-sidebar-toggle-fixed", ".details-sidebar-toggle", ".tool-tab", ".tool-tab-group-label",
+			".session-add-trigger", ".tool-add-trigger", ".tool-tab-select > svg", ".tool-tab-close",
+		];
+		return Array.from(titlebar.querySelectorAll<HTMLElement>(selectors.join(",")))
+			.filter((element) => element.getClientRects().length > 0)
+			.map((element) => {
+				const rect = element.getBoundingClientRect();
+				return { control: element.getAttribute("aria-label") ?? element.getAttribute("class"), center: rect.y + rect.height / 2 };
+			});
+	});
+	expect(controls.length).toBeGreaterThanOrEqual(5);
+	for (const { control, center } of controls) {
+		expect(Math.abs(center - expectedCenter), `${control}: center ${center}, expected ${expectedCenter}`).toBeLessThanOrEqual(0.5);
+	}
+	await expect(page.locator(".workspace-titlebar")).toHaveCSS("height", "40px");
+}
+
+test("compact tabs and release notes stay usable when the sidebar is clipped and a new task opens", async ({}, testInfo) => {
+	test.setTimeout(90_000);
+	const sessionId = "81000000-0000-4000-8000-0000000000f1";
+	const workspace = await launchWorkspace({ sessions: [{ id: sessionId, mode: "code", name: "Polish Alpha" }] });
+	const { page } = workspace;
+	try {
+		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await page.getByRole("button", { name: "Polish Alpha", exact: true }).click();
+		const codeIcon = page.getByRole("tab", { name: "Polish Alpha", exact: true }).locator('svg[data-mode="code"]');
+		await expect(codeIcon).toBeVisible();
+		const codeShape = await codeIcon.innerHTML();
+		await expectTitlebarControlsAligned(page);
+		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
+		await expect(page.locator(".session-sidebar")).toHaveCount(0);
+		await expectTitlebarControlsAligned(page);
+		expect(await page.locator('.workspace-tabbar--titlebar').evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-app-region'))).toBe("no-drag");
+		expect(await page.locator('.workspace-tabbar--titlebar .workspace-tabbar-fill').evaluate((element) => getComputedStyle(element).getPropertyValue('-webkit-app-region'))).toBe("drag");
+		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
+		await expect(page.locator(".session-sidebar")).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Polish Alpha", exact: true })).toHaveAttribute("aria-selected", "true");
+		await addTool(page, "Terminal");
+		const terminalId = await page.locator('.terminal-panel[aria-hidden="false"]').getAttribute("id");
+		const sizes = await page.evaluate(() => {
+			const chat = document.querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] .tool-tab.is-active')!;
+			const tool = document.querySelector<HTMLElement>('.tool-sidebar-tabbar .tool-tab.is-active')!;
+			return [chat, tool].map((tab) => ({ height: tab.getBoundingClientRect().height, font: getComputedStyle(tab.querySelector(".tool-tab-select")!).fontSize }));
+		});
+		expect(sizes[0]).toEqual(sizes[1]);
+		await expectTitlebarControlsAligned(page);
+		const panelTop = (await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y;
+		await page.screenshot({ path: testInfo.outputPath("titlebar-aligned-windowed.png"), animations: "disabled" });
+		if (process.platform === "darwin") {
+			// Exercise the renderer's fullscreen layout; native fullscreen is also checked manually.
+			await page.evaluate(() => { document.documentElement.dataset.fullscreen = "true"; });
+			await expectTitlebarControlsAligned(page, true);
+			expect((await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y).toBe(panelTop);
+			await page.screenshot({ path: testInfo.outputPath("titlebar-aligned-fullscreen-layout.png"), animations: "disabled" });
+			await page.evaluate(() => { delete document.documentElement.dataset.fullscreen; });
+			await expectTitlebarControlsAligned(page);
+		}
+		await page.locator(".details-sidebar-toggle").click();
+		await expect(page.locator(".tool-sidebar")).toBeHidden();
+		await expectTitlebarControlsAligned(page);
+		await page.locator(".details-sidebar-toggle").click();
+		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toBeVisible();
+		await expectTitlebarControlsAligned(page);
+		await expect(page.locator(".tool-tab-indicator")).toBeHidden();
+		await page.setViewportSize({ width: 900, height: 700 });
+		await expectTitlebarControlsAligned(page);
+		expect((await page.locator('.terminal-panel[aria-hidden="false"]').boundingBox())!.y).toBe(panelTop);
+		const bell = page.locator(".release-notes-trigger");
+		await bell.click();
+		const notes = page.getByRole("dialog", { name: "What's new", exact: true });
+		await expect(notes).toBeVisible();
+		const box = await notes.boundingBox();
+		const sidebar = await page.locator(".session-sidebar").boundingBox();
+		if (!box || !sidebar) throw new Error("Missing release notes bounds");
+		expect(box.x).toBeGreaterThanOrEqual(8);
+		expect(box.x + box.width).toBeLessThanOrEqual(892);
+		expect(box.y).toBeGreaterThanOrEqual(8);
+		expect(box.y + box.height).toBeLessThanOrEqual(692);
+		expect(box.x + box.width).toBeGreaterThan(sidebar.x + sidebar.width);
+		expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".release-notes-popover")), { x: box.x + box.width - 16, y: box.y + 20 })).toBe(true);
+		await page.screenshot({ path: testInfo.outputPath("release-notes-unclipped.png"), animations: "disabled" });
+		await page.keyboard.press("Escape");
+		await expect(notes).toHaveCount(0);
+		await expect(bell).toBeFocused();
+		await page.getByRole("button", { name: "New task", exact: true }).click();
+		await expect(page.getByRole("tab", { name: "New task", exact: true }).locator('svg[data-mode="code"]')).toBeVisible();
+		await expect(page.locator(".new-task-home")).toHaveCSS("background-color", "rgb(18, 18, 18)");
+		expect(await page.locator(".new-task-home").evaluate((home) => getComputedStyle(home).backgroundColor)).toBe(
+			await page.locator("main.workspace").evaluate((main) => getComputedStyle(main).backgroundColor),
+		);
+		await expect(page.locator(".tool-sidebar")).toBeHidden();
+		const [homeBox, workspaceBox] = await Promise.all([page.locator(".new-task-home").boundingBox(), page.locator("main.workspace").boundingBox()]);
+		if (!homeBox || !workspaceBox) throw new Error("Missing new task layout");
+		expect(homeBox.width).toBeGreaterThanOrEqual(workspaceBox.width - 3);
+		await page.screenshot({ path: testInfo.outputPath("new-task-full-width.png"), animations: "disabled" });
+		await page.getByRole("tab", { name: "Polish Alpha", exact: true }).click();
+		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toHaveAttribute("id", terminalId!);
+		await page.getByRole("button", { name: "Chat", exact: true }).click();
+		await page.getByRole("button", { name: "New task", exact: true }).click();
+		const chatIcon = page.getByRole("tab", { name: "New task", exact: true }).locator('svg[data-mode="chat"]');
+		await expect(chatIcon).toBeVisible();
+		expect(await chatIcon.innerHTML()).not.toBe(codeShape);
+		await page.screenshot({ path: testInfo.outputPath("chat-home-theme-tab-icon.png"), animations: "disabled" });
+		expect(workspace.consoleErrors).toEqual([]);
+	} catch (cause) {
+		throw await rendererFailure(cause, page, workspace.diagnostics);
+	} finally { await stopWorkspace(workspace); }
+});
+
+test("deleting a Chat project preserves a managed task sharing its workspace", async ({}, testInfo) => {
+	test.setTimeout(90_000);
+	const managedId = "81000000-0000-4000-8000-0000000000f2";
+	const selectedId = "81000000-0000-4000-8000-0000000000f3";
+	const sharedProject = path.join("agent", "workspaces", managedId);
+	const workspace = await launchWorkspace({ sessions: [
+		{ id: managedId, mode: "chat", name: "Original temporary task", project: sharedProject, cwdOrigin: "managed" },
+		{ id: selectedId, mode: "chat", name: "Selected Alpha", project: sharedProject },
+		{ id: "81000000-0000-4000-8000-0000000000f4", mode: "chat", name: "Selected Beta", project: sharedProject },
+	] });
+	const { page } = workspace;
+	const marker = path.join(workspace.tempRoot, sharedProject, "keep-task-data.txt");
+	try {
+		await writeFile(marker, "Original task data must survive project deletion");
+		await page.getByRole("button", { name: "Group sessions", exact: true }).click();
+		await page.getByRole("menu", { name: "Session grouping" }).getByRole("menuitem").click();
+		await page.getByRole("menu", { name: "Group sessions" }).getByRole("menuitemradio", { name: "Project", exact: true }).click();
+		await page.getByRole("button", { name: "Selected Alpha", exact: true }).click();
+		const project = page.locator(".project-group").filter({ has: page.getByRole("button", { name: "Selected Alpha", exact: true }) });
+		await project.getByRole("button", { name: "Project actions", exact: true }).focus();
+		await expect(project.locator(".project-action-buttons")).toHaveCSS("opacity", "1");
+		await project.getByRole("button", { name: "Project actions", exact: true }).click();
+		await page.getByRole("menuitem", { name: "Delete", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "Delete Chat project?", exact: true });
+		await expect(dialog.getByText("2 Chat sessions", { exact: false })).toBeVisible();
+		await expect(dialog.getByRole("button", { name: "Move to Trash", exact: true })).toBeEnabled();
+		await page.screenshot({ path: testInfo.outputPath("chat-project-delete-preview.png"), animations: "disabled" });
+		await dialog.getByRole("button", { name: "Move to Trash", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Selected Alpha", exact: true })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Selected Beta", exact: true })).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Original temporary task", exact: true })).toBeVisible();
+		expect(await readFile(marker, "utf8")).toBe("Original task data must survive project deletion");
+		const journals = await page.evaluate(async () => (globalThis as unknown as {
+			metis: MetisDesktopApi;
+		}).metis.listSessions({ includeArchived: true, limit: 200 }));
+		expect(journals.sessions.map((session) => session.sessionId)).toEqual([managedId]);
+		await page.screenshot({ path: testInfo.outputPath("chat-project-deleted-managed-task-kept.png"), animations: "disabled" });
+		expect(workspace.consoleErrors).toEqual([]);
+	} catch (cause) {
+		throw await rendererFailure(cause, page, workspace.diagnostics);
+	} finally { await stopWorkspace(workspace); }
+});
+
+test("browser-style sidebar opens pages, preserves tools, and keeps sessions independent", async ({}, testInfo) => {
+	test.setTimeout(120_000);
+	const first = "81000000-0000-4000-8000-0000000000d1";
+	const second = "81000000-0000-4000-8000-0000000000d2";
+	const workspace = await launchWorkspace({ sessions: [
+		{ id: first, mode: "code", name: "Browser Alpha" },
+		{ id: second, mode: "code", name: "Browser Beta" },
+	] });
+	const { page } = workspace;
+	try {
+		await page.getByRole("button", { name: "Code", exact: true }).click();
+		await page.getByRole("button", { name: "Browser Alpha", exact: true }).click();
+		await page.locator(".details-sidebar-toggle").click();
+		const strip = page.locator(".tool-sidebar-tabbar");
+		await expect(strip.getByRole("tab")).toHaveCount(1);
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .browser-start-page")).toBeVisible();
+		await page.setViewportSize({ width: 1600, height: 1075 });
+		const divider = page.getByRole("separator", { name: "Resize tools sidebar", exact: true });
+		await divider.focus();
+		for (let index = 0; index < 26; index++) await divider.press("ArrowLeft");
+		const capture = async (name: string) => {
+			const header = await page.locator(".workspace-titlebar-tools").boundingBox();
+			const sidebar = await page.locator(".tool-sidebar").boundingBox();
+			if (!header || !sidebar) throw new Error("Missing sidebar screenshot bounds");
+			await page.screenshot({ path: testInfo.outputPath(name), animations: "disabled", clip: {
+				x: sidebar.x, y: header.y, width: sidebar.width, height: sidebar.y + sidebar.height - header.y,
+			} });
+		};
+		await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+		await capture("browser-start-dark.png");
+		await page.screenshot({ path: testInfo.outputPath("browser-workspace-dark.png"), animations: "disabled" });
+		await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+		await capture("browser-start-light.png");
+		await page.evaluate(() => { document.documentElement.dataset.theme = "dark"; });
+		await page.getByRole("button", { name: "New browser tab", exact: true }).click();
+		await expect(strip.getByRole("tab")).toHaveCount(2);
+		const address = workspace.fakeProvider.address();
+		if (!address || typeof address === "string") throw new Error("Missing local browser fixture port");
+		const url = `http://127.0.0.1:${address.port}/browser-page`;
+		const urlInput = page.locator('.browser-panel.is-visible input[aria-label="Browser address"]');
+		await expect(urlInput).toBeFocused();
+		await urlInput.fill(url);
+		await expect(urlInput).toHaveValue(url);
+		await urlInput.press("Enter");
+		await expect(strip.getByRole("tab", { name: "Sidebar page", exact: true })).toBeVisible();
+		await expect.poll(() => workspace.browser.contexts().flatMap((context) => context.pages()).some((candidate) => candidate.url() === url)).toBe(true);
+		const embeddedPage = workspace.browser.contexts().flatMap((context) => context.pages()).find((candidate) => candidate.url() === url)!;
+		await expect(embeddedPage.locator("h1")).toHaveText("Browser sidebar page");
+		await strip.getByRole("tab", { name: "Sidebar page", exact: true }).click({ button: "right" });
+		await expect(page.locator(".workspace-tab-menu")).toBeVisible();
+		await expect(page.locator(".browser-panel.is-visible .browser-view-preview")).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page.locator(".workspace-tab-menu")).toHaveCount(0);
+		await expect(page.locator(".browser-panel.is-visible .browser-view-preview")).toHaveCount(0);
+		await expect(embeddedPage.locator("h1")).toHaveText("Browser sidebar page");
+		await addTool(page, "Terminal");
+		const terminalId = await page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel").getAttribute("id");
+		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
+		await expect(page.locator(".tool-sidebar")).toBeHidden();
+		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute("id", terminalId!);
+		await page.getByRole("button", { name: "Browser Beta", exact: true }).click();
+		await expect(strip.getByRole("tab")).toHaveCount(1);
+		await expect(strip.getByRole("tab", { name: "New tab", exact: true })).toBeVisible();
+		await page.getByRole("button", { name: "Browser Alpha", exact: true }).click();
+		await expect(strip.getByRole("tab")).toHaveCount(3);
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .terminal-panel")).toHaveAttribute("id", terminalId!);
+		await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
+		await page.getByRole("button", { name: "Close Sidebar page", exact: true }).click();
+		const initialBrowser = await page.locator(".browser-panel.is-visible").getAttribute("id");
+		await page.getByRole("button", { name: "Close New tab", exact: true }).click();
+		await expect(strip.getByRole("tab")).toHaveCount(1);
+		await expect(page.locator(".tool-sidebar-panel:not([hidden]) .browser-start-page")).toBeVisible();
+		await expect(page.locator(".browser-panel.is-visible")).not.toHaveAttribute("id", initialBrowser!);
+		await divider.focus();
+		for (let index = 0; index < 34; index++) await divider.press("ArrowRight");
+		await capture("browser-start-narrow.png");
+		await expect(page.locator(".browser-panel.is-visible .browser-start-recent-page")).toContainText("Sidebar page");
+		await page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true }).focus();
+		await expect.poll(() => page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true })
+			.evaluate((button) => getComputedStyle(button).outlineStyle)).toBe("solid");
+		await capture("browser-start-keyboard-focus.png");
+		await expect(page.getByRole("button", { name: "New browser tab", exact: true })).toBeInViewport();
+		expect(workspace.consoleErrors).toEqual([]);
+	} catch (cause) {
+		throw await rendererFailure(cause, page, workspace.diagnostics);
+	} finally {
+		await stopWorkspace(workspace);
+	}
+});
 
 test("terminal keeps its content in the sidebar while chat tabs split", async () => {
 	test.setTimeout(120_000);
@@ -161,6 +420,7 @@ test("terminal keeps its content in the sidebar while chat tabs split", async ()
 	});
 	const { consoleErrors, diagnostics, page } = workspace;
 	try {
+		await page.setViewportSize({ width: 1600, height: 900 });
 		await page.locator('.session-button[aria-label="Layout Alpha"]').click();
 		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 
@@ -195,6 +455,8 @@ test("terminal keeps its content in the sidebar while chat tabs split", async ()
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
 
 		expect(await panelHandle?.evaluate((element) => element.isConnected)).toBe(true);
+		await page.getByRole("tab", { name: "Layout Alpha", exact: true }).click();
+		await page.locator(`[data-active-session-id="${sessionId}"]`).waitFor({ state: "visible" });
 		await expect(page.getByText("Terminal already exists", { exact: false })).toHaveCount(0);
 		await expect(panel.locator(".xterm-rows")).toContainText("p0a-marker");
 
@@ -238,6 +500,7 @@ test("project tab groups collapse from their label and move as one", async () =>
 		await open("Group Beta", beta);
 		await expect(page.locator(".tool-tab-group-label")).toHaveCount(2);
 		await expect.poll(tabNames).toEqual(["Group Alpha One", "Group Alpha Two", "Group Beta"]);
+		await expectTitlebarControlsAligned(page);
 		if (process.env.METIS_AUDIT_DIR) {
 			await mkdir(process.env.METIS_AUDIT_DIR, { recursive: true });
 			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "tab-groups.png") });
@@ -248,6 +511,7 @@ test("project tab groups collapse from their label and move as one", async () =>
 		await page.keyboard.press("Enter");
 		await expect(label("project")).toHaveAttribute("aria-expanded", "false");
 		await expect.poll(tabNames).toEqual(["Group Beta"]);
+		await expectTitlebarControlsAligned(page);
 		if (process.env.METIS_AUDIT_DIR) {
 			await page.screenshot({ path: path.join(process.env.METIS_AUDIT_DIR, "tab-groups-collapsed.png") });
 		}
@@ -268,6 +532,7 @@ test("project tab groups collapse from their label and move as one", async () =>
 		await label("beta-project").dragTo(label("project"), { targetPosition: { x: 2, y: 8 } });
 		await expect.poll(tabNames).toEqual(["Group Beta", "Group Alpha One", "Group Alpha Two"]);
 		await expect(page.locator(".tool-tab-group-label")).toHaveCount(2);
+		await expectTitlebarControlsAligned(page);
 		expect(consoleErrors).toEqual([]);
 	} catch (error) {
 		throw await rendererFailure(error, page, diagnostics);
@@ -376,6 +641,8 @@ test("a file tab keeps workspace authorization after another session is opened",
 		await page.locator('.session-button[aria-label="Files Beta"]').click();
 		await page.locator(`[data-active-session-id="${betaId}"]`).waitFor({ state: "visible" });
 
+		await page.getByRole("tab", { name: "Files Alpha", exact: true }).click();
+		await page.locator(`[data-active-session-id="${alphaId}"]`).waitFor({ state: "visible" });
 		await page.getByRole("tab", { name: "README.md", exact: true }).click();
 		const editor = page.locator(".file-panel.is-visible .cm-content");
 		await editor.click();
@@ -413,6 +680,7 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 			await page.locator(`.session-button[aria-label="${name}"]`).click();
 			await page.locator(`[data-active-session-id="${id}"]`).waitFor({ state: "visible" });
 		};
+		await page.setViewportSize({ width: 1600, height: 900 });
 		await open("Grid Alpha", ids.a!);
 
 		const openTabMenu = async (name: string) => {
@@ -432,14 +700,14 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await menuItem("Split right").click();
 		await expect(page.locator(".workspace-pane")).toHaveCount(2);
 
-		// At 1200x800 with the sidebar visible a third column is too narrow.
+		// At 1600x900 the left and tools sidebars leave room for two columns.
 		await open("Grid Charlie", ids.c!);
 		await openTabMenu("Grid Charlie");
 		await expect(menuItem("Split right")).toBeDisabled();
 		await expect(menuItem("Split right")).toHaveAttribute("title", "Not enough room to split");
 		await page.keyboard.press("Escape");
 
-		await page.setViewportSize({ width: 1600, height: 900 });
+		await page.setViewportSize({ width: 2200, height: 900 });
 		await page.waitForFunction(
 			() => document.querySelector(".session-workspace-panes")!.getBoundingClientRect().width > 1200,
 		);
@@ -448,6 +716,7 @@ test("splits panes into a two-row grid and blocks splits beyond the caps", async
 		await expect(page.locator(".workspace-row").first().locator(".workspace-pane")).toHaveCount(3);
 
 		for (const [name, id] of [["Grid Delta", ids.d], ["Grid Echo", ids.e], ["Grid Foxtrot", ids.f]] as const) {
+			await page.getByRole("tab", { name: "Grid Charlie", exact: true }).click();
 			await open(name, id!);
 			await openTabMenu(name);
 			await menuItem("Split down").click();

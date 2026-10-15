@@ -255,37 +255,50 @@ async function resolvedColor(page: Page, property: string): Promise<string> {
 	}, property);
 }
 
-/** The panel of the focused tab; tools are workspace tabs now, not a separate sidebar. */
+/** The focused conversation panel. */
 function visiblePanel(page: Page): Locator {
 	return page.locator(".workspace-panel:not([hidden])").first();
 }
 
-/** Opens a tool: an empty sidebar shows launch cards, otherwise the "+" menu. */
-async function openTool(page: Page, name: string): Promise<void> {
-	if (await page.locator(".tool-sidebar").count() === 0) {
-		await page.locator(".details-sidebar-toggle").click();
-	}
-	const cards = page.locator(".tool-sidebar-menu");
-	if (await cards.count()) {
-		await cards.getByRole("button", { name, exact: true }).click();
-		return;
-	}
-	await page.locator(".workspace-titlebar .tool-add-trigger").first().click();
-	const item = page.locator(".tool-add-menu").getByRole("menuitem", { name, exact: true });
-	await expect(item).toBeEnabled();
-	await item.click();
+function visibleToolPanel(page: Page): Locator {
+	return page.locator(".tool-sidebar-panel:not([hidden])").first();
 }
 
-/** A lone pane spans the workspace, so the window width sets the tool panel width. */
+/** Opens a tool from the focused session's browser start page. */
+async function openTool(page: Page, name: string): Promise<void> {
+	if (!await page.locator(".tool-sidebar").isVisible()) {
+		await page.locator(".details-sidebar-toggle").click();
+	}
+	const cards = page.locator(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu");
+	if (!await cards.count()) {
+		const startTab = page.locator('.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]').first();
+		if (await startTab.count()) await startTab.click();
+		else await page.getByRole("button", { name: "New browser tab", exact: true }).click();
+	}
+	await expect(cards).toBeVisible();
+	if (name === "Browser") return;
+	await cards.getByRole("button", { name, exact: true }).click();
+}
+
+/** Resize the tool column through its divider, retaining enough chat space. */
 async function resizeWorkspacePanel(page: Page, targetWidth: number): Promise<void> {
-	const height = page.viewportSize()?.height ?? 840;
-	// Collapsing the sessions sidebar animates the shell grid; measure once it settles.
+	const viewport = page.viewportSize() ?? { width: 1280, height: 840 };
 	await page.locator(".app-shell").evaluate(async (element) => {
 		await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
 	});
 	const workspaceX = Math.round((await page.locator(".workspace").boundingBox())?.x ?? 0);
-	await page.setViewportSize({ width: workspaceX + targetWidth, height });
-	await expect.poll(async () => Math.round((await visiblePanel(page).boundingBox())?.width ?? 0)).toBe(targetWidth);
+	const sidebarWidth = targetWidth + 1;
+	await page.setViewportSize({ width: Math.max(viewport.width, workspaceX + Math.ceil(sidebarWidth / .85), workspaceX + sidebarWidth + 288), height: viewport.height });
+	const current = await page.locator(".tool-sidebar").boundingBox();
+	const divider = await page.getByRole("separator", { name: "Resize tools sidebar", exact: true }).boundingBox();
+	if (!current || !divider) throw new Error("Missing tool sidebar divider");
+	const x = divider.x + divider.width / 2;
+	const y = divider.y + divider.height / 2;
+	await page.mouse.move(x, y);
+	await page.mouse.down();
+	await page.mouse.move(x + current.width - sidebarWidth, y);
+	await page.mouse.up();
+	await expect.poll(async () => Math.round((await visibleToolPanel(page).boundingBox())?.width ?? 0)).toBe(targetWidth);
 }
 
 async function codeEditorText(editor: Locator): Promise<string> {
@@ -645,11 +658,11 @@ test("packaged task list uses the Metis composer UI in Chat and Code", async ({}
 		await expect(page.locator(".workspace-titlebar")).toHaveAttribute("data-active-session-id", COMPLETED_TASK_ID);
 		await expect(page.getByRole("region", { name: "Tasks", exact: true })).toHaveCount(0);
 
-		phase = "checking packaged New Task side rays";
+		phase = "checking packaged centered New Task home";
 		await page.getByRole("button", { name: "New task", exact: true }).click();
 		await expect(visiblePanel(page).locator(".new-task-home")).toBeVisible();
-		await expect(page.locator(".new-task-side-rays canvas")).toBeVisible();
-		await page.locator(".new-task-home").screenshot({ path: testInfo.outputPath("new-task-side-rays.png") });
+		await expect(page.locator(".new-task-home-backdrop")).toHaveCount(0);
+		await page.locator(".new-task-home").screenshot({ path: testInfo.outputPath("new-task-centered-home.png") });
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(
@@ -2935,12 +2948,12 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await page.getByRole("button", { name: "Back to agents", exact: true }).click();
 		await resizeWorkspacePanel(page, 392);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "Add tool", exact: true }).first()).toBeInViewport();
-		await visiblePanel(page).screenshot({ path: path.join(qaDir, "list-392x986.png") });
+		await expect(page.getByRole("button", { name: "New browser tab", exact: true }).first()).toBeInViewport();
+		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "list-392x986.png") });
 		await resizeWorkspacePanel(page, 280);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "Add tool", exact: true })).toBeInViewport();
-		await visiblePanel(page).screenshot({ path: path.join(qaDir, "list-280x986.png") });
+		await expect(page.getByRole("button", { name: "New browser tab", exact: true })).toBeInViewport();
+		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "list-280x986.png") });
 		await resizeWorkspacePanel(page, 392);
 
 		phase = "opening the child transcript";
@@ -2964,11 +2977,11 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		await transcript.locator(".code-execution").last().locator(".code-command > summary").last().click();
 		await expect(transcript.getByText("Packaged tool output", { exact: true })).toBeVisible();
 		expect(await transcript.locator(".code-command-output").evaluate((element) => getComputedStyle(element).overflow)).toBe("auto");
-		await visiblePanel(page).screenshot({ path: path.join(qaDir, "detail-392x986.png") });
+		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-392x986.png") });
 		await page.setViewportSize({ width: 1280, height: 938 });
 		await resizeWorkspacePanel(page, 856);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await visiblePanel(page).screenshot({ path: path.join(qaDir, "detail-856x924.png") });
+		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "detail-856x924.png") });
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged child completed");
 		await expect(page.locator(".conversation-column")).not.toContainText("Packaged tool output");
 
@@ -2995,7 +3008,7 @@ test("packaged Code agent sidebar lists durable work and opens its transcript", 
 		phase = "checking a narrow app window";
 		await page.setViewportSize({ width: 900, height: 640 });
 		expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
-		await expect(page.getByRole("button", { name: "Add tool", exact: true }).first()).toBeInViewport();
+		await expect(page.getByRole("button", { name: "New browser tab", exact: true }).first()).toBeInViewport();
 		await page.screenshot({ path: path.join(qaDir, "narrow-window-900x640.png") });
 
 		phase = "restoring the child after app restart";
@@ -3098,10 +3111,10 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		}, terminalId);
 		await expect(page.locator('.terminal-panel[aria-hidden="false"] .xterm-rows')).toContainText("METIS_TERMINAL_E2E");
 		// The add button follows the last tab in the strip.
-		const strip = page.locator(".workspace-titlebar .workspace-tabbar").first();
+		const strip = page.locator(".tool-sidebar-tabbar");
 		const [lastTabBox, addButtonBox] = await Promise.all([
 			strip.locator(".tool-tab").last().boundingBox(),
-			strip.getByRole("button", { name: "Add tool", exact: true }).boundingBox(),
+			strip.getByRole("button", { name: "New browser tab", exact: true }).boundingBox(),
 		]);
 		if (!lastTabBox || !addButtonBox) throw new Error("Terminal tab strip geometry is missing");
 		const addGap = addButtonBox.x - lastTabBox.x - lastTabBox.width;
@@ -3111,9 +3124,8 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 
 		phase = "adding terminal tabs";
 		const tabsWithOneTerminal = await page.getByRole("tab").count();
-		await clickCenter(page, strip.getByRole("button", { name: "Add tool", exact: true }));
-		await page.screenshot({ path: path.join(qaDir, "add-tool-menu-1280x840.png") });
-		await page.locator(".tool-add-menu").getByRole("menuitem", { name: "Terminal", exact: true }).click();
+		await openTool(page, "Terminal");
+		await page.screenshot({ path: path.join(qaDir, "second-terminal-1280x840.png") });
 		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal + 1);
 		await page.screenshot({ path: path.join(qaDir, "two-terminals-1280x840.png") });
 
@@ -3125,7 +3137,7 @@ test("packaged terminal sidebar runs a real PTY and keeps independent tabs", asy
 		await expect(page.locator('.terminal-panel[aria-hidden="false"]')).toHaveCount(1);
 		await page.getByRole("button", { name: "Close Terminal 2", exact: true }).click();
 		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal);
-		await visiblePanel(page).screenshot({ path: path.join(qaDir, "single-terminal-panel.png") });
+		await visibleToolPanel(page).screenshot({ path: path.join(qaDir, "single-terminal-panel.png") });
 		await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
 		await expect(page.getByRole("tab")).toHaveCount(tabsWithOneTerminal - 1);
 		expect(consoleErrors).toEqual([]);
@@ -3200,10 +3212,10 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 			await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
 		});
 		await openTool(page, "Files");
-		const panel = visiblePanel(page);
-		// A lone pane's tool panel spans the whole workspace.
+		const panel = visibleToolPanel(page);
+		// Files stay in their own sidebar beside the conversation.
 		const workspaceWidth = Math.round((await page.locator(".workspace").boundingBox())?.width ?? 0);
-		await expect.poll(async () => Math.round((await panel.boundingBox())?.width ?? 0)).toBe(workspaceWidth);
+		expect(Math.round((await panel.boundingBox())?.width ?? 0)).toBeLessThan(workspaceWidth);
 		expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
 		await panel.screenshot({ path: path.join(qaDir, "open-file-default-width.png") });
 		const readme = page.locator('.file-tree-row [title="README.md"]');
@@ -3240,11 +3252,11 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		await readme.dblclick();
 		await expect(page.locator(".tool-tab.is-preview")).toHaveCount(0);
 		await page.locator('.file-tree-row [title="notes.txt"]').click();
-		// Two file tabs plus the session's own chat tab.
-		await expect(page.getByRole("tab")).toHaveCount(3);
+		// Two file tabs, the browser start tab, and the conversation.
+		await expect(page.getByRole("tab")).toHaveCount(4);
 		await expect(page.locator(".tool-tab.is-preview")).toHaveCount(1);
 		await readme.click();
-		await expect(page.getByRole("tab")).toHaveCount(3);
+		await expect(page.getByRole("tab")).toHaveCount(4);
 		await editor.fill("# Saved from Metis\n");
 		await expect(page.locator(".tool-tab.is-dirty")).toHaveCount(1);
 		await editor.press("Meta+s");
@@ -3330,7 +3342,7 @@ test("packaged Code files edit the authorized workspace with safe saves and prev
 		const closeBinary = page.getByRole("button", { name: "Close binary.bin", exact: true });
 		await page.locator(".tool-tab", { has: closeBinary }).hover();
 		await closeBinary.click();
-		await expect(page.getByRole("tab")).toHaveCount(2);
+		await expect(page.getByRole("tab")).toHaveCount(3);
 		await page.setViewportSize({ width: 1220, height: 938 });
 		await resizePanel(904);
 		[previewBox, treeBox] = await Promise.all([
@@ -3438,7 +3450,7 @@ test("packaged Code review lazily renders diffs and keeps folder-controlled deta
 		phase = "opening collapsed review files";
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
 		await openTool(page, "Review");
-		const panel = visiblePanel(page);
+		const panel = visibleToolPanel(page);
 		const fileHeaders = page.locator(".review-file-header");
 		await expect(page.locator(".review-details")).toHaveCount(0);
 		await expect(fileHeaders).toHaveCount(178);
@@ -3637,8 +3649,8 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await openTool(page, "Browser");
 		await expect(page.getByRole("tab", { name: "New tab", exact: true })).toBeVisible();
 		await expect(page.getByRole("textbox", { name: "Browser address", exact: true })).toBeVisible();
-		await expect(page.getByText("Start browsing", { exact: true })).toBeVisible();
-		const panel = visiblePanel(page);
+		await expect(page.locator(".browser-start-page")).toBeVisible();
+		const panel = visibleToolPanel(page);
 		expect(await panel.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0);
 		await page.screenshot({ path: path.join(qaDir, "empty-1280x840.png") });
 		// A narrow panel drops the Forward button without overflowing.
@@ -3649,6 +3661,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await page.screenshot({ path: path.join(qaDir, "empty-narrow-330x840.png") });
 		await page.setViewportSize({ width: 1280, height: 840 });
 		await page.getByRole("button", { name: "Show sessions sidebar", exact: true }).click();
+		await resizeWorkspacePanel(page, 392);
 
 		phase = "navigating a real WebContentsView";
 		const address = page.getByRole("textbox", { name: "Browser address", exact: true });
@@ -3665,9 +3678,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		const embeddedWidth = await embeddedPage.evaluate(() => window.innerWidth);
 		const anchorWidth = await anchor.evaluate((element) => Math.round(element.getBoundingClientRect().width));
 		expect(Math.abs(embeddedWidth - anchorWidth)).toBeLessThanOrEqual(1);
-		// Widening the workspace (sessions sidebar hidden) must resize the native page view with its panel.
+		// The browser follows its sidebar column when the sessions column changes.
 		await page.getByRole("button", { name: "Hide sessions sidebar", exact: true }).click();
-		await expect.poll(() => embeddedPage!.evaluate(() => window.innerWidth)).toBeGreaterThan(embeddedWidth);
+		await expect.poll(() => embeddedPage!.evaluate(() => window.innerWidth)).toBe(embeddedWidth);
 		// The shell animates the collapse; once it settles the native view must match its anchor exactly.
 		await page.locator(".app-shell").evaluate(async (element) => {
 			await Promise.all(element.getAnimations({ subtree: false }).map((animation) => animation.finished));
@@ -3710,9 +3723,9 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await embeddedPage.screenshot({ path: path.join(qaDir, "loaded-page-1280x840.png") });
 
 		phase = "preserving the browser while collapsed";
-		await page.locator(".workspace-titlebar").getByRole("tab").first().click();
+		await page.getByRole("button", { name: "Hide tools sidebar", exact: true }).click();
 		await expect(page.getByRole("textbox", { name: "Browser address", exact: true })).toBeHidden();
-		await page.getByRole("tab", { name: "Metis Browser Fixture", exact: true }).click();
+		await page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
 		await expect(page.getByRole("tab", { name: "Metis Browser Fixture", exact: true })).toBeVisible();
 		expect(embeddedPage.isClosed()).toBe(false);
 		await expect(embeddedPage).toHaveURL(`${fixtureOrigin}/set-cookie`);
@@ -3764,7 +3777,7 @@ test("packaged browser sidebar loads real pages and persists its isolated profil
 		await expect(page.locator(".browser-view-preview")).toBeVisible();
 		const [actionsMenuBox, restartedPanelBox] = await Promise.all([
 			actionsMenu.boundingBox(),
-			visiblePanel(page).boundingBox(),
+			visibleToolPanel(page).boundingBox(),
 		]);
 		expect(actionsMenuBox).not.toBeNull();
 		expect(restartedPanelBox).not.toBeNull();
@@ -4499,7 +4512,7 @@ test("packaged Code project setup creates and opens a project", async () => {
 		const canonicalCodeProjectDir = await realpath(codeProjectDir);
 		const projectPicker = page.locator(".home-project-picker-code");
 		await expect(projectPicker).toHaveAttribute("data-folder-selected", "true");
-		await expect(projectPicker.getByRole("button", { name: "Choose folder" })).toHaveAttribute("title", canonicalCodeProjectDir);
+		await expect(projectPicker.getByRole("button", { name: "Choose workspace" })).toHaveAttribute("title", canonicalCodeProjectDir);
 		await page.getByRole("button", { name: "New task", exact: true }).click();
 		await page.getByRole("button", { name: "Create a new project", exact: true }).click();
 		await expect(page.getByRole("dialog", { name: "Start a new project" })).toBeVisible();

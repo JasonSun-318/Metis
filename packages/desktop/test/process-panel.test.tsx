@@ -20,6 +20,7 @@ vi.mock("@xterm/xterm", () => ({ Terminal: class {
 	dispose() { this.disposed = true; }
 } }));
 vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({ UniversalFilePreviewer: () => null }));
+vi.mock("../src/renderer/components/BrowserPanel.tsx", () => ({ BrowserPanel: () => null }));
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 let root: Root;
@@ -109,7 +110,7 @@ describe("Process workspace tab", () => {
 		expect(terminals.at(-1)?.output).toBe("first\nsecond\n");
 		expect(container.querySelector('[role="status"]')?.textContent).toBe("Command completed");
 		await render(command("two"), sessionId, mode);
-		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+			expect(container.querySelectorAll('[role="tab"]')).toHaveLength(3);
 		expect(terminals[0]?.disposed).toBe(true);
 		expect(terminals.at(-1)?.output).toBe("");
 		expect(api.createTerminal).not.toHaveBeenCalled();

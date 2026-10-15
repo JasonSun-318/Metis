@@ -27,7 +27,7 @@ describe("Sidebar geometry and workspace grid styles", () => {
 
 	it("keeps one fixed left sidebar toggle aligned with the platform title controls", () => {
 		const fixedButton = rule(".workspace-titlebar .sessions-sidebar-toggle-fixed");
-		expect(fixedButton.top).toBe("7px");
+		expect(fixedButton.top).toBe("calc(var(--titlebar-control-center-y) - 14px)");
 		expect(fixedButton.left).toBe("18px");
 		expect(
 			rule(
@@ -69,8 +69,9 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(actionButtons.borderRadius).toBe("7px");
 
 		expect(css).toMatch(
-			/\.workspace-tabbar--titlebar\s*\{[^}]*border-bottom:\s*none[^}]*-webkit-app-region:\s*drag/u,
+			/\.workspace-tabbar--titlebar\s*\{[^}]*border-bottom:\s*none[^}]*-webkit-app-region:\s*no-drag/u,
 		);
+		expect(css).toMatch(/\.workspace-tabbar-fill\s*\{[^}]*-webkit-app-region:\s*drag/u);
 	});
 
 	it("keeps the release bell beside the account footer's update check", () => {
@@ -78,10 +79,8 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(control.position).toBe("relative");
 		expect(control.flex).toBe("0 0 auto");
 
-		const popover = rule(".sidebar-footer .release-notes-popover");
-		expect(popover.bottom).toBe("calc(100% + 8px)");
-		expect(popover.left).toBe("0px");
 		const base = rule(".release-notes-popover");
+		expect(base.position).toBe("fixed");
 		expect(base.maxHeight).toContain("480px");
 		expect(base.boxShadow).toBe("var(--overlay-shadow)");
 	});

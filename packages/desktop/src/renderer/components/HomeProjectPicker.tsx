@@ -26,7 +26,7 @@ export function HomeProjectPicker({
 	onCreateProject,
 }: HomeProjectPickerProps) {
 	const { t } = useTranslation();
-	const folderLabel = folder ? projectName(folder) : t("Choose folder");
+	const folderLabel = folder ? projectName(folder) : t("Choose workspace");
 
 	return (
 		<div
@@ -35,11 +35,11 @@ export function HomeProjectPicker({
 			data-folder-locked={folderLocked ? "true" : undefined}
 		>
 			<button
-				aria-label={t("Choose folder")}
+				aria-label={t("Choose workspace")}
 				className="folder-picker home-project-picker-browse"
 				disabled={busy || folderLocked}
 				onClick={() => void onChooseFolder()}
-				title={folder ?? t("Choose folder")}
+				title={folder ?? t("Choose workspace")}
 				type="button"
 			>
 				<FolderSimple aria-hidden="true" size={16} />

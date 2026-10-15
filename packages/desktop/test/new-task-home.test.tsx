@@ -6,13 +6,10 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectSessionGroup } from "../src/renderer/components/SessionSidebar.tsx";
 import { NewTaskHome, recentProjectsFromGroups } from "../src/renderer/components/NewTaskHome.tsx";
+import { HomeProjectPicker } from "../src/renderer/components/HomeProjectPicker.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomeStarters } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
-
-vi.mock("../src/renderer/components/SideRays.tsx", () => ({
-	SideRays: () => null,
-}));
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -64,8 +61,8 @@ async function renderHome(mode: "chat" | "code", extra: Record<string, unknown> 
 		root.render(
 			<NewTaskHome
 				{...props(mode)}
-				{...extra}
 				projectControl={<button data-testid="project-control" type="button">Choose project</button>}
+				{...extra}
 			/>,
 		);
 	});
@@ -86,8 +83,8 @@ describe("NewTaskHome", () => {
 	});
 
 	it.each([
-		["chat", ".composer-chat", 9],
-		["code", ".composer-chat", 6],
+		["chat", ".composer-chat", 4],
+		["code", ".composer-chat", 4],
 	] as const)("uses the shared home structure for %s mode", async (mode, composerSelector, starterCount) => {
 		const { container, root } = await renderHome(mode);
 		try {
@@ -102,6 +99,82 @@ describe("NewTaskHome", () => {
 		} finally {
 			await act(async () => root.unmount());
 		}
+	});
+
+	it.each(["chat", "code"] as const)("keeps the workspace bar and its %s actions visible", async (mode) => {
+		const onChooseFolder = vi.fn(async () => undefined);
+		const onClearFolder = vi.fn();
+		const onCreateProject = vi.fn();
+		const { container, root } = await renderHome(mode, {
+			folder: "/work/metis",
+			projectControl: <HomeProjectPicker busy={false} folder="/work/metis" folderLocked={false} mode={mode}
+				onChooseFolder={onChooseFolder} onClearFolder={onClearFolder} onCreateProject={onCreateProject} />,
+		});
+		try {
+			const bar = container.querySelector('.new-task-home-project-control[aria-label="Workspace"]')!;
+			const choose = bar.querySelector<HTMLButtonElement>('[aria-label="Choose workspace"]')!;
+			expect(choose.title).toBe("/work/metis");
+			expect(choose.textContent).toBe("metis");
+			await act(async () => choose.click());
+			expect(onChooseFolder).toHaveBeenCalledOnce();
+			const action = bar.querySelector<HTMLButtonElement>(mode === "code"
+				? '[aria-label="Create a new project"]' : '[aria-label="No project context"]')!;
+			await act(async () => action.click());
+			expect(mode === "code" ? onCreateProject : onClearFolder).toHaveBeenCalledOnce();
+		} finally { await act(async () => root.unmount()); }
+	});
+
+	it.each([{ busy: true, folderLocked: false }, { busy: false, folderLocked: true }])("preserves locked workspace controls (%j)", async (status) => {
+		const onChooseFolder = vi.fn(async () => undefined);
+		const { container, root } = await renderHome("code", {
+			...status,
+			projectControl: <HomeProjectPicker {...status} folder="/work/metis" mode="code"
+				onChooseFolder={onChooseFolder} onCreateProject={vi.fn()} />,
+		});
+		try {
+			for (const button of container.querySelectorAll<HTMLButtonElement>(".home-project-picker button")) expect(button.disabled).toBe(true);
+			expect(onChooseFolder).not.toHaveBeenCalled();
+		} finally { await act(async () => root.unmount()); }
+	});
+
+	it("expands additional tasks without changing the draft, then prefills without submitting", async () => {
+		Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: vi.fn() });
+		const onSubmit = vi.fn(async () => undefined);
+		const { container, root } = await renderHome("chat", { onSubmit });
+		try {
+			const editor = container.querySelector<HTMLElement>("#composer-input")!;
+			await act(async () => {
+				editor.textContent = "My draft";
+				editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+			});
+			const more = container.querySelector<HTMLButtonElement>(".new-task-more-trigger")!;
+			expect(more.getAttribute("aria-expanded")).toBe("false");
+			await act(async () => more.click());
+			expect(editor.textContent).toBe("My draft");
+			expect(more.getAttribute("aria-expanded")).toBe("true");
+			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(9);
+			await act(async () => {
+				container.querySelector<HTMLButtonElement>('[data-starter-id="document"]')!.click();
+				await flush();
+			});
+			expect(editor.textContent).toContain(getHomeStarters("chat")[4]!.prompt);
+			expect(document.activeElement).toBe(editor);
+			expect(more.getAttribute("aria-expanded")).toBe("false");
+			expect(onSubmit).not.toHaveBeenCalled();
+		} finally { await act(async () => root.unmount()); }
+	});
+
+	it("returns keyboard focus to More tasks when Escape closes the additional tasks", async () => {
+		const { container, root } = await renderHome("code");
+		try {
+			const more = container.querySelector<HTMLButtonElement>(".new-task-more-trigger")!;
+			await act(async () => more.click());
+			const last = container.querySelector<HTMLButtonElement>('[data-starter-id="performance"]')!;
+			last.focus();
+			await act(async () => last.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+			expect(more.getAttribute("aria-expanded")).toBe("false");
+			expect(document.activeElement).toBe(more);
+		} finally { await act(async () => root.unmount()); }
 	});
 
 	it("opens the knowledge sidebar through the plus menu before the first message", async () => {
@@ -238,16 +311,12 @@ describe("NewTaskHome", () => {
 		}
 	});
 
-	it("smoothly reveals the starter cards and uses auto motion when reduced", async () => {
-		const scrollIntoView = vi.fn();
-		Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
-			configurable: true,
-			value: scrollIntoView,
-		});
-		const { container, root } = await renderHome("chat", { reducedMotion: true });
+	it("keeps task shortcuts disabled while the new task is preparing", async () => {
+		const { container, root } = await renderHome("chat", { busy: true });
 		try {
-			await act(async () => container.querySelector<HTMLButtonElement>(".new-task-home-discovery")!.click());
-			expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ behavior: "auto" }));
+			for (const button of container.querySelectorAll<HTMLButtonElement>(".new-task-starter, .new-task-more-trigger")) {
+				expect(button.disabled).toBe(true);
+			}
 		} finally {
 			await act(async () => root.unmount());
 		}

@@ -1,4 +1,6 @@
 import { existsSync } from "node:fs";
+import { readFile, readdir } from "node:fs/promises";
+import path from "node:path";
 import { expect, test } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import {
@@ -41,6 +43,211 @@ const PERFORMANCE_ACTIONS = 100;
 async function waitForDone(app: RunningBrowserAgentApp, marker: string): Promise<void> {
 	await expect(app.page.getByText(`done:${marker}`, { exact: true })).toBeVisible({ timeout: 60_000 });
 }
+
+test("visible browser keeps its viewport stable, actually navigates links, and marks stale clicks as errors", async ({}, testInfo) => {
+	test.setTimeout(90_000);
+	const fixture = await createBrowserAgentFixture();
+	const environment = await createBrowserAgentEnvironment(fixture.providerPort);
+	let app: RunningBrowserAgentApp | undefined;
+	let browserId = "";
+	let oldObservation = "";
+	try {
+		fixture.setScript("navigation-setup", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
+			if (step === 1) {
+				browserId = String(tabs(lastResult).at(-1)!.browserId);
+				return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/navigation` } };
+			}
+			return { text: "done:navigation-setup" };
+		});
+		fixture.setScript("stable-viewport", ({ step, lastResult }) => {
+			if (step === 0 || step % 2 === 0 && step < 8) return { tool: "browser_observe", arguments: { browserId } };
+			if (step < 8) {
+				const { observation, ...scope } = observationInput(lastResult);
+				return { tool: "browser_act", arguments: { ...scope, intent: "Keep fixture viewport stable", risk: "ordinary",
+					action: { type: "hover", target: { elementId: elementId(observation.state, "Open destination") } } } };
+			}
+			return { text: "done:stable-viewport" };
+		});
+		for (const [marker, name, source] of [
+			["navigate-visible", "Open destination", "visible"],
+			["navigate-below-fold", "Open lower destination", "below-fold"],
+		]) {
+			fixture.setScript(marker!, ({ step, lastResult, origin }) => {
+				if (step === 0) return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/navigation` } };
+				if (step === 1) return { tool: "browser_observe", arguments: { browserId } };
+				if (step === 2) {
+					oldObservation = lastResult;
+					const { observation, ...scope } = observationInput(lastResult);
+					return { tool: "browser_act", arguments: { ...scope, intent: "Open the fixture destination", risk: "ordinary",
+						action: JSON.stringify({ type: "click", target: { elementId: elementId(observation.state, name!) } }) } };
+				}
+				expect(parseToolJson(lastResult).url).toBe(`${origin}/navigation-done?from=${source}`);
+				return { text: `done:${marker}` };
+			});
+		}
+		fixture.setScript("visible-stale", ({ step }) => {
+			if (step === 0) {
+				const { observation, ...scope } = observationInput(oldObservation);
+				return { tool: "browser_act", arguments: { ...scope, intent: "Reject a previous document click", risk: "ordinary",
+					action: { type: "click", target: { elementId: elementId(observation.state, "Open destination") } } } };
+			}
+			return { text: "done:visible-stale" };
+		});
+		app = await launchBrowserAgentApp(environment);
+		await sendFixturePrompt(app.page, "navigation-setup");
+		await waitForDone(app, "navigation-setup");
+		const showTools = app.page.getByRole("button", { name: "Show tools sidebar", exact: true });
+		if (await showTools.isVisible()) await showTools.click();
+		await app.page.getByRole("tab", { name: "Metis browser fixture", exact: true }).click();
+		const panel = app.page.locator(`#browser-panel-${browserId}`);
+		await expect(panel).toBeVisible();
+		await expect(panel.getByRole("status", { name: "Browser automation active" })).toHaveCount(0);
+		const target = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url() === `${fixture.origin}/navigation`);
+		if (!target) throw new Error("Visible navigation fixture missing");
+		const cdp = await target.context().newCDPSession(target);
+		await cdp.send("Page.enable");
+		let resizeEvents = 0;
+		cdp.on("Page.frameResized", () => { resizeEvents += 1; });
+		await app.page.evaluate((id) => {
+			const panel = document.getElementById(`browser-panel-${id}`)!;
+			const anchor = panel.querySelector(".browser-view-anchor")!;
+			const state = window as typeof window & { __navigationGeometry: Array<{ active: boolean; bounds: number[] }> };
+			state.__navigationGeometry = [];
+			const sample = () => {
+				const rect = anchor.getBoundingClientRect();
+				state.__navigationGeometry.push({ active: Boolean(panel.querySelector(".browser-control-bar[role=status]")), bounds: [rect.x, rect.y, rect.width, rect.height] });
+			};
+			sample();
+			new MutationObserver(sample).observe(panel, { attributes: true, childList: true, subtree: true });
+			new ResizeObserver(sample).observe(anchor);
+		}, browserId);
+		await sendFixturePrompt(app.page, "stable-viewport");
+		await waitForDone(app, "stable-viewport");
+		await expect(panel.getByRole("status", { name: "Browser automation active" })).toHaveCount(0);
+		const samples = await app.page.evaluate(() => (window as typeof window & { __navigationGeometry: Array<{ active: boolean; bounds: number[] }> }).__navigationGeometry);
+		expect(samples.some((sample) => sample.active)).toBe(true);
+		expect(samples.every((sample) => JSON.stringify(sample.bounds) === JSON.stringify(samples[0]!.bounds))).toBe(true);
+		expect(resizeEvents).toBe(0);
+		for (const [marker, source] of [["navigate-visible", "visible"], ["navigate-below-fold", "below-fold"]]) {
+			await sendFixturePrompt(app.page, marker!);
+			await waitForDone(app, marker!);
+			await expect(target).toHaveURL(`${fixture.origin}/navigation-done?from=${source}`);
+			await expect(target.getByRole("heading", { name: "Navigation complete" })).toBeVisible();
+			await expect(panel.getByRole("textbox", { name: "Browser address" })).toHaveValue(`${fixture.origin}/navigation-done?from=${source}`);
+			await app.page.screenshot({ path: testInfo.outputPath(`packaged-navigation-${source}.png`) });
+		}
+		await sendFixturePrompt(app.page, "visible-stale");
+		await waitForDone(app, "visible-stale");
+		const staleCall = fixture.calls.find((call) => call.marker === "visible-stale")!;
+		expect(staleCall.result).toContain("not executed");
+		await expect(target).toHaveURL(`${fixture.origin}/navigation-done?from=below-fold`);
+		expect(await app.page.locator(".tool-step-output-error").filter({ hasText: "not executed" }).count()).toBe(1);
+		const sessionRoot = path.join(environment.agentDir, "sessions");
+		const sessionFiles = (await readdir(sessionRoot, { recursive: true })).filter((file) => file.endsWith(".jsonl"));
+		const messages = (await Promise.all(sessionFiles.map((file) => readFile(path.join(sessionRoot, file), "utf8"))))
+			.flatMap((text) => text.trim().split("\n").map((line) => JSON.parse(line).message));
+		expect(messages.find((message) => message?.role === "toolResult" && message.toolCallId === staleCall.callId)?.isError).toBe(true);
+		await app.page.screenshot({ path: testInfo.outputPath("packaged-stale-click-error.png") });
+	} finally {
+		if (app) await closeBrowserAgentApp(app);
+		await fixture.close();
+		await removeBrowserAgentEnvironment(environment);
+	}
+});
+
+test("packaged agent accepts encoded actions and recovers an expired browser ID", async ({}, testInfo) => {
+	test.setTimeout(90_000);
+	const fixture = await createBrowserAgentFixture();
+	const environment = await createBrowserAgentEnvironment(fixture.providerPort);
+	let app: RunningBrowserAgentApp | undefined;
+	let browserId = "";
+	let recoveredId = "";
+	let recoveryPhase = "close";
+	let messageId = "";
+	try {
+		fixture.setScript("encoded-control", ({ step, lastResult, origin }) => {
+			if (step === 0) return { tool: "browser_tabs", arguments: { action: "open" } };
+			if (step === 1) {
+				browserId = String(tabs(lastResult).at(-1)!.browserId);
+				return { tool: "browser_navigate", arguments: { browserId, action: "goto", url: `${origin}/controls` } };
+			}
+			if (step === 2) return { tool: "browser_observe", arguments: { browserId, mode: "state" } };
+			if (step <= 5) {
+				const { observation, ...scope } = observationInput(lastResult);
+				if (step === 3) messageId = elementId(observation.state, "Message");
+				const action = step === 3 ? { type: "click", target: { elementId: elementId(observation.state, "Increment") } }
+					: step === 4 ? { type: "type", elementId: messageId, text: '{"keep":"as text"}', replace: true }
+					: { type: "press", key: "Enter" };
+				return { tool: "browser_act", arguments: { ...scope, intent: "Exercise encoded fixture action", risk: "ordinary", action: JSON.stringify(action) } };
+			}
+			return { text: "done:encoded-control" };
+		});
+		fixture.setScript("expired-tab-recovery", ({ lastResult, origin }) => {
+			if (recoveryPhase === "close") {
+				recoveryPhase = "expired";
+				return { tool: "browser_tabs", arguments: { action: "close", browserId } };
+			}
+			if (recoveryPhase === "expired") {
+				recoveryPhase = "list";
+				return { tool: "browser_observe", arguments: { browserId } };
+			}
+			if (recoveryPhase === "list") {
+				expect(lastResult).toContain('browser_tabs with {"action":"list"}');
+				recoveryPhase = "choose";
+				return { tool: "browser_tabs", arguments: { action: "list" } };
+			}
+			if (recoveryPhase === "choose") {
+				const current = tabs(lastResult).at(-1);
+				if (!current) {
+					recoveryPhase = "opened";
+					return { tool: "browser_tabs", arguments: { action: "open" } };
+				}
+				recoveredId = String(current.browserId);
+				recoveryPhase = "observe";
+				return { tool: "browser_navigate", arguments: { browserId: recoveredId, action: "goto", url: `${origin}/controls` } };
+			}
+			if (recoveryPhase === "opened") {
+				recoveredId = String(tabs(lastResult).at(-1)!.browserId);
+				recoveryPhase = "observe";
+				return { tool: "browser_navigate", arguments: { browserId: recoveredId, action: "goto", url: `${origin}/controls` } };
+			}
+			if (recoveryPhase === "observe") {
+				recoveryPhase = "click";
+				return { tool: "browser_observe", arguments: { browserId: recoveredId, mode: "state" } };
+			}
+			if (recoveryPhase === "click") {
+				const { observation, ...scope } = observationInput(lastResult);
+				recoveryPhase = "done";
+				return { tool: "browser_act", arguments: { ...scope, intent: "Resume fixture control", risk: "ordinary",
+					action: JSON.stringify({ type: "click", target: { elementId: elementId(observation.state, "Increment") } }) } };
+			}
+			return { text: "done:expired-tab-recovery" };
+		});
+		app = await launchBrowserAgentApp(environment);
+		await sendFixturePrompt(app.page, "encoded-control");
+		await waitForDone(app, "encoded-control");
+		const controlled = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url() === `${fixture.origin}/controls`);
+		if (!controlled) throw new Error("Encoded-action page missing");
+		await expect(controlled.locator("#count")).toHaveText("Count: 1");
+		await expect(controlled.locator("#message-status")).toHaveText('Message: {"keep":"as text"}');
+		await controlled.screenshot({ path: testInfo.outputPath("packaged-encoded-actions.png") });
+		expect(fixture.calls.filter((call) => call.marker === "encoded-control" && call.name === "browser_act")).toHaveLength(3);
+		await sendFixturePrompt(app.page, "expired-tab-recovery");
+		await waitForDone(app, "expired-tab-recovery");
+		expect(recoveredId).not.toBe(browserId);
+		const recovered = app.browser.contexts().flatMap((context) => context.pages()).find((page) => page.url() === `${fixture.origin}/controls`);
+		if (!recovered) throw new Error("Recovered browser page missing");
+		await expect(recovered.locator("#count")).toHaveText("Count: 1");
+		await recovered.screenshot({ path: testInfo.outputPath("packaged-recovered-controls.png") });
+		const oldObserve = fixture.calls.filter((call) => call.marker === "expired-tab-recovery" && call.name === "browser_observe")[0];
+		expect(oldObserve?.result).toContain('browser_tabs with {"action":"list"}');
+	} finally {
+		if (app) await closeBrowserAgentApp(app);
+		await fixture.close();
+		await removeBrowserAgentEnvironment(environment);
+	}
+});
 
 test("packaged agent controls accessible pages, frames, screenshots, popups, stale state, caps, and budgets", async () => {
 	test.setTimeout(360_000);

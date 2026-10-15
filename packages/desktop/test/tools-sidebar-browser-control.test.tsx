@@ -44,7 +44,7 @@ function fixture() {
 				sourceProfileId: null,
 			},
 		]),
-		createBrowser: vi.fn().mockResolvedValue(state),
+		createBrowser: vi.fn().mockImplementation(async ({ browserId }: { browserId: string }) => ({ ...state, browserId })),
 		captureBrowserPreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
 		controlBrowser: vi.fn().mockResolvedValue(undefined),
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
@@ -179,7 +179,7 @@ describe("Session workspace browser lifecycle", () => {
 		};
 		await emit(opened);
 		await emit(opened);
-		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+		expect(container.querySelectorAll('[role="tab"]')).toHaveLength(3);
 		expect(onActivateSession).not.toHaveBeenCalled();
 
 		await emit({ type: "activity", sessionId: SESSION_ID, browserId: BROWSER_ID, active: true });

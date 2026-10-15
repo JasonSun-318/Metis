@@ -2,6 +2,7 @@ import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@m
 import {
 	Books,
 	ChatCircle,
+	Code,
 	ClipboardText,
 	FileText,
 	Globe,
@@ -99,14 +100,6 @@ type DragState =
 type DropTarget =
 	| { readonly paneId: string; readonly index: number }
 	| { readonly split: { readonly paneId: string; readonly direction: SplitDirection } };
-
-// The add menu belongs to one pane strip; the stored paneId is the target
-// captured at open time so the menu keeps acting on it if focus moves while
-// open. `align` flips the menu leftward when the trigger sits near the edge.
-interface MenuTarget {
-	readonly paneId: string;
-	readonly align: "start" | "end";
-}
 
 /** The project a tab belongs to; tabs of one project share a labelled group in the strip. */
 export interface WorkspaceProject {
@@ -277,7 +270,6 @@ export function SessionWorkspaceView({
 	const [fileDrafts, setFileDrafts] = useState<ReadonlyMap<string, WorkspaceFileDraft>>(new Map());
 	const [savingFileTabIds, setSavingFileTabIds] = useState<ReadonlySet<string>>(new Set());
 	const [pendingFileClose, setPendingFileClose] = useState<PendingFileClose | null>(null);
-	const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
 	const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
 	const [dragState, setDragState] = useState<DragState | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
@@ -291,7 +283,6 @@ export function SessionWorkspaceView({
 	browserProfilesRef.current = browserProfiles;
 	const browserProfilesRevision = useRef(0);
 	const preferredBrowserProfileId = useRef(localStorage.getItem(BROWSER_PROFILE_STORAGE_KEY));
-	const menuRef = useRef<HTMLDivElement>(null);
 	const panesRef = useRef<HTMLDivElement>(null);
 	const panelLayerRef = useRef<HTMLDivElement>(null);
 	const paneBodiesRef = useRef(new Map<string, HTMLElement>());
@@ -382,10 +373,13 @@ export function SessionWorkspaceView({
 	const toolsStrip = focusedChatSession === undefined || focusedChatSession === null
 		? { tabs: [] as readonly WorkspaceTab[], activeId: "" }
 		: toolStripOf(workspace, focusedChatSession);
-	// Whether the sidebar currently owns pointer focus decides what ⌘W closes.
+	// Titlebar tabs and keyboard focus participate too: tools portal outside the aside.
 	const toolsFocusedRef = useRef(false);
 	const onToolsSidebarOpenChangeRef = useRef(onToolsSidebarOpenChange);
 	onToolsSidebarOpenChangeRef.current = onToolsSidebarOpenChange;
+	const showToolsSidebar = useCallback(() => {
+		onToolsSidebarOpenChangeRef.current?.(true);
+	}, []);
 	// A newly added tool opens the sidebar once; closing stays closed afterwards.
 	const toolTabCount = [...workspace.tools.values()].reduce((count, strip) => count + strip.tabs.length, 0);
 	const seenToolTabCount = useRef(toolTabCount);
@@ -786,7 +780,6 @@ export function SessionWorkspaceView({
 	);
 
 	useEffect(() => {
-		setMenuTarget(null);
 		setTabMenu(null);
 	}, [mode, chatSessionId]);
 	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
@@ -831,17 +824,14 @@ export function SessionWorkspaceView({
 	}, [api, cleanupSessionIds, onCleanupSessionIdsHandled, onError, updateWorkspace, workspace]);
 
 	useEffect(() => {
-		if (!menuTarget && !tabMenu) return;
+		if (!tabMenu) return;
 		const close = (event: PointerEvent) => {
 			const target = event.target as Node;
-			if (menuRef.current?.contains(target)) return;
 			if ((target as HTMLElement | null)?.closest?.(".workspace-tab-menu")) return;
-			setMenuTarget(null);
 			setTabMenu(null);
 		};
 		const escape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
-				setMenuTarget(null);
 				setTabMenu(null);
 			}
 		};
@@ -851,7 +841,7 @@ export function SessionWorkspaceView({
 			document.removeEventListener("pointerdown", close);
 			document.removeEventListener("keydown", escape);
 		};
-	}, [menuTarget, tabMenu]);
+	}, [tabMenu]);
 
 	useEffect(() => {
 		if (!pendingFileClose) return;
@@ -864,6 +854,7 @@ export function SessionWorkspaceView({
 
 	useEffect(() => {
 		if (!previewRequest) return;
+		showToolsSidebar();
 		updateWorkspace((workspace) => {
 			const existing = workspaceTabs(workspace).find(
 				(tab): tab is Extract<WorkspaceTab, { kind: "preview" }> =>
@@ -882,10 +873,11 @@ export function SessionWorkspaceView({
 			};
 			return placeTab(workspace, tab);
 		});
-	}, [placeTab, previewRequest, updateWorkspace]);
+	}, [placeTab, previewRequest, showToolsSidebar, updateWorkspace]);
 
 	useEffect(() => {
 		if (!planPreviewRequest) return;
+		showToolsSidebar();
 		const { sessionId, plan } = planPreviewRequest;
 		updateWorkspace((workspace) => {
 			const existing = workspaceTabs(workspace).find(
@@ -893,17 +885,9 @@ export function SessionWorkspaceView({
 					tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === plan.planId,
 			);
 			if (existing) {
-				return activateTab({
-					...workspace,
-					panes: workspace.panes.map((pane) => ({
-						...pane,
-						tabs: pane.tabs.map((tab) =>
-							tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === plan.planId
-								? { ...tab, title: plan.title, plan }
-								: tab,
-						),
-					})),
-				}, existing.id);
+				return activateTab(mapTabs(workspace, (tab) =>
+					tab.id === existing.id && tab.kind === "plan" ? { ...tab, title: plan.title, plan } : tab,
+				), existing.id);
 			}
 			return placeTab(workspace, {
 				kind: "plan",
@@ -913,7 +897,7 @@ export function SessionWorkspaceView({
 				plan,
 			});
 		});
-	}, [placeTab, planPreviewRequest, updateWorkspace]);
+	}, [placeTab, planPreviewRequest, showToolsSidebar, updateWorkspace]);
 
 	// A pane's tool target is the session of its current tab, falling back to
 	// the projected session when the pane is empty.
@@ -956,13 +940,13 @@ export function SessionWorkspaceView({
 			};
 			return { ...placeTab(workspace, tab), nextNumber: number + 1 };
 		});
-		setMenuTarget(null);
 	};
 
-	const addBrowser = (
+	const addBrowser = useCallback((
 		target: { sessionId: string | null; cwd: string | null },
 		profile = browserProfiles.find((candidate) => candidate.profileId === preferredBrowserProfileId.current)
 			?? browserProfiles[0],
+		onlyIfEmpty = false,
 	) => {
 		const { sessionId: ownerSessionId } = target;
 		if (!ownerSessionId || !profile) return;
@@ -983,9 +967,15 @@ export function SessionWorkspaceView({
 			profileName: profile.name,
 			controlState: "idle",
 		};
-		updateWorkspace((workspace) => placeTab(workspace, tab));
-		setMenuTarget(null);
-	};
+		updateWorkspace((workspace) =>
+			onlyIfEmpty && toolStripOf(workspace, ownerSessionId).tabs.length > 0 ? workspace : placeTab(workspace, tab),
+		);
+	}, [browserProfiles, placeTab, t, updateWorkspace]);
+
+	useEffect(() => {
+		if (!visible || !sidebarOpen || sidebarClosing || !toolsTarget.sessionId || toolsStrip.tabs.length > 0) return;
+		addBrowser(toolsTarget, undefined, true);
+	}, [addBrowser, sidebarClosing, sidebarOpen, toolsTarget.cwd, toolsTarget.sessionId, toolsStrip.tabs.length, visible]);
 
 	const browserProfileImported = (profile: DesktopBrowserProfile) => {
 		setBrowserProfiles((current) => current.some((candidate) => candidate.profileId === profile.profileId)
@@ -1028,7 +1018,6 @@ export function SessionWorkspaceView({
 			const withAll = files.reduce((acc, tab) => placeTab(acc, tab), workspace);
 			return activateTab(withAll, files[0]!.id);
 		});
-		setMenuTarget(null);
 	};
 
 	const addReview = (target: { sessionId: string | null; cwd: string | null }) => {
@@ -1040,7 +1029,6 @@ export function SessionWorkspaceView({
 			const tab: WorkspaceTab = { kind: "review", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Review") };
 			return placeTab(workspace, tab);
 		});
-		setMenuTarget(null);
 	};
 
 	const addAgent = (target: { sessionId: string | null; cwd: string | null }) => {
@@ -1051,7 +1039,6 @@ export function SessionWorkspaceView({
 			const tab: WorkspaceTab = existing ?? { kind: "agent", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Agents") };
 			return existing ? activateTab(workspace, existing.id) : placeTab(workspace, tab);
 		});
-		setMenuTarget(null);
 	};
 
 	const addKnowledge = useCallback((targetSessionId: string | null) => {
@@ -1063,14 +1050,14 @@ export function SessionWorkspaceView({
 				? activateTab(workspace, existing.id)
 				: placeTab(workspace, tab);
 		});
-		setMenuTarget(null);
 	}, [placeTab, t, updateWorkspace]);
 	const handledKnowledgeRequest = useRef<number | undefined>(undefined);
 	useEffect(() => {
 		if (!knowledgeRequest || knowledgeRequest.id === handledKnowledgeRequest.current) return;
 		handledKnowledgeRequest.current = knowledgeRequest.id;
+		showToolsSidebar();
 		addKnowledge(knowledgeRequest.sessionId);
-	}, [addKnowledge, knowledgeRequest]);
+	}, [addKnowledge, knowledgeRequest, showToolsSidebar]);
 
 	const openFile = (ownerSessionId: string, cwd: string, relativePath: string, fix: boolean) => {
 		mutateWorkspace((workspace) => {
@@ -1264,6 +1251,7 @@ export function SessionWorkspaceView({
 	};
 
 	const selectTab = (id: string) => {
+		toolsFocusedRef.current = findToolLocation(workspaceRef.current, id) !== null;
 		mutateWorkspace((workspace) => activateTab(workspace, id));
 	};
 
@@ -1272,6 +1260,11 @@ export function SessionWorkspaceView({
 	const focusPane = (paneId: string) => {
 		toolsFocusedRef.current = false;
 		mutateWorkspace((workspace) => setActivePane(workspace, paneId));
+	};
+	const focusPaneContent = (paneId: string, target: EventTarget) => {
+		// A background session's modal autofocus must not change the projected chat.
+		if ((target as HTMLElement).closest('[role="dialog"], dialog')) return;
+		focusPane(paneId);
 	};
 
 	const removeTabInternal = (id: string) => {
@@ -1320,7 +1313,7 @@ export function SessionWorkspaceView({
 		handledCloseTabRequest.current = closeTabRequest;
 		if (!visible) return;
 		const current = workspaceRef.current;
-		if (toolsFocusedRef.current) {
+		if (sidebarOpen && toolsFocusedRef.current) {
 			const sessionId = focusedChatTab(current)?.sessionId;
 			const activeTool = sessionId === null || sessionId === undefined
 				? ""
@@ -1332,7 +1325,7 @@ export function SessionWorkspaceView({
 		}
 		const pane = activePane(current);
 		if (pane.activeId) closeTabRef.current(pane.activeId);
-	}, [closeTabRequest, visible]);
+	}, [closeTabRequest, sidebarOpen, visible]);
 
 	// Ctrl+Tab / Ctrl+Shift+Tab cycle the focused pane's visible tabs; tabs
 	// folded into a collapsed group are skipped, as in a browser.
@@ -1340,19 +1333,22 @@ export function SessionWorkspaceView({
 		if (!visible) return;
 		const cycle = (event: KeyboardEvent) => {
 			if (event.key !== "Tab" || !event.ctrlKey || event.metaKey || event.altKey) return;
-			const pane = activePane(workspaceRef.current);
+			const current = workspaceRef.current;
+			const pane = activePane(current);
 			const hidden = collapsedTabIds(pane, groupOf);
-			const tabs = pane.tabs.filter((tab) => !hidden.has(tab.id));
+			const sessionId = focusedChatTab(current)?.sessionId;
+			const strip = sidebarOpen && toolsFocusedRef.current && sessionId ? toolStripOf(current, sessionId) : pane;
+			const tabs = strip.tabs.filter((tab) => !hidden.has(tab.id));
 			if (tabs.length < 2) return;
 			event.preventDefault();
-			const index = tabs.findIndex((tab) => tab.id === pane.activeId);
+			const index = tabs.findIndex((tab) => tab.id === strip.activeId);
 			const next = tabs[(index + (event.shiftKey ? -1 : 1) + tabs.length) % tabs.length]!;
 			mutateWorkspace((current) => activateTab(current, next.id));
 		};
 		// Capture phase: terminals and editors stop keydown propagation inside their panes.
 		document.addEventListener("keydown", cycle, true);
 		return () => document.removeEventListener("keydown", cycle, true);
-	}, [groupOf, mutateWorkspace, visible]);
+	}, [groupOf, mutateWorkspace, sidebarOpen, visible]);
 
 	const discardPendingFile = () => {
 		if (!pendingFileClose) return;
@@ -1411,14 +1407,15 @@ export function SessionWorkspaceView({
 		const target = workspace.panes.find((pane) => pane.id === paneId);
 		if (!root || !target) return false;
 		const rect = root.getBoundingClientRect();
+		const width = Math.max(0, rect.width - (sidebarOpen && !sidebarClosing ? toolsSidebarWidth : 0));
 		if (direction === "left" || direction === "right") {
-			return rect.width / (rowCount(target.row) + 1) >= MIN_PANE_WIDTH;
+			return width / (rowCount(target.row) + 1) >= MIN_PANE_WIDTH;
 		}
 		const otherRow = direction === "down" ? 1 : 0;
 		const otherRowCount = rowCount(otherRow);
 		return otherRowCount === 0
 			? rect.height / 2 >= MIN_PANE_HEIGHT
-			: rect.width / (otherRowCount + 1) >= MIN_PANE_WIDTH;
+			: width / (otherRowCount + 1) >= MIN_PANE_WIDTH;
 	};
 
 	const splitDropDirection = (event: DragEvent<HTMLElement>, paneId: string): SplitDirection | null => {
@@ -1452,46 +1449,32 @@ export function SessionWorkspaceView({
 		return fallback;
 	};
 
-	const toolMenu = (target: { sessionId: string | null; cwd: string | null }, align: MenuTarget["align"], compact = true) => {
+	const toolLauncher = (target: { sessionId: string | null; cwd: string | null }) => {
 		const targetMode = target.sessionId === null ? mode : (sessionsById.get(target.sessionId)?.mode ?? mode);
-		const iconSize = compact ? 14 : 20;
 		return (
-		<nav
-			aria-label={t("Available tools")}
-			className={compact ? `tool-add-menu${align === "end" ? " is-align-end" : ""}` : "tool-sidebar-menu"}
-			role={compact ? "menu" : undefined}
-		>
-			<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} role={compact ? "menuitem" : undefined} type="button">
-				<div className="tool-menu-icon"><Books aria-hidden="true" size={iconSize} /></div>
-				<span>{t("Knowledge")}</span>
-			</button>
-			{targetMode === "code" && (
-				<button disabled={!target.cwd} onClick={() => addReview(target)} role={compact ? "menuitem" : undefined} title={target.cwd ? undefined : t("Open a task before reviewing changes")} type="button">
-					<div className="tool-menu-icon"><ClipboardText aria-hidden="true" size={iconSize} /></div>
-					<span>{t("Review")}</span>
+			<nav aria-label={t("Available tools")} className="tool-sidebar-menu">
+				{targetMode === "code" && (
+					<button disabled={!target.cwd} onClick={() => addReview(target)} type="button">
+						<ClipboardText aria-hidden="true" size={18} /><span>{t("Review")}</span>
+					</button>
+				)}
+				<button disabled={!target.cwd} onClick={() => addTerminal(target)} type="button">
+					<TerminalWindow aria-hidden="true" size={18} /><span>{t("Terminal")}</span>
 				</button>
-			)}
-			<button disabled={!target.cwd} onClick={() => addTerminal(target)} role={compact ? "menuitem" : undefined} title={target.cwd ? undefined : t("Open a task before starting a terminal")} type="button">
-				<div className="tool-menu-icon"><TerminalWindow aria-hidden="true" size={iconSize} /></div>
-				<span>{t("Terminal")}</span>
-			</button>
-			<button disabled={!target.sessionId} onClick={() => addBrowser(target)} role={compact ? "menuitem" : undefined} title={target.sessionId ? undefined : t("Open a task before starting a browser")} type="button">
-				<div className="tool-menu-icon"><Globe aria-hidden="true" size={iconSize} /></div>
-				<span>{t("Browser")}</span>
-			</button>
-			{targetMode === "code" && (
-				<button disabled={!target.cwd} onClick={() => addFiles(target)} role={compact ? "menuitem" : undefined} title={target.cwd ? undefined : t("Open a task before browsing files")} type="button">
-					<div className="tool-menu-icon"><FileText aria-hidden="true" size={iconSize} /></div>
-					<span>{t("Files")}</span>
+				{targetMode === "code" && (
+					<button disabled={!target.cwd} onClick={() => addFiles(target)} type="button">
+						<FileText aria-hidden="true" size={18} /><span>{t("Files")}</span>
+					</button>
+				)}
+				{targetMode === "code" && (
+					<button disabled={!target.sessionId} onClick={() => addAgent(target)} type="button">
+						<Robot aria-hidden="true" size={18} /><span>{t("Agents")}</span>
+					</button>
+				)}
+				<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} type="button">
+					<Books aria-hidden="true" size={18} /><span>{t("Knowledge")}</span>
 				</button>
-			)}
-			{targetMode === "code" && (
-				<button disabled={!target.sessionId} onClick={() => addAgent(target)} role={compact ? "menuitem" : undefined} type="button">
-					<div className="tool-menu-icon"><Robot aria-hidden="true" size={iconSize} /></div>
-					<span>{t("Agents")}</span>
-				</button>
-			)}
-		</nav>
+			</nav>
 		);
 	};
 
@@ -1534,17 +1517,14 @@ export function SessionWorkspaceView({
 		return () => observer.disconnect();
 	}, [layoutPanels, workspace, chatSessionId, visible]);
 
-	const openToolMenu = (paneId: string, trigger: HTMLElement) => {
-		const rect = trigger.getBoundingClientRect();
-		setTabMenu(null);
-		setMenuTarget((current) => current?.paneId === paneId
-			? null
-			: { paneId, align: rect.left + 216 > window.innerWidth ? "end" : "start" });
-	};
-
-	const tabIcon = (tab: WorkspaceTab): ReactNode =>
-		tab.kind === "chat" ? <ChatCircle aria-hidden="true" size={13} />
-			: tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} />
+	const tabIcon = (tab: WorkspaceTab): ReactNode => {
+		if (tab.kind === "chat") {
+			const tabMode = (tab.sessionId === null ? undefined : sessionsById.get(tab.sessionId)?.mode) ?? mode;
+			return tabMode === "code"
+				? <Code aria-hidden="true" data-mode="code" size={13} />
+				: <ChatCircle aria-hidden="true" data-mode="chat" size={13} />;
+		}
+		return tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} />
 			: tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} />
 			: tab.kind === "browser" ? <Globe aria-hidden="true" size={13} />
 			: tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />)
@@ -1552,6 +1532,7 @@ export function SessionWorkspaceView({
 			: tab.kind === "agent" ? <Robot aria-hidden="true" size={13} />
 			: tab.kind === "plan" ? <FileText aria-hidden="true" size={13} />
 			: <WorkspaceFileIcon path={tab.title} size={13} />;
+	};
 
 	// One tab element serves pane strips and the tools strip; `stripId` is the
 	// pane id or the "tools" sentinel, and drives context-menu scoping.
@@ -1593,7 +1574,6 @@ export function SessionWorkspaceView({
 				}}
 				onContextMenu={(event) => {
 					event.preventDefault();
-					setMenuTarget(null);
 					setTabMenu({ paneId: stripId, tabId: tab.id, x: event.clientX, y: event.clientY });
 				}}
 			>
@@ -1603,6 +1583,7 @@ export function SessionWorkspaceView({
 					aria-label={label}
 					className="tool-tab-select"
 					onClick={() => selectTab(tab.id)}
+					onFocus={() => { toolsFocusedRef.current = stripId === "tools"; }}
 					role="tab"
 					title={project ? `${displayTitle}\n${project.cwd}` : displayTitle}
 					type="button"
@@ -1642,6 +1623,8 @@ export function SessionWorkspaceView({
 			<div
 				className={`workspace-tabbar${inTitlebar ? " workspace-tabbar--titlebar" : ""}${focused ? " is-focused" : ""}${split && !focused ? " is-unfocused" : ""}${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
 				data-pane-id={pane.id}
+				onFocusCapture={() => { toolsFocusedRef.current = false; }}
+				onPointerDownCapture={() => { toolsFocusedRef.current = false; }}
 				onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === pane.id ? null : current)}
 				onDragOver={(event) => {
 					if (!dragState) return;
@@ -1738,11 +1721,10 @@ export function SessionWorkspaceView({
 		return workspace.panes.flatMap((pane) => {
 			const panelVisible = (tabId: string) =>
 				visible && pane.activeId === tabId
-				&& menuTarget?.paneId !== pane.id
 				&& tabMenu?.paneId !== pane.id;
 			const host = chatHost && chatHost.pane === pane ? chatHost : null;
 			const wrap = (tabId: string, content: ReactNode) => (
-				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId} onPointerDownCapture={() => focusPane(pane.id)}>
+				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId} onFocusCapture={(event) => focusPaneContent(pane.id, event.target)} onPointerDownCapture={() => focusPane(pane.id)}>
 					{content}
 				</div>
 			);
@@ -1770,6 +1752,7 @@ export function SessionWorkspaceView({
 						data-pane-id={pane.id}
 						hidden={pane.activeId !== host.tab.id || !visible}
 						key={host.tab.id}
+						onFocusCapture={(event) => focusPaneContent(pane.id, event.target)}
 						onPointerDownCapture={() => focusPane(pane.id)}
 					>
 						<div className="workspace-chat-panel">{chatViewFor(host.tab, true)}</div>
@@ -1792,10 +1775,10 @@ export function SessionWorkspaceView({
 	const renderToolPanels = () =>
 		[...workspace.tools.entries()].map(([toolSessionId, strip]) => {
 		const stripFocused = toolSessionId === focusedChatSession;
+		const ownerTarget = { sessionId: toolSessionId, cwd: sessionsById.get(toolSessionId)?.cwd ?? null };
 		const fileTabs = strip.tabs.filter((tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file");
 		const activeTab = strip.tabs.find((tab) => tab.id === strip.activeId);
-		// An open add-tool menu overlays the sidebar: panels freeze like behind a covered pane.
-		const panelVisible = (tabId: string) => visible && stripFocused && strip.activeId === tabId && menuTarget?.paneId !== "tools";
+		const panelVisible = (tabId: string) => visible && sidebarOpen && stripFocused && strip.activeId === tabId;
 		const wrap = (tabId: string, content: ReactNode) => (
 			<div className="tool-sidebar-panel" hidden={!panelVisible(tabId)} key={tabId}>
 				{content}
@@ -1824,17 +1807,19 @@ export function SessionWorkspaceView({
 						api={api}
 						browserId={tab.id}
 						controlState={tab.controlState}
+						covered={tabMenu?.paneId === "tools"}
 						handoffReason={tab.handoffReason}
 						sessionId={tab.sessionId}
 						onError={onError}
 						onOpenProfile={(profile) => {
 							const selected = browserProfiles.find((candidate) => candidate.profileId === profile.profileId);
-							if (selected) addBrowser(toolsTarget, selected);
+							if (selected) addBrowser(ownerTarget, selected);
 						}}
 						onProfileImported={browserProfileImported}
 						onState={updateBrowserState}
 						profile={{ profileId: tab.profileId, name: tab.profileName }}
 						profiles={browserProfiles}
+						startPageTools={toolLauncher(ownerTarget)}
 						visible={panelVisible(tab.id)}
 					/>,
 				) : tab.kind === "knowledge" ? wrap(tab.id,
@@ -1890,7 +1875,7 @@ export function SessionWorkspaceView({
 				const savingPaths = fileTabs.flatMap((tab) =>
 					tab.relativePath && savingFileTabIds.has(tab.id) ? [tab.relativePath] : [],
 				);
-				const groupVisible = visible && stripFocused && activeTab?.kind === "file" && menuTarget?.paneId !== "tools";
+				const groupVisible = visible && sidebarOpen && stripFocused && activeTab?.kind === "file";
 				return (
 					<div className="tool-sidebar-panel" hidden={!groupVisible} key={`files-${fileSessionId}`}>
 						<FilePanel
@@ -1921,7 +1906,6 @@ export function SessionWorkspaceView({
 	// The tools strip sits level with the session strips in the titlebar row;
 	// tool tabs keep their own widths and the row scrolls instead of squeezing.
 	const renderToolsStrip = () => {
-		const menuOpen = menuTarget?.paneId === "tools" && !sidebarClosing;
 		return (
 			<div
 				className={`workspace-tabbar workspace-tabbar--titlebar tool-sidebar-tabbar${dropTarget && "paneId" in dropTarget && dropTarget.paneId === "tools" ? " is-drop-target" : ""}`}
@@ -1945,6 +1929,8 @@ export function SessionWorkspaceView({
 						mutateWorkspace((current) => moveToolTab(current, drag.tabId, stripDropIndex(event, toolsStrip.tabs.length)));
 					}
 				}}
+				onFocusCapture={() => { toolsFocusedRef.current = true; }}
+				onPointerDownCapture={() => { toolsFocusedRef.current = true; }}
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll" ref={toolsScrollRef}>
@@ -1952,18 +1938,15 @@ export function SessionWorkspaceView({
 						renderTab("tools", toolsStrip.tabs, toolsStrip.activeId, tab, tab.sessionId ? projectFor(tab.sessionId) : null))}
 				</div>
 				{toolsStrip.tabs.length > 0 && (
-					<div className="tool-add" ref={menuOpen ? menuRef : undefined}>
+					<div className="tool-add">
 						<button
-							aria-expanded={menuOpen}
-							aria-haspopup="menu"
-							aria-label={t("Add tool")}
+							aria-label={t("New browser tab")}
 							className="tool-add-trigger"
-							onClick={(event) => openToolMenu("tools", event.currentTarget)}
+							onClick={() => addBrowser(toolsTarget)}
 							type="button"
 						>
 							<Plus aria-hidden="true" size={13} />
 						</button>
-						{menuOpen && toolMenu(toolsTarget, "end")}
 					</div>
 				)}
 			</div>
@@ -2078,12 +2061,15 @@ export function SessionWorkspaceView({
 						{renderPanels()}
 					</div>
 				</div>
-				{sidebarOpen ? (
-					<aside
-						className={`tool-sidebar${sidebarClosing ? " is-closing" : ""}`}
-						onPointerDownCapture={() => { toolsFocusedRef.current = true; }}
-						style={{ width: `${toolsSidebarWidth}px` }}
-					>
+				{/* The aside stays mounted when closed: hidden instead of unmounted so
+				    terminals, browsers and editors keep their sessions and state. */}
+				<aside
+					className={`tool-sidebar${sidebarClosing ? " is-closing" : ""}`}
+					hidden={!sidebarOpen}
+					onFocusCapture={() => { toolsFocusedRef.current = true; }}
+					onPointerDownCapture={() => { toolsFocusedRef.current = true; }}
+					style={{ width: `${toolsSidebarWidth}px` }}
+				>
 						<div
 							aria-label={t("Resize tools sidebar")}
 							aria-orientation="vertical"
@@ -2102,10 +2088,8 @@ export function SessionWorkspaceView({
 						{titlebarToolsSlot ? null : <div className="tool-sidebar-head">{renderToolsStrip()}</div>}
 						<div className="tool-sidebar-body">
 							{renderToolPanels()}
-							{toolsStrip.tabs.length === 0 ? toolMenu(toolsTarget, "start", false) : null}
 						</div>
 					</aside>
-				) : null}
 			</div>
 			{tabMenu && (() => {
 				const isToolTab = findToolLocation(workspace, tabMenu.tabId) !== null;

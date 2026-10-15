@@ -141,8 +141,14 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			role="tabpanel"
 		>
 			<div className="terminal-actions">
-				<button aria-label={t("Scroll to bottom")} className="terminal-action-btn" onClick={() => terminalRef.current?.scrollToBottom()} title={t("Scroll to bottom")} type="button"><ArrowDown aria-hidden="true" size={13} /></button>
-				<button aria-label={t("Clear terminal")} className="terminal-action-btn" onClick={() => terminalRef.current?.clear()} title={t("Clear terminal")} type="button"><Trash aria-hidden="true" size={13} /></button>
+				<button aria-label={t("Scroll to bottom")} aria-describedby={`terminal-scroll-hint-${terminalId}`} className="terminal-action-btn" onClick={() => terminalRef.current?.scrollToBottom()} type="button">
+					<ArrowDown aria-hidden="true" size={13} />
+					<span className="terminal-action-tooltip" id={`terminal-scroll-hint-${terminalId}`} role="tooltip">{t("Scroll to bottom")}</span>
+				</button>
+				<button aria-label={t("Clear terminal")} aria-describedby={`terminal-clear-hint-${terminalId}`} className="terminal-action-btn" onClick={() => terminalRef.current?.clear()} type="button">
+					<Trash aria-hidden="true" size={13} />
+					<span className="terminal-action-tooltip" id={`terminal-clear-hint-${terminalId}`} role="tooltip">{t("Clear terminal")}</span>
+				</button>
 			</div>
 			<div className="terminal-host" ref={hostRef} />
 			{status && <div className="terminal-status" role="status">{status}</div>}

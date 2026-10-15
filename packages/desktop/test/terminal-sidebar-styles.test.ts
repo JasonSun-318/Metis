@@ -44,7 +44,7 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".tool-add-menu").width).toBe("200px");
 		expect(rule(".workspace-pane-body").position).toBe("relative");
 		expect(rule(".browser-toolbar").height).toBe("42px");
-		expect(rule(".browser-address-field").borderRadius).toBe("8px");
+		expect(rule(".browser-address-field").borderRadius).toBe("16px");
 		expect(rule(".browser-panel").overflow).toBe("visible");
 		expect(rule(".browser-find-panel").top).toBe("-40px");
 		expect(rule(".browser-find-panel").right).toBe("0px");
@@ -68,6 +68,16 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".tool-tab-group").flex).toBe("0 0 auto");
 		expect(rule(".tool-tabs-scroll").overflowX).toBe("auto");
 		expect(rule(".tool-tab-group-body").overflow).toBe("hidden");
+	});
+
+	it("keeps browser automation status inside the toolbar without resizing the page", () => {
+		const bar = rule(".browser-automation-bar");
+		expect(bar.position).toBe("absolute");
+		expect(bar.top).toBe("0px");
+		expect(bar.height).toBe(rule(".browser-toolbar").height);
+		expect(rule(".browser-view-anchor").top).toBe("42px");
+		expect(css).not.toMatch(/\.browser-panel\.has-control-bar\s+\.browser-view-anchor\s*\{/u);
+		expect(rule(".browser-panel.has-control-bar:has(.browser-handoff-bar) .browser-view-anchor").top).toBe("100px");
 	});
 
 	it("anchors the tool-add menu to the plus trigger button", () => {

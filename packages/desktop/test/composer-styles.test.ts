@@ -24,9 +24,14 @@ function rule(selector: string): CSSStyleDeclaration {
 }
 
 describe("Composer visual states", () => {
-	it("uses quieter new-task rays in light mode", () => {
-		expect(rule(':root[data-theme="dark"] .new-task-side-rays').opacity).toBe("0.38");
-		expect(rule(':root[data-theme="light"] .new-task-side-rays').opacity).toBe("0.16");
+	it("uses a quiet home surface with dark and light theme support", () => {
+		const home = rule(".new-task-home");
+		expect(home.background).toBe("var(--home-bg)");
+		expect(home.getPropertyValue("--home-bg")).toBe("var(--app-bg)");
+		expect(home.getPropertyValue("--home-panel")).toBe("var(--panel)");
+		expect(home.getPropertyValue("--home-hover")).toBe("var(--panel-hover)");
+		expect(home.getPropertyValue("--home-border")).toBe("var(--border)");
+		expect(css).not.toContain(".new-task-home-backdrop");
 	});
 
 	it("keeps the composer and disabled chrome visually stationary", () => {
@@ -83,7 +88,7 @@ describe("Composer visual states", () => {
 		expect(item.padding).toBe("0px 8px");
 	});
 
-	it("uses a stationary composer over a full-screen New Task ray field", () => {
+	it("allows normal scrolling when home content grows", () => {
 		expect(rule(".new-task-home").overflow).toBe("hidden");
 		const scroll = rule(".new-task-home-scroll");
 		expect(scroll.overflowY).toBe("auto");
@@ -93,63 +98,31 @@ describe("Composer visual states", () => {
 		expect(hiddenScrollbar.display).toBe("none");
 		expect(hiddenScrollbar.width).toBe("0px");
 		expect(hiddenScrollbar.height).toBe("0px");
-
-		const rays = rule(".new-task-side-rays");
-		expect(rays.position).toBe("absolute");
-		expect(rays.pointerEvents).toBe("none");
-		expect(rays.zIndex).toBe("0");
-		expect(rule(".new-task-side-rays canvas").display).toBe("block");
 	});
 
 	it("removes the decorative New Task logo slot", () => {
 		expect(css).not.toContain(".new-task-home-heading > svg");
 	});
 
-	it("keeps the New Task folder row translucent and separate from the composer", () => {
-		expect(css).toContain("background: var(--app-bg-58)");
-		expect(rule(".new-task-home .composer").background).toBe("var(--panel)");
-		expect(rule(".new-task-home-composer").boxShadow).toBe("var(--shadow)");
+	it("preserves a separate workspace bar below the composer", () => {
+		expect(rule(".new-task-home .composer").borderBottom).toBe("1px solid var(--home-border)");
+		expect(rule(".new-task-home-project-control").minHeight).toBe("38px");
+		expect(rule(".new-task-home .home-project-picker").height).toBe("38px");
+		expect(rule(".new-task-home .home-project-picker button:focus-visible").outline).toBe("2px solid var(--focus)");
 	});
 
-	it("uses the shared compact home proportions and mode font variables", () => {
-		expect(css).toMatch(/\.new-task-home-content\s*\{[^}]*width:\s*min\(820px,\s*100%\)/);
-		expect(rule(".new-task-home-hero-main").width).toBe("100%");
-		expect(rule(".new-task-home-hero-main").maxWidth).toBe("720px");
-		expect(css).toContain(
-			"--home-initial-top: max(32px, calc((100cqh - var(--home-hero-height) - 92px) / 2 + 32px))",
-		);
-		expect(css).toContain("--home-sticky-floor: min(clamp(32px, 7cqh, 72px)");
-		expect(css).toContain("var(--home-starters-height) - var(--home-section-gap) - var(--home-bottom-gap))");
-		expect(rule(".new-task-home-scroll").containerType).toBe("size");
-		expect(rule(".new-task-home-hero").display).toBe("contents");
-		expect(rule(".new-task-home-hero-main").position).toBe("sticky");
-		expect(rule(".new-task-home-heading h1").fontFamily).toBe("var(--home-heading-font)");
-		expect(rule(".new-task-home-heading h1").fontSize).toBe("40px");
-		expect(rule(".new-task-home-heading h1").lineHeight).toBe("1.25");
+	it("keeps a readable centered welcome and lightweight shortcuts in normal flow", () => {
+		expect(css).toMatch(/\.new-task-home-content\s*\{[^}]*width:\s*min\(680px,\s*100%\)/);
+		expect(rule(".new-task-home-content").justifyContent).toBe("center");
+		expect(rule(".new-task-home-hero-main").position).toBe("relative");
+		expect(rule(".new-task-home-heading h1").fontFamily).toContain("Songti SC");
+		expect(rule(".new-task-home-heading h1").fontFamily).toContain("serif");
+		expect(rule(".new-task-home-heading h1").fontWeight).toBe("400");
+		expect(rule(".new-task-home-heading h1").whiteSpace).not.toBe("nowrap");
 		expect(rule(".new-task-home-heading").textAlign).toBe("center");
-		expect(rule(".new-task-home-heading").marginBottom).toBe("28px");
-		expect(rule(".new-task-home .composer").minHeight).toBe("112px");
-		expect(rule(".new-task-home .composer .composer-editable-input").minHeight).toBe("44px");
-		expect(rule(".new-task-home .composer .composer-editable-input").fontSize).toBe("var(--content-font-size)");
-		expect(rule(".new-task-home-project-control").minHeight).toBe("40px");
-		expect(css).not.toContain(".home-project-picker-select");
-		expect(
-			rule(".new-task-home .home-project-picker-browse, .new-task-home .home-project-picker-create").marginLeft,
-		).toBe("");
-		expect(css).not.toContain(".home-project-picker-hint");
-		expect(rule(".new-task-home-heading h1").whiteSpace).toBe("nowrap");
-		expect(rule(".new-task-starters").minHeight).toBe("");
-		expect(rule(".new-task-starters").marginTop).toBe("0px");
-		expect(rule(".new-task-starters").scrollMarginTop).toBe(
-			"calc(var(--home-sticky-top) + var(--home-hero-height) + 16px)",
-		);
-		expect(rule(".new-task-home-discovery").transition).toContain("opacity 260ms");
-		expect(rule(".new-task-home-discovery").transition).toContain("transform 260ms");
-		expect(rule('.new-task-home-discovery[data-hidden="true"]').transform).toBe("translateY(-8px)");
-		expect(rule(".new-task-starter").minHeight).toBe("96px");
-		expect(rule(".new-task-recent-project").height).toBe("46px");
-		expect(css).toContain("@container new-task-scroll (height < 900px)");
-		expect(css).toContain("@container new-task-scroll (height < 640px)");
+		expect(rule(".new-task-starter-grid").flexWrap).toBe("wrap");
+		expect(css).not.toContain("--home-sticky-top");
+		expect(css).not.toContain(".new-task-home-discovery");
 	});
 
 	it("uses the compact Metis task list above the composer", () => {

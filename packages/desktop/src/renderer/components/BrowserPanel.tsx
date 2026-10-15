@@ -22,7 +22,7 @@ import {
 	User,
 	X,
 } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
 	DesktopBrowserBounds,
@@ -39,6 +39,7 @@ import type {
 import { browserProfileLabel, formatBrowserBytes } from "../browser-display.ts";
 import { useModalPresence } from "../modal-presence.ts";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
+import { BrowserStartPage } from "./BrowserStartPage.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 type BrowserProfileChoice = Pick<DesktopBrowserProfile, "profileId" | "name"> & {
@@ -58,6 +59,9 @@ interface BrowserPanelProps {
 	readonly profile: BrowserProfileChoice;
 	readonly profiles?: readonly BrowserProfileChoice[];
 	readonly visible: boolean;
+	/** A React menu covers the native page; retain its last frame underneath. */
+	readonly covered?: boolean;
+	readonly startPageTools?: ReactNode;
 }
 
 function formatHistoryTime(visitedAt: number): string {
@@ -173,7 +177,7 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 	);
 }
 
-export function BrowserPanel({ api, sessionId, browserId, controlState, handoffReason, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible }: BrowserPanelProps) {
+export function BrowserPanel({ api, sessionId, browserId, controlState, handoffReason, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible, covered = false, startPageTools }: BrowserPanelProps) {
 	const { t } = useTranslation();
 	const modalPresent = useModalPresence();
 	const availableProfiles = profiles ?? [profile];
@@ -207,6 +211,8 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	const handoffHeadingRef = useRef<HTMLHeadingElement>(null);
 	const previousControlStateRef = useRef(controlState);
 	const findInputRef = useRef<HTMLInputElement>(null);
+	const addressInputRef = useRef<HTMLInputElement>(null);
+	const focusAddressOnMount = useRef(visible && controlState === "idle");
 	const moreRef = useRef<HTMLDivElement>(null);
 	const downloadsRef = useRef<HTMLDivElement>(null);
 	const historyRef = useRef<HTMLDivElement>(null);
@@ -219,6 +225,9 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	const onStateRef = useRef(onState);
 	const translateRef = useRef(t);
 	const visibleRef = useRef(visible);
+	const coveredRef = useRef(covered);
+	const pageUrlRef = useRef(state.url);
+	const addressEditedRef = useRef(false);
 	const moreOpenRef = useRef(moreOpen);
 	const previewRequestRef = useRef(0);
 	const zoomBusyRef = useRef(false);
@@ -226,7 +235,12 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	onStateRef.current = onState;
 	translateRef.current = t;
 	visibleRef.current = visible;
+	coveredRef.current = covered;
+	pageUrlRef.current = state.url;
 	moreOpenRef.current = moreOpen;
+	useEffect(() => {
+		if (focusAddressOnMount.current) addressInputRef.current?.focus();
+	}, []);
 
 	function closeDownloads() {
 		previewRequestRef.current += 1;
@@ -431,6 +445,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	}
 
 	function runCommand(command: DesktopBrowserCommand) {
+		if (pageUrlRef.current === "") return;
 		// The workspace owns tab closing; the panel only reacts to in-page commands.
 		if (command === "close-tab") return;
 		if (command === "find") openFind();
@@ -482,14 +497,14 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				if (event.profileId === profile.profileId) setHistory(event.entries);
 				return;
 			}
-				if (event.type === "command") {
-				if (event.browserId === browserId && visibleRef.current) runCommand(event.command);
-					return;
-				}
-				if (event.type !== "state") return;
-				if (event.state.browserId !== browserId) return;
+			if (event.type === "command") {
+				if (event.browserId === browserId && visibleRef.current && !coveredRef.current) runCommand(event.command);
+				return;
+			}
+			if (event.type !== "state") return;
+			if (event.state.browserId !== browserId) return;
 			setState(event.state);
-			setAddress(event.state.url);
+			if (!addressEditedRef.current) setAddress(event.state.url);
 			onStateRef.current(event.state);
 		});
 		void api.listBrowserDownloads().then(
@@ -504,7 +519,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			},
 			() => undefined,
 		);
-			creationRef.current ??= api.createBrowser({ sessionId, browserId, profileId: profile.profileId });
+		creationRef.current ??= api.createBrowser({ sessionId, browserId, profileId: profile.profileId });
 		void creationRef.current.then(
 			(created) => {
 				if (!active) return;
@@ -566,7 +581,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	}, [moreOpen, downloadsOpen, historyOpen]);
 
 	useEffect(() => {
-		if (!visible || clearConfirmOpen || importOpen) return;
+		if (!visible || covered || clearConfirmOpen || importOpen) return;
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
 			const key = event.key.toLowerCase();
@@ -582,7 +597,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [api, browserId, clearConfirmOpen, importOpen, visible]);
+	}, [api, browserId, clearConfirmOpen, covered, importOpen, visible]);
 
 	useEffect(() => {
 		let frame = 0;
@@ -606,7 +621,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			presentationRef.current = key;
 			void api.controlBrowser({ type: "present", sessionId, browserId, visible: presented, bounds }).then(
 				() => {
-					if (presented) setPagePreview(null);
+					if (presented && shouldPresentRef.current) setPagePreview(null);
 				},
 				(cause) => {
 					if (presentationRef.current === key) presentationRef.current = "";
@@ -655,8 +670,19 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 	}, [api, browserId]);
 
 	useLayoutEffect(() => {
+		if (!visible || !covered || state.url === "") return;
+		let active = true;
+		void api.captureBrowserPreview({ sessionId, browserId }).then(
+			(preview) => { if (active) setPagePreview(preview); },
+			(cause) => { if (active) onErrorRef.current(cause); },
+		);
+		return () => { active = false; };
+	}, [api, browserId, covered, sessionId, state.url, visible]);
+
+	useLayoutEffect(() => {
 		shouldPresentRef.current =
 			visible
+			&& !covered
 			&& !modalPresent
 			&& state.url !== ""
 			&& !moreOpen
@@ -666,7 +692,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			&& !importOpen
 			&& status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
+	}, [clearConfirmOpen, covered, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
 
 	const takeControl = () => {
 		if (takeoverBusyRef.current) return;
@@ -704,6 +730,20 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 							? t("Review and complete the sensitive action yourself, then continue.")
 							: t("Complete the requested step on this page, then continue.");
 
+	const navigate = (url: string) => {
+		const target = url.trim();
+		if (!target) return;
+		addressEditedRef.current = false;
+		setAddress(target);
+		setStatus(null);
+		setNotice(null);
+		void (creationRef.current ?? Promise.resolve()).then(() =>
+			api.controlBrowser({ type: "navigate", sessionId, browserId, url: target }),
+		).catch((cause) => {
+			setStatus(t("Browser could not load this page"));
+			onErrorRef.current(cause);
+		});
+	};
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
 		void api.controlBrowser({ type, sessionId, browserId }).catch((cause) => {
@@ -717,6 +757,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			aria-hidden={!visible}
 			aria-label={t("Browser")}
 			className={`browser-panel${visible ? " is-visible" : ""}${controlState !== "idle" ? " has-control-bar" : ""}`}
+			inert={covered}
 			id={`browser-panel-${browserId}`}
 			role="tabpanel"
 		>
@@ -734,27 +775,24 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 					triggerIcon={<User aria-hidden="true" size={13} weight="fill" />}
 					value={profile.profileId}
 				/>
-				<button aria-label={t("Back")} className="browser-toolbar-button" disabled={!state.canGoBack} onClick={() => control("back")} type="button"><ArrowLeft aria-hidden="true" size={14} /></button>
-				<button aria-label={t("Forward")} className="browser-forward browser-toolbar-button" disabled={!state.canGoForward} onClick={() => control("forward")} type="button"><ArrowRight aria-hidden="true" size={14} /></button>
-				<button aria-label={t("Reload")} className="browser-toolbar-button" disabled={state.url === ""} onClick={() => control("reload")} type="button"><ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} /></button>
+				<div className="browser-navigation">
+					<button aria-label={t("Back")} className="browser-toolbar-button" disabled={!state.canGoBack} onClick={() => control("back")} type="button"><ArrowLeft aria-hidden="true" size={14} /></button>
+					<button aria-label={t("Forward")} className="browser-forward browser-toolbar-button" disabled={!state.canGoForward} onClick={() => control("forward")} type="button"><ArrowRight aria-hidden="true" size={14} /></button>
+					<button aria-label={t("Reload")} className="browser-toolbar-button" disabled={state.url === ""} onClick={() => control("reload")} type="button"><ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} /></button>
+				</div>
 				<form
 					className="browser-address-form"
 					onSubmit={(event) => {
 						event.preventDefault();
-						const url = address.trim();
-						if (!url) return;
-						setStatus(null);
-						setNotice(null);
-						void api.controlBrowser({ type: "navigate", sessionId, browserId, url }).catch((cause) => {
-							setStatus(t("Browser could not load this page"));
-							onErrorRef.current(cause);
-						});
+						navigate(address);
 					}}
 				>
 					<div className="browser-address-field">
 						<span className="sr-only">{t("Browser address")}</span>
-						<input aria-label={t("Browser address")} onChange={(event) => setAddress(event.target.value)} placeholder={t("Enter URL")} spellCheck={false} value={address} />
-						<button aria-label={t("Open in default browser")} className="browser-address-open" disabled={state.url === ""} onClick={(event) => { event.preventDefault(); control("open-external"); }} type="button"><ArrowSquareOut aria-hidden="true" size={13} /></button>
+						<input aria-label={t("Browser address")} onChange={(event) => { addressEditedRef.current = true; setAddress(event.target.value); }} onKeyDown={(event) => {
+							if (event.key === "Escape") { addressEditedRef.current = false; setAddress(pageUrlRef.current); }
+						}} placeholder={t("Enter URL")} ref={addressInputRef} spellCheck={false} value={address} />
+						<button aria-label={t("Open in default browser")} className="browser-address-open" disabled={state.url === ""} onClick={() => control("open-external")} type="button"><ArrowSquareOut aria-hidden="true" size={13} /></button>
 					</div>
 				</form>
 				<div className="browser-history" ref={historyRef}>
@@ -876,7 +914,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				</div>
 			</div>
 			{controlState === "agent" && (
-				<div aria-label={t("Browser automation active")} className="browser-control-bar" role="status">
+				<div aria-label={t("Browser automation active")} className="browser-control-bar browser-automation-bar" role="status">
 					<span>{t("Metis is controlling this page")}</span>
 					<button disabled={takeoverBusy} onClick={takeControl} type="button">
 						{t(takeoverBusy ? "Taking control…" : "Take control")}
@@ -932,7 +970,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			<div className="browser-view-anchor" ref={anchorRef}>
 				{pagePreview && <img alt="" aria-hidden="true" className="browser-view-preview" draggable={false} src={pagePreview} />}
 			</div>
-			{state.url === "" && (
+			{state.url === "" && (startPageTools ? <BrowserStartPage tools={startPageTools} history={history} onNavigate={navigate} /> : (
 				<div className="browser-empty">
 					<div className="browser-empty-content">
 						<Globe aria-hidden="true" size={25} weight="light" />
@@ -940,7 +978,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 						<span>{t("Enter a URL to open a page")}</span>
 					</div>
 				</div>
-			)}
+			))}
 			{clearConfirmOpen && <BrowserClearDialog busy={clearBusy} onCancel={() => setClearConfirmOpen(false)} onConfirm={clearBrowserData} />}
 			{importOpen && (
 				<BrowserImportDialog

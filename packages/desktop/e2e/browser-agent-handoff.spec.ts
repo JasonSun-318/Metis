@@ -200,7 +200,9 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 		expect(fixture.deleteCount()).toBe(1);
 		await expect.poll(() => fixture.deleteCount()).toBe(1);
 
-		await app.page.getByRole("button", { name: "Show tools sidebar", exact: true }).click();
+		const showTools = app.page.getByRole("button", { name: "Show tools sidebar", exact: true });
+		if (await showTools.isVisible()) await showTools.click();
+		await expect(app.page.getByRole("button", { name: "Hide tools sidebar", exact: true })).toBeVisible();
 		await app.page.evaluate(() => {
 			const state = window as typeof window & { __browserHandoffRequests?: number };
 			state.__browserHandoffRequests = 0;
@@ -209,6 +211,8 @@ test("packaged confirmation rejects safely, approves once, and Take control ente
 			});
 		});
 		await sendFixturePrompt(app.page, "take-control-race");
+		// Agent-created tabs stay in the background; select the controlled tab explicitly.
+		await app.page.getByRole("tab", { name: "New tab", exact: true }).click();
 		const activity = app.page.getByRole("status", { name: "Browser automation active", exact: true });
 		await expect(activity).toContainText("Metis is controlling this page");
 		await app.page.screenshot({ animations: "disabled", path: testInfo.outputPath("agent-activity-dark-1280x840.png") });
