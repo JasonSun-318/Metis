@@ -5,6 +5,13 @@
 .message-file-info { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .message-file-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; color: var(--text); }
 .message-file-info small { color: var(--muted); font-size: 11px; }
+.message-file-selection { width: 320px; max-width: 100%; min-width: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); overflow: hidden; }
+.message-file-selection-details > summary { display: flex; min-width: 0; align-items: center; gap: 9px; padding: 10px 12px; cursor: pointer; }
+.message-file-selection-details > summary > svg { flex: none; }
+.message-file-selection-details > summary > .drawer-details-caret { margin-right: 0; color: var(--muted); }
+.message-file-selection-details .message-file-info small { overflow-wrap: anywhere; }
+.message-file-selection-details blockquote { max-height: 220px; overflow: auto; margin: 0 12px 12px; padding: 0 0 0 10px; border-left: 2px solid var(--border-strong); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; user-select: text; }
+.message-file-selection-truncated { display: block; margin: 0 12px 12px; color: var(--muted); font-size: 11px; }
 .transcript.has-navigation { container-type: inline-size; }
 .transcript.has-navigation .transcript-scroll { padding-left: max(48px, calc((100% - var(--conversation-width)) / 2)); }
 .conversation-navigation { position: absolute; z-index: 4; left: 4px; top: 50%; transform: translateY(-50%); width: 42px; max-height: calc(100% - 128px); }

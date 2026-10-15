@@ -109,9 +109,14 @@ function textBlocks(item: ItemView): TextBlock[] {
 
 /** Visible markdown/plain text of a message, concatenated in block order. */
 export function messageText(item: ItemView): string {
-	return textBlocks(item)
+	const text = textBlocks(item)
 		.map((block) => block.text)
 		.join("\n");
+	if (item.role !== "user" || !item.fileSelections?.length) return text;
+	const references = item.fileSelections
+		.map((file) => `[${file.name}${file.startLine === undefined ? "" : `:${file.startLine}–${file.endLine}`}]`)
+		.join(" ");
+	return [text, references].filter(Boolean).join("\n\n");
 }
 
 function isThinkingEcho(text: string, thinking: string): boolean {

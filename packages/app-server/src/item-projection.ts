@@ -11,7 +11,6 @@ import type {
 } from "@metis/app-protocol";
 import {
 	formatSessionAttachmentDisplayText,
-	formatSessionFileSelections,
 	parseDeliverFileDetails,
 	type StoredPlan,
 	splitSessionAttachmentPrompt,
@@ -186,8 +185,12 @@ function assistantBlocks(
 	return blocks;
 }
 
-function userContent(content: unknown, budget: TextBudget): Pick<ItemView, "content" | "attachments"> {
+function userContent(
+	content: unknown,
+	budget: TextBudget,
+): Pick<ItemView, "content" | "attachments" | "fileSelections"> {
 	const attachments: NonNullable<ItemView["attachments"]> = [];
+	const fileSelections: NonNullable<ItemView["fileSelections"]> = [];
 	const publicText = (text: string): string => {
 		const prompt = splitSessionAttachmentPrompt(text);
 		for (const attachment of prompt.attachments) {
@@ -196,8 +199,34 @@ function userContent(content: unknown, budget: TextBudget): Pick<ItemView, "cont
 				continue;
 			attachments.push({ name: attachment.name.slice(0, 255), byteLength: attachment.size });
 		}
-		// Preserve the existing selection/editor labels while removing upload paths.
-		return formatSessionAttachmentDisplayText(formatSessionFileSelections(prompt.text, prompt.fileSelections));
+		for (const file of prompt.fileSelections) {
+			if (fileSelections.length >= 8) break;
+			const selectedText = boundedText(file.selectedText, 2048);
+			const target = file.target;
+			fileSelections.push({
+				name: file.name,
+				source: file.source,
+				selectedText,
+				...(selectedText === file.selectedText ? {} : { selectedTextTruncated: true }),
+				...(file.startLine === undefined ? {} : { startLine: file.startLine, endLine: file.endLine }),
+				...(target === undefined
+					? {}
+					: {
+							target:
+								target.kind === "pptx"
+									? { kind: target.kind, page: target.page, objectName: target.objectName }
+									: target.kind === "pdf"
+										? {
+												kind: target.kind,
+												page: target.page,
+												...(target.endPage === undefined ? {} : { endPage: target.endPage }),
+											}
+										: { kind: target.kind, sheet: target.sheet, range: target.range },
+						}),
+			});
+		}
+		// Keep editor display formatting while projecting uploads and quotes separately.
+		return formatSessionAttachmentDisplayText(prompt.text);
 	};
 	const sanitized =
 		typeof content === "string"
@@ -214,6 +243,7 @@ function userContent(content: unknown, budget: TextBudget): Pick<ItemView, "cont
 	return {
 		content: textBlocks(sanitized, budget).filter((block) => block.type !== "text" || block.text.trim() !== ""),
 		...(attachments.length > 0 ? { attachments } : {}),
+		...(fileSelections.length > 0 ? { fileSelections } : {}),
 	};
 }
 

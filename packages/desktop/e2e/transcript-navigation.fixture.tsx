@@ -2,6 +2,8 @@ import type { ItemView } from "@metis/app-protocol";
 import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Transcript } from "../src/renderer/components/Transcript.tsx";
+import { TerminalPanel } from "../src/renderer/components/TerminalPanel.tsx";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 
 const params = new URLSearchParams(location.search);
@@ -15,7 +17,14 @@ function messages(index: number): ItemView[] {
 			itemId: `user-${index}`,
 			role: "user",
 			content: [{ type: "text", text: `第 ${index + 1} 个问题：请整理产品资料中的知识点，并补充笔记之间的关联。` }],
-			...(index % 10 === 0
+			...(params.has("references") && index === 0 ? {
+				content: [{ type: "text" as const, text: "翻译一下 [literal.md:1–8]" }],
+				fileSelections: [
+					{ name: "AGENTS.md", source: "workspace" as const, selectedText: "# 1. Language and communication\n\n- Default language: Chinese.\n- Preserve unrelated content.", startLine: 1, endLine: 8 },
+					{ name: "report.pdf", source: "delivered" as const, selectedText: "Selected document text", target: { kind: "pdf" as const, page: 2, endPage: 3 } },
+				],
+			} : {}),
+			...(index % 10 === 0 && !params.has("references")
 				? {
 						attachments: [
 							{ name: "产品调研报告.pdf", byteLength: 243712 },
@@ -41,7 +50,12 @@ function messages(index: number): ItemView[] {
 			content: [
 				{
 					type: "text",
-					text: `第 ${index + 1} 条回答\n\n已整理为独立主题笔记，保留了资料来源，并关联到现有知识点。\n\n${"每篇笔记只围绕一个明确主题展开，避免为拆分而拆分。\n\n".repeat((index % 5) + 1)}`,
+					text: `第 ${index + 1} 条回答\n\n已整理为独立主题笔记，保留了资料来源，并关联到现有知识点。\n\n${"每篇笔记只围绕一个明确主题展开，避免为拆分而拆分。\n\n".repeat((index % 5) + 1)}` + (params.has("selection") ? [
+						"\n\nSelection paragraph: selectable conversation content.",
+						"\n\n[Selectable link](https://example.test/)",
+						"\n\n| Column | Value |\n| --- | --- |\n| Selection | Table content |",
+						"\n\n```ts\nconst selectable = true;\n```",
+					].join("") : ""),
 				},
 			],
 		},
@@ -76,7 +90,7 @@ function Fixture() {
 				showNavigation={params.get("surface") !== "editor"}
 				itemIds={items.map((item) => item.itemId)}
 				itemsById={new Map(items.map((item) => [item.itemId, { ...item, sessionId: session }]))}
-				hasOlder={older}
+				hasOlder={older && !params.has("references")}
 				loadingOlder={false}
 				autoLoadOlder
 				onLoadOlder={async () => {
@@ -84,6 +98,11 @@ function Fixture() {
 					setOlder(false);
 				}}
 			/>
+			{params.has("terminal") && <div style={{ position: "relative", height: 130, flex: "0 0 130px" }}>
+				<TerminalPanel api={{ createTerminal: async () => undefined, resizeTerminal: async () => undefined,
+					writeTerminal: async () => undefined, subscribeTerminal: () => () => undefined } as unknown as MetisDesktopApi}
+					cwd="/isolated-fixture" terminalId="fixture-terminal" theme={params.get("theme") === "light" ? "light" : "dark"} visible />
+			</div>}
 			<footer>
 				发送消息给 Metis <span>＋</span>
 			</footer>

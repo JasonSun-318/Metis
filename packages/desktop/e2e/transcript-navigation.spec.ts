@@ -25,7 +25,7 @@ test.beforeAll(async () => {
 	});
 	await build({
 		stdin: {
-			contents: ["tokens.css", "app.css", "transcript-navigation.css"]
+			contents: ["tokens.css", "app.css", "transcript-navigation.css", path.resolve(__dirname, "../../../node_modules/@xterm/xterm/css/xterm.css")]
 				.map((file) => `@import "${path.resolve(__dirname, "../src/renderer/styles", file).replaceAll("\\", "/")}";`)
 				.join("\n"),
 			loader: "css",
@@ -70,6 +70,87 @@ function pageErrors(page: Page) {
 	page.on("pageerror", (error) => errors.push(error.message));
 	return errors;
 }
+
+test("sent file references stay readable and expandable in Chat and Code", async ({ page }, info) => {
+	const errors = pageErrors(page);
+	for (const mode of ["chat", "code"]) {
+		for (const theme of ["dark", "light"]) {
+			await page.setViewportSize({ width: 1000, height: 800 });
+			await page.goto(`${url}/?mode=${mode}&theme=${theme}&count=1&references=1`);
+			const user = page.locator('[data-user-message="user-0"]');
+			const cards = user.locator(".message-file-selection");
+			await expect(cards).toHaveCount(2);
+			await expect(user.locator(".message-user, .code-turn-user-bubble")).toHaveText("翻译一下 [literal.md:1–8]");
+			const quote = cards.first().locator("blockquote");
+			const toggle = cards.first().locator("summary");
+			await expect(toggle).toContainText("AGENTS.md");
+			await expect(toggle).toContainText("第 1–8 行");
+			await expect(cards.first().locator("details")).not.toHaveAttribute("open");
+			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height).toBe(0);
+			await toggle.click();
+			await expect(cards.first().locator("details")).toHaveAttribute("open");
+			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height ?? 0).toBeGreaterThan(50);
+			await expect(quote).toContainText("Default language: Chinese.");
+			expect(await quote.evaluate((element) => getComputedStyle(element).userSelect)).toBe("text");
+			await page.screenshot({ path: info.outputPath(`sent-references-${mode}-${theme}.png`) });
+			await toggle.focus();
+			await page.keyboard.press("Enter");
+			await expect(cards.first().locator("details")).not.toHaveAttribute("open");
+			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height).toBe(0);
+		}
+	}
+	expect(errors).toEqual([]);
+});
+
+test("Chat and Code text can be selected and terminal action hints appear on hover and focus", async ({ page }, info) => {
+	for (const mode of ["chat", "code"]) {
+		await page.setViewportSize({ width: 1280, height: 1000 });
+		await page.goto(`${url}/?mode=${mode}&count=1&selection=1&terminal=1`);
+		const paragraph = page.getByText("Selection paragraph: selectable conversation content.", { exact: true });
+		await expect(paragraph).toBeVisible();
+		const user = page.locator(mode === "chat" ? ".message-user p" : ".code-turn-user-bubble p").first();
+		for (const content of [user, paragraph, page.getByRole("cell", { name: "Table content", exact: true }), page.locator("pre code")]) {
+			await content.scrollIntoViewIfNeeded();
+			const rect = await content.evaluate((element) => {
+				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+				let node = walker.nextNode() as Text | null;
+				while (node && !node.data.trim()) node = walker.nextNode() as Text | null;
+				if (!node) throw new Error("Selection fixture has no text");
+				const start = node.data.search(/\S/u);
+				const range = document.createRange();
+				range.setStart(node, start);
+				range.setEnd(node, Math.min(node.data.length, start + 8));
+				const box = range.getBoundingClientRect();
+				return { x: box.x, y: box.y + box.height / 2, width: box.width };
+			});
+			await page.mouse.move(rect.x + 1, rect.y);
+			await page.mouse.down();
+			await page.mouse.move(rect.x + rect.width - 1, rect.y, { steps: 8 });
+			await page.mouse.up();
+			expect(await page.evaluate(() => window.getSelection()?.toString().trim()), await content.innerText()).toBeTruthy();
+		}
+		const link = page.getByRole("link", { name: "Selectable link" });
+		expect(await link.evaluate((element) => getComputedStyle(element).userSelect)).toBe("text");
+		for (const name of ["滚动到底部", "清空终端"]) {
+			await page.locator("header").click({ position: { x: 20, y: 20 } });
+			await page.locator(".terminal-panel").hover({ position: { x: 20, y: 60 } });
+			const button = page.getByRole("button", { name, exact: true });
+			await button.hover();
+			await expect(page.getByRole("tooltip", { name, exact: true })).toBeVisible();
+			await page.screenshot({ path: info.outputPath(`terminal-hint-${mode}-${name === "滚动到底部" ? "scroll" : "clear"}.png`) });
+			await page.mouse.move(10, 10);
+			await expect(page.getByRole("tooltip", { name, exact: true })).toHaveCount(0);
+			await page.locator("header button").first().focus();
+			for (let index = 0; index < 12 && !await button.evaluate((element) => element === document.activeElement); index += 1) {
+				await page.keyboard.press("Tab");
+			}
+			await expect(button).toBeFocused();
+			await expect(page.getByRole("tooltip", { name, exact: true })).toBeVisible();
+			await page.locator("header").click({ position: { x: 20, y: 20 } });
+		}
+		await page.screenshot({ path: info.outputPath(`selectable-transcript-${mode}.png`) });
+	}
+});
 
 test("Agent rail previews, jumps to virtualized messages, and retains history position", async ({ page }, info) => {
 	const errors = pageErrors(page);

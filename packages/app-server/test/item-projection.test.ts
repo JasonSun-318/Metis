@@ -1,4 +1,5 @@
 import type { ItemView } from "@metis/app-protocol";
+import { formatSessionFileSelections } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import {
 	appendProjectedDelta,
@@ -392,5 +393,97 @@ describe("uploaded file presentation", () => {
 		expect(project("explain <attachments>XML</attachments>")?.content).toEqual([
 			{ type: "text", text: "explain <attachments>XML</attachments>" },
 		]);
+	});
+});
+
+describe("selected file presentation", () => {
+	const selection = {
+		source: "workspace" as const,
+		name: "AGENTS.md",
+		path: "/private/work/AGENTS.md",
+		basis: "source" as const,
+		selectedText: "# 1. Language\nDefault language: Chinese.",
+		startLine: 1,
+		endLine: 8,
+	};
+	const project = (content: unknown) =>
+		projectLiveMessage({
+			itemId: "selected-file",
+			sessionId: "session-1",
+			turnId: "turn-1",
+			state: "completed",
+			fallbackTimestamp: CREATED_AT,
+			message: { role: "user", content },
+		})!;
+	it("preserves references in live and restored views without flattening them into text or exposing paths", () => {
+		const content = formatSessionFileSelections("翻译一下 [literal.md:1–8]", [selection]);
+		const live = project(content);
+		expect(live.content).toEqual([{ type: "text", text: "翻译一下 [literal.md:1–8]" }]);
+		expect(live.fileSelections).toEqual([
+			{
+				name: selection.name,
+				source: selection.source,
+				selectedText: selection.selectedText,
+				startLine: 1,
+				endLine: 8,
+			},
+		]);
+		expect(JSON.stringify(live)).not.toContain("/private/work");
+		expect(JSON.stringify(live)).not.toContain("file_selections");
+		const restored = projectMessageEntry({
+			entry: {
+				type: "message",
+				id: "selected-file",
+				turnId: "turn-1",
+				timestamp: CREATED_AT,
+				message: { role: "user", content },
+			},
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		});
+		expect(restored).toEqual(live);
+		expect(project("[AGENTS.md:1–8]").fileSelections).toBeUndefined();
+		expect(project(formatSessionFileSelections("", [selection])).content).toEqual([]);
+	});
+	it("bounds UTF-8 previews and total reference count without changing the durable quote", () => {
+		const quoted = { ...selection, selectedText: "中文".repeat(2000) };
+		const durable = formatSessionFileSelections("Explain", [quoted]);
+		const result = project(durable);
+		expect(Buffer.byteLength(result.fileSelections![0]!.selectedText, "utf8")).toBeLessThanOrEqual(2048);
+		expect(result.fileSelections![0]!.selectedTextTruncated).toBe(true);
+		expect(result.fileSelections![0]!.selectedText).not.toContain("\ufffd");
+		expect(durable).toContain(quoted.selectedText);
+		const many = Array.from({ length: 3 }, () => ({
+			type: "text",
+			text: formatSessionFileSelections("", Array(8).fill(selection)),
+		}));
+		expect(project(many).fileSelections).toHaveLength(8);
+	});
+	it("keeps public document locations and omits private slide addressing", () => {
+		const result = project(
+			formatSessionFileSelections("Explain", [
+				{ ...selection, target: { kind: "pdf", page: 2, endPage: 3 } },
+				{
+					...selection,
+					target: {
+						kind: "pptx",
+						page: 4,
+						slidePath: "ppt/slides/slide4.xml",
+						objectId: "shape-1",
+						objectType: "shape",
+						objectName: "Title",
+					},
+				},
+				{ ...selection, target: { kind: "spreadsheet", sheet: "Budget", range: "C5:D6" } },
+			]),
+		);
+		expect(result.fileSelections?.map((file) => file.target)).toEqual([
+			{ kind: "pdf", page: 2, endPage: 3 },
+			{ kind: "pptx", page: 4, objectName: "Title" },
+			{ kind: "spreadsheet", sheet: "Budget", range: "C5:D6" },
+		]);
+		expect(JSON.stringify(result)).not.toContain("slidePath");
 	});
 });

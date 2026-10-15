@@ -537,6 +537,35 @@ export const MessageAttachmentViewSchema = StrictObject({
 	byteLength: Type.Integer({ minimum: 0, maximum: 128 * 1024 * 1024 }),
 });
 
+/** Public quote previews; storage paths and model-facing reference instructions stay private. */
+export const MessageFileSelectionViewSchema = StrictObject({
+	name: Type.String({ minLength: 1, maxLength: 255 }),
+	source: Type.Union([Type.Literal("workspace"), Type.Literal("delivered")]),
+	selectedText: Utf8String(2048, { minLength: 1 }),
+	selectedTextTruncated: Type.Optional(Type.Boolean()),
+	startLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+	endLine: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
+	target: Type.Optional(
+		Type.Union([
+			StrictObject({
+				kind: Type.Literal("pdf"),
+				page: Type.Integer({ minimum: 1, maximum: 1000000 }),
+				endPage: Type.Optional(Type.Integer({ minimum: 1, maximum: 1000000 })),
+			}),
+			StrictObject({
+				kind: Type.Literal("pptx"),
+				page: Type.Integer({ minimum: 1, maximum: 1000000 }),
+				objectName: Type.String({ maxLength: 255 }),
+			}),
+			StrictObject({
+				kind: Type.Literal("spreadsheet"),
+				sheet: Type.String({ minLength: 1, maxLength: 255 }),
+				range: Type.String({ pattern: "^[A-Z]{1,3}[1-9][0-9]{0,6}(:[A-Z]{1,3}[1-9][0-9]{0,6})?$" }),
+			}),
+		]),
+	),
+});
+
 export const ItemViewSchema = StrictObject({
 	itemId: OpaqueIdSchema,
 	sessionId: SessionIdSchema,
@@ -545,6 +574,7 @@ export const ItemViewSchema = StrictObject({
 	state: Type.Union([Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("interrupted")]),
 	content: Type.Array(ItemContentBlockViewSchema, { maxItems: 256 }),
 	attachments: Type.Optional(Type.Array(MessageAttachmentViewSchema, { maxItems: 16 })),
+	fileSelections: Type.Optional(Type.Array(MessageFileSelectionViewSchema, { maxItems: 8 })),
 	usage: Type.Optional(ItemUsageViewSchema),
 	createdAt: TimestampSchema,
 	completedAt: Type.Optional(TimestampSchema),

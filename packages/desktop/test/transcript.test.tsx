@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { shouldAdjustTranscriptScroll, shouldFollowTranscript, Transcript } from "../src/renderer/components/Transcript.tsx";
 import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
+import { messageText } from "../src/renderer/components/transcript-turn-model.ts";
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const TURN_ID = "turn-1";
@@ -1123,6 +1124,32 @@ describe("Transcript", () => {
 });
 
 describe("sent attachment cards", () => {
+	it.each(["chat", "code"] as const)("preserves selected file cards in %s, including reference-only messages", async (appearance) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+		const reference: ItemView = {
+			...item("selected-file", "user", [{ type: "text", text: "翻译一下 [literal.md:1–8]" }]),
+			fileSelections: [
+				{ name: "AGENTS.md", source: "workspace", selectedText: "<img src=x onerror=alert(1)>\n# 1. Language", startLine: 1, endLine: 8 },
+				{ name: "report.pdf", source: "delivered", selectedText: "Selected document text", target: { kind: "pdf", page: 2, endPage: 3 } },
+			],
+		};
+		await act(async () => root.render(<Turn items={[reference]} />));
+		expect(messageText(reference)).toBe("翻译一下 [literal.md:1–8]\n\n[AGENTS.md:1–8] [report.pdf]");
+		expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
+		expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("AGENTS.md");
+		expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("1–8");
+		expect(container.querySelectorAll(".message-file-selection summary")[1]?.textContent).toContain("2–3");
+		expect(container.querySelector(".message-file-selection blockquote")?.textContent).toBe(reference.fileSelections![0]!.selectedText);
+		expect(container.querySelector(".message-file-selection img, .message-file-selection script")).toBeNull();
+		expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe("翻译一下 [literal.md:1–8]");
+		await act(async () => root.render(<Turn items={[{ ...reference, content: [] }]} />));
+		expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
+		expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
+		await act(async () => root.unmount());
+	});
 	it.each(["chat", "code"] as const)("renders files separately from the %s message and preserves literal brackets", async (appearance) => {
 		const container = document.createElement("div");
 		document.body.append(container);

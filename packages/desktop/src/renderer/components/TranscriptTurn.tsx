@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
+import { MessageFileSelections } from "./MessageFileSelections.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -333,6 +334,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 						return (
 							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
 								<MessageAttachments attachments={segment.item.attachments} />
+								<MessageFileSelections selections={segment.item.fileSelections} />
 								{segment.item.content.length > 0 && <div className="message message-user">
 									{segment.item.content.map((block, blockIndex) => <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />)}
 								</div>}

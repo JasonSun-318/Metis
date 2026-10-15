@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
+import { MessageFileSelections } from "./MessageFileSelections.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -232,6 +233,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 						return (
 							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
 								<MessageAttachments attachments={segment.item.attachments} />
+								<MessageFileSelections selections={segment.item.fileSelections} />
 								{segment.item.content.length > 0 && <div className="code-turn-user-bubble">{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>}
 								{onCopy && copyText.trim() !== "" && (
 									<div className="turn-actions">

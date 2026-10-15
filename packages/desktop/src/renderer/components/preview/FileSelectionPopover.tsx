@@ -52,7 +52,6 @@ export function FileSelectionPopover({
 			popup?.hidePopover();
 			return;
 		}
-		popup.showPopover();
 		const position = () => {
 			const isText = range instanceof Range;
 			if (!(isText ? range.startContainer : range).isConnected) {
@@ -86,18 +85,24 @@ export function FileSelectionPopover({
 			popup.style.left = `${Math.max(8, Math.min(anchor.left, width - bounds.width - 8))}px`;
 			popup.style.top = `${Math.max(8, Math.min(top, height - bounds.height - 8))}px`;
 		};
-		position();
+		// A selection is captured on pointerup. Opening during that event lets
+		// the same gesture light-dismiss the new popover in Chromium.
+		const showFrame = requestAnimationFrame(() => {
+			popup.showPopover();
+			position();
+			if (editing) inputRef.current?.focus();
+		});
 		const observer = new ResizeObserver(position);
 		observer.observe(popup);
 		window.addEventListener("resize", position);
 		document.addEventListener("scroll", position, true);
-		if (editing) inputRef.current?.focus();
 		const highlights = globalThis.CSS?.highlights as unknown as Map<string, Highlight> | undefined;
 		const key = "metis-file-selection";
 		const highlight =
 			typeof Highlight === "undefined" || !(range instanceof Range) ? undefined : new Highlight(range);
 		if (highlight && highlights) highlights.set(key, highlight);
 		return () => {
+			cancelAnimationFrame(showFrame);
 			observer.disconnect();
 			window.removeEventListener("resize", position);
 			document.removeEventListener("scroll", position, true);

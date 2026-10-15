@@ -202,6 +202,7 @@ try {
 				],
 				"/fixture.js": [join(directory, "fixture.js"), "text/javascript"],
 				"/app.css": [join(desktop, "src/renderer/styles/app.css"), "text/css"],
+				"/transcript-navigation.css": [join(desktop, "src/renderer/styles/transcript-navigation.css"), "text/css"],
 			};
 			if (files[url.pathname]) {
 				res.setHeader("content-type", files[url.pathname][1]);
@@ -287,6 +288,7 @@ try {
 import React,{useState,useEffect} from 'react';import {createRoot} from 'react-dom/client';
 import {PreviewHost} from ${component("components/preview/PreviewHost.tsx")};
 import {Composer} from ${component("components/Composer.tsx")};
+import {MessageFileSelections} from ${component("components/MessageFileSelections.tsx")};
 import {FilePanel} from ${component("components/FilePanel.tsx")};
 import {FileSelectionProvider} from ${component("components/preview/FileSelectionContext.tsx")};
 import {useConversationPlanFlow} from ${component("hooks/use-conversation-plan-flow.ts")};
@@ -312,7 +314,7 @@ function App(){
  const flow=useConversationPlanFlow({api,sessionId:activeSession,writableSessionId:activeSession,running,queuedTurnCount:snapshot?.queuedTurns.length ?? 0,serverReady:true,syncReady:true,compacting:false,interactionPending:false,collaborationMode:'default',itemOrder:[],itemsById:new Map(),clearError:()=>setError(''),reportError:error=>setError(error.message)});
  useEffect(()=>{const poll=async()=>{if(busy)return;busy=true;try{const result=await(await fetch('/poll?after='+cursor)).json();cursor=result.cursor;window.snapshot=result.snapshot;setSnapshot(result.snapshot);if(result.events.length)for(const listener of subscribers)listener({type:'app-server',envelope:{jsonrpc:'2.0',method:'connection/events',params:{events:result.events}}});}finally{busy=false;}};void poll();const timer=setInterval(poll,100);return()=>clearInterval(timer);},[]);
  return <FileSelectionProvider enabled={activeSession===sessionId} onSubmit={(sid,input)=>sid===sessionId?flow.submit(input):Promise.reject(new Error("This conversation is not ready to send"))}>
- <section id="conversation"><div id="messages">{snapshot?.recentItems.map(item=><div className={'message '+item.role} key={item.itemId}>{item.content.map((block,i)=><pre key={i}>{block.text ?? (block.type==='tool_result' ? block.name+': '+block.output:'')}</pre>)}</div>)}{snapshot?.queuedTurns.map(turn=><div className="queued" key={turn.queueItemId}>{turn.text}</div>)}</div><div id="error">{error}</div><Composer key={activeSession} disabled={false} running={running} onInterrupt={async()=>{}} onSubmit={flow.submit} selectionSessionId={activeSession}/></section>
+ <section id="conversation"><div id="messages">{snapshot?.recentItems.map(item=><div className={'message '+item.role} key={item.itemId}>{item.role==='user' && <MessageFileSelections selections={item.fileSelections}/>} {item.content.map((block,i)=><pre key={i}>{block.text ?? (block.type==='tool_result' ? block.name+': '+block.output:'')}</pre>)}</div>)}{snapshot?.queuedTurns.map(turn=><div className="queued" key={turn.queueItemId}>{turn.text}</div>)}</div><div id="error">{error}</div><Composer key={activeSession} disabled={false} running={running} onInterrupt={async()=>{}} onSubmit={flow.submit} selectionSessionId={activeSession}/></section>
  <aside id="preview">{workspaceFiles ? <WorkspaceFiles/> : <PreviewHost file={target} api={api} active={activeSession===sessionId} onError={console.error}/>}</aside>
  </FileSelectionProvider>;
 }
@@ -328,7 +330,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 		jsx: "automatic",
 		logLevel: "silent",
 	});
-	const html = `<!doctype html><html><head><link rel="stylesheet" href="/app.css"><style>:root{--app-bg:#171717;--panel:#262626;--text:#eee;--muted:#aaa;--border-strong:#555;--border:#444;--surface-08:#333;--overlay-shadow:0 4px 20px #0008}body{font-family:Arial}#root{display:flex;height:100vh;gap:20px;padding:12px}#conversation{flex:1;min-width:0;display:flex;flex-direction:column}#messages{flex:1;overflow:auto}.message pre{white-space:pre-wrap;font:inherit;font-size:13px;padding:8px}.message.user{margin:8px 0 8px 12%;border-radius:12px;background:#303030}.message.tool{font-size:11px;color:#aaa}#preview{position:relative;width:480px;min-width:0;flex:none}.composer-dock{position:relative}.text-viewport{padding:20px}.file-markdown p{margin:18px 0}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`;
+	const html = `<!doctype html><html><head><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/transcript-navigation.css"><style>:root{--app-bg:#171717;--panel:#262626;--text:#eee;--muted:#aaa;--border-strong:#555;--border:#444;--surface-08:#333;--overlay-shadow:0 4px 20px #0008}body{font-family:Arial}#root{display:flex;height:100vh;gap:20px;padding:12px}#conversation{flex:1;min-width:0;display:flex;flex-direction:column}#messages{flex:1;overflow:auto}#messages>.message{position:static}.message pre{white-space:pre-wrap;font:inherit;font-size:13px;padding:8px}.message.user{margin:8px 0 8px 12%;border-radius:12px;background:#303030}.message.tool{font-size:11px;color:#aaa}#preview{position:relative;width:480px;min-width:0;flex:none}.composer-dock{position:relative}.text-viewport{padding:20px}.file-markdown p{margin:18px 0}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`;
 	browser = await chromium.launch({ channel: process.env.PREVIEW_BROWSER_CHANNEL ?? "chrome", headless: true });
 	const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 	page.setDefaultTimeout(8000);
@@ -497,7 +499,7 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await popup.getByRole("button", { name: "Add to conversation", exact: true }).click();
 	await expect(page.getByRole("button", { name: "Expand preview", exact: true })).toBeVisible();
 	await expect(page.locator("#composer-input")).toBeFocused();
-	// Session isolation removes the old draft; formatted JSON has no source line hints.
+	// Returning to the task restores its notes reference alongside the new JSON fragment.
 	await page.evaluate(() => window.switchTask());
 	await expect(page.locator(".composer-selections")).toHaveCount(0);
 	await page.evaluate(() => window.openFixture("data.json"));
@@ -507,8 +509,10 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await page.locator("#composer-input").fill("Explain JSON");
 	await page.locator("#composer-input").press("Enter");
 	await expect.poll(() => requests.at(-1)?.params.text).toBe("Explain JSON");
-	assert.equal(requests.at(-1).params.fileSelections[0].basis, "formatted");
-	assert.equal(requests.at(-1).params.fileSelections[0].startLine, undefined);
+	const jsonQuote = requests.at(-1).params.fileSelections.find((file) => file.relativePath === "data.json");
+	assert.equal(jsonQuote?.basis, "formatted");
+	assert.equal(jsonQuote.startLine, undefined);
+	assert(requests.at(-1).params.fileSelections.some((file) => file.relativePath === "notes.md"));
 	await expect.poll(() => page.evaluate(() => Boolean(window.snapshot && !window.snapshot.activeTurnId))).toBe(true);
 	await page.evaluate(() => window.openFixture("code.ts"));
 	await expect(page.locator(".preview-plain-text")).toContainText("const second");
@@ -697,6 +701,14 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await expect.poll(() => requests.at(-1)?.params.text).toBe("Explain workspace source selection");
 	assert.equal(requests.at(-1).params.fileSelections[0].startLine, 3);
 	await expect.poll(() => opened.isActive()).toBe(false);
+	const sentQuote = page.locator(".message.user").last().locator(".message-file-selection");
+	await expect(sentQuote).toHaveCount(1);
+	await expect(sentQuote.locator("summary")).toContainText("notes.md");
+	await expect(sentQuote.locator("summary")).toContainText("Lines 3–3");
+	await sentQuote.locator("summary").click();
+	await expect(sentQuote.locator("blockquote")).toBeVisible();
+	await expect(sentQuote.locator("blockquote")).toHaveText("Original target sentence.");
+	await page.screenshot({ path: join(directory, "sent-workspace-reference.png") });
 	await page.getByRole("button", { name: "Show preview", exact: true }).click();
 	await drag("Original target sentence.", 0, false, ".file-preview-body");
 	await popup.getByRole("button", { name: "Request changes", exact: true }).click();
@@ -729,6 +741,9 @@ await setLocale('en');createRoot(document.getElementById('root')).render(<App/>)
 	await opened.close();
 	opened = await host.open(ref);
 	const restored = await opened.snapshot(epoch, () => events.length);
+	assert(restored.recentItems.some((item) => item.role === "user" && item.fileSelections?.some(
+		(file) => file.name === "notes.md" && file.startLine === 3 && file.selectedText === "Original target sentence.",
+	)));
 	assert(
 		restored.recentItems.some(
 			(item) =>
