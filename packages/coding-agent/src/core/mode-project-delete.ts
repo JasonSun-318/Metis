@@ -63,6 +63,7 @@ interface SessionHeaderView {
 	readonly id: string;
 	readonly cwd: string;
 	readonly mode?: AgentMode;
+	readonly cwdOrigin?: "managed" | "user-selected";
 	readonly scheduled?: unknown;
 }
 
@@ -179,6 +180,9 @@ function readFastHeader(path: string): SessionHeaderView {
 		}
 		assertValidSessionId(value.id);
 		if (value.mode !== undefined && !isAgentMode(value.mode)) throw new Error("Session header mode is invalid");
+		const cwdOrigin = value.cwdOrigin === undefined ? "user-selected" : value.cwdOrigin;
+		if (cwdOrigin !== "managed" && cwdOrigin !== "user-selected")
+			throw new Error("Session header cwd origin is invalid");
 		if (!isAbsolute(value.cwd) || Buffer.byteLength(value.cwd, "utf8") > 32 * 1024) {
 			throw new Error("Session header cwd is invalid");
 		}
@@ -188,6 +192,7 @@ function readFastHeader(path: string): SessionHeaderView {
 			id: value.id,
 			cwd: value.cwd,
 			mode: value.mode as AgentMode | undefined,
+			cwdOrigin,
 			...(value.scheduled === undefined ? {} : { scheduled: value.scheduled }),
 		};
 	} finally {
@@ -306,6 +311,8 @@ function scanProjectStorage(
 			throw new ProjectDeleteError("SESSION_CORRUPT", `Duplicate session id in project storage: ${header.id}`);
 		}
 		ids.add(header.id);
+		// Match the catalog's project scope without removing a task sharing its cwd.
+		if (header.cwdOrigin === "managed") continue;
 		result.set(path, { id: header.id, archived, updatedAt: new Date(lstatSync(path).mtimeMs).toISOString() });
 	}
 	return result;

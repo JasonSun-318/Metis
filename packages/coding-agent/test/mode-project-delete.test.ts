@@ -78,12 +78,13 @@ function createSession(
 	layout: TestLayout,
 	id: string,
 	mode: "chat" | "code",
-	options: { cwd?: string; archived?: boolean; scheduled?: boolean } = {},
+	options: { cwd?: string; archived?: boolean; scheduled?: boolean; cwdOrigin?: "managed" | "user-selected" } = {},
 ): { path: string; target: ModeProjectSessionTarget } {
 	const cwd = options.cwd ?? layout.cwd;
 	const manager = SessionManager.create(cwd, getDefaultSessionDir(cwd, layout.agentDir), {
 		id,
 		mode,
+		...(options.cwdOrigin ? { cwdOrigin: options.cwdOrigin } : {}),
 		...(options.scheduled ? { scheduled: { taskId: `task-${id}`, runId: `run-${id}` } } : {}),
 	});
 	const activePath = manager.getSessionFile();
@@ -152,6 +153,50 @@ describe("mode project Trash", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
+
+	it.each([false, true])(
+		"keeps a managed task sharing the selected Chat project's workspace (archived: %s)",
+		async (archived) => {
+			const layout = createLayout();
+			roots.push(layout.root);
+			const managedId = "ba2f47af-8b7c-48dd-bf57-98e440202fbf";
+			layout.cwd = join(layout.agentDir, "workspaces", managedId);
+			mkdirSync(layout.cwd, { recursive: true });
+			const managed = createSession(layout, managedId, "chat", { cwdOrigin: "managed", archived });
+			const first = createSession(layout, "selected-first", "chat");
+			const second = createSession(layout, "selected-second", "chat", { archived: true });
+			const managedFile = write(join(layout.cwd, "keep-task-data.txt"));
+			const result = await trashModeProjectData(input(layout, [first.target, second.target]), hooks());
+			expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 2 });
+			expect(existsSync(first.path)).toBe(false);
+			expect(existsSync(second.path)).toBe(false);
+			expect(existsSync(managed.path)).toBe(true);
+			expect(existsSync(managedFile)).toBe(true);
+		},
+	);
+
+	it.each([undefined, "unexpected"])(
+		"validates the project cwd origin and supports old headers (origin: %s)",
+		async (cwdOrigin) => {
+			const layout = createLayout();
+			roots.push(layout.root);
+			const selected = createSession(layout, "selected-origin", "chat");
+			const records = readFileSync(selected.path, "utf8").trimEnd().split("\n");
+			const header = JSON.parse(records[0]!);
+			if (cwdOrigin === undefined) delete header.cwdOrigin;
+			else header.cwdOrigin = cwdOrigin;
+			records[0] = JSON.stringify(header);
+			writeFileSync(selected.path, `${records.join("\n")}\n`);
+			const result = await trashModeProjectData(input(layout, [selected.target]), hooks());
+			if (cwdOrigin === undefined) {
+				expect(result).toEqual({ ok: true, method: "trash", deletedSessionCount: 1 });
+				expect(existsSync(selected.path)).toBe(false);
+			} else {
+				expect(result).toMatchObject({ ok: false, code: "SESSION_CORRUPT" });
+				expect(existsSync(selected.path)).toBe(true);
+			}
+		},
+	);
 
 	it("deletes only one mode's ordinary sessions and proven-owned data", async () => {
 		const layout = createLayout();
