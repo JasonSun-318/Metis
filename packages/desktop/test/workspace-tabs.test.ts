@@ -256,9 +256,7 @@ describe("workspaceTabs / findTabLocation", () => {
 		workspace = split(workspace, "t1", "right");
 		expect(workspaceTabs(workspace).map((tab) => tab.id)).toEqual([chatId, "t1"]);
 		expect(findTabLocation(workspace, "t1")).toEqual({ paneIndex: 1, tabIndex: 0 });
-		expect(workspace.panes.find((pane) => pane.tabs.some((tab) => tab.id === "t1"))!.id).toBe(
-			workspace.panes[1]!.id,
-		);
+		expect(workspace.panes.find((pane) => pane.tabs.some((tab) => tab.id === "t1"))!.id).toBe(workspace.panes[1]!.id);
 	});
 });
 
