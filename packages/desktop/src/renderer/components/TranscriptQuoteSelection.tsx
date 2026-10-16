@@ -166,9 +166,9 @@ export function TranscriptQuoteSelection({
 				</button>
 			</div>
 			{!sourceReady && (
-				<div className="conversation-selection-notice" role="status">
+				<output className="status-block conversation-selection-notice">
 					{t("Wait for this reply to finish before quoting")}
-				</div>
+				</output>
 			)}
 			{error && (
 				<div className="selection-error" role="alert">

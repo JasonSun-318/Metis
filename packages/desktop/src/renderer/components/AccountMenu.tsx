@@ -3,11 +3,16 @@ import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useProfileIdentity } from "../profile-identity.ts";
 
-export const AccountMenu = memo(function AccountMenu({ onSettings, onCheckUpdate, checkingUpdate = false, updateDownloading = false }: {
- readonly onSettings: () => void;
- readonly onCheckUpdate?: () => void;
- readonly checkingUpdate?: boolean;
- readonly updateDownloading?: boolean;
+export const AccountMenu = memo(function AccountMenu({
+	onSettings,
+	onCheckUpdate,
+	checkingUpdate = false,
+	updateDownloading = false,
+}: {
+	readonly onSettings: () => void;
+	readonly onCheckUpdate?: () => void;
+	readonly checkingUpdate?: boolean;
+	readonly updateDownloading?: boolean;
 }) {
 	const { t } = useTranslation();
 	const identity = useProfileIdentity();
@@ -55,32 +60,51 @@ export const AccountMenu = memo(function AccountMenu({ onSettings, onCheckUpdate
 				</div>
 			) : null}
 			<div className="account-menu-footer">
-			<button
-				aria-label={identity.displayName}
-				aria-expanded={open}
-				aria-haspopup="menu"
-				className="account-menu-trigger"
-				onClick={() => setOpen((current) => !current)}
-				ref={triggerRef}
-				type="button"
-			>
-				<span aria-hidden="true" className="account-mark">
-					{identity.avatarDataUrl
-						? <img alt="" src={identity.avatarDataUrl} />
-						: identity.displayName.trim()[0]?.toUpperCase() ?? "M"}
-				</span>
-				<span className="account-menu-name">{identity.displayName}</span>
-				<CaretDown aria-hidden="true" size={14} />
-			</button>
-			{onCheckUpdate && <button
-				aria-label={t(checkingUpdate ? "Checking for updates" : "Check for updates")}
-				aria-busy={checkingUpdate}
-				className="account-update-check"
-				disabled={checkingUpdate || updateDownloading}
-				onClick={() => { setOpen(false); onCheckUpdate(); }}
-				title={t(updateDownloading ? "Update download in progress" : checkingUpdate ? "Checking for updates" : "Check for updates")}
-				type="button"
-			><ArrowsClockwise aria-hidden="true" className={checkingUpdate ? "is-spinning" : undefined} size={15} /></button>}
+				<button
+					aria-label={identity.displayName}
+					aria-expanded={open}
+					aria-haspopup="menu"
+					className="account-menu-trigger"
+					onClick={() => setOpen((current) => !current)}
+					ref={triggerRef}
+					type="button"
+				>
+					<span aria-hidden="true" className="account-mark">
+						{identity.avatarDataUrl ? (
+							<img alt="" src={identity.avatarDataUrl} />
+						) : (
+							(identity.displayName.trim()[0]?.toUpperCase() ?? "M")
+						)}
+					</span>
+					<span className="account-menu-name">{identity.displayName}</span>
+					<CaretDown aria-hidden="true" size={14} />
+				</button>
+				{onCheckUpdate && (
+					<button
+						aria-label={t(checkingUpdate ? "Checking for updates" : "Check for updates")}
+						aria-busy={checkingUpdate}
+						className="account-update-check"
+						disabled={checkingUpdate || updateDownloading}
+						onClick={() => {
+							setOpen(false);
+							onCheckUpdate();
+						}}
+						title={t(
+							updateDownloading
+								? "Update download in progress"
+								: checkingUpdate
+									? "Checking for updates"
+									: "Check for updates",
+						)}
+						type="button"
+					>
+						<ArrowsClockwise
+							aria-hidden="true"
+							className={checkingUpdate ? "is-spinning" : undefined}
+							size={15}
+						/>
+					</button>
+				)}
 			</div>
 		</div>
 	);

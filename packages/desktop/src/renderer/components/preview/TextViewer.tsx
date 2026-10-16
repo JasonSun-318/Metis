@@ -42,6 +42,10 @@ export function TextViewer({
 		() => (kind === "markdown" ? sourceText : formatPreviewText(fileName, sourceText)),
 		[sourceText, fileName, kind],
 	);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.fileId): New content or file identity invalidates the previous text selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.relativePath): New content or file identity invalidates the previous text selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.sessionId): New content or file identity invalidates the previous text selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(sourceText): New content or file identity invalidates the previous text selection.
 	useEffect(() => {
 		setSelection(null);
 		setOpen(false);

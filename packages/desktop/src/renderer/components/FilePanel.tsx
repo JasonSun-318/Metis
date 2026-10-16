@@ -1,4 +1,3 @@
-import { useVirtualizer } from "@tanstack/react-virtual";
 import {
 	CaretRight,
 	Code,
@@ -17,22 +16,23 @@ import {
 	SpinnerGap,
 	Trash,
 } from "@phosphor-icons/react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
-	MetisDesktopApi,
 	DesktopWorkspaceEntry,
 	DesktopWorkspaceFile,
 	DesktopWorkspaceMutationInput,
 	DesktopWorkspaceMutationResult,
+	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { DialogFrame } from "./ProjectActions.tsx";
 import { useFileSelections } from "./preview/FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./preview/FileSelectionPopover.tsx";
-import { selectionFromRange, selectionFromText, type DraftFileSelection } from "./preview/file-selection.ts";
+import { type DraftFileSelection, selectionFromRange, selectionFromText } from "./preview/file-selection.ts";
 import { classifyPreviewKind, isHostedPreviewKind } from "./preview/preview-kinds.ts";
-import { DialogFrame } from "./ProjectActions.tsx";
 import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -84,7 +84,12 @@ interface FilePanelProps {
 }
 
 type InlineEdit =
-	| { readonly type: "create"; readonly kind: "directory" | "file"; readonly parentRelativePath: string; readonly name: string }
+	| {
+			readonly type: "create";
+			readonly kind: "directory" | "file";
+			readonly parentRelativePath: string;
+			readonly name: string;
+	  }
 	| { readonly type: "rename"; readonly entry: DesktopWorkspaceEntry; readonly name: string };
 
 interface TreeMenu {
@@ -162,6 +167,10 @@ export function FilePanel({
 	const [selectionError, setSelectionError] = useState("");
 	const currentDraft = useRef(draft);
 	currentDraft.current = draft;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(draft?.text): Edits invalidate text selection offsets.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(visible): Visibility changes dismiss stale text selection popovers.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(sessionId): Changing sessions invalidates the previous text selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(activePath): Changing the file invalidates the previous text selection.
 	useEffect(() => {
 		setSelection(null);
 		setSelectionOpen(false);
@@ -221,7 +230,7 @@ export function FilePanel({
 	const draftMatchesActivePath = draft?.file.relativePath === activePath;
 	const displayedFile = draftMatchesActivePath ? draft.file : file;
 
- const captureSelection = (editor?: CodeTextSelection) => {
+	const captureSelection = (editor?: CodeTextSelection) => {
 		if (!visible || !draftMatchesActivePath || !activePath || !selectionActions?.enabled) return;
 		const root = previewBodyRef.current;
 		const native = window.getSelection();
@@ -294,26 +303,30 @@ export function FilePanel({
 		};
 	}, [activePath, api, sessionId, visible, onError]);
 
-	const loadDirectory = useCallback(async (relativePath: string) => {
-		const cached = cacheRef.current.get(relativePath);
-		if (cached && Date.now() - cached.loadedAt < DIRECTORY_CACHE_MS) return;
-		if (loadingDirectoriesRef.current.has(relativePath)) return;
-		loadingDirectoriesRef.current.add(relativePath);
-		setLoadingDirectories(new Set(loadingDirectoriesRef.current));
-		try {
-			const entries = await api.listWorkspaceDirectory({ sessionId, relativePath });
-			cacheRef.current.set(relativePath, { entries, loadedAt: Date.now() });
-			setTreeError(null);
-			setTreeVersion((value) => value + 1);
-		} catch (cause) {
-			setTreeError(cause instanceof Error ? cause.message : t("Files could not be loaded"));
-			onError(cause);
-		} finally {
-			loadingDirectoriesRef.current.delete(relativePath);
+	const loadDirectory = useCallback(
+		async (relativePath: string) => {
+			const cached = cacheRef.current.get(relativePath);
+			if (cached && Date.now() - cached.loadedAt < DIRECTORY_CACHE_MS) return;
+			if (loadingDirectoriesRef.current.has(relativePath)) return;
+			loadingDirectoriesRef.current.add(relativePath);
 			setLoadingDirectories(new Set(loadingDirectoriesRef.current));
-		}
-	}, [api, onError, sessionId, t]);
+			try {
+				const entries = await api.listWorkspaceDirectory({ sessionId, relativePath });
+				cacheRef.current.set(relativePath, { entries, loadedAt: Date.now() });
+				setTreeError(null);
+				setTreeVersion((value) => value + 1);
+			} catch (cause) {
+				setTreeError(cause instanceof Error ? cause.message : t("Files could not be loaded"));
+				onError(cause);
+			} finally {
+				loadingDirectoriesRef.current.delete(relativePath);
+				setLoadingDirectories(new Set(loadingDirectoriesRef.current));
+			}
+		},
+		[api, onError, sessionId, t],
+	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(treeVersion): Directory cache updates require loading newly reachable expanded paths.
 	useEffect(() => {
 		if (!visible) return;
 		void loadDirectory("");
@@ -401,14 +414,14 @@ export function FilePanel({
 		const close = (event: PointerEvent) => {
 			if (!actionMenuRef.current?.contains(event.target as Node)) setActionMenuOpen(false);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") setActionMenuOpen(false);
 		};
 		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		return () => {
 			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 		};
 	}, [actionMenuOpen]);
 
@@ -417,15 +430,15 @@ export function FilePanel({
 		const closeMenu = (event: PointerEvent) => {
 			if (!treeMenuRef.current?.contains(event.target as Node)) setTreeMenu(null);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key !== "Escape" || mutationPending || inlineEdit || trashEntry) return;
 			setTreeMenu(null);
 		};
 		document.addEventListener("pointerdown", closeMenu);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		return () => {
 			document.removeEventListener("pointerdown", closeMenu);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 		};
 	}, [inlineEdit, mutationPending, trashEntry, treeMenu]);
 
@@ -441,7 +454,7 @@ export function FilePanel({
 		append("", 0);
 		return rows;
 	}, [expanded, treeVersion]);
-		const rows = useMemo<readonly TreeRow[]>(() => {
+	const rows = useMemo<readonly TreeRow[]>(() => {
 		if (inlineEdit?.type === "create") return withCreateRow(treeRows, inlineEdit);
 		if (!query.trim()) return treeRows;
 		return searchResults.map((relativePath) => ({
@@ -459,9 +472,10 @@ export function FilePanel({
 		initialRect: { width: 320, height: 600 },
 	});
 	const measuredRows = virtualizer.getVirtualItems();
-	const visibleRows = measuredRows.length > 0
-		? measuredRows
-		: Array.from({ length: Math.min(rows.length, 30) }, (_, index) => ({ index, start: index * 28 }));
+	const visibleRows =
+		measuredRows.length > 0
+			? measuredRows
+			: Array.from({ length: Math.min(rows.length, 30) }, (_, index) => ({ index, start: index * 28 }));
 
 	const toggleDirectory = (relativePath: string) => {
 		const next = new Set(expanded);
@@ -544,9 +558,11 @@ export function FilePanel({
 					kind: result.kind,
 				} satisfies DesktopWorkspaceEntry;
 				setSelectedEntry(created);
-				if (result.kind === "directory") onExpandedPathsChange([...new Set([...expandedPaths, result.relativePath])]);
+				if (result.kind === "directory")
+					onExpandedPathsChange([...new Set([...expandedPaths, result.relativePath])]);
 			} else if (result.action === "trash") {
-				if (selectedEntry && pathListAffects([selectedEntry.relativePath], result.previousRelativePath)) setSelectedEntry(null);
+				if (selectedEntry && pathListAffects([selectedEntry.relativePath], result.previousRelativePath))
+					setSelectedEntry(null);
 			} else {
 				setSelectedEntry((current) => {
 					if (!current || !pathListAffects([current.relativePath], result.previousRelativePath)) return current;
@@ -555,11 +571,17 @@ export function FilePanel({
 				});
 			}
 			onWorkspaceMutation(result);
-			setNotice(t(
-				result.action === "create" ? "Created"
-					: result.action === "rename" ? "Renamed"
-						: result.action === "move" ? "Moved" : "Moved to Trash",
-			));
+			setNotice(
+				t(
+					result.action === "create"
+						? "Created"
+						: result.action === "rename"
+							? "Renamed"
+							: result.action === "move"
+								? "Moved"
+								: "Moved to Trash",
+				),
+			);
 		} catch (cause) {
 			inlineLockedRef.current = false;
 			const message = cause instanceof Error ? cause.message : String(cause);
@@ -629,7 +651,8 @@ export function FilePanel({
 		input.select();
 	}, [inlineSessionKey]);
 	const affectedDirtyCount = trashEntry
-		? dirtyPaths.filter((path) => path === trashEntry.relativePath || path.startsWith(`${trashEntry.relativePath}/`)).length
+		? dirtyPaths.filter((path) => path === trashEntry.relativePath || path.startsWith(`${trashEntry.relativePath}/`))
+				.length
 		: 0;
 	const hostedPreview = Boolean(activePath && isHostedPreviewKind(classifyPreviewKind(fileName(activePath))));
 
@@ -643,38 +666,100 @@ export function FilePanel({
 		>
 			<div className="file-preview">
 				<header className="file-preview-toolbar">
-					<div aria-label={t("File path")} className="file-breadcrumbs">
+					<nav aria-label={t("File path")} className="file-breadcrumbs">
 						<span>{rootName(cwd)}</span>
-						{activePath?.split("/").map((part, index) => <span key={`${index}:${part}`}>{part}</span>)}
-					</div>
+						{activePath?.split("/").map((part, index) => (
+							<span key={`${index}:${part}`}>{part}</span>
+						))}
+					</nav>
 					<div className="file-preview-actions">
 						{displayedFile && activePath && (
 							<>
 								{displayedFile.kind === "text" && draftMatchesActivePath && (
-									<button aria-label={t("Save file")} disabled={draft.text === draft.savedText || saving} onClick={() => void save().catch(onError)} title={t(saving ? "Saving…" : "Save")} type="button">
+									<button
+										aria-label={t("Save file")}
+										disabled={draft.text === draft.savedText || saving}
+										onClick={() => void save().catch(onError)}
+										title={t(saving ? "Saving…" : "Save")}
+										type="button"
+									>
 										<FloppyDisk aria-hidden="true" size={14} />
 									</button>
 								)}
 								{displayedFile.kind === "text" && isMarkdown(activePath) && (
-									<button aria-label={t(previewMode ? "View source" : "Show preview")} onClick={() => setPreviewMode((value) => !value)} title={t(previewMode ? "Source" : "Preview")} type="button">
-										{previewMode ? <Code aria-hidden="true" size={14} /> : <Eye aria-hidden="true" size={14} />}
+									<button
+										aria-label={t(previewMode ? "View source" : "Show preview")}
+										onClick={() => setPreviewMode((value) => !value)}
+										title={t(previewMode ? "Source" : "Preview")}
+										type="button"
+									>
+										{previewMode ? (
+											<Code aria-hidden="true" size={14} />
+										) : (
+											<Eye aria-hidden="true" size={14} />
+										)}
 									</button>
 								)}
-								<button aria-label={t("Copy path")} onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))} title={t("Copy path")} type="button"><Copy aria-hidden="true" size={14} /></button>
-								{displayedFile.kind === "text" && <button aria-label={t("Copy contents")} onClick={() => void copy(draftMatchesActivePath ? draft.text : displayedFile.text, t("Contents copied"))} title={t("Copy contents")} type="button"><FileText aria-hidden="true" size={14} /></button>}
+								<button
+									aria-label={t("Copy path")}
+									onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))}
+									title={t("Copy path")}
+									type="button"
+								>
+									<Copy aria-hidden="true" size={14} />
+								</button>
+								{displayedFile.kind === "text" && (
+									<button
+										aria-label={t("Copy contents")}
+										onClick={() =>
+											void copy(
+												draftMatchesActivePath ? draft.text : displayedFile.text,
+												t("Contents copied"),
+											)
+										}
+										title={t("Copy contents")}
+										type="button"
+									>
+										<FileText aria-hidden="true" size={14} />
+									</button>
+								)}
 								<div className="file-open-menu" ref={actionMenuRef}>
-									<button aria-expanded={actionMenuOpen} aria-haspopup="menu" aria-label={t("Open file actions")} onClick={() => setActionMenuOpen((value) => !value)} title={t("Open file actions")} type="button"><DotsThree aria-hidden="true" size={16} /></button>
-									{actionMenuOpen && <div aria-label={t("Open file actions")} className="file-open-popover" role="menu">
-										<button onClick={() => open("default")} role="menuitem" type="button">{t("Open in default app")}</button>
-										<button onClick={() => open("reveal")} role="menuitem" type="button">{t("Reveal in file manager")}</button>
-									</div>}
+									<button
+										aria-expanded={actionMenuOpen}
+										aria-haspopup="menu"
+										aria-label={t("Open file actions")}
+										onClick={() => setActionMenuOpen((value) => !value)}
+										title={t("Open file actions")}
+										type="button"
+									>
+										<DotsThree aria-hidden="true" size={16} />
+									</button>
+									{actionMenuOpen && (
+										<div aria-label={t("Open file actions")} className="file-open-popover" role="menu">
+											<button onClick={() => open("default")} role="menuitem" type="button">
+												{t("Open in default app")}
+											</button>
+											<button onClick={() => open("reveal")} role="menuitem" type="button">
+												{t("Reveal in file manager")}
+											</button>
+										</div>
+									)}
 								</div>
 							</>
 						)}
-						<button aria-expanded={treeOpen} aria-label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")} className={`file-tree-toggle${treeOpen ? " is-active" : ""}`} onClick={() => setTreeOpen((val) => !val)} title={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")} type="button"><SidebarSimple aria-hidden="true" size={14} /></button>
+						<button
+							aria-expanded={treeOpen}
+							aria-label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}
+							className={`file-tree-toggle${treeOpen ? " is-active" : ""}`}
+							onClick={() => setTreeOpen((val) => !val)}
+							title={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}
+							type="button"
+						>
+							<SidebarSimple aria-hidden="true" size={14} />
+						</button>
 					</div>
 				</header>
-				{notice && <div className="file-preview-notice" role="status">{notice}</div>}
+				{notice && <output className="status-block file-preview-notice">{notice}</output>}
 				<div
 					role="document"
 					ref={previewBodyRef}
@@ -687,11 +772,22 @@ export function FilePanel({
 					className={`file-preview-body transcript-code${draftMatchesActivePath && !previewMode ? " has-editor" : ""}${hostedPreview ? " has-hosted-preview" : ""}`}
 				>
 					{!activePath ? (
-						<div className="file-empty-state"><FolderOpen aria-hidden="true" size={29} /><strong>{t("Open file")}</strong><span>{t("Choose a file from the workspace tree")}</span></div>
+						<div className="file-empty-state">
+							<FolderOpen aria-hidden="true" size={29} />
+							<strong>{t("Open file")}</strong>
+							<span>{t("Choose a file from the workspace tree")}</span>
+						</div>
 					) : previewLoading ? (
-						<div className="file-empty-state"><SpinnerGap aria-hidden="true" className="is-spinning" size={24} /><span>{t("Opening file…")}</span></div>
+						<div className="file-empty-state">
+							<SpinnerGap aria-hidden="true" className="is-spinning" size={24} />
+							<span>{t("Opening file…")}</span>
+						</div>
 					) : previewError ? (
-						<div className="file-empty-state is-error"><File aria-hidden="true" size={27} /><strong>{t("File could not be opened")}</strong><span>{previewError}</span></div>
+						<div className="file-empty-state is-error">
+							<File aria-hidden="true" size={27} />
+							<strong>{t("File could not be opened")}</strong>
+							<span>{previewError}</span>
+						</div>
 					) : hostedPreview && activePath ? (
 						<UniversalFilePreviewer
 							active={visible}
@@ -717,14 +813,29 @@ export function FilePanel({
 							onError={onError}
 						/>
 					) : displayedFile?.kind === "unsupported" ? (
-						<div className="file-empty-state"><File aria-hidden="true" size={27} /><strong>{t(displayedFile.reason === "too-large" ? "File is too large to preview" : "Binary file cannot be previewed")}</strong><span>{t("Open it in the default app to inspect it")}</span></div>
+						<div className="file-empty-state">
+							<File aria-hidden="true" size={27} />
+							<strong>
+								{t(
+									displayedFile.reason === "too-large"
+										? "File is too large to preview"
+										: "Binary file cannot be previewed",
+								)}
+							</strong>
+							<span>{t("Open it in the default app to inspect it")}</span>
+						</div>
 					) : visible && draftMatchesActivePath && isMarkdown(draft.file.relativePath) && previewMode ? (
-						<article className="file-markdown code-turn-answer"><Markdown text={draft.text} sourcePositions /></article>
+						<article className="file-markdown code-turn-answer">
+							<Markdown text={draft.text} sourcePositions />
+						</article>
 					) : visible && draftMatchesActivePath ? (
 						<CodeEditor
 							onSelect={captureSelection}
 							label={t("Edit {{name}}", { name: fileName(draft.file.relativePath) })}
-							onChange={(text) => { setNotice(null); onDraftChange(text); }}
+							onChange={(text) => {
+								setNotice(null);
+								onDraftChange(text);
+							}}
 							onSave={() => void save().catch(onError)}
 							path={draft.file.relativePath}
 							value={draft.text}
@@ -756,7 +867,7 @@ export function FilePanel({
 
 			<aside className="file-tree">
 				{treeOpen && (
-					<div
+					<hr
 						aria-label={t("Resize file tree")}
 						aria-orientation="vertical"
 						aria-valuemax={MAX_TREE_WIDTH}
@@ -790,14 +901,19 @@ export function FilePanel({
 							}
 							event.currentTarget.releasePointerCapture(event.pointerId);
 						}}
-						role="separator"
 						tabIndex={0}
 					/>
 				)}
 				<div className="file-tree-toolbar">
 					<div className="file-search-field">
 						<MagnifyingGlass aria-hidden="true" size={14} />
-						<input aria-label={t("Filter files")} onChange={(event) => setQuery(event.target.value)} placeholder={t("Filter files…")} type="search" value={query} />
+						<input
+							aria-label={t("Filter files")}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={t("Filter files…")}
+							type="search"
+							value={query}
+						/>
 						{searching && <SpinnerGap aria-hidden="true" className="is-spinning" size={13} />}
 					</div>
 				</div>
@@ -817,114 +933,192 @@ export function FilePanel({
 							const row = rows[item.index]!;
 							const entry = row.entry;
 							const isCreateRow = entry.relativePath === CREATE_ROW_KEY;
-							const isRenaming = inlineEdit?.type === "rename" && inlineEdit.entry.relativePath === entry.relativePath;
+							const isRenaming =
+								inlineEdit?.type === "rename" && inlineEdit.entry.relativePath === entry.relativePath;
 							const isEditing = isCreateRow || isRenaming;
-							const editName = isCreateRow && inlineEdit?.type === "create"
-								? inlineEdit.name
-								: isRenaming && inlineEdit?.type === "rename" ? inlineEdit.name : entry.name;
+							const editName =
+								isCreateRow && inlineEdit?.type === "create"
+									? inlineEdit.name
+									: isRenaming && inlineEdit?.type === "rename"
+										? inlineEdit.name
+										: entry.name;
 							const isExpanded = entry.kind === "directory" && expanded.has(entry.relativePath);
 							const loading = loadingDirectories.has(entry.relativePath);
-							const rowBody = <>
-								{entry.kind === "directory" ? <CaretRight aria-hidden="true" className={`file-tree-caret ${isExpanded ? "is-expanded" : ""}`} size={12} /> : <span className="file-tree-caret" />}
-								<WorkspaceFileIcon expanded={isExpanded} kind={entry.kind} path={isCreateRow ? editName : entry.relativePath} />
-								{isEditing ? (
-									<input
-										aria-label={t("Name")}
-										autoCapitalize="off"
-										autoComplete="off"
-										autoCorrect="off"
-										className="file-tree-name-input"
-										disabled={mutationPending}
-										onBlur={commitInlineEdit}
-										onChange={(event) => setInlineEdit((current) => current ? { ...current, name: event.target.value } : current)}
-										onContextMenu={(event) => event.stopPropagation()}
-										onKeyDown={(event) => {
-											if (event.key === "Enter") {
-												event.preventDefault();
-												commitInlineEdit();
-											} else if (event.key === "Escape") {
-												event.preventDefault();
-												event.stopPropagation();
-												cancelInlineEdit();
-											}
-										}}
-										ref={nameInputRef}
-										spellCheck={false}
-										value={editName}
+							const rowBody = (
+								<>
+									{entry.kind === "directory" ? (
+										<CaretRight
+											aria-hidden="true"
+											className={`file-tree-caret ${isExpanded ? "is-expanded" : ""}`}
+											size={12}
+										/>
+									) : (
+										<span className="file-tree-caret" />
+									)}
+									<WorkspaceFileIcon
+										expanded={isExpanded}
+										kind={entry.kind}
+										path={isCreateRow ? editName : entry.relativePath}
 									/>
-								) : (
-									<span>{query.trim() ? entry.relativePath : entry.name}</span>
-								)}
-								{loading && <SpinnerGap aria-hidden="true" className="is-spinning" size={12} />}
-							</>;
-							return <div
-								aria-expanded={entry.kind === "directory" ? isExpanded : undefined}
-								className={`file-tree-row${activePath === entry.relativePath ? " is-active" : ""}${selectedEntry?.relativePath === entry.relativePath || isEditing ? " is-selected" : ""}`}
-								key={entry.relativePath}
-								onContextMenu={(event) => {
-									event.preventDefault();
-									event.stopPropagation();
-									if (isEditing) return;
-									showTreeMenu(entry, event.clientX, event.clientY);
-								}}
-								role="treeitem"
-								style={{ paddingLeft: 8 + row.depth * 17, transform: `translateY(${item.start}px)` }}
-							>
-								{isEditing ? (
-									<div className="file-tree-row-select is-editing">{rowBody}</div>
-								) : (
-									<button
-										className="file-tree-row-select"
-										onClick={() => {
-											setSelectedEntry(entry);
-											if (entry.kind === "directory") toggleDirectory(entry.relativePath);
-											else onOpenFile(entry.relativePath, false);
-										}}
-										onDoubleClick={() => { if (entry.kind !== "directory") onOpenFile(entry.relativePath, true); }}
-										title={entry.relativePath}
-										type="button"
-									>{rowBody}</button>
-								)}
-							</div>;
+									{isEditing ? (
+										<input
+											aria-label={t("Name")}
+											autoCapitalize="off"
+											autoComplete="off"
+											autoCorrect="off"
+											className="file-tree-name-input"
+											disabled={mutationPending}
+											onBlur={commitInlineEdit}
+											onChange={(event) =>
+												setInlineEdit((current) =>
+													current ? { ...current, name: event.target.value } : current,
+												)
+											}
+											onContextMenu={(event) => event.stopPropagation()}
+											onKeyDown={(event) => {
+												if (event.key === "Enter") {
+													event.preventDefault();
+													commitInlineEdit();
+												} else if (event.key === "Escape") {
+													event.preventDefault();
+													event.stopPropagation();
+													cancelInlineEdit();
+												}
+											}}
+											ref={nameInputRef}
+											spellCheck={false}
+											value={editName}
+										/>
+									) : (
+										<span>{query.trim() ? entry.relativePath : entry.name}</span>
+									)}
+									{loading && <SpinnerGap aria-hidden="true" className="is-spinning" size={12} />}
+								</>
+							);
+							return (
+								<div
+									tabIndex={-1}
+									aria-expanded={entry.kind === "directory" ? isExpanded : undefined}
+									className={`file-tree-row${activePath === entry.relativePath ? " is-active" : ""}${selectedEntry?.relativePath === entry.relativePath || isEditing ? " is-selected" : ""}`}
+									key={entry.relativePath}
+									onContextMenu={(event) => {
+										event.preventDefault();
+										event.stopPropagation();
+										if (isEditing) return;
+										showTreeMenu(entry, event.clientX, event.clientY);
+									}}
+									role="treeitem"
+									style={{ paddingLeft: 8 + row.depth * 17, transform: `translateY(${item.start}px)` }}
+								>
+									{isEditing ? (
+										<div className="file-tree-row-select is-editing">{rowBody}</div>
+									) : (
+										<button
+											className="file-tree-row-select"
+											onClick={() => {
+												setSelectedEntry(entry);
+												if (entry.kind === "directory") toggleDirectory(entry.relativePath);
+												else onOpenFile(entry.relativePath, false);
+											}}
+											onDoubleClick={() => {
+												if (entry.kind !== "directory") onOpenFile(entry.relativePath, true);
+											}}
+											title={entry.relativePath}
+											type="button"
+										>
+											{rowBody}
+										</button>
+									)}
+								</div>
+							);
 						})}
 					</div>
 					{!searching && rows.length === 0 && (
-						<div className="file-tree-empty" role="status">
+						<output className="status-block file-tree-empty">
 							{rootLoading ? (
-								<><SpinnerGap aria-hidden="true" className="is-spinning" size={14} /><span>{t("Loading…")}</span></>
+								<>
+									<SpinnerGap aria-hidden="true" className="is-spinning" size={14} />
+									<span>{t("Loading…")}</span>
+								</>
 							) : (
 								<>
-									<span>{t(query.trim() ? "No matching files" : treeError ?? "This workspace is empty")}</span>
-									{treeError && !query.trim() && <button onClick={() => void loadDirectory("")} type="button">{t("Retry")}</button>}
+									<span>
+										{t(query.trim() ? "No matching files" : (treeError ?? "This workspace is empty"))}
+									</span>
+									{treeError && !query.trim() && (
+										<button onClick={() => void loadDirectory("")} type="button">
+											{t("Retry")}
+										</button>
+									)}
 								</>
 							)}
-						</div>
+						</output>
 					)}
 				</div>
 			</aside>
 
-			{treeMenu && (() => {
-				const menuEntry = treeMenu.entry;
-				return (
-				<div
-					aria-label={t("File actions")}
-					className="file-tree-menu"
-					ref={treeMenuRef}
-					role="menu"
-					style={{ left: treeMenu.left, top: treeMenu.top }}
-				>
-					{(menuEntry === null || menuEntry.kind === "directory") && <>
-						<button onClick={() => beginCreate("file", menuEntry?.relativePath ?? "")} role="menuitem" type="button"><FilePlus aria-hidden="true" size={13} />{t("New file")}</button>
-						<button onClick={() => beginCreate("directory", menuEntry?.relativePath ?? "")} role="menuitem" type="button"><FolderPlus aria-hidden="true" size={13} />{t("New folder")}</button>
-						{menuEntry && <div className="file-tree-menu-separator" />}
-					</>}
-					{menuEntry && <>
-						<button disabled={menuEntry.kind === "symlink" || pathListAffects(savingPaths, menuEntry.relativePath)} onClick={() => beginEntryMutation("rename", menuEntry)} role="menuitem" type="button"><PencilSimple aria-hidden="true" size={13} />{t("Rename")}</button>
-						<button className="is-destructive" disabled={menuEntry.kind === "symlink" || pathListAffects(savingPaths, menuEntry.relativePath)} onClick={() => beginEntryMutation("trash", menuEntry)} role="menuitem" type="button"><Trash aria-hidden="true" size={13} />{t("Move to Trash")}</button>
-					</>}
-				</div>
-				);
-			})()}
+			{treeMenu &&
+				(() => {
+					const menuEntry = treeMenu.entry;
+					return (
+						<div
+							aria-label={t("File actions")}
+							className="file-tree-menu"
+							ref={treeMenuRef}
+							role="menu"
+							style={{ left: treeMenu.left, top: treeMenu.top }}
+						>
+							{(menuEntry === null || menuEntry.kind === "directory") && (
+								<>
+									<button
+										onClick={() => beginCreate("file", menuEntry?.relativePath ?? "")}
+										role="menuitem"
+										type="button"
+									>
+										<FilePlus aria-hidden="true" size={13} />
+										{t("New file")}
+									</button>
+									<button
+										onClick={() => beginCreate("directory", menuEntry?.relativePath ?? "")}
+										role="menuitem"
+										type="button"
+									>
+										<FolderPlus aria-hidden="true" size={13} />
+										{t("New folder")}
+									</button>
+									{menuEntry && <div className="file-tree-menu-separator" />}
+								</>
+							)}
+							{menuEntry && (
+								<>
+									<button
+										disabled={
+											menuEntry.kind === "symlink" || pathListAffects(savingPaths, menuEntry.relativePath)
+										}
+										onClick={() => beginEntryMutation("rename", menuEntry)}
+										role="menuitem"
+										type="button"
+									>
+										<PencilSimple aria-hidden="true" size={13} />
+										{t("Rename")}
+									</button>
+									<button
+										className="is-destructive"
+										disabled={
+											menuEntry.kind === "symlink" || pathListAffects(savingPaths, menuEntry.relativePath)
+										}
+										onClick={() => beginEntryMutation("trash", menuEntry)}
+										role="menuitem"
+										type="button"
+									>
+										<Trash aria-hidden="true" size={13} />
+										{t("Move to Trash")}
+									</button>
+								</>
+							)}
+						</div>
+					);
+				})()}
 
 			{trashEntry && (
 				<DialogFrame
@@ -937,14 +1131,36 @@ export function FilePanel({
 				>
 					<h2 id="file-trash-title">{t("Move {{name}} to Trash?", { name: trashEntry.name })}</h2>
 					<div id="file-trash-description">
-						{affectedDirtyCount > 0 && <p>{t(affectedDirtyCount === 1
-							? "Unsaved changes in {{count}} open file will be discarded."
-							: "Unsaved changes in {{count}} open files will be discarded.", { count: affectedDirtyCount })}</p>}
+						{affectedDirtyCount > 0 && (
+							<p>
+								{t(
+									affectedDirtyCount === 1
+										? "Unsaved changes in {{count}} open file will be discarded."
+										: "Unsaved changes in {{count}} open files will be discarded.",
+									{ count: affectedDirtyCount },
+								)}
+							</p>
+						)}
 						<p>{t("The saved version can be recovered from Trash.")}</p>
 					</div>
 					<div className="project-dialog-actions">
-						<button className="button-secondary" disabled={mutationPending} onClick={() => setTrashEntry(null)} ref={trashCancelRef} type="button">{t("Cancel")}</button>
-						<button className="project-delete-confirm" disabled={mutationPending} onClick={submitTrash} type="button">{t(mutationPending ? "Moving…" : "Move to Trash")}</button>
+						<button
+							className="button-secondary"
+							disabled={mutationPending}
+							onClick={() => setTrashEntry(null)}
+							ref={trashCancelRef}
+							type="button"
+						>
+							{t("Cancel")}
+						</button>
+						<button
+							className="project-delete-confirm"
+							disabled={mutationPending}
+							onClick={submitTrash}
+							type="button"
+						>
+							{t(mutationPending ? "Moving…" : "Move to Trash")}
+						</button>
 					</div>
 				</DialogFrame>
 			)}

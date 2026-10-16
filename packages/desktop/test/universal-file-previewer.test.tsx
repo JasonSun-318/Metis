@@ -107,6 +107,8 @@ describe("DeliveredFileCard", () => {
 				file={{
 					fileId: "1234567890abcdef",
 					name: "financial_model.xlsx",
+					byteLength: 1024,
+					deliveredAt: "2026-10-15T00:00:00.000Z",
 					message: "Here is the completed model.",
 					availability: "available",
 				}}
@@ -127,6 +129,8 @@ describe("DeliveredFileCard", () => {
 		expect(onPreview).toHaveBeenCalledWith({
 			fileId: "1234567890abcdef",
 			name: "financial_model.xlsx",
+			byteLength: 1024,
+			deliveredAt: "2026-10-15T00:00:00.000Z",
 			message: "Here is the completed model.",
 			availability: "available",
 		});
@@ -140,6 +144,8 @@ describe("DeliveredFileCard", () => {
 				file={{
 					fileId: "1234567890abcdef",
 					name: "financial_model.xlsx",
+					byteLength: 1024,
+					deliveredAt: "2026-10-15T00:00:00.000Z",
 					message: "Here is the completed model.",
 					availability: "unavailable",
 				}}

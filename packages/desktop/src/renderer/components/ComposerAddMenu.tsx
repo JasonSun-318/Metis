@@ -1,6 +1,6 @@
 import type { McpServerSummaryView, SkillSummaryView } from "@metis/app-protocol";
 import { Books, Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "@phosphor-icons/react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { KnowledgeLinkMenu, type KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 
@@ -51,13 +51,13 @@ export function ComposerAddMenu({
 	const [submenuOffsetY, setSubmenuOffsetY] = useState(0);
 	const lastCommandRequest = useRef<number | undefined>(undefined);
 
-	const close = (restoreFocus = false) => {
+	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
 		setMcpOpen(false);
 		setSkillsOpen(false);
 		setKnowledgeOpen(false);
 		if (restoreFocus) triggerRef.current?.focus();
-	};
+	}, []);
 
 	useEffect(() => {
 		if (!disabled) return;
@@ -92,7 +92,7 @@ export function ComposerAddMenu({
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [open]);
+	}, [close, open]);
 
 	useLayoutEffect(() => {
 		if (!open) return;
@@ -120,7 +120,8 @@ export function ComposerAddMenu({
 			const spaceAboveTrigger = triggerRect.top - minY;
 			const spaceBelowTrigger = viewportHeight - triggerRect.bottom - MARGIN;
 			const neededSpaceAbove = menuHeight + 4;
-			const pVertical = spaceAboveTrigger < neededSpaceAbove && spaceBelowTrigger > spaceAboveTrigger ? "below" : "above";
+			const pVertical =
+				spaceAboveTrigger < neededSpaceAbove && spaceBelowTrigger > spaceAboveTrigger ? "below" : "above";
 
 			let pOffsetX = 0;
 			if (pAlign === "left") {
@@ -166,7 +167,8 @@ export function ComposerAddMenu({
 			if (skillsOpen || mcpOpen || knowledgeOpen) {
 				const popoverLeft = (pAlign === "left" ? triggerRect.left : triggerRect.right - MAIN_MENU_WIDTH) + pOffsetX;
 				const popoverRight = popoverLeft + MAIN_MENU_WIDTH;
-				const popoverTop = (pVertical === "above" ? triggerRect.top - 4 - menuHeight : triggerRect.bottom + 4) + pOffsetY;
+				const popoverTop =
+					(pVertical === "above" ? triggerRect.top - 4 - menuHeight : triggerRect.bottom + 4) + pOffsetY;
 				const popoverBottom = popoverTop + menuHeight;
 
 				let subH: "right" | "left" | "stacked" = "right";
@@ -283,7 +285,7 @@ export function ComposerAddMenu({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [disabled, onAddFiles]);
+	}, [close, disabled, onAddFiles]);
 
 	return (
 		<div className="composer-add" ref={rootRef}>
@@ -353,7 +355,9 @@ export function ComposerAddMenu({
 						>
 							<Paperclip aria-hidden="true" size={15} />
 							<span>{t("Add files or photos")}</span>
-							<span aria-hidden="true" className="composer-menu-shortcut">⌘U</span>
+							<span aria-hidden="true" className="composer-menu-shortcut">
+								⌘U
+							</span>
 						</button>
 						{knowledge && (
 							<>
@@ -405,7 +409,7 @@ export function ComposerAddMenu({
 								)}
 							</>
 						)}
-						<div className="composer-menu-separator" role="separator" />
+						<hr className="composer-menu-separator" />
 						<button
 							aria-expanded={skillsOpen}
 							className={skillsOpen ? "is-active" : undefined}
@@ -433,13 +437,29 @@ export function ComposerAddMenu({
 								}}
 							>
 								{skills.map((skill) => (
-									<button key={skill.name} onClick={() => { close(); onSelectSkill(skill); }} role="menuitem" title={skill.name} type="button">
+									<button
+										key={skill.name}
+										onClick={() => {
+											close();
+											onSelectSkill(skill);
+										}}
+										role="menuitem"
+										title={skill.name}
+										type="button"
+									>
 										<Scroll aria-hidden="true" size={15} />
 										<span className="composer-menu-item-label">{skill.name}</span>
 									</button>
 								))}
-								<div className="composer-menu-separator" role="separator" />
-								<button onClick={() => { close(); onManageSkills(); }} role="menuitem" type="button">
+								<hr className="composer-menu-separator" />
+								<button
+									onClick={() => {
+										close();
+										onManageSkills();
+									}}
+									role="menuitem"
+									type="button"
+								>
 									<Briefcase aria-hidden="true" size={15} />
 									<span className="composer-menu-item-label">{t("Manage skills")}</span>
 								</button>
@@ -472,13 +492,29 @@ export function ComposerAddMenu({
 								}}
 							>
 								{mcpServers.map((server) => (
-									<button key={`${server.scope}:${server.name}`} onClick={() => { close(); onManageMcp(); }} role="menuitem" title={server.name} type="button">
+									<button
+										key={`${server.scope}:${server.name}`}
+										onClick={() => {
+											close();
+											onManageMcp();
+										}}
+										role="menuitem"
+										title={server.name}
+										type="button"
+									>
 										<Plug aria-hidden="true" size={15} />
 										<span className="composer-menu-item-label">{server.name}</span>
 									</button>
 								))}
-								<div className="composer-menu-separator" role="separator" />
-								<button onClick={() => { close(); onManageMcp(); }} role="menuitem" type="button">
+								<hr className="composer-menu-separator" />
+								<button
+									onClick={() => {
+										close();
+										onManageMcp();
+									}}
+									role="menuitem"
+									type="button"
+								>
 									<Briefcase aria-hidden="true" size={15} />
 									<span className="composer-menu-item-label">{t("Manage MCP")}</span>
 								</button>

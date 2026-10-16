@@ -1,15 +1,15 @@
 // @vitest-environment jsdom
 
 import { act } from "react";
-import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProjectSessionGroup } from "../src/renderer/components/SessionSidebar.tsx";
-import { NewTaskHome, recentProjectsFromGroups } from "../src/renderer/components/NewTaskHome.tsx";
 import { HomeProjectPicker } from "../src/renderer/components/HomeProjectPicker.tsx";
+import { NewTaskHome, recentProjectsFromGroups } from "../src/renderer/components/NewTaskHome.tsx";
+import type { ProjectSessionGroup } from "../src/renderer/components/SessionSidebar.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomeStarters } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
+import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const flush = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
@@ -19,17 +19,21 @@ function project(cwd: string, name: string, updatedAt: string): ProjectSessionGr
 		mode: "code",
 		name,
 		pinned: false,
-		sessions: [{
-			sessionId: `${name}-session`,
-			mode: "code",
-			cwdOrigin: "user-selected",
-			cwd,
-			createdAt: updatedAt,
-			updatedAt,
-			state: "idle",
-			archived: false,
-			unread: false,
-		}],
+		sessions: [
+			{
+				sessionId: `${name}-session`,
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd,
+				createdAt: updatedAt,
+				updatedAt,
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		],
 	};
 }
 
@@ -61,7 +65,11 @@ async function renderHome(mode: "chat" | "code", extra: Record<string, unknown> 
 		root.render(
 			<NewTaskHome
 				{...props(mode)}
-				projectControl={<button data-testid="project-control" type="button">Choose project</button>}
+				projectControl={
+					<button data-testid="project-control" type="button">
+						Choose project
+					</button>
+				}
 				{...extra}
 			/>,
 		);
@@ -107,8 +115,17 @@ describe("NewTaskHome", () => {
 		const onCreateProject = vi.fn();
 		const { container, root } = await renderHome(mode, {
 			folder: "/work/metis",
-			projectControl: <HomeProjectPicker busy={false} folder="/work/metis" folderLocked={false} mode={mode}
-				onChooseFolder={onChooseFolder} onClearFolder={onClearFolder} onCreateProject={onCreateProject} />,
+			projectControl: (
+				<HomeProjectPicker
+					busy={false}
+					folder="/work/metis"
+					folderLocked={false}
+					mode={mode}
+					onChooseFolder={onChooseFolder}
+					onClearFolder={onClearFolder}
+					onCreateProject={onCreateProject}
+				/>
+			),
 		});
 		try {
 			const bar = container.querySelector('.new-task-home-project-control[aria-label="Workspace"]')!;
@@ -117,24 +134,40 @@ describe("NewTaskHome", () => {
 			expect(choose.textContent).toBe("metis");
 			await act(async () => choose.click());
 			expect(onChooseFolder).toHaveBeenCalledOnce();
-			const action = bar.querySelector<HTMLButtonElement>(mode === "code"
-				? '[aria-label="Create a new project"]' : '[aria-label="No project context"]')!;
+			const action = bar.querySelector<HTMLButtonElement>(
+				mode === "code" ? '[aria-label="Create a new project"]' : '[aria-label="No project context"]',
+			)!;
 			await act(async () => action.click());
 			expect(mode === "code" ? onCreateProject : onClearFolder).toHaveBeenCalledOnce();
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
-	it.each([{ busy: true, folderLocked: false }, { busy: false, folderLocked: true }])("preserves locked workspace controls (%j)", async (status) => {
+	it.each([
+		{ busy: true, folderLocked: false },
+		{ busy: false, folderLocked: true },
+	])("preserves locked workspace controls (%j)", async (status) => {
 		const onChooseFolder = vi.fn(async () => undefined);
 		const { container, root } = await renderHome("code", {
 			...status,
-			projectControl: <HomeProjectPicker {...status} folder="/work/metis" mode="code"
-				onChooseFolder={onChooseFolder} onCreateProject={vi.fn()} />,
+			projectControl: (
+				<HomeProjectPicker
+					{...status}
+					folder="/work/metis"
+					mode="code"
+					onChooseFolder={onChooseFolder}
+					onCreateProject={vi.fn()}
+				/>
+			),
 		});
 		try {
-			for (const button of container.querySelectorAll<HTMLButtonElement>(".home-project-picker button")) expect(button.disabled).toBe(true);
+			for (const button of container.querySelectorAll<HTMLButtonElement>(".home-project-picker button"))
+				expect(button.disabled).toBe(true);
 			expect(onChooseFolder).not.toHaveBeenCalled();
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("expands additional tasks without changing the draft, then prefills without submitting", async () => {
@@ -161,7 +194,9 @@ describe("NewTaskHome", () => {
 			expect(document.activeElement).toBe(editor);
 			expect(more.getAttribute("aria-expanded")).toBe("false");
 			expect(onSubmit).not.toHaveBeenCalled();
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("returns keyboard focus to More tasks when Escape closes the additional tasks", async () => {
@@ -174,7 +209,9 @@ describe("NewTaskHome", () => {
 			await act(async () => last.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 			expect(more.getAttribute("aria-expanded")).toBe("false");
 			expect(document.activeElement).toBe(more);
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("opens the knowledge sidebar through the plus menu before the first message", async () => {
@@ -189,10 +226,16 @@ describe("NewTaskHome", () => {
 		});
 		try {
 			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
-			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click());
+			await act(async () =>
+				[...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click(),
+			);
 			expect(prepare).not.toHaveBeenCalled();
 			expect(api.getSessionKnowledge).not.toHaveBeenCalled();
-			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Open knowledge sidebar")!.click());
+			await act(async () =>
+				[...container.querySelectorAll("button")]
+					.find((item) => item.textContent === "Open knowledge sidebar")!
+					.click(),
+			);
 			expect(prepare).toHaveBeenCalledOnce();
 			expect(openKnowledge).toHaveBeenCalledWith("prepared-session");
 			expect(container.querySelector('[role="menu"]')).toBeNull();
@@ -210,14 +253,21 @@ describe("NewTaskHome", () => {
 			getSessionKnowledge: vi.fn(async () => ({ libraries: [] })),
 			setSessionKnowledge: setLinks,
 		} as unknown as MetisDesktopApi;
-		const { container, root } = await renderHome("chat", { knowledge: { api, onPrepare: prepare, onOpen: vi.fn() }, onSubmit });
+		const { container, root } = await renderHome("chat", {
+			knowledge: { api, onPrepare: prepare, onOpen: vi.fn() },
+			onSubmit,
+		});
 		try {
 			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
-			await act(async () => [...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click());
+			await act(async () =>
+				[...container.querySelectorAll("button")].find((item) => item.textContent === "Knowledge")!.click(),
+			);
 			expect(prepare).not.toHaveBeenCalled();
 			await act(async () => container.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]')!.click());
 			expect(prepare).toHaveBeenCalledOnce();
-			expect(setLinks).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "prepared-session", libraryIds: ["library"] }));
+			expect(setLinks).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: "prepared-session", libraryIds: ["library"] }),
+			);
 			expect(onSubmit).not.toHaveBeenCalled();
 		} finally {
 			await act(async () => root.unmount());
@@ -262,8 +312,9 @@ describe("NewTaskHome", () => {
 	it.each(["chat", "code"] as const)("includes the configured profile name in the %s greeting", async (mode) => {
 		const { container, root } = await renderHome(mode);
 		try {
-			expect(container.querySelector(".new-task-home-heading h1")?.textContent)
-				.toContain(DEFAULT_PROFILE_IDENTITY.displayName);
+			expect(container.querySelector(".new-task-home-heading h1")?.textContent).toContain(
+				DEFAULT_PROFILE_IDENTITY.displayName,
+			);
 		} finally {
 			await act(async () => root.unmount());
 		}
@@ -285,36 +336,41 @@ describe("NewTaskHome", () => {
 		}
 	});
 
-	it.each([false, true])("prefills a mode starter and returns to the home top (reduced motion: %s)", async (reducedMotion) => {
-		const scrollTo = vi.fn();
-		Object.defineProperty(HTMLElement.prototype, "scrollTo", {
-			configurable: true,
-			value: scrollTo,
-		});
-		const onSubmit = vi.fn().mockResolvedValue(undefined);
-		const { container, root } = await renderHome("code", { onSubmit, reducedMotion });
-		try {
-			const starter = getHomeStarters("code")[0]!;
-			await act(async () => {
-				container.querySelector<HTMLButtonElement>(`[data-starter-id="${starter.id}"]`)!.click();
-				await flush();
+	it.each([false, true])(
+		"prefills a mode starter and returns to the home top (reduced motion: %s)",
+		async (reducedMotion) => {
+			const scrollTo = vi.fn();
+			Object.defineProperty(HTMLElement.prototype, "scrollTo", {
+				configurable: true,
+				value: scrollTo,
 			});
+			const onSubmit = vi.fn().mockResolvedValue(undefined);
+			const { container, root } = await renderHome("code", { onSubmit, reducedMotion });
+			try {
+				const starter = getHomeStarters("code")[0]!;
+				await act(async () => {
+					container.querySelector<HTMLButtonElement>(`[data-starter-id="${starter.id}"]`)!.click();
+					await flush();
+				});
 
-			const editor = container.querySelector<HTMLElement>("#composer-input")!;
-			expect(editor.textContent).toContain(starter.prompt);
-			expect(document.activeElement).toBe(editor);
-			expect(scrollTo).toHaveBeenCalledWith({ behavior: reducedMotion ? "auto" : "smooth", top: 0 });
-			expect(scrollTo.mock.instances[0]).toBe(container.querySelector(".new-task-home-scroll"));
-			expect(onSubmit).not.toHaveBeenCalled();
-		} finally {
-			await act(async () => root.unmount());
-		}
-	});
+				const editor = container.querySelector<HTMLElement>("#composer-input")!;
+				expect(editor.textContent).toContain(starter.prompt);
+				expect(document.activeElement).toBe(editor);
+				expect(scrollTo).toHaveBeenCalledWith({ behavior: reducedMotion ? "auto" : "smooth", top: 0 });
+				expect(scrollTo.mock.instances[0]).toBe(container.querySelector(".new-task-home-scroll"));
+				expect(onSubmit).not.toHaveBeenCalled();
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
 
 	it("keeps task shortcuts disabled while the new task is preparing", async () => {
 		const { container, root } = await renderHome("chat", { busy: true });
 		try {
-			for (const button of container.querySelectorAll<HTMLButtonElement>(".new-task-starter, .new-task-more-trigger")) {
+			for (const button of container.querySelectorAll<HTMLButtonElement>(
+				".new-task-starter, .new-task-more-trigger",
+			)) {
 				expect(button.disabled).toBe(true);
 			}
 		} finally {

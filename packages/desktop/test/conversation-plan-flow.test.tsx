@@ -142,7 +142,7 @@ describe("useConversationPlanFlow", () => {
 
 		vi.mocked(api.startTurn)
 			.mockRejectedValueOnce(Object.assign(new Error("turn rejected"), { code: RPC_ERROR_CODES.OPERATION_FAILED }))
-			.mockResolvedValueOnce({});
+			.mockResolvedValueOnce({ operationId: "operation-1", status: "accepted" });
 		await expect(act(async () => flow.submit({ text: "known failure", attachments: [] }))).rejects.toThrow(
 			"turn rejected",
 		);

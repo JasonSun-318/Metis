@@ -2,8 +2,8 @@ import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@m
 import {
 	Books,
 	ChatCircle,
-	Code,
 	ClipboardText,
+	Code,
 	FileText,
 	Globe,
 	Plus,
@@ -11,7 +11,7 @@ import {
 	TerminalWindow,
 	X,
 } from "@phosphor-icons/react";
-import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type { CSSProperties, DragEvent, ReactNode, PointerEvent as ReactPointerEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -22,38 +22,6 @@ import {
 	type DesktopWorkspaceMutationResult,
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
-import {
-	activateTab,
-	activePane,
-	addTab,
-	collapsedTabIds,
-	chatTab,
-	defaultWorkspace,
-	findChatTab,
-	findTabLocation,
-	findToolLocation,
-	focusedChatTab,
-	canSplit,
-	mapTabs,
-	moveTab,
-	moveTabGroup,
-	moveToolTab,
-	normalizeTabGroups,
-	relatedInsertIndex,
-	removeTab,
-	revealTab,
-	removeTabs,
-	type SessionWorkspace,
-	setActivePane,
-	type SplitDirection,
-	splitTab,
-	tabGroupRuns,
-	toggleTabGroup,
-	toolStripOf,
-	type WorkspacePane,
-	type WorkspaceTab,
-	workspaceTabs,
-} from "../workspace-tabs.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import {
@@ -64,15 +32,46 @@ import {
 	remapPath,
 	saveStoredFiles,
 } from "../workspace-files.ts";
-import { BrowserPanel } from "./BrowserPanel.tsx";
-import { KnowledgePanel } from "./KnowledgePanel.tsx";
-import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
-import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
-import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
-import { PlanPreview } from "./PlanPreview.tsx";
-import { ReviewPanel } from "./ReviewPanel.tsx";
+import {
+	activateTab,
+	activePane,
+	addTab,
+	canSplit,
+	chatTab,
+	collapsedTabIds,
+	defaultWorkspace,
+	findChatTab,
+	findToolLocation,
+	focusedChatTab,
+	mapTabs,
+	moveTab,
+	moveTabGroup,
+	moveToolTab,
+	normalizeTabGroups,
+	relatedInsertIndex,
+	removeTab,
+	removeTabs,
+	revealTab,
+	type SessionWorkspace,
+	type SplitDirection,
+	setActivePane,
+	splitTab,
+	tabGroupRuns,
+	toggleTabGroup,
+	toolStripOf,
+	type WorkspacePane,
+	type WorkspaceTab,
+	workspaceTabs,
+} from "../workspace-tabs.ts";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
+import { BrowserPanel } from "./BrowserPanel.tsx";
+import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
+import { KnowledgePanel } from "./KnowledgePanel.tsx";
+import { PlanPreview } from "./PlanPreview.tsx";
 import { ProcessPanel } from "./ProcessPanel.tsx";
+import { previewBytesCache } from "./preview/preview-bytes-cache.ts";
+import { UniversalFilePreviewer, type UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
+import { ReviewPanel } from "./ReviewPanel.tsx";
 import { SessionChatView, type SessionChatViewContext } from "./SessionChatView.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
@@ -93,9 +92,7 @@ interface TabMenuState {
 }
 
 // A drag carries one tab, or a whole project group when it starts on the group's label.
-type DragState =
-	| { readonly tabId: string }
-	| { readonly group: { readonly paneId: string; readonly key: string } };
+type DragState = { readonly tabId: string } | { readonly group: { readonly paneId: string; readonly key: string } };
 
 type DropTarget =
 	| { readonly paneId: string; readonly index: number }
@@ -114,7 +111,12 @@ const TAB_GROUP_COLORS = ["#5b8def", "#3fb68b", "#d9963b", "#b77ae0", "#e0707a",
 const noProject = (): WorkspaceProject | null => null;
 const noInteractions: NonNullable<SessionWorkspaceViewProps["inlineInteractions"]> = [];
 
-type PlaceTab = (workspace: SessionWorkspace, tab: WorkspaceTab, paneId?: string, activate?: boolean) => SessionWorkspace;
+type PlaceTab = (
+	workspace: SessionWorkspace,
+	tab: WorkspaceTab,
+	paneId?: string,
+	activate?: boolean,
+) => SessionWorkspace;
 
 const MIN_PANE_WIDTH = 360;
 const MIN_PANE_HEIGHT = 280;
@@ -148,8 +150,8 @@ interface SessionWorkspaceViewProps {
 	readonly projectFor?: (sessionId: string) => WorkspaceProject | null;
 	readonly sessionsById: ReadonlyMap<
 		string,
-		Pick<SessionSummary, "sessionId" | "cwd" | "mode">
-			& Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>
+		Pick<SessionSummary, "sessionId" | "cwd" | "mode"> &
+			Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>
 	>;
 	readonly sessionTitleFor: (sessionId: string) => string;
 	readonly store: AppStore;
@@ -195,8 +197,7 @@ function syncChatTabs(
 ): SessionWorkspace {
 	const pane = activePane(workspace);
 	const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
-	const shouldFocus = activeTab === undefined || activeTab.kind === "chat"
-		|| pendingSessionId === chatSessionId;
+	const shouldFocus = activeTab === undefined || activeTab.kind === "chat" || pendingSessionId === chatSessionId;
 	if (chatIsDraft) {
 		const draftTab = findChatTab(workspace, null);
 		if (chatSessionId === null) {
@@ -210,7 +211,7 @@ function syncChatTabs(
 				...next,
 				panes: next.panes.map((candidate) => ({
 					...candidate,
-					tabs: candidate.tabs.map((tab) => tab.id === draftTab.id ? { ...tab, sessionId: chatSessionId } : tab),
+					tabs: candidate.tabs.map((tab) => (tab.id === draftTab.id ? { ...tab, sessionId: chatSessionId } : tab)),
 				})),
 			};
 		}
@@ -273,12 +274,14 @@ export function SessionWorkspaceView({
 	const [tabMenu, setTabMenu] = useState<TabMenuState | null>(null);
 	const [dragState, setDragState] = useState<DragState | null>(null);
 	const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
-	const [browserProfiles, setBrowserProfiles] = useState<readonly DesktopBrowserProfile[]>([{
-		profileId: DEFAULT_BROWSER_PROFILE_ID,
-		name: "Default",
-		sourceId: null,
-		sourceProfileId: null,
-	}]);
+	const [browserProfiles, setBrowserProfiles] = useState<readonly DesktopBrowserProfile[]>([
+		{
+			profileId: DEFAULT_BROWSER_PROFILE_ID,
+			name: "Default",
+			sourceId: null,
+			sourceProfileId: null,
+		},
+	]);
 	const browserProfilesRef = useRef(browserProfiles);
 	browserProfilesRef.current = browserProfiles;
 	const browserProfilesRevision = useRef(0);
@@ -312,7 +315,10 @@ export function SessionWorkspaceView({
 			indicator.style.width = `${Math.max(0, tabRect.width - 20)}px`;
 			indicator.style.transform = `translateX(${tabRect.left - scrollEl.getBoundingClientRect().left + scrollEl.scrollLeft + 10}px)`;
 			// Grouped strips tint the line with the tab's group accent color.
-			indicator.style.setProperty("--tab-group-color", getComputedStyle(tabEl).getPropertyValue("--tab-group-color"));
+			indicator.style.setProperty(
+				"--tab-group-color",
+				getComputedStyle(tabEl).getPropertyValue("--tab-group-color"),
+			);
 			indicator.classList.add("is-set");
 		}
 	}, []);
@@ -370,11 +376,13 @@ export function SessionWorkspaceView({
 	// The aside stays mounted through the slide-out animation.
 	const sidebarOpen = toolsSidebarOpen ?? true;
 	const sidebarClosing = toolsSidebarClosing ?? false;
-	const toolsStrip = focusedChatSession === undefined || focusedChatSession === null
-		? { tabs: [] as readonly WorkspaceTab[], activeId: "" }
-		: toolStripOf(workspace, focusedChatSession);
+	const toolsStrip =
+		focusedChatSession === undefined || focusedChatSession === null
+			? { tabs: [] as readonly WorkspaceTab[], activeId: "" }
+			: toolStripOf(workspace, focusedChatSession);
 	// Titlebar tabs and keyboard focus participate too: tools portal outside the aside.
 	const toolsFocusedRef = useRef(false);
+	const pendingCloseCancelRef = useRef<HTMLButtonElement>(null);
 	const onToolsSidebarOpenChangeRef = useRef(onToolsSidebarOpenChange);
 	onToolsSidebarOpenChangeRef.current = onToolsSidebarOpenChange;
 	const showToolsSidebar = useCallback(() => {
@@ -389,39 +397,52 @@ export function SessionWorkspaceView({
 		if (grew && !sidebarOpen) onToolsSidebarOpenChangeRef.current?.(true);
 	}, [sidebarOpen, toolTabCount]);
 	const dirtySessionIds = useMemo(
-		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => {
-			if (tab.sessionId === null) return [];
-			const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
-			return draft !== undefined && draft.text !== draft.savedText ? [tab.sessionId] : [];
-		}))].sort(),
+		() =>
+			[
+				...new Set(
+					workspaceTabs(workspace).flatMap((tab) => {
+						if (tab.sessionId === null) return [];
+						const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
+						return draft !== undefined && draft.text !== draft.savedText ? [tab.sessionId] : [];
+					}),
+				),
+			].sort(),
 		[fileDrafts, workspace],
 	);
-	const dirtySessionKey = dirtySessionIds.join("");
+	const dirtySessionKey = dirtySessionIds.join("\n");
 	const retainedKey = useMemo(
-		() => [...new Set(workspaceTabs(workspace).flatMap((tab) => (tab.sessionId === null ? [] : [tab.sessionId])))]
-			.sort().join("\n"),
+		() =>
+			[...new Set(workspaceTabs(workspace).flatMap((tab) => (tab.sessionId === null ? [] : [tab.sessionId])))]
+				.sort()
+				.join("\n"),
 		[workspace],
 	);
-	const liveKey = useMemo(
-		() => {
-			const live = new Set(workspace.panes.flatMap((pane) => {
+	const liveKey = useMemo(() => {
+		const live = new Set(
+			workspace.panes.flatMap((pane) => {
 				const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
 				return (tab?.kind === "chat" || tab?.kind === "agent") && tab.sessionId !== null ? [tab.sessionId] : [];
-			}));
-			// An open Agents tool tab keeps its session live even off the chat pane.
-			const activeTool = toolsStrip.tabs.find((tab) => tab.id === toolsStrip.activeId);
-			if (sidebarOpen && activeTool?.kind === "agent" && focusedChatSession) live.add(focusedChatSession);
-			return [...live].sort().join("\n");
-		},
-		[workspace, sidebarOpen, toolsStrip, focusedChatSession],
-	);
+			}),
+		);
+		// An open Agents tool tab keeps its session live even off the chat pane.
+		const activeTool = toolsStrip.tabs.find((tab) => tab.id === toolsStrip.activeId);
+		if (sidebarOpen && activeTool?.kind === "agent" && focusedChatSession) live.add(focusedChatSession);
+		return [...live].sort().join("\n");
+	}, [workspace, sidebarOpen, toolsStrip, focusedChatSession]);
 	// Sessions with a pane-active chat tab host their own modal interactions;
 	// the App-level host covers sessions without a visible chat pane.
 	const chatLiveKey = useMemo(
-		() => [...new Set(workspace.panes.flatMap((pane) => {
-			const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
-			return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
-		}))].sort().join("\n"),
+		() =>
+			[
+				...new Set(
+					workspace.panes.flatMap((pane) => {
+						const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
+						return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
+					}),
+				),
+			]
+				.sort()
+				.join("\n"),
 		[workspace],
 	);
 
@@ -478,10 +499,12 @@ export function SessionWorkspaceView({
 		}
 		return TAB_GROUP_COLORS[index]!;
 	};
-	const openGroupKeys = new Set(workspaceTabs(workspace).flatMap((tab) => {
-		const project = tab.sessionId === null ? null : projectFor(tab.sessionId);
-		return project ? [project.key] : [];
-	}));
+	const openGroupKeys = new Set(
+		workspaceTabs(workspace).flatMap((tab) => {
+			const project = tab.sessionId === null ? null : projectFor(tab.sessionId);
+			return project ? [project.key] : [];
+		}),
+	);
 	for (const key of groupColors.current.keys()) {
 		if (!openGroupKeys.has(key)) groupColors.current.delete(key);
 	}
@@ -507,7 +530,11 @@ export function SessionWorkspaceView({
 			workspaceRef.current = next;
 			setWorkspace(next);
 			const focused = focusedChatTab(next);
-			if (focused && focused.sessionId !== chatSessionIdRef.current && pendingChatFocus.current !== focused.sessionId) {
+			if (
+				focused &&
+				focused.sessionId !== chatSessionIdRef.current &&
+				pendingChatFocus.current !== focused.sessionId
+			) {
 				pendingChatFocus.current = focused.sessionId;
 				onChatSessionRef.current(focused.sessionId);
 			}
@@ -530,25 +557,32 @@ export function SessionWorkspaceView({
 	const setGroupClosing = (id: string, closing: boolean) => {
 		setClosingGroups((current) => {
 			const next = new Set(current);
-			if (closing) next.add(id); else next.delete(id);
+			if (closing) next.add(id);
+			else next.delete(id);
 			return next;
 		});
 	};
 
 	const collapseGroupBody = (body: HTMLElement, id: string, paneId: string, key: string) => {
 		const anim = body.animate(
-			[{ maxWidth: `${body.getBoundingClientRect().width}px`, opacity: 1 }, { maxWidth: "0px", opacity: 0 }],
+			[
+				{ maxWidth: `${body.getBoundingClientRect().width}px`, opacity: 1 },
+				{ maxWidth: "0px", opacity: 0 },
+			],
 			{ duration: 220, easing: "cubic-bezier(.16,1,.3,1)", fill: "forwards" },
 		);
 		groupAnims.current.set(id, { anim, closing: true });
 		setGroupClosing(id, true);
-		anim.finished.then(() => {
-			if (groupAnims.current.get(id)?.anim === anim) {
-				groupAnims.current.delete(id);
-				mutateWorkspace((current) => toggleTabGroup(current, paneId, key, groupOf));
-				setGroupClosing(id, false);
-			}
-		}, () => {});
+		anim.finished.then(
+			() => {
+				if (groupAnims.current.get(id)?.anim === anim) {
+					groupAnims.current.delete(id);
+					mutateWorkspace((current) => toggleTabGroup(current, paneId, key, groupOf));
+					setGroupClosing(id, false);
+				}
+			},
+			() => {},
+		);
 	};
 
 	const toggleGroupAnimated = (label: HTMLElement, paneId: string, key: string, collapsed: boolean) => {
@@ -583,13 +617,19 @@ export function SessionWorkspaceView({
 			callback = (el) => {
 				if (!el || !expandingGroups.current.delete(id)) return;
 				const anim = el.animate(
-					[{ maxWidth: "0px", opacity: 0 }, { maxWidth: `${el.scrollWidth}px`, opacity: 1 }],
+					[
+						{ maxWidth: "0px", opacity: 0 },
+						{ maxWidth: `${el.scrollWidth}px`, opacity: 1 },
+					],
 					{ duration: 220, easing: "cubic-bezier(.16,1,.3,1)" },
 				);
 				groupAnims.current.set(id, { anim, closing: false });
-				anim.finished.then(() => {
-					if (groupAnims.current.get(id)?.anim === anim) groupAnims.current.delete(id);
-				}, () => {});
+				anim.finished.then(
+					() => {
+						if (groupAnims.current.get(id)?.anim === anim) groupAnims.current.delete(id);
+					},
+					() => {},
+				);
 			};
 			groupBodyRefCallbacks.current.set(id, callback);
 		}
@@ -601,6 +641,7 @@ export function SessionWorkspaceView({
 	const groupSignature = workspace.panes
 		.map((pane) => pane.tabs.map((tab) => groupOf(tab) ?? "").join("\n"))
 		.join("\0");
+	// biome-ignore lint/correctness/useExhaustiveDependencies(groupSignature): Resolved project identities regroup tabs after the session list arrives.
 	useEffect(() => {
 		updateWorkspace((current) => current);
 	}, [groupSignature, updateWorkspace]);
@@ -609,7 +650,9 @@ export function SessionWorkspaceView({
 	// adopt the draft's real sessionId when it materializes so the chat subtree
 	// (and the composer's editable DOM) survives the draft -> session transition.
 	useEffect(() => {
-		updateWorkspace((current) => syncChatTabs(current, chatSessionId, chatIsDraft, pendingChatFocus.current, placeTab));
+		updateWorkspace((current) =>
+			syncChatTabs(current, chatSessionId, chatIsDraft, pendingChatFocus.current, placeTab),
+		);
 	}, [chatIsDraft, chatSessionId, placeTab, updateWorkspace]);
 
 	// Once the projected session's tab is focused, the pending focus request is
@@ -664,9 +707,7 @@ export function SessionWorkspaceView({
 		const tab: WorkspaceTab = { kind: "process", id, sessionId: chatSessionId, title: "Process", process };
 		updateWorkspace((current) => {
 			const existing = workspaceTabs(current).some((candidate) => candidate.id === id);
-			const replaced = existing
-				? mapTabs(current, (item) => (item.id === id ? tab : item))
-				: placeTab(current, tab);
+			const replaced = existing ? mapTabs(current, (item) => (item.id === id ? tab : item)) : placeTab(current, tab);
 			return activateTab(replaced, id);
 		});
 	}, [process, chatSessionId, placeTab, updateWorkspace]);
@@ -686,7 +727,8 @@ export function SessionWorkspaceView({
 		}
 		updateWorkspace((current) =>
 			mapTabs(current, (tab) =>
-				tab.id === `process-${chatSessionId}` && tab.kind === "process" ? { ...tab, process } : tab),
+				tab.id === `process-${chatSessionId}` && tab.kind === "process" ? { ...tab, process } : tab,
+			),
 		);
 	}, [openProcess, process, chatSessionId, updateWorkspace]);
 
@@ -703,15 +745,14 @@ export function SessionWorkspaceView({
 	useEffect(() => {
 		let active = true;
 		const revision = browserProfilesRevision.current;
-		void api.listBrowserProfiles().then(
-			(profiles) => {
-				if (active && profiles.length > 0 && browserProfilesRevision.current === revision) {
-					setBrowserProfiles(profiles);
-				}
-			},
-			onError,
-		);
-		return () => { active = false; };
+		void api.listBrowserProfiles().then((profiles) => {
+			if (active && profiles.length > 0 && browserProfilesRevision.current === revision) {
+				setBrowserProfiles(profiles);
+			}
+		}, onError);
+		return () => {
+			active = false;
+		};
 	}, [api, onError]);
 
 	useEffect(
@@ -733,16 +774,21 @@ export function SessionWorkspaceView({
 					const profile = browserProfilesRef.current.find(({ profileId }) => profileId === event.profileId);
 					updateWorkspace((workspace) => {
 						if (workspaceTabs(workspace).some(({ id }) => id === event.browserId)) return workspace;
-						return placeTab(workspace, {
-							kind: "browser",
-							id: event.browserId,
-							sessionId: event.sessionId,
-							title: t("New tab"),
-							url: "",
-							profileId: event.profileId,
-							profileName: profile?.name ?? t("Browser"),
-							controlState: "idle",
-						}, workspace.activePaneId, false);
+						return placeTab(
+							workspace,
+							{
+								kind: "browser",
+								id: event.browserId,
+								sessionId: event.sessionId,
+								title: t("New tab"),
+								url: "",
+								profileId: event.profileId,
+								profileName: profile?.name ?? t("Browser"),
+								controlState: "idle",
+							},
+							workspace.activePaneId,
+							false,
+						);
 					});
 					return;
 				}
@@ -761,7 +807,11 @@ export function SessionWorkspaceView({
 						if (tab.kind !== "browser" || tab.id !== event.browserId) return tab;
 						changed = true;
 						if (event.type === "activity") {
-							return { ...tab, controlState: event.active ? "agent" as const : "idle" as const, handoffReason: undefined };
+							return {
+								...tab,
+								controlState: event.active ? ("agent" as const) : ("idle" as const),
+								handoffReason: undefined,
+							};
 						}
 						return event.status === "requested"
 							? { ...tab, controlState: "handoff" as const, handoffReason: event.reason }
@@ -779,10 +829,15 @@ export function SessionWorkspaceView({
 		[api, onActivateSession, placeTab, t, updateWorkspace],
 	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(chatSessionId): Changing sessions dismisses tab actions and remeasures the active panes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(mode): Changing workspace mode dismisses the previous tab action menu.
 	useEffect(() => {
 		setTabMenu(null);
 	}, [mode, chatSessionId]);
-	useEffect(() => onDirtySessionIdsChange(dirtySessionIds), [dirtySessionKey, onDirtySessionIdsChange]);
+	useEffect(
+		() => onDirtySessionIdsChange(dirtySessionKey ? dirtySessionKey.split("\n") : []),
+		[dirtySessionKey, onDirtySessionIdsChange],
+	);
 	useEffect(() => {
 		void api
 			.retainWorkspaceSessions({
@@ -805,7 +860,8 @@ export function SessionWorkspaceView({
 			if (tab.sessionId === null || !removedSessions.has(tab.sessionId)) continue;
 			removedTabIds.add(tab.id);
 			if (tab.kind === "terminal") void api.closeTerminal({ terminalId: tab.id }).catch(onError);
-			else if (tab.kind === "browser") void api.closeBrowser({ sessionId: tab.sessionId, browserId: tab.id }).catch(onError);
+			else if (tab.kind === "browser")
+				void api.closeBrowser({ sessionId: tab.sessionId, browserId: tab.id }).catch(onError);
 		}
 		for (const ownerSessionId of cleanupSessionIds) {
 			previewBytesCache.deleteSession(ownerSessionId);
@@ -819,7 +875,7 @@ export function SessionWorkspaceView({
 		setExpandedBySession((current) => new Map([...current].filter(([id]) => !removedSessions.has(id))));
 		setFileDrafts((current) => new Map([...current].filter(([id]) => !removedTabIds.has(id))));
 		setSavingFileTabIds((current) => new Set([...current].filter((id) => !removedTabIds.has(id))));
-		setPendingFileClose((current) => current && removedSessions.has(current.sessionId) ? null : current);
+		setPendingFileClose((current) => (current && removedSessions.has(current.sessionId) ? null : current));
 		onCleanupSessionIdsHandled(cleanupSessionIds);
 	}, [api, cleanupSessionIds, onCleanupSessionIdsHandled, onError, updateWorkspace, workspace]);
 
@@ -830,16 +886,16 @@ export function SessionWorkspaceView({
 			if ((target as HTMLElement | null)?.closest?.(".workspace-tab-menu")) return;
 			setTabMenu(null);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
 				setTabMenu(null);
 			}
 		};
 		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		return () => {
 			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 		};
 	}, [tabMenu]);
 
@@ -861,7 +917,9 @@ export function SessionWorkspaceView({
 					tab.kind === "preview" &&
 					tab.sessionId === previewRequest.sessionId &&
 					tab.file.source === previewRequest.source &&
-					(previewRequest.fileId ? tab.file.fileId === previewRequest.fileId : tab.file.relativePath === previewRequest.relativePath),
+					(previewRequest.fileId
+						? tab.file.fileId === previewRequest.fileId
+						: tab.file.relativePath === previewRequest.relativePath),
 			);
 			if (existing) return activateTab(workspace, existing.id);
 			const tab: WorkspaceTab = {
@@ -885,9 +943,12 @@ export function SessionWorkspaceView({
 					tab.kind === "plan" && tab.sessionId === sessionId && tab.plan.planId === plan.planId,
 			);
 			if (existing) {
-				return activateTab(mapTabs(workspace, (tab) =>
-					tab.id === existing.id && tab.kind === "plan" ? { ...tab, title: plan.title, plan } : tab,
-				), existing.id);
+				return activateTab(
+					mapTabs(workspace, (tab) =>
+						tab.id === existing.id && tab.kind === "plan" ? { ...tab, title: plan.title, plan } : tab,
+					),
+					existing.id,
+				);
 			}
 			return placeTab(workspace, {
 				kind: "plan",
@@ -918,12 +979,15 @@ export function SessionWorkspaceView({
 	};
 
 	// Tools always attach to the session behind the focused pane.
-	const toolsTarget = {
-		sessionId: focusedChatSession ?? null,
-		cwd: focusedChatSession
-			? (sessionsById.get(focusedChatSession)?.cwd ?? (focusedChatSession === chatSessionId ? chatCwd : null))
-			: null,
-	};
+	const toolsTarget = useMemo(
+		() => ({
+			sessionId: focusedChatSession ?? null,
+			cwd: focusedChatSession
+				? (sessionsById.get(focusedChatSession)?.cwd ?? (focusedChatSession === chatSessionId ? chatCwd : null))
+				: null,
+		}),
+		[focusedChatSession, sessionsById, chatSessionId, chatCwd],
+	);
 
 	const addTerminal = (target: { sessionId: string | null; cwd: string | null }) => {
 		const { sessionId: ownerSessionId, cwd } = target;
@@ -942,45 +1006,52 @@ export function SessionWorkspaceView({
 		});
 	};
 
-	const addBrowser = useCallback((
-		target: { sessionId: string | null; cwd: string | null },
-		profile = browserProfiles.find((candidate) => candidate.profileId === preferredBrowserProfileId.current)
-			?? browserProfiles[0],
-		onlyIfEmpty = false,
-	) => {
-		const { sessionId: ownerSessionId } = target;
-		if (!ownerSessionId || !profile) return;
-		preferredBrowserProfileId.current = profile.profileId;
-		try {
-			localStorage.setItem(BROWSER_PROFILE_STORAGE_KEY, profile.profileId);
-		} catch {
-			// Browsing still works when preference storage is unavailable.
-		}
-		const id = crypto.randomUUID();
-		const tab: WorkspaceTab = {
-			kind: "browser",
-			id,
-			sessionId: ownerSessionId,
-			title: t("New tab"),
-			url: "",
-			profileId: profile.profileId,
-			profileName: profile.name,
-			controlState: "idle",
-		};
-		updateWorkspace((workspace) =>
-			onlyIfEmpty && toolStripOf(workspace, ownerSessionId).tabs.length > 0 ? workspace : placeTab(workspace, tab),
-		);
-	}, [browserProfiles, placeTab, t, updateWorkspace]);
+	const addBrowser = useCallback(
+		(
+			target: { sessionId: string | null; cwd: string | null },
+			profile = browserProfiles.find((candidate) => candidate.profileId === preferredBrowserProfileId.current) ??
+				browserProfiles[0],
+			onlyIfEmpty = false,
+		) => {
+			const { sessionId: ownerSessionId } = target;
+			if (!ownerSessionId || !profile) return;
+			preferredBrowserProfileId.current = profile.profileId;
+			try {
+				localStorage.setItem(BROWSER_PROFILE_STORAGE_KEY, profile.profileId);
+			} catch {
+				// Browsing still works when preference storage is unavailable.
+			}
+			const id = crypto.randomUUID();
+			const tab: WorkspaceTab = {
+				kind: "browser",
+				id,
+				sessionId: ownerSessionId,
+				title: t("New tab"),
+				url: "",
+				profileId: profile.profileId,
+				profileName: profile.name,
+				controlState: "idle",
+			};
+			updateWorkspace((workspace) =>
+				onlyIfEmpty && toolStripOf(workspace, ownerSessionId).tabs.length > 0
+					? workspace
+					: placeTab(workspace, tab),
+			);
+		},
+		[browserProfiles, placeTab, t, updateWorkspace],
+	);
 
 	useEffect(() => {
 		if (!visible || !sidebarOpen || sidebarClosing || !toolsTarget.sessionId || toolsStrip.tabs.length > 0) return;
 		addBrowser(toolsTarget, undefined, true);
-	}, [addBrowser, sidebarClosing, sidebarOpen, toolsTarget.cwd, toolsTarget.sessionId, toolsStrip.tabs.length, visible]);
+	}, [addBrowser, sidebarClosing, sidebarOpen, toolsTarget, toolsStrip.tabs.length, visible]);
 
 	const browserProfileImported = (profile: DesktopBrowserProfile) => {
-		setBrowserProfiles((current) => current.some((candidate) => candidate.profileId === profile.profileId)
-			? current.map((candidate) => candidate.profileId === profile.profileId ? profile : candidate)
-			: [...current, profile]);
+		setBrowserProfiles((current) =>
+			current.some((candidate) => candidate.profileId === profile.profileId)
+				? current.map((candidate) => (candidate.profileId === profile.profileId ? profile : candidate))
+				: [...current, profile],
+		);
 		addBrowser(toolsTarget, profile);
 	};
 
@@ -995,7 +1066,9 @@ export function SessionWorkspaceView({
 			return next;
 		});
 		updateWorkspace((workspace) => {
-			const existing = [...workspaceTabs(workspace)].reverse().find((tab) => tab.kind === "file" && tab.sessionId === ownerSessionId);
+			const existing = [...workspaceTabs(workspace)]
+				.reverse()
+				.find((tab) => tab.kind === "file" && tab.sessionId === ownerSessionId);
 			if (existing) return activateTab(workspace, existing.id);
 			const restored: WorkspaceTab[] = stored.fixedPaths.map((relativePath) => ({
 				kind: "file" as const,
@@ -1006,15 +1079,20 @@ export function SessionWorkspaceView({
 				relativePath,
 				fixed: true,
 			}));
-			const files = restored.length > 0 ? restored : [{
-				kind: "file" as const,
-				id: crypto.randomUUID(),
-				sessionId: ownerSessionId,
-				title: t("Open file"),
-				cwd,
-				relativePath: null,
-				fixed: false,
-			}];
+			const files =
+				restored.length > 0
+					? restored
+					: [
+							{
+								kind: "file" as const,
+								id: crypto.randomUUID(),
+								sessionId: ownerSessionId,
+								title: t("Open file"),
+								cwd,
+								relativePath: null,
+								fixed: false,
+							},
+						];
 			const withAll = files.reduce((acc, tab) => placeTab(acc, tab), workspace);
 			return activateTab(withAll, files[0]!.id);
 		});
@@ -1024,9 +1102,16 @@ export function SessionWorkspaceView({
 		const { sessionId: ownerSessionId, cwd } = target;
 		if (!ownerSessionId || !cwd || mode !== "code") return;
 		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "review" && tab.sessionId === ownerSessionId);
+			const existing = workspaceTabs(workspace).find(
+				(tab) => tab.kind === "review" && tab.sessionId === ownerSessionId,
+			);
 			if (existing) return activateTab(workspace, existing.id);
-			const tab: WorkspaceTab = { kind: "review", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Review") };
+			const tab: WorkspaceTab = {
+				kind: "review",
+				id: crypto.randomUUID(),
+				sessionId: ownerSessionId,
+				title: t("Review"),
+			};
 			return placeTab(workspace, tab);
 		});
 	};
@@ -1035,22 +1120,37 @@ export function SessionWorkspaceView({
 		const { sessionId: ownerSessionId } = target;
 		if (!ownerSessionId || mode !== "code") return;
 		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "agent" && tab.sessionId === ownerSessionId);
-			const tab: WorkspaceTab = existing ?? { kind: "agent", id: crypto.randomUUID(), sessionId: ownerSessionId, title: t("Agents") };
+			const existing = workspaceTabs(workspace).find(
+				(tab) => tab.kind === "agent" && tab.sessionId === ownerSessionId,
+			);
+			const tab: WorkspaceTab = existing ?? {
+				kind: "agent",
+				id: crypto.randomUUID(),
+				sessionId: ownerSessionId,
+				title: t("Agents"),
+			};
 			return existing ? activateTab(workspace, existing.id) : placeTab(workspace, tab);
 		});
 	};
 
-	const addKnowledge = useCallback((targetSessionId: string | null) => {
-		if (!targetSessionId) return;
-		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "knowledge" && tab.sessionId === targetSessionId);
-			const tab: WorkspaceTab = existing ?? { kind: "knowledge", id: crypto.randomUUID(), sessionId: targetSessionId, title: t("Knowledge") };
-			return existing
-				? activateTab(workspace, existing.id)
-				: placeTab(workspace, tab);
-		});
-	}, [placeTab, t, updateWorkspace]);
+	const addKnowledge = useCallback(
+		(targetSessionId: string | null) => {
+			if (!targetSessionId) return;
+			updateWorkspace((workspace) => {
+				const existing = workspaceTabs(workspace).find(
+					(tab) => tab.kind === "knowledge" && tab.sessionId === targetSessionId,
+				);
+				const tab: WorkspaceTab = existing ?? {
+					kind: "knowledge",
+					id: crypto.randomUUID(),
+					sessionId: targetSessionId,
+					title: t("Knowledge"),
+				};
+				return existing ? activateTab(workspace, existing.id) : placeTab(workspace, tab);
+			});
+		},
+		[placeTab, t, updateWorkspace],
+	);
 	const handledKnowledgeRequest = useRef<number | undefined>(undefined);
 	useEffect(() => {
 		if (!knowledgeRequest || knowledgeRequest.id === handledKnowledgeRequest.current) return;
@@ -1061,15 +1161,21 @@ export function SessionWorkspaceView({
 
 	const openFile = (ownerSessionId: string, cwd: string, relativePath: string, fix: boolean) => {
 		mutateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find((tab) => tab.kind === "file" && tab.sessionId === ownerSessionId && tab.relativePath === relativePath);
+			const existing = workspaceTabs(workspace).find(
+				(tab) => tab.kind === "file" && tab.sessionId === ownerSessionId && tab.relativePath === relativePath,
+			);
 			let next = workspace;
 			if (existing) {
 				next = activateTab(workspace, existing.id);
 				if (fix && existing.kind === "file" && !existing.fixed) {
-					next = mapTabs(next, (tab) => tab.id === existing.id && tab.kind === "file" ? { ...tab, fixed: true } : tab);
+					next = mapTabs(next, (tab) =>
+						tab.id === existing.id && tab.kind === "file" ? { ...tab, fixed: true } : tab,
+					);
 				}
 			} else {
-				const preview = workspaceTabs(workspace).find((tab) => tab.kind === "file" && tab.sessionId === ownerSessionId && !tab.fixed);
+				const preview = workspaceTabs(workspace).find(
+					(tab) => tab.kind === "file" && tab.sessionId === ownerSessionId && !tab.fixed,
+				);
 				const nextTab: WorkspaceTab = {
 					kind: "file",
 					id: preview?.id ?? crypto.randomUUID(),
@@ -1080,7 +1186,10 @@ export function SessionWorkspaceView({
 					fixed: fix,
 				};
 				if (preview) {
-					next = activateTab(mapTabs(workspace, (tab) => tab.id === preview.id ? nextTab : tab), nextTab.id);
+					next = activateTab(
+						mapTabs(workspace, (tab) => (tab.id === preview.id ? nextTab : tab)),
+						nextTab.id,
+					);
 				} else {
 					next = placeTab(workspace, nextTab);
 				}
@@ -1101,7 +1210,8 @@ export function SessionWorkspaceView({
 			if (
 				existing?.file.relativePath === file.relativePath &&
 				(existing.text !== existing.savedText || existing.file.revision === file.revision)
-			) return current;
+			)
+				return current;
 			return new Map(current).set(tabId, { file, savedText: file.text, text: file.text });
 		});
 	};
@@ -1113,11 +1223,11 @@ export function SessionWorkspaceView({
 			return new Map(current).set(tabId, { ...draft, text });
 		});
 		mutateWorkspace((workspace) => {
-			const fileTab = workspaceTabs(workspace).find((tab): tab is Extract<WorkspaceTab, { kind: "file" }> =>
-				tab.kind === "file" && tab.id === tabId,
+			const fileTab = workspaceTabs(workspace).find(
+				(tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file" && tab.id === tabId,
 			);
 			if (!fileTab || fileTab.fixed) return workspace;
-			const next = mapTabs(workspace, (tab) => tab.id === tabId ? { ...fileTab, fixed: true } : tab);
+			const next = mapTabs(workspace, (tab) => (tab.id === tabId ? { ...fileTab, fixed: true } : tab));
 			saveStoredFiles(
 				ownerSessionId,
 				fileTab.cwd,
@@ -1138,7 +1248,8 @@ export function SessionWorkspaceView({
 			!draft ||
 			draft.text === draft.savedText ||
 			savingFileTabIds.has(tabId)
-		) return;
+		)
+			return;
 		const textToSave = draft.text;
 		setSavingFileTabIds((current) => new Set(current).add(tabId));
 		try {
@@ -1193,13 +1304,19 @@ export function SessionWorkspaceView({
 		}
 
 		if (result.action === "trash") {
-			const removedIds = new Set(workspaceTabs(workspace).flatMap((tab) =>
-				tab.kind === "file" && tab.sessionId === ownerSessionId
-					&& tab.relativePath && pathIsWithin(tab.relativePath, result.previousRelativePath)
-					? [tab.id] : [],
-			));
-			const expandedPaths = (expandedBySession.get(ownerSessionId) ?? [])
-				.filter((path) => !pathIsWithin(path, result.previousRelativePath));
+			const removedIds = new Set(
+				workspaceTabs(workspace).flatMap((tab) =>
+					tab.kind === "file" &&
+					tab.sessionId === ownerSessionId &&
+					tab.relativePath &&
+					pathIsWithin(tab.relativePath, result.previousRelativePath)
+						? [tab.id]
+						: [],
+				),
+			);
+			const expandedPaths = (expandedBySession.get(ownerSessionId) ?? []).filter(
+				(path) => !pathIsWithin(path, result.previousRelativePath),
+			);
 			setExpandedBySession((current) => new Map(current).set(ownerSessionId, expandedPaths));
 			setFileDrafts((current) => new Map([...current].filter(([id]) => !removedIds.has(id))));
 			mutateWorkspace((latest) => {
@@ -1222,17 +1339,33 @@ export function SessionWorkspaceView({
 			return;
 		}
 
-		setFileDrafts((current) => new Map([...current].map(([id, draft]) => {
-			if (!pathIsWithin(draft.file.relativePath, result.previousRelativePath)) return [id, draft] as const;
-			return [id, {
-				...draft,
-				file: {
-					...draft.file,
-					relativePath: remapPath(draft.file.relativePath, result.previousRelativePath, result.relativePath),
-					absolutePath: remapPath(draft.file.absolutePath, result.previousAbsolutePath, result.absolutePath),
-				},
-			}] as const;
-		})));
+		setFileDrafts(
+			(current) =>
+				new Map(
+					[...current].map(([id, draft]) => {
+						if (!pathIsWithin(draft.file.relativePath, result.previousRelativePath)) return [id, draft] as const;
+						return [
+							id,
+							{
+								...draft,
+								file: {
+									...draft.file,
+									relativePath: remapPath(
+										draft.file.relativePath,
+										result.previousRelativePath,
+										result.relativePath,
+									),
+									absolutePath: remapPath(
+										draft.file.absolutePath,
+										result.previousAbsolutePath,
+										result.absolutePath,
+									),
+								},
+							},
+						] as const;
+					}),
+				),
+		);
 		const expandedPaths = (expandedBySession.get(ownerSessionId) ?? []).map((path) =>
 			pathIsWithin(path, result.previousRelativePath)
 				? remapPath(path, result.previousRelativePath, result.relativePath)
@@ -1241,7 +1374,13 @@ export function SessionWorkspaceView({
 		setExpandedBySession((current) => new Map(current).set(ownerSessionId, expandedPaths));
 		mutateWorkspace((latest) => {
 			const next = mapTabs(latest, (tab) => {
-				if (tab.kind !== "file" || tab.sessionId !== ownerSessionId || !tab.relativePath || !pathIsWithin(tab.relativePath, result.previousRelativePath)) return tab;
+				if (
+					tab.kind !== "file" ||
+					tab.sessionId !== ownerSessionId ||
+					!tab.relativePath ||
+					!pathIsWithin(tab.relativePath, result.previousRelativePath)
+				)
+					return tab;
 				const relativePath = remapPath(tab.relativePath, result.previousRelativePath, result.relativePath);
 				return { ...tab, relativePath, title: displayFileName(relativePath) };
 			});
@@ -1271,7 +1410,8 @@ export function SessionWorkspaceView({
 		const closing = workspaceTabs(workspace).find((tab) => tab.id === id);
 		if (!closing) return;
 		if (closing.kind === "terminal") void api.closeTerminal({ terminalId: id }).catch(onError);
-		else if (closing.kind === "browser") void api.closeBrowser({ sessionId: closing.sessionId, browserId: id }).catch(onError);
+		else if (closing.kind === "browser")
+			void api.closeBrowser({ sessionId: closing.sessionId, browserId: id }).catch(onError);
 		else if (closing.kind === "agent") store.selectAgentTranscript(closing.sessionId, null);
 		setFileDrafts((current) => {
 			if (!current.has(id)) return current;
@@ -1286,7 +1426,8 @@ export function SessionWorkspaceView({
 					closing.sessionId,
 					closing.cwd,
 					workspaceTabs(next),
-					expandedBySession.get(closing.sessionId) ?? loadStoredFiles(closing.sessionId, closing.cwd).expandedPaths,
+					expandedBySession.get(closing.sessionId) ??
+						loadStoredFiles(closing.sessionId, closing.cwd).expandedPaths,
 				);
 			}
 			return next;
@@ -1315,9 +1456,8 @@ export function SessionWorkspaceView({
 		const current = workspaceRef.current;
 		if (sidebarOpen && toolsFocusedRef.current) {
 			const sessionId = focusedChatTab(current)?.sessionId;
-			const activeTool = sessionId === null || sessionId === undefined
-				? ""
-				: toolStripOf(current, sessionId).activeId;
+			const activeTool =
+				sessionId === null || sessionId === undefined ? "" : toolStripOf(current, sessionId).activeId;
 			if (activeTool) {
 				closeTabRef.current(activeTool);
 				return;
@@ -1349,6 +1489,10 @@ export function SessionWorkspaceView({
 		document.addEventListener("keydown", cycle, true);
 		return () => document.removeEventListener("keydown", cycle, true);
 	}, [groupOf, mutateWorkspace, sidebarOpen, visible]);
+
+	useEffect(() => {
+		if (pendingFileClose?.tabId) pendingCloseCancelRef.current?.focus();
+	}, [pendingFileClose?.tabId]);
 
 	const discardPendingFile = () => {
 		if (!pendingFileClose) return;
@@ -1385,9 +1529,11 @@ export function SessionWorkspaceView({
 		setDropTarget(null);
 		// Tool tabs live in the sidebar; only chat tabs can land on a pane strip.
 		if (!drag || ("tabId" in drag && findToolLocation(workspace, drag.tabId) !== null)) return;
-		mutateWorkspace((workspace) => "group" in drag
-			? moveTabGroup(workspace, drag.group.paneId, drag.group.key, groupOf, paneId, index)
-			: moveTab(workspace, drag.tabId, paneId, index));
+		mutateWorkspace((workspace) =>
+			"group" in drag
+				? moveTabGroup(workspace, drag.group.paneId, drag.group.key, groupOf, paneId, index)
+				: moveTab(workspace, drag.tabId, paneId, index),
+		);
 	};
 
 	const handleDropSplit = (paneId: string, direction: SplitDirection) => {
@@ -1397,8 +1543,6 @@ export function SessionWorkspaceView({
 		if (!drag || "group" in drag || findToolLocation(workspace, drag.tabId) !== null) return;
 		mutateWorkspace((workspace) => splitTab(workspace, drag.tabId, paneId, direction));
 	};
-
-
 
 	const rowCount = (row: 0 | 1) => workspace.panes.filter((pane) => pane.row === row).length;
 
@@ -1413,9 +1557,7 @@ export function SessionWorkspaceView({
 		}
 		const otherRow = direction === "down" ? 1 : 0;
 		const otherRowCount = rowCount(otherRow);
-		return otherRowCount === 0
-			? rect.height / 2 >= MIN_PANE_HEIGHT
-			: width / (otherRowCount + 1) >= MIN_PANE_WIDTH;
+		return otherRowCount === 0 ? rect.height / 2 >= MIN_PANE_HEIGHT : width / (otherRowCount + 1) >= MIN_PANE_WIDTH;
 	};
 
 	const splitDropDirection = (event: DragEvent<HTMLElement>, paneId: string): SplitDirection | null => {
@@ -1425,12 +1567,12 @@ export function SessionWorkspaceView({
 		const rect = event.currentTarget.getBoundingClientRect();
 		const horizontal = Math.min(120, rect.width * 0.25);
 		const vertical = Math.min(120, rect.height * 0.25);
-		const nearest = ([
+		const nearest = [
 			{ direction: "left" as const, distance: event.clientX - rect.left, edge: horizontal },
 			{ direction: "right" as const, distance: rect.right - event.clientX, edge: horizontal },
 			{ direction: "up" as const, distance: event.clientY - rect.top, edge: vertical },
 			{ direction: "down" as const, distance: rect.bottom - event.clientY, edge: vertical },
-		])
+		]
 			.filter((candidate) => candidate.distance >= 0 && candidate.distance <= candidate.edge)
 			.sort((a, b) => a.distance - b.distance)[0];
 		return nearest && canSplit(workspace, paneId, nearest.direction) && fitsSplit(paneId, nearest.direction)
@@ -1455,24 +1597,29 @@ export function SessionWorkspaceView({
 			<nav aria-label={t("Available tools")} className="tool-sidebar-menu">
 				{targetMode === "code" && (
 					<button disabled={!target.cwd} onClick={() => addReview(target)} type="button">
-						<ClipboardText aria-hidden="true" size={18} /><span>{t("Review")}</span>
+						<ClipboardText aria-hidden="true" size={18} />
+						<span>{t("Review")}</span>
 					</button>
 				)}
 				<button disabled={!target.cwd} onClick={() => addTerminal(target)} type="button">
-					<TerminalWindow aria-hidden="true" size={18} /><span>{t("Terminal")}</span>
+					<TerminalWindow aria-hidden="true" size={18} />
+					<span>{t("Terminal")}</span>
 				</button>
 				{targetMode === "code" && (
 					<button disabled={!target.cwd} onClick={() => addFiles(target)} type="button">
-						<FileText aria-hidden="true" size={18} /><span>{t("Files")}</span>
+						<FileText aria-hidden="true" size={18} />
+						<span>{t("Files")}</span>
 					</button>
 				)}
 				{targetMode === "code" && (
 					<button disabled={!target.sessionId} onClick={() => addAgent(target)} type="button">
-						<Robot aria-hidden="true" size={18} /><span>{t("Agents")}</span>
+						<Robot aria-hidden="true" size={18} />
+						<span>{t("Agents")}</span>
 					</button>
 				)}
 				<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} type="button">
-					<Books aria-hidden="true" size={18} /><span>{t("Knowledge")}</span>
+					<Books aria-hidden="true" size={18} />
+					<span>{t("Knowledge")}</span>
 				</button>
 			</nav>
 		);
@@ -1495,9 +1642,12 @@ export function SessionWorkspaceView({
 			};
 			const previous = panelRectsRef.current.get(panel);
 			if (
-				previous?.x === next.x && previous.y === next.y
-				&& previous.width === next.width && previous.height === next.height
-			) continue;
+				previous?.x === next.x &&
+				previous.y === next.y &&
+				previous.width === next.width &&
+				previous.height === next.height
+			)
+				continue;
 			panelRectsRef.current.set(panel, next);
 			panel.style.transform = `translate(${next.x}px, ${next.y}px)`;
 			panel.style.width = `${next.width}px`;
@@ -1506,10 +1656,17 @@ export function SessionWorkspaceView({
 		}
 	}, []);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(visible): Visibility changes require layout and observer registration.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(chatIsDraft): Switching between a draft and a session changes the mounted pane geometry.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(chatSessionId): Changing sessions dismisses tab actions and remeasures the active panes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(workspace): Workspace changes mount different pane bodies and require layout and observer registration.
 	useLayoutEffect(() => {
 		layoutPanels();
 	}, [layoutPanels, workspace, chatSessionId, chatIsDraft, visible]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(visible): Visibility changes require layout and observer registration.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(chatSessionId): Changing sessions dismisses tab actions and remeasures the active panes.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(workspace): Workspace changes mount different pane bodies and require layout and observer registration.
 	useEffect(() => {
 		const observer = new ResizeObserver(layoutPanels);
 		if (panesRef.current) observer.observe(panesRef.current);
@@ -1520,28 +1677,54 @@ export function SessionWorkspaceView({
 	const tabIcon = (tab: WorkspaceTab): ReactNode => {
 		if (tab.kind === "chat") {
 			const tabMode = (tab.sessionId === null ? undefined : sessionsById.get(tab.sessionId)?.mode) ?? mode;
-			return tabMode === "code"
-				? <Code aria-hidden="true" data-mode="code" size={13} />
-				: <ChatCircle aria-hidden="true" data-mode="chat" size={13} />;
+			return tabMode === "code" ? (
+				<Code aria-hidden="true" data-mode="code" size={13} />
+			) : (
+				<ChatCircle aria-hidden="true" data-mode="chat" size={13} />
+			);
 		}
-		return tab.kind === "knowledge" ? <Books aria-hidden="true" size={13} />
-			: tab.kind === "terminal" || tab.kind === "process" ? <TerminalWindow aria-hidden="true" size={13} />
-			: tab.kind === "browser" ? <Globe aria-hidden="true" size={13} />
-			: tab.kind === "file" ? (tab.relativePath ? <WorkspaceFileIcon path={tab.relativePath} size={13} /> : <FileText aria-hidden="true" size={13} />)
-			: tab.kind === "review" ? <ClipboardText aria-hidden="true" size={13} />
-			: tab.kind === "agent" ? <Robot aria-hidden="true" size={13} />
-			: tab.kind === "plan" ? <FileText aria-hidden="true" size={13} />
-			: <WorkspaceFileIcon path={tab.title} size={13} />;
+		return tab.kind === "knowledge" ? (
+			<Books aria-hidden="true" size={13} />
+		) : tab.kind === "terminal" || tab.kind === "process" ? (
+			<TerminalWindow aria-hidden="true" size={13} />
+		) : tab.kind === "browser" ? (
+			<Globe aria-hidden="true" size={13} />
+		) : tab.kind === "file" ? (
+			tab.relativePath ? (
+				<WorkspaceFileIcon path={tab.relativePath} size={13} />
+			) : (
+				<FileText aria-hidden="true" size={13} />
+			)
+		) : tab.kind === "review" ? (
+			<ClipboardText aria-hidden="true" size={13} />
+		) : tab.kind === "agent" ? (
+			<Robot aria-hidden="true" size={13} />
+		) : tab.kind === "plan" ? (
+			<FileText aria-hidden="true" size={13} />
+		) : (
+			<WorkspaceFileIcon path={tab.title} size={13} />
+		);
 	};
 
 	// One tab element serves pane strips and the tools strip; `stripId` is the
 	// pane id or the "tools" sentinel, and drives context-menu scoping.
-	const renderTab = (stripId: string, tabs: readonly WorkspaceTab[], activeId: string, tab: WorkspaceTab, project: WorkspaceProject | null) => {
-		const displayTitle = tab.kind === "chat"
-			? (tab.sessionId === null ? t("New task") : sessionTitleFor(tab.sessionId))
-			: tab.kind === "browser" && tab.url === ""
-				? t("New tab")
-				: tab.kind === "file" && tab.relativePath === null ? t("Open file") : tab.title;
+	const renderTab = (
+		stripId: string,
+		tabs: readonly WorkspaceTab[],
+		activeId: string,
+		tab: WorkspaceTab,
+		project: WorkspaceProject | null,
+	) => {
+		const displayTitle =
+			tab.kind === "chat"
+				? tab.sessionId === null
+					? t("New task")
+					: sessionTitleFor(tab.sessionId)
+				: tab.kind === "browser" && tab.url === ""
+					? t("New tab")
+					: tab.kind === "file" && tab.relativePath === null
+						? t("Open file")
+						: tab.title;
 		const draft = tab.kind === "file" ? fileDrafts.get(tab.id) : undefined;
 		const dirty = draft !== undefined && draft.text !== draft.savedText;
 		const saving = savingFileTabIds.has(tab.id);
@@ -1555,26 +1738,30 @@ export function SessionWorkspaceView({
 		// The status goes in the description, like the sidebar, so a tab keeps a stable name.
 		const label = dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle;
 		return (
+			// biome-ignore lint/a11y/noStaticElementInteractions: The tab wrapper owns dragging and pointer shortcuts; its native buttons supply the same keyboard actions.
 			<div
 				className={`tool-tab${active ? " is-active" : ""}${tab.kind === "file" && !tab.fixed ? " is-preview" : ""}${dirty ? " is-dirty" : ""}`}
-				data-drop-index={tabs.indexOf(tab)}
-				draggable
-				key={tab.id}
 				onAuxClick={(event) => {
 					// Middle-click closes, matching browsers and editors.
 					if (event.button !== 1) return;
 					event.preventDefault();
 					closeTab(tab.id);
 				}}
-				onDragEnd={() => { setDragState(null); setDropTarget(null); }}
+				onContextMenu={(event) => {
+					event.preventDefault();
+					setTabMenu({ paneId: stripId, tabId: tab.id, x: event.clientX, y: event.clientY });
+				}}
+				data-drop-index={tabs.indexOf(tab)}
+				draggable
+				key={tab.id}
+				onDragEnd={() => {
+					setDragState(null);
+					setDropTarget(null);
+				}}
 				onDragStart={(event) => {
 					event.dataTransfer.setData("text/plain", tab.id);
 					event.dataTransfer.effectAllowed = "move";
 					setDragState({ tabId: tab.id });
-				}}
-				onContextMenu={(event) => {
-					event.preventDefault();
-					setTabMenu({ paneId: stripId, tabId: tab.id, x: event.clientX, y: event.clientY });
 				}}
 			>
 				<button
@@ -1583,7 +1770,9 @@ export function SessionWorkspaceView({
 					aria-label={label}
 					className="tool-tab-select"
 					onClick={() => selectTab(tab.id)}
-					onFocus={() => { toolsFocusedRef.current = stripId === "tools"; }}
+					onFocus={() => {
+						toolsFocusedRef.current = stripId === "tools";
+					}}
 					role="tab"
 					title={project ? `${displayTitle}\n${project.cwd}` : displayTitle}
 					type="button"
@@ -1623,9 +1812,17 @@ export function SessionWorkspaceView({
 			<div
 				className={`workspace-tabbar${inTitlebar ? " workspace-tabbar--titlebar" : ""}${focused ? " is-focused" : ""}${split && !focused ? " is-unfocused" : ""}${dropTarget && "paneId" in dropTarget && dropTarget.paneId === pane.id ? " is-drop-target" : ""}`}
 				data-pane-id={pane.id}
-				onFocusCapture={() => { toolsFocusedRef.current = false; }}
-				onPointerDownCapture={() => { toolsFocusedRef.current = false; }}
-				onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === pane.id ? null : current)}
+				onFocusCapture={() => {
+					toolsFocusedRef.current = false;
+				}}
+				onPointerDownCapture={() => {
+					toolsFocusedRef.current = false;
+				}}
+				onDragLeave={() =>
+					setDropTarget((current) =>
+						current && "paneId" in current && current.paneId === pane.id ? null : current,
+					)
+				}
 				onDragOver={(event) => {
 					if (!dragState) return;
 					if ("tabId" in dragState && findToolLocation(workspace, dragState.tabId) !== null) return;
@@ -1642,54 +1839,78 @@ export function SessionWorkspaceView({
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll" ref={tabStripRef(pane.id)}>
-					{grouped ? runs.map((run, index) => {
-						const first = run.tabs[0]!;
-						if (!run.group) {
-							const tabs = run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, null));
-							return index === 0 ? tabs : [<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${first.id}`} />, ...tabs];
-						}
-						const group = run.group;
-						const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
-						// A drawer on its way shut already wears the collapsed look.
-						const shownCollapsed = collapsed || closingGroups.has(`${pane.id}${group.key}`);
-						const groupLabel = t("{{name}} tab group", { name: group.name });
-						return (
-							<div
-								className={`tool-tab-group${shownCollapsed ? " is-collapsed" : ""}`}
-								key={`group-${group.key}`}
-								role="presentation"
-								style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
-							>
-								<button
-									aria-description={shownCollapsed
-										? t("{{count}} tabs hidden", { count: run.tabs.length })
-										: undefined}
-									aria-expanded={!shownCollapsed}
-									aria-label={groupLabel}
-									className="tool-tab-group-label"
-									data-drop-index={pane.tabs.indexOf(first)}
-									draggable
-									onClick={(event) => toggleGroupAnimated(event.currentTarget, pane.id, group.key, collapsed)}
-									onDragEnd={() => { setDragState(null); setDropTarget(null); }}
-									onDragStart={(event) => {
-										event.dataTransfer.setData("text/plain", group.key);
-										event.dataTransfer.effectAllowed = "move";
-										setDragState({ group: { paneId: pane.id, key: group.key } });
-									}}
-									title={group.cwd}
-									type="button"
-								>
-									<span className="tool-tab-group-name">{group.name}</span>
-									{shownCollapsed && <span aria-hidden="true" className="tool-tab-group-count">{run.tabs.length}</span>}
-								</button>
-								{!collapsed && (
-									<div className="tool-tab-group-body" ref={groupBodyRef(pane.id, group.key)}>
-										{run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, group))}
+					{grouped
+						? runs.map((run, index) => {
+								const first = run.tabs[0]!;
+								if (!run.group) {
+									const tabs = run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, null));
+									return index === 0
+										? tabs
+										: [
+												<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${first.id}`} />,
+												...tabs,
+											];
+								}
+								const group = run.group;
+								const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
+								// A drawer on its way shut already wears the collapsed look.
+								const shownCollapsed = collapsed || closingGroups.has(`${pane.id}${group.key}`);
+								const groupLabel = t("{{name}} tab group", { name: group.name });
+								return (
+									<div
+										className={`tool-tab-group${shownCollapsed ? " is-collapsed" : ""}`}
+										key={`group-${group.key}`}
+										role="presentation"
+										style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
+									>
+										<button
+											aria-description={
+												shownCollapsed ? t("{{count}} tabs hidden", { count: run.tabs.length }) : undefined
+											}
+											aria-expanded={!shownCollapsed}
+											aria-label={groupLabel}
+											className="tool-tab-group-label"
+											data-drop-index={pane.tabs.indexOf(first)}
+											draggable
+											onClick={(event) =>
+												toggleGroupAnimated(event.currentTarget, pane.id, group.key, collapsed)
+											}
+											onDragEnd={() => {
+												setDragState(null);
+												setDropTarget(null);
+											}}
+											onDragStart={(event) => {
+												event.dataTransfer.setData("text/plain", group.key);
+												event.dataTransfer.effectAllowed = "move";
+												setDragState({ group: { paneId: pane.id, key: group.key } });
+											}}
+											title={group.cwd}
+											type="button"
+										>
+											<span className="tool-tab-group-name">{group.name}</span>
+											{shownCollapsed && (
+												<span aria-hidden="true" className="tool-tab-group-count">
+													{run.tabs.length}
+												</span>
+											)}
+										</button>
+										{!collapsed && (
+											<div className="tool-tab-group-body" ref={groupBodyRef(pane.id, group.key)}>
+												{run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, group))}
+											</div>
+										)}
 									</div>
-								)}
-							</div>
-						);
-					}) : pane.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, tab.sessionId === null ? null : projectFor(tab.sessionId)))}
+								);
+							})
+						: pane.tabs.map((tab) =>
+								renderTab(
+									pane.id,
+									pane.tabs,
+									pane.activeId,
+									tab,
+									tab.sessionId === null ? null : projectFor(tab.sessionId),
+								),
+							)}
 					<span aria-hidden="true" className="tool-tab-indicator" />
 				</div>
 				<div className="tool-add">
@@ -1710,21 +1931,28 @@ export function SessionWorkspaceView({
 	const renderPanels = () => {
 		let chatHost: { pane: WorkspacePane; tab: WorkspaceTab } | null = null;
 		for (const pane of workspace.panes) {
-			const tab = pane.tabs.find((candidate) =>
-				candidate.kind === "chat"
-				&& (candidate.sessionId === chatSessionId || (chatIsDraft && candidate.sessionId === null)));
+			const tab = pane.tabs.find(
+				(candidate) =>
+					candidate.kind === "chat" &&
+					(candidate.sessionId === chatSessionId || (chatIsDraft && candidate.sessionId === null)),
+			);
 			if (tab) {
 				chatHost = { pane, tab };
 				break;
 			}
 		}
 		return workspace.panes.flatMap((pane) => {
-			const panelVisible = (tabId: string) =>
-				visible && pane.activeId === tabId
-				&& tabMenu?.paneId !== pane.id;
+			const panelVisible = (tabId: string) => visible && pane.activeId === tabId && tabMenu?.paneId !== pane.id;
 			const host = chatHost && chatHost.pane === pane ? chatHost : null;
 			const wrap = (tabId: string, content: ReactNode) => (
-				<div className="workspace-panel" data-pane-id={pane.id} hidden={!panelVisible(tabId)} key={tabId} onFocusCapture={(event) => focusPaneContent(pane.id, event.target)} onPointerDownCapture={() => focusPane(pane.id)}>
+				<div
+					className="workspace-panel"
+					data-pane-id={pane.id}
+					hidden={!panelVisible(tabId)}
+					key={tabId}
+					onFocusCapture={(event) => focusPaneContent(pane.id, event.target)}
+					onPointerDownCapture={() => focusPane(pane.id)}
+				>
 					{content}
 				</div>
 			);
@@ -1773,135 +2001,171 @@ export function SessionWorkspaceView({
 	// Every session's tool tabs stay mounted (hidden) so terminals and editors
 	// keep their state; only the focused session's strip shows.
 	const renderToolPanels = () =>
-		[...workspace.tools.entries()].map(([toolSessionId, strip]) => {
-		const stripFocused = toolSessionId === focusedChatSession;
-		const ownerTarget = { sessionId: toolSessionId, cwd: sessionsById.get(toolSessionId)?.cwd ?? null };
-		const fileTabs = strip.tabs.filter((tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file");
-		const activeTab = strip.tabs.find((tab) => tab.id === strip.activeId);
-		const panelVisible = (tabId: string) => visible && sidebarOpen && stripFocused && strip.activeId === tabId;
-		const wrap = (tabId: string, content: ReactNode) => (
-			<div className="tool-sidebar-panel" hidden={!panelVisible(tabId)} key={tabId}>
-				{content}
-			</div>
-		);
-		return [
-			...strip.tabs.flatMap((tab) =>
-				tab.kind === "process" ? wrap(tab.id,
-					<ProcessPanel
-						panelId={`process-panel-${tab.id}`}
-						process={tab.process}
-						theme={theme}
-						onError={onError}
-						visible={panelVisible(tab.id)}
-					/>,
-				) : tab.kind === "terminal" ? wrap(tab.id,
-					<TerminalPanel
-						api={api}
-						cwd={tab.cwd}
-						terminalId={tab.id}
-						theme={theme}
-						visible={panelVisible(tab.id)}
-					/>,
-				) : tab.kind === "browser" ? wrap(tab.id,
-					<BrowserPanel
-						api={api}
-						browserId={tab.id}
-						controlState={tab.controlState}
-						covered={tabMenu?.paneId === "tools"}
-						handoffReason={tab.handoffReason}
-						sessionId={tab.sessionId}
-						onError={onError}
-						onOpenProfile={(profile) => {
-							const selected = browserProfiles.find((candidate) => candidate.profileId === profile.profileId);
-							if (selected) addBrowser(ownerTarget, selected);
-						}}
-						onProfileImported={browserProfileImported}
-						onState={updateBrowserState}
-						profile={{ profileId: tab.profileId, name: tab.profileName }}
-						profiles={browserProfiles}
-						startPageTools={toolLauncher(ownerTarget)}
-						visible={panelVisible(tab.id)}
-					/>,
-				) : tab.kind === "knowledge" ? wrap(tab.id,
-					<KnowledgePanel api={api} sessionId={tab.sessionId} visible={panelVisible(tab.id)} />,
-				) : tab.kind === "review" ? wrap(tab.id,
-					<ReviewPanel
-						api={api}
-						sessionId={tab.sessionId}
-						theme={theme}
-						visible={panelVisible(tab.id)}
-					/>,
-				) : tab.kind === "agent" ? wrap(tab.id,
-					<AgentTreePanel
-						api={api}
-						onError={onError}
-						sessionId={tab.sessionId}
-						store={store}
-						visible={panelVisible(tab.id)}
-					/>,
-				) : tab.kind === "plan" ? wrap(tab.id,
-					<div
-						className="tool-panel plan-panel"
-						id={`plan-panel-${tab.id}`}
-						role="tabpanel"
-					>
-						<PlanPreview plan={tab.plan} />
-					</div>,
-				) : tab.kind === "preview" ? wrap(tab.id,
-					<div
-						className="tool-panel preview-panel"
-						id={`preview-panel-${tab.id}`}
-						role="tabpanel"
-					>
-						<UniversalFilePreviewer
-							active={panelVisible(tab.id)}
-							api={api}
-							file={tab.file}
-							onClose={() => closeTab(tab.id)}
-							onError={onError}
-						/>
-					</div>,
-				) : [],
-			),
-			// All file tabs of one session share a single FilePanel (tree + editor).
-			fileTabs.length > 0 ? (() => {
-				const fileSessionId = toolSessionId;
-				const groupActiveTab = activeTab?.kind === "file" ? activeTab : fileTabs.at(-1);
-				const cwd = fileTabs[0]!.cwd;
-				const dirtyPaths = fileTabs.flatMap((tab) => {
-					const draft = fileDrafts.get(tab.id);
-					return tab.relativePath && draft && draft.text !== draft.savedText ? [tab.relativePath] : [];
-				});
-				const savingPaths = fileTabs.flatMap((tab) =>
-					tab.relativePath && savingFileTabIds.has(tab.id) ? [tab.relativePath] : [],
-				);
-				const groupVisible = visible && sidebarOpen && stripFocused && activeTab?.kind === "file";
-				return (
-					<div className="tool-sidebar-panel" hidden={!groupVisible} key={`files-${fileSessionId}`}>
-						<FilePanel
-							activePath={groupActiveTab?.relativePath ?? null}
-							api={api}
-							cwd={cwd}
-							draft={groupActiveTab ? fileDrafts.get(groupActiveTab.id) ?? null : null}
-							dirtyPaths={dirtyPaths}
-							expandedPaths={expandedBySession.get(fileSessionId) ?? []}
-							onDraftChange={(text) => { if (groupActiveTab) updateFileDraft(fileSessionId, groupActiveTab.id, text); }}
-							onDraftLoaded={(file) => { if (groupActiveTab) loadFileDraft(groupActiveTab.id, file); }}
-							onError={onError}
-							onExpandedPathsChange={(paths) => updateExpandedPaths(fileSessionId, cwd, paths)}
-							onOpenFile={(relativePath, fix) => openFile(fileSessionId, cwd, relativePath, fix)}
-							onSave={async () => { if (groupActiveTab) await saveFileTab(fileSessionId, groupActiveTab.id); }}
-							onWorkspaceMutation={(result) => applyWorkspaceMutation(fileSessionId, cwd, result)}
-							saving={groupActiveTab ? savingFileTabIds.has(groupActiveTab.id) : false}
-							savingPaths={savingPaths}
-							sessionId={fileSessionId}
-							visible={groupVisible}
-						/>
-					</div>
-				);
-			})() : null,
-		];
-		}).flat();
+		[...workspace.tools.entries()].flatMap(([toolSessionId, strip]) => {
+			const stripFocused = toolSessionId === focusedChatSession;
+			const ownerTarget = { sessionId: toolSessionId, cwd: sessionsById.get(toolSessionId)?.cwd ?? null };
+			const fileTabs = strip.tabs.filter(
+				(tab): tab is Extract<WorkspaceTab, { kind: "file" }> => tab.kind === "file",
+			);
+			const activeTab = strip.tabs.find((tab) => tab.id === strip.activeId);
+			const panelVisible = (tabId: string) => visible && sidebarOpen && stripFocused && strip.activeId === tabId;
+			const wrap = (tabId: string, content: ReactNode) => (
+				<div className="tool-sidebar-panel" hidden={!panelVisible(tabId)} key={tabId}>
+					{content}
+				</div>
+			);
+			return [
+				...strip.tabs.flatMap((tab) =>
+					tab.kind === "process"
+						? wrap(
+								tab.id,
+								<ProcessPanel
+									panelId={`process-panel-${tab.id}`}
+									process={tab.process}
+									theme={theme}
+									onError={onError}
+									visible={panelVisible(tab.id)}
+								/>,
+							)
+						: tab.kind === "terminal"
+							? wrap(
+									tab.id,
+									<TerminalPanel
+										api={api}
+										cwd={tab.cwd}
+										terminalId={tab.id}
+										theme={theme}
+										visible={panelVisible(tab.id)}
+									/>,
+								)
+							: tab.kind === "browser"
+								? wrap(
+										tab.id,
+										<BrowserPanel
+											api={api}
+											browserId={tab.id}
+											controlState={tab.controlState}
+											covered={tabMenu?.paneId === "tools"}
+											handoffReason={tab.handoffReason}
+											sessionId={tab.sessionId}
+											onError={onError}
+											onOpenProfile={(profile) => {
+												const selected = browserProfiles.find(
+													(candidate) => candidate.profileId === profile.profileId,
+												);
+												if (selected) addBrowser(ownerTarget, selected);
+											}}
+											onProfileImported={browserProfileImported}
+											onState={updateBrowserState}
+											profile={{ profileId: tab.profileId, name: tab.profileName }}
+											profiles={browserProfiles}
+											startPageTools={toolLauncher(ownerTarget)}
+											visible={panelVisible(tab.id)}
+										/>,
+									)
+								: tab.kind === "knowledge"
+									? wrap(
+											tab.id,
+											<KnowledgePanel api={api} sessionId={tab.sessionId} visible={panelVisible(tab.id)} />,
+										)
+									: tab.kind === "review"
+										? wrap(
+												tab.id,
+												<ReviewPanel
+													api={api}
+													sessionId={tab.sessionId}
+													theme={theme}
+													visible={panelVisible(tab.id)}
+												/>,
+											)
+										: tab.kind === "agent"
+											? wrap(
+													tab.id,
+													<AgentTreePanel
+														api={api}
+														onError={onError}
+														sessionId={tab.sessionId}
+														store={store}
+														visible={panelVisible(tab.id)}
+													/>,
+												)
+											: tab.kind === "plan"
+												? wrap(
+														tab.id,
+														<div
+															className="tool-panel plan-panel"
+															id={`plan-panel-${tab.id}`}
+															role="tabpanel"
+														>
+															<PlanPreview plan={tab.plan} />
+														</div>,
+													)
+												: tab.kind === "preview"
+													? wrap(
+															tab.id,
+															<div
+																className="tool-panel preview-panel"
+																id={`preview-panel-${tab.id}`}
+																role="tabpanel"
+															>
+																<UniversalFilePreviewer
+																	active={panelVisible(tab.id)}
+																	api={api}
+																	file={tab.file}
+																	onClose={() => closeTab(tab.id)}
+																	onError={onError}
+																/>
+															</div>,
+														)
+													: [],
+				),
+				// All file tabs of one session share a single FilePanel (tree + editor).
+				fileTabs.length > 0
+					? (() => {
+							const fileSessionId = toolSessionId;
+							const groupActiveTab = activeTab?.kind === "file" ? activeTab : fileTabs.at(-1);
+							const cwd = fileTabs[0]!.cwd;
+							const dirtyPaths = fileTabs.flatMap((tab) => {
+								const draft = fileDrafts.get(tab.id);
+								return tab.relativePath && draft && draft.text !== draft.savedText ? [tab.relativePath] : [];
+							});
+							const savingPaths = fileTabs.flatMap((tab) =>
+								tab.relativePath && savingFileTabIds.has(tab.id) ? [tab.relativePath] : [],
+							);
+							const groupVisible = visible && sidebarOpen && stripFocused && activeTab?.kind === "file";
+							return (
+								<div className="tool-sidebar-panel" hidden={!groupVisible} key={`files-${fileSessionId}`}>
+									<FilePanel
+										activePath={groupActiveTab?.relativePath ?? null}
+										api={api}
+										cwd={cwd}
+										draft={groupActiveTab ? (fileDrafts.get(groupActiveTab.id) ?? null) : null}
+										dirtyPaths={dirtyPaths}
+										expandedPaths={expandedBySession.get(fileSessionId) ?? []}
+										onDraftChange={(text) => {
+											if (groupActiveTab) updateFileDraft(fileSessionId, groupActiveTab.id, text);
+										}}
+										onDraftLoaded={(file) => {
+											if (groupActiveTab) loadFileDraft(groupActiveTab.id, file);
+										}}
+										onError={onError}
+										onExpandedPathsChange={(paths) => updateExpandedPaths(fileSessionId, cwd, paths)}
+										onOpenFile={(relativePath, fix) => openFile(fileSessionId, cwd, relativePath, fix)}
+										onSave={async () => {
+											if (groupActiveTab) await saveFileTab(fileSessionId, groupActiveTab.id);
+										}}
+										onWorkspaceMutation={(result) => applyWorkspaceMutation(fileSessionId, cwd, result)}
+										saving={groupActiveTab ? savingFileTabIds.has(groupActiveTab.id) : false}
+										savingPaths={savingPaths}
+										sessionId={fileSessionId}
+										visible={groupVisible}
+									/>
+								</div>
+							);
+						})()
+					: null,
+			];
+		});
 
 	// The tools strip sits level with the session strips in the titlebar row;
 	// tool tabs keep their own widths and the row scrolls instead of squeezing.
@@ -1909,7 +2173,11 @@ export function SessionWorkspaceView({
 		return (
 			<div
 				className={`workspace-tabbar workspace-tabbar--titlebar tool-sidebar-tabbar${dropTarget && "paneId" in dropTarget && dropTarget.paneId === "tools" ? " is-drop-target" : ""}`}
-				onDragLeave={() => setDropTarget((current) => current && "paneId" in current && current.paneId === "tools" ? null : current)}
+				onDragLeave={() =>
+					setDropTarget((current) =>
+						current && "paneId" in current && current.paneId === "tools" ? null : current,
+					)
+				}
 				onDragOver={(event) => {
 					if (!dragState || "group" in dragState) return;
 					// Only tool tabs may reorder inside the sidebar strip.
@@ -1926,16 +2194,29 @@ export function SessionWorkspaceView({
 					setDragState(null);
 					setDropTarget(null);
 					if (drag && "tabId" in drag) {
-						mutateWorkspace((current) => moveToolTab(current, drag.tabId, stripDropIndex(event, toolsStrip.tabs.length)));
+						mutateWorkspace((current) =>
+							moveToolTab(current, drag.tabId, stripDropIndex(event, toolsStrip.tabs.length)),
+						);
 					}
 				}}
-				onFocusCapture={() => { toolsFocusedRef.current = true; }}
-				onPointerDownCapture={() => { toolsFocusedRef.current = true; }}
+				onFocusCapture={() => {
+					toolsFocusedRef.current = true;
+				}}
+				onPointerDownCapture={() => {
+					toolsFocusedRef.current = true;
+				}}
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll" ref={toolsScrollRef}>
 					{toolsStrip.tabs.map((tab) =>
-						renderTab("tools", toolsStrip.tabs, toolsStrip.activeId, tab, tab.sessionId ? projectFor(tab.sessionId) : null))}
+						renderTab(
+							"tools",
+							toolsStrip.tabs,
+							toolsStrip.activeId,
+							tab,
+							tab.sessionId ? projectFor(tab.sessionId) : null,
+						),
+					)}
 				</div>
 				{toolsStrip.tabs.length > 0 && (
 					<div className="tool-add">
@@ -1983,17 +2264,17 @@ export function SessionWorkspaceView({
 		<div className="session-workspace-root" hidden={!visible}>
 			{visible && stripsInTitlebar
 				? createPortal(
-					<div className="workspace-titlebar-strips">
-						{topPanes.map((pane) => (
-							<div className="workspace-titlebar-cell" key={pane.id}>{renderTabStrip(pane, true)}</div>
-						))}
-					</div>,
-					titlebarTabsSlot!,
-				)
+						<div className="workspace-titlebar-strips">
+							{topPanes.map((pane) => (
+								<div className="workspace-titlebar-cell" key={pane.id}>
+									{renderTabStrip(pane, true)}
+								</div>
+							))}
+						</div>,
+						titlebarTabsSlot!,
+					)
 				: null}
-			{visible && sidebarOpen && titlebarToolsSlot
-				? createPortal(renderToolsStrip(), titlebarToolsSlot)
-				: null}
+			{visible && sidebarOpen && titlebarToolsSlot ? createPortal(renderToolsStrip(), titlebarToolsSlot) : null}
 			<div className="session-workspace-instance">
 				<div
 					className={`session-workspace-panes${dragState ? " is-dragging" : ""}`}
@@ -2007,12 +2288,15 @@ export function SessionWorkspaceView({
 							<div className="workspace-row" key={row}>
 								{rowPanes.map((pane) => (
 									<section
+										aria-label={t("Workspace")}
 										className={`workspace-pane${splitTarget?.paneId === pane.id ? " is-split-target" : ""}`}
 										data-split-direction={splitTarget?.paneId === pane.id ? splitTarget.direction : undefined}
 										key={pane.id}
 										onDragLeave={(event) => {
 											if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-											setDropTarget((current) => current && "split" in current && current.split.paneId === pane.id ? null : current);
+											setDropTarget((current) =>
+												current && "split" in current && current.split.paneId === pane.id ? null : current,
+											);
 										}}
 										onDragOver={(event) => {
 											if (!dragState) return;
@@ -2044,7 +2328,11 @@ export function SessionWorkspaceView({
 												<div className="workspace-empty" role="tabpanel">
 													<p>{t("Pick a session from the sidebar.")}</p>
 													{onNewSession && (
-														<button className="button-secondary" onClick={() => onNewSession(null)} type="button">
+														<button
+															className="button-secondary"
+															onClick={() => onNewSession(null)}
+															type="button"
+														>
 															<Plus aria-hidden="true" size={13} />
 															{t("Start a new task")}
 														</button>
@@ -2066,76 +2354,131 @@ export function SessionWorkspaceView({
 				<aside
 					className={`tool-sidebar${sidebarClosing ? " is-closing" : ""}`}
 					hidden={!sidebarOpen}
-					onFocusCapture={() => { toolsFocusedRef.current = true; }}
-					onPointerDownCapture={() => { toolsFocusedRef.current = true; }}
+					onFocusCapture={() => {
+						toolsFocusedRef.current = true;
+					}}
+					onPointerDownCapture={() => {
+						toolsFocusedRef.current = true;
+					}}
 					style={{ width: `${toolsSidebarWidth}px` }}
 				>
-						<div
-							aria-label={t("Resize tools sidebar")}
-							aria-orientation="vertical"
-							className="tool-sidebar-resizer"
-							onKeyDown={(event) => {
-								if (!onToolsSidebarWidthChange) return;
-								if (event.key === "ArrowLeft") onToolsSidebarWidthChange(clampToolsSidebarWidth(toolsSidebarWidth + 16));
-								else if (event.key === "ArrowRight") onToolsSidebarWidthChange(clampToolsSidebarWidth(toolsSidebarWidth - 16));
-								else return;
-								event.preventDefault();
-							}}
-							onPointerDown={startToolsResize}
-							role="separator"
-							tabIndex={0}
-						/>
-						{titlebarToolsSlot ? null : <div className="tool-sidebar-head">{renderToolsStrip()}</div>}
-						<div className="tool-sidebar-body">
-							{renderToolPanels()}
-						</div>
-					</aside>
+					<hr
+						aria-valuenow={toolsSidebarWidth}
+						aria-valuemin={clampToolsSidebarWidth(0)}
+						aria-valuemax={clampToolsSidebarWidth(Number.MAX_SAFE_INTEGER)}
+						aria-label={t("Resize tools sidebar")}
+						aria-orientation="vertical"
+						className="tool-sidebar-resizer"
+						onKeyDown={(event) => {
+							if (!onToolsSidebarWidthChange) return;
+							if (event.key === "ArrowLeft")
+								onToolsSidebarWidthChange(clampToolsSidebarWidth(toolsSidebarWidth + 16));
+							else if (event.key === "ArrowRight")
+								onToolsSidebarWidthChange(clampToolsSidebarWidth(toolsSidebarWidth - 16));
+							else return;
+							event.preventDefault();
+						}}
+						onPointerDown={startToolsResize}
+						tabIndex={0}
+					/>
+					{titlebarToolsSlot ? null : <div className="tool-sidebar-head">{renderToolsStrip()}</div>}
+					<div className="tool-sidebar-body">{renderToolPanels()}</div>
+				</aside>
 			</div>
-			{tabMenu && (() => {
-				const isToolTab = findToolLocation(workspace, tabMenu.tabId) !== null;
-				const otherPanes = workspace.panes.filter((pane) => pane.id !== tabMenu.paneId);
-				const menuStyle: CSSProperties = { left: `${tabMenu.x}px`, top: `${tabMenu.y}px` };
-				return (
-					<nav aria-label={t("Tab actions")} className="tool-add-menu workspace-tab-menu" role="menu" style={menuStyle}>
-						{isToolTab ? null : (["right", "down"] as const).map((direction) => {
-							const reason = !canSplit(workspace, tabMenu.paneId, direction)
-								? t("Up to 6 panes")
-								: !fitsSplit(tabMenu.paneId, direction)
-									? t("Not enough room to split")
-									: undefined;
-							return (
-								<button
-									disabled={reason !== undefined}
-									key={direction}
-									onClick={() => { mutateWorkspace((ws) => splitTab(ws, tabMenu.tabId, tabMenu.paneId, direction)); setTabMenu(null); }}
-									role="menuitem"
-									title={reason}
-									type="button"
-								>
-									<span>{direction === "right" ? t("Split right") : t("Split down")}</span>
-								</button>
-							);
-						})}
-						{isToolTab ? null : otherPanes.map((pane, index) => (
-							<button key={pane.id} onClick={() => { mutateWorkspace((ws) => moveTab(ws, tabMenu.tabId, pane.id)); setTabMenu(null); }} role="menuitem" type="button">
-								<span>{t("Move to pane {{index}}", { index: index + 1 })}</span>
+			{tabMenu &&
+				(() => {
+					const isToolTab = findToolLocation(workspace, tabMenu.tabId) !== null;
+					const otherPanes = workspace.panes.filter((pane) => pane.id !== tabMenu.paneId);
+					const menuStyle: CSSProperties = { left: `${tabMenu.x}px`, top: `${tabMenu.y}px` };
+					return (
+						<div
+							aria-label={t("Tab actions")}
+							className="tool-add-menu workspace-tab-menu"
+							role="menu"
+							style={menuStyle}
+						>
+							{isToolTab
+								? null
+								: (["right", "down"] as const).map((direction) => {
+										const reason = !canSplit(workspace, tabMenu.paneId, direction)
+											? t("Up to 6 panes")
+											: !fitsSplit(tabMenu.paneId, direction)
+												? t("Not enough room to split")
+												: undefined;
+										return (
+											<button
+												disabled={reason !== undefined}
+												key={direction}
+												onClick={() => {
+													mutateWorkspace((ws) => splitTab(ws, tabMenu.tabId, tabMenu.paneId, direction));
+													setTabMenu(null);
+												}}
+												role="menuitem"
+												title={reason}
+												type="button"
+											>
+												<span>{direction === "right" ? t("Split right") : t("Split down")}</span>
+											</button>
+										);
+									})}
+							{isToolTab
+								? null
+								: otherPanes.map((pane, index) => (
+										<button
+											key={pane.id}
+											onClick={() => {
+												mutateWorkspace((ws) => moveTab(ws, tabMenu.tabId, pane.id));
+												setTabMenu(null);
+											}}
+											role="menuitem"
+											type="button"
+										>
+											<span>{t("Move to pane {{index}}", { index: index + 1 })}</span>
+										</button>
+									))}
+							<button
+								onClick={() => {
+									closeTab(tabMenu.tabId);
+									setTabMenu(null);
+								}}
+								role="menuitem"
+								type="button"
+							>
+								<span>{t("Close")}</span>
 							</button>
-						))}
-						<button onClick={() => { closeTab(tabMenu.tabId); setTabMenu(null); }} role="menuitem" type="button">
-							<span>{t("Close")}</span>
-						</button>
-					</nav>
-				);
-			})()}
+						</div>
+					);
+				})()}
 			{pendingFileClose && (
 				<div className="modal-backdrop">
-					<div aria-describedby="unsaved-file-message" aria-label={t("Unsaved changes")} aria-modal="true" className="interaction-dialog unsaved-file-dialog" role="dialog">
+					<div
+						aria-describedby="unsaved-file-message"
+						aria-label={t("Unsaved changes")}
+						aria-modal="true"
+						className="interaction-dialog unsaved-file-dialog"
+						role="dialog"
+					>
 						<h2>{t("Save changes to {{name}}?", { name: pendingFileClose.name })}</h2>
 						<p id="unsaved-file-message">{t("Your changes will be lost if you don’t save them.")}</p>
 						<div className="interaction-actions">
-							<button autoFocus className="button-secondary" onClick={() => setPendingFileClose(null)} type="button">{t("Cancel")}</button>
-							<button className="button-secondary" onClick={discardPendingFile} type="button">{t("Don’t Save")}</button>
-							<button disabled={savingFileTabIds.has(pendingFileClose.tabId)} onClick={() => void saveAndClosePendingFile()} type="button">{t(savingFileTabIds.has(pendingFileClose.tabId) ? "Saving…" : "Save")}</button>
+							<button
+								ref={pendingCloseCancelRef}
+								className="button-secondary"
+								onClick={() => setPendingFileClose(null)}
+								type="button"
+							>
+								{t("Cancel")}
+							</button>
+							<button className="button-secondary" onClick={discardPendingFile} type="button">
+								{t("Don’t Save")}
+							</button>
+							<button
+								disabled={savingFileTabIds.has(pendingFileClose.tabId)}
+								onClick={() => void saveAndClosePendingFile()}
+								type="button"
+							>
+								{t(savingFileTabIds.has(pendingFileClose.tabId) ? "Saving…" : "Save")}
+							</button>
 						</div>
 					</div>
 				</div>

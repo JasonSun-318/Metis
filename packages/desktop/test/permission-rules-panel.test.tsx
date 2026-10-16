@@ -25,7 +25,9 @@ const RULE = {
 };
 
 async function flush() {
-	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
 }
 
 function api() {
@@ -62,12 +64,16 @@ describe("PermissionRulesPanel", () => {
 		expect(container.textContent).toContain("Always allow");
 		expect(container.textContent).toContain(RULE.id.slice(0, 12));
 		expect(container.textContent).toContain("2 additional details omitted");
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove bash permission"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Remove bash permission"]')!.click(),
+		);
 		await flush();
-		expect(client.deletePermissionRule).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: SESSION_ID,
-			ruleId: RULE.id,
-		}));
+		expect(client.deletePermissionRule).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: SESSION_ID,
+				ruleId: RULE.id,
+			}),
+		);
 		expect(container.textContent).toContain("No remembered permission decisions for this project.");
 		await act(async () => root.unmount());
 	});
@@ -81,11 +87,16 @@ describe("PermissionRulesPanel", () => {
 		await act(async () => root.render(<PermissionRulesPanel api={client} serverReady sessionId={SESSION_ID} />));
 		await flush();
 
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove bash permission"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Remove bash permission"]')!.click(),
+		);
 		await flush();
 		expect(container.textContent).toContain("remove failed");
 		expect(container.textContent).toContain("npm test");
-		const clearButtons = () => [...container.querySelectorAll<HTMLButtonElement>("button")].filter((button) => button.textContent === "Clear all");
+		const clearButtons = () =>
+			[...container.querySelectorAll<HTMLButtonElement>("button")].filter(
+				(button) => button.textContent === "Clear all",
+			);
 		await act(async () => clearButtons()[0]!.click());
 		expect(container.querySelector('[aria-labelledby="clear-permissions-title"]')).not.toBeNull();
 		await act(async () => clearButtons().at(-1)!.click());
@@ -99,14 +110,16 @@ describe("PermissionRulesPanel", () => {
 		const client = api();
 		vi.mocked(client.listPermissionRules).mockResolvedValueOnce({
 			projectPath: "/work/project",
-			rules: [{
-				...RULE,
-				executionTarget: "external",
-				details: [
-					{ label: "Address", value: "https://example.test" },
-					{ label: "Details", value: "[REDACTED]" },
-				],
-			}],
+			rules: [
+				{
+					...RULE,
+					executionTarget: "external",
+					details: [
+						{ label: "Address", value: "https://example.test" },
+						{ label: "Details", value: "[REDACTED]" },
+					],
+				},
+			],
 		});
 		const container = document.createElement("div");
 		document.body.append(container);

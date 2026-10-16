@@ -16,7 +16,11 @@ describe("ContextUsageRing", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ContextUsageRing controls="session-status-panel" expanded={false} onClick={onClick} percent={25} />));
+		await act(async () =>
+			root.render(
+				<ContextUsageRing controls="session-status-panel" expanded={false} onClick={onClick} percent={25} />,
+			),
+		);
 		const button = container.querySelector<HTMLButtonElement>("button.context-usage-ring")!;
 		expect(button.getAttribute("aria-label")).toMatch(/25%/);
 		const meter = container.querySelector<SVGCircleElement>(".context-usage-ring-meter")!;
@@ -24,12 +28,18 @@ describe("ContextUsageRing", () => {
 		expect(Number(meter.getAttribute("stroke-dashoffset"))).toBeCloseTo(circumference * 0.75, 3);
 		await act(async () => button.click());
 		expect(onClick).toHaveBeenCalledOnce();
-		await act(async () => root.render(<ContextUsageRing controls="session-status-panel" expanded onClick={onClick} percent={112.5} />));
+		await act(async () =>
+			root.render(<ContextUsageRing controls="session-status-panel" expanded onClick={onClick} percent={112.5} />),
+		);
 		expect(button.getAttribute("aria-expanded")).toBe("true");
 		expect(button.getAttribute("aria-controls")).toBe("session-status-panel");
 		expect(button.getAttribute("aria-label")).toMatch(/exceeded/i);
 		expect(Number(meter.getAttribute("stroke-dashoffset"))).toBeCloseTo(0, 3);
-		await act(async () => root.render(<ContextUsageRing controls="session-status-panel" expanded={false} onClick={onClick} percent={null} />));
+		await act(async () =>
+			root.render(
+				<ContextUsageRing controls="session-status-panel" expanded={false} onClick={onClick} percent={null} />,
+			),
+		);
 		expect(button.getAttribute("aria-label")).toMatch(/unknown|unavailable/i);
 		expect(Number(meter.getAttribute("stroke-dashoffset"))).toBeCloseTo(circumference, 3);
 		await act(async () => root.unmount());

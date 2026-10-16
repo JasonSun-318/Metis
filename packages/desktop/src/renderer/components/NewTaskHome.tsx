@@ -1,17 +1,17 @@
 import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
 import {
+	Bug,
 	CalendarBlank,
 	CaretDown,
 	CaretRight,
 	ChartBar,
-	Bug,
-	FileText,
+	DotsThree,
 	Files,
+	FileText,
 	FolderSimple,
 	Gauge,
 	GitDiff,
 	ListChecks,
-	DotsThree,
 	MagnifyingGlass,
 	PencilSimple,
 	PresentationChart,
@@ -22,14 +22,14 @@ import {
 } from "@phosphor-icons/react";
 import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+import { getHomeStarters, type HomeStarter, type HomeStarterId, pickHomeGreeting } from "../new-task-home-content.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
-import { getHomeStarters, pickHomeGreeting, type HomeStarter, type HomeStarterId } from "../new-task-home-content.ts";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
+import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { ProjectSessionGroup } from "./SessionSidebar.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
-import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 const starterIcons: Record<HomeStarterId, typeof FileText> = {
 	report: FileText,
@@ -73,22 +73,22 @@ function normalizedProjectKey(cwd: string): string {
 	return normalized || "/";
 }
 
-export function recentProjectsFromGroups(
-	projects: readonly ProjectSessionGroup[],
-): readonly NewTaskRecentProject[] {
+export function recentProjectsFromGroups(projects: readonly ProjectSessionGroup[]): readonly NewTaskRecentProject[] {
 	const candidates = projects
 		.map((project) => ({
 			cwd: project.cwd,
 			name: project.name,
 			updatedAt: project.sessions.reduce(
-				(latest, session) => session.updatedAt > latest ? session.updatedAt : latest,
+				(latest, session) => (session.updatedAt > latest ? session.updatedAt : latest),
 				"",
 			),
 		}))
-		.sort((left, right) =>
-			right.updatedAt.localeCompare(left.updatedAt)
-			|| left.name.localeCompare(right.name)
-			|| left.cwd.localeCompare(right.cwd));
+		.sort(
+			(left, right) =>
+				right.updatedAt.localeCompare(left.updatedAt) ||
+				left.name.localeCompare(right.name) ||
+				left.cwd.localeCompare(right.cwd),
+		);
 	const seen = new Set<string>();
 	const recent: NewTaskRecentProject[] = [];
 	for (const project of candidates) {
@@ -246,21 +246,28 @@ export function NewTaskHome({
 									submitDisabled={mode === "code" && folder === null}
 									thinkingControl={thinkingControl}
 								/>
-								<div aria-label={t("Workspace")} className="new-task-home-project-control" role="group">
+								<fieldset aria-label={t("Workspace")} className="control-group new-task-home-project-control">
 									{projectControl ?? (
 										<button
 											className="folder-picker"
 											disabled={busy || folderLocked}
 											onClick={() => void onChooseFolder()}
-											title={folder ?? t(folderLocked ? "This task has no project folder" : "Choose a project or folder")}
+											title={
+												folder ??
+												t(folderLocked ? "This task has no project folder" : "Choose a project or folder")
+											}
 											type="button"
 										>
 											<AnimatedNavIcon kind="folder" />
-											<span>{folder ? folderName(folder) : t(folderLocked ? "No project folder" : "Choose a workspace folder")}</span>
+											<span>
+												{folder
+													? folderName(folder)
+													: t(folderLocked ? "No project folder" : "Choose a workspace folder")}
+											</span>
 											<CaretDown aria-hidden="true" size={13} />
 										</button>
 									)}
-								</div>
+								</fieldset>
 							</div>
 						</div>
 					</div>

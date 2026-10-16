@@ -2,8 +2,8 @@ import { BellSimple, CaretDown, X } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
-import { DrawerDetails } from "./DrawerDetails.tsx";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
+import { DrawerDetails } from "./DrawerDetails.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 export const RELEASE_NOTES_READ_VERSION_STORAGE_KEY = "metis.release-notes-read-version.v1";
@@ -57,12 +57,23 @@ function ReleaseNotesEntry({
 }) {
 	const { t } = useTranslation();
 	return (
-		<DrawerDetails className="release-notes-release" defaultOpen={latest} showCaret={false} summary={<>
-				<span>{t("Version")} {version}</span>
-				{latest && <small>{t("Latest")}</small>}
-				<CaretDown aria-hidden="true" size={14} />
-			</>}>
-			<div className="release-notes-markdown"><Markdown text={notes} /></div>
+		<DrawerDetails
+			className="release-notes-release"
+			defaultOpen={latest}
+			showCaret={false}
+			summary={
+				<>
+					<span>
+						{t("Version")} {version}
+					</span>
+					{latest && <small>{t("Latest")}</small>}
+					<CaretDown aria-hidden="true" size={14} />
+				</>
+			}
+		>
+			<div className="release-notes-markdown">
+				<Markdown text={notes} />
+			</div>
 		</DrawerDetails>
 	);
 }
@@ -85,26 +96,29 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 	const mountedRef = useRef(true);
 	const loadTaskRef = useRef<Promise<void> | null>(null);
 
-	const refresh = useCallback((force = false) => {
-		if (!force && loadTaskRef.current) return loadTaskRef.current;
-		if (mountedRef.current) {
-			setLoading(true);
-			setFailed(false);
-		}
-		const task = loadReleaseNotes(loadChangelog, force)
-			.then((next) => {
-				if (mountedRef.current && loadTaskRef.current === task) setChangelog(next);
-			})
-			.catch(() => {
-				if (mountedRef.current && loadTaskRef.current === task) setFailed(true);
-			})
-			.finally(() => {
-				if (loadTaskRef.current === task) loadTaskRef.current = null;
-				if (mountedRef.current && loadTaskRef.current === null) setLoading(false);
-			});
-		loadTaskRef.current = task;
-		return task;
-	}, [loadChangelog]);
+	const refresh = useCallback(
+		(force = false) => {
+			if (!force && loadTaskRef.current) return loadTaskRef.current;
+			if (mountedRef.current) {
+				setLoading(true);
+				setFailed(false);
+			}
+			const task = loadReleaseNotes(loadChangelog, force)
+				.then((next) => {
+					if (mountedRef.current && loadTaskRef.current === task) setChangelog(next);
+				})
+				.catch(() => {
+					if (mountedRef.current && loadTaskRef.current === task) setFailed(true);
+				})
+				.finally(() => {
+					if (loadTaskRef.current === task) loadTaskRef.current = null;
+					if (mountedRef.current && loadTaskRef.current === null) setLoading(false);
+				});
+			loadTaskRef.current = task;
+			return task;
+		},
+		[loadChangelog],
+	);
 
 	useEffect(() => {
 		mountedRef.current = true;
@@ -142,9 +156,11 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 		const left = Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8));
 		const above = Math.max(0, rect.top - 16);
 		const below = Math.max(0, viewportHeight - rect.bottom - 16);
-		setPosition(above >= below
-			? { left, width, bottom: viewportHeight - rect.top + 8, maxHeight: Math.min(480, above) }
-			: { left, width, top: rect.bottom + 8, maxHeight: Math.min(480, below) });
+		setPosition(
+			above >= below
+				? { left, width, bottom: viewportHeight - rect.top + 8, maxHeight: Math.min(480, above) }
+				: { left, width, top: rect.bottom + 8, maxHeight: Math.min(480, below) },
+		);
 	}, []);
 
 	useLayoutEffect(() => {
@@ -199,37 +215,57 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 				<BellSimple aria-hidden="true" size={17} />
 				{unread && <span aria-hidden="true" className="release-notes-unread-dot" />}
 			</button>
-			{open && createPortal(
-				<section
-					aria-labelledby="release-notes-title"
-					className="release-notes-popover"
-					id="release-notes-popover"
-					popover="manual"
-					ref={popoverRef}
-					role="dialog"
-					style={position}
-				>
-					<header>
-						<strong id="release-notes-title">{t("What's new")}</strong>
-						<button aria-label={t("Close release notes")} className="release-notes-close" onClick={close} ref={closeButtonRef} type="button">
-							<X aria-hidden="true" size={16} />
-						</button>
-					</header>
-					<div className="release-notes-body">
-						{loading && !changelog && <p className="release-notes-status" role="status">{t("Loading release notes...")}</p>}
-						{failed && <p className="release-notes-status is-error" role="alert">{t("Could not load release notes. Check your connection and try again.")}</p>}
-						{!loading && !failed && (!changelog || changelog.releases.length === 0) && <p className="release-notes-status" role="status">{t("No release notes are available yet.")}</p>}
-						{changelog?.releases.map((release, index) => (
-							<ReleaseNotesEntry
-								key={release.version}
-								latest={index === 0}
-								notes={release.notes}
-								version={release.version}
-							/>
-						))}
-					</div>
-				</section>, document.body,
-			)}
+			{open &&
+				createPortal(
+					<section
+						aria-labelledby="release-notes-title"
+						className="release-notes-popover"
+						id="release-notes-popover"
+						popover="manual"
+						ref={popoverRef}
+						role="dialog"
+						style={position}
+					>
+						<header>
+							<strong id="release-notes-title">{t("What's new")}</strong>
+							<button
+								aria-label={t("Close release notes")}
+								className="release-notes-close"
+								onClick={close}
+								ref={closeButtonRef}
+								type="button"
+							>
+								<X aria-hidden="true" size={16} />
+							</button>
+						</header>
+						<div className="release-notes-body">
+							{loading && !changelog && (
+								<output className="status-paragraph release-notes-status">
+									{t("Loading release notes...")}
+								</output>
+							)}
+							{failed && (
+								<p className="release-notes-status is-error" role="alert">
+									{t("Could not load release notes. Check your connection and try again.")}
+								</p>
+							)}
+							{!loading && !failed && (!changelog || changelog.releases.length === 0) && (
+								<output className="status-paragraph release-notes-status">
+									{t("No release notes are available yet.")}
+								</output>
+							)}
+							{changelog?.releases.map((release, index) => (
+								<ReleaseNotesEntry
+									key={release.version}
+									latest={index === 0}
+									notes={release.notes}
+									version={release.version}
+								/>
+							))}
+						</div>
+					</section>,
+					document.body,
+				)}
 		</div>
 	);
 }

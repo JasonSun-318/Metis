@@ -4,7 +4,12 @@ import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState }
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
-import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity, type ProfileIdentity, useProfileIdentity } from "../profile-identity.ts";
+import {
+	DEFAULT_PROFILE_IDENTITY,
+	type ProfileIdentity,
+	saveProfileIdentity,
+	useProfileIdentity,
+} from "../profile-identity.ts";
 import { UsagePanel } from "./UsagePanel.tsx";
 
 const DAY_MS = 86_400_000;
@@ -43,7 +48,10 @@ function dateFromDayNumber(value: number): Date {
 	return new Date(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
 }
 
-export function buildActivityWeeks(profile: ProfileUsageSummaryView, locale: "en-US" | "zh-CN" = "en-US"): readonly ActivityWeek[] {
+export function buildActivityWeeks(
+	profile: ProfileUsageSummaryView,
+	locale: "en-US" | "zh-CN" = "en-US",
+): readonly ActivityWeek[] {
 	const monthName = new Intl.DateTimeFormat(locale, { month: "short" });
 	const today = dateKey(new Date(profile.generatedAt));
 	const todayDay = dayNumber(today);
@@ -58,7 +66,7 @@ export function buildActivityWeeks(profile: ProfileUsageSummaryView, locale: "en
 		const monthStart = days.find((day) => dateParts(day.date)[2] === 1 && !day.future);
 		return { days, month: monthStart ? monthName.format(dateFromDayNumber(dayNumber(monthStart.date))) : null };
 	});
-	const labeledWeeks = weeks.flatMap((week, index) => week.month ? [index] : []);
+	const labeledWeeks = weeks.flatMap((week, index) => (week.month ? [index] : []));
 	for (const index of labeledWeeks.slice(0, -12)) weeks[index] = { ...weeks[index]!, month: null };
 	return weeks;
 }
@@ -88,13 +96,13 @@ function formatActivityTokens(tokens: number, compact: Intl.NumberFormat): strin
 function ProfileLoading() {
 	const { t } = useTranslation();
 	return (
-		<div aria-label={t("Loading personal profile")} className="profile-loading" role="status">
+		<output aria-label={t("Loading personal profile")} className="status-block profile-loading">
 			<span className="profile-loading-avatar" />
 			<span className="profile-loading-line profile-loading-title" />
 			<span className="profile-loading-line" />
 			<div className="profile-loading-card" />
 			<div className="profile-loading-chart" />
-		</div>
+		</output>
 	);
 }
 
@@ -111,7 +119,10 @@ export function ProfilePanel({
 }) {
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
-	const compactNumber = useMemo(() => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }), [locale]);
+	const compactNumber = useMemo(
+		() => new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
+		[locale],
+	);
 	const fullNumber = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 	const fullDate = useMemo(() => new Intl.DateTimeFormat(locale, { dateStyle: "medium" }), [locale]);
 	const [activeTab, setActiveTab] = useState<"activity" | "usage">(initialTab);
@@ -120,6 +131,10 @@ export function ProfilePanel({
 	const [request, setRequest] = useState(0);
 	const identity = useProfileIdentity();
 	const [editingName, setEditingName] = useState(false);
+	const nameInputRef = useRef<HTMLInputElement>(null);
+	useEffect(() => {
+		if (editingName) nameInputRef.current?.focus();
+	}, [editingName]);
 	const [nameDraft, setNameDraft] = useState(identity.displayName);
 	const [identityError, setIdentityError] = useState<string | null>(null);
 	const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -130,18 +145,25 @@ export function ProfilePanel({
 	};
 
 	const load = useCallback(() => setRequest((current) => current + 1), []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(request): Retry explicitly reloads the personal profile.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
 		setError(null);
 		void api.getProfile().then(
-			(result) => { if (current) setProfile(result); },
-			(cause) => { if (current) setError(cause instanceof Error ? cause.message : "Personal profile could not be loaded."); },
+			(result) => {
+				if (current) setProfile(result);
+			},
+			(cause) => {
+				if (current) setError(cause instanceof Error ? cause.message : "Personal profile could not be loaded.");
+			},
 		);
-		return () => { current = false; };
+		return () => {
+			current = false;
+		};
 	}, [api, request, serverReady]);
 
-	const weeks = useMemo(() => profile ? buildActivityWeeks(profile, locale) : [], [locale, profile]);
+	const weeks = useMemo(() => (profile ? buildActivityWeeks(profile, locale) : []), [locale, profile]);
 	const saveIdentity = (next: ProfileIdentity) => {
 		try {
 			saveProfileIdentity(next);
@@ -184,14 +206,22 @@ export function ProfilePanel({
 			bitmap?.close();
 		}
 	};
-	if (!profile && !error) return <section className="profile-panel"><ProfileLoading /></section>;
+	if (!profile && !error)
+		return (
+			<section className="profile-panel">
+				<ProfileLoading />
+			</section>
+		);
 	if (!profile) {
 		return (
 			<section className="profile-panel">
 				<div className="profile-error" role="alert">
 					<h1>{t("Couldn’t load your profile")}</h1>
 					<p>{error === "Personal profile could not be loaded." ? t(error) : error}</p>
-					<button disabled={!serverReady} onClick={load} type="button"><ArrowClockwise aria-hidden="true" size={16} />{t("Retry")}</button>
+					<button disabled={!serverReady} onClick={load} type="button">
+						<ArrowClockwise aria-hidden="true" size={16} />
+						{t("Retry")}
+					</button>
 				</div>
 			</section>
 		);
@@ -227,33 +257,82 @@ export function ProfilePanel({
 						<span className="profile-eyebrow">{t("Personal profile")}</span>
 						<div className="profile-identity-main">
 							<div className="profile-avatar-actions">
-								<button aria-label={t("Change avatar")} className="profile-avatar" onClick={() => avatarInputRef.current?.click()} type="button">
-									{identity.avatarDataUrl ? <img alt="" src={identity.avatarDataUrl} /> : <span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>}
-									<i aria-hidden="true"><Camera size={14} /></i>
+								<button
+									aria-label={t("Change avatar")}
+									className="profile-avatar"
+									onClick={() => avatarInputRef.current?.click()}
+									type="button"
+								>
+									{identity.avatarDataUrl ? (
+										<img alt="" src={identity.avatarDataUrl} />
+									) : (
+										<span aria-hidden="true">{identity.displayName.trim()[0]?.toUpperCase() ?? "A"}</span>
+									)}
+									<i aria-hidden="true">
+										<Camera size={14} />
+									</i>
 								</button>
-								{identity.avatarDataUrl ? <button aria-label={t("Remove avatar")} className="profile-avatar-remove" onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })} type="button"><Trash aria-hidden="true" size={14} /></button> : null}
-								<input accept="image/png,image/jpeg,image/webp" hidden onChange={(event) => { void selectAvatar(event.target.files?.[0]); event.target.value = ""; }} ref={avatarInputRef} type="file" />
+								{identity.avatarDataUrl ? (
+									<button
+										aria-label={t("Remove avatar")}
+										className="profile-avatar-remove"
+										onClick={() => saveIdentity({ ...identity, avatarDataUrl: null })}
+										type="button"
+									>
+										<Trash aria-hidden="true" size={14} />
+									</button>
+								) : null}
+								<input
+									accept="image/png,image/jpeg,image/webp"
+									hidden
+									onChange={(event) => {
+										void selectAvatar(event.target.files?.[0]);
+										event.target.value = "";
+									}}
+									ref={avatarInputRef}
+									type="file"
+								/>
 							</div>
 							<div className="profile-identity-copy">
 								<div className="profile-name-row">
-									{editingName ? <input
-										aria-label={t("Display name")}
-										autoFocus
-										maxLength={80}
-										onBlur={saveDisplayName}
-										onChange={(event) => setNameDraft(event.target.value)}
-										onKeyDown={(event) => {
-											if (event.key === "Enter") event.currentTarget.blur();
-											if (event.key === "Escape") { setNameDraft(identity.displayName); setEditingName(false); }
-										}}
-										value={nameDraft}
-									/> : <h1>{identity.displayName}</h1>}
-									<button aria-label={t("Edit display name")} onClick={() => setEditingName(true)} type="button"><PencilSimple aria-hidden="true" size={15} /></button>
+									{editingName ? (
+										<input
+											aria-label={t("Display name")}
+											ref={nameInputRef}
+											maxLength={80}
+											onBlur={saveDisplayName}
+											onChange={(event) => setNameDraft(event.target.value)}
+											onKeyDown={(event) => {
+												if (event.key === "Enter") event.currentTarget.blur();
+												if (event.key === "Escape") {
+													setNameDraft(identity.displayName);
+													setEditingName(false);
+												}
+											}}
+											value={nameDraft}
+										/>
+									) : (
+										<h1>{identity.displayName}</h1>
+									)}
+									<button
+										aria-label={t("Edit display name")}
+										onClick={() => setEditingName(true)}
+										type="button"
+									>
+										<PencilSimple aria-hidden="true" size={15} />
+									</button>
 								</div>
 								<p>{t("Local profile")}</p>
-								{identityError ? <p className="profile-identity-error" role="alert">{identityError}</p> : null}
+								{identityError ? (
+									<p className="profile-identity-error" role="alert">
+										{identityError}
+									</p>
+								) : null}
 							</div>
-							<div aria-label={t("Profile view")} className="settings-segmented profile-tab-switch" role="group">
+							<fieldset
+								aria-label={t("Profile view")}
+								className="control-group settings-segmented profile-tab-switch"
+							>
 								<button
 									aria-pressed={activeTab === "activity"}
 									onClick={() => handleTabChange("activity")}
@@ -268,58 +347,99 @@ export function ProfilePanel({
 								>
 									{t("Usage")}
 								</button>
-							</div>
+							</fieldset>
 						</div>
 					</header>
-					<div aria-label={t("Usage summary")} className="profile-stats">
-						{stats.map(([value, label]) => <div key={label}><strong>{value}</strong><span>{t(label)}</span></div>)}
-					</div>
+					<section aria-label={t("Usage summary")} className="profile-stats">
+						{stats.map(([value, label]) => (
+							<div key={label}>
+								<strong>{value}</strong>
+								<span>{t(label)}</span>
+							</div>
+						))}
+					</section>
 					{activeTab === "activity" ? (
 						<div className="profile-activity-view">
 							<section className="profile-activity">
 								<div className="profile-section-heading">
-									<div><span>{t("Token activity")}</span><small>{t("Last 53 weeks")}</small></div>
+									<div>
+										<span>{t("Token activity")}</span>
+										<small>{t("Last 53 weeks")}</small>
+									</div>
 									<span>{t("Daily")}</span>
 								</div>
-								<div aria-label={t("Daily Token activity")} className="profile-heatmap-scroll">
+								<section aria-label={t("Daily Token activity")} className="profile-heatmap-scroll">
 									<div className="profile-heatmap">
 										{weeks.map((week, index) => (
 											<div className="profile-heatmap-week" key={week.days[0]?.date ?? index}>
-											{week.days.map((day) => {
-												if (day.future) return <span className="profile-heatmap-future" key={day.date} />;
-												const tokens = formatActivityTokens(day.tokens, compactNumber);
-												const date = fullDate.format(dateFromDayNumber(dayNumber(day.date)));
-												return <span
-													aria-label={t("{{date}}: {{tokens}} Tokens", { date, tokens })}
-													className="profile-heatmap-cell"
-													data-level={intensity(day.tokens, profile.peakDailyTokens)}
-													data-tooltip={t("{{date}} · {{tokens}} Tokens", { date, tokens })}
-													key={day.date}
-													style={{ "--profile-cell-index": index } as CSSProperties}
-												/>;
-											})}
+												{week.days.map((day) => {
+													if (day.future)
+														return <span className="profile-heatmap-future" key={day.date} />;
+													const tokens = formatActivityTokens(day.tokens, compactNumber);
+													const date = fullDate.format(dateFromDayNumber(dayNumber(day.date)));
+													return (
+														<span
+															role="img"
+															aria-label={t("{{date}}: {{tokens}} Tokens", { date, tokens })}
+															className="profile-heatmap-cell"
+															data-level={intensity(day.tokens, profile.peakDailyTokens)}
+															data-tooltip={t("{{date}} · {{tokens}} Tokens", { date, tokens })}
+															key={day.date}
+															style={{ "--profile-cell-index": index } as CSSProperties}
+														/>
+													);
+												})}
 												{week.month && <small>{week.month}</small>}
 											</div>
 										))}
 									</div>
-								</div>
+								</section>
 							</section>
 							<div className="profile-details">
 								<section>
 									<h2>{t("Activity insights")}</h2>
 									<dl>
-										<div><dt>{t("Most used mode")}</dt><dd>{mode}</dd></div>
-										<div><dt>{t("Most used reasoning effort")}</dt><dd>{thinking}</dd></div>
-										<div><dt>{t("Skills explored")}</dt><dd>{fullNumber.format(profile.usedSkillCount)}</dd></div>
-										<div><dt>{t("Skill uses")}</dt><dd>{fullNumber.format(profile.skillUseCount)}</dd></div>
-										<div><dt>{t("Chats")}</dt><dd>{fullNumber.format(profile.sessionCount)}</dd></div>
+										<div>
+											<dt>{t("Most used mode")}</dt>
+											<dd>{mode}</dd>
+										</div>
+										<div>
+											<dt>{t("Most used reasoning effort")}</dt>
+											<dd>{thinking}</dd>
+										</div>
+										<div>
+											<dt>{t("Skills explored")}</dt>
+											<dd>{fullNumber.format(profile.usedSkillCount)}</dd>
+										</div>
+										<div>
+											<dt>{t("Skill uses")}</dt>
+											<dd>{fullNumber.format(profile.skillUseCount)}</dd>
+										</div>
+										<div>
+											<dt>{t("Chats")}</dt>
+											<dd>{fullNumber.format(profile.sessionCount)}</dd>
+										</div>
 									</dl>
 								</section>
 								<section>
 									<h2>{t("Most used Skills")}</h2>
-									{profile.topSkills.length === 0 ? <p className="profile-skills-empty">{t("Skill activity will appear after you use a Skill.")}</p> : (
+									{profile.topSkills.length === 0 ? (
+										<p className="profile-skills-empty">
+											{t("Skill activity will appear after you use a Skill.")}
+										</p>
+									) : (
 										<ol className="profile-skill-list">
-											{profile.topSkills.map((skill) => <li key={skill.name}><Sparkle aria-hidden="true" size={15} /><strong>{skill.name}</strong><span>{t(skill.count === 1 ? "{{count}} use" : "{{count}} uses", { count: fullNumber.format(skill.count) })}</span></li>)}
+											{profile.topSkills.map((skill) => (
+												<li key={skill.name}>
+													<Sparkle aria-hidden="true" size={15} />
+													<strong>{skill.name}</strong>
+													<span>
+														{t(skill.count === 1 ? "{{count}} use" : "{{count}} uses", {
+															count: fullNumber.format(skill.count),
+														})}
+													</span>
+												</li>
+											))}
 										</ol>
 									)}
 								</section>
@@ -327,7 +447,9 @@ export function ProfilePanel({
 						</div>
 					) : (
 						<div className="profile-usage-view">
-							{api.getUsage ? <UsagePanel api={api as Pick<MetisDesktopApi, "getUsage">} serverReady={serverReady} /> : null}
+							{api.getUsage ? (
+								<UsagePanel api={api as Pick<MetisDesktopApi, "getUsage">} serverReady={serverReady} />
+							) : null}
 						</div>
 					)}
 				</div>

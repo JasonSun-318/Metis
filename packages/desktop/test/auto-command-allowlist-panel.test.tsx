@@ -170,11 +170,13 @@ describe("AutoCommandAllowlistPanel", () => {
 	});
 
 	it("disables controls while a save is in flight", async () => {
-		let resolveUpdate: ((value: { rules: { command: string; allowNetwork: boolean }[]; suggestions: string[] }) => void) | undefined;
+		let resolveUpdate:
+			| ((value: { rules: { command: string; allowNetwork: boolean }[]; suggestions: string[] }) => void)
+			| undefined;
 		const client = clientStub({
 			updatePermissionAutoSettings: vi.fn(
 				() =>
-					new Promise((resolve) => {
+					new Promise<Awaited<ReturnType<MetisDesktopApi["updatePermissionAutoSettings"]>>>((resolve) => {
 						resolveUpdate = resolve;
 					}),
 			),
@@ -212,7 +214,9 @@ describe("AutoCommandAllowlistPanel", () => {
 		setInput(container, "curl");
 		await act(async () => clickButton(container, "Add command"));
 		await flush();
-		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Auto command rules could not be saved.");
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+			"Auto command rules could not be saved.",
+		);
 		expect(container.textContent).toContain("ls");
 		await act(async () => clickButton(container, "Add command"));
 		await flush();

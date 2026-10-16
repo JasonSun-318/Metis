@@ -60,7 +60,9 @@ function mount(
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
-	act(() => root.render(<InteractionHost interaction={interaction} onRespond={onRespond} sandboxHealth={sandboxHealth} />));
+	act(() =>
+		root.render(<InteractionHost interaction={interaction} onRespond={onRespond} sandboxHealth={sandboxHealth} />),
+	);
 	return { container, onRespond, root };
 }
 
@@ -74,12 +76,14 @@ function choice(container: HTMLElement, label: string) {
 
 describe("permission approval interaction", () => {
 	it("renders exact risk, target, path, and domain details without secrets or hidden reasoning", async () => {
-		const { container } = mount(approval({
-			priorReviewer: "model",
-			priorReviewerOutcome: "unavailable",
-			riskLevel: "critical",
-			executionTarget: "external",
-		}));
+		const { container } = mount(
+			approval({
+				priorReviewer: "model",
+				priorReviewerOutcome: "unavailable",
+				riskLevel: "critical",
+				executionTarget: "external",
+			}),
+		);
 		const panel = container.querySelector(".permission-approval-panel")!;
 		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
@@ -113,7 +117,9 @@ describe("permission approval interaction", () => {
 			await new Promise((resolve) => setTimeout(resolve, 20));
 		});
 		const { container, root } = mount(approval(), onRespond);
-		await act(async () => { await Promise.resolve(); });
+		await act(async () => {
+			await Promise.resolve();
+		});
 		expect(document.activeElement?.textContent).toContain("Reject");
 		await act(async () => choice(container, "Allow once").click());
 		expect(choice(container, "Allow once").disabled).toBe(true);
@@ -130,14 +136,15 @@ describe("permission approval interaction", () => {
 	});
 
 	it("denies with Escape and closes a stale response without authorizing", async () => {
-		const onRespond = vi.fn()
+		const onRespond = vi
+			.fn()
 			.mockRejectedValueOnce(new Error("Approval was unavailable or cancelled"))
 			.mockResolvedValue(undefined);
 		const { container } = mount(approval(), onRespond);
 		await act(async () =>
-			container.querySelector(".permission-approval-panel")!.dispatchEvent(
-				new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }),
-			),
+			container
+				.querySelector(".permission-approval-panel")!
+				.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })),
 		);
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
 		expect(container.textContent).toContain("This approval is no longer available.");
@@ -164,11 +171,13 @@ describe("permission approval interaction", () => {
 
 	it("translates the live review and approval surface", async () => {
 		await setLocale("zh-CN");
-		const { container } = mount(approval({
-			priorReviewer: "model",
-			priorReviewerOutcome: "deny",
-			executionTarget: "host",
-		}));
+		const { container } = mount(
+			approval({
+				priorReviewer: "model",
+				priorReviewerOutcome: "deny",
+				executionTarget: "host",
+			}),
+		);
 		expect(container.textContent).toContain("始终允许此精确操作");
 		expect(container.textContent).toContain("始终拒绝此精确操作");
 		expect(container.textContent).toContain("自动安全审查拒绝了此操作。");

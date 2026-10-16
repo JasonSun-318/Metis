@@ -51,16 +51,18 @@ async function mount(options: { running?: boolean; queuedTurns?: readonly Queued
 	const root = createRoot(container);
 	roots.push(root);
 	const handlers = { onDelete: vi.fn(), onEdit: vi.fn(), onSend: vi.fn() };
-	await act(async () => root.render(
-		<QueuedTurnList
+	await act(async () =>
+		root.render(
+			<QueuedTurnList
 				disabled={false}
 				onDelete={handlers.onDelete}
 				onEdit={handlers.onEdit}
 				onSend={handlers.onSend}
 				running={options.running ?? false}
-			turns={options.queuedTurns ?? turns}
-		/>,
-	));
+				turns={options.queuedTurns ?? turns}
+			/>,
+		),
+	);
 	return { container, handlers };
 }
 
@@ -72,16 +74,22 @@ describe("QueuedTurnList", () => {
 			"Second message",
 		]);
 		expect(container.textContent).toContain("notes.txt");
-		expect(container.querySelector('[role="group"][aria-label="Queued message 1"]')).not.toBeNull();
+		expect(container.querySelector('fieldset[aria-label="Queued message 1"]')).not.toBeNull();
 		const sends = [...container.querySelectorAll<HTMLButtonElement>(".queued-turn-send")];
-		expect(sends.map(({ textContent, disabled }) => [textContent, disabled])).toEqual([["Send", false], ["Send", true]]);
+		expect(sends.map(({ textContent, disabled }) => [textContent, disabled])).toEqual([
+			["Send", false],
+			["Send", true],
+		]);
 		await act(async () => sends[0]!.click());
 		expect(handlers.onSend).toHaveBeenCalledWith(turns[0], "start");
 	});
 
 	it("recalls a queued message from a direct Edit button", async () => {
 		const { container, handlers } = await mount({ running: true });
-		expect([...container.querySelectorAll(".queued-turn-send")].map(({ textContent }) => textContent)).toEqual(["Guide", "Guide"]);
+		expect([...container.querySelectorAll(".queued-turn-send")].map(({ textContent }) => textContent)).toEqual([
+			"Guide",
+			"Guide",
+		]);
 		await act(async () => button(container, "Edit queued message").click());
 		expect(handlers.onEdit).toHaveBeenCalledWith(turns[0]);
 		expect(container.querySelector('[aria-label="Queued message actions"]')).toBeNull();

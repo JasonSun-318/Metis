@@ -4,8 +4,12 @@ import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { shouldAdjustTranscriptScroll, shouldFollowTranscript, Transcript } from "../src/renderer/components/Transcript.tsx";
 import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
+import {
+	shouldAdjustTranscriptScroll,
+	shouldFollowTranscript,
+	Transcript,
+} from "../src/renderer/components/Transcript.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { messageText } from "../src/renderer/components/transcript-turn-model.ts";
 
@@ -16,8 +20,10 @@ const LONG_THINKING = "用户希望查看桌面内容。我需要先取得目录
 class TriggerResizeObserver implements ResizeObserver {
 	static readonly instances: TriggerResizeObserver[] = [];
 	readonly targets = new Set<Element>();
+	private readonly callback: ResizeObserverCallback;
 
-	constructor(private readonly callback: ResizeObserverCallback) {
+	constructor(callback: ResizeObserverCallback) {
+		this.callback = callback;
 		TriggerResizeObserver.instances.push(this);
 	}
 
@@ -72,7 +78,13 @@ const turnItems: ItemView[] = [
 		},
 	]),
 	item("folder-result", "tool", [
-		{ type: "tool_result", toolCallId: "tool-folder", name: "request_cowork_directory", isError: false, output: "/Users/ent/Desktop" },
+		{
+			type: "tool_result",
+			toolCallId: "tool-folder",
+			name: "request_cowork_directory",
+			isError: false,
+			output: "/Users/ent/Desktop",
+		},
 	]),
 	item("assistant-command", "assistant", [
 		{ type: "thinking", text: "目录已经连接，现在列出其中的文件。" },
@@ -98,31 +110,39 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("ordered-user", "user", [{ type: "text", text: "继续处理" }]),
-			item("ordered-first", "assistant", [
-				{ type: "thinking", text: "先读取当前状态。" },
-				{ type: "tool_call", toolCallId: "ordered-read", name: "read", state: "completed" },
-			]),
-			item("ordered-read-result", "tool", [
-				{ type: "tool_result", toolCallId: "ordered-read", name: "read", isError: false, output: "ok" },
-			]),
-			item("ordered-update", "assistant", [{ type: "text", text: "状态已读取，现在继续修改。" }]),
-			item("ordered-second", "assistant", [
-				{ type: "thinking", text: "根据读取结果执行修改。" },
-				{ type: "tool_call", toolCallId: "ordered-edit", name: "edit", state: "completed" },
-			]),
-			item("ordered-edit-result", "tool", [
-				{ type: "tool_result", toolCallId: "ordered-edit", name: "edit", isError: false, output: "done" },
-			]),
-			item("ordered-final", "assistant", [{ type: "text", text: "修改完成。" }]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("ordered-user", "user", [{ type: "text", text: "继续处理" }]),
+						item("ordered-first", "assistant", [
+							{ type: "thinking", text: "先读取当前状态。" },
+							{ type: "tool_call", toolCallId: "ordered-read", name: "read", state: "completed" },
+						]),
+						item("ordered-read-result", "tool", [
+							{ type: "tool_result", toolCallId: "ordered-read", name: "read", isError: false, output: "ok" },
+						]),
+						item("ordered-update", "assistant", [{ type: "text", text: "状态已读取，现在继续修改。" }]),
+						item("ordered-second", "assistant", [
+							{ type: "thinking", text: "根据读取结果执行修改。" },
+							{ type: "tool_call", toolCallId: "ordered-edit", name: "edit", state: "completed" },
+						]),
+						item("ordered-edit-result", "tool", [
+							{ type: "tool_result", toolCallId: "ordered-edit", name: "edit", isError: false, output: "done" },
+						]),
+						item("ordered-final", "assistant", [{ type: "text", text: "修改完成。" }]),
+					]}
+				/>,
+			),
+		);
 
 		const chains = [...container.querySelectorAll<HTMLElement>(".execution-chain")];
 		const chain = chains[0]!;
 		const firstThought = [...chain.querySelectorAll("p")].find((node) => node.textContent === "先读取当前状态。");
 		const update = [...chain.querySelectorAll("p")].find((node) => node.textContent === "状态已读取，现在继续修改。");
-		const secondThought = [...chain.querySelectorAll("p")].find((node) => node.textContent === "根据读取结果执行修改。");
+		const secondThought = [...chain.querySelectorAll("p")].find(
+			(node) => node.textContent === "根据读取结果执行修改。",
+		);
 		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
 		expect(chains).toHaveLength(1);
 		expect(container.querySelector(".turn-intermediate")).toBeNull();
@@ -134,35 +154,42 @@ describe("TranscriptTurn", () => {
 		await act(async () => root.unmount());
 	});
 
-	it.each(["chat", "code"] as const)("places a same-turn steer after earlier %s assistant content", async (appearance) => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const items = [
-			item("steer-user", "user", [{ type: "text", text: "写一篇介绍" }]),
-			item("steer-first", "assistant", [{ type: "text", text: "这是第一段。" }]),
-			item("steer-guide", "user", [{ type: "text", text: "改成更短" }]),
-			item("steer-final", "assistant", [{ type: "text", text: "更短的介绍。" }]),
-		];
-		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
-		await act(async () => root.render(<Turn items={items} running />));
+	it.each(["chat", "code"] as const)(
+		"places a same-turn steer after earlier %s assistant content",
+		async (appearance) => {
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const items = [
+				item("steer-user", "user", [{ type: "text", text: "写一篇介绍" }]),
+				item("steer-first", "assistant", [{ type: "text", text: "这是第一段。" }]),
+				item("steer-guide", "user", [{ type: "text", text: "改成更短" }]),
+				item("steer-final", "assistant", [{ type: "text", text: "更短的介绍。" }]),
+			];
+			const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+			await act(async () => root.render(<Turn items={items} running />));
 
-		const users = [...container.querySelectorAll<HTMLElement>(appearance === "chat" ? ".turn-user" : ".code-turn-user")];
-		const first = container.querySelector<HTMLElement>(appearance === "chat" ? ".turn-intermediate" : ".code-turn-status");
-		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
-		expect(users).toHaveLength(2);
-		expect(users[0]!.textContent).toContain("写一篇介绍");
-		expect(users[1]!.textContent).toContain("改成更短");
-		expect(users[1]!.classList.contains("is-entering")).toBe(true);
-		expect(first?.textContent).toContain("这是第一段。");
-		expect(final?.textContent).toContain("更短的介绍。");
-		expect(users[0]!.compareDocumentPosition(first!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		expect(first!.compareDocumentPosition(users[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		expect(users[1]!.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+			const users = [
+				...container.querySelectorAll<HTMLElement>(appearance === "chat" ? ".turn-user" : ".code-turn-user"),
+			];
+			const first = container.querySelector<HTMLElement>(
+				appearance === "chat" ? ".turn-intermediate" : ".code-turn-status",
+			);
+			const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
+			expect(users).toHaveLength(2);
+			expect(users[0]!.textContent).toContain("写一篇介绍");
+			expect(users[1]!.textContent).toContain("改成更短");
+			expect(users[1]!.classList.contains("is-entering")).toBe(true);
+			expect(first?.textContent).toContain("这是第一段。");
+			expect(final?.textContent).toContain("更短的介绍。");
+			expect(users[0]!.compareDocumentPosition(first!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+			expect(first!.compareDocumentPosition(users[1]!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+			expect(users[1]!.compareDocumentPosition(final!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 
-		await act(async () => root.unmount());
-	});
+			await act(async () => root.unmount());
+		},
+	);
 
 	it("matches the collapsed, height-capped, show-more, and nested-command states", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -185,7 +212,9 @@ describe("TranscriptTurn", () => {
 		expect(chain.querySelector("details.tool-step:not(.tool-step-command)")).toBeNull();
 		expect(chain.querySelector(".tool-step-command > summary")?.textContent).toContain("Ran command");
 		expect(container.querySelector(".turn-thought-label")).toBeNull();
-		const intermediate = [...container.querySelectorAll("p")].find((node) => node.textContent?.startsWith("我需要先请求访问"));
+		const intermediate = [...container.querySelectorAll("p")].find((node) =>
+			node.textContent?.startsWith("我需要先请求访问"),
+		);
 		expect(intermediate).toBeDefined();
 		expect(chain.contains(intermediate!)).toBe(true);
 
@@ -194,7 +223,7 @@ describe("TranscriptTurn", () => {
 		expect(final!.closest("[data-transcript-answer]")).not.toBeNull();
 		expect(chain.contains(final!)).toBe(false);
 
-		await act(async () => chain.querySelector(":scope > summary")!.click());
+		await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
 		expect(chain.open).toBe(true);
 		expect(chain.textContent).toContain("用户希望查看桌面内容");
 		const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
@@ -207,13 +236,13 @@ describe("TranscriptTurn", () => {
 			const height = child.matches("details.tool-step-command") ? 50 : 120;
 			Object.defineProperty(child, "getBoundingClientRect", {
 				configurable: true,
-				value: () => ({ height } as DOMRect),
+				value: () => ({ height }) as DOMRect,
 			});
 			const summary = child.querySelector(":scope > summary");
 			if (summary) {
 				Object.defineProperty(summary, "getBoundingClientRect", {
 					configurable: true,
-					value: () => ({ height } as DOMRect),
+					value: () => ({ height }) as DOMRect,
 				});
 			}
 		}
@@ -241,7 +270,7 @@ describe("TranscriptTurn", () => {
 		expect(command!.textContent).toContain("ls -la /Users/ent/Desktop");
 		expect(command!.textContent).toContain("file.txt");
 
-		await act(async () => chain.querySelector(":scope > summary")!.click());
+		await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
 		expect(chain.open).toBe(false);
 		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
 
@@ -257,9 +286,9 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const runningItems = turnItems.slice(0, -1).map((entry) =>
-			entry.itemId === "assistant-synthesis" ? { ...entry, state: "streaming" as const } : entry,
-		);
+		const runningItems = turnItems
+			.slice(0, -1)
+			.map((entry) => (entry.itemId === "assistant-synthesis" ? { ...entry, state: "streaming" as const } : entry));
 		await act(async () => root.render(<TranscriptTurn items={runningItems} running />));
 		const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
 		expect(chain.open).toBe(true);
@@ -275,13 +304,13 @@ describe("TranscriptTurn", () => {
 			const height = child.matches("details.tool-step-command") ? 50 : 120;
 			Object.defineProperty(child, "getBoundingClientRect", {
 				configurable: true,
-				value: () => ({ height } as DOMRect),
+				value: () => ({ height }) as DOMRect,
 			});
 			const summary = child.querySelector(":scope > summary");
 			if (summary) {
 				Object.defineProperty(summary, "getBoundingClientRect", {
 					configurable: true,
-					value: () => ({ height } as DOMRect),
+					value: () => ({ height }) as DOMRect,
 				});
 			}
 		}
@@ -304,27 +333,37 @@ describe("TranscriptTurn", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		try {
-			await act(async () => root.render(<TranscriptTurn items={[
-				item("short-user", "user", [{ type: "text", text: "列出文件" }]),
-				item("short-command", "assistant", [{
-					type: "tool_call",
-					toolCallId: "short-command-tool",
-					name: "bash",
-					state: "completed",
-					inputPreview: JSON.stringify({ command: "ls -la" }),
-				}]),
-				item("short-result", "tool", [{
-					type: "tool_result",
-					toolCallId: "short-command-tool",
-					name: "bash",
-					isError: false,
-					output: "a very long command output".repeat(100),
-				}]),
-				item("short-answer", "assistant", [{ type: "text", text: "完成。" }]),
-			]} />));
+			await act(async () =>
+				root.render(
+					<TranscriptTurn
+						items={[
+							item("short-user", "user", [{ type: "text", text: "列出文件" }]),
+							item("short-command", "assistant", [
+								{
+									type: "tool_call",
+									toolCallId: "short-command-tool",
+									name: "bash",
+									state: "completed",
+									inputPreview: JSON.stringify({ command: "ls -la" }),
+								},
+							]),
+							item("short-result", "tool", [
+								{
+									type: "tool_result",
+									toolCallId: "short-command-tool",
+									name: "bash",
+									isError: false,
+									output: "a very long command output".repeat(100),
+								},
+							]),
+							item("short-answer", "assistant", [{ type: "text", text: "完成。" }]),
+						]}
+					/>,
+				),
+			);
 
 			const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
-			await act(async () => chain.querySelector(":scope > summary")!.click());
+			await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
 			const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
 			const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
 			const command = chain.querySelector<HTMLDetailsElement>("details.tool-step-command")!;
@@ -340,11 +379,11 @@ describe("TranscriptTurn", () => {
 			});
 			Object.defineProperty(command, "getBoundingClientRect", {
 				configurable: true,
-				value: () => ({ height: timelineHeight } as DOMRect),
+				value: () => ({ height: timelineHeight }) as DOMRect,
 			});
 			Object.defineProperty(commandSummary, "getBoundingClientRect", {
 				configurable: true,
-				value: () => ({ height: 32 } as DOMRect),
+				value: () => ({ height: 32 }) as DOMRect,
 			});
 
 			await act(async () => TriggerResizeObserver.trigger(timeline));
@@ -366,10 +405,16 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("plain-user", "user", [{ type: "text", text: "你好" }]),
-			item("plain-answer", "assistant", [{ type: "text", text: "你好！" }]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("plain-user", "user", [{ type: "text", text: "你好" }]),
+						item("plain-answer", "assistant", [{ type: "text", text: "你好！" }]),
+					]}
+				/>,
+			),
+		);
 		expect(container.querySelector(".execution-chain")).toBeNull();
 		expect(container.querySelector(".turn-thought-label")).toBeNull();
 		expect(container.textContent).toContain("你好！");
@@ -377,60 +422,90 @@ describe("TranscriptTurn", () => {
 	});
 
 	it("summarizes Chat internal tools without exposing failed or orphan JSON", async () => {
-		const askInput = JSON.stringify({ questions: [{
-			question: "How should Metis answer?",
-			multiple: false,
-			options: [{ label: "Concise" }, { label: "Detailed" }],
-		}] });
-		const askOutput = `User answers:\n${JSON.stringify([{
-			question: "How should Metis answer?",
-			selected: ["Concise"],
-		}], null, 2)}`;
+		const askInput = JSON.stringify({
+			questions: [
+				{
+					question: "How should Metis answer?",
+					multiple: false,
+					options: [{ label: "Concise" }, { label: "Detailed" }],
+				},
+			],
+		});
+		const askOutput = `User answers:\n${JSON.stringify(
+			[
+				{
+					question: "How should Metis answer?",
+					selected: ["Concise"],
+				},
+			],
+			null,
+			2,
+		)}`;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("chat-safe-user", "user", [{ type: "text", text: "Ask and continue" }]),
-			item("chat-safe-call", "assistant", [{
-				type: "tool_call",
-				toolCallId: "chat-safe-ask",
-				name: "ask_user",
-				state: "completed",
-				inputPreview: askInput,
-			}]),
-			item("chat-safe-result", "tool", [{
-				type: "tool_result",
-				toolCallId: "chat-safe-ask",
-				name: "ask_user",
-				isError: false,
-				output: askOutput,
-			}]),
-			item("chat-failed-call", "assistant", [{
-				type: "tool_call",
-				toolCallId: "chat-failed-task",
-				name: "set_tasks",
-				state: "completed",
-				inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }),
-			}]),
-			item("chat-failed-result", "tool", [{
-				type: "tool_result",
-				toolCallId: "chat-failed-task",
-				name: "set_tasks",
-				isError: true,
-				output: JSON.stringify({ internal_error_code: "TASK_FAILED", details: { retry: false } }),
-			}]),
-			item("chat-orphan-result", "tool", [{
-				type: "tool_result",
-				toolCallId: "chat-orphan-close",
-				name: "interrupt_agent",
-				isError: false,
-				output: JSON.stringify({ name: "Login flow audit", status: "stopped", taskSummary: "Inspect refresh" }),
-			}]),
-			item("chat-safe-final", "assistant", [{ type: "text", text: "Done" }]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("chat-safe-user", "user", [{ type: "text", text: "Ask and continue" }]),
+						item("chat-safe-call", "assistant", [
+							{
+								type: "tool_call",
+								toolCallId: "chat-safe-ask",
+								name: "ask_user",
+								state: "completed",
+								inputPreview: askInput,
+							},
+						]),
+						item("chat-safe-result", "tool", [
+							{
+								type: "tool_result",
+								toolCallId: "chat-safe-ask",
+								name: "ask_user",
+								isError: false,
+								output: askOutput,
+							},
+						]),
+						item("chat-failed-call", "assistant", [
+							{
+								type: "tool_call",
+								toolCallId: "chat-failed-task",
+								name: "set_tasks",
+								state: "completed",
+								inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }),
+							},
+						]),
+						item("chat-failed-result", "tool", [
+							{
+								type: "tool_result",
+								toolCallId: "chat-failed-task",
+								name: "set_tasks",
+								isError: true,
+								output: JSON.stringify({ internal_error_code: "TASK_FAILED", details: { retry: false } }),
+							},
+						]),
+						item("chat-orphan-result", "tool", [
+							{
+								type: "tool_result",
+								toolCallId: "chat-orphan-close",
+								name: "interrupt_agent",
+								isError: false,
+								output: JSON.stringify({
+									name: "Login flow audit",
+									status: "stopped",
+									taskSummary: "Inspect refresh",
+								}),
+							},
+						]),
+						item("chat-safe-final", "assistant", [{ type: "text", text: "Done" }]),
+					]}
+				/>,
+			),
+		);
 
 		for (const chain of container.querySelectorAll<HTMLDetailsElement>("details.execution-chain")) {
-			await act(async () => chain.querySelector(":scope > summary")!.click());
+			await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
 		}
 		expect(container.textContent).toContain("How should Metis answer?");
 		expect(container.textContent).toContain("Concise");
@@ -448,18 +523,24 @@ describe("TranscriptTurn", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const echoedPrefix = "我需要先检查当前工具并确认配置。".repeat(8);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("echo-user", "user", [{ type: "text", text: "检查工具" }]),
-			item("echo-assistant", "assistant", [
-				{ type: "thinking", text: `${echoedPrefix}重新启动会话或重新加载配置` },
-				{ type: "text", text: `${echoedPrefix}重新启动会话或重新配置\n` },
-				{ type: "tool_call", toolCallId: "echo-tool", name: "read", state: "completed" },
-			]),
-			item("echo-result", "tool", [
-				{ type: "tool_result", toolCallId: "echo-tool", name: "read", isError: false, output: "ok" },
-			]),
-			item("echo-final", "assistant", [{ type: "text", text: "工具检查完成。" }]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("echo-user", "user", [{ type: "text", text: "检查工具" }]),
+						item("echo-assistant", "assistant", [
+							{ type: "thinking", text: `${echoedPrefix}重新启动会话或重新加载配置` },
+							{ type: "text", text: `${echoedPrefix}重新启动会话或重新配置\n` },
+							{ type: "tool_call", toolCallId: "echo-tool", name: "read", state: "completed" },
+						]),
+						item("echo-result", "tool", [
+							{ type: "tool_result", toolCallId: "echo-tool", name: "read", isError: false, output: "ok" },
+						]),
+						item("echo-final", "assistant", [{ type: "text", text: "工具检查完成。" }]),
+					]}
+				/>,
+			),
+		);
 
 		expect(container.querySelector(".turn-intermediate")).toBeNull();
 		expect(container.querySelector(".execution-chain")?.textContent).toContain("重新加载配置");
@@ -472,24 +553,46 @@ describe("TranscriptTurn", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const echoed = "我需要先检查当前工具并确认配置。".repeat(8);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
-			item("stream-echo-assistant", "assistant", [
-				{ type: "thinking", text: echoed },
-				{ type: "text", text: echoed },
-			], "streaming"),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
+						item(
+							"stream-echo-assistant",
+							"assistant",
+							[
+								{ type: "thinking", text: echoed },
+								{ type: "text", text: echoed },
+							],
+							"streaming",
+						),
+					]}
+				/>,
+			),
+		);
 
 		expect(container.querySelector("[data-transcript-answer]")).toBeNull();
 		expect(container.querySelector(".execution-chain")?.textContent).toContain(echoed);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
-			item("stream-echo-assistant", "assistant", [
-				{ type: "thinking", text: echoed },
-				{ type: "text", text: echoed },
-				{ type: "tool_call", toolCallId: "stream-echo-tool", name: "read", state: "running" },
-			], "streaming"),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("stream-echo-user", "user", [{ type: "text", text: "检查工具" }]),
+						item(
+							"stream-echo-assistant",
+							"assistant",
+							[
+								{ type: "thinking", text: echoed },
+								{ type: "text", text: echoed },
+								{ type: "tool_call", toolCallId: "stream-echo-tool", name: "read", state: "running" },
+							],
+							"streaming",
+						),
+					]}
+				/>,
+			),
+		);
 		expect(container.querySelector(".execution-chain")?.textContent).toContain(echoed);
 		expect(container.querySelector(".turn-intermediate")).toBeNull();
 		await act(async () => root.unmount());
@@ -498,10 +601,15 @@ describe("TranscriptTurn", () => {
 	it("does not invent a result for a running tool call", async () => {
 		const running = [
 			turnItems[0]!,
-			item("assistant-running", "assistant", [
-				{ type: "thinking", text: "我正在读取桌面目录。" },
-				{ type: "tool_call", toolCallId: "tool-running", name: "bash", state: "running", inputPreview: "pwd" },
-			], "streaming"),
+			item(
+				"assistant-running",
+				"assistant",
+				[
+					{ type: "thinking", text: "我正在读取桌面目录。" },
+					{ type: "tool_call", toolCallId: "tool-running", name: "bash", state: "running", inputPreview: "pwd" },
+				],
+				"streaming",
+			),
 		];
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -517,21 +625,35 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("markdown-user", "user", [{ type: "text", text: "Format this" }]),
-			item("markdown-answer", "assistant", [{
-				type: "text",
-				text: "**Bold**\n\n- one\n- two\n\n```ts\nconst safe = true;\n```\n\n[docs](https://example.com) [bad](javascript:alert(1)) [protocol-relative](//example.com) <script>boom()</script>",
-			}]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("markdown-user", "user", [{ type: "text", text: "Format this" }]),
+						item("markdown-answer", "assistant", [
+							{
+								type: "text",
+								text: "**Bold**\n\n- one\n- two\n\n```ts\nconst safe = true;\n```\n\n[docs](https://example.com) [bad](javascript:alert(1)) [protocol-relative](//example.com) <script>boom()</script>",
+							},
+						]),
+					]}
+				/>,
+			),
+		);
 
 		const answer = container.querySelector("[data-transcript-answer]")!;
 		expect(answer.querySelector("strong")?.textContent).toBe("Bold");
 		expect([...answer.querySelectorAll("li")].map((node) => node.textContent)).toEqual(["one", "two"]);
 		expect(answer.querySelector("pre code")?.textContent).toContain("const safe = true;");
 		expect(answer.querySelector<HTMLAnchorElement>('a[href="https://example.com"]')).not.toBeNull();
-		expect([...answer.querySelectorAll("a")].find((node) => node.textContent === "bad")?.hasAttribute("href")).toBe(false);
-		expect([...answer.querySelectorAll("a")].find((node) => node.textContent === "protocol-relative")?.hasAttribute("href")).toBe(false);
+		expect([...answer.querySelectorAll("a")].find((node) => node.textContent === "bad")?.hasAttribute("href")).toBe(
+			false,
+		);
+		expect(
+			[...answer.querySelectorAll("a")]
+				.find((node) => node.textContent === "protocol-relative")
+				?.hasAttribute("href"),
+		).toBe(false);
 		expect(answer.querySelector("script")).toBeNull();
 		expect(answer.textContent).toContain("<script>boom()</script>");
 		await act(async () => root.unmount());
@@ -541,10 +663,15 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const render = (state: ItemView["state"]) => root.render(<TranscriptTurn items={[
-			item("stream-user", "user", [{ type: "text", text: "Stream" }]),
-			item("stream-answer", "assistant", [{ type: "text", text: "**Working**" }], state),
-		]} />);
+		const render = (state: ItemView["state"]) =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("stream-user", "user", [{ type: "text", text: "Stream" }]),
+						item("stream-answer", "assistant", [{ type: "text", text: "**Working**" }], state),
+					]}
+				/>,
+			);
 
 		await act(async () => render("streaming"));
 		expect(container.querySelector("[data-transcript-answer] strong")?.textContent).toBe("Working");
@@ -557,14 +684,28 @@ describe("TranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TranscriptTurn items={[
-			item("mixed-user", "user", [{ type: "text", text: "Summarize" }]),
-			item("mixed-report", "assistant", [
-				{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
-				{ type: "tool_call", toolCallId: "mixed-stop", name: "interrupt_agent", state: "completed" },
-			]),
-			item("mixed-result", "tool", [{ type: "tool_result", toolCallId: "mixed-stop", name: "interrupt_agent", isError: false, output: "stopped" }]),
-		]} />));
+		await act(async () =>
+			root.render(
+				<TranscriptTurn
+					items={[
+						item("mixed-user", "user", [{ type: "text", text: "Summarize" }]),
+						item("mixed-report", "assistant", [
+							{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
+							{ type: "tool_call", toolCallId: "mixed-stop", name: "interrupt_agent", state: "completed" },
+						]),
+						item("mixed-result", "tool", [
+							{
+								type: "tool_result",
+								toolCallId: "mixed-stop",
+								name: "interrupt_agent",
+								isError: false,
+								output: "stopped",
+							},
+						]),
+					]}
+				/>,
+			),
+		);
 
 		expect(container.querySelector(".execution-chain strong")?.textContent).toBe("Summary");
 		expect(container.querySelector(".execution-chain table")?.textContent).toContain("Child");
@@ -629,10 +770,22 @@ describe("CodeTranscriptTurn", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<CodeTranscriptTurn items={[
-			item("private-user", "user", [{ type: "text", text: "实现这个功能" }]),
-			item("private-working", "assistant", [{ type: "text", text: "我需要先分析内部实现细节。" }], "streaming"),
-		]} running />));
+		await act(async () =>
+			root.render(
+				<CodeTranscriptTurn
+					items={[
+						item("private-user", "user", [{ type: "text", text: "实现这个功能" }]),
+						item(
+							"private-working",
+							"assistant",
+							[{ type: "text", text: "我需要先分析内部实现细节。" }],
+							"streaming",
+						),
+					]}
+					running
+				/>,
+			),
+		);
 
 		expect(container.textContent).not.toContain("我需要先分析内部实现细节");
 		expect(container.querySelector(".turn-runtime-status")).not.toBeNull();
@@ -684,64 +837,82 @@ describe("Transcript", () => {
 			createdAt: "2026-07-22T00:00:00.000Z",
 			completedAt: "2026-07-22T00:00:01.000Z",
 		};
-		await act(async () => root.render(
-			<Transcript appearance={appearance} hasOlder={false} itemIds={[compaction.itemId]} itemsById={new Map([[compaction.itemId, compaction]])} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
-		expect(container.querySelector(".transcript-compaction-row [role=separator]")?.textContent).toBe("Compacted");
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance={appearance}
+					hasOlder={false}
+					itemIds={[compaction.itemId]}
+					itemsById={new Map([[compaction.itemId, compaction]])}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
+		expect(container.querySelector(".transcript-compaction-row hr")?.getAttribute("aria-label")).toBe("Compacted");
 		expect(container.textContent).not.toContain("summary");
 		await act(async () => root.unmount());
 	});
 
-	it.each(["chat", "code"] as const)("animates only the latest user message in the active %s turn", async (appearance) => {
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const items = [
-			item("user-first", "user", [{ type: "text", text: "First" }]),
-			item("user-latest", "user", [{ type: "text", text: "Latest" }]),
-		];
-		const render = (activeTurnId: string | null) => root.render(
-			<Transcript
-				activeTurnId={activeTurnId}
-				appearance={appearance}
-				hasOlder={false}
-				itemIds={items.map(({ itemId }) => itemId)}
-				itemsById={new Map(items.map((entry) => [entry.itemId, entry]))}
-				loadingOlder={false}
-				onLoadOlder={async () => undefined}
-			/>,
-		);
+	it.each(["chat", "code"] as const)(
+		"animates only the latest user message in the active %s turn",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const items = [
+				item("user-first", "user", [{ type: "text", text: "First" }]),
+				item("user-latest", "user", [{ type: "text", text: "Latest" }]),
+			];
+			const render = (activeTurnId: string | null) =>
+				root.render(
+					<Transcript
+						activeTurnId={activeTurnId}
+						appearance={appearance}
+						hasOlder={false}
+						itemIds={items.map(({ itemId }) => itemId)}
+						itemsById={new Map(items.map((entry) => [entry.itemId, entry]))}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				);
 
-		await act(async () => render(TURN_ID));
-		expect(container.querySelectorAll(appearance === "chat" ? ".turn-user" : ".code-turn-user")).toHaveLength(2);
-		expect(container.querySelectorAll(".is-entering")).toHaveLength(1);
-		expect(container.querySelector(".is-entering")?.textContent).toContain("Latest");
+			await act(async () => render(TURN_ID));
+			expect(container.querySelectorAll(appearance === "chat" ? ".turn-user" : ".code-turn-user")).toHaveLength(2);
+			expect(container.querySelectorAll(".is-entering")).toHaveLength(1);
+			expect(container.querySelector(".is-entering")?.textContent).toContain("Latest");
 
-		await act(async () => render(null));
-		expect(container.querySelector(".is-entering")).toBeNull();
-		await act(async () => root.unmount());
-	});
+			await act(async () => render(null));
+			expect(container.querySelector(".is-entering")).toBeNull();
+			await act(async () => root.unmount());
+		},
+	);
 
 	it.each(["chat", "code"] as const)("renders one active-turn status in %s mode", async (appearance) => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const render = (activeTurnId: string | null | undefined) => root.render(
-			<Transcript
-				activeTurnId={activeTurnId}
-				activeTurnStartedAt="2026-07-22T00:00:00.000Z"
-				appearance={appearance}
-				hasOlder={false}
-				itemIds={turnItems.map((entry) => entry.itemId)}
-				itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
-				loadingOlder={false}
-				onLoadOlder={async () => undefined}
-			/>,
-		);
+		const render = (activeTurnId: string | null | undefined) =>
+			root.render(
+				<Transcript
+					activeTurnId={activeTurnId}
+					activeTurnStartedAt="2026-07-22T00:00:00.000Z"
+					appearance={appearance}
+					hasOlder={false}
+					itemIds={turnItems.map((entry) => entry.itemId)}
+					itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			);
 
 		await act(async () => render(TURN_ID));
 		expect(container.querySelectorAll(".turn-runtime-status")).toHaveLength(1);
-		expect(container.querySelector(`.${appearance === "chat" ? "transcript-turn" : "code-transcript-turn"} .turn-runtime-status`)).not.toBeNull();
+		expect(
+			container.querySelector(
+				`.${appearance === "chat" ? "transcript-turn" : "code-transcript-turn"} .turn-runtime-status`,
+			),
+		).not.toBeNull();
 		await act(async () => render(null));
 		expect(container.querySelector(".turn-runtime-status")).toBeNull();
 		await act(async () => root.unmount());
@@ -764,9 +935,18 @@ describe("Transcript", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		try {
-			await act(async () => root.render(
-				<Transcript appearance="chat" hasOlder={false} itemIds={turnItems.map((entry) => entry.itemId)} itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
-			));
+			await act(async () =>
+				root.render(
+					<Transcript
+						appearance="chat"
+						hasOlder={false}
+						itemIds={turnItems.map((entry) => entry.itemId)}
+						itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				),
+			);
 			const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
 			Object.defineProperties(scroll, {
 				clientHeight: { configurable: true, value: 600 },
@@ -794,10 +974,22 @@ describe("Transcript", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		let scrollHeight = 1_000;
-		const onLoadOlder = vi.fn(async () => { scrollHeight = 1_400; });
-		await act(async () => root.render(
-			<Transcript appearance="code" autoLoadOlder hasOlder itemIds={turnItems.map((entry) => entry.itemId)} itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={onLoadOlder} />,
-		));
+		const onLoadOlder = vi.fn(async () => {
+			scrollHeight = 1_400;
+		});
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					autoLoadOlder
+					hasOlder
+					itemIds={turnItems.map((entry) => entry.itemId)}
+					itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
+					loadingOlder={false}
+					onLoadOlder={onLoadOlder}
+				/>,
+			),
+		);
 		const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
 		Object.defineProperties(scroll, {
 			clientHeight: { configurable: true, value: 600 },
@@ -823,9 +1015,18 @@ describe("Transcript", () => {
 		const root = createRoot(container);
 		const itemIds = turnItems.map((entry) => entry.itemId);
 		const itemsById = new Map(turnItems.map((entry) => [entry.itemId, entry]));
-		await act(async () => root.render(
-			<Transcript appearance="chat" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="chat"
+					hasOlder={false}
+					itemIds={itemIds}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
 		const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
 		await act(async () => chain.querySelector("summary")!.click());
@@ -833,13 +1034,24 @@ describe("Transcript", () => {
 
 		itemsById.set("assistant-plan", {
 			...itemsById.get("assistant-plan")!,
-			content: itemsById.get("assistant-plan")!.content.map((block) =>
-				block.type === "thinking" ? { ...block, text: `${block.text}正在执行。` } : block,
-			),
+			content: itemsById
+				.get("assistant-plan")!
+				.content.map((block) =>
+					block.type === "thinking" ? { ...block, text: `${block.text}正在执行。` } : block,
+				),
 		});
-		await act(async () => root.render(
-			<Transcript appearance="chat" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="chat"
+					hasOlder={false}
+					itemIds={itemIds}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		expect(container.querySelector<HTMLDetailsElement>(".execution-chain")!.open).toBe(true);
 		expect(container.textContent).toContain("正在执行。");
 		await act(async () => root.unmount());
@@ -850,9 +1062,18 @@ describe("Transcript", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const itemsById = new Map(turnItems.map((entry) => [entry.itemId, entry]));
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={turnItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={turnItems.map((entry) => entry.itemId)}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		expect(container.querySelector(".execution-chain")).toBeNull();
 		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
 		expect(container.querySelector(".code-turn-user")?.textContent).toContain("看看桌面有什么");
@@ -865,7 +1086,7 @@ describe("Transcript", () => {
 		expect(execution.open).toBe(false);
 		expect(execution.querySelector(".code-execution-card")).not.toBeNull();
 		expect(execution.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
-		await act(async () => execution.querySelector(":scope > summary")!.click());
+		await act(async () => execution.querySelector<HTMLElement>(":scope > summary")!.click());
 		expect(execution.open).toBe(true);
 		expect(execution.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(false);
 		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
@@ -880,40 +1101,104 @@ describe("Transcript", () => {
 	});
 
 	it("renders safe Code summaries for internal tools while preserving operation and external details", async () => {
-		const askInput = JSON.stringify({ questions: [{
-			question: "How should Metis answer?",
-			multiple: false,
-			options: [{ label: "Concise", description: "Short" }, { label: "Detailed", description: "Long" }],
-		}] });
-		const askOutput = `User answers:\n${JSON.stringify([{
-			question: "How should Metis answer?",
-			selected: ["Concise"],
-		}], null, 2)}`;
+		const askInput = JSON.stringify({
+			questions: [
+				{
+					question: "How should Metis answer?",
+					multiple: false,
+					options: [
+						{ label: "Concise", description: "Short" },
+						{ label: "Detailed", description: "Long" },
+					],
+				},
+			],
+		});
+		const askOutput = `User answers:\n${JSON.stringify(
+			[
+				{
+					question: "How should Metis answer?",
+					selected: ["Concise"],
+				},
+			],
+			null,
+			2,
+		)}`;
 		const codeItems = [
 			item("code-safe-user", "user", [{ type: "text", text: "Use the tools" }]),
 			item("code-safe-calls", "assistant", [
-				{ type: "tool_call", toolCallId: "code-safe-ask", name: "ask_user", state: "completed", inputPreview: askInput },
-				{ type: "tool_call", toolCallId: "code-safe-tasks", name: "set_tasks", state: "completed", inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }) },
-				{ type: "tool_call", toolCallId: "code-safe-write", name: "write", state: "completed", inputPreview: JSON.stringify({ path: "report.txt", content: "verified" }) },
-				{ type: "tool_call", toolCallId: "code-safe-mcp", name: "mcp__docs__search", state: "completed", inputPreview: JSON.stringify({ query: "refresh token" }) },
+				{
+					type: "tool_call",
+					toolCallId: "code-safe-ask",
+					name: "ask_user",
+					state: "completed",
+					inputPreview: askInput,
+				},
+				{
+					type: "tool_call",
+					toolCallId: "code-safe-tasks",
+					name: "set_tasks",
+					state: "completed",
+					inputPreview: JSON.stringify({ tasks: [{ task: "Run validation", completed: false }] }),
+				},
+				{
+					type: "tool_call",
+					toolCallId: "code-safe-write",
+					name: "write",
+					state: "completed",
+					inputPreview: JSON.stringify({ path: "report.txt", content: "verified" }),
+				},
+				{
+					type: "tool_call",
+					toolCallId: "code-safe-mcp",
+					name: "mcp__docs__search",
+					state: "completed",
+					inputPreview: JSON.stringify({ query: "refresh token" }),
+				},
 			]),
 			item("code-safe-results", "tool", [
 				{ type: "tool_result", toolCallId: "code-safe-ask", name: "ask_user", isError: false, output: askOutput },
-				{ type: "tool_result", toolCallId: "code-safe-tasks", name: "set_tasks", isError: false, output: "<task_list>\n- [ ] Run validation\n</task_list>" },
-				{ type: "tool_result", toolCallId: "code-safe-write", name: "write", isError: false, output: "Wrote report.txt" },
-				{ type: "tool_result", toolCallId: "code-safe-mcp", name: "mcp__docs__search", isError: false, output: "External result" },
+				{
+					type: "tool_result",
+					toolCallId: "code-safe-tasks",
+					name: "set_tasks",
+					isError: false,
+					output: "<task_list>\n- [ ] Run validation\n</task_list>",
+				},
+				{
+					type: "tool_result",
+					toolCallId: "code-safe-write",
+					name: "write",
+					isError: false,
+					output: "Wrote report.txt",
+				},
+				{
+					type: "tool_result",
+					toolCallId: "code-safe-mcp",
+					name: "mcp__docs__search",
+					isError: false,
+					output: "External result",
+				},
 			]),
 		];
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={new Map(codeItems.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={codeItems.map((entry) => entry.itemId)}
+					itemsById={new Map(codeItems.map((entry) => [entry.itemId, entry]))}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
 		expect(execution.open).toBe(false);
-		await act(async () => execution.querySelector(":scope > summary")!.click());
+		await act(async () => execution.querySelector<HTMLElement>(":scope > summary")!.click());
 		const tools = [...execution.querySelectorAll<HTMLDetailsElement>(".code-command")];
 		expect(tools).toHaveLength(4);
 		for (const tool of tools) {
@@ -939,13 +1224,26 @@ describe("Transcript", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const user = item("markdown-code-user", "user", [{ type: "text", text: "Summarize" }]);
-		const report = item("markdown-code-report", "assistant", [
-			{ type: "tool_call", toolCallId: "stop-child", name: "interrupt_agent", state: "running" },
-			{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
-		], "streaming");
-		const render = (entries: readonly ItemView[]) => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={entries.map((entry) => entry.itemId)} itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))} loadingOlder={false} onLoadOlder={async () => undefined} />,
+		const report = item(
+			"markdown-code-report",
+			"assistant",
+			[
+				{ type: "tool_call", toolCallId: "stop-child", name: "interrupt_agent", state: "running" },
+				{ type: "text", text: "**Summary**\n\n| Name | State |\n| --- | --- |\n| Child | Done |" },
+			],
+			"streaming",
 		);
+		const render = (entries: readonly ItemView[]) =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={entries.map((entry) => entry.itemId)}
+					itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			);
 
 		await act(async () => render([user, report]));
 		expect(container.querySelector(".code-turn-status")).toBeNull();
@@ -955,14 +1253,26 @@ describe("Transcript", () => {
 			...report,
 			state: "completed" as const,
 			completedAt: "2026-07-22T00:00:01.000Z",
-			content: report.content.map((block) => block.type === "tool_call" ? { ...block, state: "completed" as const } : block),
+			content: report.content.map((block) =>
+				block.type === "tool_call" ? { ...block, state: "completed" as const } : block,
+			),
 		};
-		await act(async () => render([
-			user,
-			completedReport,
-			item("markdown-code-result", "tool", [{ type: "tool_result", toolCallId: "stop-child", name: "interrupt_agent", isError: false, output: "stopped" }]),
-			item("markdown-code-final", "assistant", [{ type: "text", text: "All agents closed." }]),
-		]));
+		await act(async () =>
+			render([
+				user,
+				completedReport,
+				item("markdown-code-result", "tool", [
+					{
+						type: "tool_result",
+						toolCallId: "stop-child",
+						name: "interrupt_agent",
+						isError: false,
+						output: "stopped",
+					},
+				]),
+				item("markdown-code-final", "assistant", [{ type: "text", text: "All agents closed." }]),
+			]),
+		);
 		expect(container.querySelector(".code-turn-status")).toBeNull();
 		expect(container.textContent).not.toContain("Summary");
 		expect(container.querySelector(".code-turn-answer")?.textContent).toBe("All agents closed.");
@@ -976,30 +1286,51 @@ describe("Transcript", () => {
 		const withCodeTurn = (entry: ItemView): ItemView => ({ ...entry, turnId: "code-turn" });
 		const codeItems = [
 			withCodeTurn(item("code-user", "user", [{ type: "text", text: "重试并检查工具" }])),
-			withCodeTurn(item("code-tool-1", "assistant", [
-				{ type: "tool_call", toolCallId: "tool-1", name: "read", state: "completed" },
-			])),
-			withCodeTurn(item("code-result-1", "tool", [
-				{ type: "tool_result", toolCallId: "tool-1", name: "read", isError: false, output: "one" },
-			])),
-			withCodeTurn(item("code-tool-2", "assistant", [
-				{ type: "tool_call", toolCallId: "tool-2", name: "grep", state: "completed" },
-			])),
-			withCodeTurn(item("code-result-2", "tool", [
-				{ type: "tool_result", toolCallId: "tool-2", name: "grep", isError: false, output: "two" },
-			])),
-			withCodeTurn(item("code-tool-3", "assistant", [
-				{ type: "tool_call", toolCallId: "tool-3", name: "web_fetch", state: "completed" },
-			])),
-			withCodeTurn(item("code-result-3", "tool", [
-				{ type: "tool_result", toolCallId: "tool-3", name: "web_fetch", isError: false, output: "three" },
-			])),
+			withCodeTurn(
+				item("code-tool-1", "assistant", [
+					{ type: "tool_call", toolCallId: "tool-1", name: "read", state: "completed" },
+				]),
+			),
+			withCodeTurn(
+				item("code-result-1", "tool", [
+					{ type: "tool_result", toolCallId: "tool-1", name: "read", isError: false, output: "one" },
+				]),
+			),
+			withCodeTurn(
+				item("code-tool-2", "assistant", [
+					{ type: "tool_call", toolCallId: "tool-2", name: "grep", state: "completed" },
+				]),
+			),
+			withCodeTurn(
+				item("code-result-2", "tool", [
+					{ type: "tool_result", toolCallId: "tool-2", name: "grep", isError: false, output: "two" },
+				]),
+			),
+			withCodeTurn(
+				item("code-tool-3", "assistant", [
+					{ type: "tool_call", toolCallId: "tool-3", name: "web_fetch", state: "completed" },
+				]),
+			),
+			withCodeTurn(
+				item("code-result-3", "tool", [
+					{ type: "tool_result", toolCallId: "tool-3", name: "web_fetch", isError: false, output: "three" },
+				]),
+			),
 		];
 		const itemsById = new Map(codeItems.map((entry) => [entry.itemId, entry]));
 
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={codeItems.map((entry) => entry.itemId)}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 
 		expect(container.querySelectorAll(".code-execution")).toHaveLength(1);
 		expect(container.querySelector(".code-execution > summary")?.textContent).toContain("Used 3 tools");
@@ -1010,9 +1341,18 @@ describe("Transcript", () => {
 			...codeItems.slice(5),
 		];
 		const separatedById = new Map(separatedItems.map((entry) => [entry.itemId, entry]));
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={separatedItems.map((entry) => entry.itemId)} itemsById={separatedById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={separatedItems.map((entry) => entry.itemId)}
+					itemsById={separatedById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		expect(container.querySelectorAll(".code-execution")).toHaveLength(2);
 		expect(container.textContent).toContain("前两个工具完成，继续检查。");
 		await act(async () => root.unmount());
@@ -1022,18 +1362,30 @@ describe("Transcript", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const running = item("assistant-code-running", "assistant", [
-			{ type: "tool_call", toolCallId: "code-running", name: "bash", state: "running", inputPreview: "pwd" },
-		], "streaming");
+		const running = item(
+			"assistant-code-running",
+			"assistant",
+			[{ type: "tool_call", toolCallId: "code-running", name: "bash", state: "running", inputPreview: "pwd" }],
+			"streaming",
+		);
 		const itemIds = [turnItems[0]!.itemId, running.itemId];
 		const itemsById = new Map([turnItems[0]!, running].map((entry) => [entry.itemId, entry]));
 
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={itemIds}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
 		expect(execution.open).toBe(false);
-		await act(async () => execution.querySelector(":scope > summary")!.click());
+		await act(async () => execution.querySelector<HTMLElement>(":scope > summary")!.click());
 		const command = execution.querySelector<HTMLDetailsElement>(".code-command-shell")!;
 		expect(command.open).toBe(false);
 		await act(async () => command.querySelector("summary")!.click());
@@ -1043,11 +1395,28 @@ describe("Transcript", () => {
 
 		itemsById.set(running.itemId, {
 			...running,
-			content: [{ type: "tool_call", toolCallId: "code-running", name: "bash", state: "running", inputPreview: "pwd && whoami" }],
+			content: [
+				{
+					type: "tool_call",
+					toolCallId: "code-running",
+					name: "bash",
+					state: "running",
+					inputPreview: "pwd && whoami",
+				},
+			],
 		});
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={itemIds}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
 		expect(container.querySelector<HTMLDetailsElement>(".code-execution")!.open).toBe(true);
 		expect(container.querySelector<HTMLDetailsElement>(".code-command-shell")!.open).toBe(true);
@@ -1063,20 +1432,39 @@ describe("Transcript", () => {
 			item("code-error-user", "user", [{ type: "text", text: "Count files" }]),
 			item("code-error-call", "assistant", [
 				{ type: "thinking", text: LONG_THINKING },
-				{ type: "tool_call", toolCallId: "code-error", name: "bash", state: "completed", inputPreview: "find data" },
+				{
+					type: "tool_call",
+					toolCallId: "code-error",
+					name: "bash",
+					state: "completed",
+					inputPreview: "find data",
+				},
 			]),
 			item("code-error-result", "tool", [
 				{ type: "tool_result", toolCallId: "code-error", name: "bash", isError: true, output: "Permission denied" },
 			]),
-			item("code-error-final", "assistant", [{ type: "text", text: "| Type | Count |\n| --- | ---: |\n| video | 10 |" }]),
+			item("code-error-final", "assistant", [
+				{ type: "text", text: "| Type | Count |\n| --- | ---: |\n| video | 10 |" },
+			]),
 		];
 		const itemsById = new Map(codeItems.map((entry) => [entry.itemId, entry]));
-		await act(async () => root.render(
-			<Transcript appearance="code" hasOlder={false} itemIds={codeItems.map((entry) => entry.itemId)} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-		));
+		await act(async () =>
+			root.render(
+				<Transcript
+					appearance="code"
+					hasOlder={false}
+					itemIds={codeItems.map((entry) => entry.itemId)}
+					itemsById={itemsById}
+					loadingOlder={false}
+					onLoadOlder={async () => undefined}
+				/>,
+			),
+		);
 		const execution = container.querySelector<HTMLDetailsElement>(".code-execution")!;
-		await act(async () => execution.querySelector(":scope > summary")!.click());
-		await act(async () => execution.querySelector<HTMLDetailsElement>(".code-command")!.querySelector("summary")!.click());
+		await act(async () => execution.querySelector<HTMLElement>(":scope > summary")!.click());
+		await act(async () =>
+			execution.querySelector<HTMLDetailsElement>(".code-command")!.querySelector("summary")!.click(),
+		);
 		expect(container.querySelector(".code-command-output-error")?.textContent).toContain("Permission denied");
 		expect(container.querySelector(".code-turn-answer table")?.textContent).toContain("video");
 		expect(container.textContent).not.toContain(LONG_THINKING);
@@ -1089,27 +1477,59 @@ describe("Transcript", () => {
 			const container = document.createElement("div");
 			document.body.append(container);
 			const root = createRoot(container);
-			const running = item("code-running-2", "assistant", [
-				{ type: "tool_call", toolCallId: "code-running-2", name: "bash", state: "running", inputPreview: "pwd" },
-			], "streaming");
+			const running = item(
+				"code-running-2",
+				"assistant",
+				[{ type: "tool_call", toolCallId: "code-running-2", name: "bash", state: "running", inputPreview: "pwd" }],
+				"streaming",
+			);
 			const itemIds = [running.itemId];
 			const itemsById = new Map([[running.itemId, running]]);
 
-			await act(async () => root.render(
-				<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-			));
+			await act(async () =>
+				root.render(
+					<Transcript
+						appearance="code"
+						hasOlder={false}
+						itemIds={itemIds}
+						itemsById={itemsById}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				),
+			);
 			const enter = () => container.querySelector<HTMLElement>(".code-execution-title-enter");
 			const leave = () => container.querySelector<HTMLElement>(".code-execution-title-leave");
 			expect(enter()?.textContent).toBe("Running a command");
 			expect(leave()).toBeNull();
 
-			const completed = item("code-running-2", "assistant", [
-				{ type: "tool_call", toolCallId: "code-running-2", name: "bash", state: "completed", inputPreview: "pwd" },
-			], "completed");
+			const completed = item(
+				"code-running-2",
+				"assistant",
+				[
+					{
+						type: "tool_call",
+						toolCallId: "code-running-2",
+						name: "bash",
+						state: "completed",
+						inputPreview: "pwd",
+					},
+				],
+				"completed",
+			);
 			itemsById.set(running.itemId, completed);
-			await act(async () => root.render(
-				<Transcript appearance="code" hasOlder={false} itemIds={itemIds} itemsById={itemsById} loadingOlder={false} onLoadOlder={async () => undefined} />,
-			));
+			await act(async () =>
+				root.render(
+					<Transcript
+						appearance="code"
+						hasOlder={false}
+						itemIds={itemIds}
+						itemsById={itemsById}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				),
+			);
 			expect(leave()?.textContent).toBe("Running a command");
 			expect(enter()?.textContent).toBe("Ran a command");
 
@@ -1124,46 +1544,72 @@ describe("Transcript", () => {
 });
 
 describe("sent attachment cards", () => {
-	it.each(["chat", "code"] as const)("preserves selected file cards in %s, including reference-only messages", async (appearance) => {
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
-		const reference: ItemView = {
-			...item("selected-file", "user", [{ type: "text", text: "翻译一下 [literal.md:1–8]" }]),
-			fileSelections: [
-				{ name: "AGENTS.md", source: "workspace", selectedText: "<img src=x onerror=alert(1)>\n# 1. Language", startLine: 1, endLine: 8 },
-				{ name: "report.pdf", source: "delivered", selectedText: "Selected document text", target: { kind: "pdf", page: 2, endPage: 3 } },
-			],
-		};
-		await act(async () => root.render(<Turn items={[reference]} />));
-		expect(messageText(reference)).toBe("翻译一下 [literal.md:1–8]\n\n[AGENTS.md:1–8] [report.pdf]");
-		expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
-		expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("AGENTS.md");
-		expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("1–8");
-		expect(container.querySelectorAll(".message-file-selection summary")[1]?.textContent).toContain("2–3");
-		expect(container.querySelector(".message-file-selection blockquote")?.textContent).toBe(reference.fileSelections![0]!.selectedText);
-		expect(container.querySelector(".message-file-selection img, .message-file-selection script")).toBeNull();
-		expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe("翻译一下 [literal.md:1–8]");
-		await act(async () => root.render(<Turn items={[{ ...reference, content: [] }]} />));
-		expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
-		expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
-		await act(async () => root.unmount());
-	});
-	it.each(["chat", "code"] as const)("renders files separately from the %s message and preserves literal brackets", async (appearance) => {
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
-		const upload: ItemView = { ...item("upload", "user", [{ type: "text", text: "Read [notes.pdf]" }]),
-			attachments: [{ name: "notes.pdf", byteLength: 4096 }, { name: "说明.md", byteLength: 80 }] };
-		await act(async () => root.render(<Turn items={[upload]} />));
-		expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
-		expect(container.querySelector(".message-file-card")?.textContent).toContain("PDF · 4 KB");
-		expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe("Read [notes.pdf]");
-		await act(async () => root.render(<Turn items={[{ ...upload, content: [] }]} />));
-		expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
-		expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
-		await act(async () => root.unmount());
-	});
+	it.each(["chat", "code"] as const)(
+		"preserves selected file cards in %s, including reference-only messages",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+			const reference: ItemView = {
+				...item("selected-file", "user", [{ type: "text", text: "翻译一下 [literal.md:1–8]" }]),
+				fileSelections: [
+					{
+						name: "AGENTS.md",
+						source: "workspace",
+						selectedText: "<img src=x onerror=alert(1)>\n# 1. Language",
+						startLine: 1,
+						endLine: 8,
+					},
+					{
+						name: "report.pdf",
+						source: "delivered",
+						selectedText: "Selected document text",
+						target: { kind: "pdf", page: 2, endPage: 3 },
+					},
+				],
+			};
+			await act(async () => root.render(<Turn items={[reference]} />));
+			expect(messageText(reference)).toBe("翻译一下 [literal.md:1–8]\n\n[AGENTS.md:1–8] [report.pdf]");
+			expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
+			expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("AGENTS.md");
+			expect(container.querySelector(".message-file-selection summary")?.textContent).toContain("1–8");
+			expect(container.querySelectorAll(".message-file-selection summary")[1]?.textContent).toContain("2–3");
+			expect(container.querySelector(".message-file-selection blockquote")?.textContent).toBe(
+				reference.fileSelections![0]!.selectedText,
+			);
+			expect(container.querySelector(".message-file-selection img, .message-file-selection script")).toBeNull();
+			expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe(
+				"翻译一下 [literal.md:1–8]",
+			);
+			await act(async () => root.render(<Turn items={[{ ...reference, content: [] }]} />));
+			expect(container.querySelectorAll(".message-file-selection")).toHaveLength(2);
+			expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
+			await act(async () => root.unmount());
+		},
+	);
+	it.each(["chat", "code"] as const)(
+		"renders files separately from the %s message and preserves literal brackets",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const Turn = appearance === "chat" ? TranscriptTurn : CodeTranscriptTurn;
+			const upload: ItemView = {
+				...item("upload", "user", [{ type: "text", text: "Read [notes.pdf]" }]),
+				attachments: [
+					{ name: "notes.pdf", byteLength: 4096 },
+					{ name: "说明.md", byteLength: 80 },
+				],
+			};
+			await act(async () => root.render(<Turn items={[upload]} />));
+			expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
+			expect(container.querySelector(".message-file-card")?.textContent).toContain("PDF · 4 KB");
+			expect(container.querySelector(".message-user, .code-turn-user-bubble")?.textContent).toBe("Read [notes.pdf]");
+			await act(async () => root.render(<Turn items={[{ ...upload, content: [] }]} />));
+			expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
+			expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
+			await act(async () => root.unmount());
+		},
+	);
 });

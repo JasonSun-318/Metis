@@ -1,7 +1,7 @@
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { DrawerDetails } from "../DrawerDetails.tsx";
 import type { ConversationSubmission } from "../../composer-submission.ts";
+import { DrawerDetails } from "../DrawerDetails.tsx";
 import { type DraftFileSelection, selectionTargetLabel, validateSelectionSize } from "./file-selection.ts";
 
 interface FileSelectionActions {
@@ -40,8 +40,7 @@ export function FileSelectionProvider({
 	}, []);
 	const selections = useMemo(() => [...drafts.values()].flat(), [drafts]);
 	const assertReady = () => {
-		if (!mounted.current || !current.current.enabled)
-			throw new Error(t("This conversation is not ready to send"));
+		if (!mounted.current || !current.current.enabled) throw new Error(t("This conversation is not ready to send"));
 	};
 	const replaceDrafts = (next: ReadonlyMap<string, readonly DraftFileSelection[]>) => {
 		draftsRef.current = next;
@@ -98,12 +97,16 @@ export function FileSelectionProvider({
 export function FileSelectionChips({ sessionId }: { readonly sessionId?: string | null }) {
 	const context = useFileSelections();
 	const { t } = useTranslation();
-	const selections = sessionId === undefined
-		? (context?.selections ?? [])
-		: (context?.selections ?? []).filter((selection) => selection.sessionId === sessionId);
+	const selections =
+		sessionId === undefined
+			? (context?.selections ?? [])
+			: (context?.selections ?? []).filter((selection) => selection.sessionId === sessionId);
 	if (!selections.length) return null;
 	return (
-		<DrawerDetails className="composer-selections" summary={t("{{count}} selected text fragments", { count: selections.length })}>
+		<DrawerDetails
+			className="composer-selections"
+			summary={t("{{count}} selected text fragments", { count: selections.length })}
+		>
 			<div className="composer-selection-list">
 				{selections.map((selection) => (
 					<div className="composer-selection" key={selection.id}>

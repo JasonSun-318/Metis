@@ -1,5 +1,5 @@
-import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "@phosphor-icons/react";
 import type { SessionSummary } from "@metis/app-protocol";
+import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -29,6 +29,7 @@ export function MemorySessionSettings({
 	const [busy, setBusy] = useState<string | null>(null);
 	const generation = useRef(0);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(revision): Retry explicitly reloads conversation memory settings.
 	useEffect(() => {
 		const requestGeneration = ++generation.current;
 		setSessions(null);
@@ -71,7 +72,8 @@ export function MemorySessionSettings({
 			if (generation.current === requestGeneration)
 				setSessions(
 					(current) =>
-						current?.map((session) => (session.sessionId === sessionId ? { ...session, ...next } : session)) ?? null,
+						current?.map((session) => (session.sessionId === sessionId ? { ...session, ...next } : session)) ??
+						null,
 				);
 		} catch {
 			if (generation.current === requestGeneration)
@@ -138,7 +140,7 @@ export function MemorySessionSettings({
 								}}
 							/>
 						</label>
-						<div className="memory-scope-tabs" role="group" aria-label={t("Filter conversations")}>
+						<fieldset className="control-group memory-scope-tabs" aria-label={t("Filter conversations")}>
 							<button
 								className={!exceptionsOnly ? "is-active" : ""}
 								aria-pressed={!exceptionsOnly}
@@ -155,7 +157,7 @@ export function MemorySessionSettings({
 							>
 								{t("With exceptions")}
 							</button>
-						</div>
+						</fieldset>
 					</div>
 					{error && (
 						<div className="memory-info-banner" role="alert">
@@ -173,7 +175,11 @@ export function MemorySessionSettings({
 						</div>
 					)}
 					{sessions === null ? (
-						!error && <p role="status">{t(serverReady ? "Loading…" : "Waiting for connection…")}</p>
+						!error && (
+							<output className="status-paragraph">
+								{t(serverReady ? "Loading…" : "Waiting for connection…")}
+							</output>
+						)
 					) : filtered.length === 0 ? (
 						<div className="memory-empty-state">
 							<ChatCircle size={24} aria-hidden="true" />
@@ -213,13 +219,18 @@ export function MemorySessionSettings({
 													<label className="web-search-toggle">
 														<input
 															aria-label={t(
-																flag === "useMemory" ? "Use saved memories: {{name}}" : "Save new memories: {{name}}",
+																flag === "useMemory"
+																	? "Use saved memories: {{name}}"
+																	: "Save new memories: {{name}}",
 																{ name },
 															)}
+															aria-checked={session[flag] !== false}
 															role="switch"
 															checked={session[flag] !== false}
 															disabled={!serverReady || busy !== null}
-															onChange={(event) => void change(session.sessionId, flag, event.target.checked)}
+															onChange={(event) =>
+																void change(session.sessionId, flag, event.target.checked)
+															}
 															type="checkbox"
 														/>
 														<span aria-hidden="true" className="web-search-toggle-track" />
@@ -229,7 +240,7 @@ export function MemorySessionSettings({
 										</div>
 										<footer className="memory-session-meta">
 											<span>{new Date(session.createdAt).toLocaleString()}</span>
-											{busy === session.sessionId && <span role="status">{t("Saving…")}</span>}
+											{busy === session.sessionId && <output>{t("Saving…")}</output>}
 										</footer>
 									</li>
 								);

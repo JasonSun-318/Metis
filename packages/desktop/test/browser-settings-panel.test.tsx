@@ -44,11 +44,13 @@ function download(overrides: Partial<DesktopDownloadItem> & { downloadId: string
 	};
 }
 
-function fixture(overrides: {
-	history?: Readonly<Record<string, readonly DesktopHistoryEntry[]>>;
-	downloads?: readonly DesktopDownloadItem[];
-	platform?: "darwin" | "win32";
-} = {}) {
+function fixture(
+	overrides: {
+		history?: Readonly<Record<string, readonly DesktopHistoryEntry[]>>;
+		downloads?: readonly DesktopDownloadItem[];
+		platform?: "darwin" | "win32";
+	} = {},
+) {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
 	const history = overrides.history ?? {
 		[DEFAULT_BROWSER_PROFILE_ID]: [
@@ -74,7 +76,9 @@ function fixture(overrides: {
 		importBrowserData: vi.fn(),
 		subscribeBrowser: (next: (event: DesktopBrowserEvent) => void) => {
 			listener = next;
-			return () => { listener = undefined; };
+			return () => {
+				listener = undefined;
+			};
 		},
 	} as unknown as MetisDesktopApi;
 	return { api, emit: (event: DesktopBrowserEvent) => listener?.(event) };
@@ -94,7 +98,9 @@ function setValue(input: HTMLInputElement, value: string) {
 }
 
 async function flush() {
-	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
 }
 
 function renderPanel(api: MetisDesktopApi) {
@@ -110,10 +116,14 @@ beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	await setLocale("en");
 	if (!HTMLDialogElement.prototype.showModal) {
-		HTMLDialogElement.prototype.showModal = function showModal() { this.setAttribute("open", ""); };
+		HTMLDialogElement.prototype.showModal = function showModal() {
+			this.setAttribute("open", "");
+		};
 	}
 	if (!HTMLDialogElement.prototype.close) {
-		HTMLDialogElement.prototype.close = function close() { this.removeAttribute("open"); };
+		HTMLDialogElement.prototype.close = function close() {
+			this.removeAttribute("open");
+		};
 	}
 });
 
@@ -164,12 +174,14 @@ describe("BrowserSettingsPanel", () => {
 		vi.mocked(api.listBrowserProfiles)
 			.mockResolvedValueOnce(profiles)
 			.mockResolvedValueOnce([...profiles, importedProfile]);
-		vi.mocked(api.listBrowserImportSources).mockResolvedValueOnce([{
-			sourceId: "chrome",
-			name: "Google Chrome",
-			running: false,
-			profiles: [{ sourceProfileId: "Profile 2", name: "Work", email: "work@example.com" }],
-		}]);
+		vi.mocked(api.listBrowserImportSources).mockResolvedValueOnce([
+			{
+				sourceId: "chrome",
+				name: "Google Chrome",
+				running: false,
+				profiles: [{ sourceProfileId: "Profile 2", name: "Work", email: "work@example.com" }],
+			},
+		]);
 		vi.mocked(api.importBrowserData).mockResolvedValueOnce({
 			profile: importedProfile,
 			cookies: { imported: 12, skipped: 0 },
@@ -203,7 +215,9 @@ describe("BrowserSettingsPanel", () => {
 
 		expect(container.textContent).toContain("Metis docs");
 		expect(container.textContent).not.toContain("Yesterday archive");
-		await act(async () => container.querySelectorAll<HTMLButtonElement>(".browser-settings-history-group h3 button")[1]!.click());
+		await act(async () =>
+			container.querySelectorAll<HTMLButtonElement>(".browser-settings-history-group h3 button")[1]!.click(),
+		);
 		expect(container.textContent).toContain("Yesterday archive");
 		await act(async () => button(container, "Browser profile").click());
 		await act(async () => {
@@ -215,9 +229,13 @@ describe("BrowserSettingsPanel", () => {
 		expect(api.listBrowserHistory).toHaveBeenLastCalledWith({ profileId: chromeProfileId });
 		expect(container.textContent).toContain("Chrome profile docs");
 
-		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[aria-label="Search browsing history"]')!, "missing"));
+		await act(async () =>
+			setValue(container.querySelector<HTMLInputElement>('input[aria-label="Search browsing history"]')!, "missing"),
+		);
 		expect(container.textContent).toContain("No matching history");
-		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[aria-label="Search browsing history"]')!, "Chrome"));
+		await act(async () =>
+			setValue(container.querySelector<HTMLInputElement>('input[aria-label="Search browsing history"]')!, "Chrome"),
+		);
 		expect(container.textContent).toContain("Chrome profile docs");
 
 		await act(async () => button(container, "Clear browsing history").click());
@@ -237,26 +255,38 @@ describe("BrowserSettingsPanel", () => {
 		await act(async () => button(container, "Open file").click());
 		expect(api.controlBrowserDownload).toHaveBeenCalledWith({ type: "open", downloadId: "done" });
 
-		await act(async () => emit({
-			type: "downloads",
-			downloads: [download({ downloadId: "paused", filename: "archive.zip", state: "paused", receivedBytes: 500 })],
-		}));
+		await act(async () =>
+			emit({
+				type: "downloads",
+				downloads: [
+					download({ downloadId: "paused", filename: "archive.zip", state: "paused", receivedBytes: 500 }),
+				],
+			}),
+		);
 		expect(container.textContent).toContain("archive.zip");
 		await act(async () => button(container, "Resume download").click());
 		expect(api.controlBrowserDownload).toHaveBeenCalledWith({ type: "resume", downloadId: "paused" });
 
-		await act(async () => emit({
-			type: "downloads",
-			downloads: [download({ downloadId: "active", filename: "active.zip", state: "progressing", receivedBytes: 250 })],
-		}));
+		await act(async () =>
+			emit({
+				type: "downloads",
+				downloads: [
+					download({ downloadId: "active", filename: "active.zip", state: "progressing", receivedBytes: 250 }),
+				],
+			}),
+		);
 		expect(button(container, "Pause download")).toBeDefined();
 		await act(async () => button(container, "Cancel download").click());
 		expect(api.controlBrowserDownload).toHaveBeenCalledWith({ type: "cancel", downloadId: "active" });
 
-		await act(async () => emit({
-			type: "downloads",
-			downloads: [download({ downloadId: "failed", filename: "failed.zip", state: "interrupted", receivedBytes: 250 })],
-		}));
+		await act(async () =>
+			emit({
+				type: "downloads",
+				downloads: [
+					download({ downloadId: "failed", filename: "failed.zip", state: "interrupted", receivedBytes: 250 }),
+				],
+			}),
+		);
 		await act(async () => button(container, "Retry download").click());
 		expect(api.controlBrowserDownload).toHaveBeenCalledWith({ type: "retry", downloadId: "failed" });
 	});

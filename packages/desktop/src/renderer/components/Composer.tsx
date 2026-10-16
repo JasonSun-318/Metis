@@ -11,18 +11,14 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
-import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
-import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
 import { ConversationQuoteChips, useConversationQuotes } from "./ConversationQuoteContext.tsx";
-import {
-	type ComposerSlashCommand,
-	composerSlashCommands,
-	SlashCommandMenu,
-} from "./SlashCommandMenu.tsx";
+import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
+import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
+import { type ComposerSlashCommand, composerSlashCommands, SlashCommandMenu } from "./SlashCommandMenu.tsx";
 import { TaskList } from "./TaskList.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
@@ -381,10 +377,7 @@ export function Composer({
 
 		const parsed = parseComposerContent(el);
 		const inputExists =
-			parsed.cleanText.length > 0 ||
-			attachments.length > 0 ||
-			parsed.tokenSkills.length > 0 ||
-			parsed.hasGoalToken;
+			parsed.cleanText.length > 0 || attachments.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken;
 		setHasInput(inputExists);
 
 		if (!inputExists && (el.innerHTML === "<br>" || el.innerHTML === "<br/>" || el.innerHTML === "<div><br></div>")) {
@@ -405,13 +398,15 @@ export function Composer({
 
 	useEffect(() => {
 		const editor = editorRef.current;
-		if (!editor || !prefillRequest || disabled || submitting ||
-				consumedPrefillId.current === prefillRequest.id) return;
+		if (!editor || !prefillRequest || disabled || submitting || consumedPrefillId.current === prefillRequest.id)
+			return;
 		const text = prefillRequest.text.trim();
 		if (!text) return;
 		const parsed = parseComposerContent(editor);
-		const replaceTemplate = !parsed.hasGoalToken &&
-			untouchedPrefillText.current !== null && parsed.cleanText === untouchedPrefillText.current;
+		const replaceTemplate =
+			!parsed.hasGoalToken &&
+			untouchedPrefillText.current !== null &&
+			parsed.cleanText === untouchedPrefillText.current;
 		if (replaceTemplate) {
 			const skillTokens = Array.from(editor.querySelectorAll(".composer-skill-token"));
 			editor.replaceChildren(...skillTokens, document.createTextNode(text));
@@ -431,68 +426,83 @@ export function Composer({
 		syncEditorState();
 	}, [prefillRequest, disabled, submitting, syncEditorState]);
 
-	const processFiles = useCallback(async (files: readonly File[]) => {
-		if (files.length === 0) return;
-		const incoming: DesktopAttachmentSelection[] = [];
-		for (const file of files) {
-			const resolved = onResolveDroppedFiles ? onResolveDroppedFiles([file])[0] : undefined;
-			const filePath = resolved?.path || (file as unknown as { path?: string }).path || "";
-			if (file.type.startsWith("image/")) {
-				const previewDataUrl = await new Promise<string>((resolve) => {
-					const reader = new FileReader();
-					reader.onload = () => resolve(reader.result as string);
-					reader.onerror = () => resolve("");
-					reader.readAsDataURL(file);
-				});
-				incoming.push({
-					path: filePath || `clipboard-${Date.now()}-${file.name}`,
-					name: file.name || "pasted-image.png",
-					previewDataUrl: previewDataUrl || undefined,
-				});
-			} else if (filePath) {
-				incoming.push({
-					path: filePath,
-					name: file.name,
-				});
+	const processFiles = useCallback(
+		async (files: readonly File[]) => {
+			if (files.length === 0) return;
+			const incoming: DesktopAttachmentSelection[] = [];
+			for (const file of files) {
+				const resolved = onResolveDroppedFiles ? onResolveDroppedFiles([file])[0] : undefined;
+				const filePath = resolved?.path || (file as unknown as { path?: string }).path || "";
+				if (file.type.startsWith("image/")) {
+					const previewDataUrl = await new Promise<string>((resolve) => {
+						const reader = new FileReader();
+						reader.onload = () => resolve(reader.result as string);
+						reader.onerror = () => resolve("");
+						reader.readAsDataURL(file);
+					});
+					incoming.push({
+						path: filePath || `clipboard-${Date.now()}-${file.name}`,
+						name: file.name || "pasted-image.png",
+						previewDataUrl: previewDataUrl || undefined,
+					});
+				} else if (filePath) {
+					incoming.push({
+						path: filePath,
+						name: file.name,
+					});
+				}
 			}
-		}
 
-		if (incoming.length > 0) {
-			setAttachments((current) => {
-				const byPath = new Map(current.map((att) => [att.path, att]));
-				for (const att of incoming) byPath.set(att.path, att);
-				return [...byPath.values()].slice(0, 16);
-			});
-			setHasInput(true);
-		}
-	}, [onResolveDroppedFiles]);
+			if (incoming.length > 0) {
+				setAttachments((current) => {
+					const byPath = new Map(current.map((att) => [att.path, att]));
+					for (const att of incoming) byPath.set(att.path, att);
+					return [...byPath.values()].slice(0, 16);
+				});
+				setHasInput(true);
+			}
+		},
+		[onResolveDroppedFiles],
+	);
 
-	const handlePaste = useCallback((event: React.ClipboardEvent) => {
-		if (awaitingAnswer) { event.preventDefault(); return; }
-		const files = Array.from(event.clipboardData.files);
-		if (files.length > 0) {
-			event.preventDefault();
-			void processFiles(files);
-			return;
-		}
+	const handlePaste = useCallback(
+		(event: React.ClipboardEvent) => {
+			if (awaitingAnswer) {
+				event.preventDefault();
+				return;
+			}
+			const files = Array.from(event.clipboardData.files);
+			if (files.length > 0) {
+				event.preventDefault();
+				void processFiles(files);
+				return;
+			}
 
-		const text = event.clipboardData.getData("text/plain");
-		const editor = editorRef.current;
-		if (text && editor) {
-			event.preventDefault();
-			insertPlainTextAtSelection(editor, text);
-			syncEditorState();
-		}
-	}, [awaitingAnswer, processFiles, syncEditorState]);
+			const text = event.clipboardData.getData("text/plain");
+			const editor = editorRef.current;
+			if (text && editor) {
+				event.preventDefault();
+				insertPlainTextAtSelection(editor, text);
+				syncEditorState();
+			}
+		},
+		[awaitingAnswer, processFiles, syncEditorState],
+	);
 
-	const handleDrop = useCallback((event: React.DragEvent) => {
-		if (awaitingAnswer) { event.preventDefault(); return; }
-		const files = Array.from(event.dataTransfer.files);
-		if (files.length > 0) {
-			event.preventDefault();
-			void processFiles(files);
-		}
-	}, [awaitingAnswer, processFiles]);
+	const handleDrop = useCallback(
+		(event: React.DragEvent) => {
+			if (awaitingAnswer) {
+				event.preventDefault();
+				return;
+			}
+			const files = Array.from(event.dataTransfer.files);
+			if (files.length > 0) {
+				event.preventDefault();
+				void processFiles(files);
+			}
+		},
+		[awaitingAnswer, processFiles],
+	);
 
 	useEffect(() => {
 		const el = editorRef.current;
@@ -538,7 +548,10 @@ export function Composer({
 						const skillName = val.slice("/skill:".length).trim();
 						const matchedSkill = skills.find((s) => s.name === skillName || s.name.startsWith(skillName));
 						if (matchedSkill) {
-							el.replaceChildren(createSkillTokenNode(matchedSkill, syncEditorState), document.createTextNode(" "));
+							el.replaceChildren(
+								createSkillTokenNode(matchedSkill, syncEditorState),
+								document.createTextNode(" "),
+							);
 							syncEditorState();
 							return;
 						}
@@ -568,50 +581,59 @@ export function Composer({
 		setSlashQuery(undefined);
 	}, []);
 
-	const handleSelectCommand = useCallback((command: ComposerSlashCommand) => {
-		if (disabledSlashCommands.has(command)) return;
-		if (command === "goal") {
-			const editor = editorRef.current;
-			if (editor) {
-				const goalToken = createGoalTokenNode(syncEditorState);
-				insertTokenAtCursor(editor, goalToken);
+	const handleSelectCommand = useCallback(
+		(command: ComposerSlashCommand) => {
+			if (disabledSlashCommands.has(command)) return;
+			if (command === "goal") {
+				const editor = editorRef.current;
+				if (editor) {
+					const goalToken = createGoalTokenNode(syncEditorState);
+					insertTokenAtCursor(editor, goalToken);
+					syncEditorState();
+				}
+				setSlashQuery(undefined);
+				return;
+			}
+
+			if (editorRef.current) {
+				editorRef.current.replaceChildren();
 				syncEditorState();
 			}
 			setSlashQuery(undefined);
-			return;
-		}
+			void Promise.resolve(onSlashCommand?.(command)).catch(() => undefined);
+		},
+		[disabledSlashCommands, onSlashCommand, syncEditorState],
+	);
 
-		if (editorRef.current) {
-			editorRef.current.replaceChildren();
-			syncEditorState();
-		}
-		setSlashQuery(undefined);
-		void Promise.resolve(onSlashCommand?.(command)).catch(() => undefined);
-	}, [disabledSlashCommands, onSlashCommand, syncEditorState]);
-
-	const handleSelectSkill = useCallback((skill: SkillSummaryView) => {
-		const editor = editorRef.current;
-		if (editor) {
-			const skillToken = createSkillTokenNode(skill, syncEditorState);
-			insertTokenAtCursor(editor, skillToken);
-			syncEditorState();
-		}
-		setSlashQuery(undefined);
-	}, [syncEditorState]);
-
-	const handleAddSkill = useCallback((skill: SkillSummaryView) => {
-		const editor = editorRef.current;
-		if (editor) {
-			const existingSkillToken = editor.querySelector(".composer-skill-token:not(.composer-goal-token)");
-			const skillToken = createSkillTokenNode(skill, syncEditorState);
-			if (existingSkillToken) {
-				existingSkillToken.replaceWith(skillToken);
-			} else {
+	const handleSelectSkill = useCallback(
+		(skill: SkillSummaryView) => {
+			const editor = editorRef.current;
+			if (editor) {
+				const skillToken = createSkillTokenNode(skill, syncEditorState);
 				insertTokenAtCursor(editor, skillToken);
+				syncEditorState();
 			}
-			syncEditorState();
-		}
-	}, [syncEditorState]);
+			setSlashQuery(undefined);
+		},
+		[syncEditorState],
+	);
+
+	const handleAddSkill = useCallback(
+		(skill: SkillSummaryView) => {
+			const editor = editorRef.current;
+			if (editor) {
+				const existingSkillToken = editor.querySelector(".composer-skill-token:not(.composer-goal-token)");
+				const skillToken = createSkillTokenNode(skill, syncEditorState);
+				if (existingSkillToken) {
+					existingSkillToken.replaceWith(skillToken);
+				} else {
+					insertTokenAtCursor(editor, skillToken);
+				}
+				syncEditorState();
+			}
+		},
+		[syncEditorState],
+	);
 
 	const addFiles = async () => {
 		if (!onPickFiles) return;
@@ -630,10 +652,7 @@ export function Composer({
 			const editor = editorRef.current;
 			const parsed = parseComposerContent(editor);
 			setHasInput(
-				parsed.cleanText.length > 0 ||
-				next.length > 0 ||
-				parsed.tokenSkills.length > 0 ||
-				parsed.hasGoalToken,
+				parsed.cleanText.length > 0 || next.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken,
 			);
 			return next;
 		});
@@ -670,10 +689,7 @@ export function Composer({
 		const parsed = parseComposerContent(editor);
 		const prompt = parsed.cleanText;
 		const hasContent =
-			prompt.length > 0 ||
-			attachments.length > 0 ||
-			parsed.tokenSkills.length > 0 ||
-			parsed.hasGoalToken;
+			prompt.length > 0 || attachments.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken;
 
 		if (!hasContent || disabled || awaitingAnswer || submitDisabled || submitting) return;
 
@@ -714,7 +730,9 @@ export function Composer({
 		const selected = (fileSelections?.selections ?? []).filter(
 			(item) => selectionSessionId === undefined || item.sessionId === selectionSessionId,
 		);
-		const quotes = selectionSessionId ? (conversationQuotes?.drafts ?? []).filter((item) => item.sessionId === selectionSessionId) : [];
+		const quotes = selectionSessionId
+			? (conversationQuotes?.drafts ?? []).filter((item) => item.sessionId === selectionSessionId)
+			: [];
 		if ((selected.length || quotes.length) && !prompt.trim()) return;
 		setSubmitting(true);
 		try {
@@ -776,42 +794,66 @@ export function Composer({
 				onPaste={handlePaste}
 				onSubmit={(event) => void submit(event).catch(() => undefined)}
 			>
-				<label className="sr-only" htmlFor={inputId}>{t("Message Metis")}</label>
+				<label className="sr-only" htmlFor={inputId}>
+					{t("Message Metis")}
+				</label>
 				<div className="composer-box">
 					<FileSelectionChips sessionId={selectionSessionId} />
 					<ConversationQuoteChips sessionId={selectionSessionId} />
 					{attachments.length > 0 && (
-						<div aria-label={t("Message additions")} className="composer-attachments">
-							{attachments.map((attachment) => attachment.previewDataUrl ? (
-								<div className="composer-image-preview" key={attachment.path}>
-									<img alt={attachment.name} src={attachment.previewDataUrl} />
-									<button aria-label={t("Remove file {{name}}", { name: attachment.name })} onClick={() => removeAttachment(attachment.path)} type="button">
-										<X aria-hidden="true" size={12} />
-									</button>
-								</div>
-							) : (
-								<div className="composer-file-card" key={attachment.path}>
-									<span className="composer-file-card-icon"><WorkspaceFileIcon path={attachment.name} size={15} /></span>
-									<span className="composer-file-card-copy">
-										<strong title={attachment.name}>{attachment.name}</strong>
-										<small>{attachmentTypeLabel(attachment.name)}</small>
-									</span>
-									<button aria-label={t("Remove file {{name}}", { name: attachment.name })} onClick={() => removeAttachment(attachment.path)} type="button">
-										<X aria-hidden="true" size={12} />
-									</button>
-								</div>
-							))}
-						</div>
+						<section aria-label={t("Message additions")} className="composer-attachments">
+							{attachments.map((attachment) =>
+								attachment.previewDataUrl ? (
+									<div className="composer-image-preview" key={attachment.path}>
+										<img alt={attachment.name} src={attachment.previewDataUrl} />
+										<button
+											aria-label={t("Remove file {{name}}", { name: attachment.name })}
+											onClick={() => removeAttachment(attachment.path)}
+											type="button"
+										>
+											<X aria-hidden="true" size={12} />
+										</button>
+									</div>
+								) : (
+									<div className="composer-file-card" key={attachment.path}>
+										<span className="composer-file-card-icon">
+											<WorkspaceFileIcon path={attachment.name} size={15} />
+										</span>
+										<span className="composer-file-card-copy">
+											<strong title={attachment.name}>{attachment.name}</strong>
+											<small>{attachmentTypeLabel(attachment.name)}</small>
+										</span>
+										<button
+											aria-label={t("Remove file {{name}}", { name: attachment.name })}
+											onClick={() => removeAttachment(attachment.path)}
+											type="button"
+										>
+											<X aria-hidden="true" size={12} />
+										</button>
+									</div>
+								),
+							)}
+						</section>
 					)}
 					{contextControl}
 					<div className="composer-input-line">
+						{/* biome-ignore lint/a11y/useSemanticElements: The contenteditable textbox embeds skill and goal tokens that native text controls cannot render. */}
 						<div
 							aria-label={t("Message Metis")}
 							className="composer-editable-input"
 							aria-disabled={awaitingAnswer || undefined}
 							contentEditable={!disabled && !awaitingAnswer && !submitting}
 							data-empty={!hasInput ? "true" : undefined}
-							data-placeholder={placeholder ?? (isCode ? t("Describe a task or ask a question") : t(running || queueing ? "Add a queued message…" : "Ask Metis anything, or describe a task…"))}
+							data-placeholder={
+								placeholder ??
+								(isCode
+									? t("Describe a task or ask a question")
+									: t(
+											running || queueing
+												? "Add a queued message…"
+												: "Ask Metis anything, or describe a task…",
+										))
+							}
 							id={inputId}
 							onInput={syncEditorState}
 							onKeyDown={handleKeyDown}
@@ -829,13 +871,27 @@ export function Composer({
 						{isCode && (
 							<div className="composer-code-action">
 								{running && (!hasInput || awaitingAnswer) ? (
-									<button aria-label={t("Stop task")} className="composer-code-stop" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
+									<button
+										aria-label={t("Stop task")}
+										className="composer-code-stop"
+										disabled={disabled}
+										onClick={() => void onInterrupt().catch(() => undefined)}
+										type="button"
+									>
 										<Stop aria-hidden="true" size={13} weight="fill" />
 									</button>
 								) : (
-									<button aria-label={t(running || queueing ? "Queue message" : "Send message")} className={`composer-code-submit ${hasInput ? "is-active" : ""}`} disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput} type="submit">
+									<button
+										aria-label={t(running || queueing ? "Queue message" : "Send message")}
+										className={`composer-code-submit ${hasInput ? "is-active" : ""}`}
+										disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput}
+										type="submit"
+									>
 										<svg aria-hidden="true" fill="currentColor" height="13" viewBox="0 0 256 256" width="13">
-											<path d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z" transform="scale(-1, 1) translate(-256, 0)" />
+											<path
+												d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"
+												transform="scale(-1, 1) translate(-256, 0)"
+											/>
 										</svg>
 									</button>
 								)}
@@ -859,8 +915,14 @@ export function Composer({
 						/>
 						{permissionControl}
 						{collaborationControl}
-						{mcpConnectionState === "connecting" && <span className="composer-mcp-status" role="status">{t("MCP connecting")}</span>}
-						{mcpConnectionState === "failed" && <button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">{t("MCP connection failed")}</button>}
+						{mcpConnectionState === "connecting" && (
+							<output className="composer-mcp-status">{t("MCP connecting")}</output>
+						)}
+						{mcpConnectionState === "failed" && (
+							<button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">
+								{t("MCP connection failed")}
+							</button>
+						)}
 					</div>
 					<div className="composer-trailing">
 						{onOpenContextUsage && (
@@ -873,15 +935,27 @@ export function Composer({
 						)}
 						{modelControl}
 						{thinkingControl}
-						{!isCode && (
-							running && (!hasInput || awaitingAnswer) ? (
-								<button aria-label={t("Stop task")} className="composer-icon-button composer-stop button-secondary" disabled={disabled} onClick={() => void onInterrupt().catch(() => undefined)} type="button">
+						{!isCode &&
+							(running && (!hasInput || awaitingAnswer) ? (
+								<button
+									aria-label={t("Stop task")}
+									className="composer-icon-button composer-stop button-secondary"
+									disabled={disabled}
+									onClick={() => void onInterrupt().catch(() => undefined)}
+									type="button"
+								>
 									<Stop aria-hidden="true" size={16} weight="fill" />
 								</button>
-							) : <button aria-label={t(running || queueing ? "Queue message" : "Send message")} className="composer-icon-button composer-send" disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput} type="submit">
-								<ArrowUp aria-hidden="true" size={19} weight="bold" />
-							</button>
-						)}
+							) : (
+								<button
+									aria-label={t(running || queueing ? "Queue message" : "Send message")}
+									className="composer-icon-button composer-send"
+									disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput}
+									type="submit"
+								>
+									<ArrowUp aria-hidden="true" size={19} weight="bold" />
+								</button>
+							))}
 					</div>
 				</div>
 			</form>

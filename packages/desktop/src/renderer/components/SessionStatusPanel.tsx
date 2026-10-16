@@ -80,9 +80,7 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 				</button>
 			</header>
 			{loading ? (
-				<p className="session-status-message" role="status">
-					{t("Loading session status…")}
-				</p>
+				<output className="status-paragraph session-status-message">{t("Loading session status…")}</output>
 			) : error ? (
 				<p className="session-status-message is-error" role="alert">
 					{t(error)}
@@ -91,7 +89,9 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 				<>
 					<p className="context-usage-summary">
 						<span>
-							{usagePercent == null ? "—" : t("{{percent}}% Full", { percent: Math.round(usagePercent * 10) / 10 })}
+							{usagePercent == null
+								? "—"
+								: t("{{percent}}% Full", { percent: Math.round(usagePercent * 10) / 10 })}
 						</span>
 						<span>{tokensLine ?? "—"}</span>
 					</p>
@@ -141,18 +141,38 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 						<div className="context-usage-cache-heading">
 							<span>{t("Cache hit rate")}</span>
 							<small>{t("Latest completed request")}</small>
-							<span className="context-usage-cache-info" onMouseEnter={() => setCacheInfoHovered(true)} onMouseLeave={() => setCacheInfoHovered(false)}>
-								<button type="button" aria-label={t("About cache hit rate")} aria-describedby={cacheInfoId}
-									onFocus={() => setCacheInfoOpen(true)} onBlur={() => setCacheInfoOpen(false)} onClick={() => setCacheInfoOpen(true)}
-									onKeyDown={(event) => { if (event.key === "Escape" && (cacheInfoOpen || cacheInfoHovered)) { event.stopPropagation(); setCacheInfoOpen(false); setCacheInfoHovered(false); } }}>
+							<span className="context-usage-cache-info">
+								<button
+									type="button"
+									aria-label={t("About cache hit rate")}
+									aria-describedby={cacheInfoId}
+									onMouseEnter={() => setCacheInfoHovered(true)}
+									onMouseLeave={() => setCacheInfoHovered(false)}
+									onFocus={() => setCacheInfoOpen(true)}
+									onBlur={() => setCacheInfoOpen(false)}
+									onClick={() => setCacheInfoOpen(true)}
+									onKeyDown={(event) => {
+										if (event.key === "Escape" && (cacheInfoOpen || cacheInfoHovered)) {
+											event.stopPropagation();
+											setCacheInfoOpen(false);
+											setCacheInfoHovered(false);
+										}
+									}}
+								>
 									<Info aria-hidden="true" size={13} />
 								</button>
 								<p id={cacheInfoId} role="tooltip" hidden={!cacheInfoOpen && !cacheInfoHovered}>
-									{t(cacheHitPercent === null ? "Cache usage not reported for a completed request on this model." : "Cached input / total input for one model request; output tokens are excluded.")}
+									{t(
+										cacheHitPercent === null
+											? "Cache usage not reported for a completed request on this model."
+											: "Cached input / total input for one model request; output tokens are excluded.",
+									)}
 								</p>
 							</span>
 						</div>
-						<span className="context-usage-cache-value">{cacheHitPercent === null ? "—" : `${cacheHitPercent}%`}</span>
+						<span className="context-usage-cache-value">
+							{cacheHitPercent === null ? "—" : `${cacheHitPercent}%`}
+						</span>
 					</div>
 				</>
 			) : null}

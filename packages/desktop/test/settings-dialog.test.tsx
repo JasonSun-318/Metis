@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
 
-import type {
-	ModelSettingsView,
-	UsageRangeDays,
-	UsageSummaryView,
-	WebSearchSettingsView,
-} from "@metis/app-protocol";
+import type { ModelSettingsView, UsageRangeDays, UsageSummaryView, WebSearchSettingsView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,15 +23,31 @@ const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
 	vision: null,
 	defaultThinkingSelection: "high",
-	providers: [{
-		provider: "openai",
-		name: "OpenAI",
-		builtin: true,
-		baseUrl: null,
-		api: null,
-		auth: { configured: true, source: "stored", label: "••••1234" },
-		models: [{ provider: "openai", modelId: "gpt-5", name: "GPT-5", contextWindow: 400_000, maxOutputTokens: 128_000, reasoning: true, thinkingLevels: ["off", "minimal", "low", "medium", "high"], reasoningMode: null, reasoningSource: null, imageInput: true, custom: false }],
-	}],
+	providers: [
+		{
+			provider: "openai",
+			name: "OpenAI",
+			builtin: true,
+			baseUrl: null,
+			api: null,
+			auth: { configured: true, source: "stored", label: "••••1234" },
+			models: [
+				{
+					provider: "openai",
+					modelId: "gpt-5",
+					name: "GPT-5",
+					contextWindow: 400_000,
+					maxOutputTokens: 128_000,
+					reasoning: true,
+					thinkingLevels: ["off", "minimal", "low", "medium", "high"],
+					reasoningMode: null,
+					reasoningSource: null,
+					imageInput: true,
+					custom: false,
+				},
+			],
+		},
+	],
 	loadError: null,
 };
 
@@ -68,7 +79,22 @@ function usage(rangeDays: UsageRangeDays): UsageSummaryView {
 		cacheReadTokens: 0,
 		cacheWriteTokens: 0,
 	}));
-	return { generatedAt: "2026-08-08T12:00:00.000Z", rangeDays, totalTokens: 100, inputTokens: 60, outputTokens: 40, cacheReadTokens: 0, cacheWriteTokens: 0, chatTokens: 20, codeTokens: 80, sessionCount: 2, chatSessionCount: 1, codeSessionCount: 1, daily, topModels: [{ provider: "openai", modelId: "gpt-5", totalTokens: 100 }] };
+	return {
+		generatedAt: "2026-08-08T12:00:00.000Z",
+		rangeDays,
+		totalTokens: 100,
+		inputTokens: 60,
+		outputTokens: 40,
+		cacheReadTokens: 0,
+		cacheWriteTokens: 0,
+		chatTokens: 20,
+		codeTokens: 80,
+		sessionCount: 2,
+		chatSessionCount: 1,
+		codeSessionCount: 1,
+		daily,
+		topModels: [{ provider: "openai", modelId: "gpt-5", totalTokens: 100 }],
+	};
 }
 
 async function flush() {
@@ -76,7 +102,9 @@ async function flush() {
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
+	const match = [...container.querySelectorAll("button")].find(
+		(candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+	);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
 }
@@ -107,32 +135,66 @@ const memorySettings = {
 };
 
 describe("SettingsDialog", () => {
- it("protects an unsaved personalization draft and keeps navigation focus", async () => {
-  const api = { getProfile: vi.fn().mockResolvedValue(profileSummary), getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }), getPersonalization: vi.fn().mockResolvedValue({ instructions: "" }), updatePersonalization: vi.fn().mockRejectedValue(new Error("offline")), getMemorySettings: vi.fn().mockResolvedValue(memorySettings), getModelSettings: vi.fn().mockResolvedValue({ defaultModel: null, vision: null, defaultThinkingSelection: "off", providers: [], loadError: null }), listMemoryNotes: vi.fn().mockResolvedValue({ notes: [] }), listMemoryHistory: vi.fn().mockResolvedValue({ entries: [] }), undoMemoryChange: vi.fn() } as unknown as MetisDesktopApi;
-  const container = document.createElement("div"); document.body.append(container);
-  const root = createRoot(container); const onClose = vi.fn();
-  await act(async () => root.render(<SettingsDialog api={api} generalPreferences={generalPreferences} onClose={onClose} onGeneralPreferencesChange={() => undefined} onThemeChange={() => undefined} serverReady theme="dark" closeDelayMs={0} />));
-  await act(async () => { button(container, "Personalization").focus(); button(container, "Personalization").click(); });
-  await flush();
-  expect(document.activeElement).toBe(button(container, "Personalization"));
-  act(() => setValue(container.querySelector("textarea")!, "Keep this draft"));
-  act(() => button(container, "Memory").click());
-  expect(container.textContent).toContain("Unsaved changes");
-  act(() => button(container, "Keep editing").click());
-  expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
-  await act(async () => button(container, "Save instructions").click());
-  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
-  expect(onClose).not.toHaveBeenCalled();
-  expect(container.textContent).toContain("Unsaved changes");
-  act(() => button(container, "Keep editing").click());
-  expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
-  act(() => button(container, "Memory").click());
-  act(() => button(container, "Discard changes").click());
-  await flush();
-  expect(container.querySelector(".memory-page")).not.toBeNull();
-  expect(container.querySelector(".personalization-page")).toBeNull();
-  await act(async () => root.unmount());
- });
+	it("protects an unsaved personalization draft and keeps navigation focus", async () => {
+		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+			getPersonalization: vi.fn().mockResolvedValue({ instructions: "" }),
+			updatePersonalization: vi.fn().mockRejectedValue(new Error("offline")),
+			getMemorySettings: vi.fn().mockResolvedValue(memorySettings),
+			getModelSettings: vi.fn().mockResolvedValue({
+				defaultModel: null,
+				vision: null,
+				defaultThinkingSelection: "off",
+				providers: [],
+				loadError: null,
+			}),
+			listMemoryNotes: vi.fn().mockResolvedValue({ notes: [] }),
+			listMemoryHistory: vi.fn().mockResolvedValue({ entries: [] }),
+			undoMemoryChange: vi.fn(),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onClose = vi.fn();
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={onClose}
+					onGeneralPreferencesChange={() => undefined}
+					onThemeChange={() => undefined}
+					serverReady
+					theme="dark"
+					closeDelayMs={0}
+				/>,
+			),
+		);
+		await act(async () => {
+			button(container, "Personalization").focus();
+			button(container, "Personalization").click();
+		});
+		await flush();
+		expect(document.activeElement).toBe(button(container, "Personalization"));
+		act(() => setValue(container.querySelector("textarea")!, "Keep this draft"));
+		act(() => button(container, "Memory").click());
+		expect(container.textContent).toContain("Unsaved changes");
+		act(() => button(container, "Keep editing").click());
+		expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
+		await act(async () => button(container, "Save instructions").click());
+		act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		expect(onClose).not.toHaveBeenCalled();
+		expect(container.textContent).toContain("Unsaved changes");
+		act(() => button(container, "Keep editing").click());
+		expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
+		act(() => button(container, "Memory").click());
+		act(() => button(container, "Discard changes").click());
+		await flush();
+		expect(container.querySelector(".memory-page")).not.toBeNull();
+		expect(container.querySelector(".personalization-page")).toBeNull();
+		await act(async () => root.unmount());
+	});
 
 	it("keeps only the active page mounted and closes with Escape", async () => {
 		const listBrowserProfiles = vi.fn().mockResolvedValue([]);
@@ -162,17 +224,19 @@ describe("SettingsDialog", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<SettingsDialog
-				api={api}
-				generalPreferences={generalPreferences}
-				onClose={onClose}
-				onGeneralPreferencesChange={onGeneralPreferencesChange}
-				onThemeChange={onThemeChange}
-				serverReady
-				theme="dark"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={onClose}
+					onGeneralPreferencesChange={onGeneralPreferencesChange}
+					onThemeChange={onThemeChange}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
 		await flush();
 		expect(api.getProfile).toHaveBeenCalledTimes(1);
 		expect(api.getUsage).not.toHaveBeenCalled();
@@ -202,7 +266,9 @@ describe("SettingsDialog", () => {
 		await act(async () => button(container, "Default reasoning").click());
 		const settingsDialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
 		expect(settingsDialog.querySelector(".menu-select-popover")).not.toBeNull();
-		await act(async () => settingsDialog.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click());
+		await act(async () =>
+			settingsDialog.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click(),
+		);
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
 		expect(onClose).not.toHaveBeenCalled();
 		expect(container.querySelector(".model-provider-dialog")).toBeNull();
@@ -221,17 +287,19 @@ describe("SettingsDialog", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<SettingsDialog
-				api={api}
-				generalPreferences={generalPreferences}
-				onClose={vi.fn()}
-				onGeneralPreferencesChange={vi.fn()}
-				onThemeChange={vi.fn()}
-				serverReady
-				theme="dark"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={vi.fn()}
+					onGeneralPreferencesChange={vi.fn()}
+					onThemeChange={vi.fn()}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
 		await flush();
 		expect(getPermissionAutoSettings).not.toHaveBeenCalled();
 		await act(async () => button(container, "Permissions").click());
@@ -255,17 +323,19 @@ describe("SettingsDialog", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<SettingsDialog
-				api={api}
-				generalPreferences={generalPreferences}
-				onClose={onClose}
-				onGeneralPreferencesChange={onGeneralPreferencesChange}
-				onThemeChange={onThemeChange}
-				serverReady
-				theme="dark"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={onClose}
+					onGeneralPreferencesChange={onGeneralPreferencesChange}
+					onThemeChange={onThemeChange}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
 		await flush();
 		await act(async () => button(container, "General").click());
 		await flush();
@@ -289,8 +359,9 @@ describe("SettingsDialog", () => {
 		const contentFontSize = button(container, "内容字号");
 		expect(contentFontSize.closest(".settings-section")?.querySelector("h3")?.textContent).toBe("排版与字体");
 		await act(async () => contentFontSize.click());
-		const twentyPixels = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((option) => option.textContent?.trim() === "20 px")!;
+		const twentyPixels = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(option) => option.textContent?.trim() === "20 px",
+		)!;
 		await act(async () => twentyPixels.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, contentFontSize: "20px" });
 		await act(async () => root.unmount());
@@ -310,17 +381,19 @@ describe("SettingsDialog", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<SettingsDialog
-				api={api}
-				generalPreferences={generalPreferences}
-				onClose={vi.fn()}
-				onGeneralPreferencesChange={vi.fn()}
-				onThemeChange={vi.fn()}
-				serverReady
-				theme="dark"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={vi.fn()}
+					onGeneralPreferencesChange={vi.fn()}
+					onThemeChange={vi.fn()}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
 		expect(getPersonalization).not.toHaveBeenCalled();
 		await act(async () => button(container, "Personalization").click());
 		await flush();
@@ -331,7 +404,7 @@ describe("SettingsDialog", () => {
 		await act(async () => button(container, "Save instructions").click());
 		await flush();
 		expect(updatePersonalization).toHaveBeenCalledWith({ instructions: "Be concise." });
-		expect(container.querySelector('[role="status"]')?.textContent).toContain("Saved");
+		expect(container.querySelector('output, [role="status"]')?.textContent).toContain("Saved");
 
 		await act(async () => setValue(textarea, "😀".repeat(16_385)));
 		expect(button(container, "Save instructions").disabled).toBe(true);
@@ -345,39 +418,58 @@ describe("SettingsDialog", () => {
 		const presetText = [...container.querySelectorAll(".personalization-preset-chip")]
 			.map((node) => node.textContent ?? "")
 			.join(" ");
-		expect(presetText).not.toMatch(/[⚡🔍💻🌐🛡️]/u);
+		expect(presetText).not.toMatch(/⚡|🔍|💻|🌐|🛡/u);
 		await act(async () => root.unmount());
 	});
 });
 
 describe("ModelSettingsPanel", () => {
- it("keeps configured providers visible and searches the optional provider catalog", async () => {
-  const unconfigured = { ...modelSettings.providers[0]!, provider: "anthropic", name: "Anthropic", auth: { configured: false, source: "none" as const, label: null } };
-  const api = { getModelSettings: vi.fn().mockResolvedValue({ ...modelSettings, providers: [...modelSettings.providers, unconfigured] }) } as unknown as MetisDesktopApi;
-  const container = document.createElement("div"); document.body.append(container); const root = createRoot(container);
-  await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
-  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
-  expect(container.textContent).toContain("Specialized models");
-  act(() => button(container, "Browse providers").click());
-  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
-  act(() => setValue(container.querySelector('input[type="search"]')!, "no match"));
-  expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
-  expect(container.textContent).toContain("No providers match your search.");
-  act(() => setValue(container.querySelector('input[type="search"]')!, "anthropic"));
-  expect(container.querySelector(".model-provider-catalog")?.textContent).toContain("Anthropic");
-  await act(async () => root.unmount());
- });
+	it("keeps configured providers visible and searches the optional provider catalog", async () => {
+		const unconfigured = {
+			...modelSettings.providers[0]!,
+			provider: "anthropic",
+			name: "Anthropic",
+			auth: { configured: false, source: "none" as const, label: null },
+		};
+		const api = {
+			getModelSettings: vi
+				.fn()
+				.mockResolvedValue({ ...modelSettings, providers: [...modelSettings.providers, unconfigured] }),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(container.textContent).toContain("Specialized models");
+		act(() => button(container, "Browse providers").click());
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
+		act(() => setValue(container.querySelector('input[type="search"]')!, "no match"));
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(container.textContent).toContain("No providers match your search.");
+		act(() => setValue(container.querySelector('input[type="search"]')!, "anthropic"));
+		expect(container.querySelector(".model-provider-catalog")?.textContent).toContain("Anthropic");
+		await act(async () => root.unmount());
+	});
 
 	it("opens a built-in provider as a credential-first form", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const testModelConnection = vi.fn().mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 42 });
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection } as unknown as MetisDesktopApi;
+		const testModelConnection = vi
+			.fn()
+			.mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 42 });
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection,
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
-		expect(container.querySelector(".model-provider-intro")?.textContent).toContain("Manage your connected providers");
+		expect(container.querySelector(".model-provider-intro")?.textContent).toContain(
+			"Manage your connected providers",
+		);
 		expect(container.querySelector(".model-settings-page h2")?.textContent).not.toBe("Providers");
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
@@ -390,33 +482,47 @@ describe("ModelSettingsPanel", () => {
 		expect(editor.textContent).not.toContain("Protocol");
 		expect(editor.textContent).not.toContain("Custom models");
 		await act(async () => button(editor, "Use this model").click());
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({ mutation: { type: "set_defaults", model: { provider: "openai", modelId: "gpt-5" }, thinkingSelection: "high" } }));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: {
+					type: "set_defaults",
+					model: { provider: "openai", modelId: "gpt-5" },
+					thinkingSelection: "high",
+				},
+			}),
+		);
 		const credential = editor.querySelector<HTMLInputElement>('input[type="password"]')!;
 		await act(async () => {
 			setValue(credential, "updated-key");
 		});
 		await act(async () => button(editor, "Save API key").click());
 		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: {
-				type: "save_provider",
-				provider: "openai",
-				name: "OpenAI",
-				baseUrl: null,
-				api: null,
-				models: [],
-				credential: { action: "set", value: "updated-key" },
-			},
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: {
+					type: "save_provider",
+					provider: "openai",
+					name: "OpenAI",
+					baseUrl: null,
+					api: null,
+					models: [],
+					credential: { action: "set", value: "updated-key" },
+				},
+			}),
+		);
 		await act(async () => button(container, "Test connection").click());
 		await flush();
-		expect(testModelConnection).toHaveBeenCalledWith(expect.objectContaining({ provider: "openai", modelId: "gpt-5" }));
+		expect(testModelConnection).toHaveBeenCalledWith(
+			expect.objectContaining({ provider: "openai", modelId: "gpt-5" }),
+		);
 		expect(container.textContent).toContain("Connection succeeded · 42 ms");
 		await act(async () => button(container, "Clear credentials").click());
 		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: expect.objectContaining({ provider: "openai", credential: { action: "remove" } }),
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({ provider: "openai", credential: { action: "remove" } }),
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -433,40 +539,68 @@ describe("ModelSettingsPanel", () => {
 			}
 			return modelSettings;
 		});
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		const visionPanel = [...container.querySelectorAll(".model-service-panel")].find((panel) => panel.textContent?.includes("Vision model"));
+		const visionPanel = [...container.querySelectorAll(".model-service-panel")].find((panel) =>
+			panel.textContent?.includes("Vision model"),
+		);
 		expect(visionPanel?.textContent).toContain("Not configured");
 		await act(async () => {
 			[...visionPanel!.querySelectorAll("button")].find((item) => item.textContent?.includes("Configure"))?.click();
 		});
 		await flush();
 
-		await act(async () => setValue(document.querySelector<HTMLInputElement>('input[placeholder="My vision"]')!, "My vision"));
-		await act(async () => setValue(document.querySelector<HTMLInputElement>('input[placeholder="https://api.openai.com/v1"]')!, "https://api.openai.com/v1"));
-		await act(async () => setValue(document.querySelector<HTMLInputElement>('input[placeholder="gpt-4o"]')!, "gpt-4o"));
-		await act(async () => setValue(document.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"));
+		await act(async () =>
+			setValue(document.querySelector<HTMLInputElement>('input[placeholder="My vision"]')!, "My vision"),
+		);
+		await act(async () =>
+			setValue(
+				document.querySelector<HTMLInputElement>('input[placeholder="https://api.openai.com/v1"]')!,
+				"https://api.openai.com/v1",
+			),
+		);
+		await act(async () =>
+			setValue(document.querySelector<HTMLInputElement>('input[placeholder="gpt-4o"]')!, "gpt-4o"),
+		);
+		await act(async () =>
+			setValue(document.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"),
+		);
 		await act(async () => button(document.body as HTMLElement, "Save").click());
 		await flush();
 
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: expect.objectContaining({
-				type: "set_vision",
-				settings: { name: "My vision", baseUrl: "https://api.openai.com/v1", api: "openai-responses", modelId: "gpt-4o" },
-				credential: { action: "set", value: "sk-vision-key" },
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({
+					type: "set_vision",
+					settings: {
+						name: "My vision",
+						baseUrl: "https://api.openai.com/v1",
+						api: "openai-responses",
+						modelId: "gpt-4o",
+					},
+					credential: { action: "set", value: "sk-vision-key" },
+				}),
 			}),
-		}));
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("adds a custom provider with base URL, API format, key, and multiple models", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -481,7 +615,10 @@ describe("ModelSettingsPanel", () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "my-custom");
 		});
 		await act(async () => {
-			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.mycorp.dev/v1");
+			setValue(
+				container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!,
+				"https://api.mycorp.dev/v1",
+			);
 		});
 		await act(async () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-custom-key");
@@ -504,7 +641,8 @@ describe("ModelSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Generic reasoning: Low, medium, high"))?.click();
+				.find((item) => item.textContent?.includes("Generic reasoning: Low, medium, high"))
+				?.click();
 		});
 		// 添加第二行
 		await act(async () => button(container, "Add model").click());
@@ -520,27 +658,78 @@ describe("ModelSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Anthropic Messages"))?.click();
+				.find((item) => item.textContent?.includes("Anthropic Messages"))
+				?.click();
 		});
 		await flush();
 
 		await act(async () => button(container, "Save provider").click());
 		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: {
-				type: "save_provider",
-				provider: "my-custom",
-				name: "my-custom",
-				baseUrl: "https://api.mycorp.dev/v1",
-				api: "anthropic-messages",
-				models: [
-					{ modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoningMode: "generic", imageInput: false },
-					{ modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoningMode: "auto", imageInput: false },
-				],
-				credential: { action: "set", value: "sk-custom-key" },
-			},
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: {
+					type: "save_provider",
+					provider: "my-custom",
+					name: "my-custom",
+					baseUrl: "https://api.mycorp.dev/v1",
+					api: "anthropic-messages",
+					models: [
+						{
+							modelId: "my-model-a",
+							name: "My Model A",
+							contextWindow: 200000,
+							maxOutputTokens: 32000,
+							reasoningMode: "generic",
+							imageInput: false,
+						},
+						{
+							modelId: "my-model-b",
+							name: "My Model B",
+							contextWindow: 128000,
+							maxOutputTokens: 16384,
+							reasoningMode: "auto",
+							imageInput: false,
+						},
+					],
+					credential: { action: "set", value: "sk-custom-key" },
+				},
+			}),
+		);
 		await act(async () => root.unmount());
+	});
+
+	it("keeps model controls and their labels attached when a preceding model is removed", async () => {
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+			await flush();
+			await act(async () => button(container, "Add provider").click());
+			await act(async () => button(container, "Add model").click());
+			const [first, second] = container.querySelectorAll<HTMLElement>(".model-custom-model-row");
+			const input = second!.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!;
+			await act(async () => {
+				input.focus();
+				setValue(input, "kept-model");
+			});
+			await act(async () => button(first!, "Remove model").click());
+			expect(container.querySelector(".model-custom-model-row")).toBe(second);
+			expect(document.activeElement).toBe(input);
+			expect(input.value).toBe("kept-model");
+			const labels = [...container.querySelectorAll<HTMLLabelElement>("label[for]")];
+			expect(labels.length).toBeGreaterThan(0);
+			for (const label of labels) {
+				expect(label.control).toBeInstanceOf(HTMLButtonElement);
+				expect(label.control?.id).toBe(label.htmlFor);
+				expect(document.getElementById(label.htmlFor)).toBe(label.control);
+			}
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("edits and removes an existing custom provider with its saved values", async () => {
@@ -548,21 +737,51 @@ describe("ModelSettingsPanel", () => {
 			...modelSettings,
 			defaultModel: { provider: "my-custom", modelId: "my-model-a" },
 			defaultThinkingSelection: "high",
-			providers: [{
-				provider: "my-custom",
-				name: "My Custom",
-				builtin: false,
-				baseUrl: "https://api.mycorp.dev/v1",
-				api: "anthropic-messages",
-				auth: { configured: true, source: "stored", label: "••••1234" },
-				models: [
-					{ provider: "my-custom", modelId: "my-model-a", name: "My Model A", contextWindow: 200000, maxOutputTokens: 32000, reasoning: true, thinkingLevels: ["off", "low", "medium", "high"], reasoningMode: "generic", reasoningSource: "generic", imageInput: false, custom: true },
-					{ provider: "my-custom", modelId: "my-model-b", name: "My Model B", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, thinkingLevels: ["off"], reasoningMode: "auto", reasoningSource: "unrecognized", imageInput: false, custom: true },
-				],
-			}],
+			providers: [
+				{
+					provider: "my-custom",
+					name: "My Custom",
+					builtin: false,
+					baseUrl: "https://api.mycorp.dev/v1",
+					api: "anthropic-messages",
+					auth: { configured: true, source: "stored", label: "••••1234" },
+					models: [
+						{
+							provider: "my-custom",
+							modelId: "my-model-a",
+							name: "My Model A",
+							contextWindow: 200000,
+							maxOutputTokens: 32000,
+							reasoning: true,
+							thinkingLevels: ["off", "low", "medium", "high"],
+							reasoningMode: "generic",
+							reasoningSource: "generic",
+							imageInput: false,
+							custom: true,
+						},
+						{
+							provider: "my-custom",
+							modelId: "my-model-b",
+							name: "My Model B",
+							contextWindow: 128000,
+							maxOutputTokens: 16384,
+							reasoning: false,
+							thinkingLevels: ["off"],
+							reasoningMode: "auto",
+							reasoningSource: "unrecognized",
+							imageInput: false,
+							custom: true,
+						},
+					],
+				},
+			],
 		};
 		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(customSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(customSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -572,36 +791,50 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
 		await flush();
 		const editor = container.querySelector<HTMLElement>(".model-custom-provider-dialog")!;
-		expect(editor.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!.value)
-			.toBe("https://api.mycorp.dev/v1");
+		expect(editor.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!.value).toBe(
+			"https://api.mycorp.dev/v1",
+		);
 		expect(editor.textContent).toContain("My Model A");
 		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
 		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
 		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
-		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain("Generic reasoning: Low, medium, high");
+		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain(
+			"Generic reasoning: Low, medium, high",
+		);
 		expect(editor.textContent).toContain("not found for the selected API format");
 		expect(editor.querySelectorAll(".model-use-row .menu-select-value")[1]?.textContent).toBe("High");
 		await act(async () => button(editor, "Default reasoning").click());
-		expect([...editor.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent?.trim()))
-			.toEqual(["Off", "Low", "Medium", "High"]);
+		expect(
+			[...editor.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent?.trim()),
+		).toEqual(["Off", "Low", "Medium", "High"]);
 		await act(async () => editor.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click());
 		await act(async () => button(editor, "Use this model").click());
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: {
-				type: "set_defaults",
-				model: { provider: "my-custom", modelId: "my-model-a" },
-				thinkingSelection: "high",
-			},
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: {
+					type: "set_defaults",
+					model: { provider: "my-custom", modelId: "my-model-a" },
+					thinkingSelection: "high",
+				},
+			}),
+		);
 
 		// 改名后保存：显示名更新，provider id 与已有凭据保持不变；保存成功后 dialog 关闭
 		const nameInput = editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!;
-		await act(async () => { setValue(nameInput, "My Custom Renamed"); });
+		await act(async () => {
+			setValue(nameInput, "My Custom Renamed");
+		});
 		await act(async () => button(editor, "Save provider").click());
 		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: expect.objectContaining({ provider: "my-custom", name: "My Custom Renamed", credential: { action: "keep" } }),
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({
+					provider: "my-custom",
+					name: "My Custom Renamed",
+					credential: { action: "keep" },
+				}),
+			}),
+		);
 		expect(container.querySelector(".model-custom-provider-dialog")).toBeNull();
 
 		// 重新打开并移除
@@ -609,15 +842,21 @@ describe("ModelSettingsPanel", () => {
 		await flush();
 		await act(async () => button(container, "Remove provider").click());
 		await flush();
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: { type: "remove_provider", provider: "my-custom" },
-		}));
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: { type: "remove_provider", provider: "my-custom" },
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("marks a custom model as image-capable when the Image input toggle is checked", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -626,25 +865,38 @@ describe("ModelSettingsPanel", () => {
 
 		await act(async () => button(container, "Add provider").click());
 		await flush();
-		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "vision-provider"));
-		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.vision.dev/v1"));
-		await act(async () => setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"));
+		await act(async () =>
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "vision-provider"),
+		);
+		await act(async () =>
+			setValue(
+				container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!,
+				"https://api.vision.dev/v1",
+			),
+		);
+		await act(async () =>
+			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-vision-key"),
+		);
 		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
-		await act(async () => setValue(firstRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "vision-model"));
+		await act(async () =>
+			setValue(firstRow.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!, "vision-model"),
+		);
 		// 默认未勾选
-		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(false);
+		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(
+			false,
+		);
 		await act(async () => firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
 		await act(async () => button(container, "Save provider").click());
 		await flush();
 
-		expect(updateModelSettings).toHaveBeenCalledWith(expect.objectContaining({
-			mutation: expect.objectContaining({
-				provider: "vision-provider",
-				models: [
-					expect.objectContaining({ modelId: "vision-model", imageInput: true }),
-				],
+		expect(updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({
+					provider: "vision-provider",
+					models: [expect.objectContaining({ modelId: "vision-model", imageInput: true })],
+				}),
 			}),
-		}));
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -652,20 +904,38 @@ describe("ModelSettingsPanel", () => {
 		const customSettings: ModelSettingsView = {
 			...modelSettings,
 			defaultModel: null,
-			providers: [{
-				provider: "vision-provider",
-				name: "Vision Provider",
-				builtin: false,
-				baseUrl: "https://api.vision.dev/v1",
-				api: "openai-responses",
-				auth: { configured: true, source: "stored", label: "••••1234" },
-				models: [
-					{ provider: "vision-provider", modelId: "vision-model", name: "Vision Model", contextWindow: 128000, maxOutputTokens: 16384, reasoning: false, thinkingLevels: ["off"], reasoningMode: "off", reasoningSource: "off", imageInput: true, custom: true },
-				],
-			}],
+			providers: [
+				{
+					provider: "vision-provider",
+					name: "Vision Provider",
+					builtin: false,
+					baseUrl: "https://api.vision.dev/v1",
+					api: "openai-responses",
+					auth: { configured: true, source: "stored", label: "••••1234" },
+					models: [
+						{
+							provider: "vision-provider",
+							modelId: "vision-model",
+							name: "Vision Model",
+							contextWindow: 128000,
+							maxOutputTokens: 16384,
+							reasoning: false,
+							thinkingLevels: ["off"],
+							reasoningMode: "off",
+							reasoningSource: "off",
+							imageInput: true,
+							custom: true,
+						},
+					],
+				},
+			],
 		};
 		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(customSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(customSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -675,13 +945,19 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
 		await flush();
 		const firstRow = container.querySelectorAll<HTMLElement>(".model-custom-model-row")[0]!;
-		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(true);
+		expect((firstRow.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement).checked).toBe(
+			true,
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("rejects a custom provider name that collides with an existing provider", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -694,7 +970,10 @@ describe("ModelSettingsPanel", () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "openai");
 		});
 		await act(async () => {
-			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.example.com/v1");
+			setValue(
+				container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!,
+				"https://api.example.com/v1",
+			);
 		});
 		await act(async () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-key");
@@ -708,7 +987,11 @@ describe("ModelSettingsPanel", () => {
 
 	it("rejects duplicate model IDs within a custom provider", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -719,7 +1002,10 @@ describe("ModelSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "my-dup");
-			setValue(container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!, "https://api.example.com/v1");
+			setValue(
+				container.querySelector<HTMLInputElement>('input[placeholder="https://api.example.com/v1"]')!,
+				"https://api.example.com/v1",
+			);
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="sk-…"]')!, "sk-key");
 		});
 		await act(async () => button(container, "Add model").click());
@@ -738,7 +1024,11 @@ describe("ModelSettingsPanel", () => {
 
 	it("opens only one provider dialog at a time", async () => {
 		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
-		const api = { getModelSettings: vi.fn().mockResolvedValue(modelSettings), updateModelSettings, testModelConnection: vi.fn() } as unknown as MetisDesktopApi;
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			updateModelSettings,
+			testModelConnection: vi.fn(),
+		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -799,7 +1089,8 @@ describe("WebSearchSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Tavily"))?.click();
+				.find((item) => item.textContent?.includes("Tavily"))
+				?.click();
 		});
 		await flush();
 		expect(input.placeholder.length).toBeGreaterThanOrEqual(24);
@@ -809,7 +1100,13 @@ describe("WebSearchSettingsPanel", () => {
 
 	it("loads and saves web search settings with an API key", async () => {
 		const getWebSearchSettings = vi.fn().mockResolvedValue(webSearchSettings);
-		const updateWebSearchSettings = vi.fn().mockResolvedValue({ ...webSearchSettings, enabled: true, provider: "serpapi", authConfigured: true, authSource: "stored" });
+		const updateWebSearchSettings = vi.fn().mockResolvedValue({
+			...webSearchSettings,
+			enabled: true,
+			provider: "serpapi",
+			authConfigured: true,
+			authSource: "stored",
+		});
 		const api = { getWebSearchSettings, updateWebSearchSettings } as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -825,7 +1122,8 @@ describe("WebSearchSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("SerpApi"))?.click();
+				.find((item) => item.textContent?.includes("SerpApi"))
+				?.click();
 		});
 		await flush();
 		await act(async () => {
@@ -866,8 +1164,12 @@ describe("WebSearchSettingsPanel", () => {
 	});
 
 	it("clears the unsaved API key draft when switching providers", async () => {
-		const getWebSearchSettings = vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
-		const updateWebSearchSettings = vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
+		const getWebSearchSettings = vi
+			.fn()
+			.mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
+		const updateWebSearchSettings = vi
+			.fn()
+			.mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false });
 		const api = { getWebSearchSettings, updateWebSearchSettings } as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -884,7 +1186,8 @@ describe("WebSearchSettingsPanel", () => {
 		await flush();
 		await act(async () => {
 			[...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Tavily"))?.click();
+				.find((item) => item.textContent?.includes("Tavily"))
+				?.click();
 		});
 		await flush();
 		expect(container.querySelector<HTMLInputElement>('input[type="password"]')!.value).toBe("");
@@ -908,18 +1211,20 @@ describe("WebSearchSettingsPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<SettingsDialog
-				api={api}
-				closeDelayMs={160}
-				generalPreferences={generalPreferences}
-				onClose={onClose}
-				onGeneralPreferencesChange={vi.fn()}
-				onThemeChange={vi.fn()}
-				serverReady
-				theme="dark"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					closeDelayMs={160}
+					generalPreferences={generalPreferences}
+					onClose={onClose}
+					onGeneralPreferencesChange={vi.fn()}
+					onThemeChange={vi.fn()}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
 		await flush();
 		const backdrop = container.querySelector(".settings-backdrop")!;
 		expect(backdrop.classList.contains("is-closing")).toBe(false);

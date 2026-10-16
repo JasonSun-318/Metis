@@ -1,0 +1,9 @@
+{
+	"extends": "./tsconfig.renderer.json",
+	"compilerOptions": {
+		"allowJs": true,
+		"types": ["node", "electron", "react", "react-dom"]
+	},
+	"include": ["test/**/*.ts", "test/**/*.tsx", "e2e/**/*.tsx", "src/types/**/*.d.ts", "src/renderer/**/*.d.ts"],
+	"exclude": ["node_modules", ".webpack", "out"]
+}

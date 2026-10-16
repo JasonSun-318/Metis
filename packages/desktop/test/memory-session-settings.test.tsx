@@ -95,6 +95,7 @@ it("keeps saved flags on failure, allows retry, and sends the use-memory exclusi
 		const checkbox = container.querySelector<HTMLInputElement>(".memory-session-row input")!;
 		await act(async () => checkbox.click());
 		expect(checkbox.checked).toBe(true);
+		expect(checkbox.getAttribute("aria-checked")).toBe("true");
 		expect(container.querySelector('[role="alert"]')).not.toBeNull();
 		await act(async () => checkbox.click());
 		expect(api.setSessionMemoryFlags).toHaveBeenLastCalledWith(
@@ -102,6 +103,7 @@ it("keeps saved flags on failure, allows retry, and sends the use-memory exclusi
 		);
 		expect(api.setSessionMemoryFlags.mock.calls.at(-1)![0]).not.toHaveProperty("contributeMemory");
 		expect(checkbox.checked).toBe(false);
+		expect(checkbox.getAttribute("aria-checked")).toBe("false");
 		await act(async () => root.render(<MemorySessionSettings api={api} serverReady={false} />));
 		expect(container.querySelector(".memory-session-row")).toBeNull();
 	} finally {

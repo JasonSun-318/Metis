@@ -29,7 +29,10 @@ afterEach(async () => {
 	vi.useRealTimers();
 });
 
-function mount(goal: SessionGoalView | null, handlers?: Partial<{ onPause: () => void; onResume: () => void; onClear: () => void }>) {
+function mount(
+	goal: SessionGoalView | null,
+	handlers?: Partial<{ onPause: () => void; onResume: () => void; onClear: () => void }>,
+) {
 	const onPause = handlers?.onPause ?? vi.fn();
 	const onResume = handlers?.onResume ?? vi.fn();
 	const onClear = handlers?.onClear ?? vi.fn();
@@ -104,7 +107,7 @@ describe("GoalBar", () => {
 			act(() => root.unmount());
 			roots = roots.filter((candidate) => candidate !== root);
 			container.remove();
-			onResume.mockClear();
+			vi.mocked(onResume).mockClear();
 		}
 	});
 });

@@ -1,13 +1,12 @@
 // @vitest-environment jsdom
 
-import type { ItemView, SessionSnapshot, AgentSummaryView } from "@metis/app-protocol";
+import type { AgentSummaryView, ItemView, SessionSnapshot } from "@metis/app-protocol";
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentTreePanel } from "../src/renderer/components/AgentTreePanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
-import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
 const CREATED_AT = "2026-08-06T00:00:00.000Z";
@@ -51,12 +50,7 @@ function agentSummary(
 	};
 }
 
-function archivedAgent(
-	agentId: string,
-	taskText: string,
-	finalMessage?: string,
-	name = taskText,
-): AgentSummaryView {
+function archivedAgent(agentId: string, taskText: string, finalMessage?: string, name = taskText): AgentSummaryView {
 	return agentSummary(agentId, taskText, "done", name, {
 		archived: true,
 		currentTask: undefined,
@@ -76,6 +70,8 @@ function snapshot(sessionId: string, agents: readonly AgentSummaryView[], cursor
 			state: "running",
 			archived: false,
 			unread: false,
+			useMemory: true,
+			contributeMemory: true,
 		},
 		collaborationMode: "default",
 		permissionPreset: "ask",
@@ -94,7 +90,7 @@ function snapshot(sessionId: string, agents: readonly AgentSummaryView[], cursor
 		thinkingSelection: "off",
 		actualThinkingLevel: "off",
 		availableThinkingSelections: ["off"],
-		agents,
+		agents: [...agents],
 		serverEpoch: EPOCH,
 		cursor,
 	};
@@ -123,22 +119,31 @@ function deferred<T>() {
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
-		candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+	const match = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+		(candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
 	);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
 }
 
 async function flush() {
-	await act(async () => { await Promise.resolve(); });
+	await act(async () => {
+		await Promise.resolve();
+	});
 }
 
-function renderPanel(store: AppStore, api: MetisDesktopApi, onError = vi.fn(), sessionId = "parent") {
+function renderPanel(
+	store: AppStore,
+	api: Parameters<typeof AgentTreePanel>[0]["api"],
+	onError = vi.fn(),
+	sessionId = "parent",
+) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
-	void act(() => root.render(<AgentTreePanel api={api} onError={onError} sessionId={sessionId} store={store} visible />));
+	void act(() =>
+		root.render(<AgentTreePanel api={api} onError={onError} sessionId={sessionId} store={store} visible />),
+	);
 	return { container, onError, root };
 }
 
@@ -151,7 +156,7 @@ function api(readAgentItems = vi.fn().mockResolvedValue({ items: [], nextBeforeI
 			agent: agentSummary(agentId, "task", "done", agentId, { archived }),
 		})),
 		deleteAgent: vi.fn().mockImplementation(async ({ agentId }) => ({ agentId, status: "deleted" })),
-	} as unknown as MetisDesktopApi;
+	} satisfies Parameters<typeof AgentTreePanel>[0]["api"];
 }
 
 let roots: Root[] = [];
@@ -177,9 +182,9 @@ afterEach(async () => {
 describe("AgentTreePanel", () => {
 	it("uses the assigned name instead of the first task text as the visible title", async () => {
 		const store = new AppStore();
-		store.applySnapshot(snapshot("parent", [
-			agentSummary("child", "你能创建 skill 吗", "running", "Skill creation"),
-		]));
+		store.applySnapshot(
+			snapshot("parent", [agentSummary("child", "你能创建 skill 吗", "running", "Skill creation")]),
+		);
 		const rendered = renderPanel(store, api());
 		roots.push(rendered.root);
 
@@ -194,11 +199,13 @@ describe("AgentTreePanel", () => {
 
 	it("groups real summaries, uses one elapsed timer, and omits excluded controls", async () => {
 		const store = new AppStore();
-		store.applySnapshot(snapshot("parent", [
-			agentSummary("running-1", "Analyze code", "running"),
-			agentSummary("queued-1", "Find tests", "queued"),
-			agentSummary("done-1", "Summarize project", "done"),
-		]));
+		store.applySnapshot(
+			snapshot("parent", [
+				agentSummary("running-1", "Analyze code", "running"),
+				agentSummary("queued-1", "Find tests", "queued"),
+				agentSummary("done-1", "Summarize project", "done"),
+			]),
+		);
 		const interval = vi.spyOn(window, "setInterval");
 		const rendered = renderPanel(store, api());
 		roots.push(rendered.root);
@@ -243,7 +250,8 @@ describe("AgentTreePanel", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
 		const first = deferred<{ items: ItemView[]; nextBeforeItemId: null }>();
-		const read = vi.fn()
+		const read = vi
+			.fn()
 			.mockReturnValueOnce(first.promise)
 			.mockResolvedValueOnce({ items: [item("child", "latest")], nextBeforeItemId: null });
 		const rendered = renderPanel(store, api(read));
@@ -277,7 +285,7 @@ describe("AgentTreePanel", () => {
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
 		const stop = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptAgent = vi.fn().mockReturnValue(stop.promise) as MetisDesktopApi["interruptAgent"];
+		desktopApi.interruptAgent = vi.fn().mockReturnValue(stop.promise);
 		const rendered = renderPanel(store, desktopApi);
 		roots.push(rendered.root);
 		const card = button(rendered.container, "View transcript for Analyze code");
@@ -291,11 +299,13 @@ describe("AgentTreePanel", () => {
 		await act(async () => stopButton.click());
 		expect(desktopApi.interruptAgent).toHaveBeenCalledTimes(1);
 		expect(stopButton.disabled).toBe(true);
-		expect(desktopApi.interruptAgent).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "parent",
-			agentId: "child",
-			requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
-		}));
+		expect(desktopApi.interruptAgent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "parent",
+				agentId: "child",
+				requestId: expect.stringMatching(/^[0-9a-f-]{36}$/i),
+			}),
+		);
 		await act(async () => button(rendered.container, "Back to agents").click());
 		expect(document.activeElement?.getAttribute("aria-label")).toBe("View transcript for Analyze code");
 		await act(async () => stop.resolve({}));
@@ -442,7 +452,7 @@ describe("AgentTreePanel", () => {
 	});
 
 	it("hides the task selector for single-task agents and truncates long option labels", async () => {
-		const longSummary = "这是一段非常长的任务摘要".repeat(19) + "唯一结尾哨兵唯一结尾";
+		const longSummary = `${"这是一段非常长的任务摘要".repeat(19)}唯一结尾哨兵唯一结尾`;
 		const longTask = { ...taskSummary(longSummary, "done"), taskId: "tasklong1" };
 		const firstTask = { ...taskSummary("First task", "done"), taskId: "task-old" };
 		const store = new AppStore();
@@ -534,14 +544,8 @@ describe("AgentTreePanel", () => {
 		roots.push(rendered.root);
 		await act(async () => button(rendered.container, "Load older agents").click());
 		await flush();
-		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(
-			1,
-			expect.objectContaining({ afterAgentId: "agent-99" }),
-		);
-		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(
-			2,
-			expect.objectContaining({ afterAgentId: "agent-98" }),
-		);
+		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(1, expect.objectContaining({ afterAgentId: "agent-99" }));
+		expect(desktopApi.listAgents).toHaveBeenNthCalledWith(2, expect.objectContaining({ afterAgentId: "agent-98" }));
 		expect(rendered.onError).not.toHaveBeenCalled();
 		expect(button(rendered.container, "View transcript for Agent 100")).toBeTruthy();
 	});
@@ -599,7 +603,7 @@ describe("AgentTreePanel", () => {
 		await act(async () => button(rendered.container, "View transcript for Paged worker").click());
 		expect(store.getSnapshot().agentTranscript.agentId).toBe("paged");
 
-		await act(async () => store.applySnapshot(snapshot("parent", [firstPage[0]!] , 10)));
+		await act(async () => store.applySnapshot(snapshot("parent", [firstPage[0]!], 10)));
 		await flush();
 		expect(rendered.container.textContent).not.toContain("Paged worker");
 		expect(store.getSnapshot().agentTranscript.agentId).toBeNull();
@@ -627,9 +631,7 @@ describe("AgentTreePanel", () => {
 				serverEpoch: EPOCH,
 				fromCursor: 1,
 				toCursor: 1,
-				events: [
-					{ type: "agent/deleted", sessionId: "parent", agentId: "paged", deletedAgentIds: ["paged"] },
-				],
+				events: [{ type: "agent/deleted", sessionId: "parent", agentId: "paged", deletedAgentIds: ["paged"] }],
 			});
 		});
 		await flush();
@@ -640,7 +642,7 @@ describe("AgentTreePanel", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "done", "Disposable")]));
 		const desktopApi = api();
-		desktopApi.deleteAgent = vi.fn().mockRejectedValue(new Error("delete failed")) as MetisDesktopApi["deleteAgent"];
+		desktopApi.deleteAgent = vi.fn().mockRejectedValue(new Error("delete failed"));
 		const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
 		const rendered = renderPanel(store, desktopApi);
 		roots.push(rendered.root);
@@ -708,7 +710,7 @@ describe("AgentTreePanel", () => {
 		const archived = deferred<{ agent: AgentSummaryView }>();
 		const desktopApi = api();
 		desktopApi.listAgents = vi.fn().mockReturnValue(listed.promise);
-		desktopApi.archiveAgent = vi.fn().mockReturnValue(archived.promise) as MetisDesktopApi["archiveAgent"];
+		desktopApi.archiveAgent = vi.fn().mockReturnValue(archived.promise);
 		const onError = vi.fn();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -741,16 +743,18 @@ describe("AgentTreePanel", () => {
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
 		const pending = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptAgent = vi.fn().mockReturnValue(pending.promise) as MetisDesktopApi["interruptAgent"];
+		desktopApi.interruptAgent = vi.fn().mockReturnValue(pending.promise);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		roots.push(root);
-		await act(async () => root.render(
-			<StrictMode>
-				<AgentTreePanel api={desktopApi} onError={vi.fn()} sessionId="parent" store={store} visible />
-			</StrictMode>,
-		));
+		await act(async () =>
+			root.render(
+				<StrictMode>
+					<AgentTreePanel api={desktopApi} onError={vi.fn()} sessionId="parent" store={store} visible />
+				</StrictMode>,
+			),
+		);
 		const stopButton = button(container, "Stop Analyze code");
 		await act(async () => stopButton.click());
 		expect(stopButton.disabled).toBe(true);
@@ -763,7 +767,7 @@ describe("AgentTreePanel", () => {
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
 		const pending = deferred<unknown>();
 		const desktopApi = api();
-		desktopApi.interruptAgent = vi.fn().mockReturnValue(pending.promise) as MetisDesktopApi["interruptAgent"];
+		desktopApi.interruptAgent = vi.fn().mockReturnValue(pending.promise);
 		const rendered = renderPanel(store, desktopApi);
 		await act(async () => button(rendered.container, "Stop Analyze code").click());
 		await act(async () => rendered.root.unmount());
@@ -775,7 +779,10 @@ describe("AgentTreePanel", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "done")]));
 		store.selectAgentTranscript("parent", "child");
-		store.replaceAgentItems("parent", "child", null, { items: [item("child", "retained activity")], nextBeforeItemId: null });
+		store.replaceAgentItems("parent", "child", null, {
+			items: [item("child", "retained activity")],
+			nextBeforeItemId: null,
+		});
 		const rendered = renderPanel(store, api(vi.fn().mockRejectedValue(new Error("read failed"))));
 		roots.push(rendered.root);
 		await flush();
@@ -788,7 +795,7 @@ describe("AgentTreePanel", () => {
 		const store = new AppStore();
 		store.applySnapshot(snapshot("parent", [agentSummary("child", "Analyze code", "running")]));
 		const desktopApi = api();
-		desktopApi.interruptAgent = vi.fn().mockRejectedValue(new Error("stop failed")) as MetisDesktopApi["interruptAgent"];
+		desktopApi.interruptAgent = vi.fn().mockRejectedValue(new Error("stop failed"));
 		const rendered = renderPanel(store, desktopApi);
 		roots.push(rendered.root);
 		await act(async () => button(rendered.container, "Stop Analyze code").click());
@@ -813,12 +820,14 @@ describe("AgentTreePanel", () => {
 			},
 		};
 		const store = new AppStore();
-		store.applySnapshot(snapshot("parent", [
-			agentSummary("child", "检查代理", "done", "检查员", {
-				tasks: [localizedTask],
-				latestTask: localizedTask,
-			}),
-		]));
+		store.applySnapshot(
+			snapshot("parent", [
+				agentSummary("child", "检查代理", "done", "检查员", {
+					tasks: [localizedTask],
+					latestTask: localizedTask,
+				}),
+			]),
+		);
 		const rendered = renderPanel(store, api());
 		roots.push(rendered.root);
 		await flush();

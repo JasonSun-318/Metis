@@ -1,7 +1,7 @@
 import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AskUserPanel, type AskUserDraft } from "./AskUserPanel.tsx";
+import { type AskUserDraft, AskUserPanel } from "./AskUserPanel.tsx";
 import { PermissionApprovalPanel } from "./PermissionApprovalPanel.tsx";
 
 interface InteractionHostProps {
@@ -18,7 +18,13 @@ function approvalErrorMessage(cause: unknown): string {
 	return message;
 }
 
-export function InteractionHost({ interaction, onRespond, askUserDrafts, disabled, sandboxHealth = "healthy" }: InteractionHostProps) {
+export function InteractionHost({
+	interaction,
+	onRespond,
+	askUserDrafts,
+	disabled,
+	sandboxHealth = "healthy",
+}: InteractionHostProps) {
 	const { t } = useTranslation();
 	const firstControl = useRef<HTMLElement>(null);
 	const [input, setInput] = useState("");
@@ -31,6 +37,7 @@ export function InteractionHost({ interaction, onRespond, askUserDrafts, disable
 		queueMicrotask(() => firstControl.current?.focus());
 		return () => previous?.focus();
 	}, [interaction]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(interaction?.interactionId): A different interaction starts with fresh busy and error state.
 	useEffect(() => {
 		setBusy(false);
 		setError(null);
@@ -38,16 +45,12 @@ export function InteractionHost({ interaction, onRespond, askUserDrafts, disable
 
 	if (!interaction) return null;
 	if (interaction.kind === "ask_user") {
-		return <AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={askUserDrafts} disabled={disabled} />;
+		return (
+			<AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={askUserDrafts} disabled={disabled} />
+		);
 	}
 	if (interaction.kind === "session_permission_approval") {
-		return (
-			<PermissionApprovalPanel
-				interaction={interaction}
-				onRespond={onRespond}
-				sandboxHealth={sandboxHealth}
-			/>
-		);
+		return <PermissionApprovalPanel interaction={interaction} onRespond={onRespond} sandboxHealth={sandboxHealth} />;
 	}
 	const respond = async (response: InteractionResponseInput) => {
 		setBusy(true);
@@ -67,59 +70,87 @@ export function InteractionHost({ interaction, onRespond, askUserDrafts, disable
 
 	return (
 		<div className="modal-backdrop">
-		<section aria-describedby="interaction-message" aria-labelledby="interaction-title" aria-modal="true" className="interaction-dialog" role="dialog">
-			<h2 id="interaction-title">{t(interaction.title)}</h2>
-			<p id="interaction-message">{t(interaction.message)}</p>
-			{(interaction.kind === "project_trust" || interaction.kind === "select") && (
-				<div className="interaction-options">
-					{interaction.choices.map((choice, index) => (
+			<section
+				aria-describedby="interaction-message"
+				aria-labelledby="interaction-title"
+				aria-modal="true"
+				className="interaction-dialog"
+				role="dialog"
+			>
+				<h2 id="interaction-title">{t(interaction.title)}</h2>
+				<p id="interaction-message">{t(interaction.message)}</p>
+				{(interaction.kind === "project_trust" || interaction.kind === "select") && (
+					<div className="interaction-options">
+						{interaction.choices.map((choice, index) => (
+							<button
+								disabled={busy}
+								key={choice.id}
+								onClick={() =>
+									void respond({
+										interactionId: interaction.interactionId,
+										kind: interaction.kind,
+										choiceId: choice.id,
+									})
+								}
+								ref={index === 0 ? (firstControl as React.RefObject<HTMLButtonElement>) : undefined}
+								type="button"
+							>
+								<strong>{t(choice.label)}</strong>
+								{choice.description && <span>{t(choice.description)}</span>}
+							</button>
+						))}
+					</div>
+				)}
+				{interaction.kind === "confirm" && (
+					<div className="interaction-actions">
 						<button
+							className="button-secondary"
 							disabled={busy}
-							key={choice.id}
-							onClick={() => void respond({ interactionId: interaction.interactionId, kind: interaction.kind, choiceId: choice.id })}
-							ref={index === 0 ? (firstControl as React.RefObject<HTMLButtonElement>) : undefined}
+							onClick={() =>
+								void respond({ interactionId: interaction.interactionId, kind: "confirm", confirmed: false })
+							}
+							ref={firstControl as React.RefObject<HTMLButtonElement>}
 							type="button"
 						>
-							<strong>{t(choice.label)}</strong>
-							{choice.description && <span>{t(choice.description)}</span>}
+							{interaction.cancelLabel ? t(interaction.cancelLabel) : t("Cancel")}
 						</button>
-					))}
-				</div>
-			)}
-			{interaction.kind === "confirm" && (
-				<div className="interaction-actions">
-					<button
-						className="button-secondary"
-						disabled={busy}
-						onClick={() => void respond({ interactionId: interaction.interactionId, kind: "confirm", confirmed: false })}
-						ref={firstControl as React.RefObject<HTMLButtonElement>}
-						type="button"
-					>
-						{interaction.cancelLabel ? t(interaction.cancelLabel) : t("Cancel")}
-					</button>
-					<button disabled={busy} onClick={() => void respond({ interactionId: interaction.interactionId, kind: "confirm", confirmed: true })} type="button">
-						{interaction.confirmLabel ? t(interaction.confirmLabel) : t("Confirm")}
-					</button>
-				</div>
-			)}
-			{interaction.kind === "input" && (
-				<form onSubmit={submitInput}>
-					<label className="sr-only" htmlFor="interaction-input">{t("Response")}</label>
-					<input
-						autoComplete="off"
-						disabled={busy}
-						id="interaction-input"
-						onChange={(event) => setInput(event.target.value)}
-						placeholder={interaction.placeholder ? t(interaction.placeholder) : undefined}
-						ref={firstControl as React.RefObject<HTMLInputElement>}
-						type={interaction.secret ? "password" : "text"}
-						value={input}
-					/>
-					<button disabled={busy} type="submit">{t("Submit")}</button>
-				</form>
-			)}
-			{error && <p className="error-copy" role="alert">{t(error)}</p>}
-		</section>
-	</div>
+						<button
+							disabled={busy}
+							onClick={() =>
+								void respond({ interactionId: interaction.interactionId, kind: "confirm", confirmed: true })
+							}
+							type="button"
+						>
+							{interaction.confirmLabel ? t(interaction.confirmLabel) : t("Confirm")}
+						</button>
+					</div>
+				)}
+				{interaction.kind === "input" && (
+					<form onSubmit={submitInput}>
+						<label className="sr-only" htmlFor="interaction-input">
+							{t("Response")}
+						</label>
+						<input
+							autoComplete="off"
+							disabled={busy}
+							id="interaction-input"
+							onChange={(event) => setInput(event.target.value)}
+							placeholder={interaction.placeholder ? t(interaction.placeholder) : undefined}
+							ref={firstControl as React.RefObject<HTMLInputElement>}
+							type={interaction.secret ? "password" : "text"}
+							value={input}
+						/>
+						<button disabled={busy} type="submit">
+							{t("Submit")}
+						</button>
+					</form>
+				)}
+				{error && (
+					<p className="error-copy" role="alert">
+						{t(error)}
+					</p>
+				)}
+			</section>
+		</div>
 	);
 }

@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { StrictMode, act } from "react";
+import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../src/renderer/components/BrowserPanel.tsx";
@@ -49,7 +49,17 @@ function renderPanel(api: MetisDesktopApi) {
 	void act(() =>
 		root.render(
 			<StrictMode>
-				<BrowserPanel api={api} sessionId="11111111-1111-4111-8111-111111111111" browserId="browser-1" controlState="idle" onError={vi.fn()} onProfileImported={vi.fn()} onState={vi.fn()} profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }} visible />
+				<BrowserPanel
+					api={api}
+					sessionId="11111111-1111-4111-8111-111111111111"
+					browserId="browser-1"
+					controlState="idle"
+					onError={vi.fn()}
+					onProfileImported={vi.fn()}
+					onState={vi.fn()}
+					profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }}
+					visible
+				/>
 			</StrictMode>,
 		),
 	);
@@ -57,10 +67,12 @@ function renderPanel(api: MetisDesktopApi) {
 	return { container };
 }
 
-function browserPanelApi(overrides: {
-	controlBrowserDownload?: MetisDesktopApi["controlBrowserDownload"];
-	downloads?: readonly DesktopDownloadItem[];
-} = {}): { api: MetisDesktopApi; emitBrowserEvent: (event: DesktopBrowserEvent) => void } {
+function browserPanelApi(
+	overrides: {
+		controlBrowserDownload?: MetisDesktopApi["controlBrowserDownload"];
+		downloads?: readonly DesktopDownloadItem[];
+	} = {},
+): { api: MetisDesktopApi; emitBrowserEvent: (event: DesktopBrowserEvent) => void } {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
 	const state: DesktopBrowserState = {
 		browserId: "browser-1",
@@ -107,12 +119,14 @@ describe("BrowserPanel downloads", () => {
 		const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
 		expect(css).toMatch(/\.browser-download-badge\s*\{[^}]*background:\s*var\(--link\)/u);
 		expect(css).toMatch(/\.browser-download-badge\s*\{[^}]*animation:\s*session-running-pulse/u);
-		expect(css).toMatch(/prefers-reduced-motion:\s*reduce[^]*\.browser-download-badge\s*\{[^}]*animation:\s*none/u);
+		expect(css).toMatch(
+			/prefers-reduced-motion:\s*reduce[\s\S]*\.browser-download-badge\s*\{[^}]*animation:\s*none/u,
+		);
 	});
 
 	it("lists downloads with per-state actions and forwards controls", async () => {
 		const controlBrowserDownload = vi.fn().mockResolvedValue(undefined);
-		const { api, emitBrowserEvent } = browserPanelApi({
+		const { api } = browserPanelApi({
 			controlBrowserDownload,
 			downloads: [
 				download({ downloadId: "d-active" }),

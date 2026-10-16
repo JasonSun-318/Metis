@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFileSelections } from "./FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./FileSelectionPopover.tsx";
@@ -13,11 +13,15 @@ export function useDocumentSelection(file: UniversalPreviewTarget | undefined, b
 	const [selected, setSelected] = useState<{ draft: DraftFileSelection; anchor: Range | HTMLElement } | null>(null);
 	const [error, setError] = useState("");
 	const locked = useRef(false);
-	const clear = () => {
+	const clear = useCallback(() => {
 		locked.current = false;
 		setSelected(null);
 		setError("");
-	};
+	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.fileId): New bytes or file identity invalidates the previous document selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.relativePath): New bytes or file identity invalidates the previous document selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.sessionId): New bytes or file identity invalidates the previous document selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): New bytes or file identity invalidates the previous document selection.
 	useEffect(clear, [bytes, file?.sessionId, file?.relativePath, file?.fileId]);
 	useEffect(() => {
 		if (!selected || selected.anchor instanceof Range) return;

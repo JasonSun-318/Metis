@@ -1,5 +1,5 @@
 import { X } from "@phosphor-icons/react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 /** Native modal: isolates focus/background, restores the trigger, and guards unsaved edits. */

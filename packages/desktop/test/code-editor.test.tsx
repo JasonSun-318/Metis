@@ -24,15 +24,17 @@ describe("CodeEditor", () => {
 		const onChange = vi.fn();
 		const onSave = vi.fn();
 
-		await act(async () => root.render(
-			<CodeEditor
-				label="Edit App.tsx"
-				onChange={onChange}
-				onSave={onSave}
-				path="src/App.tsx"
-				value="export const App = 1;"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<CodeEditor
+					label="Edit App.tsx"
+					onChange={onChange}
+					onSave={onSave}
+					path="src/App.tsx"
+					value="export const App = 1;"
+				/>,
+			),
+		);
 		const view = mountedView(container);
 		act(() => view.dispatch({ changes: { from: 19, to: 20, insert: "2" } }));
 		expect(onChange).toHaveBeenLastCalledWith("export const App = 2;");
@@ -42,15 +44,17 @@ describe("CodeEditor", () => {
 		expect(save.defaultPrevented).toBe(true);
 		expect(onSave).toHaveBeenCalledTimes(1);
 
-		await act(async () => root.render(
-			<CodeEditor
-				label="Edit App.tsx"
-				onChange={onChange}
-				onSave={onSave}
-				path="src/App.tsx"
-				value="external value"
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<CodeEditor
+					label="Edit App.tsx"
+					onChange={onChange}
+					onSave={onSave}
+					path="src/App.tsx"
+					value="external value"
+				/>,
+			),
+		);
 		expect(view.state.doc.toString()).toBe("external value");
 		await act(async () => root.unmount());
 	});
@@ -60,9 +64,17 @@ describe("CodeEditor", () => {
 			const container = document.createElement("div");
 			document.body.append(container);
 			const root = createRoot(container);
-			await act(async () => root.render(
-				<CodeEditor label={`Edit ${path}`} onChange={() => undefined} onSave={() => undefined} path={path} value="value" />,
-			));
+			await act(async () =>
+				root.render(
+					<CodeEditor
+						label={`Edit ${path}`}
+						onChange={() => undefined}
+						onSave={() => undefined}
+						path={path}
+						value="value"
+					/>,
+				),
+			);
 			expect(mountedView(container).state.doc.toString()).toBe("value");
 			await act(async () => root.unmount());
 		}
@@ -73,15 +85,17 @@ describe("CodeEditor", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<CodeEditor
-				label="Edit palette.ts"
-				onChange={() => undefined}
-				onSave={() => undefined}
-				path="palette.ts"
-				value={'export const answer = "visible";'}
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<CodeEditor
+					label="Edit palette.ts"
+					onChange={() => undefined}
+					onSave={() => undefined}
+					path="palette.ts"
+					value={'export const answer = "visible";'}
+				/>,
+			),
+		);
 		const spans = [...container.querySelectorAll<HTMLElement>(".cm-line span")];
 		const token = (text: string) => spans.find((span) => span.textContent === text)!;
 		expect(getComputedStyle(token("export")).color).toBe("var(--syntax-keyword)");

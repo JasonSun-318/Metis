@@ -1,6 +1,15 @@
 import type { ClientResult } from "@metis/app-protocol";
 import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
-import { type CSSProperties, type FormEvent, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+	type CSSProperties,
+	type FormEvent,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useRef,
+	useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { actionMenuPosition } from "./action-menu-position.ts";
@@ -32,9 +41,11 @@ function errorMessage(cause: unknown): string {
 }
 
 function focusable(dialog: HTMLElement): HTMLElement[] {
-	return Array.from(dialog.querySelectorAll<HTMLElement>(
-		"button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
-	));
+	return Array.from(
+		dialog.querySelectorAll<HTMLElement>(
+			"button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
+		),
+	);
 }
 
 export function DialogFrame({
@@ -59,9 +70,13 @@ export function DialogFrame({
 	const canCancel = useRef(cancellable);
 	cancel.current = onCancel;
 	canCancel.current = cancellable;
-	const handleKeyDown = (event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault" | "target">) => {
+	const handleKeyDown = useCallback((event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault" | "target">) => {
 		if (event.key === "Escape" && canCancel.current) {
-			if (dialog.current?.querySelector('[aria-haspopup][aria-expanded="true"]') || (event.target instanceof Element && event.target.closest('[role="listbox"], [role="menu"]'))) return;
+			if (
+				dialog.current?.querySelector('[aria-haspopup][aria-expanded="true"]') ||
+				(event.target instanceof Element && event.target.closest('[role="listbox"], [role="menu"]'))
+			)
+				return;
 			event.preventDefault();
 			cancel.current();
 			return;
@@ -78,14 +93,14 @@ export function DialogFrame({
 			event.preventDefault();
 			first.focus();
 		}
-	};
+	}, []);
 	useLayoutEffect(() => {
 		queueMicrotask(() => initialFocus.current?.focus());
 		const node = dialog.current;
 		const onKeyDown = (event: KeyboardEvent) => handleKeyDown(event);
 		node?.addEventListener("keydown", onKeyDown);
 		return () => node?.removeEventListener("keydown", onKeyDown);
-	}, [initialFocus]);
+	}, [handleKeyDown, initialFocus]);
 	return (
 		<div
 			className="modal-backdrop"
@@ -135,14 +150,18 @@ export function ProjectActions({
 	const restoreMenuItem = useRef<"rename" | "delete" | null>(null);
 	const previewGeneration = useRef(0);
 	const updateMenuPosition = useCallback(() => {
-		if (actionsButton.current) setMenuPosition(actionMenuPosition(actionsButton.current.getBoundingClientRect(), 146, 3));
+		if (actionsButton.current)
+			setMenuPosition(actionMenuPosition(actionsButton.current.getBoundingClientRect(), 146, 3));
 	}, []);
 
-	const closeMenu = (restoreFocus = true) => {
-		setMenuOpen(false);
-		onDeactivate();
-		if (restoreFocus) queueMicrotask(() => actionsButton.current?.focus());
-	};
+	const closeMenu = useCallback(
+		(restoreFocus = true) => {
+			setMenuOpen(false);
+			onDeactivate();
+			if (restoreFocus) queueMicrotask(() => actionsButton.current?.focus());
+		},
+		[onDeactivate],
+	);
 	const cancelDialog = () => {
 		if (dialog === "delete" && deleteState.status === "deleting") return;
 		previewGeneration.current += 1;
@@ -199,7 +218,7 @@ export function ProjectActions({
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [menuOpen, updateMenuPosition]);
+	}, [closeMenu, menuOpen, updateMenuPosition]);
 	useLayoutEffect(() => {
 		if (menuOpen) updateMenuPosition();
 	}, [menuOpen, updateMenuPosition]);
@@ -267,153 +286,196 @@ export function ProjectActions({
 					<NotePencil aria-hidden="true" size={15} />
 				</button>
 			</div>
-			{menuOpen && createPortal((
-				<div
-					aria-label={t("{{name}} project actions", { name: group.name })}
-					className="project-action-menu"
-					onKeyDown={(event) => {
-						if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-						event.preventDefault();
-						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-						if (items.length === 0) return;
-						const current = items.indexOf(document.activeElement as HTMLButtonElement);
-						const target = event.key === "Home"
-							? items[0]
-							: event.key === "End"
-								? items.at(-1)
-								: event.key === "ArrowDown"
-									? items[(current + 1) % items.length]
-									: items[(current <= 0 ? items.length : current) - 1];
-						target?.focus();
-					}}
-					ref={menu}
-					role="menu"
-					style={menuPosition}
-				>
-					<button
-						onClick={() => {
-							setAlias(group.name);
-							setMenuOpen(false);
-							setDialog("rename");
+			{menuOpen &&
+				createPortal(
+					<div
+						aria-label={t("{{name}} project actions", { name: group.name })}
+						className="project-action-menu"
+						onKeyDown={(event) => {
+							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+							event.preventDefault();
+							const items = Array.from(
+								event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+							);
+							if (items.length === 0) return;
+							const current = items.indexOf(document.activeElement as HTMLButtonElement);
+							const target =
+								event.key === "Home"
+									? items[0]
+									: event.key === "End"
+										? items.at(-1)
+										: event.key === "ArrowDown"
+											? items[(current + 1) % items.length]
+											: items[(current <= 0 ? items.length : current) - 1];
+							target?.focus();
 						}}
-						ref={renameMenuItem}
-						role="menuitem"
-						type="button"
+						ref={menu}
+						role="menu"
+						style={menuPosition}
 					>
-						<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
-					</button>
-					<button
-						onClick={() => {
-							onPin(group, !group.pinned);
-							closeMenu();
-						}}
-						role="menuitem"
-						type="button"
-					>
-						{group.pinned
-							? <PushPin aria-hidden="true" size={15} />
-							: <PushPinSimple aria-hidden="true" size={15} />}
-						{t(group.pinned ? "Unpin" : "Pin")}
-					</button>
-					<button
-						className="project-delete-menu-item"
-						disabled={busy}
-						onClick={() => {
-							setMenuOpen(false);
-							setDialog("delete");
-							loadDeletePreview();
-						}}
-						ref={deleteMenuItem}
-						role="menuitem"
-						type="button"
-					>
-						<Trash aria-hidden="true" size={15} /> {t("Delete")}
-					</button>
-				</div>
-			), document.body)}
-			{dialog === "rename" && createPortal((
-				<DialogFrame
-					cancellable
-					descriptionId="project-rename-description"
-					initialFocus={renameInput}
-					onCancel={cancelDialog}
-					titleId="project-rename-title"
-				>
-					<h2 id="project-rename-title">{t("Rename project")}</h2>
-					<p id="project-rename-description">{t("Change this Desktop display name only. The folder and sessions are unchanged.")}</p>
-					<form onSubmit={submitRename}>
-						<label htmlFor="project-rename-input">{t("Display name")}</label>
-						<input
-							autoComplete="off"
-							id="project-rename-input"
-							onChange={(event) => setAlias([...event.target.value].slice(0, 80).join(""))}
-							ref={renameInput}
-							value={alias}
-						/>
-						<div className="project-dialog-actions">
-							<button className="button-secondary" onClick={cancelDialog} type="button">{t("Cancel")}</button>
-							<button type="submit">{t("Rename")}</button>
-						</div>
-					</form>
-				</DialogFrame>
-			), document.body)}
-			{dialog === "delete" && createPortal((
-				<DialogFrame
-					cancellable={deleteState.status !== "deleting"}
-					descriptionId="project-delete-description"
-					initialFocus={deleteInitialFocus}
-					onCancel={cancelDialog}
-					titleId="project-delete-title"
-				>
-					<h2 id="project-delete-title">{t("Delete {{mode}} project?", { mode: modeLabel })}</h2>
-					<div id="project-delete-description">
-						{deleteState.status === "loading" && <p role="status">{t("Checking project data…")}</p>}
-						{deleteState.status === "error" && (
-							<><p role="alert">{t(deleteState.message)}</p><p>{t("No data was removed. Retry to load a fresh preview.")}</p></>
-						)}
-						{(deleteState.status === "ready" || deleteState.status === "deleting") && (
-							<>
-								<p>{t("{{count}} {{mode}} sessions, including archived sessions, will move to Trash.", { count: deleteState.preview.sessionCount, mode: modeLabel })}</p>
-								<p className="project-delete-path"><code>{deleteState.preview.cwd}</code></p>
-								<ul>
-									<li>{t("Matching attachments, images, tool outputs, Subagents, document work, and {{mode}} project memory are included.", { mode: modeLabel })}</li>
-									<li>{t("The {{mode}} project and its memory are unchanged.", { mode: otherModeLabel })}</li>
-									<li>{t("The source folder and its files are unchanged.")}</li>
-									<li>{t("Schedules are not deleted automatically.")}</li>
-								</ul>
-								{deleteState.preview.blockingScheduleCount > 0 && (
-									<p className="project-delete-blocker" role="alert">
-										{t("{{count}} fixed-workspace schedules block deletion. Delete them from the schedule workflow first.", { count: deleteState.preview.blockingScheduleCount })}
-									</p>
-								)}
-								{deleteState.status === "deleting" && <p role="status">{t("Moving project data to Trash…")}</p>}
-							</>
-						)}
-					</div>
-					<div className="project-dialog-actions">
 						<button
-							className="button-secondary"
-							disabled={deleteState.status === "deleting"}
-							onClick={cancelDialog}
-							ref={deleteInitialFocus}
+							onClick={() => {
+								setAlias(group.name);
+								setMenuOpen(false);
+								setDialog("rename");
+							}}
+							ref={renameMenuItem}
+							role="menuitem"
 							type="button"
 						>
-							{t("Cancel")}
+							<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
 						</button>
-						{deleteState.status === "error" && <button onClick={loadDeletePreview} type="button">{t("Retry")}</button>}
-						{(deleteState.status === "ready" || deleteState.status === "deleting") && (
+						<button
+							onClick={() => {
+								onPin(group, !group.pinned);
+								closeMenu();
+							}}
+							role="menuitem"
+							type="button"
+						>
+							{group.pinned ? (
+								<PushPin aria-hidden="true" size={15} />
+							) : (
+								<PushPinSimple aria-hidden="true" size={15} />
+							)}
+							{t(group.pinned ? "Unpin" : "Pin")}
+						</button>
+						<button
+							className="project-delete-menu-item"
+							disabled={busy}
+							onClick={() => {
+								setMenuOpen(false);
+								setDialog("delete");
+								loadDeletePreview();
+							}}
+							ref={deleteMenuItem}
+							role="menuitem"
+							type="button"
+						>
+							<Trash aria-hidden="true" size={15} /> {t("Delete")}
+						</button>
+					</div>,
+					document.body,
+				)}
+			{dialog === "rename" &&
+				createPortal(
+					<DialogFrame
+						cancellable
+						descriptionId="project-rename-description"
+						initialFocus={renameInput}
+						onCancel={cancelDialog}
+						titleId="project-rename-title"
+					>
+						<h2 id="project-rename-title">{t("Rename project")}</h2>
+						<p id="project-rename-description">
+							{t("Change this Desktop display name only. The folder and sessions are unchanged.")}
+						</p>
+						<form onSubmit={submitRename}>
+							<label htmlFor="project-rename-input">{t("Display name")}</label>
+							<input
+								autoComplete="off"
+								id="project-rename-input"
+								onChange={(event) => setAlias([...event.target.value].slice(0, 80).join(""))}
+								ref={renameInput}
+								value={alias}
+							/>
+							<div className="project-dialog-actions">
+								<button className="button-secondary" onClick={cancelDialog} type="button">
+									{t("Cancel")}
+								</button>
+								<button type="submit">{t("Rename")}</button>
+							</div>
+						</form>
+					</DialogFrame>,
+					document.body,
+				)}
+			{dialog === "delete" &&
+				createPortal(
+					<DialogFrame
+						cancellable={deleteState.status !== "deleting"}
+						descriptionId="project-delete-description"
+						initialFocus={deleteInitialFocus}
+						onCancel={cancelDialog}
+						titleId="project-delete-title"
+					>
+						<h2 id="project-delete-title">{t("Delete {{mode}} project?", { mode: modeLabel })}</h2>
+						<div id="project-delete-description">
+							{deleteState.status === "loading" && (
+								<output className="status-paragraph">{t("Checking project data…")}</output>
+							)}
+							{deleteState.status === "error" && (
+								<>
+									<p role="alert">{t(deleteState.message)}</p>
+									<p>{t("No data was removed. Retry to load a fresh preview.")}</p>
+								</>
+							)}
+							{(deleteState.status === "ready" || deleteState.status === "deleting") && (
+								<>
+									<p>
+										{t("{{count}} {{mode}} sessions, including archived sessions, will move to Trash.", {
+											count: deleteState.preview.sessionCount,
+											mode: modeLabel,
+										})}
+									</p>
+									<p className="project-delete-path">
+										<code>{deleteState.preview.cwd}</code>
+									</p>
+									<ul>
+										<li>
+											{t(
+												"Matching attachments, images, tool outputs, Subagents, document work, and {{mode}} project memory are included.",
+												{ mode: modeLabel },
+											)}
+										</li>
+										<li>
+											{t("The {{mode}} project and its memory are unchanged.", { mode: otherModeLabel })}
+										</li>
+										<li>{t("The source folder and its files are unchanged.")}</li>
+										<li>{t("Schedules are not deleted automatically.")}</li>
+									</ul>
+									{deleteState.preview.blockingScheduleCount > 0 && (
+										<p className="project-delete-blocker" role="alert">
+											{t(
+												"{{count}} fixed-workspace schedules block deletion. Delete them from the schedule workflow first.",
+												{ count: deleteState.preview.blockingScheduleCount },
+											)}
+										</p>
+									)}
+									{deleteState.status === "deleting" && (
+										<output className="status-paragraph">{t("Moving project data to Trash…")}</output>
+									)}
+								</>
+							)}
+						</div>
+						<div className="project-dialog-actions">
 							<button
-								className="project-delete-confirm"
-								disabled={deleteState.status === "deleting" || deleteState.preview.blockingScheduleCount > 0}
-								onClick={() => void confirmDelete()}
+								className="button-secondary"
+								disabled={deleteState.status === "deleting"}
+								onClick={cancelDialog}
+								ref={deleteInitialFocus}
 								type="button"
 							>
-								{t(deleteState.status === "deleting" ? "Deleting…" : "Move to Trash")}
+								{t("Cancel")}
 							</button>
-						)}
-					</div>
-				</DialogFrame>
-			), document.body)}
+							{deleteState.status === "error" && (
+								<button onClick={loadDeletePreview} type="button">
+									{t("Retry")}
+								</button>
+							)}
+							{(deleteState.status === "ready" || deleteState.status === "deleting") && (
+								<button
+									className="project-delete-confirm"
+									disabled={deleteState.status === "deleting" || deleteState.preview.blockingScheduleCount > 0}
+									onClick={() => void confirmDelete()}
+									type="button"
+								>
+									{t(deleteState.status === "deleting" ? "Deleting…" : "Move to Trash")}
+								</button>
+							)}
+						</div>
+					</DialogFrame>,
+					document.body,
+				)}
 		</div>
 	);
 }

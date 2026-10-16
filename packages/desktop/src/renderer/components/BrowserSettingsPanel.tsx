@@ -29,7 +29,11 @@ import { MenuSelect } from "./MenuSelect.tsx";
 
 type BrowserSettingsView = "overview" | "history" | "downloads";
 
-function HistoryClearDialog({ busy, onCancel, onConfirm }: {
+function HistoryClearDialog({
+	busy,
+	onCancel,
+	onConfirm,
+}: {
 	readonly busy: boolean;
 	readonly onCancel: () => void;
 	readonly onConfirm: () => void;
@@ -57,8 +61,16 @@ function HistoryClearDialog({ busy, onCancel, onConfirm }: {
 				<h2 id="browser-settings-clear-title">{t("Clear browsing history?")}</h2>
 				<p>{t("This permanently removes history from the selected Metis browser profile.")}</p>
 				<footer>
-					<button className="settings-secondary-button" disabled={busy} onClick={onCancel} type="button">{t("Cancel")}</button>
-					<button aria-label={t("Confirm clear browsing history")} className="settings-danger-button" disabled={busy} onClick={onConfirm} type="button">
+					<button className="settings-secondary-button" disabled={busy} onClick={onCancel} type="button">
+						{t("Cancel")}
+					</button>
+					<button
+						aria-label={t("Confirm clear browsing history")}
+						className="settings-danger-button"
+						disabled={busy}
+						onClick={onConfirm}
+						type="button"
+					>
 						{t(busy ? "Clearing…" : "Clear history")}
 					</button>
 				</footer>
@@ -67,43 +79,102 @@ function HistoryClearDialog({ busy, onCancel, onConfirm }: {
 	);
 }
 
-function DownloadRow({ download, onAction }: {
+function DownloadRow({
+	download,
+	onAction,
+}: {
 	readonly download: DesktopDownloadItem;
 	readonly onAction: (type: DesktopDownloadControlType, downloadId: string) => void;
 }) {
 	const { t } = useTranslation();
-	const percent = download.totalBytes > 0
-		? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100))
-		: null;
-	const size = download.totalBytes > 0
-		? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
-		: formatBrowserBytes(download.receivedBytes);
-	const state = download.state === "progressing"
-		? t("Downloading")
-		: download.state === "paused"
-			? t("Paused")
-			: download.state === "completed"
-				? t("Completed")
-				: download.state === "cancelled"
-					? t("Cancelled")
-					: t("Download failed");
+	const percent =
+		download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
+	const size =
+		download.totalBytes > 0
+			? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
+			: formatBrowserBytes(download.receivedBytes);
+	const state =
+		download.state === "progressing"
+			? t("Downloading")
+			: download.state === "paused"
+				? t("Paused")
+				: download.state === "completed"
+					? t("Completed")
+					: download.state === "cancelled"
+						? t("Cancelled")
+						: t("Download failed");
 	return (
 		<li className="browser-settings-download" data-download-state={download.state}>
 			<div className="browser-settings-download-copy">
 				<strong title={download.filename}>{download.filename}</strong>
-				<span>{size} · {state}{percent !== null && download.state === "progressing" ? ` · ${percent}%` : ""}</span>
+				<span>
+					{size} · {state}
+					{percent !== null && download.state === "progressing" ? ` · ${percent}%` : ""}
+				</span>
 			</div>
 			<div className="browser-settings-download-actions">
-				{download.state === "progressing" && <button aria-label={t("Pause download")} onClick={() => onAction("pause", download.downloadId)} type="button"><Pause aria-hidden="true" size={14} /></button>}
-				{download.state === "paused" && <button aria-label={t("Resume download")} onClick={() => onAction("resume", download.downloadId)} type="button"><Play aria-hidden="true" size={14} /></button>}
-				{(download.state === "progressing" || download.state === "paused") && <button aria-label={t("Cancel download")} onClick={() => onAction("cancel", download.downloadId)} type="button"><X aria-hidden="true" size={14} /></button>}
-				{download.state === "completed" && <button aria-label={t("Open file")} onClick={() => onAction("open", download.downloadId)} type="button"><ArrowSquareOut aria-hidden="true" size={14} /></button>}
-				{download.state === "completed" && <button aria-label={t("Show in folder")} onClick={() => onAction("reveal", download.downloadId)} type="button"><FolderOpen aria-hidden="true" size={14} /></button>}
-				{(download.state === "interrupted" || download.state === "cancelled") && <button aria-label={t("Retry download")} onClick={() => onAction("retry", download.downloadId)} type="button"><ArrowCounterClockwise aria-hidden="true" size={14} /></button>}
-				<button aria-label={t("Remove from list")} onClick={() => onAction("remove", download.downloadId)} type="button"><Trash aria-hidden="true" size={14} /></button>
+				{download.state === "progressing" && (
+					<button
+						aria-label={t("Pause download")}
+						onClick={() => onAction("pause", download.downloadId)}
+						type="button"
+					>
+						<Pause aria-hidden="true" size={14} />
+					</button>
+				)}
+				{download.state === "paused" && (
+					<button
+						aria-label={t("Resume download")}
+						onClick={() => onAction("resume", download.downloadId)}
+						type="button"
+					>
+						<Play aria-hidden="true" size={14} />
+					</button>
+				)}
+				{(download.state === "progressing" || download.state === "paused") && (
+					<button
+						aria-label={t("Cancel download")}
+						onClick={() => onAction("cancel", download.downloadId)}
+						type="button"
+					>
+						<X aria-hidden="true" size={14} />
+					</button>
+				)}
+				{download.state === "completed" && (
+					<button aria-label={t("Open file")} onClick={() => onAction("open", download.downloadId)} type="button">
+						<ArrowSquareOut aria-hidden="true" size={14} />
+					</button>
+				)}
+				{download.state === "completed" && (
+					<button
+						aria-label={t("Show in folder")}
+						onClick={() => onAction("reveal", download.downloadId)}
+						type="button"
+					>
+						<FolderOpen aria-hidden="true" size={14} />
+					</button>
+				)}
+				{(download.state === "interrupted" || download.state === "cancelled") && (
+					<button
+						aria-label={t("Retry download")}
+						onClick={() => onAction("retry", download.downloadId)}
+						type="button"
+					>
+						<ArrowCounterClockwise aria-hidden="true" size={14} />
+					</button>
+				)}
+				<button
+					aria-label={t("Remove from list")}
+					onClick={() => onAction("remove", download.downloadId)}
+					type="button"
+				>
+					<Trash aria-hidden="true" size={14} />
+				</button>
 			</div>
 			{(download.state === "progressing" || download.state === "paused") && (
-				<div aria-hidden="true" className="browser-settings-download-progress"><i style={{ width: `${percent ?? 0}%` }} /></div>
+				<div aria-hidden="true" className="browser-settings-download-progress">
+					<i style={{ width: `${percent ?? 0}%` }} />
+				</div>
 			)}
 		</li>
 	);
@@ -129,7 +200,9 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [clearing, setClearing] = useState(false);
 
-	useEffect(() => { selectedProfileIdRef.current = selectedProfileId; }, [selectedProfileId]);
+	useEffect(() => {
+		selectedProfileIdRef.current = selectedProfileId;
+	}, [selectedProfileId]);
 
 	useEffect(() => {
 		let active = true;
@@ -158,23 +231,42 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			if (event.type === "downloads") setDownloads(event.downloads);
 			if (event.type === "history" && event.profileId === selectedProfileIdRef.current) setHistory(event.entries);
 		});
-		return () => { active = false; unsubscribe(); };
+		return () => {
+			active = false;
+			unsubscribe();
+		};
 	}, [api, t]);
 
 	useEffect(() => {
 		let active = true;
 		setHistoryLoading(true);
 		void api.listBrowserHistory({ profileId: selectedProfileId }).then(
-			(entries) => { if (active) { setHistory(entries); setHistoryLoading(false); } },
-			() => { if (active) { setError(t("Browser settings could not be loaded")); setHistoryLoading(false); } },
+			(entries) => {
+				if (active) {
+					setHistory(entries);
+					setHistoryLoading(false);
+				}
+			},
+			() => {
+				if (active) {
+					setError(t("Browser settings could not be loaded"));
+					setHistoryLoading(false);
+				}
+			},
 		);
-		return () => { active = false; };
+		return () => {
+			active = false;
+		};
 	}, [api, selectedProfileId, t]);
 
 	const filteredHistory = useMemo(() => {
 		const query = search.trim().toLocaleLowerCase();
-		return query === "" ? history : history.filter((entry) =>
-			entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query));
+		return query === ""
+			? history
+			: history.filter(
+					(entry) =>
+						entry.title.toLocaleLowerCase().includes(query) || entry.url.toLocaleLowerCase().includes(query),
+				);
 	}, [history, search]);
 	const groupedHistory = useMemo(() => {
 		const formatter = new Intl.DateTimeFormat(i18n.language, { year: "numeric", month: "long", day: "numeric" });
@@ -188,9 +280,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 
 	useEffect(() => {
 		if (search.trim() !== "" || groupedHistory.length === 0) return;
-		setExpandedHistoryDates((current) =>
-			current.size === 0 ? new Set([groupedHistory[0]![0]]) : current,
-		);
+		setExpandedHistoryDates((current) => (current.size === 0 ? new Set([groupedHistory[0]![0]]) : current));
 	}, [groupedHistory, search]);
 
 	const refreshProfiles = async (result?: DesktopBrowserImportResult) => {
@@ -238,13 +328,29 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 		return (
 			<div className="settings-page browser-settings-page browser-settings-detail">
 				<div className="browser-settings-detail-header">
-					<button aria-label={t("Back to browser settings")} className="browser-settings-back" onClick={() => setView("overview")} type="button"><ArrowLeft aria-hidden="true" size={15} />{t("Browser")}</button>
-					<div><h2>{t("Browsing history")}</h2><p>{t("Search and manage pages visited in the selected Metis browser profile.")}</p></div>
+					<button
+						aria-label={t("Back to browser settings")}
+						className="browser-settings-back"
+						onClick={() => setView("overview")}
+						type="button"
+					>
+						<ArrowLeft aria-hidden="true" size={15} />
+						{t("Browser")}
+					</button>
+					<div>
+						<h2>{t("Browsing history")}</h2>
+						<p>{t("Search and manage pages visited in the selected Metis browser profile.")}</p>
+					</div>
 				</div>
 				<div className="browser-settings-toolbar">
 					<label className="browser-settings-search">
 						<MagnifyingGlass aria-hidden="true" size={15} />
-						<input aria-label={t("Search browsing history")} onChange={(event) => setSearch(event.target.value)} placeholder={t("Search browsing history")} value={search} />
+						<input
+							aria-label={t("Search browsing history")}
+							onChange={(event) => setSearch(event.target.value)}
+							placeholder={t("Search browsing history")}
+							value={search}
+						/>
 					</label>
 					<MenuSelect
 						ariaLabel={t("Browser profile")}
@@ -254,48 +360,92 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 							setExpandedHistoryDates(new Set());
 							setSelectedProfileId(value);
 						}}
-						options={profiles.map((profile) => ({ value: profile.profileId, label: browserProfileLabel(profile, t("Default profile")) }))}
+						options={profiles.map((profile) => ({
+							value: profile.profileId,
+							label: browserProfileLabel(profile, t("Default profile")),
+						}))}
 						value={selectedProfileId}
 					/>
-					<button aria-label={t("Clear browsing history")} className="settings-danger-button" disabled={history.length === 0 || historyLoading} onClick={() => setConfirmClear(true)} type="button">{t("Clear history")}</button>
+					<button
+						aria-label={t("Clear browsing history")}
+						className="settings-danger-button"
+						disabled={history.length === 0 || historyLoading}
+						onClick={() => setConfirmClear(true)}
+						type="button"
+					>
+						{t("Clear history")}
+					</button>
 				</div>
-				{error && <p className="settings-inline-error" role="alert">{error}</p>}
-				{notice && <p className="settings-action-message" role="status">{notice}</p>}
-				{historyLoading ? <div className="browser-settings-state" role="status">{t("Loading browsing history…")}</div> : groupedHistory.length === 0 ? (
-					<div className="browser-settings-state"><ClockCounterClockwise aria-hidden="true" size={24} /><strong>{t(search.trim() ? "No matching history" : "No history yet")}</strong></div>
+				{error && (
+					<p className="settings-inline-error" role="alert">
+						{error}
+					</p>
+				)}
+				{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
+				{historyLoading ? (
+					<output className="status-block browser-settings-state">{t("Loading browsing history…")}</output>
+				) : groupedHistory.length === 0 ? (
+					<div className="browser-settings-state">
+						<ClockCounterClockwise aria-hidden="true" size={24} />
+						<strong>{t(search.trim() ? "No matching history" : "No history yet")}</strong>
+					</div>
 				) : (
 					<div className="browser-settings-history-groups">
 						{groupedHistory.map(([date, entries]) => {
 							const expanded = search.trim() !== "" || expandedHistoryDates.has(date);
-							return <section className="browser-settings-history-group" key={date}>
-								<h3>
-									<button
-										aria-expanded={expanded}
-										onClick={() => setExpandedHistoryDates((current) => {
-											const next = new Set(current);
-											if (next.has(date)) next.delete(date);
-											else next.add(date);
-											return next;
-										})}
-										type="button"
-									>
-										<span>{date}</span>
-										<span>{t("{{count}} visits", { count: entries.length })}</span>
-										<CaretDown aria-hidden="true" size={13} />
-									</button>
-								</h3>
-								{expanded && <ul>{entries.map((entry) => (
-									<li key={entry.entryId}>
-										<span className="browser-settings-history-icon"><ClockCounterClockwise aria-hidden="true" size={14} /></span>
-										<div><strong>{entry.title}</strong><span title={entry.url}>{entry.url}</span></div>
-										<time dateTime={new Date(entry.visitedAt).toISOString()}>{new Date(entry.visitedAt).toLocaleTimeString(i18n.language, { hour: "2-digit", minute: "2-digit" })}</time>
-									</li>
-								))}</ul>}
-							</section>;
+							return (
+								<section className="browser-settings-history-group" key={date}>
+									<h3>
+										<button
+											aria-expanded={expanded}
+											onClick={() =>
+												setExpandedHistoryDates((current) => {
+													const next = new Set(current);
+													if (next.has(date)) next.delete(date);
+													else next.add(date);
+													return next;
+												})
+											}
+											type="button"
+										>
+											<span>{date}</span>
+											<span>{t("{{count}} visits", { count: entries.length })}</span>
+											<CaretDown aria-hidden="true" size={13} />
+										</button>
+									</h3>
+									{expanded && (
+										<ul>
+											{entries.map((entry) => (
+												<li key={entry.entryId}>
+													<span className="browser-settings-history-icon">
+														<ClockCounterClockwise aria-hidden="true" size={14} />
+													</span>
+													<div>
+														<strong>{entry.title}</strong>
+														<span title={entry.url}>{entry.url}</span>
+													</div>
+													<time dateTime={new Date(entry.visitedAt).toISOString()}>
+														{new Date(entry.visitedAt).toLocaleTimeString(i18n.language, {
+															hour: "2-digit",
+															minute: "2-digit",
+														})}
+													</time>
+												</li>
+											))}
+										</ul>
+									)}
+								</section>
+							);
 						})}
 					</div>
 				)}
-				{confirmClear && <HistoryClearDialog busy={clearing} onCancel={() => setConfirmClear(false)} onConfirm={() => void clearHistory()} />}
+				{confirmClear && (
+					<HistoryClearDialog
+						busy={clearing}
+						onCancel={() => setConfirmClear(false)}
+						onConfirm={() => void clearHistory()}
+					/>
+				)}
 			</div>
 		);
 	}
@@ -304,49 +454,164 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 		return (
 			<div className="settings-page browser-settings-page browser-settings-detail">
 				<div className="browser-settings-detail-header">
-					<button aria-label={t("Back to browser settings")} className="browser-settings-back" onClick={() => setView("overview")} type="button"><ArrowLeft aria-hidden="true" size={15} />{t("Browser")}</button>
-					<div><h2>{t("Current-run downloads")}</h2><p>{t("Manage files downloaded by the built-in browser during this app run.")}</p></div>
+					<button
+						aria-label={t("Back to browser settings")}
+						className="browser-settings-back"
+						onClick={() => setView("overview")}
+						type="button"
+					>
+						<ArrowLeft aria-hidden="true" size={15} />
+						{t("Browser")}
+					</button>
+					<div>
+						<h2>{t("Current-run downloads")}</h2>
+						<p>{t("Manage files downloaded by the built-in browser during this app run.")}</p>
+					</div>
 				</div>
-				{error && <p className="settings-inline-error" role="alert">{error}</p>}
-				{notice && <p className="settings-action-message" role="status">{notice}</p>}
+				{error && (
+					<p className="settings-inline-error" role="alert">
+						{error}
+					</p>
+				)}
+				{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
 				{downloads.length === 0 ? (
-					<div className="browser-settings-state"><DownloadSimple aria-hidden="true" size={24} /><strong>{t("No downloads in this run")}</strong></div>
-				) : <ul className="browser-settings-download-list">{downloads.map((item) => <DownloadRow download={item} key={item.downloadId} onAction={(type, id) => void runDownloadAction(type, id)} />)}</ul>}
+					<div className="browser-settings-state">
+						<DownloadSimple aria-hidden="true" size={24} />
+						<strong>{t("No downloads in this run")}</strong>
+					</div>
+				) : (
+					<ul className="browser-settings-download-list">
+						{downloads.map((item) => (
+							<DownloadRow
+								download={item}
+								key={item.downloadId}
+								onAction={(type, id) => void runDownloadAction(type, id)}
+							/>
+						))}
+					</ul>
+				)}
 			</div>
 		);
 	}
 
 	return (
 		<div className="settings-page browser-settings-page">
-			{error && <p className="settings-inline-error" role="alert">{error}</p>}
-			{notice && <p className="settings-action-message" role="status">{notice}</p>}
+			{error && (
+				<p className="settings-inline-error" role="alert">
+					{error}
+				</p>
+			)}
+			{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
 			<section className="settings-section">
-			<header className="settings-section-heading"><div><h3>{t("Browser data")}</h3><p>{t(windowsHistoryOnly
-					? "Bring in browser history and manage profile-specific history."
-					: "Bring in existing sessions and manage profile-specific history.")}</p></div></header>
-			<div className="settings-card">
-				<div className="general-setting-row">
-					<div className="general-setting-copy"><span>{t("Import browser data")}</span><p>{t(windowsHistoryOnly
-						? "Import browsing history from a supported Chromium profile."
-						: "Import Cookies and browsing history from a supported Chromium profile.")}</p></div>
-						<div className="general-setting-control"><button aria-label={t("Import browser data")} className="settings-secondary-button" onClick={() => setImportOpen(true)} type="button">{t("Import…")}</button></div>
+				<header className="settings-section-heading">
+					<div>
+						<h3>{t("Browser data")}</h3>
+						<p>
+							{t(
+								windowsHistoryOnly
+									? "Bring in browser history and manage profile-specific history."
+									: "Bring in existing sessions and manage profile-specific history.",
+							)}
+						</p>
+					</div>
+				</header>
+				<div className="settings-card">
+					<div className="general-setting-row">
+						<div className="general-setting-copy">
+							<span>{t("Import browser data")}</span>
+							<p>
+								{t(
+									windowsHistoryOnly
+										? "Import browsing history from a supported Chromium profile."
+										: "Import Cookies and browsing history from a supported Chromium profile.",
+								)}
+							</p>
+						</div>
+						<div className="general-setting-control">
+							<button
+								aria-label={t("Import browser data")}
+								className="settings-secondary-button"
+								onClick={() => setImportOpen(true)}
+								type="button"
+							>
+								{t("Import…")}
+							</button>
+						</div>
 					</div>
 					<div className="general-setting-row">
-						<div className="general-setting-copy"><span>{t("Browsing history")}</span><p>{t("View and clear up to the newest 500 entries for each isolated browser profile.")}</p><small>{loading ? t("Loading…") : t("{{count}} profiles · {{count2}} entries in selected profile", { count: profiles.length, count2: history.length })}</small></div>
-						<div className="general-setting-control"><button aria-label={t("Manage browsing history")} className="settings-secondary-button" onClick={() => setView("history")} type="button">{t("Manage")}</button></div>
+						<div className="general-setting-copy">
+							<span>{t("Browsing history")}</span>
+							<p>{t("View and clear up to the newest 500 entries for each isolated browser profile.")}</p>
+							<small>
+								{loading
+									? t("Loading…")
+									: t("{{count}} profiles · {{count2}} entries in selected profile", {
+											count: profiles.length,
+											count2: history.length,
+										})}
+							</small>
+						</div>
+						<div className="general-setting-control">
+							<button
+								aria-label={t("Manage browsing history")}
+								className="settings-secondary-button"
+								onClick={() => setView("history")}
+								type="button"
+							>
+								{t("Manage")}
+							</button>
+						</div>
 					</div>
 				</div>
 			</section>
 			<section className="settings-section">
-				<header className="settings-section-heading"><div><h3>{t("Downloads")}</h3><p>{t("Use the system Downloads folder and manage this run's download tasks.")}</p></div></header>
+				<header className="settings-section-heading">
+					<div>
+						<h3>{t("Downloads")}</h3>
+						<p>{t("Use the system Downloads folder and manage this run's download tasks.")}</p>
+					</div>
+				</header>
 				<div className="settings-card">
 					<div className="general-setting-row">
-						<div className="general-setting-copy"><span>{t("System Downloads folder")}</span><p>{t("The built-in browser currently saves files to the system Downloads folder.")}</p>{downloadDirectory && <small className="browser-settings-path" title={downloadDirectory}>{downloadDirectory}</small>}</div>
-						<div className="general-setting-control"><button aria-label={t("Open Downloads folder")} className="settings-secondary-button" disabled={!downloadDirectory} onClick={() => void api.openBrowserDownloadDirectory().catch(() => setError(t("Browser action failed")))} type="button">{t("Open")}</button></div>
+						<div className="general-setting-copy">
+							<span>{t("System Downloads folder")}</span>
+							<p>{t("The built-in browser currently saves files to the system Downloads folder.")}</p>
+							{downloadDirectory && (
+								<small className="browser-settings-path" title={downloadDirectory}>
+									{downloadDirectory}
+								</small>
+							)}
+						</div>
+						<div className="general-setting-control">
+							<button
+								aria-label={t("Open Downloads folder")}
+								className="settings-secondary-button"
+								disabled={!downloadDirectory}
+								onClick={() =>
+									void api.openBrowserDownloadDirectory().catch(() => setError(t("Browser action failed")))
+								}
+								type="button"
+							>
+								{t("Open")}
+							</button>
+						</div>
 					</div>
 					<div className="general-setting-row">
-						<div className="general-setting-copy"><span>{t("Current-run downloads")}</span><p>{t("View progress and manage files retained during this app run.")}</p><small>{t("{{count}} downloads", { count: downloads.length })}</small></div>
-						<div className="general-setting-control"><button aria-label={t("Manage downloads")} className="settings-secondary-button" onClick={() => setView("downloads")} type="button">{t("Manage")}</button></div>
+						<div className="general-setting-copy">
+							<span>{t("Current-run downloads")}</span>
+							<p>{t("View progress and manage files retained during this app run.")}</p>
+							<small>{t("{{count}} downloads", { count: downloads.length })}</small>
+						</div>
+						<div className="general-setting-control">
+							<button
+								aria-label={t("Manage downloads")}
+								className="settings-secondary-button"
+								onClick={() => setView("downloads")}
+								type="button"
+							>
+								{t("Manage")}
+							</button>
+						</div>
 					</div>
 				</div>
 			</section>

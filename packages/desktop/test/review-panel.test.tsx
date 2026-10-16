@@ -3,14 +3,34 @@
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { MetisDesktopApi, DesktopWorkspaceReviewSnapshot } from "../src/shared/desktop-api.ts";
+import type { DesktopWorkspaceReviewSnapshot, MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 vi.mock("@pierre/diffs/react", () => ({
-	PatchDiff: ({ options, patch }: {
+	PatchDiff: ({
+		options,
+		patch,
+	}: {
 		readonly options: { readonly hunkSeparators?: string; readonly loadDiffFiles?: () => Promise<unknown> };
 		readonly patch: string;
-	}) => <pre data-hunk-separators={options.hunkSeparators} data-testid="patch">{patch}<button onClick={() => void options.loadDiffFiles?.()} type="button">Expand unchanged</button></pre>,
-	WorkerPoolContextProvider: ({ children, highlighterOptions }: { readonly children: ReactNode; readonly highlighterOptions: { readonly theme: string } }) => <div data-testid="worker-provider" data-theme={highlighterOptions.theme}>{children}</div>,
+	}) => (
+		<pre data-hunk-separators={options.hunkSeparators} data-testid="patch">
+			{patch}
+			<button onClick={() => void options.loadDiffFiles?.()} type="button">
+				Expand unchanged
+			</button>
+		</pre>
+	),
+	WorkerPoolContextProvider: ({
+		children,
+		highlighterOptions,
+	}: {
+		readonly children: ReactNode;
+		readonly highlighterOptions: { readonly theme: string };
+	}) => (
+		<div data-testid="worker-provider" data-theme={highlighterOptions.theme}>
+			{children}
+		</div>
+	),
 }));
 
 import { ReviewPanel } from "../src/renderer/components/ReviewPanel.tsx";
@@ -26,16 +46,47 @@ const workingTree: DesktopWorkspaceReviewSnapshot = {
 	head: commitHash,
 	revision: "working-tree",
 	files: [
-		{ relativePath: "README.md", previousRelativePath: null, status: "modified", additions: 1, deletions: 1, binary: false },
-		{ relativePath: "packages/src/nested.ts", previousRelativePath: null, status: "modified", additions: 2, deletions: 0, binary: false },
+		{
+			relativePath: "README.md",
+			previousRelativePath: null,
+			status: "modified",
+			additions: 1,
+			deletions: 1,
+			binary: false,
+		},
+		{
+			relativePath: "packages/src/nested.ts",
+			previousRelativePath: null,
+			status: "modified",
+			additions: 2,
+			deletions: 0,
+			binary: false,
+		},
 	],
-	commits: [{ hash: commitHash, shortHash: "0123456", subject: "Initial commit", authorName: "Ada", authoredAt: "2026-08-05T00:00:00Z" }],
+	commits: [
+		{
+			hash: commitHash,
+			shortHash: "0123456",
+			subject: "Initial commit",
+			authorName: "Ada",
+			authoredAt: "2026-08-05T00:00:00Z",
+		},
+	],
 };
 
 const commitSnapshot: DesktopWorkspaceReviewSnapshot = {
 	...workingTree,
 	revision: commitHash,
-	files: [{ relativePath: "package.json", previousRelativePath: null, status: "added", additions: 3, deletions: 0, binary: false }],
+	files: [
+		{
+			relativePath: "package.json",
+			previousRelativePath: null,
+			status: "added",
+			additions: 3,
+			deletions: 0,
+			binary: false,
+		},
+	],
 };
 
 async function flush() {
@@ -43,8 +94,8 @@ async function flush() {
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((candidate) =>
-		candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+	const match = [...container.querySelectorAll("button")].find(
+		(candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
 	);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
@@ -76,7 +127,9 @@ describe("ReviewPanel", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} theme="light" visible />));
 		await flush();
-		expect(container.querySelector('[data-testid="worker-provider"]')?.getAttribute("data-theme")).toBe("pierre-light");
+		expect(container.querySelector('[data-testid="worker-provider"]')?.getAttribute("data-theme")).toBe(
+			"pierre-light",
+		);
 
 		const headers = [...container.querySelectorAll<HTMLButtonElement>(".review-file-header")];
 		expect(headers).toHaveLength(2);
@@ -85,12 +138,22 @@ describe("ReviewPanel", () => {
 
 		await act(async () => headers[0]!.click());
 		await flush();
-		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledWith({ sessionId, revision: "working-tree", relativePath: "README.md" });
-		expect(container.querySelector('[data-testid="patch"]')?.getAttribute("data-hunk-separators")).toBe("line-info-basic");
+		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledWith({
+			sessionId,
+			revision: "working-tree",
+			relativePath: "README.md",
+		});
+		expect(container.querySelector('[data-testid="patch"]')?.getAttribute("data-hunk-separators")).toBe(
+			"line-info-basic",
+		);
 		expect(api.getWorkspaceReviewFileContext).not.toHaveBeenCalled();
 		await act(async () => button(container, "Expand unchanged").click());
 		await flush();
-		expect(api.getWorkspaceReviewFileContext).toHaveBeenCalledWith({ sessionId, revision: "working-tree", relativePath: "README.md" });
+		expect(api.getWorkspaceReviewFileContext).toHaveBeenCalledWith({
+			sessionId,
+			revision: "working-tree",
+			relativePath: "README.md",
+		});
 		await act(async () => root.unmount());
 	});
 
@@ -99,7 +162,14 @@ describe("ReviewPanel", () => {
 			...workingTree,
 			files: [
 				...workingTree.files,
-				{ relativePath: ".codegraph/.gitignore", previousRelativePath: null, status: "modified", additions: 1, deletions: 0, binary: false },
+				{
+					relativePath: ".codegraph/.gitignore",
+					previousRelativePath: null,
+					status: "modified",
+					additions: 1,
+					deletions: 0,
+					binary: false,
+				},
 			],
 		} satisfies DesktopWorkspaceReviewSnapshot;
 		const api = {
@@ -121,8 +191,9 @@ describe("ReviewPanel", () => {
 		expect(container.querySelector(".review-toolbar > span")?.getAttribute("title")).toBe("/tmp/project");
 		const allChanges = button(container, "All Changes");
 		expect(allChanges.textContent).toBe("All Changes");
-		expect(container.querySelector(".review-details-scroll")?.compareDocumentPosition(allChanges) ?? 0)
-			.toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+		expect(container.querySelector(".review-details-scroll")?.compareDocumentPosition(allChanges) ?? 0).toBe(
+			Node.DOCUMENT_POSITION_FOLLOWING,
+		);
 		const directories = [...container.querySelectorAll<HTMLButtonElement>(".review-tree button[aria-expanded]")];
 		expect(directories.length).toBeGreaterThan(0);
 		expect(directories.every((directory) => directory.getAttribute("aria-expanded") === "true")).toBe(true);
@@ -139,9 +210,13 @@ describe("ReviewPanel", () => {
 	it("keeps the rendered review and worker provider mounted until a revision replacement is ready", async () => {
 		let resolveCommit!: (value: DesktopWorkspaceReviewSnapshot) => void;
 		const api = {
-			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => revision === "working-tree"
-				? Promise.resolve(workingTree)
-				: new Promise<DesktopWorkspaceReviewSnapshot>((resolve) => { resolveCommit = resolve; })),
+			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) =>
+				revision === "working-tree"
+					? Promise.resolve(workingTree)
+					: new Promise<DesktopWorkspaceReviewSnapshot>((resolve) => {
+							resolveCommit = resolve;
+						}),
+			),
 			getWorkspaceReviewFileDiff: vi.fn(),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
@@ -167,9 +242,13 @@ describe("ReviewPanel", () => {
 
 	it("keeps file actions bound to the displayed revision after a replacement fails", async () => {
 		const api = {
-			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => revision === "working-tree"
-				? Promise.resolve(workingTree)
-				: Promise.reject(new Error("commit unavailable"))),
+			getWorkspaceReview: vi
+				.fn()
+				.mockImplementation(({ revision }: { readonly revision: string }) =>
+					revision === "working-tree"
+						? Promise.resolve(workingTree)
+						: Promise.reject(new Error("commit unavailable")),
+				),
 			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
@@ -194,7 +273,11 @@ describe("ReviewPanel", () => {
 
 	it("switches to a commit snapshot collapsed and renders honest non-text states", async () => {
 		const api = {
-			getWorkspaceReview: vi.fn().mockImplementation(({ revision }: { readonly revision: string }) => Promise.resolve(revision === "working-tree" ? workingTree : commitSnapshot)),
+			getWorkspaceReview: vi
+				.fn()
+				.mockImplementation(({ revision }: { readonly revision: string }) =>
+					Promise.resolve(revision === "working-tree" ? workingTree : commitSnapshot),
+				),
 			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "binary" }),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");

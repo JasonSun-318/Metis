@@ -5,7 +5,6 @@ import type {
 	MemorySettingsView,
 	ModelSettingsView,
 } from "@metis/app-protocol";
-import { PatchDiff, WorkerPoolContextProvider, type WorkerInitializationRenderOptions } from "@pierre/diffs/react";
 import {
 	ArrowCounterClockwise,
 	Brain,
@@ -18,13 +17,14 @@ import {
 	Trash,
 	XCircle,
 } from "@phosphor-icons/react";
+import { PatchDiff, type WorkerInitializationRenderOptions, WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { type DreamSettingsDraft, parseDreamDraft, toDreamDraft } from "./memory-dream-settings.ts";
 import { MemoryDialog } from "./MemoryDialog.tsx";
-import { MemorySessionSettings } from "./MemorySessionSettings.tsx";
 import { MemoryDreamSettings } from "./MemoryDreamSettings.tsx";
+import { MemorySessionSettings } from "./MemorySessionSettings.tsx";
+import { type DreamSettingsDraft, parseDreamDraft, toDreamDraft } from "./memory-dream-settings.ts";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 const HISTORY_LIMIT = 20;
@@ -612,7 +612,7 @@ export function MemorySettingsPanel({
 	};
 
 	if (!settings && !error) {
-		return <div aria-label={t("Memory settings")} className="settings-loading" role="status" />;
+		return <output aria-label={t("Memory settings")} className="status-block settings-loading" />;
 	}
 
 	const dreamLastRun = settings?.dream.lastRun;
@@ -646,11 +646,7 @@ export function MemorySettingsPanel({
 					{error}
 				</p>
 			)}
-			{notice && (
-				<p className="memory-dialog-notice" role="status">
-					{notice}
-				</p>
-			)}
+			{notice && <output className="status-paragraph memory-dialog-notice">{notice}</output>}
 		</>
 	);
 
@@ -679,6 +675,7 @@ export function MemorySettingsPanel({
 									checked={settings?.enabled ?? false}
 									disabled={!serverReady || busy}
 									onChange={(event) => update({ enabled: event.target.checked })}
+									aria-checked={settings?.enabled ?? false}
 									role="switch"
 									type="checkbox"
 								/>
@@ -689,7 +686,9 @@ export function MemorySettingsPanel({
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Remember project progress")}</span>
-							<p>{t("Keep a short summary of each project’s progress and next steps for future conversations.")}</p>
+							<p>
+								{t("Keep a short summary of each project’s progress and next steps for future conversations.")}
+							</p>
 						</div>
 						<div className="general-setting-control">
 							<label className="web-search-toggle">
@@ -699,6 +698,7 @@ export function MemorySettingsPanel({
 									checked={settings?.activeContext ?? false}
 									disabled={!serverReady || busy}
 									onChange={(event) => update({ activeContext: event.target.checked })}
+									aria-checked={settings?.activeContext ?? false}
 									role="switch"
 									type="checkbox"
 								/>
@@ -775,6 +775,7 @@ export function MemorySettingsPanel({
 									checked={dreamDraft?.enabled ?? settings?.dream.enabled ?? false}
 									disabled={!serverReady || busy}
 									onChange={(event) => toggleDream(event.target.checked)}
+									aria-checked={dreamDraft?.enabled ?? settings?.dream.enabled ?? false}
 									role="switch"
 									type="checkbox"
 								/>
@@ -877,7 +878,7 @@ export function MemorySettingsPanel({
 					busy={noteBusy !== null}
 				>
 					<div className="memory-notes-toolbar">
-						<div aria-label={t("Memory scope")} className="memory-scope-tabs" role="group">
+						<fieldset aria-label={t("Memory scope")} className="control-group memory-scope-tabs">
 							<button
 								aria-pressed={notesScope === "global"}
 								className={notesScope === "global" ? "is-active" : ""}
@@ -896,7 +897,7 @@ export function MemorySettingsPanel({
 									{t("Project")}
 								</button>
 							) : null}
-						</div>
+						</fieldset>
 						<label className="memory-notes-search">
 							<MagnifyingGlass aria-hidden="true" size={13} />
 							<span className="sr-only">{t("Search memory notes")}</span>
@@ -925,10 +926,10 @@ export function MemorySettingsPanel({
 							<span>{notesError}</span>
 						</div>
 					) : notes === null ? (
-						<div className="memory-info-banner" role="status">
+						<output className="status-block memory-info-banner">
 							<Info aria-hidden="true" size={15} />
 							<span>{t("Loading…")}</span>
-						</div>
+						</output>
 					) : notes.length === 0 ? (
 						<div className="memory-empty-state">
 							<Brain aria-hidden="true" size={22} />
@@ -1120,10 +1121,10 @@ export function MemorySettingsPanel({
 				>
 					<div className="memory-history-content">
 						{history === null ? (
-							<div className="memory-info-banner" role="status">
+							<output className="status-block memory-info-banner">
 								<Info aria-hidden="true" size={15} />
 								<span>{t("Loading…")}</span>
-							</div>
+							</output>
 						) : history.length === 0 ? (
 							<div className="memory-info-banner">
 								<Brain aria-hidden="true" size={15} />
@@ -1175,10 +1176,14 @@ export function MemorySettingsPanel({
 																{t("Unable to load this change.")}
 															</p>
 														) : diff.patch === undefined ? (
-															<p className="memory-history-meta">{t("No content changes remain for this entry.")}</p>
+															<p className="memory-history-meta">
+																{t("No content changes remain for this entry.")}
+															</p>
 														) : (
 															<>
-																<p className="memory-history-meta">{t("Before this change → current version")}</p>
+																<p className="memory-history-meta">
+																	{t("Before this change → current version")}
+																</p>
 																<WorkerPoolContextProvider
 																	highlighterOptions={DIFF_HIGHLIGHTER[theme]}
 																	key={theme}
@@ -1203,9 +1208,7 @@ export function MemorySettingsPanel({
 
 			<div className="settings-form-actions memory-form-actions">
 				{settingsDirty ? (
-					<span className="settings-unsaved-label" role="status">
-						{t("Unsaved changes")}
-					</span>
+					<output className="settings-unsaved-label">{t("Unsaved changes")}</output>
 				) : (
 					<span className="memory-section-caption">
 						{t("Preferences and consolidation settings apply after saving.")}

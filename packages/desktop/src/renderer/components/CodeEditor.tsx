@@ -151,15 +151,17 @@ export function CodeEditor({ label, onChange, onSave, onSelect, path, value }: C
 	const onSaveRef = useRef(onSave);
 	const editorValueRef = useRef(value);
 	const applyingControlledValue = useRef(false);
+	const valueRef = useRef(value);
+	valueRef.current = value;
 	onChangeRef.current = onChange;
 	onSaveRef.current = onSave;
 
 	useEffect(() => {
 		const parent = hostRef.current;
 		if (!parent) return;
-		editorValueRef.current = value;
+		editorValueRef.current = valueRef.current;
 		const view = new EditorView({
-			doc: value,
+			doc: valueRef.current,
 			parent,
 			extensions: [
 				Prec.high(

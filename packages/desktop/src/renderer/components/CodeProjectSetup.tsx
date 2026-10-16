@@ -1,11 +1,8 @@
 import { CaretLeft, CaretRight, FolderSimple, Plus, X } from "@phosphor-icons/react";
 import { type DragEvent, type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { DesktopAttachmentSelection, DesktopCreateProjectFolderInput } from "../../shared/desktop-api.ts";
 import codeProjectHand from "../assets/code-project-hand.svg";
-import type {
-	DesktopAttachmentSelection,
-	DesktopCreateProjectFolderInput,
-} from "../../shared/desktop-api.ts";
 import { DialogFrame } from "./ProjectActions.tsx";
 import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
@@ -77,14 +74,15 @@ export function CodeProjectSetup({
 		let active = true;
 		const saved = localStorage.getItem(LOCATION_KEY);
 		if (saved) setLocation(saved);
-		else void onGetDefaultLocation().then(
-			(value) => {
-				if (active) setLocation(value);
-			},
-			(cause) => {
-				if (active) setError(errorMessage(cause));
-			},
-		);
+		else
+			void onGetDefaultLocation().then(
+				(value) => {
+					if (active) setLocation(value);
+				},
+				(cause) => {
+					if (active) setError(errorMessage(cause));
+				},
+			);
 		return () => {
 			active = false;
 		};
@@ -135,11 +133,13 @@ export function CodeProjectSetup({
 		setPending(true);
 		setError(null);
 		try {
-			const cwd = createdProject ?? await onCreateProject({
-				parentDirectory: location,
-				name: name.trim(),
-				files: files.map(({ path, name }) => ({ path, name })),
-			});
+			const cwd =
+				createdProject ??
+				(await onCreateProject({
+					parentDirectory: location,
+					name: name.trim(),
+					files: files.map(({ path, name }) => ({ path, name })),
+				}));
 			setCreatedProject(cwd);
 			await (onProjectCreated ?? onOpenProject)(cwd);
 		} catch (cause) {
@@ -175,17 +175,38 @@ export function CodeProjectSetup({
 						<div className="code-project-choice-copy">
 							<h2 id="code-project-choose-title">{t("Create a new project")}</h2>
 							<p id="code-project-choose-description">
-								{t("A dedicated place for ongoing work. Files stay in a folder on your computer, and Metis keeps the project context together.")}
+								{t(
+									"A dedicated place for ongoing work. Files stay in a folder on your computer, and Metis keeps the project context together.",
+								)}
 							</p>
 							<div className="code-project-options">
-								<button aria-label={t("Start from scratch")} onClick={() => setStep("create")} ref={startButton} type="button">
-									<span className="code-project-option-icon"><Plus aria-hidden="true" size={24} /></span>
-									<span><strong>{t("Start from scratch")}</strong><small>{t("Create a new folder and add your files.")}</small></span>
+								<button
+									aria-label={t("Start from scratch")}
+									onClick={() => setStep("create")}
+									ref={startButton}
+									type="button"
+								>
+									<span className="code-project-option-icon">
+										<Plus aria-hidden="true" size={24} />
+									</span>
+									<span>
+										<strong>{t("Start from scratch")}</strong>
+										<small>{t("Create a new folder and add your files.")}</small>
+									</span>
 									<CaretRight aria-hidden="true" size={17} />
 								</button>
-								<button aria-label={t("Use an existing folder")} onClick={() => setStep("existing")} type="button">
-									<span className="code-project-option-icon"><FolderSimple aria-hidden="true" size={22} /></span>
-									<span><strong>{t("Use an existing folder")}</strong><small>{t("Give Metis a folder you already work from.")}</small></span>
+								<button
+									aria-label={t("Use an existing folder")}
+									onClick={() => setStep("existing")}
+									type="button"
+								>
+									<span className="code-project-option-icon">
+										<FolderSimple aria-hidden="true" size={22} />
+									</span>
+									<span>
+										<strong>{t("Use an existing folder")}</strong>
+										<small>{t("Give Metis a folder you already work from.")}</small>
+									</span>
 									<CaretRight aria-hidden="true" size={17} />
 								</button>
 							</div>
@@ -198,12 +219,22 @@ export function CodeProjectSetup({
 
 				{step === "create" && (
 					<form className="code-project-form" onSubmit={(event) => void createProject(event)}>
-						<button aria-label={t("Back")} className="code-project-back" disabled={pending} onClick={goBack} type="button">
+						<button
+							aria-label={t("Back")}
+							className="code-project-back"
+							disabled={pending}
+							onClick={goBack}
+							type="button"
+						>
 							<CaretLeft aria-hidden="true" size={21} />
 						</button>
 						<h2 id="code-project-create-title">{t("Start a new project")}</h2>
-						<p className="sr-only" id="code-project-create-description">{t("Create a folder for a new Metis Code project.")}</p>
-						<label htmlFor="code-project-name">{t("Name")} <span aria-hidden="true">*</span></label>
+						<p className="sr-only" id="code-project-create-description">
+							{t("Create a folder for a new Metis Code project.")}
+						</p>
+						<label htmlFor="code-project-name">
+							{t("Name")} <span aria-hidden="true">*</span>
+						</label>
 						<input
 							autoComplete="off"
 							disabled={pending || createdProject !== null}
@@ -231,14 +262,25 @@ export function CodeProjectSetup({
 							type="button"
 						>
 							<Plus aria-hidden="true" size={18} />
-							<span>{files.length > 0 ? t("{{count}} files selected", { count: files.length }) : t("Drop files here or click to browse")}</span>
+							<span>
+								{files.length > 0
+									? t("{{count}} files selected", { count: files.length })
+									: t("Drop files here or click to browse")}
+							</span>
 						</button>
 						{files.length > 0 && (
 							<ul className="code-project-files" aria-label={t("Files to add")}>
 								{files.map((file) => (
 									<li key={`${file.path}\u0000${file.name}`}>
 										<span>{file.name}</span>
-									<button aria-label={t("Remove {{name}}", { name: file.name })} disabled={pending || createdProject !== null} onClick={() => setFiles((current) => current.filter((candidate) => candidate !== file))} type="button">
+										<button
+											aria-label={t("Remove {{name}}", { name: file.name })}
+											disabled={pending || createdProject !== null}
+											onClick={() =>
+												setFiles((current) => current.filter((candidate) => candidate !== file))
+											}
+											type="button"
+										>
 											<X aria-hidden="true" size={14} />
 										</button>
 									</li>
@@ -246,13 +288,30 @@ export function CodeProjectSetup({
 							</ul>
 						)}
 						<span className="code-project-field-label">{t("Choose project location")}</span>
-						<button aria-label={location ? t("Choose project location, current {{location}}", { location }) : t("Choose project location")} className="code-project-location" disabled={pending || createdProject !== null} onClick={() => void chooseLocation()} title={location} type="button">
+						<button
+							aria-label={
+								location
+									? t("Choose project location, current {{location}}", { location })
+									: t("Choose project location")
+							}
+							className="code-project-location"
+							disabled={pending || createdProject !== null}
+							onClick={() => void chooseLocation()}
+							title={location}
+							type="button"
+						>
 							<FolderSimple aria-hidden="true" size={18} />
 							<span>{location || t("Loading location…")}</span>
 						</button>
-						{error && <p className="code-project-error" role="alert">{t(error)}</p>}
+						{error && (
+							<p className="code-project-error" role="alert">
+								{t(error)}
+							</p>
+						)}
 						<div className="code-project-form-actions">
-							<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">{t("Cancel")}</button>
+							<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">
+								{t("Cancel")}
+							</button>
 							<button disabled={busy || pending || !name.trim() || !location} type="submit">
 								{t(pending ? (createdProject ? "Opening…" : "Creating…") : createdProject ? "Retry" : "Create")}
 							</button>
@@ -262,17 +321,35 @@ export function CodeProjectSetup({
 
 				{step === "existing" && (
 					<div className="code-project-existing">
-						<button aria-label={t("Back")} className="code-project-back" disabled={pending} onClick={goBack} type="button">
+						<button
+							aria-label={t("Back")}
+							className="code-project-back"
+							disabled={pending}
+							onClick={goBack}
+							type="button"
+						>
 							<CaretLeft aria-hidden="true" size={21} />
 						</button>
 						<h2 id="code-project-existing-title">{t("Use an existing folder")}</h2>
 						<p id="code-project-existing-description">
-							{t("Choose a folder and Metis will treat its files as project context. Metis will remember Code context across tasks in this project.")}
+							{t(
+								"Choose a folder and Metis will treat its files as project context. Metis will remember Code context across tasks in this project.",
+							)}
 						</p>
-						<button className="code-project-choose-folder" disabled={busy || pending} onClick={() => void openExisting()} ref={chooseFolderButton} type="button">
+						<button
+							className="code-project-choose-folder"
+							disabled={busy || pending}
+							onClick={() => void openExisting()}
+							ref={chooseFolderButton}
+							type="button"
+						>
 							{t(pending ? "Opening…" : "Choose folder")}
 						</button>
-						{error && <p className="code-project-error" role="alert">{t(error)}</p>}
+						{error && (
+							<p className="code-project-error" role="alert">
+								{t(error)}
+							</p>
+						)}
 					</div>
 				)}
 			</DialogFrame>

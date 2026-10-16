@@ -43,11 +43,16 @@ export function SessionGroupingMenu({
 		const primaryLeft = Math.max(8, Math.min(rect.right - PRIMARY_WIDTH, viewportWidth - PRIMARY_WIDTH - 8));
 		const primaryTop = Math.min(rect.bottom + 3, viewportHeight - 44);
 		const preferredSecondaryLeft = primaryLeft + PRIMARY_WIDTH + 2;
-		const secondaryLeft = preferredSecondaryLeft + SECONDARY_WIDTH <= viewportWidth - 8
-			? preferredSecondaryLeft
-			: Math.max(8, primaryLeft - SECONDARY_WIDTH - 2);
+		const secondaryLeft =
+			preferredSecondaryLeft + SECONDARY_WIDTH <= viewportWidth - 8
+				? preferredSecondaryLeft
+				: Math.max(8, primaryLeft - SECONDARY_WIDTH - 2);
 		setPrimaryPosition({ left: primaryLeft, top: primaryTop, width: PRIMARY_WIDTH });
-		setSecondaryPosition({ left: secondaryLeft, top: Math.min(primaryTop + 5, viewportHeight - 133), width: SECONDARY_WIDTH });
+		setSecondaryPosition({
+			left: secondaryLeft,
+			top: Math.min(primaryTop + 5, viewportHeight - 133),
+			width: SECONDARY_WIDTH,
+		});
 	}, []);
 
 	const close = useCallback((restoreFocus = false) => {
@@ -75,7 +80,8 @@ export function SessionGroupingMenu({
 		if (!open) return;
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
-			if (!root.current?.contains(node) && !primary.current?.contains(node) && !secondary.current?.contains(node)) close();
+			if (!root.current?.contains(node) && !primary.current?.contains(node) && !secondary.current?.contains(node))
+				close();
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
@@ -96,7 +102,14 @@ export function SessionGroupingMenu({
 
 	const menus = open ? (
 		<>
-			<div aria-label={t("Session grouping")} className="session-grouping-menu-primary" id={primaryId} ref={primary} role="menu" style={primaryPosition}>
+			<div
+				aria-label={t("Session grouping")}
+				className="session-grouping-menu-primary"
+				id={primaryId}
+				ref={primary}
+				role="menu"
+				style={primaryPosition}
+			>
 				<button
 					aria-controls={submenuOpen ? secondaryId : undefined}
 					aria-expanded={submenuOpen}
@@ -114,7 +127,10 @@ export function SessionGroupingMenu({
 					type="button"
 				>
 					<span>{t("Group by")}</span>
-					<span className="session-grouping-current">{currentLabel}<CaretRight aria-hidden="true" size={15} /></span>
+					<span className="session-grouping-current">
+						{currentLabel}
+						<CaretRight aria-hidden="true" size={15} />
+					</span>
 				</button>
 			</div>
 			{submenuOpen && (
@@ -133,13 +149,14 @@ export function SessionGroupingMenu({
 						event.preventDefault();
 						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
 						const current = items.indexOf(document.activeElement as HTMLButtonElement);
-						const next = event.key === "Home"
-							? items[0]
-							: event.key === "End"
-								? items.at(-1)
-								: event.key === "ArrowDown"
-									? items[(current + 1) % items.length]
-									: items[(current <= 0 ? items.length : current) - 1];
+						const next =
+							event.key === "Home"
+								? items[0]
+								: event.key === "End"
+									? items.at(-1)
+									: event.key === "ArrowDown"
+										? items[(current + 1) % items.length]
+										: items[(current <= 0 ? items.length : current) - 1];
 						next?.focus();
 					}}
 					ref={secondary}
@@ -149,7 +166,11 @@ export function SessionGroupingMenu({
 					{OPTIONS.map((option, index) => {
 						const selected = option.value === value;
 						return (
-							<div className={index === 3 ? "session-grouping-menu-last" : undefined} key={option.value} role="none">
+							<div
+								className={index === 3 ? "session-grouping-menu-last" : undefined}
+								key={option.value}
+								role="none"
+							>
 								<button
 									aria-checked={selected}
 									onClick={() => {

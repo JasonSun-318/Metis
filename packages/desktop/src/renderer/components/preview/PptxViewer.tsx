@@ -3,11 +3,11 @@ import { SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
+import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
+import { mountPptxSelectionLayer } from "./pptx-selection.ts";
 import { materializePreviewBlobUrls } from "./preview-blob-urls.ts";
 import { type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
-import { mountPptxSelectionLayer } from "./pptx-selection.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface PptxViewerProps {
@@ -40,6 +40,10 @@ export function PptxViewer({ fileName, file, byteLength, bytes, onClose, onOpenD
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
+	const hasFile = file !== undefined;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.fileId): Changing the selection target requires remounting slide selection layers.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.relativePath): Changing the selection target requires remounting slide selection layers.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.sessionId): Changing the selection target requires remounting slide selection layers.
 	useEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
@@ -49,7 +53,7 @@ export function PptxViewer({ fileName, file, byteLength, bytes, onClose, onOpenD
 		const rendered = new Map<number, HTMLElement>();
 		const mountSelection = (index: number, element: HTMLElement) => {
 			const slide = handle?.presentationData?.slides[index];
-			if (!slide || !file) return;
+			if (!slide || !hasFile) return;
 			mountPptxSelectionLayer(slide, element, index + 1, (value, anchor) =>
 				selectionRef.current.select(value.target, value.text, anchor, value.excerpt),
 			);
@@ -104,8 +108,9 @@ export function PptxViewer({ fileName, file, byteLength, bytes, onClose, onOpenD
 
 			host.replaceChildren();
 		};
-	}, [bytes, t, file?.sessionId, file?.relativePath, file?.fileId]);
+	}, [bytes, t, hasFile, file?.sessionId, file?.relativePath, file?.fileId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(resizing): Resize completion requires restoring the current slide after layout.
 	useEffect(() => {
 		if (!viewer || size.width <= 0 || size.height <= 0) return;
 		let cancelled = false;

@@ -26,10 +26,10 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 	const updateMenuPosition = useCallback(() => {
 		if (trigger.current) setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 200, 1));
 	}, []);
-	const closeMenu = (restoreFocus = true) => {
+	const closeMenu = useCallback((restoreFocus = true) => {
 		setMenuOpen(false);
 		if (restoreFocus) queueMicrotask(() => trigger.current?.focus());
-	};
+	}, []);
 	const closeDialog = () => {
 		setConfirmDelete(false);
 		queueMicrotask(() => trigger.current?.focus());
@@ -57,7 +57,7 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [menuOpen, updateMenuPosition]);
+	}, [closeMenu, menuOpen, updateMenuPosition]);
 	useLayoutEffect(() => {
 		if (menuOpen) updateMenuPosition();
 	}, [menuOpen, updateMenuPosition]);
@@ -75,29 +75,31 @@ export function ScheduledTaskActions({ deleteDisabled, disabled, onDelete, task 
 			>
 				<DotsThree aria-hidden="true" size={17} weight="bold" />
 			</button>
-			{menuOpen && createPortal((
-				<div
-					aria-label={t("Actions for {{name}}", { name: task.name })}
-					className="session-action-menu"
-					ref={menu}
-					role="menu"
-					style={menuPosition}
-				>
-					<button
-						className="session-delete-menu-item"
-						disabled={deleteDisabled}
-						onClick={() => {
-							setMenuOpen(false);
-							setConfirmDelete(true);
-						}}
-						ref={deleteItem}
-						role="menuitem"
-						type="button"
+			{menuOpen &&
+				createPortal(
+					<div
+						aria-label={t("Actions for {{name}}", { name: task.name })}
+						className="session-action-menu"
+						ref={menu}
+						role="menu"
+						style={menuPosition}
 					>
-						<Trash aria-hidden="true" size={15} /> {t("Delete")}
-					</button>
-				</div>
-			), document.body)}
+						<button
+							className="session-delete-menu-item"
+							disabled={deleteDisabled}
+							onClick={() => {
+								setMenuOpen(false);
+								setConfirmDelete(true);
+							}}
+							ref={deleteItem}
+							role="menuitem"
+							type="button"
+						>
+							<Trash aria-hidden="true" size={15} /> {t("Delete")}
+						</button>
+					</div>,
+					document.body,
+				)}
 			{confirmDelete && (
 				<ScheduledTaskDeleteDialog
 					deleteSchedule={onDelete}

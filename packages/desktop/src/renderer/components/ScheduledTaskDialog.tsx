@@ -90,28 +90,44 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 	const projects = useMemo(() => projectSessions(sessions), [sessions]);
 	const currentModelKey = task ? modelKey(task.model) : "";
 	const currentModelAvailable = models.some((model) => modelKey(model) === currentModelKey);
-	const targetOptions = useMemo(() => [
-		...(task?.target.workspace === "fixed" ? [{
-			value: "unchanged",
-			label: task.target.cwd,
-		}] : []),
-		{ value: "task", label: t("Dedicated task workspace") },
-		...projects.map((session) => ({
-			value: `session:${session.sessionId}`,
-			label: `${projectName(session.cwd!)} — ${session.cwd}`,
-		})),
-	], [i18n.resolvedLanguage, projects, task, t]);
-	const modelOptions = useMemo(() => [
-		...(task && !currentModelAvailable ? [{
-			value: currentModelKey,
-			label: t("{{model}} (unavailable)", { model: `${task.model.provider}/${task.model.modelId}` }),
-			disabled: true,
-		}] : []),
-		...models.map((model) => ({
-			value: modelKey(model),
-			label: `${model.name} · ${model.provider}`,
-		})),
-	], [currentModelAvailable, currentModelKey, i18n.resolvedLanguage, models, task, t]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(i18n.resolvedLanguage): Locale changes refresh translated select options.
+	const targetOptions = useMemo(
+		() => [
+			...(task?.target.workspace === "fixed"
+				? [
+						{
+							value: "unchanged",
+							label: task.target.cwd,
+						},
+					]
+				: []),
+			{ value: "task", label: t("Dedicated task workspace") },
+			...projects.map((session) => ({
+				value: `session:${session.sessionId}`,
+				label: `${projectName(session.cwd!)} — ${session.cwd}`,
+			})),
+		],
+		[i18n.resolvedLanguage, projects, task, t],
+	);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(i18n.resolvedLanguage): Locale changes refresh translated select options.
+	const modelOptions = useMemo(
+		() => [
+			...(task && !currentModelAvailable
+				? [
+						{
+							value: currentModelKey,
+							label: t("{{model}} (unavailable)", { model: `${task.model.provider}/${task.model.modelId}` }),
+							disabled: true,
+						},
+					]
+				: []),
+			...models.map((model) => ({
+				value: modelKey(model),
+				label: `${model.name} · ${model.provider}`,
+			})),
+		],
+		[currentModelAvailable, currentModelKey, i18n.resolvedLanguage, models, task, t],
+	);
 	const [name, setName] = useState(task?.name ?? "");
 	const [description, setDescription] = useState(task?.description ?? "");
 	const [instruction, setInstruction] = useState(task?.instruction ?? "");
@@ -192,29 +208,25 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					})
 				).task;
 			} else {
-				const taskAccessCwd =
-					task.target.workspace === "task" ? (task.target.additionalWorkspaceCwd ?? "") : "";
+				const taskAccessCwd = task.target.workspace === "task" ? (task.target.additionalWorkspaceCwd ?? "") : "";
 				const targetFields: Pick<
 					ClientParams<"schedule/update">,
 					"sourceSessionId" | "additionalWorkspaceCwd"
-				> =
-					target === "unchanged"
-						? {}
-						: target === "task"
-							? task.target.workspace !== "task" || additionalWorkspaceCwd !== taskAccessCwd
-								? {
-										sourceSessionId: null,
-										additionalWorkspaceCwd: additionalWorkspaceCwd || null,
-									}
-								: {}
-							: { sourceSessionId: target.slice("session:".length) };
+				> = target === "unchanged"
+					? {}
+					: target === "task"
+						? task.target.workspace !== "task" || additionalWorkspaceCwd !== taskAccessCwd
+							? {
+									sourceSessionId: null,
+									additionalWorkspaceCwd: additionalWorkspaceCwd || null,
+								}
+							: {}
+						: { sourceSessionId: target.slice("session:".length) };
 				const input: ClientParams<"schedule/update"> = {
 					requestId: request.current.id,
 					taskId: task.id,
 					...(name.trim() === task.name ? {} : { name: name.trim() }),
-					...(description === (task.description ?? "")
-						? {}
-						: { description: description || null }),
+					...(description === (task.description ?? "") ? {} : { description: description || null }),
 					...(instruction === task.instruction ? {} : { instruction }),
 					...(modelKey(model) === currentModelKey ? {} : { model }),
 					...(JSON.stringify(schedule) === JSON.stringify(initialSchedule) ? {} : { schedule }),
@@ -248,18 +260,63 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 			}}
 			ref={dialog}
 		>
-			<form method="dialog" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+			<form
+				method="dialog"
+				onSubmit={(event) => {
+					event.preventDefault();
+					void save();
+				}}
+			>
 				<header>
 					<h2 id="scheduled-task-dialog-title">{t(task ? "Edit scheduled task" : "Create scheduled task")}</h2>
-					<button aria-label={t("Close")} disabled={busy} onClick={onClose} type="button"><X aria-hidden="true" size={17} /></button>
+					<button aria-label={t("Close")} disabled={busy} onClick={onClose} type="button">
+						<X aria-hidden="true" size={17} />
+					</button>
 				</header>
 				<div className="scheduled-task-dialog-fields">
-				<label>{t("Name")}<input autoFocus maxLength={120} onChange={(event) => setName(event.target.value)} required value={name} /></label>
-					<label>{t("Description")}<input maxLength={512} onChange={(event) => setDescription(event.target.value)} placeholder={t("Optional display description")} value={description} /></label>
-					<label>{t("Instructions")}<textarea onChange={(event) => setInstruction(event.target.value)} required rows={5} value={instruction} /></label>
+					<label>
+						{t("Name")}
+						<input
+							autoFocus
+							maxLength={120}
+							onChange={(event) => setName(event.target.value)}
+							required
+							value={name}
+						/>
+					</label>
+					<label>
+						{t("Description")}
+						<input
+							maxLength={512}
+							onChange={(event) => setDescription(event.target.value)}
+							placeholder={t("Optional display description")}
+							value={description}
+						/>
+					</label>
+					<label>
+						{t("Instructions")}
+						<textarea
+							onChange={(event) => setInstruction(event.target.value)}
+							required
+							rows={5}
+							value={instruction}
+						/>
+					</label>
 					<div className="scheduled-task-dialog-row">
-						<div className="scheduled-task-field"><span>{t("Work in")}</span><MenuSelect ariaLabel={t("Work in")} onChange={setTarget} options={targetOptions} value={target} /></div>
-						<div className="scheduled-task-field"><span>{t("Model")}</span><MenuSelect ariaLabel={t("Model")} onChange={setSelectedModel} options={modelOptions} placeholder={t("Choose a configured model")} value={selectedModel} /></div>
+						<div className="scheduled-task-field">
+							<span>{t("Work in")}</span>
+							<MenuSelect ariaLabel={t("Work in")} onChange={setTarget} options={targetOptions} value={target} />
+						</div>
+						<div className="scheduled-task-field">
+							<span>{t("Model")}</span>
+							<MenuSelect
+								ariaLabel={t("Model")}
+								onChange={setSelectedModel}
+								options={modelOptions}
+								placeholder={t("Choose a configured model")}
+								value={selectedModel}
+							/>
+						</div>
 					</div>
 					{target === "task" && (
 						<div className="scheduled-task-access-folder">
@@ -287,28 +344,184 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 								)}
 							</div>
 							<small>
-								{t("Metis can modify this folder and all of its subfolders. It is not copied or deleted with the task.")}
+								{t(
+									"Metis can modify this folder and all of its subfolders. It is not copied or deleted with the task.",
+								)}
 							</small>
 						</div>
 					)}
 					<fieldset>
 						<legend>{t("Repeat")}</legend>
-						<MenuSelect ariaLabel={t("Repeat")} onChange={setKind} options={[
-							{ value: "once", label: t("Once") },
-							{ value: "daily", label: t("Daily") },
-							{ value: "weekly", label: t("Weekly") },
-							{ value: "monthly", label: t("Monthly") },
-							{ value: "interval", label: t("Interval") },
-						]} value={schedule.kind} />
-						{schedule.kind === "once" && <div className="scheduled-task-recurrence-fields"><label>{t("Date")}<input min={localDate()} onChange={(event) => setSchedule({ ...schedule, date: event.target.value })} required type="date" value={schedule.date} /></label><label>{t("Time")}<input onChange={(event) => setSchedule({ ...schedule, time: event.target.value })} required type="time" value={schedule.time} /></label></div>}
-						{schedule.kind === "daily" && <label>{t("Time")}<input onChange={(event) => setSchedule({ ...schedule, time: event.target.value })} required type="time" value={schedule.time} /></label>}
-						{schedule.kind === "weekly" && <><div aria-label={t("Weekdays")} className="scheduled-task-weekdays">{WEEKDAYS.map((label, index) => { const day = index + 1; const selected = schedule.weekdays.includes(day); return <button aria-pressed={selected} key={label} onClick={() => setSchedule({ ...schedule, weekdays: selected ? schedule.weekdays.filter((item) => item !== day) : [...schedule.weekdays, day].sort() })} type="button">{t(label)}</button>; })}</div><label>{t("Time")}<input onChange={(event) => setSchedule({ ...schedule, time: event.target.value })} required type="time" value={schedule.time} /></label></>}
-						{schedule.kind === "monthly" && <div className="scheduled-task-recurrence-fields"><label>{t("Day")}<input max={31} min={1} onChange={(event) => setSchedule({ ...schedule, day: Number(event.target.value) })} required type="number" value={schedule.day} /></label><label>{t("Time")}<input onChange={(event) => setSchedule({ ...schedule, time: event.target.value })} required type="time" value={schedule.time} /></label></div>}
-						{schedule.kind === "interval" && <><div className="scheduled-task-recurrence-fields"><label>{t("Every")}<input max={10000} min={1} onChange={(event) => setSchedule({ ...schedule, every: Number(event.target.value) })} required type="number" value={schedule.every} /></label><div className="scheduled-task-field"><span>{t("Unit")}</span><MenuSelect ariaLabel={t("Unit")} onChange={(unit) => setSchedule({ ...schedule, unit })} options={[{ value: "minute", label: t("Minutes") }, { value: "hour", label: t("Hours") }]} value={schedule.unit} /></div></div><div className="scheduled-task-recurrence-fields"><label>{t("Start date")}<input onChange={(event) => setSchedule({ ...schedule, startDate: event.target.value })} required type="date" value={schedule.startDate} /></label><label>{t("Start time")}<input onChange={(event) => setSchedule({ ...schedule, startTime: event.target.value })} required type="time" value={schedule.startTime} /></label></div></>}
-				</fieldset>
-				{error && <p className="scheduled-task-form-error" role="alert">{t(error)}</p>}
+						<MenuSelect
+							ariaLabel={t("Repeat")}
+							onChange={setKind}
+							options={[
+								{ value: "once", label: t("Once") },
+								{ value: "daily", label: t("Daily") },
+								{ value: "weekly", label: t("Weekly") },
+								{ value: "monthly", label: t("Monthly") },
+								{ value: "interval", label: t("Interval") },
+							]}
+							value={schedule.kind}
+						/>
+						{schedule.kind === "once" && (
+							<div className="scheduled-task-recurrence-fields">
+								<label>
+									{t("Date")}
+									<input
+										min={localDate()}
+										onChange={(event) => setSchedule({ ...schedule, date: event.target.value })}
+										required
+										type="date"
+										value={schedule.date}
+									/>
+								</label>
+								<label>
+									{t("Time")}
+									<input
+										onChange={(event) => setSchedule({ ...schedule, time: event.target.value })}
+										required
+										type="time"
+										value={schedule.time}
+									/>
+								</label>
+							</div>
+						)}
+						{schedule.kind === "daily" && (
+							<label>
+								{t("Time")}
+								<input
+									onChange={(event) => setSchedule({ ...schedule, time: event.target.value })}
+									required
+									type="time"
+									value={schedule.time}
+								/>
+							</label>
+						)}
+						{schedule.kind === "weekly" && (
+							<>
+								<fieldset aria-label={t("Weekdays")} className="control-group scheduled-task-weekdays">
+									{WEEKDAYS.map((label, index) => {
+										const day = index + 1;
+										const selected = schedule.weekdays.includes(day);
+										return (
+											<button
+												aria-pressed={selected}
+												key={label}
+												onClick={() =>
+													setSchedule({
+														...schedule,
+														weekdays: selected
+															? schedule.weekdays.filter((item) => item !== day)
+															: [...schedule.weekdays, day].sort(),
+													})
+												}
+												type="button"
+											>
+												{t(label)}
+											</button>
+										);
+									})}
+								</fieldset>
+								<label>
+									{t("Time")}
+									<input
+										onChange={(event) => setSchedule({ ...schedule, time: event.target.value })}
+										required
+										type="time"
+										value={schedule.time}
+									/>
+								</label>
+							</>
+						)}
+						{schedule.kind === "monthly" && (
+							<div className="scheduled-task-recurrence-fields">
+								<label>
+									{t("Day")}
+									<input
+										max={31}
+										min={1}
+										onChange={(event) => setSchedule({ ...schedule, day: Number(event.target.value) })}
+										required
+										type="number"
+										value={schedule.day}
+									/>
+								</label>
+								<label>
+									{t("Time")}
+									<input
+										onChange={(event) => setSchedule({ ...schedule, time: event.target.value })}
+										required
+										type="time"
+										value={schedule.time}
+									/>
+								</label>
+							</div>
+						)}
+						{schedule.kind === "interval" && (
+							<>
+								<div className="scheduled-task-recurrence-fields">
+									<label>
+										{t("Every")}
+										<input
+											max={10000}
+											min={1}
+											onChange={(event) => setSchedule({ ...schedule, every: Number(event.target.value) })}
+											required
+											type="number"
+											value={schedule.every}
+										/>
+									</label>
+									<div className="scheduled-task-field">
+										<span>{t("Unit")}</span>
+										<MenuSelect
+											ariaLabel={t("Unit")}
+											onChange={(unit) => setSchedule({ ...schedule, unit })}
+											options={[
+												{ value: "minute", label: t("Minutes") },
+												{ value: "hour", label: t("Hours") },
+											]}
+											value={schedule.unit}
+										/>
+									</div>
+								</div>
+								<div className="scheduled-task-recurrence-fields">
+									<label>
+										{t("Start date")}
+										<input
+											onChange={(event) => setSchedule({ ...schedule, startDate: event.target.value })}
+											required
+											type="date"
+											value={schedule.startDate}
+										/>
+									</label>
+									<label>
+										{t("Start time")}
+										<input
+											onChange={(event) => setSchedule({ ...schedule, startTime: event.target.value })}
+											required
+											type="time"
+											value={schedule.startTime}
+										/>
+									</label>
+								</div>
+							</>
+						)}
+					</fieldset>
+					{error && (
+						<p className="scheduled-task-form-error" role="alert">
+							{t(error)}
+						</p>
+					)}
 				</div>
-				<footer><button className="button-secondary" disabled={busy} onClick={onClose} type="button">{t("Cancel")}</button><button disabled={busy || models.length === 0} type="submit">{t(busy ? "Saving…" : "Save")}</button></footer>
+				<footer>
+					<button className="button-secondary" disabled={busy} onClick={onClose} type="button">
+						{t("Cancel")}
+					</button>
+					<button disabled={busy || models.length === 0} type="submit">
+						{t(busy ? "Saving…" : "Save")}
+					</button>
+				</footer>
 			</form>
 		</dialog>
 	);

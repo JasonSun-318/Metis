@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { bytesToDataUrl, previewImageMediaType } from "./preview-bytes.ts";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
+import { bytesToDataUrl, previewImageMediaType } from "./preview-bytes.ts";
 
 export interface ImageViewerProps {
 	readonly fileName: string;

@@ -42,7 +42,11 @@ const PRESET_INSTRUCTIONS = [
 	},
 ] as const;
 
-export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
+export function PersonalizationPanel({
+	api,
+	serverReady,
+	onDirtyChange,
+}: {
 	readonly api: Pick<MetisDesktopApi, "getPersonalization" | "updatePersonalization">;
 	readonly serverReady: boolean;
 	readonly onDirtyChange?: (dirty: boolean) => void;
@@ -57,10 +61,13 @@ export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
 	const [request, setRequest] = useState(0);
 	const instructionBytes = useMemo(() => new TextEncoder().encode(instructions).byteLength, [instructions]);
 	const dirty = savedInstructions !== null && instructions !== savedInstructions;
-	useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+	useEffect(() => {
+		onDirtyChange?.(dirty);
+	}, [dirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
 	const oversized = instructionBytes > MAX_INSTRUCTION_BYTES;
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(request): Retry explicitly reloads global instructions.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
@@ -113,15 +120,21 @@ export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
 	};
 
 	if (loading) {
-		return <div aria-label={t("Global instructions")} className="settings-loading" role="status" />;
+		return <output aria-label={t("Global instructions")} className="status-block settings-loading" />;
 	}
 	if (error === "load") {
 		return (
 			<div className="settings-page personalization-page">
 				<div className="personalization-load-error settings-inline-error" role="alert">
 					<p>{t("Couldn’t load global instructions.")}</p>
-					<button className="settings-secondary-button" disabled={!serverReady} onClick={() => setRequest((value) => value + 1)} type="button">
-						<ArrowClockwise aria-hidden="true" size={15} />{t("Retry")}
+					<button
+						className="settings-secondary-button"
+						disabled={!serverReady}
+						onClick={() => setRequest((value) => value + 1)}
+						type="button"
+					>
+						<ArrowClockwise aria-hidden="true" size={15} />
+						{t("Retry")}
 					</button>
 				</div>
 			</div>
@@ -172,11 +185,24 @@ export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
 					</label>
 					<div className="personalization-footer">
 						<div className="personalization-meta">
-							<span className="personalization-bytes">{t("{{used}} / {{max}} bytes", { used: instructionBytes.toLocaleString(), max: MAX_INSTRUCTION_BYTES.toLocaleString() })}</span>
-							{oversized ? <span className="personalization-error" role="alert">{t("Global instructions are too large.")}</span> : null}
-							{dirty ? <span className="personalization-unsaved" role="status">{t("Unsaved changes")}</span> : null}
-								{saved ? <span className="personalization-saved-badge" role="status">{t("Saved")}</span> : null}
-							{error === "save" ? <span className="personalization-error" role="alert">{t("Couldn’t save global instructions.")}</span> : null}
+							<span className="personalization-bytes">
+								{t("{{used}} / {{max}} bytes", {
+									used: instructionBytes.toLocaleString(),
+									max: MAX_INSTRUCTION_BYTES.toLocaleString(),
+								})}
+							</span>
+							{oversized ? (
+								<span className="personalization-error" role="alert">
+									{t("Global instructions are too large.")}
+								</span>
+							) : null}
+							{dirty ? <output className="personalization-unsaved">{t("Unsaved changes")}</output> : null}
+							{saved ? <output className="personalization-saved-badge">{t("Saved")}</output> : null}
+							{error === "save" ? (
+								<span className="personalization-error" role="alert">
+									{t("Couldn’t save global instructions.")}
+								</span>
+							) : null}
 						</div>
 						<div className="personalization-actions">
 							{instructions ? (
@@ -207,7 +233,9 @@ export function PersonalizationPanel({ api, serverReady, onDirtyChange }: {
 						</div>
 					</div>
 				</div>
-				<p className="personalization-helper-note">{t("Changes apply to new or reloaded tasks. Running tasks are not interrupted.")}</p>
+				<p className="personalization-helper-note">
+					{t("Changes apply to new or reloaded tasks. Running tasks are not interrupted.")}
+				</p>
 			</section>
 		</div>
 	);

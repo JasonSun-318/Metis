@@ -37,12 +37,14 @@ function harness(tasks: readonly ScheduleTaskView[] = [task()]) {
 		listSchedules: vi.fn().mockResolvedValue({ tasks, nextAfterTaskId: null, unreadCount: 0 }),
 	} as unknown as MetisDesktopApi;
 	const store = new ScheduleStore();
-	store.applySnapshot({ serverEpoch: EPOCH, tasks, unreadCount: 0, cursor: 0 });
+	store.applySnapshot({ serverEpoch: EPOCH, tasks: [...tasks], unreadCount: 0, cursor: 0 });
 	return { api, store };
 }
 
 async function wait(ms = 0) {
-	await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, ms));
+	});
 }
 
 afterEach(() => {
@@ -57,7 +59,20 @@ describe("ScheduledTasksPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTasksPanel
+					api={api}
+					onCreateWithMetis={async () => {}}
+					onOpenSession={() => undefined}
+					onSelectTask={() => undefined}
+					selectedTaskId={null}
+					serverReady
+					sessions={[]}
+					store={store}
+				/>,
+			),
+		);
 		await wait(220);
 		expect(container.textContent).toContain("Scheduled tasks");
 		expect(container.textContent).toContain("Morning brief");
@@ -68,17 +83,25 @@ describe("ScheduledTasksPanel", () => {
 			search.dispatchEvent(new Event("input", { bubbles: true }));
 		});
 		await wait(220);
-		expect(api.listSchedules).toHaveBeenLastCalledWith(expect.objectContaining({ query: "calendar", sort: "next_run" }));
+		expect(api.listSchedules).toHaveBeenLastCalledWith(
+			expect.objectContaining({ query: "calendar", sort: "next_run" }),
+		);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Sort scheduled tasks"]')!.click());
-		const lastUpdated = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((button) => button.textContent === "Last updated")!;
+		const lastUpdated = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(button) => button.textContent === "Last updated",
+		)!;
 		await act(async () => lastUpdated.click());
 		await wait(220);
-		expect(api.listSchedules).toHaveBeenLastCalledWith(expect.objectContaining({ query: "calendar", sort: "updated" }));
-		const newTask = [...container.querySelectorAll("button")].find((button) => button.textContent?.trim() === "New task")!;
+		expect(api.listSchedules).toHaveBeenLastCalledWith(
+			expect.objectContaining({ query: "calendar", sort: "updated" }),
+		);
+		const newTask = [...container.querySelectorAll("button")].find(
+			(button) => button.textContent?.trim() === "New task",
+		)!;
 		await act(async () => newTask.click());
-		const manual = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((button) => button.textContent?.trim() === "Set up manually")!;
+		const manual = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(button) => button.textContent?.trim() === "Set up manually",
+		)!;
 		await act(async () => manual.click());
 		expect(container.querySelector("dialog")?.textContent).toContain("Create scheduled task");
 		expect(container.querySelector('[aria-label="Repeat"]')).not.toBeNull();
@@ -87,30 +110,46 @@ describe("ScheduledTasksPanel", () => {
 
 	it("creates with Metis only after an explicit folder or default-workspace choice", async () => {
 		const { api, store } = harness([]);
-		api.selectProjectFolder = vi.fn()
-			.mockResolvedValueOnce(null)
-			.mockResolvedValueOnce("/work/selected-project");
+		api.selectProjectFolder = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce("/work/selected-project");
 		const onCreateWithMetis = vi.fn().mockResolvedValue(undefined);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={onCreateWithMetis} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTasksPanel
+					api={api}
+					onCreateWithMetis={onCreateWithMetis}
+					onOpenSession={() => undefined}
+					onSelectTask={() => undefined}
+					selectedTaskId={null}
+					serverReady
+					sessions={[]}
+					store={store}
+				/>,
+			),
+		);
 		await wait(220);
-		expect([...container.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "New task")).toHaveLength(1);
+		expect(
+			[...container.querySelectorAll("button")].filter((button) => button.textContent?.trim() === "New task"),
+		).toHaveLength(1);
 
 		const openAssisted = async () => {
-			const newTask = [...container.querySelectorAll<HTMLButtonElement>("button")]
-				.find((button) => button.textContent?.trim() === "New task")!;
+			const newTask = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+				(button) => button.textContent?.trim() === "New task",
+			)!;
 			await act(async () => newTask.click());
-			const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((button) => button.textContent?.trim() === "Create with Metis")!;
+			const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+				(button) => button.textContent?.trim() === "Create with Metis",
+			)!;
 			await act(async () => assisted.click());
 		};
 
 		await openAssisted();
 		expect(container.querySelector("dialog")?.textContent).toContain("Where should this task work?");
-		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
-			.find((button) => button.textContent?.includes("Choose folder"))!;
+		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")].find((button) =>
+			button.textContent?.includes("Choose folder"),
+		)!;
 		await act(async () => chooseFolder.click());
 		await wait();
 		expect(api.selectProjectFolder).toHaveBeenCalledTimes(1);
@@ -123,8 +162,9 @@ describe("ScheduledTasksPanel", () => {
 		expect(container.querySelector("dialog")).toBeNull();
 
 		await openAssisted();
-		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
-			.find((button) => button.textContent?.includes("Use default workspace"))!;
+		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")].find((button) =>
+			button.textContent?.includes("Use default workspace"),
+		)!;
 		await act(async () => useDefault.click());
 		await wait();
 		expect(onCreateWithMetis).toHaveBeenLastCalledWith(null);
@@ -138,14 +178,29 @@ describe("ScheduledTasksPanel", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTasksPanel
+					api={api}
+					onCreateWithMetis={async () => {}}
+					onOpenSession={() => undefined}
+					onSelectTask={() => undefined}
+					selectedTaskId={null}
+					serverReady
+					sessions={[]}
+					store={store}
+				/>,
+			),
+		);
 		await wait(220);
 		expect(container.querySelector<HTMLInputElement>('[role="switch"]')?.checked).toBe(true);
 		const toggle = container.querySelector<HTMLInputElement>('[role="switch"]')!;
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
 		api.setScheduleKeepAwake = vi.fn().mockRejectedValue(new Error("native failure"));
 		await act(async () => toggle.click());
 		await wait();
 		expect(localStorage.getItem("metis.scheduleKeepAwake.v1")).toBe("true");
+		expect(toggle.getAttribute("aria-checked")).toBe("true");
 		const retry = [...container.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
 		await act(async () => retry.click());
 		expect(api.setScheduleKeepAwake).toHaveBeenLastCalledWith(true);
@@ -154,14 +209,29 @@ describe("ScheduledTasksPanel", () => {
 
 	it("keeps a model-loading error visible when the task list succeeds", async () => {
 		const { api, store } = harness([]);
-		api.listModels = vi.fn().mockRejectedValue(new Error("model catalog failed"));
+		vi.mocked(api.listModels).mockRejectedValue(new Error("model catalog failed"));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTasksPanel api={api} onCreateWithMetis={async () => {}} onOpenSession={() => undefined} onSelectTask={() => undefined} selectedTaskId={null} serverReady sessions={[]} store={store} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTasksPanel
+					api={api}
+					onCreateWithMetis={async () => {}}
+					onOpenSession={() => undefined}
+					onSelectTask={() => undefined}
+					selectedTaskId={null}
+					serverReady
+					sessions={[]}
+					store={store}
+				/>,
+			),
+		);
 		await wait(220);
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain("model catalog failed");
-		const create = [...container.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent?.trim() === "New task")!;
+		const create = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent?.trim() === "New task",
+		)!;
 		expect(create.disabled).toBe(true);
 		await act(async () => root.unmount());
 	});

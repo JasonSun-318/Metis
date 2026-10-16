@@ -5,11 +5,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AccountMenu } from "../src/renderer/components/AccountMenu.tsx";
-import {
-	buildActivityWeeks,
-	formatDuration,
-	ProfilePanel,
-} from "../src/renderer/components/ProfilePanel.tsx";
+import { buildActivityWeeks, formatDuration, ProfilePanel } from "../src/renderer/components/ProfilePanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import {
 	DEFAULT_PROFILE_IDENTITY,
@@ -46,8 +42,8 @@ async function flush() {
 }
 
 function button(container: ParentNode, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll("button")].find((candidate) =>
-		candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+	const match = [...container.querySelectorAll("button")].find(
+		(candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
 	);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
@@ -70,8 +66,10 @@ describe("ProfilePanel", () => {
 		expect(weeks).toHaveLength(53);
 		expect(weeks.filter((week) => week.month)).toHaveLength(12);
 		expect(weeks.flatMap((week) => week.days)).toHaveLength(371);
-		expect(weeks.flatMap((week) => week.days).find((day) => day.date === "2026-07-31"))
-			.toMatchObject({ tokens: 125, future: false });
+		expect(weeks.flatMap((week) => week.days).find((day) => day.date === "2026-07-31")).toMatchObject({
+			tokens: 125,
+			future: false,
+		});
 		expect(formatDuration(59_000)).toBe("0m");
 		expect(formatDuration(7_020_000)).toBe("1h 57m");
 	});
@@ -104,11 +102,16 @@ describe("ProfilePanel", () => {
 	it("compacts Token activity only from 10,000", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		await setLocale("zh-CN");
-		const api = { getProfile: vi.fn().mockResolvedValue({
-			...profile,
-			peakDailyTokens: 10_000,
-			activity: [{ date: "2026-07-31", tokens: 9_999 }, { date: "2026-08-01", tokens: 10_000 }],
-		}) };
+		const api = {
+			getProfile: vi.fn().mockResolvedValue({
+				...profile,
+				peakDailyTokens: 10_000,
+				activity: [
+					{ date: "2026-07-31", tokens: 9_999 },
+					{ date: "2026-08-01", tokens: 10_000 },
+				],
+			}),
+		};
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -126,14 +129,23 @@ describe("ProfilePanel", () => {
 		const drawImage = vi.fn();
 		const createImageBitmap = vi.fn(async () => bitmap);
 		vi.stubGlobal("createImageBitmap", createImageBitmap);
-		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+			drawImage,
+		} as unknown as CanvasRenderingContext2D);
 		vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue("data:image/webp;base64,resized");
 		saveProfileIdentity({ displayName: "Barry", avatarDataUrl: null });
 		const api = { getProfile: vi.fn().mockResolvedValue(profile) };
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<><AccountMenu onSettings={vi.fn()} /><ProfilePanel api={api} serverReady /></>));
+		await act(async () =>
+			root.render(
+				<>
+					<AccountMenu onSettings={vi.fn()} />
+					<ProfilePanel api={api} serverReady />
+				</>,
+			),
+		);
 		await flush();
 
 		expect(container.querySelector(".profile-identity h1")?.textContent).toBe("Barry");
@@ -150,21 +162,29 @@ describe("ProfilePanel", () => {
 		expect(container.querySelector(".account-menu-name")?.textContent).toBe("Barry Bai");
 
 		const avatar = container.querySelector<HTMLInputElement>('input[type="file"]')!;
-		Object.defineProperty(avatar, "files", { configurable: true, value: [new File(["avatar"], "avatar.png", { type: "image/png" })] });
+		Object.defineProperty(avatar, "files", {
+			configurable: true,
+			value: [new File(["avatar"], "avatar.png", { type: "image/png" })],
+		});
 		await act(async () => avatar.dispatchEvent(new Event("change", { bubbles: true })));
 		await flush();
 		expect(createImageBitmap).toHaveBeenCalledOnce();
 		expect(drawImage).toHaveBeenCalledWith(bitmap, 0, 0, 256, 128);
 		expect(bitmap.close).toHaveBeenCalledOnce();
-		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).avatarDataUrl).toBe("data:image/webp;base64,resized");
-		expect(container.querySelector<HTMLImageElement>(".account-mark img")?.src).toBe("data:image/webp;base64,resized");
+		expect(JSON.parse(localStorage.getItem(PROFILE_IDENTITY_STORAGE_KEY)!).avatarDataUrl).toBe(
+			"data:image/webp;base64,resized",
+		);
+		expect(container.querySelector<HTMLImageElement>(".account-mark img")?.src).toBe(
+			"data:image/webp;base64,resized",
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("keeps an honest empty state and retries a failed request", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const api = {
-			getProfile: vi.fn()
+			getProfile: vi
+				.fn()
 				.mockRejectedValueOnce(new Error("offline"))
 				.mockResolvedValueOnce({ ...profile, usedSkillCount: 0, skillUseCount: 0, topSkills: [] }),
 		};
@@ -211,9 +231,7 @@ describe("AccountMenu", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () =>
-			root.render(<AccountMenu onCheckUpdate={onCheckUpdate} onSettings={onSettings} />),
-		);
+		await act(async () => root.render(<AccountMenu onCheckUpdate={onCheckUpdate} onSettings={onSettings} />));
 
 		const refresh = button(container, "Check for updates");
 		expect(refresh.classList.contains("account-update-check")).toBe(true);

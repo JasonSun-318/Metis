@@ -11,11 +11,7 @@ import {
 	turnTokenTarget,
 } from "../src/renderer/components/TurnRuntimeStatus.tsx";
 
-function assistant(
-	itemId: string,
-	content: ItemContentBlockView[],
-	usage?: ItemView["usage"],
-): ItemView {
+function assistant(itemId: string, content: ItemContentBlockView[], usage?: ItemView["usage"]): ItemView {
 	return {
 		itemId,
 		sessionId: "session-1",
@@ -65,9 +61,9 @@ describe("TurnRuntimeStatus", () => {
 		const root = createRoot(container);
 		const items = [assistant("streaming", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
 
-		await act(async () => root.render(
-			<TurnRuntimeStatus items={items} running startedAt="2026-08-08T00:00:00.000Z" />,
-		));
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={items} running startedAt="2026-08-08T00:00:00.000Z" />),
+		);
 		const status = container.querySelector(".turn-runtime-status");
 		expect(status?.textContent).toContain("0s");
 		expect(status?.textContent).toContain("0 tokens");
@@ -82,9 +78,9 @@ describe("TurnRuntimeStatus", () => {
 		await act(async () => vi.advanceTimersByTimeAsync(900));
 		expect(status?.textContent).toContain("1s");
 
-		await act(async () => root.render(
-			<TurnRuntimeStatus items={items} running={false} startedAt="2026-08-08T00:00:00.000Z" />,
-		));
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={items} running={false} startedAt="2026-08-08T00:00:00.000Z" />),
+		);
 		expect(container.querySelector(".turn-runtime-status")).toBeNull();
 		expect(vi.getTimerCount()).toBe(0);
 		await act(async () => root.unmount());
@@ -96,10 +92,12 @@ describe("TurnRuntimeStatus", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<TurnRuntimeStatus items={[]} running startedAt="2026-08-08T00:00:00.000Z" variant="compaction" />,
-		));
-		expect(container.querySelector("[role=status]")?.textContent).toContain("Compacting conversation");
+		await act(async () =>
+			root.render(
+				<TurnRuntimeStatus items={[]} running startedAt="2026-08-08T00:00:00.000Z" variant="compaction" />,
+			),
+		);
+		expect(container.querySelector("output")?.textContent).toContain("Compacting conversation");
 		expect(container.querySelector("[data-runtime-tokens]")).toBeNull();
 		expect(container.textContent).not.toContain("tokens");
 		await act(async () => root.unmount());

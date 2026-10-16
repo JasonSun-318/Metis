@@ -30,8 +30,9 @@ function setValue(element: HTMLInputElement | HTMLTextAreaElement, value: string
 async function selectOption(container: HTMLElement, label: string, option: string) {
 	const trigger = container.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!;
 	await act(async () => trigger.click());
-	const item = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-		.find((button) => button.textContent === option)!;
+	const item = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+		(button) => button.textContent === option,
+	)!;
 	await act(async () => item.click());
 }
 
@@ -49,9 +50,22 @@ describe("ScheduledTaskDialog", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTaskDialog api={api} models={[{ provider: "openai", modelId: "gpt-4", name: "GPT-4" }]} onClose={() => undefined} onSaved={onSaved} sessions={[]} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTaskDialog
+					api={api}
+					models={[{ provider: "openai", modelId: "gpt-4", name: "GPT-4" }]}
+					onClose={() => undefined}
+					onSaved={onSaved}
+					sessions={[]}
+				/>,
+			),
+		);
 		const labels = [...container.querySelectorAll("label")];
-		const control = (name: string) => labels.find((label) => label.firstChild?.textContent === name)?.querySelector("input, textarea") as HTMLInputElement | HTMLTextAreaElement;
+		const control = (name: string) =>
+			labels.find((label) => label.firstChild?.textContent === name)?.querySelector("input, textarea") as
+				| HTMLInputElement
+				| HTMLTextAreaElement;
 		await act(async () => {
 			setValue(control("Name"), "Morning brief");
 			setValue(control("Description"), "Desktop summary");
@@ -63,14 +77,16 @@ describe("ScheduledTaskDialog", () => {
 		});
 		const save = [...container.querySelectorAll("button")].find((button) => button.textContent === "Save")!;
 		await act(async () => save.click());
-		expect(createSchedule).toHaveBeenCalledWith(expect.objectContaining({
-			name: "Morning brief",
-			description: "Desktop summary",
-			instruction: "Summarize the calendar.",
-			model: { provider: "openai", modelId: "gpt-4" },
-			schedule: { kind: "daily", time: "09:00" },
-			additionalWorkspaceCwd: "/Users/test/Desktop",
-		}));
+		expect(createSchedule).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "Morning brief",
+				description: "Desktop summary",
+				instruction: "Summarize the calendar.",
+				model: { provider: "openai", modelId: "gpt-4" },
+				schedule: { kind: "daily", time: "09:00" },
+				additionalWorkspaceCwd: "/Users/test/Desktop",
+			}),
+		);
 		expect(onSaved).toHaveBeenCalledWith(TASK);
 		await act(async () => root.unmount());
 	});

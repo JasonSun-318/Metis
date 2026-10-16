@@ -95,18 +95,18 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 			const target = event.target as Node;
 			if (!triggerRef.current?.contains(target) && !menuRef.current?.contains(target)) setMenuOpen(false);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
 			setMenuOpen(false);
 			queueMicrotask(() => triggerRef.current?.focus());
 		};
 		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		window.addEventListener("resize", updateMenuPosition);
 		window.addEventListener("scroll", updateMenuPosition, true);
 		return () => {
 			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
@@ -122,13 +122,17 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 	};
 
 	return (
+		/* biome-ignore lint/a11y/useKeyWithClickEvents: The card forwards clicks to its native Preview button, which supplies the same keyboard action. */
 		<article
-				aria-disabled={!available}
-				className={`transcript-delivered-file-card${available ? "" : " is-unavailable"}`}
-				onClick={(e) => {
-					if (!available) return;
+			aria-disabled={!available}
+			className={`transcript-delivered-file-card${available ? "" : " is-unavailable"}`}
+			onClick={(e) => {
+				if (!available) return;
 				const target = e.target as HTMLElement;
-				if (!target.closest(".transcript-delivered-file-actions") && !target.closest(".transcript-delivered-file-menu")) {
+				if (
+					!target.closest(".transcript-delivered-file-actions") &&
+					!target.closest(".transcript-delivered-file-menu")
+				) {
 					handleMainAction();
 				}
 			}}
@@ -139,24 +143,24 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 			<div className="transcript-delivered-file-copy">
 				<strong title={file.name}>{fileBaseName(file.name)}</strong>
 				<small>{fileTypeLabel(file.name, t)}</small>
-					{file.message ? <p title={file.message}>{file.message}</p> : null}
-					{available ? null : <p className="transcript-delivered-file-unavailable">{t("File unavailable")}</p>}
-				</div>
-				<div className="transcript-delivered-file-actions">
-					<button
-						className="transcript-delivered-file-open"
-						disabled={!available}
-						onClick={handleMainAction}
-						type="button"
-					>
+				{file.message ? <p title={file.message}>{file.message}</p> : null}
+				{available ? null : <p className="transcript-delivered-file-unavailable">{t("File unavailable")}</p>}
+			</div>
+			<div className="transcript-delivered-file-actions">
+				<button
+					className="transcript-delivered-file-open"
+					disabled={!available}
+					onClick={handleMainAction}
+					type="button"
+				>
 					{t("Preview")}
 				</button>
 				<button
 					aria-expanded={menuOpen}
 					aria-haspopup="menu"
 					aria-label={t("More file actions")}
-						className="transcript-delivered-file-menu-trigger"
-						disabled={!available}
+					className="transcript-delivered-file-menu-trigger"
+					disabled={!available}
 					onClick={() => setMenuOpen((current) => !current)}
 					ref={triggerRef}
 					type="button"
@@ -164,7 +168,7 @@ export function DeliveredFileCard({ file, onOpen, onPreview }: DeliveredFileCard
 					<CaretDown aria-hidden="true" size={12} />
 				</button>
 			</div>
-				{available && menuOpen
+			{available && menuOpen
 				? createPortal(
 						<div className="transcript-delivered-file-menu" ref={menuRef} role="menu" style={menuPosition}>
 							<button

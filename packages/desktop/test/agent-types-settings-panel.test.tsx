@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { CustomAgentTypeView } from "@metis/app-protocol";
-import { act, StrictMode } from "react";
+import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentTypesSettingsPanel } from "../src/renderer/components/AgentTypesSettingsPanel.tsx";
@@ -53,7 +53,11 @@ function renderPanel(api: MetisDesktopApi) {
 function agentTypesApi(overrides: Partial<MetisDesktopApi> = {}): MetisDesktopApi {
 	return {
 		listAgentTypes: vi.fn().mockResolvedValue({
-			types: [typeView({ id: "default" }), typeView({ id: "explorer", allowedTools: ["read", "grep"] }), typeView({ id: "auditor", builtIn: false, displayName: "Auditor" })],
+			types: [
+				typeView({ id: "default" }),
+				typeView({ id: "explorer", allowedTools: ["read", "grep"] }),
+				typeView({ id: "auditor", builtIn: false, displayName: "Auditor" }),
+			],
 		}),
 		upsertAgentType: vi.fn().mockImplementation(async ({ type }) => ({ type: { ...type, builtIn: false } })),
 		removeAgentType: vi.fn().mockResolvedValue({ id: "auditor" }),
@@ -138,8 +142,6 @@ describe("AgentTypesSettingsPanel", () => {
 		await flush();
 
 		expect(confirmSpy).toHaveBeenCalled();
-		expect(desktopApi.removeAgentType).toHaveBeenCalledWith(
-			expect.objectContaining({ id: "auditor" }),
-		);
+		expect(desktopApi.removeAgentType).toHaveBeenCalledWith(expect.objectContaining({ id: "auditor" }));
 	});
 });

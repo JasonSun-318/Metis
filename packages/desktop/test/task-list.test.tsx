@@ -60,7 +60,9 @@ describe("TaskList", () => {
 	it("collapses to the first incomplete task without remounting its rows", () => {
 		const mounted = mount(tasks);
 		const { container } = mounted;
-		const toggle = container.querySelector<HTMLButtonElement>('.task-list-header.task-list-toggle[aria-expanded="true"]');
+		const toggle = container.querySelector<HTMLButtonElement>(
+			'.task-list-header.task-list-toggle[aria-expanded="true"]',
+		);
 		const firstRow = container.querySelector(".task-list-items .task-list-row");
 		expect(toggle?.getAttribute("aria-label")).toBe("Collapse task list");
 
@@ -79,7 +81,7 @@ describe("TaskList", () => {
 		expect(summary?.textContent).toContain("Working");
 		expect(summary?.textContent).toContain("First task");
 		expect(summary?.textContent).toContain("Expand task list");
-		mounted.rerender(tasks.map((task, index) => index === 0 ? { ...task, completed: true } : task));
+		mounted.rerender(tasks.map((task, index) => (index === 0 ? { ...task, completed: true } : task)));
 		expect(container.querySelector(".task-list-summary .task-list-text")?.textContent).toBe("Third task");
 
 		act(() => summary?.click());
@@ -115,7 +117,10 @@ describe("TaskList", () => {
 
 	it("keeps a restored completed snapshot hidden after the server epoch changes", () => {
 		const mounted = mount(tasks, "epoch-a");
-		mounted.rerender(tasks.map((task) => ({ ...task, completed: true })), "epoch-b");
+		mounted.rerender(
+			tasks.map((task) => ({ ...task, completed: true })),
+			"epoch-b",
+		);
 
 		expect(mounted.container.childElementCount).toBe(0);
 	});

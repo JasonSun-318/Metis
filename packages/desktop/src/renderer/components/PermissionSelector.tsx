@@ -110,7 +110,9 @@ export function PermissionSelector({
 			}
 			if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
 			event.preventDefault();
-			const enabled = optionRefs.current.filter((node): node is HTMLButtonElement => node !== null && !node.disabled);
+			const enabled = optionRefs.current.filter(
+				(node): node is HTMLButtonElement => node !== null && !node.disabled,
+			);
 			if (enabled.length === 0) return;
 			const current = enabled.indexOf(document.activeElement as HTMLButtonElement);
 			const delta = event.key === "ArrowDown" ? 1 : -1;
@@ -148,12 +150,11 @@ export function PermissionSelector({
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{status && (
-				<p
-					className={`permission-selector-status${!sandboxReady || constrainedByParent ? " is-warning" : ""}`}
-					role="status"
+				<output
+					className={`status-paragraph ${`permission-selector-status${!sandboxReady || constrainedByParent ? " is-warning" : ""}`}`}
 				>
 					{status}
-				</p>
+				</output>
 			)}
 			{open && (
 				<div aria-label={t("Permissions")} className="permission-selector-popover" role="menu">
@@ -186,7 +187,9 @@ export function PermissionSelector({
 						);
 					})}
 					{constrainedByParent && (
-						<p className="permission-selector-note">{t("A parent session limits the effective permissions for this task.")}</p>
+						<p className="permission-selector-note">
+							{t("A parent session limits the effective permissions for this task.")}
+						</p>
 					)}
 					{!sandboxReady && (
 						<p className="permission-selector-note" role="alert">
@@ -203,7 +206,9 @@ export function PermissionSelector({
 						>
 							<span>
 								<strong>{t(setupPending ? "Setting up Windows sandbox…" : "Set up Windows sandbox")}</strong>
-								<small>{t("Windows will ask for permission once to create an isolated account and network rules.")}</small>
+								<small>
+									{t("Windows will ask for permission once to create an isolated account and network rules.")}
+								</small>
 							</span>
 						</button>
 					)}

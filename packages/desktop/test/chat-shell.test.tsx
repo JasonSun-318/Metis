@@ -1,22 +1,27 @@
 // @vitest-environment jsdom
 
-import type { AgentSummaryView, ClientResult, McpServerSummaryView, ScheduleTaskView, SessionSnapshot, SessionSummary } from "@metis/app-protocol";
 import { EditorView } from "@codemirror/view";
+import type {
+	AgentSummaryView,
+	ClientResult,
+	McpServerSummaryView,
+	ModelSettingsView,
+	ScheduleTaskView,
+	SessionSnapshot,
+	SessionSummary,
+} from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	App,
-	sessionDisplayTitle,
-} from "../src/renderer/components/App.tsx";
-import { firstInteractionForSession } from "../src/renderer/session-view-utils.ts";
-import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
+import { App, sessionDisplayTitle } from "../src/renderer/components/App.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesPopover.tsx";
+import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { GENERAL_PREFERENCES_STORAGE_KEY } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomePeriod, HOME_GREETINGS } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
+import { firstInteractionForSession } from "../src/renderer/session-view-utils.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
 	loadProjectPreferences,
@@ -55,6 +60,8 @@ function session(sessionId: string, mode: "chat" | "code", cwd: string, name?: s
 		state: "idle",
 		archived: false,
 		unread: false,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 
@@ -76,10 +83,7 @@ function scheduledTask(): ScheduleTaskView {
 	};
 }
 
-function mcpServer(
-	state: McpServerSummaryView["state"] = "connected",
-	lastError?: string,
-): McpServerSummaryView {
+function mcpServer(state: McpServerSummaryView["state"] = "connected", lastError?: string): McpServerSummaryView {
 	return {
 		name: "deepwiki",
 		scope: "user",
@@ -133,9 +137,15 @@ function snapshot(summary: SessionSummary): SessionSnapshot {
 }
 
 function button(container: HTMLElement, label: string): HTMLButtonElement {
-	const matches = (root: ParentNode) => [...root.querySelectorAll<HTMLButtonElement>("button")]
-		.find((candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label);
-	const portalMatch = [...document.querySelectorAll(".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-popover")]
+	const matches = (root: ParentNode) =>
+		[...root.querySelectorAll<HTMLButtonElement>("button")].find(
+			(candidate) => candidate.getAttribute("aria-label") === label || candidate.textContent?.trim() === label,
+		);
+	const portalMatch = [
+		...document.querySelectorAll(
+			".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-popover",
+		),
+	]
 		.map((root) => matches(root))
 		.find((candidate) => candidate !== undefined);
 	const match = matches(container) ?? portalMatch;
@@ -158,7 +168,9 @@ async function openToolStartPage(container: HTMLElement): Promise<HTMLElement> {
 	if (toggle) await act(async () => toggle.click());
 	const launchers = () => workspace.querySelector<HTMLElement>(".tool-sidebar-panel:not([hidden]) .tool-sidebar-menu");
 	if (launchers()) return launchers()!;
-	const existing = workspace.querySelector<HTMLButtonElement>('.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]');
+	const existing = workspace.querySelector<HTMLButtonElement>(
+		'.tool-sidebar-tabbar [role="tab"][aria-label="New tab"]',
+	);
 	await act(async () => (existing ?? workspace.querySelector<HTMLButtonElement>(".tool-add-trigger")!).click());
 	const page = launchers();
 	if (!page) throw new Error("Missing browser start page tools");
@@ -202,9 +214,16 @@ function changeTextarea(textarea: HTMLElement, value: string) {
 	if (textarea instanceof HTMLTextAreaElement) {
 		Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
 	} else {
-		(textarea as unknown as { value: string }).value = value;
+		// The contenteditable editor's value setter preserves selected skill tokens.
+		Reflect.set(textarea, "value", value);
 	}
 	textarea.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function composerText(editor: HTMLElement): string {
+	const value: unknown = Reflect.get(editor, "value");
+	if (typeof value !== "string") throw new Error("Missing composer value");
+	return value;
 }
 
 function changeInput(input: HTMLInputElement, value: string) {
@@ -212,14 +231,10 @@ function changeInput(input: HTMLInputElement, value: string) {
 	input.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
-function changeSelect(select: HTMLSelectElement, value: string) {
-	Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")?.set?.call(select, value);
-	select.dispatchEvent(new Event("change", { bubbles: true }));
-}
-
 function codeEditor(container: ParentNode, label: string): EditorView {
-	const content = [...container.querySelectorAll<HTMLElement>(".cm-content")]
-		.find((element) => element.getAttribute("aria-label") === label);
+	const content = [...container.querySelectorAll<HTMLElement>(".cm-content")].find(
+		(element) => element.getAttribute("aria-label") === label,
+	);
 	const editor = content?.closest<HTMLElement>(".cm-editor");
 	const view = editor ? EditorView.findFromDOM(editor) : null;
 	if (!view) throw new Error(`Missing CodeMirror editor: ${label}`);
@@ -231,17 +246,22 @@ function changeCodeEditor(view: EditorView, value: string): void {
 }
 
 async function openTreeMenu(container: HTMLElement, title: string): Promise<void> {
-	const label = [...container.querySelectorAll<HTMLElement>(".file-tree-row [title]")]
-		.find((element) => element.title === title);
+	const label = [...container.querySelectorAll<HTMLElement>(".file-tree-row [title]")].find(
+		(element) => element.title === title,
+	);
 	const row = label?.closest(".file-tree-row");
 	if (!row) throw new Error(`Missing tree row for ${title}`);
-	await act(async () => row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 80 })));
+	await act(async () =>
+		row.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 80 })),
+	);
 }
 
 async function openRootTreeMenu(container: HTMLElement): Promise<void> {
 	const tree = container.querySelector<HTMLElement>(".file-tree-scroll");
 	if (!tree) throw new Error("Missing file tree");
-	await act(async () => tree.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })));
+	await act(async () =>
+		tree.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 24, clientY: 24 })),
+	);
 }
 
 async function submitTreeName(container: HTMLElement, name: string): Promise<void> {
@@ -253,17 +273,19 @@ async function submitTreeName(container: HTMLElement, name: string): Promise<voi
 	});
 }
 
-function createHarness(options: {
-	failFirstOpen?: boolean;
-	failOpenSessionIds?: readonly string[];
-	loseFirstCreateResponse?: boolean;
-	loseFirstStartResponse?: boolean;
-	scheduleTasks?: readonly ScheduleTaskView[];
-	sessions?: readonly SessionSummary[];
-	mcpLists?: readonly (readonly McpServerSummaryView[])[];
-	changelog?: DesktopChangelog;
-	updateState?: DesktopUpdateState;
-} = {}) {
+function createHarness(
+	options: {
+		failFirstOpen?: boolean;
+		failOpenSessionIds?: readonly string[];
+		loseFirstCreateResponse?: boolean;
+		loseFirstStartResponse?: boolean;
+		scheduleTasks?: readonly ScheduleTaskView[];
+		sessions?: readonly SessionSummary[];
+		mcpLists?: readonly (readonly McpServerSummaryView[])[];
+		changelog?: DesktopChangelog;
+		updateState?: DesktopUpdateState;
+	} = {},
+) {
 	localStorage.setItem(
 		"metis.session-grouping.v1",
 		localStorage.getItem("metis.session-grouping.v1") ?? '{"chat":"project","code":"project"}',
@@ -287,7 +309,9 @@ function createHarness(options: {
 	const mcpLists = options.mcpLists ?? [[mcpServer()]];
 	const api = {
 		platform: "win32",
-		getServerState: vi.fn().mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
+		getServerState: vi
+			.fn()
+			.mockResolvedValue({ state: "ready", serverEpoch: EPOCH, restartAttempt: 0, failure: null }),
 		getModelSettings: vi.fn().mockResolvedValue({
 			defaultModel: null,
 			defaultThinkingSelection: "off",
@@ -370,7 +394,8 @@ function createHarness(options: {
 		deleteProject: vi.fn(async (input) => {
 			const before = sessions.length;
 			sessions = sessions.filter(
-				(candidate) => candidate.mode !== input.mode || candidate.cwd !== input.cwd || candidate.scheduled !== undefined,
+				(candidate) =>
+					candidate.mode !== input.mode || candidate.cwd !== input.cwd || candidate.scheduled !== undefined,
 			);
 			return {
 				ok: true as const,
@@ -378,9 +403,7 @@ function createHarness(options: {
 			};
 		}),
 		selectProjectFolder: vi.fn().mockResolvedValue("/work/selected-project"),
-		selectAttachmentFiles: vi.fn().mockResolvedValue([
-			{ path: "/tmp/report.pdf", name: "report.pdf" },
-		]),
+		selectAttachmentFiles: vi.fn().mockResolvedValue([{ path: "/tmp/report.pdf", name: "report.pdf" }]),
 		resolveDroppedFiles: vi.fn().mockReturnValue([]),
 		getDefaultProjectLocation: vi.fn().mockResolvedValue("/Users/test/Metis Projects"),
 		createProjectFolder: vi.fn(async ({ parentDirectory, name }) => `${parentDirectory}/${name}`),
@@ -413,12 +436,14 @@ function createHarness(options: {
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
 		listBrowserDownloads: vi.fn().mockResolvedValue([]),
 		controlBrowserDownload: vi.fn().mockResolvedValue(undefined),
-		listBrowserProfiles: vi.fn().mockResolvedValue([{
-			profileId: DEFAULT_BROWSER_PROFILE_ID,
-			name: "Default",
-			sourceId: null,
-			sourceProfileId: null,
-		}]),
+		listBrowserProfiles: vi.fn().mockResolvedValue([
+			{
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+				name: "Default",
+				sourceId: null,
+				sourceProfileId: null,
+			},
+		]),
 		listBrowserImportSources: vi.fn().mockResolvedValue([]),
 		importBrowserData: vi.fn(),
 		listBrowserHistory: vi.fn().mockResolvedValue([]),
@@ -427,14 +452,16 @@ function createHarness(options: {
 			browserSubscribers.add(listener);
 			return () => browserSubscribers.delete(listener);
 		}),
-		listWorkspaceDirectory: vi.fn(async ({ relativePath }) => relativePath === "docs"
-			? [{ name: "guide.md", relativePath: "docs/guide.md", kind: "file" as const }]
-			: [
-				{ name: "docs", relativePath: "docs", kind: "directory" as const },
-				{ name: ".env", relativePath: ".env", kind: "file" as const },
-				{ name: "notes.txt", relativePath: "notes.txt", kind: "file" as const },
-				{ name: "README.md", relativePath: "README.md", kind: "file" as const },
-			]),
+		listWorkspaceDirectory: vi.fn(async ({ relativePath }) =>
+			relativePath === "docs"
+				? [{ name: "guide.md", relativePath: "docs/guide.md", kind: "file" as const }]
+				: [
+						{ name: "docs", relativePath: "docs", kind: "directory" as const },
+						{ name: ".env", relativePath: ".env", kind: "file" as const },
+						{ name: "notes.txt", relativePath: "notes.txt", kind: "file" as const },
+						{ name: "README.md", relativePath: "README.md", kind: "file" as const },
+					],
+		),
 		searchWorkspaceFiles: vi.fn().mockResolvedValue(["docs/guide.md"]),
 		getWorkspaceReview: vi.fn().mockResolvedValue({
 			kind: "review" as const,
@@ -454,12 +481,20 @@ function createHarness(options: {
 			text: relativePath.endsWith(".md") ? `# ${relativePath}\n\nWorkspace preview.` : `contents of ${relativePath}`,
 			revision: "a".repeat(64),
 		})),
-		writeWorkspaceFile: vi.fn(async ({ text }) => ({ revision: "b".repeat(64), byteLength: new TextEncoder().encode(text).byteLength })),
+		writeWorkspaceFile: vi.fn(async ({ text }) => ({
+			revision: "b".repeat(64),
+			byteLength: new TextEncoder().encode(text).byteLength,
+		})),
 		openWorkspaceFile: vi.fn().mockResolvedValue(undefined),
 		mutateWorkspaceEntry: vi.fn(async (input) => {
 			if (input.action === "create") {
 				const relativePath = input.parentRelativePath ? `${input.parentRelativePath}/${input.name}` : input.name;
-				return { action: "create" as const, kind: input.kind, relativePath, absolutePath: `/work/code-project/${relativePath}` };
+				return {
+					action: "create" as const,
+					kind: input.kind,
+					relativePath,
+					absolutePath: `/work/code-project/${relativePath}`,
+				};
 			}
 			if (input.action === "trash") {
 				return {
@@ -470,9 +505,10 @@ function createHarness(options: {
 				};
 			}
 			const name = input.action === "rename" ? input.name : input.relativePath.split("/").at(-1)!;
-			const parent = input.action === "rename"
-				? input.relativePath.split("/").slice(0, -1).join("/")
-				: input.destinationDirectoryRelativePath;
+			const parent =
+				input.action === "rename"
+					? input.relativePath.split("/").slice(0, -1).join("/")
+					: input.destinationDirectoryRelativePath;
 			const relativePath = parent ? `${parent}/${name}` : name;
 			return {
 				action: input.action,
@@ -523,7 +559,7 @@ function createHarness(options: {
 			const current = sessions.find((candidate) => candidate.sessionId === sessionId);
 			if (!current) throw new Error("missing session");
 			const renamed = { ...current, name };
-			sessions = sessions.map((candidate) => candidate.sessionId === sessionId ? renamed : candidate);
+			sessions = sessions.map((candidate) => (candidate.sessionId === sessionId ? renamed : candidate));
 			return { session: renamed };
 		}),
 		forkSession: vi.fn(async ({ sessionId, entryId }) => {
@@ -567,7 +603,7 @@ function createHarness(options: {
 			const current = sessions.find((candidate) => candidate.sessionId === sessionId);
 			if (!current) throw new Error("missing session");
 			const read = { ...current, unread: false };
-			sessions = sessions.map((candidate) => candidate.sessionId === sessionId ? read : candidate);
+			sessions = sessions.map((candidate) => (candidate.sessionId === sessionId ? read : candidate));
 			return { session: read };
 		}),
 		startTurn: vi.fn(async () => {
@@ -632,7 +668,9 @@ function createHarness(options: {
 	} as unknown as MetisDesktopApi;
 	return {
 		api,
-		emitBrowser: (event: Parameters<MetisDesktopApi["subscribeBrowser"]>[0] extends (event: infer Event) => void ? Event : never) => {
+		emitBrowser: (
+			event: Parameters<MetisDesktopApi["subscribeBrowser"]>[0] extends (event: infer Event) => void ? Event : never,
+		) => {
 			for (const listener of browserSubscribers) listener(event);
 		},
 		emitEvent: (event: Parameters<NonNullable<typeof subscriber>>[0]) => subscriber?.(event),
@@ -663,52 +701,77 @@ afterEach(() => {
 });
 
 describe("Chat desktop shell", () => {
-	it.each(["en", "zh-CN"] as const)("dismisses memory event notifications after five seconds without replaying older notices (%s)", async (locale) => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = session("chat-memory", "chat", "/work/chat-project", "Memory");
-		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
-		const { api, emitEvent } = createHarness({ sessions: [active] });
-		const store = new AppStore();
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		try {
-			await act(async () => root.render(<App api={api} store={store} />));
-			await flush();
-			await act(async () => { await setLocale(locale); });
-			vi.useFakeTimers();
-			const notify = async (cursor: number, slug: string) => act(async () => emitEvent({
-				type: "app-server",
-				envelope: {
-					jsonrpc: "2.0", method: "connection/events",
-					params: { serverEpoch: EPOCH, fromCursor: cursor, toCursor: cursor, events: [{
-						type: "memory/changed",
-						entry: { id: `memory-${cursor}`, ts: new Date().toISOString(), actor: { kind: "agent", sessionId: active.sessionId }, op: "create", scope: "global", target: { slug } },
-					}] },
-				},
-			}));
-			await notify(1, "older-note");
-			await notify(2, "user-jason-profile");
-			expect(container.querySelector(".system-notice")?.textContent).toContain(locale === "zh-CN" ? "已保存记忆：“user-jason-profile”" : 'Saved memory: note "user-jason-profile"');
-			await act(async () => vi.advanceTimersByTime(4_999));
-			expect(container.querySelector(".system-notice")).not.toBeNull();
-			await act(async () => store.upsertSession({ ...active, name: "Updated while chatting" }));
-			await act(async () => vi.advanceTimersByTime(1));
-			expect(container.querySelector(".system-notice")).toBeNull();
-			await act(async () => store.upsertSession(active));
-			expect(container.querySelector(".system-notice")).toBeNull();
-			await notify(3, "new-note");
-			await act(async () => vi.advanceTimersByTime(4_000));
-			await notify(4, "new-note");
-			await act(async () => vi.advanceTimersByTime(1_000));
-			expect(container.querySelector(".system-notice")?.textContent).toContain("new-note");
-			await act(async () => button(container, locale === "zh-CN" ? "关闭提醒" : "Dismiss notification").click());
-			expect(container.querySelector(".system-notice")).toBeNull();
-		} finally {
-			await act(async () => root.unmount());
-			vi.useRealTimers();
-		}
-	});
+	it.each(["en", "zh-CN"] as const)(
+		"dismisses memory event notifications after five seconds without replaying older notices (%s)",
+		async (locale) => {
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			const active = session("chat-memory", "chat", "/work/chat-project", "Memory");
+			localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+			const { api, emitEvent } = createHarness({ sessions: [active] });
+			const store = new AppStore();
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			try {
+				await act(async () => root.render(<App api={api} store={store} />));
+				await flush();
+				await act(async () => {
+					await setLocale(locale);
+				});
+				vi.useFakeTimers();
+				const notify = async (cursor: number, slug: string) =>
+					act(async () =>
+						emitEvent({
+							type: "app-server",
+							envelope: {
+								jsonrpc: "2.0",
+								method: "connection/events",
+								params: {
+									serverEpoch: EPOCH,
+									fromCursor: cursor,
+									toCursor: cursor,
+									events: [
+										{
+											type: "memory/changed",
+											entry: {
+												id: `memory-${cursor}`,
+												ts: new Date().toISOString(),
+												actor: { kind: "agent", sessionId: active.sessionId },
+												op: "create",
+												scope: "global",
+												target: { slug },
+											},
+										},
+									],
+								},
+							},
+						}),
+					);
+				await notify(1, "older-note");
+				await notify(2, "user-jason-profile");
+				expect(container.querySelector(".system-notice")?.textContent).toContain(
+					locale === "zh-CN" ? "已保存记忆：“user-jason-profile”" : 'Saved memory: note "user-jason-profile"',
+				);
+				await act(async () => vi.advanceTimersByTime(4_999));
+				expect(container.querySelector(".system-notice")).not.toBeNull();
+				await act(async () => store.upsertSession({ ...active, name: "Updated while chatting" }));
+				await act(async () => vi.advanceTimersByTime(1));
+				expect(container.querySelector(".system-notice")).toBeNull();
+				await act(async () => store.upsertSession(active));
+				expect(container.querySelector(".system-notice")).toBeNull();
+				await notify(3, "new-note");
+				await act(async () => vi.advanceTimersByTime(4_000));
+				await notify(4, "new-note");
+				await act(async () => vi.advanceTimersByTime(1_000));
+				expect(container.querySelector(".system-notice")?.textContent).toContain("new-note");
+				await act(async () => button(container, locale === "zh-CN" ? "关闭提醒" : "Dismiss notification").click());
+				expect(container.querySelector(".system-notice")).toBeNull();
+			} finally {
+				await act(async () => root.unmount());
+				vi.useRealTimers();
+			}
+		},
+	);
 
 	it("constrains the tools sidebar on resize without overwriting its session preference", async () => {
 		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -756,8 +819,10 @@ describe("Chat desktop shell", () => {
 			expect(clampSessionSidebarWidth(286)).toBe(286);
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
-			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("560px");
-			const resizer = container.querySelector<HTMLElement>('[role="separator"][aria-label="Resize sessions sidebar"]')!;
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe(
+				"560px",
+			);
+			const resizer = container.querySelector<HTMLElement>('hr[aria-label="Resize sessions sidebar"]')!;
 			Object.defineProperties(resizer, {
 				hasPointerCapture: { configurable: true, value: () => false },
 				setPointerCapture: { configurable: true, value: vi.fn() },
@@ -772,19 +837,25 @@ describe("Chat desktop shell", () => {
 			};
 			await act(async () => resizer.dispatchEvent(pointer("pointerdown", 560)));
 			await act(async () => resizer.dispatchEvent(pointer("pointermove", 544)));
-			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("544px");
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe(
+				"544px",
+			);
 			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("560");
 			await act(async () => resizer.dispatchEvent(pointer("pointerup", 544)));
 			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("544");
 
 			Object.defineProperty(window, "innerWidth", { configurable: true, value: 720 });
 			await act(async () => window.dispatchEvent(new Event("resize")));
-			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("240px");
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe(
+				"240px",
+			);
 			expect(localStorage.getItem("metis.session-sidebar-width.v1")).toBe("544");
 
 			Object.defineProperty(window, "innerWidth", { configurable: true, value: 1_800 });
 			await act(async () => window.dispatchEvent(new Event("resize")));
-			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe("544px");
+			expect(container.querySelector<HTMLElement>(".app-shell")?.style.getPropertyValue("--sidebar-width")).toBe(
+				"544px",
+			);
 		} finally {
 			await act(async () => root.unmount());
 			Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
@@ -796,7 +867,11 @@ describe("Chat desktop shell", () => {
 		const now = new Date();
 		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
 		const sessions = [
-			{ ...session("chat-today", "chat", "/work/shared", "Today unread"), updatedAt: now.toISOString(), unread: true },
+			{
+				...session("chat-today", "chat", "/work/shared", "Today unread"),
+				updatedAt: now.toISOString(),
+				unread: true,
+			},
 			{ ...session("chat-yesterday", "chat", "/work/shared", "Yesterday read"), updatedAt: yesterday.toISOString() },
 			{ ...session("code-today", "code", "/work/shared", "Code today"), updatedAt: now.toISOString() },
 		];
@@ -814,7 +889,12 @@ describe("Chat desktop shell", () => {
 		expect(button(container, "Today unread").querySelector(".session-button-title i")?.className).toBe("unread");
 		await act(async () => button(container, "Today").click());
 		expect(button(container, "Today").getAttribute("aria-expanded")).toBe("false");
-		expect(button(container, "Today").closest(".session-section")?.querySelector(".session-section-drawer")?.hasAttribute("inert")).toBe(true);
+		expect(
+			button(container, "Today")
+				.closest(".session-section")
+				?.querySelector(".session-section-drawer")
+				?.hasAttribute("inert"),
+		).toBe(true);
 
 		await act(async () => button(container, "Group sessions").click());
 		expect(button(document.body, "Group by Date")).toBeTruthy();
@@ -849,7 +929,17 @@ describe("Chat desktop shell", () => {
 	it("keeps session and project action menus outside clipping sidebar containers", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.session-grouping.v1", '{"chat":"date","code":"date"}');
-		const bottom = { bottom: 754, height: 24, left: 260, right: 284, top: 730, width: 24, x: 260, y: 730, toJSON: () => ({}) } as DOMRect;
+		const bottom = {
+			bottom: 754,
+			height: 24,
+			left: 260,
+			right: 284,
+			top: 730,
+			width: 24,
+			x: 260,
+			y: 730,
+			toJSON: () => ({}),
+		} as DOMRect;
 		const { api } = createHarness({ sessions: [session("chat-bottom", "chat", "/work/bottom", "Bottom task")] });
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -861,7 +951,9 @@ describe("Chat desktop shell", () => {
 		const sessionTrigger = button(sessionRow, "Actions for Bottom task");
 		vi.spyOn(sessionTrigger, "getBoundingClientRect").mockReturnValue(bottom);
 		await act(async () => sessionTrigger.click());
-		const sessionMenu = document.body.querySelector<HTMLElement>('[role="menu"][aria-label="Bottom task session actions"]')!;
+		const sessionMenu = document.body.querySelector<HTMLElement>(
+			'[role="menu"][aria-label="Bottom task session actions"]',
+		)!;
 		expect(sessionMenu).not.toBeNull();
 		expect(sessionRow.contains(sessionMenu)).toBe(false);
 		expect(sessionMenu.style.position).toBe("fixed");
@@ -877,7 +969,9 @@ describe("Chat desktop shell", () => {
 		const projectTrigger = button(group, "Project actions");
 		vi.spyOn(projectTrigger, "getBoundingClientRect").mockReturnValue(bottom);
 		await act(async () => projectTrigger.click());
-		const projectMenu = document.body.querySelector<HTMLElement>('[role="menu"][aria-label="bottom project actions"]')!;
+		const projectMenu = document.body.querySelector<HTMLElement>(
+			'[role="menu"][aria-label="bottom project actions"]',
+		)!;
 		expect(projectMenu).not.toBeNull();
 		expect(group.contains(projectMenu)).toBe(false);
 		expect(projectMenu.style.position).toBe("fixed");
@@ -909,7 +1003,11 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(button(container, "Scheduled tasks")).toBeTruthy();
 		await act(async () => button(container, "Code").click());
-		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Scheduled tasks")).toBe(false);
+		expect(
+			[...container.querySelectorAll("button")].some(
+				(candidate) => candidate.textContent?.trim() === "Scheduled tasks",
+			),
+		).toBe(false);
 		await act(async () => root.unmount());
 	});
 
@@ -992,8 +1090,14 @@ describe("Chat desktop shell", () => {
 		const available = { status: "available" as const, version: "0.81.0", releaseNotes: RELEASE_NOTES };
 		const { api, emitUpdate } = createHarness();
 		let resolveCheck: ((state: typeof available) => void) | undefined;
-		api.checkForUpdate = vi.fn()
-			.mockImplementationOnce(() => new Promise<typeof available>((resolve) => { resolveCheck = resolve; }))
+		api.checkForUpdate = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<typeof available>((resolve) => {
+						resolveCheck = resolve;
+					}),
+			)
 			.mockResolvedValue(available);
 
 		const container = document.createElement("div");
@@ -1043,7 +1147,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => update.click());
 		expect(api.startUpdate).toHaveBeenCalledOnce();
 
-		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 42 }));
+		await act(async () =>
+			emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 42 }),
+		);
 		expect(button(notice, "Downloading update 42%").disabled).toBe(true);
 		await act(async () => emitUpdate({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
 		expect(button(notice, "Open installer").disabled).toBe(false);
@@ -1090,7 +1196,9 @@ describe("Chat desktop shell", () => {
 		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("Update checks are unavailable in this build"));
 		await act(async () => refreshBtn.click());
 		await flush();
-		expect(container.querySelector('.system-notice[data-tone="info"]')?.textContent).toBe("Update checks are not supported in this build");
+		expect(container.querySelector('.system-notice[data-tone="info"]')?.textContent).toBe(
+			"Update checks are not supported in this build",
+		);
 
 		// 4. Stale check does not overwrite downloading/ready state
 		let resolveDelayedCheck: ((val: { status: "unavailable" }) => void) | undefined;
@@ -1101,7 +1209,9 @@ describe("Chat desktop shell", () => {
 				}),
 		);
 		await act(async () => refreshBtn.click());
-		await act(async () => emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 60 }));
+		await act(async () =>
+			emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 60 }),
+		);
 		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
 		expect(button(notice, "Downloading update 60%")).not.toBeNull();
 
@@ -1135,7 +1245,7 @@ describe("Chat desktop shell", () => {
 	it("creates a folder-bound Chat and sends the assisted schedule prompt", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
-		api.listModels = vi.fn().mockResolvedValue({
+		vi.mocked(api.listModels).mockResolvedValue({
 			models: [{ provider: "test-provider", modelId: "test-model", name: "Test model" }],
 		});
 		const container = document.createElement("div");
@@ -1145,33 +1255,41 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Scheduled tasks").click());
-		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 220));
+		});
 		await act(async () => button(container, "Create scheduled task").click());
-		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.textContent?.trim() === "Create with Metis")!;
+		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.textContent?.trim() === "Create with Metis",
+		)!;
 		await act(async () => assisted.click());
-		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
-			.find((candidate) => candidate.textContent?.includes("Choose folder"))!;
+		const chooseFolder = [...container.querySelectorAll<HTMLButtonElement>("dialog button")].find((candidate) =>
+			candidate.textContent?.includes("Choose folder"),
+		)!;
 		await act(async () => chooseFolder.click());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "chat",
-			cwd: "/work/selected-project",
-			name: "Set up a scheduled task",
-		}));
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			text: "I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "chat",
+				cwd: "/work/selected-project",
+				name: "Set up a scheduled task",
+			}),
+		);
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-created",
+				text: "I want to set up a scheduled task. Briefly explain how scheduled tasks work in Metis, then ask me a few concise questions to determine what it should do, when it should run, and whether it should use an available Skill. Do not create the task until I confirm the details.",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("uses a managed Chat when assisted schedule setup skips folder selection", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
-		api.listModels = vi.fn().mockResolvedValue({
+		vi.mocked(api.listModels).mockResolvedValue({
 			models: [{ provider: "test-provider", modelId: "test-model", name: "Test model" }],
 		});
 		const container = document.createElement("div");
@@ -1181,13 +1299,17 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Scheduled tasks").click());
-		await act(async () => { await new Promise((resolve) => setTimeout(resolve, 220)); });
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 220));
+		});
 		await act(async () => button(container, "Create scheduled task").click());
-		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.textContent?.trim() === "Create with Metis")!;
+		const assisted = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.textContent?.trim() === "Create with Metis",
+		)!;
 		await act(async () => assisted.click());
-		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")]
-			.find((candidate) => candidate.textContent?.includes("Use default workspace"))!;
+		const useDefault = [...container.querySelectorAll<HTMLButtonElement>("dialog button")].find((candidate) =>
+			candidate.textContent?.includes("Use default workspace"),
+		)!;
 		await act(async () => useDefault.click());
 		await flush();
 		await flush();
@@ -1207,10 +1329,12 @@ describe("Chat desktop shell", () => {
 		saveProjectPreferences(localStorage, preferences);
 
 		const loaded = loadProjectPreferences(localStorage);
-		expect([...loaded.values()]).toEqual(expect.arrayContaining([
-			{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true },
-			{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
-		]));
+		expect([...loaded.values()]).toEqual(
+			expect.arrayContaining([
+				{ mode: "chat", cwd: "/work/shared", alias: "🚀".repeat(80), pinned: true },
+				{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
+			]),
+		);
 		const withoutChat = removeProjectPreference(loaded, "chat", "/work/shared");
 		expect([...withoutChat.values()]).toEqual([
 			{ mode: "code", cwd: "/work/shared", alias: "Code alias", pinned: false },
@@ -1249,11 +1373,9 @@ describe("Chat desktop shell", () => {
 		preferences = setProjectPinned(preferences, "chat", "/work/c", true);
 		preferences = setProjectAlias(preferences, "chat", "/work/a", "   ");
 
-		expect(buildSessionTree(store.getSnapshot(), "chat", preferences).projects.map((project) => project.name)).toEqual([
-			"b",
-			"c",
-			"a",
-		]);
+		expect(
+			buildSessionTree(store.getSnapshot(), "chat", preferences).projects.map((project) => project.name),
+		).toEqual(["b", "c", "a"]);
 		expect(buildSessionTree(store.getSnapshot(), "code", preferences).projects[0]).toMatchObject({
 			name: "Code A alias",
 			pinned: false,
@@ -1273,18 +1395,32 @@ describe("Chat desktop shell", () => {
 		const listSkills = vi.fn().mockResolvedValue({
 			skills: [{ name: "shared", description: "Shared", source: "project" }],
 		});
-		const skillApi = { listSkills };
+		const skillApi = { ...createHarness().api, listSkills };
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<PluginsPanel api={skillApi} preferences={new Map()} serverReady state={{ ...store.getSnapshot(), activeSessionId: "chat-shared" }} />,
-		));
+		await act(async () =>
+			root.render(
+				<PluginsPanel
+					api={skillApi}
+					preferences={new Map()}
+					serverReady
+					state={{ ...store.getSnapshot(), activeSessionId: "chat-shared" }}
+				/>,
+			),
+		);
 		await flush();
 		expect(listSkills).toHaveBeenLastCalledWith({ sessionId: "chat-shared" });
-		await act(async () => root.render(
-			<PluginsPanel api={skillApi} preferences={new Map()} serverReady state={{ ...store.getSnapshot(), activeSessionId: "code-other" }} />,
-		));
+		await act(async () =>
+			root.render(
+				<PluginsPanel
+					api={skillApi}
+					preferences={new Map()}
+					serverReady
+					state={{ ...store.getSnapshot(), activeSessionId: "code-other" }}
+				/>,
+			),
+		);
 		await flush();
 		expect(listSkills).toHaveBeenLastCalledWith({ sessionId: "code-other" });
 		expect(listSkills).toHaveBeenCalledTimes(2);
@@ -1310,13 +1446,15 @@ describe("Chat desktop shell", () => {
 		await act(async () => actionButtons[0]!.click());
 		await flush();
 		expect(group.querySelector(".project-heading")?.getAttribute("aria-expanded")).toBe("true");
-		expect([...document.body.querySelectorAll(".project-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
-			"Rename",
-			"Pin",
-			"Delete",
-		]);
+		expect(
+			[...document.body.querySelectorAll(".project-action-menu [role=menuitem]")].map((item) =>
+				item.textContent?.trim(),
+			),
+		).toEqual(["Rename", "Pin", "Delete"]);
 		expect(document.activeElement?.textContent?.trim()).toBe("Rename");
-		await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+		await act(async () =>
+			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })),
+		);
 		expect(document.activeElement?.textContent?.trim()).toBe("Pin");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		await flush();
@@ -1327,10 +1465,12 @@ describe("Chat desktop shell", () => {
 		await act(async () => actionButtons[1]!.click());
 		await flush();
 		await flush();
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "chat",
-			cwd: "/work/chat-project",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "chat",
+				cwd: "/work/chat-project",
+			}),
+		);
 		expect(order).toEqual(["create", "open", "list"]);
 		expect(api.startTurn).not.toHaveBeenCalled();
 		expect(container.querySelector('[data-active-session-id="chat-created"]')).not.toBeNull();
@@ -1340,14 +1480,16 @@ describe("Chat desktop shell", () => {
 		order.length = 0;
 		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
 		await act(async () => changeTextarea(textarea, "Inspect this project"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(api.renameSession).not.toHaveBeenCalled();
 		expect(order).toEqual(["start"]);
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			text: "Inspect this project",
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-created",
+				text: "Inspect this project",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -1363,20 +1505,25 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = container.querySelector<HTMLTextAreaElement>("#composer-input")!;
 		await act(async () => changeTextarea(textarea, "Keep the turn"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(api.renameSession).not.toHaveBeenCalled();
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: unnamed.sessionId,
-			text: "Keep the turn",
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: unnamed.sessionId,
+				text: "Keep the turn",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("groups scheduled tasks separately and deletes their generated sessions from the row action", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const ordinary = session("chat-session-ordinary", "chat", "/work/shared", "Ordinary task");
-		const loose = { ...session("chat-session-loose", "chat", "/work/managed", "Loose task"), cwdOrigin: "managed" as const };
+		const loose = {
+			...session("chat-session-loose", "chat", "/work/managed", "Loose task"),
+			cwdOrigin: "managed" as const,
+		};
 		const task = scheduledTask();
 		const scheduledRun = {
 			...session("chat-session-scheduled", "chat", "/work/shared", "Generated run"),
@@ -1405,19 +1552,29 @@ describe("Chat desktop shell", () => {
 		const sessionList = container.querySelector<HTMLElement>(".project-list")!;
 		const scheduledSection = container.querySelector<HTMLElement>(".scheduled-task-quick-list")!;
 		expect(sessionList.contains(scheduledSection)).toBe(true);
-		expect([
-			...sessionList.querySelectorAll(":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2"),
-		].map((element) => element.textContent)).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
+		expect(
+			[
+				...sessionList.querySelectorAll(
+					":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2",
+				),
+			].map((element) => element.textContent),
+		).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
 		const retainedRow = button(scheduledSection, "检查桌面文件").closest<HTMLElement>(".session-row")!;
 		expect(retainedRow.querySelector(".session-scheduled-badge")).toBeNull();
 		expect(container.querySelector(".loose-tasks")?.textContent ?? "").not.toContain("检查桌面文件");
 		await act(async () => button(retainedRow, "Actions for 检查桌面文件").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Copy title", "Delete"]);
+		expect(
+			[...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) =>
+				item.textContent?.trim(),
+			),
+		).toEqual(["Pin", "Copy title", "Delete"]);
 		await act(async () => button(document.body, "Delete").click());
 		await flush();
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
-		expect(api.deleteSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: retainedScheduledRun.sessionId }));
+		expect(api.deleteSession).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: retainedScheduledRun.sessionId }),
+		);
 		expect(scheduledSection.textContent).not.toContain("检查桌面文件");
 		const row = button(container, task.name).closest<HTMLElement>(".scheduled-task-quick-row")!;
 		expect(row).not.toBeNull();
@@ -1431,23 +1588,27 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Delete").click());
 		await flush();
 
-		expect(api.deleteSchedule).toHaveBeenCalledWith(expect.objectContaining({
-			taskId: task.id,
-			deleteSessions: true,
-		}));
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{ type: "session/invalidated", sessionId: scheduledRun.sessionId, reason: "deleted" }],
+		expect(api.deleteSchedule).toHaveBeenCalledWith(
+			expect.objectContaining({
+				taskId: task.id,
+				deleteSessions: true,
+			}),
+		);
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [{ type: "session/invalidated", sessionId: scheduledRun.sessionId, reason: "deleted" }],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 		expect(container.textContent).not.toContain(task.name);
 		expect(container.querySelector(".scheduled-task-quick-list")).toBeNull();
@@ -1459,7 +1620,10 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const active = session("chat-session-active", "chat", "/work/shared", "Active task");
 		const other = session("chat-session-other", "chat", "/work/shared", "Other task");
-		const running = { ...session("chat-session-running", "chat", "/work/shared", "Running task"), state: "running" as const };
+		const running = {
+			...session("chat-session-running", "chat", "/work/shared", "Running task"),
+			state: "running" as const,
+		};
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
 		const { api } = createHarness({ sessions: [active, other, running] });
 		const container = document.createElement("div");
@@ -1470,7 +1634,11 @@ describe("Chat desktop shell", () => {
 
 		let otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Other task").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
+		expect(
+			[...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) =>
+				item.textContent?.trim(),
+			),
+		).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
 		await act(async () => button(document.body, "Pin").click());
 		expect(button(container, "Pinned")).toBeTruthy();
 		otherRow = button(container, "Other task").closest<HTMLElement>(".session-row")!;
@@ -1485,14 +1653,18 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeInput(input, "Renamed task"));
 		await act(async () => button(container.querySelector<HTMLElement>(".project-dialog")!, "Rename").click());
 		await flush();
-		expect(api.renameSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: other.sessionId, name: "Renamed task" }));
+		expect(api.renameSession).toHaveBeenCalledWith(
+			expect.objectContaining({ sessionId: other.sessionId, name: "Renamed task" }),
+		);
 		expect(container.textContent).toContain("Renamed task");
 
 		otherRow = button(container, "Renamed task").closest<HTMLElement>(".session-row")!;
 		await act(async () => button(otherRow, "Actions for Renamed task").click());
 		await act(async () => button(document.body, "Delete").click());
 		await flush();
-		expect(container.querySelector(".project-dialog")?.textContent).toContain("Project memory, Skills, schedules, other sessions, and source files are unchanged");
+		expect(container.querySelector(".project-dialog")?.textContent).toContain(
+			"Project memory, Skills, schedules, other sessions, and source files are unchanged",
+		);
 		await act(async () => button(container, "Move to Trash").click());
 		await flush();
 		expect(api.deleteSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: other.sessionId }));
@@ -1521,15 +1693,26 @@ describe("Chat desktop shell", () => {
 
 	it("shows outcome notifications only until the user views that session", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const active = { ...session("chat-active", "chat", "/work/shared", "Active task"), unread: true, lastTurnOutcome: "completed" as const };
+		const active = {
+			...session("chat-active", "chat", "/work/shared", "Active task"),
+			unread: true,
+			lastTurnOutcome: "completed" as const,
+		};
 		const completed = {
 			...session("chat-completed", "chat", "/work/shared", "Completed task"),
 			state: "running" as const,
 			unread: true,
 			lastTurnOutcome: "completed" as const,
 		};
-		const failed = { ...session("chat-failed", "chat", "/work/shared", "Failed task"), unread: true, lastTurnOutcome: "failed" as const };
-		const read = { ...session("chat-read", "chat", "/work/shared", "Read task"), lastTurnOutcome: "completed" as const };
+		const failed = {
+			...session("chat-failed", "chat", "/work/shared", "Failed task"),
+			unread: true,
+			lastTurnOutcome: "failed" as const,
+		};
+		const read = {
+			...session("chat-read", "chat", "/work/shared", "Read task"),
+			lastTurnOutcome: "completed" as const,
+		};
 		const attention = {
 			...session("chat-attention", "chat", "/work/shared", "Attention task"),
 			state: "running" as const,
@@ -1576,12 +1759,11 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Actions for Active task").click());
-		expect([...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) => item.textContent?.trim())).toEqual([
-			"Pin",
-			"Copy title",
-			"Rename",
-			"Delete",
-		]);
+		expect(
+			[...document.body.querySelectorAll(".session-action-menu [role=menuitem]")].map((item) =>
+				item.textContent?.trim(),
+			),
+		).toEqual(["Pin", "Copy title", "Rename", "Delete"]);
 		await act(async () => button(document.body, "Rename").click());
 		let input = document.body.querySelector<HTMLInputElement>("#session-rename-input")!;
 		expect(input.value).toBe("Active task");
@@ -1591,23 +1773,27 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(document.body, "Rename").click());
 		input = document.body.querySelector<HTMLInputElement>("#session-rename-input")!;
 		await act(async () => changeInput(input, "Renamed active task"));
-		await act(async () => input.form!.requestSubmit());
+		await act(async () => input.closest("form")!.requestSubmit());
 		await flush();
-		expect(api.renameSession).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: active.sessionId,
-			name: "Renamed active task",
-		}));
+		expect(api.renameSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: active.sessionId,
+				name: "Renamed active task",
+			}),
+		);
 
 		await act(async () => button(container, "Actions for Renamed active task").click());
 		await act(async () => button(document.body, "Pin").click());
 		const pinnedSection = button(container, "Pinned").closest<HTMLElement>(".session-section")!;
 		expect(pinnedSection.textContent).toContain("Renamed active task");
-		expect([...container.querySelectorAll<HTMLButtonElement>(".session-button")].filter((candidate) => candidate.getAttribute("aria-label") === "Renamed active task")).toHaveLength(1);
+		expect(
+			[...container.querySelectorAll<HTMLButtonElement>(".session-button")].filter(
+				(candidate) => candidate.getAttribute("aria-label") === "Renamed active task",
+			),
+		).toHaveLength(1);
 		const pinnedProject = projectRow(container, "/work/shared");
 		expect(button(pinnedProject, "New task in shared")).not.toBeNull();
-		expect(localStorage.getItem("metis.sessionPins.v1")).toBe(
-			'{"version":1,"sessionIds":["chat-header-actions"]}',
-		);
+		expect(localStorage.getItem("metis.sessionPins.v1")).toBe('{"version":1,"sessionIds":["chat-header-actions"]}');
 
 		await act(async () => root.unmount());
 		root = createRoot(container);
@@ -1617,7 +1803,11 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Actions for Renamed active task").click());
 		expect(button(document.body, "Unpin")).toBeTruthy();
 		await act(async () => button(document.body, "Unpin").click());
-		expect([...container.querySelectorAll<HTMLButtonElement>(".session-section-heading")].some((candidate) => candidate.textContent?.trim() === "Pinned")).toBe(false);
+		expect(
+			[...container.querySelectorAll<HTMLButtonElement>(".session-section-heading")].some(
+				(candidate) => candidate.textContent?.trim() === "Pinned",
+			),
+		).toBe(false);
 		expect(projectRow(container, "/work/shared").textContent).toContain("Renamed active task");
 
 		await act(async () => button(container, "Actions for Renamed active task").click());
@@ -1669,10 +1859,7 @@ describe("Chat desktop shell", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		const create = () => button(
-			projectRow(container, "/work/chat-project"),
-			"New task in chat-project",
-		);
+		const create = () => button(projectRow(container, "/work/chat-project"), "New task in chat-project");
 		await act(async () => create().click());
 		await flush();
 		await act(async () => create().click());
@@ -1748,7 +1935,10 @@ describe("Chat desktop shell", () => {
 	it("shows a complete mode-specific delete preview, blocks schedules, then removes only Chat", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const chatActive = session("chat-delete-active", "chat", "/work/shared", "Chat active");
-		const chatArchived = { ...session("chat-delete-archived", "chat", "/work/shared", "Chat archived"), archived: true };
+		const chatArchived = {
+			...session("chat-delete-archived", "chat", "/work/shared", "Chat archived"),
+			archived: true,
+		};
 		const code = session("code-delete-preserved", "code", "/work/shared", "Code preserved");
 		let preferences = setProjectAlias(new Map(), "chat", "/work/shared", "Chat local");
 		preferences = setProjectPinned(preferences, "chat", "/work/shared", true);
@@ -1802,11 +1992,13 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await flush();
 
-		expect(api.deleteProject).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "chat",
-			cwd: "/work/shared",
-			expectedRevision: "b".repeat(64),
-		}));
+		expect(api.deleteProject).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "chat",
+				cwd: "/work/shared",
+				expectedRevision: "b".repeat(64),
+			}),
+		);
 		expect(container.textContent).not.toContain("Chat local");
 		expect(container.querySelector(".new-task-home")).not.toBeNull();
 		expect(localStorage.getItem("metis.activeSessionId.chat")).toBeNull();
@@ -1866,9 +2058,10 @@ describe("Chat desktop shell", () => {
 		});
 		let resolveA!: (value: { ok: true; result: ClientResult<"project/deletePreview"> }) => void;
 		vi.mocked(api.previewProjectDelete).mockImplementation(async ({ mode, cwd }) => {
-			if (cwd === "/work/a") return await new Promise((resolve) => {
-				resolveA = resolve;
-			});
+			if (cwd === "/work/a")
+				return await new Promise((resolve) => {
+					resolveA = resolve;
+				});
 			return {
 				ok: true,
 				result: { mode, cwd: "/canonical/b", sessionCount: 1, blockingScheduleCount: 0, revision: "b".repeat(64) },
@@ -1889,16 +2082,18 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(groupB, "Delete").click());
 		await flush();
 		expect(projectDialog().textContent).toContain("/canonical/b");
-		await act(async () => resolveA({
-			ok: true,
-			result: {
-				mode: "chat",
-				cwd: "/canonical/a",
-				sessionCount: 99,
-				blockingScheduleCount: 0,
-				revision: "a".repeat(64),
-			},
-		}));
+		await act(async () =>
+			resolveA({
+				ok: true,
+				result: {
+					mode: "chat",
+					cwd: "/canonical/a",
+					sessionCount: 99,
+					blockingScheduleCount: 0,
+					revision: "a".repeat(64),
+				},
+			}),
+		);
 		await flush();
 		expect(projectDialog().textContent).toContain("/canonical/b");
 		expect(projectDialog().textContent).not.toContain("/canonical/a");
@@ -1906,7 +2101,13 @@ describe("Chat desktop shell", () => {
 	});
 
 	it("never exposes the managed workspace path as the session title", () => {
-		expect(sessionDisplayTitle({ cwd: "/Users/example/.metis/agent/workspaces/session-id", cwdOrigin: "managed", name: "" })).toBe("Chat");
+		expect(
+			sessionDisplayTitle({
+				cwd: "/Users/example/.metis/agent/workspaces/session-id",
+				cwdOrigin: "managed",
+				name: "",
+			}),
+		).toBe("Chat");
 		expect(sessionDisplayTitle({ cwd: "/work/project", cwdOrigin: "user-selected", name: "" })).toBe("/work/project");
 	});
 
@@ -1932,11 +2133,9 @@ describe("Chat desktop shell", () => {
 			[visible.interactionId, visible],
 		]);
 
-		expect(firstInteractionForSession(
-			[other.interactionId, visible.interactionId],
-			interactions,
-			"visible-session",
-		)).toBe(visible);
+		expect(
+			firstInteractionForSession([other.interactionId, visible.interactionId], interactions, "visible-session"),
+		).toBe(visible);
 	});
 
 	it("docks permission approval above the active composer", async () => {
@@ -1949,37 +2148,39 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		act(() => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				id: "00000000-0000-4000-8000-000000000203",
-				method: "interaction/request",
-				params: {
-					serverEpoch: EPOCH,
-					interaction: {
-						interactionId: "00000000-0000-4000-8000-000000000204",
-						sessionId: "chat-existing",
-						title: "Approve bash?",
-						message: "Remove the generated cache.",
-						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "session_permission_approval",
-						requestId: "00000000-0000-4000-8000-000000000204",
-						actionId: "action-bash-cache",
-						toolLabel: "bash",
-						riskLevel: "critical",
-						executionTarget: "sandbox",
-						reason: "Remove the generated cache.",
-						scopeComplete: true,
-						details: [
-							{ label: "Command", value: "rm cache.tmp" },
-							{ label: "Working directory", value: "/tmp/work" },
-						],
-						choices: ["allow-once", "always-allow-exact", "deny-once"],
+		act(() =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					id: "00000000-0000-4000-8000-000000000203",
+					method: "interaction/request",
+					params: {
+						serverEpoch: EPOCH,
+						interaction: {
+							interactionId: "00000000-0000-4000-8000-000000000204",
+							sessionId: "chat-existing",
+							title: "Approve bash?",
+							message: "Remove the generated cache.",
+							createdAt: "2026-07-20T00:00:00.000Z",
+							kind: "session_permission_approval",
+							requestId: "00000000-0000-4000-8000-000000000204",
+							actionId: "action-bash-cache",
+							toolLabel: "bash",
+							riskLevel: "critical",
+							executionTarget: "sandbox",
+							reason: "Remove the generated cache.",
+							scopeComplete: true,
+							details: [
+								{ label: "Command", value: "rm cache.tmp" },
+								{ label: "Working directory", value: "/tmp/work" },
+							],
+							choices: ["allow-once", "always-allow-exact", "deny-once"],
+						},
 					},
 				},
-			},
-		}));
+			}),
+		);
 
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
@@ -1993,9 +2194,7 @@ describe("Chat desktop shell", () => {
 		expect(panel.textContent).toContain("/tmp/work");
 		expect(panel.textContent).toContain("workspace sandbox");
 		expect(panel.textContent).toContain("Always allow this exact action");
-		expect(panel.querySelector("#permission-approval-reason")?.textContent).toContain(
-			"Remove the generated cache.",
-		);
+		expect(panel.querySelector("#permission-approval-reason")?.textContent).toContain("Remove the generated cache.");
 		expect(panel.textContent).not.toContain("Arguments:");
 		await act(async () => button(panel, "Allow once").click());
 		await flush();
@@ -2018,34 +2217,38 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		act(() => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				id: "00000000-0000-4000-8000-000000000205",
-				method: "interaction/request",
-				params: {
-					serverEpoch: EPOCH,
-					interaction: {
-						interactionId: "00000000-0000-4000-8000-000000000206",
-						sessionId: "chat-existing",
-						title: "Metis has questions",
-						message: "Answer each question to continue.",
-						createdAt: "2026-08-10T00:00:00.000Z",
-						kind: "ask_user",
-						questions: [{
-							id: "question:0",
-							question: "Where should the data be stored?",
-							multiple: false,
-							choices: [
-								{ id: "choice:0", label: "Local" },
-								{ id: "choice:1", label: "Cloud" },
+		act(() =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					id: "00000000-0000-4000-8000-000000000205",
+					method: "interaction/request",
+					params: {
+						serverEpoch: EPOCH,
+						interaction: {
+							interactionId: "00000000-0000-4000-8000-000000000206",
+							sessionId: "chat-existing",
+							title: "Metis has questions",
+							message: "Answer each question to continue.",
+							createdAt: "2026-08-10T00:00:00.000Z",
+							kind: "ask_user",
+							questions: [
+								{
+									id: "question:0",
+									question: "Where should the data be stored?",
+									multiple: false,
+									choices: [
+										{ id: "choice:0", label: "Local" },
+										{ id: "choice:1", label: "Cloud" },
+									],
+								},
 							],
-						}],
+						},
 					},
 				},
-			},
-		}));
+			}),
+		);
 
 		const dock = container.querySelector<HTMLElement>(".composer-dock")!;
 		const panel = container.querySelector<HTMLElement>(".ask-user-panel")!;
@@ -2058,10 +2261,16 @@ describe("Chat desktop shell", () => {
 		expect(panel.textContent).toContain("Where should the data be stored?");
 		expect(panel.textContent).toContain("Something else");
 
-		await act(async () => [...panel.querySelectorAll<HTMLButtonElement>(".ask-user-option")]
-			.find((candidate) => candidate.textContent?.includes("Cloud"))?.click());
+		await act(async () =>
+			[...panel.querySelectorAll<HTMLButtonElement>(".ask-user-option")]
+				.find((candidate) => candidate.textContent?.includes("Cloud"))
+				?.click(),
+		);
 		expect(api.respondToInteraction).not.toHaveBeenCalled();
-		await act(async () => { panel.querySelector<HTMLButtonElement>(".ask-user-step")!.click(); await new Promise(r => setTimeout(r, 180)); });
+		await act(async () => {
+			panel.querySelector<HTMLButtonElement>(".ask-user-step")!.click();
+			await new Promise((r) => setTimeout(r, 180));
+		});
 		await flush();
 		expect(api.respondToInteraction).toHaveBeenCalledWith({
 			interactionId: "00000000-0000-4000-8000-000000000206",
@@ -2097,7 +2306,9 @@ describe("Chat desktop shell", () => {
 		expect(activeWorkspace(container).querySelector(".tool-add-trigger")).toBeNull();
 		expect(activeWorkspace(container).querySelector(".details-sidebar-toggle")).toBeNull();
 		expect(container.querySelector(".home-project-picker-select")).toBeNull();
-		expect(container.querySelectorAll<HTMLButtonElement>('.home-project-picker button[aria-label="Choose workspace"]')).toHaveLength(1);
+		expect(
+			container.querySelectorAll<HTMLButtonElement>('.home-project-picker button[aria-label="Choose workspace"]'),
+		).toHaveLength(1);
 
 		await act(async () => button(container, "Choose workspace").click());
 		await flush();
@@ -2108,19 +2319,23 @@ describe("Chat desktop shell", () => {
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "  Analyze this repository\ncarefully  "));
 		order.length = 0;
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "chat",
-			cwd: "/work/selected-project",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "chat",
+				cwd: "/work/selected-project",
+			}),
+		);
 		expect(vi.mocked(api.createSession).mock.calls[0]![0]).not.toHaveProperty("name");
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			text: "Analyze this repository\ncarefully",
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-created",
+				text: "Analyze this repository\ncarefully",
+			}),
+		);
 		expect(order).toEqual(["create", "list", "focus", "start"]);
 		expect(activeWorkspace(container).querySelector(".details-sidebar-toggle")).not.toBeNull();
 
@@ -2153,9 +2368,11 @@ describe("Chat desktop shell", () => {
 
 	it("renders a stable configured-name greeting and updates the nickname", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const poolFor = (previousId?: string) => HOME_GREETINGS.filter(
-			(item) => (item.period === getHomePeriod(new Date()) || item.period === "anytime") && item.id !== previousId,
-		);
+		const poolFor = (previousId?: string) =>
+			HOME_GREETINGS.filter(
+				(item) =>
+					(item.period === getHomePeriod(new Date()) || item.period === "anytime") && item.id !== previousId,
+			);
 		const { api } = createHarness();
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2163,7 +2380,7 @@ describe("Chat desktop shell", () => {
 		try {
 			// Prime the module-level previous greeting, then aim the random mock at
 			// "anytime-task" inside the pool that excludes it.
-			const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0);
+			vi.spyOn(Math, "random").mockReturnValue(0);
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
 			await act(async () => button(container, "New task").click());
@@ -2232,9 +2449,10 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll("#composer-input")).toHaveLength(1);
 		expect(container.querySelectorAll('[aria-label="Add to message"]')).toHaveLength(1);
 		expect(api.createSession).not.toHaveBeenCalled();
-		const textarea = (container.querySelector<HTMLElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!;
+		const textarea = (container.querySelector<HTMLElement>("textarea") ??
+			container.querySelector<HTMLElement>("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Start without a folder"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -2271,16 +2489,19 @@ describe("Chat desktop shell", () => {
 		await act(async () => menuOption(container, "Full").click());
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
 		expect(button(container, "Select permissions, current Full")).not.toBeNull();
-		const textarea = (container.querySelector<HTMLElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!;
+		const textarea = (container.querySelector<HTMLElement>("textarea") ??
+			container.querySelector<HTMLElement>("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Run with full access"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "chat",
-			permissionPreset: "full",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "chat",
+				permissionPreset: "full",
+			}),
+		);
 		expect(api.setPermissionPreset).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
@@ -2289,10 +2510,13 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
-		let resolveChange!: (result: { permissionPreset: "full" }) => void;
-		vi.mocked(api.setPermissionPreset).mockImplementationOnce(() => new Promise((resolve) => {
-			resolveChange = resolve;
-		}));
+		let resolveChange!: (result: ClientResult<"session/setPermissionPreset">) => void;
+		vi.mocked(api.setPermissionPreset).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveChange = resolve;
+				}),
+		);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -2307,28 +2531,39 @@ describe("Chat desktop shell", () => {
 			expect(button(container, label).disabled, label).toBe(false);
 		}
 
-		await act(async () => resolveChange({ permissionPreset: "full" }));
+		await act(async () =>
+			resolveChange({
+				permissionPreset: "full",
+				effectiveSettings: { sandboxPolicy: "danger-full-access", approvalPolicy: "never" },
+				constrainedByParent: false,
+				sandboxHealth: "healthy",
+			}),
+		);
 		expect(button(container, "Select permissions, current Ask").disabled).toBe(false);
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{
-						type: "session/permissionPresetChanged",
-						sessionId: "chat-existing",
-						permissionPreset: "full",
-						effectiveSettings: { sandboxPolicy: "danger-full-access", approvalPolicy: "user" },
-						constrainedByParent: false,
-						sandboxHealth: "healthy",
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "session/permissionPresetChanged",
+								sessionId: "chat-existing",
+								permissionPreset: "full",
+								effectiveSettings: { sandboxPolicy: "danger-full-access", approvalPolicy: "user" },
+								constrainedByParent: false,
+								sandboxHealth: "healthy",
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		expect(button(container, "Select permissions, current Full")).not.toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -2489,27 +2724,34 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		let resolveOpen!: (value: SessionSnapshot) => void;
-		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => {
-			resolveOpen = resolve;
-		}));
+		vi.mocked(api.openSession).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveOpen = resolve;
+				}),
+		);
 		act(() => button(container, "Next task").click());
 		await act(async () => resolveOpen(snapshot(next)));
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 3,
-					toCursor: 3,
-					events: [{
-						type: "session/updated",
-						session: { ...active, unread: true, lastTurnOutcome: "completed" },
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 3,
+						toCursor: 3,
+						events: [
+							{
+								type: "session/updated",
+								session: { ...active, unread: true, lastTurnOutcome: "completed" },
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 
 		expect(api.markSessionRead).not.toHaveBeenCalled();
 		expect(button(container, "Active task").querySelector("i.completed")).not.toBeNull();
@@ -2542,39 +2784,65 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it.each([false, true])("allows live permission changes without stopping the turn (waiting approval=%s)", async (waiting) => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
-		const { api, emitEvent } = createHarness();
-		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
-		const interactionId = "22222222-2222-4222-8222-222222222222";
-		vi.mocked(api.openSession).mockResolvedValueOnce({
-			...snapshot(running), activeTurnId: "turn-running",
-			pendingInteractions: waiting ? [{ interactionId, sessionId: "chat-existing", title: "Approve bash?",
-				message: "Approval required", createdAt: "2026-09-20T00:00:00.000Z", kind: "session_permission_approval",
-				requestId: interactionId, actionId: "bash-call", toolLabel: "bash", riskLevel: "low", executionTarget: "sandbox",
-				reason: "Approval required", scopeComplete: true, details: [], choices: ["allow-once", "deny-once"] }] : [],
-		});
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		const store = new AppStore();
-		await act(async () => root.render(<App api={api} store={store} />));
-		await flush();
-		expect(button(container, "Select permissions, current Ask").disabled).toBe(false);
-		await act(async () => button(container, "Select permissions, current Ask").click());
-		await act(async () => menuOption(container, "Full").click());
-		expect(api.setPermissionPreset).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing", permissionPreset: "full" }));
-		expect(api.interruptTurn).not.toHaveBeenCalled();
-		expect(store.getSnapshot().activeTurnId).toBe("turn-running");
-		if (waiting) {
-			expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(true);
-			await act(async () => emitEvent({ type: "interaction-cancelled", interactionId }));
-			expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(false);
-			expect(container.querySelector(".permission-approval-panel")).toBeNull();
-		}
-		await act(async () => root.unmount());
-	});
+	it.each([false, true])(
+		"allows live permission changes without stopping the turn (waiting approval=%s)",
+		async (waiting) => {
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+			const { api, emitEvent } = createHarness();
+			const running = {
+				...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+				state: "running" as const,
+			};
+			const interactionId = "22222222-2222-4222-8222-222222222222";
+			vi.mocked(api.openSession).mockResolvedValueOnce({
+				...snapshot(running),
+				activeTurnId: "turn-running",
+				pendingInteractions: waiting
+					? [
+							{
+								interactionId,
+								sessionId: "chat-existing",
+								title: "Approve bash?",
+								message: "Approval required",
+								createdAt: "2026-09-20T00:00:00.000Z",
+								kind: "session_permission_approval",
+								requestId: interactionId,
+								actionId: "bash-call",
+								toolLabel: "bash",
+								riskLevel: "low",
+								executionTarget: "sandbox",
+								reason: "Approval required",
+								scopeComplete: true,
+								details: [],
+								choices: ["allow-once", "deny-once"],
+							},
+						]
+					: [],
+			});
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const store = new AppStore();
+			await act(async () => root.render(<App api={api} store={store} />));
+			await flush();
+			expect(button(container, "Select permissions, current Ask").disabled).toBe(false);
+			await act(async () => button(container, "Select permissions, current Ask").click());
+			await act(async () => menuOption(container, "Full").click());
+			expect(api.setPermissionPreset).toHaveBeenCalledWith(
+				expect.objectContaining({ sessionId: "chat-existing", permissionPreset: "full" }),
+			);
+			expect(api.interruptTurn).not.toHaveBeenCalled();
+			expect(store.getSnapshot().activeTurnId).toBe("turn-running");
+			if (waiting) {
+				expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(true);
+				await act(async () => emitEvent({ type: "interaction-cancelled", interactionId }));
+				expect(store.getSnapshot().interactionsById.has(interactionId)).toBe(false);
+				expect(container.querySelector(".permission-approval-panel")).toBeNull();
+			}
+			await act(async () => root.unmount());
+		},
+	);
 
 	it("enters Plan mode with /plan and disables sending while the change is in flight", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -2582,9 +2850,10 @@ describe("Chat desktop shell", () => {
 		const { api, emitEvent } = createHarness();
 		let resolveMode!: (value: { collaborationMode: "plan" }) => void;
 		vi.mocked(api.setCollaborationMode).mockImplementationOnce(
-			() => new Promise((resolve) => {
-				resolveMode = resolve;
-			}),
+			() =>
+				new Promise((resolve) => {
+					resolveMode = resolve;
+				}),
 		);
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -2594,8 +2863,9 @@ describe("Chat desktop shell", () => {
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "/plan"));
-		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.querySelector("strong")?.textContent === "/plan",
+		)!;
 		await act(async () => option.click());
 		expect(api.setCollaborationMode).toHaveBeenCalledWith(expect.objectContaining({ collaborationMode: "plan" }));
 		expect(button(container, "Exit Plan mode").disabled).toBe(true);
@@ -2616,11 +2886,13 @@ describe("Chat desktop shell", () => {
 						serverEpoch: EPOCH,
 						fromCursor: 1,
 						toCursor: 1,
-						events: [{
-							type: "session/collaborationModeChanged",
-							sessionId: "chat-existing",
-							collaborationMode: "plan",
-						}],
+						events: [
+							{
+								type: "session/collaborationModeChanged",
+								sessionId: "chat-existing",
+								collaborationMode: "plan",
+							},
+						],
 					},
 				},
 			});
@@ -2636,14 +2908,17 @@ describe("Chat desktop shell", () => {
 		expect(exitPlanMode.querySelector(".collaboration-mode-exit-icon")).not.toBeNull();
 
 		await act(async () => changeTextarea(editor, "/plan"));
-		const activePlanOption = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		const activePlanOption = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.querySelector("strong")?.textContent === "/plan",
+		)!;
 		expect(activePlanOption.getAttribute("aria-disabled")).toBe("true");
 		await act(async () => activePlanOption.click());
 		expect(api.setCollaborationMode).toHaveBeenCalledTimes(1);
 
 		await act(async () => exitPlanMode.click());
-		expect(api.setCollaborationMode).toHaveBeenLastCalledWith(expect.objectContaining({ collaborationMode: "default" }));
+		expect(api.setCollaborationMode).toHaveBeenLastCalledWith(
+			expect.objectContaining({ collaborationMode: "default" }),
+		);
 		expect(container.querySelector(".collaboration-mode-control")).toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -2652,7 +2927,10 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
-		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		const running = {
+			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			state: "running" as const,
+		};
 		vi.mocked(api.openSession).mockResolvedValueOnce({
 			...snapshot(running),
 			activeTurnId: "turn-running",
@@ -2665,8 +2943,9 @@ describe("Chat desktop shell", () => {
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "/plan"));
-		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.querySelector("strong")?.textContent === "/plan")!;
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.querySelector("strong")?.textContent === "/plan",
+		)!;
 		expect(option.getAttribute("aria-disabled")).toBe("true");
 		await act(async () => option.click());
 		expect(api.setCollaborationMode).not.toHaveBeenCalled();
@@ -2700,12 +2979,13 @@ describe("Chat desktop shell", () => {
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "Keep this draft while choosing a project"));
-		const recentProjectRow = [...container.querySelectorAll<HTMLButtonElement>(".new-task-recent-project")]
-			.find((candidate) => candidate.textContent?.includes("code-project"));
+		const recentProjectRow = [...container.querySelectorAll<HTMLButtonElement>(".new-task-recent-project")].find(
+			(candidate) => candidate.textContent?.includes("code-project"),
+		);
 		expect(recentProjectRow).not.toBeUndefined();
 		await act(async () => recentProjectRow!.click());
 		expect(container.textContent).toContain("code-project");
-		expect(editor.value).toBe("Keep this draft while choosing a project");
+		expect(composerText(editor)).toBe("Keep this draft while choosing a project");
 		expect(document.activeElement).toBe(editor);
 		expect(api.createSession).not.toHaveBeenCalled();
 
@@ -2717,18 +2997,22 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => changeTextarea(editor, "Inspect this codebase"));
 		order.length = 0;
-		await act(async () => editor.form!.requestSubmit());
+		await act(async () => editor.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "code",
-			cwd: "/work/selected-project",
-		}));
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "code-created",
-			text: "Inspect this codebase",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "code",
+				cwd: "/work/selected-project",
+			}),
+		);
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "code-created",
+				text: "Inspect this codebase",
+			}),
+		);
 		expect(order).toEqual(["create", "list", "focus", "start"]);
 		expect(container.querySelector(".new-task-home")).toBeNull();
 		await act(async () => root.unmount());
@@ -2751,7 +3035,7 @@ describe("Chat desktop shell", () => {
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "A Code task still needs a project"));
 		expect(button(container, "Send message").disabled).toBe(true);
-		await act(async () => editor.form!.requestSubmit());
+		await act(async () => editor.closest("form")!.requestSubmit());
 		expect(api.createSession).not.toHaveBeenCalled();
 		expect(projectRow(container, "/work/code-project")).not.toBeNull();
 		expect(container.querySelector('[data-active-session-id="code-existing"]')).toBeNull();
@@ -2782,7 +3066,7 @@ describe("Chat desktop shell", () => {
 			expect(container.querySelector<HTMLElement>(".new-task-home")?.dataset.mode).toBe("code");
 			expect(container.querySelectorAll(".new-task-starter")).toHaveLength(4);
 			const codeEditor = container.querySelector<HTMLElement>("#composer-input")!;
-			expect(codeEditor.value).toBe("");
+			expect(composerText(codeEditor)).toBe("");
 			expect(container.querySelector(".new-task-home-heading h1")?.textContent).toContain("build");
 		} finally {
 			saveProfileIdentity(DEFAULT_PROFILE_IDENTITY);
@@ -2808,7 +3092,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => button(container, "Cancel").click());
 		expect(container.querySelector("[role=dialog]")).toBeNull();
-		expect(draftEditor.value).toBe("Draft survives project setup cancellation");
+		expect(composerText(draftEditor)).toBe("Draft survives project setup cancellation");
 		expect(api.createSession).not.toHaveBeenCalled();
 
 		await act(async () => button(container, "Create a new project").click());
@@ -2816,7 +3100,9 @@ describe("Chat desktop shell", () => {
 
 		expect(container.querySelector<HTMLInputElement>("#code-project-name")?.value).toBe("");
 		expect(container.textContent).toContain("/Users/test/Metis Projects");
-		await act(async () => changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Desktop App"));
+		await act(async () =>
+			changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Desktop App"),
+		);
 		await act(async () => container.querySelector<HTMLFormElement>(".code-project-form")!.requestSubmit());
 		await flush();
 		await flush();
@@ -2833,18 +3119,22 @@ describe("Chat desktop shell", () => {
 
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "Initialize the app"));
-		await act(async () => editor.form!.requestSubmit());
+		await act(async () => editor.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
-		expect(api.createSession).toHaveBeenCalledWith(expect.objectContaining({
-			mode: "code",
-			cwd: "/Users/test/Metis Projects/Desktop App",
-		}));
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "code-created",
-			text: "Initialize the app",
-		}));
+		expect(api.createSession).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mode: "code",
+				cwd: "/Users/test/Metis Projects/Desktop App",
+			}),
+		);
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "code-created",
+				text: "Initialize the app",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -2852,9 +3142,12 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
 		let resolveCreate!: (cwd: string) => void;
-		api.createProjectFolder = vi.fn(() => new Promise<string>((resolve) => {
-			resolveCreate = resolve;
-		}));
+		api.createProjectFolder = vi.fn(
+			() =>
+				new Promise<string>((resolve) => {
+					resolveCreate = resolve;
+				}),
+		);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -2865,7 +3158,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "New task").click());
 		await act(async () => button(container, "Create a new project").click());
 		await flush();
-		await act(async () => changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Stale Project"));
+		await act(async () =>
+			changeInput(container.querySelector<HTMLInputElement>("#code-project-name")!, "Stale Project"),
+		);
 		await act(async () => container.querySelector<HTMLFormElement>(".code-project-form")!.requestSubmit());
 		await flush();
 
@@ -2905,7 +3200,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".composer-skill-menu")?.textContent).toContain("pdf");
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		await act(async () => button(container, "Add to message").click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
 		expect(container.querySelector(".composer-file-card")?.textContent).toContain("report.pdf");
 		await act(async () => root.unmount());
@@ -2950,8 +3247,9 @@ describe("Chat desktop shell", () => {
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		const run = async (command: string) => {
 			await act(async () => changeTextarea(textarea, `/${command}`));
-			const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((candidate) => candidate.querySelector("strong")?.textContent === `/${command}`)!;
+			const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+				(candidate) => candidate.querySelector("strong")?.textContent === `/${command}`,
+			)!;
 			await act(async () => option.click());
 			await flush();
 		};
@@ -2986,8 +3284,8 @@ describe("Chat desktop shell", () => {
 		const pending: Array<{
 			resolve: (status: ClientResult<"session/status">) => void;
 		}> = [];
-		vi.mocked(api.getSessionStatus).mockImplementation(() =>
-			new Promise<ClientResult<"session/status">>((resolve) => pending.push({ resolve })),
+		vi.mocked(api.getSessionStatus).mockImplementation(
+			() => new Promise<ClientResult<"session/status">>((resolve) => pending.push({ resolve })),
 		);
 		const status = (tokens: number, contextWindow: number): ClientResult<"session/status"> => ({
 			sessionId: "chat-existing",
@@ -3060,10 +3358,12 @@ describe("Chat desktop shell", () => {
 		await flush();
 		vi.mocked(api.getSessionStatus).mockClear();
 		const summary = session("chat-existing", "chat", "/work/chat-project", "Chat project task");
-		await act(async () => store.applySnapshot({
-			...snapshot(summary),
-			model: { provider: "test-provider", modelId: "other-model" },
-		}));
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(summary),
+				model: { provider: "test-provider", modelId: "other-model" },
+			}),
+		);
 		await flush();
 		expect(api.getSessionStatus).toHaveBeenCalledWith({ sessionId: "chat-existing" });
 		await act(async () => root.unmount());
@@ -3080,7 +3380,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/goal keep tests green"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(api.setSessionGoal).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -3090,7 +3390,7 @@ describe("Chat desktop shell", () => {
 		);
 		expect(api.startTurn).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
-	})
+	});
 	// --- First-send composer transition ---
 
 	function spyHomeTransition() {
@@ -3101,15 +3401,16 @@ describe("Chat desktop shell", () => {
 			cancel: vi.fn(),
 		} as unknown as Animation);
 		Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
-		const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect")
-			.mockImplementation(function (this: HTMLElement) {
-				if (this.matches(".new-task-home .composer")) return new DOMRect(410, 196, 770, 132);
-				if (this.matches(".conversation-column .composer")) return new DOMRect(410, 700, 770, 120);
-				return originalRect.call(this);
-			});
+		const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
+			this: HTMLElement,
+		) {
+			if (this.matches(".new-task-home .composer")) return new DOMRect(410, 196, 770, 132);
+			if (this.matches(".conversation-column .composer")) return new DOMRect(410, 700, 770, 120);
+			return originalRect.call(this);
+		});
 		return {
 			animate,
-			restore: async (root?: { unmount: () => Promise<void> }) => {
+			restore: async (root?: { unmount: () => void }) => {
 				if (root) await act(async () => root.unmount());
 				rectSpy.mockRestore();
 				if (originalAnimate) Object.defineProperty(HTMLElement.prototype, "animate", originalAnimate);
@@ -3208,7 +3509,7 @@ describe("Chat desktop shell", () => {
 		});
 		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
 			await pendingStart;
-			return {};
+			return { operationId: "operation-1", status: "accepted" };
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -3249,7 +3550,7 @@ describe("Chat desktop shell", () => {
 		});
 		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
 			await pendingStart;
-			return {};
+			return { operationId: "operation-1", status: "accepted" };
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -3308,7 +3609,7 @@ describe("Chat desktop shell", () => {
 		});
 		vi.mocked(api.startTurn).mockImplementationOnce(async () => {
 			await pendingStart;
-			return {};
+			return { operationId: "operation-1", status: "accepted" };
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -3337,31 +3638,35 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{
-						type: "item/completed",
-						item: {
-							itemId: "assistant-reply-1",
-							sessionId: "chat-existing",
-							turnId: "turn-1",
-							role: "assistant",
-							state: "completed",
-							content: [{ type: "text", text: "Here is the reply" }],
-							createdAt: "2026-08-13T00:00:00.000Z",
-							completedAt: "2026-08-13T00:00:00.000Z",
-						},
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "item/completed",
+								item: {
+									itemId: "assistant-reply-1",
+									sessionId: "chat-existing",
+									turnId: "turn-1",
+									role: "assistant",
+									state: "completed",
+									content: [{ type: "text", text: "Here is the reply" }],
+									createdAt: "2026-08-13T00:00:00.000Z",
+									completedAt: "2026-08-13T00:00:00.000Z",
+								},
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 
 		const forkButton = container.querySelector<HTMLButtonElement>('[aria-label="Fork conversation"]');
@@ -3390,43 +3695,48 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 2,
-					events: [{
-						type: "item/completed",
-						item: {
-							itemId: "user-message-1",
-							sessionId: "chat-existing",
-							turnId: "turn-1",
-							role: "user",
-							state: "completed",
-							content: [{ type: "text", text: "hello metis" }],
-							createdAt: "2026-08-13T00:00:00.000Z",
-							completedAt: "2026-08-13T00:00:00.000Z",
-						},
-					}, {
-						type: "item/completed",
-						item: {
-							itemId: "assistant-reply-2",
-							sessionId: "chat-existing",
-							turnId: "turn-1",
-							role: "assistant",
-							state: "completed",
-							content: [{ type: "text", text: "Here is the reply" }],
-							createdAt: "2026-08-13T00:00:01.000Z",
-							completedAt: "2026-08-13T00:00:01.000Z",
-						},
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 2,
+						events: [
+							{
+								type: "item/completed",
+								item: {
+									itemId: "user-message-1",
+									sessionId: "chat-existing",
+									turnId: "turn-1",
+									role: "user",
+									state: "completed",
+									content: [{ type: "text", text: "hello metis" }],
+									createdAt: "2026-08-13T00:00:00.000Z",
+									completedAt: "2026-08-13T00:00:00.000Z",
+								},
+							},
+							{
+								type: "item/completed",
+								item: {
+									itemId: "assistant-reply-2",
+									sessionId: "chat-existing",
+									turnId: "turn-1",
+									role: "assistant",
+									state: "completed",
+									content: [{ type: "text", text: "Here is the reply" }],
+									createdAt: "2026-08-13T00:00:01.000Z",
+									completedAt: "2026-08-13T00:00:01.000Z",
+								},
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 
 		const copyButtons = container.querySelectorAll<HTMLButtonElement>('[aria-label="Copy message"]');
@@ -3454,43 +3764,48 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Code").click());
 		await flush();
 
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 2,
-					events: [{
-						type: "item/completed",
-						item: {
-							itemId: "code-user-message-1",
-							sessionId: "code-existing",
-							turnId: "code-turn-1",
-							role: "user",
-							state: "completed",
-							content: [{ type: "text", text: "build the app" }],
-							createdAt: "2026-08-13T00:00:00.000Z",
-							completedAt: "2026-08-13T00:00:00.000Z",
-						},
-					}, {
-						type: "item/completed",
-						item: {
-							itemId: "code-reply-2",
-							sessionId: "code-existing",
-							turnId: "code-turn-1",
-							role: "assistant",
-							state: "completed",
-							content: [{ type: "text", text: "Code reply here" }],
-							createdAt: "2026-08-13T00:00:01.000Z",
-							completedAt: "2026-08-13T00:00:01.000Z",
-						},
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 2,
+						events: [
+							{
+								type: "item/completed",
+								item: {
+									itemId: "code-user-message-1",
+									sessionId: "code-existing",
+									turnId: "code-turn-1",
+									role: "user",
+									state: "completed",
+									content: [{ type: "text", text: "build the app" }],
+									createdAt: "2026-08-13T00:00:00.000Z",
+									completedAt: "2026-08-13T00:00:00.000Z",
+								},
+							},
+							{
+								type: "item/completed",
+								item: {
+									itemId: "code-reply-2",
+									sessionId: "code-existing",
+									turnId: "code-turn-1",
+									role: "assistant",
+									state: "completed",
+									content: [{ type: "text", text: "Code reply here" }],
+									createdAt: "2026-08-13T00:00:01.000Z",
+									completedAt: "2026-08-13T00:00:01.000Z",
+								},
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 
 		const copyButtons = container.querySelectorAll<HTMLButtonElement>('[aria-label="Copy message"]');
@@ -3516,31 +3831,35 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "Code").click());
 		await flush();
 
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{
-						type: "item/completed",
-						item: {
-							itemId: "code-reply-1",
-							sessionId: "code-existing",
-							turnId: "turn-1",
-							role: "assistant",
-							state: "completed",
-							content: [{ type: "text", text: "Code reply here" }],
-							createdAt: "2026-08-13T00:00:00.000Z",
-							completedAt: "2026-08-13T00:00:00.000Z",
-						},
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "item/completed",
+								item: {
+									itemId: "code-reply-1",
+									sessionId: "code-existing",
+									turnId: "turn-1",
+									role: "assistant",
+									state: "completed",
+									content: [{ type: "text", text: "Code reply here" }],
+									createdAt: "2026-08-13T00:00:00.000Z",
+									completedAt: "2026-08-13T00:00:00.000Z",
+								},
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 
 		const forkButton = container.querySelector<HTMLButtonElement>('[aria-label="Fork conversation"]');
@@ -3557,9 +3876,12 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
 		let resolveCompact!: (result: ClientResult<"session/compact">) => void;
-		vi.mocked(api.compactSession).mockImplementationOnce(() => new Promise((resolve) => {
-			resolveCompact = resolve;
-		}));
+		vi.mocked(api.compactSession).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveCompact = resolve;
+				}),
+		);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -3567,41 +3889,48 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/compact"));
-		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.querySelector("strong")?.textContent === "/compact",
+		)!;
 		await act(async () => option.click());
 		expect(api.compactSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
 		expect(container.querySelector('[aria-label="Compacting conversation…"]')).not.toBeNull();
 		expect(textarea.disabled).toBe(true);
 
-		await act(async () => resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }));
+		await act(async () =>
+			resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }),
+		);
 		await flush();
 		expect(container.querySelector('[aria-label="Compacting conversation…"]')).toBeNull();
 		expect(textarea.disabled).toBe(false);
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{
-						type: "item/completed",
-						item: {
-							itemId: "compaction-1",
-							sessionId: "chat-existing",
-							role: "system",
-							state: "completed",
-							content: [{ type: "compaction" }],
-							createdAt: "2026-08-13T00:00:00.000Z",
-							completedAt: "2026-08-13T00:00:00.000Z",
-						},
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "item/completed",
+								item: {
+									itemId: "compaction-1",
+									sessionId: "chat-existing",
+									role: "system",
+									state: "completed",
+									content: [{ type: "compaction" }],
+									createdAt: "2026-08-13T00:00:00.000Z",
+									completedAt: "2026-08-13T00:00:00.000Z",
+								},
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		expect(container.querySelector(".transcript-compaction-row")?.textContent).toBe("Compacted");
 		await act(async () => root.unmount());
 	});
@@ -3617,8 +3946,9 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "/compact"));
-		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-			.find((candidate) => candidate.querySelector("strong")?.textContent === "/compact")!;
+		const option = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(candidate) => candidate.querySelector("strong")?.textContent === "/compact",
+		)!;
 		await act(async () => option.click());
 		await flush();
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Nothing to compact");
@@ -3665,7 +3995,10 @@ describe("Chat desktop shell", () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
-		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
+		const running = {
+			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			state: "running" as const,
+		};
 		vi.mocked(api.openSession).mockResolvedValueOnce({
 			...snapshot(running),
 			activeTurnId: "turn-running",
@@ -3680,45 +4013,55 @@ describe("Chat desktop shell", () => {
 		await act(async () => changeTextarea(textarea, "Check the failing test next"));
 		await act(async () => button(container, "Queue message").click());
 		await flush();
-		expect(api.queueTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-existing",
-			text: "Check the failing test next",
-		}));
+		expect(api.queueTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-existing",
+				text: "Check the failing test next",
+			}),
+		);
 		expect(api.steerTurn).not.toHaveBeenCalled();
-		expect(textarea.value).toBe("");
+		expect(composerText(textarea)).toBe("");
 
-		await act(async () => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				method: "connection/events",
-				params: {
-					serverEpoch: EPOCH,
-					fromCursor: 1,
-					toCursor: 1,
-					events: [{
-						type: "turn/queueChanged",
-						sessionId: "chat-existing",
-						queuedTurns: [{
-							queueItemId: "queue-1",
-							revision: "revision-1",
-							state: "queued",
-							text: "Check the failing test next",
-							attachments: [],
-						}],
-					}],
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 1,
+						toCursor: 1,
+						events: [
+							{
+								type: "turn/queueChanged",
+								sessionId: "chat-existing",
+								queuedTurns: [
+									{
+										queueItemId: "queue-1",
+										revision: "revision-1",
+										state: "queued",
+										text: "Check the failing test next",
+										attachments: [],
+									},
+								],
+							},
+						],
+					},
 				},
-			},
-		}));
+			}),
+		);
 		expect(container.querySelector(".queued-turn-text")?.textContent).toBe("Check the failing test next");
 
 		await act(async () => button(container, "Edit queued message").click());
 		await flush();
-		expect(api.deleteQueuedTurn).toHaveBeenCalledWith(expect.objectContaining({
-			queueItemId: "queue-1",
-			expectedRevision: "revision-1",
-		}));
-		expect(textarea.value).toBe("Check the failing test next");
+		expect(api.deleteQueuedTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				queueItemId: "queue-1",
+				expectedRevision: "revision-1",
+			}),
+		);
+		expect(composerText(textarea)).toBe("Check the failing test next");
 		expect(document.activeElement).toBe(textarea);
 		expect(api.updateQueuedTurn).not.toHaveBeenCalled();
 		expect(api.sendQueuedTurn).not.toHaveBeenCalled();
@@ -3728,11 +4071,13 @@ describe("Chat desktop shell", () => {
 	it("submits selected files and one hidden skill on first Chat send", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const { api } = createHarness();
-		vi.mocked(api.selectAttachmentFiles).mockResolvedValue([{
-			path: "/tmp/photo.png",
-			name: "photo.png",
-			previewDataUrl: "data:image/png;base64,cHJldmlldw==",
-		}]);
+		vi.mocked(api.selectAttachmentFiles).mockResolvedValue([
+			{
+				path: "/tmp/photo.png",
+				name: "photo.png",
+				previewDataUrl: "data:image/png;base64,cHJldmlldw==",
+			},
+		]);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -3740,13 +4085,17 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(container.querySelector('[aria-label="Add folder (coming soon)"]')).toBeNull();
-		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "KeyU", metaKey: true })));
+		await act(async () =>
+			document.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "KeyU", metaKey: true })),
+		);
 		await flush();
 		expect(api.selectAttachmentFiles).toHaveBeenCalledTimes(1);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
 		expect(container.querySelector(".composer-add-menu > .composer-menu-separator")).not.toBeNull();
 		expect(container.querySelector(".composer-menu-shortcut")?.textContent).toBe("⌘U");
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
 		expect(api.selectAttachmentFiles).toHaveBeenCalledTimes(2);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
@@ -3757,19 +4106,25 @@ describe("Chat desktop shell", () => {
 
 		expect(container.querySelector('.composer-image-preview img[alt="photo.png"]')).not.toBeNull();
 		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
-		expect([...container.querySelectorAll("button")].some((candidate) => candidate.textContent?.trim() === "Browse skills")).toBe(false);
+		expect(
+			[...container.querySelectorAll("button")].some(
+				(candidate) => candidate.textContent?.trim() === "Browse skills",
+			),
+		).toBe(false);
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Summarize this"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
 		expect(api.createSession).toHaveBeenCalledTimes(1);
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			text: "/skill:pdf Summarize this",
-			attachments: [{ path: "/tmp/photo.png", name: "photo.png" }],
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-created",
+				text: "/skill:pdf Summarize this",
+				attachments: [{ path: "/tmp/photo.png", name: "photo.png" }],
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -3784,9 +4139,13 @@ describe("Chat desktop shell", () => {
 
 		const add = () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
 		await act(async () => add().click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click(),
+		);
 		expect(container.textContent).not.toContain("report.pdf");
 
 		await act(async () => add().click());
@@ -3804,7 +4163,9 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "Manage skills").click(),
+		);
 		expect(container.textContent).toContain("Customize");
 		expect(container.textContent).toContain("pdf");
 		await act(async () => root.unmount());
@@ -3843,7 +4204,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		expect(container.querySelector('[role="status"]')?.textContent).toContain("MCP connecting");
+		expect(container.querySelector('output, [role="status"]')?.textContent).toContain("MCP connecting");
 		await act(async () => new Promise((resolve) => setTimeout(resolve, 550)));
 		expect(vi.mocked(api.listMcpServers)).toHaveBeenCalledTimes(2);
 		expect(container.textContent).not.toContain("MCP connecting");
@@ -3879,16 +4240,25 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
-		await act(async () => (container.querySelector<HTMLTextAreaElement>("textarea") ?? container.querySelector<HTMLElement>("#composer-input"))!.closest("form")!.requestSubmit());
+		await act(async () =>
+			(container.querySelector<HTMLTextAreaElement>("textarea") ??
+				container.querySelector<HTMLElement>("#composer-input"))!
+				.closest("form")!
+				.requestSubmit(),
+		);
 		await flush();
 		await flush();
 
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			text: "",
-			attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: "",
+				attachments: [{ path: "/tmp/report.pdf", name: "report.pdf" }],
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -3900,15 +4270,31 @@ describe("Chat desktop shell", () => {
 			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
 			defaultThinkingSelection: "max",
 			vision: null,
-			providers: [{
-				provider: "glm",
-				name: "GLM",
-				builtin: false,
-				baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-				api: "openai-completions",
-				auth: { configured: true, source: "stored" },
-				models: [{ provider: "glm", modelId: "glm-5.3-flash", name: "GLM 5.3 Flash", contextWindow: 128_000, maxOutputTokens: 16_384, reasoning: true, thinkingLevels: ["low", "high", "max"], reasoningMode: "auto", reasoningSource: "catalog", imageInput: false, custom: true }],
-			}],
+			providers: [
+				{
+					provider: "glm",
+					name: "GLM",
+					builtin: false,
+					baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+					api: "openai-completions",
+					auth: { configured: true, source: "stored" },
+					models: [
+						{
+							provider: "glm",
+							modelId: "glm-5.3-flash",
+							name: "GLM 5.3 Flash",
+							contextWindow: 128_000,
+							maxOutputTokens: 16_384,
+							reasoning: true,
+							thinkingLevels: ["low", "high", "max"],
+							reasoningMode: "auto",
+							reasoningSource: "catalog",
+							imageInput: false,
+							custom: true,
+						},
+					],
+				},
+			],
 			loadError: null,
 		};
 		vi.mocked(api.getModelSettings).mockResolvedValue(settings);
@@ -3939,35 +4325,43 @@ describe("Chat desktop shell", () => {
 
 		const add = () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!;
 		await act(async () => add().click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
 		await act(async () => add().click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Skills").click());
 		await act(async () => button(container.querySelector<HTMLElement>(".composer-skill-menu")!, "pdf").click());
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Same prompt"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 
-		expect(textarea.value).toBe("Same prompt");
+		expect(composerText(textarea)).toBe("Same prompt");
 		expect(container.querySelector('[aria-label="Remove file report.pdf"]')).not.toBeNull();
 		expect(container.querySelector('[aria-label="Remove skill pdf"]')).not.toBeNull();
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Remove file report.pdf"]')!.click(),
+		);
 		vi.mocked(api.selectAttachmentFiles).mockResolvedValueOnce([{ path: "/tmp/other.pdf", name: "other.pdf" }]);
 		await act(async () => add().click());
-		await act(async () => button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>(".composer-add-menu")!, "Add files or photos").click(),
+		);
 		await flush();
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 
 		const first = vi.mocked(api.startTurn).mock.calls[0]![0];
 		const second = vi.mocked(api.startTurn).mock.calls[1]![0];
 		expect(second.requestId).not.toBe(first.requestId);
-		expect(second).toEqual(expect.objectContaining({
-			text: "/skill:pdf Same prompt",
-			attachments: [{ path: "/tmp/other.pdf", name: "other.pdf" }],
-		}));
-		expect(textarea.value).toBe("");
+		expect(second).toEqual(
+			expect.objectContaining({
+				text: "/skill:pdf Same prompt",
+				attachments: [{ path: "/tmp/other.pdf", name: "other.pdf" }],
+			}),
+		);
+		expect(composerText(textarea)).toBe("");
 		expect(container.querySelector(".composer-file-card")).toBeNull();
 		expect(container.querySelector(".composer-skill-token")).toBeNull();
 		await act(async () => root.unmount());
@@ -3978,17 +4372,20 @@ describe("Chat desktop shell", () => {
 		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
 		const { api } = createHarness();
-		const codeSnapshot = {
+		const codeSnapshot: SessionSnapshot = {
 			...snapshot(session("code-existing", "code", "/work/code-project", "Code project task")),
 			thinkingSelection: "high" as const,
 			actualThinkingLevel: "high" as const,
-			availableThinkingSelections: ["off", "low", "medium", "high", "max"] as const,
+			availableThinkingSelections: ["off", "low", "medium", "high", "max"],
 		};
 		vi.mocked(api.openSession).mockResolvedValue(codeSnapshot);
 		let rejectChange!: (reason: Error) => void;
-		vi.mocked(api.setThinkingSelection).mockImplementation(() => new Promise((_resolve, reject) => {
-			rejectChange = reject;
-		}));
+		vi.mocked(api.setThinkingSelection).mockImplementation(
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectChange = reject;
+				}),
+		);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -4062,7 +4459,7 @@ describe("Chat desktop shell", () => {
 			textarea.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter", isComposing: true }));
 		});
 		expect(api.createSession).not.toHaveBeenCalled();
-		expect(textarea.value).toBe("还在组词");
+		expect(composerText(textarea)).toBe("还在组词");
 
 		await act(async () => root.unmount());
 	});
@@ -4077,14 +4474,14 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Keep this draft"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 
 		expect(container.textContent).toContain("open failed once");
-		expect(textarea.value).toBe("Keep this draft");
+		expect(composerText(textarea)).toBe("Keep this draft");
 		expect(api.createSession).toHaveBeenCalledTimes(1);
 		expect(button(container, "Select permissions, current Auto").disabled).toBe(true);
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -4110,20 +4507,22 @@ describe("Chat desktop shell", () => {
 		expect(api.createSession).not.toHaveBeenCalled();
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => changeTextarea(editor, "Retry this Code task"));
-		await act(async () => editor.form!.requestSubmit());
+		await act(async () => editor.closest("form")!.requestSubmit());
 		await flush();
 
 		expect(container.textContent).toContain("open failed once");
 		expect(api.createSession).toHaveBeenCalledTimes(1);
-		await act(async () => editor.form!.requestSubmit());
+		await act(async () => editor.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
 		expect(api.createSession).toHaveBeenCalledTimes(1);
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "code-created",
-			text: "Retry this Code task",
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "code-created",
+				text: "Retry this Code task",
+			}),
+		);
 		expect(container.querySelector(".new-task-home")).toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -4141,7 +4540,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Keep the real folder"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 
 		const folderButton = container.querySelector<HTMLButtonElement>(".folder-picker")!;
@@ -4162,12 +4561,12 @@ describe("Chat desktop shell", () => {
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 
 		await act(async () => changeTextarea(textarea, "First payload"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(container.textContent).toContain("start response lost");
 
 		await act(async () => changeTextarea(textarea, "Changed payload"));
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -4190,13 +4589,13 @@ describe("Chat desktop shell", () => {
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Retry the same create"));
 
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(container.textContent).toContain("create response lost");
-		expect(textarea.value).toBe("Retry the same create");
+		expect(composerText(textarea)).toBe("Retry the same create");
 		expect(button(container, "Select permissions, current Auto").disabled).toBe(true);
 
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		await flush();
 
@@ -4220,10 +4619,10 @@ describe("Chat desktop shell", () => {
 		const textarea = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
 		await act(async () => changeTextarea(textarea, "Retry active turn"));
 
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 		expect(container.textContent).toContain("start response lost");
-		await act(async () => textarea.form!.requestSubmit());
+		await act(async () => textarea.closest("form")!.requestSubmit());
 		await flush();
 
 		expect(api.startTurn).toHaveBeenCalledTimes(2);
@@ -4279,9 +4678,18 @@ describe("Chat desktop shell", () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api } = createHarness();
 		let resolveChange!: () => void;
-		vi.mocked(api.setModel).mockImplementationOnce(() => new Promise<void>((resolve) => {
-			resolveChange = resolve;
-		}));
+		vi.mocked(api.setModel).mockImplementationOnce(
+			(input) =>
+				new Promise<ClientResult<"session/setModel">>((resolve) => {
+					resolveChange = () =>
+						resolve({
+							model: { provider: input.provider, modelId: input.modelId },
+							thinkingSelection: "off",
+							actualThinkingLevel: "off",
+							availableThinkingSelections: ["off"],
+						});
+				}),
+		);
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -4289,12 +4697,14 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await act(async () => button(container, "Select model").click());
-		const provider = [...container.querySelectorAll<HTMLButtonElement>(".model-selector-provider")]
-			.find((candidate) => candidate.textContent?.includes("Test Provider"));
+		const provider = [...container.querySelectorAll<HTMLButtonElement>(".model-selector-provider")].find(
+			(candidate) => candidate.textContent?.includes("Test Provider"),
+		);
 		if (!provider) throw new Error("Missing Test Provider option");
 		act(() => provider.click());
-		const otherModel = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
-			.find((candidate) => candidate.textContent?.includes("Other model"));
+		const otherModel = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(
+			(candidate) => candidate.textContent?.includes("Other model"),
+		);
 		if (!otherModel) throw new Error("Missing Other model option");
 		act(() => otherModel.click());
 		await flush();
@@ -4322,9 +4732,12 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 		let resolveOpen!: (value: SessionSnapshot) => void;
-		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => {
-			resolveOpen = resolve;
-		}));
+		vi.mocked(api.openSession).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveOpen = resolve;
+				}),
+		);
 
 		act(() => button(container, "Other chat task").click());
 		await flush();
@@ -4352,9 +4765,10 @@ describe("Chat desktop shell", () => {
 		await flush();
 		let rejectOpen!: (error: Error) => void;
 		vi.mocked(api.openSession).mockImplementationOnce(
-			() => new Promise((_resolve, reject) => {
-				rejectOpen = reject;
-			}),
+			() =>
+				new Promise((_resolve, reject) => {
+					rejectOpen = reject;
+				}),
 		);
 
 		act(() => button(container, "Chat project task").click());
@@ -4422,15 +4836,20 @@ describe("Chat desktop shell", () => {
 		expect(container.textContent).toContain("Chat project task");
 
 		let resolveCodeOpen!: (value: SessionSnapshot) => void;
-		vi.mocked(api.openSession).mockImplementationOnce(() => new Promise((resolve) => {
-			resolveCodeOpen = resolve;
-		}));
+		vi.mocked(api.openSession).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveCodeOpen = resolve;
+				}),
+		);
 		act(() => button(container, "Code").click());
 
 		expect(container.textContent).toContain("Chat project task");
 		expect(container.textContent).not.toContain("Metis Code");
 
-		await act(async () => resolveCodeOpen(snapshot(session("code-existing", "code", "/work/code-project", "Code project task"))));
+		await act(async () =>
+			resolveCodeOpen(snapshot(session("code-existing", "code", "/work/code-project", "Code project task"))),
+		);
 		expect(container.textContent).toContain("Code project task");
 		await act(async () => root.unmount());
 	});
@@ -4441,9 +4860,10 @@ describe("Chat desktop shell", () => {
 		const { api } = createHarness();
 		let resolveOpen!: (value: SessionSnapshot) => void;
 		vi.mocked(api.openSession).mockImplementationOnce(
-			() => new Promise((resolve) => {
-				resolveOpen = resolve;
-			}),
+			() =>
+				new Promise((resolve) => {
+					resolveOpen = resolve;
+				}),
 		);
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -4454,7 +4874,9 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".new-task-home")).toBeNull();
 		expect(container.querySelector("#composer-input")).toBeNull();
 
-		await act(async () => resolveOpen(snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task"))));
+		await act(async () =>
+			resolveOpen(snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task"))),
+		);
 		expect(container.querySelector('[data-active-session-id="chat-existing"]')).not.toBeNull();
 		expect(container.querySelector("#composer-input")).not.toBeNull();
 		await act(async () => root.unmount());
@@ -4471,27 +4893,29 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		act(() => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				id: "00000000-0000-4000-8000-000000000201",
-				method: "interaction/request",
-				params: {
-					serverEpoch: EPOCH,
-					interaction: {
-						interactionId: "00000000-0000-4000-8000-000000000202",
-						sessionId: "chat-existing",
-						title: "Trust this project?",
-						message: "Project resources can execute code.",
-						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "project_trust",
-						projectPath: "/work/chat-project",
-						choices: [{ id: "trust-once", label: "Trust (this session only)" }],
+		act(() =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					id: "00000000-0000-4000-8000-000000000201",
+					method: "interaction/request",
+					params: {
+						serverEpoch: EPOCH,
+						interaction: {
+							interactionId: "00000000-0000-4000-8000-000000000202",
+							sessionId: "chat-existing",
+							title: "Trust this project?",
+							message: "Project resources can execute code.",
+							createdAt: "2026-07-20T00:00:00.000Z",
+							kind: "project_trust",
+							projectPath: "/work/chat-project",
+							choices: [{ id: "trust-once", label: "Trust (this session only)" }],
+						},
 					},
 				},
-			},
-		}));
+			}),
+		);
 
 		expect(container.textContent).toContain("Trust this project?");
 		expect(container.querySelector(".new-task-home")).toBeNull();
@@ -4523,7 +4947,9 @@ describe("Chat desktop shell", () => {
 		await act(async () => sidebarToggle.click());
 		expect(container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')).toBe(sidebarToggle);
 		expect(container.querySelector(".session-sidebar")).toBeNull();
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Show sessions sidebar"]')!.click(),
+		);
 		expect(container.querySelector(".session-sidebar")).not.toBeNull();
 		const toolMenu = await openToolStartPage(container);
 		expect(toolMenu.textContent).toContain("Review");
@@ -4532,16 +4958,20 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(toolMenu, "Agents").click());
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 		const agentStartPage = await openToolStartPage(container);
-		const agentMenuItem = [...agentStartPage.querySelectorAll<HTMLButtonElement>('button')]
-			.find((candidate) => candidate.textContent?.includes("Agents"))!;
+		const agentMenuItem = [...agentStartPage.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+			candidate.textContent?.includes("Agents"),
+		)!;
 		await act(async () => agentMenuItem.click());
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 
-		const backendCalls = vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
+		const backendCalls =
+			vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length;
 		await act(async () => button(container, "Customize").click());
 		expect(container.textContent).toContain("Customize");
 		expect(container.textContent).toContain("pdf");
-		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(backendCalls);
+		expect(vi.mocked(api.createSession).mock.calls.length + vi.mocked(api.openSession).mock.calls.length).toBe(
+			backendCalls,
+		);
 
 		await act(async () => button(container, "Chat").click());
 		await flush();
@@ -4549,8 +4979,12 @@ describe("Chat desktop shell", () => {
 		const visiblePanel = activeWorkspace(container).querySelector<HTMLElement>(".workspace-panel:not([hidden]) > *")!;
 		expect(visiblePanel.className).toContain("workspace-chat-panel");
 		const modeTabs = [...activeWorkspace(container).querySelectorAll('[role="tab"]')];
-		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Chat project task")?.getAttribute("aria-selected")).toBe("true");
-		expect(modeTabs.find((tab) => tab.getAttribute("aria-label") === "Code project task")?.getAttribute("aria-selected")).not.toBe("true");
+		expect(
+			modeTabs.find((tab) => tab.getAttribute("aria-label") === "Chat project task")?.getAttribute("aria-selected"),
+		).toBe("true");
+		expect(
+			modeTabs.find((tab) => tab.getAttribute("aria-label") === "Code project task")?.getAttribute("aria-selected"),
+		).not.toBe("true");
 		expect(container.querySelector('[aria-label="Add to message"]')).not.toBeNull();
 		const chatToolMenu = await openToolStartPage(container);
 		expect(chatToolMenu.textContent).toContain("Terminal");
@@ -4619,10 +5053,12 @@ describe("Chat desktop shell", () => {
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
 		expect(create).toMatchObject({ mode: "chat", cwd: "/work/selected-project", permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("name");
-		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
-			sessionId: "chat-created",
-			text: "I want to create a project-level Skill in /work/selected-project. Use the create-skill Skill and ask me for the information you need before creating it.",
-		}));
+		expect(api.startTurn).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				sessionId: "chat-created",
+				text: "I want to create a project-level Skill in /work/selected-project. Use the create-skill Skill and ask me for the information you need before creating it.",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -4647,9 +5083,11 @@ describe("Chat desktop shell", () => {
 		const create = vi.mocked(api.createSession).mock.calls.at(-1)![0];
 		expect(create).toMatchObject({ mode: "chat", permissionPreset: "auto" });
 		expect(create).not.toHaveProperty("cwd");
-		expect(api.startTurn).toHaveBeenLastCalledWith(expect.objectContaining({
-			text: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.",
-		}));
+		expect(api.startTurn).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				text: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -4669,11 +5107,16 @@ describe("Chat desktop shell", () => {
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(api.createTerminal).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/work/chat-project" }));
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
-		expect(activeWorkspace(container).querySelector<HTMLElement>('.tool-sidebar-tabbar [aria-selected="true"]')?.getAttribute("aria-label")).toBe("Terminal");
-		expect([...activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!.children].map((child) => child.className)).toEqual([
-			"tool-tabs-scroll",
-			"tool-add",
-		]);
+		expect(
+			activeWorkspace(container)
+				.querySelector<HTMLElement>('.tool-sidebar-tabbar [aria-selected="true"]')
+				?.getAttribute("aria-label"),
+		).toBe("Terminal");
+		expect(
+			[...activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!.children].map(
+				(child) => child.className,
+			),
+		).toEqual(["tool-tabs-scroll", "tool-add"]);
 
 		await act(async () => button(container, "Code").click());
 		await flush();
@@ -4688,7 +5131,9 @@ describe("Chat desktop shell", () => {
 		// panel stays mounted and visible while the chat shows in the pane.
 		expect(container.querySelector(".terminal-panel")).not.toBeNull();
 		expect(container.querySelector(".terminal-panel.is-visible")).not.toBeNull();
-		await act(async () => button(activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!, "Terminal").click());
+		await act(async () =>
+			button(activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!, "Terminal").click(),
+		);
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
 
@@ -4711,7 +5156,14 @@ describe("Chat desktop shell", () => {
 	it("keeps tab contents mounted when tabs are split or moved between panes", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -4739,22 +5191,29 @@ describe("Chat desktop shell", () => {
 		// so open a second session first; only chat tabs can split.
 		await act(async () => button(container, "Second task").click());
 		await flush();
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Second task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Second task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
 		expect(api.createTerminal).toHaveBeenCalledTimes(1);
 		expect(terminalPanel.isConnected).toBe(true);
 
-		await act(async () => tabFor("Chat project task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
-		const moveItem = [...container.querySelectorAll<HTMLButtonElement>('.workspace-tab-menu [role="menuitem"]')]
-			.find((candidate) => candidate.textContent?.includes("Move to pane"))!;
+		await act(async () =>
+			tabFor("Chat project task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
+		const moveItem = [...container.querySelectorAll<HTMLButtonElement>('.workspace-tab-menu [role="menuitem"]')].find(
+			(candidate) => candidate.textContent?.includes("Move to pane"),
+		)!;
 		await act(async () => moveItem.click());
 		await flush();
 		expect(container.querySelector("#composer-input")).toBe(composer);
@@ -4809,7 +5268,14 @@ describe("Chat desktop shell", () => {
 	it("subscribes a second session when its chat tab is split into another pane", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -4829,11 +5295,15 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(api.subscribeSession).not.toHaveBeenCalled();
 
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Other task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Other task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 
@@ -4850,7 +5320,14 @@ describe("Chat desktop shell", () => {
 	it("renders a live chat view in every visible chat pane and keeps it mounted across focus", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -4862,14 +5339,16 @@ describe("Chat desktop shell", () => {
 		});
 		vi.mocked(api.subscribeSession).mockResolvedValue({
 			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
-			recentItems: [{
-				itemId: "item-background",
-				sessionId: "chat-existing",
-				role: "assistant",
-				state: "completed",
-				content: [{ type: "text", text: "background reply" }],
-				createdAt: "2026-07-20T00:00:00.000Z",
-			}],
+			recentItems: [
+				{
+					itemId: "item-background",
+					sessionId: "chat-existing",
+					role: "assistant",
+					state: "completed",
+					content: [{ type: "text", text: "background reply" }],
+					createdAt: "2026-07-20T00:00:00.000Z",
+				},
+			],
 		});
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -4879,18 +5358,24 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Other task").click());
 		await flush();
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Other task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Other task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 		await flush();
 
 		expect(activeWorkspace(container).querySelectorAll(".workspace-pane")).toHaveLength(2);
 		// Both panes render a live conversation — no focus placeholder remains.
-		const livePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])")];
+		const livePanels = [
+			...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-panel:not([hidden])"),
+		];
 		expect(livePanels).toHaveLength(2);
 		expect(livePanels.every((panel) => panel.querySelector(".conversation-column"))).toBe(true);
 		expect(activeWorkspace(container).textContent).not.toContain("This session is not in focus.");
@@ -4918,7 +5403,14 @@ describe("Chat desktop shell", () => {
 	it("keeps a hidden chat tab's composer draft mounted across tab switches", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -4936,11 +5428,15 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Other task").click());
 		await flush();
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Other task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Other task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 		// Focus the first pane's chat so the second pane's composer is the
@@ -4950,8 +5446,9 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		// Top-row strips live in the titlebar, so a pane is addressed through its strip.
-		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-tabbar")]
-			.find((strip) => strip.querySelector('[role="tab"][aria-label="Other task"]'))!;
+		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-tabbar")].find(
+			(strip) => strip.querySelector('[role="tab"][aria-label="Other task"]'),
+		)!;
 		const editor = container.querySelector<HTMLElement>("#composer-input-chat-other")!;
 		expect(editor).not.toBeNull();
 		await act(async () => {
@@ -4966,7 +5463,11 @@ describe("Chat desktop shell", () => {
 		const menu = await openToolStartPage(container);
 		await act(async () => button(menu, "Terminal").click());
 		await flush();
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [role="tab"][aria-label="Terminal"]')?.getAttribute("aria-selected")).toBe("true");
+		expect(
+			activeWorkspace(container)
+				.querySelector('.tool-sidebar-tabbar [role="tab"][aria-label="Terminal"]')
+				?.getAttribute("aria-selected"),
+		).toBe("true");
 
 		await act(async () => tabFor("Other task").querySelector<HTMLElement>('[role="tab"]')!.click());
 		await flush();
@@ -4994,25 +5495,27 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		act(() => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				id: "00000000-0000-4000-8000-000000000207",
-				method: "interaction/request",
-				params: {
-					serverEpoch: EPOCH,
-					interaction: {
-						interactionId: "00000000-0000-4000-8000-000000000208",
-						sessionId: "chat-other",
-						title: "Purge old logs?",
-						message: "The hidden session asks for confirmation.",
-						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "confirm",
+		act(() =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					id: "00000000-0000-4000-8000-000000000207",
+					method: "interaction/request",
+					params: {
+						serverEpoch: EPOCH,
+						interaction: {
+							interactionId: "00000000-0000-4000-8000-000000000208",
+							sessionId: "chat-other",
+							title: "Purge old logs?",
+							message: "The hidden session asks for confirmation.",
+							createdAt: "2026-07-20T00:00:00.000Z",
+							kind: "confirm",
+						},
 					},
 				},
-			},
-		}));
+			}),
+		);
 		await flush();
 
 		const backdrop = container.querySelector<HTMLElement>(".modal-backdrop")!;
@@ -5033,7 +5536,14 @@ describe("Chat desktop shell", () => {
 	it("renders a pending modal interaction inside the live session's own pane", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5051,33 +5561,39 @@ describe("Chat desktop shell", () => {
 
 		await act(async () => button(container, "Other task").click());
 		await flush();
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Other task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Other task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 
-		act(() => emitEvent({
-			type: "app-server",
-			envelope: {
-				jsonrpc: "2.0",
-				id: "00000000-0000-4000-8000-000000000209",
-				method: "interaction/request",
-				params: {
-					serverEpoch: EPOCH,
-					interaction: {
-						interactionId: "00000000-0000-4000-8000-000000000210",
-						sessionId: "chat-existing",
-						title: "Purge old logs?",
-						message: "The unfocused live session asks for confirmation.",
-						createdAt: "2026-07-20T00:00:00.000Z",
-						kind: "confirm",
+		act(() =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					id: "00000000-0000-4000-8000-000000000209",
+					method: "interaction/request",
+					params: {
+						serverEpoch: EPOCH,
+						interaction: {
+							interactionId: "00000000-0000-4000-8000-000000000210",
+							sessionId: "chat-existing",
+							title: "Purge old logs?",
+							message: "The unfocused live session asks for confirmation.",
+							createdAt: "2026-07-20T00:00:00.000Z",
+							kind: "confirm",
+						},
 					},
 				},
-			},
-		}));
+			}),
+		);
 		// The unfocused pane coalesces store notifications (~150ms throttle).
 		await act(async () => new Promise((resolve) => setTimeout(resolve, 220)));
 		await flush();
@@ -5106,7 +5622,14 @@ describe("Chat desktop shell", () => {
 	it("routes a file selection change request through the owning session's composer", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5128,18 +5651,23 @@ describe("Chat desktop shell", () => {
 		await flush();
 		await act(async () => button(container, "Other task").click());
 		await flush();
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
-		await act(async () => tabFor("Other task").dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
+		await act(async () =>
+			tabFor("Other task").dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		await act(async () => button(container, "Split right").click());
 		await flush();
 
 		// Open the workspace tree for the other session. Tools attach to the
 		// focused pane's session, so focus that pane's tab first.
-		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-tabbar")]
-			.find((strip) => strip.querySelector('[role="tab"][aria-label="Other task"]'))!;
+		const otherPane = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".workspace-tabbar")].find(
+			(strip) => strip.querySelector('[role="tab"][aria-label="Other task"]'),
+		)!;
 		await act(async () => otherPane.querySelector<HTMLElement>('[role="tab"][aria-label="Other task"]')!.click());
 		await flush();
 		const filesMenu = await openToolStartPage(container);
@@ -5163,15 +5691,19 @@ describe("Chat desktop shell", () => {
 			selection.removeAllRanges();
 			selection.addRange(range);
 			await act(async () => {
-				filesPanel.querySelector<HTMLElement>(".file-code-editor")!.dispatchEvent(
-					new MouseEvent("mouseup", { bubbles: true, button: 0 }),
-				);
+				filesPanel
+					.querySelector<HTMLElement>(".file-code-editor")!
+					.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, button: 0 }));
 				await new Promise((resolve) => requestAnimationFrame(resolve));
 			});
 		};
 		const popover = () => container.querySelector<HTMLElement>(".file-selection-popover");
-		const otherChatPanel = () => container.querySelector<HTMLElement>("#composer-input")!.closest<HTMLElement>(".workspace-panel")!;
-		const focusedChatPanel = () => container.querySelector<HTMLElement>("#composer-input-code-existing")!.closest<HTMLElement>(".workspace-panel")!;
+		const otherChatPanel = () =>
+			container.querySelector<HTMLElement>("#composer-input")!.closest<HTMLElement>(".workspace-panel")!;
+		const focusedChatPanel = () =>
+			container
+				.querySelector<HTMLElement>("#composer-input-code-existing")!
+				.closest<HTMLElement>(".workspace-panel")!;
 
 		await selectText(0, 8);
 		expect(popover()).not.toBeNull();
@@ -5193,10 +5725,12 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		expect(api.startTurn).toHaveBeenCalledOnce();
-		expect(api.startTurn).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "code-other",
-			text: expect.stringContaining("please tidy"),
-		}));
+		expect(api.startTurn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "code-other",
+				text: expect.stringContaining("please tidy"),
+			}),
+		);
 		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].fileSelections).toHaveLength(1);
 		await act(async () => root.unmount());
 	});
@@ -5204,7 +5738,14 @@ describe("Chat desktop shell", () => {
 	it("renders a live agent tree for a session that is not the focused chat", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5273,7 +5814,9 @@ describe("Chat desktop shell", () => {
 			expect.objectContaining({ liveSessionIds: ["code-existing"] }),
 		);
 
-		const visiblePanels = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-sidebar-panel:not([hidden])")];
+		const visiblePanels = [
+			...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-sidebar-panel:not([hidden])"),
+		];
 		const agentPanel = visiblePanels.find((panel) => panel.querySelector(".subagent-panel"));
 		expect(agentPanel).toBeTruthy();
 		expect(agentPanel!.textContent).toContain("Code worker");
@@ -5291,7 +5834,14 @@ describe("Chat desktop shell", () => {
 	it("splits panes into a second row and reports when a split is blocked", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 1600, bottom: 900, left: 0, width: 1600, height: 900,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5309,12 +5859,16 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
 
-		const tabFor = (label: string) => [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector(`[role="tab"][aria-label="${label}"]`))!;
+		const tabFor = (label: string) =>
+			[...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+				candidate.querySelector(`[role="tab"][aria-label="${label}"]`),
+			)!;
 		const openMenu = async (label: string) => {
-			await act(async () => tabFor(label).dispatchEvent(
-				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-			));
+			await act(async () =>
+				tabFor(label).dispatchEvent(
+					new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+				),
+			);
 		};
 
 		// Only chat tabs split; each new session lands in the focused pane.
@@ -5325,7 +5879,9 @@ describe("Chat desktop shell", () => {
 		await openMenu("Task three");
 		await act(async () => button(container, "Split right").click());
 		await flush();
-		expect(activeWorkspace(container).querySelectorAll(".workspace-row")[0]!.querySelectorAll(".workspace-pane")).toHaveLength(3);
+		expect(
+			activeWorkspace(container).querySelectorAll(".workspace-row")[0]!.querySelectorAll(".workspace-pane"),
+		).toHaveLength(3);
 
 		await act(async () => button(container, "Task four").click());
 		await openMenu("Task four");
@@ -5345,7 +5901,14 @@ describe("Chat desktop shell", () => {
 	it("disables splits when the workspace is too small", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 600, bottom: 500, left: 0, width: 600, height: 500,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 600,
+			bottom: 500,
+			left: 0,
+			width: 600,
+			height: 500,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5359,11 +5922,14 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Terminal");
 		await flush();
 		// Tool tabs cannot split, so the size check is exercised via the chat tab.
-		const tab = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")]
-			.find((candidate) => candidate.querySelector('[role="tab"][aria-label="Chat project task"]'))!;
-		await act(async () => tab.dispatchEvent(
-			new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
-		));
+		const tab = [...activeWorkspace(container).querySelectorAll<HTMLElement>(".tool-tab")].find((candidate) =>
+			candidate.querySelector('[role="tab"][aria-label="Chat project task"]'),
+		)!;
+		await act(async () =>
+			tab.dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
 		const splitRight = button(container, "Split right");
 		expect(splitRight.disabled).toBe(true);
 		expect(splitRight.title).toBe("Not enough room to split");
@@ -5385,25 +5951,54 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={store} />));
 		await flush();
 
-		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
-		await act(async () => store.applySnapshot({
-			...snapshot(running),
-			activeTurnId: "turn-running",
-			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
-		}));
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [role="tab"][aria-label="Process"][aria-selected="true"]')).not.toBeNull();
+		const running = {
+			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			state: "running" as const,
+		};
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(running),
+				activeTurnId: "turn-running",
+				process: {
+					processId: "process-one",
+					command: "echo one",
+					output: "one\n",
+					state: "running",
+					truncated: false,
+				},
+			}),
+		);
+		expect(
+			activeWorkspace(container).querySelector(
+				'.tool-sidebar-tabbar [role="tab"][aria-label="Process"][aria-selected="true"]',
+			),
+		).not.toBeNull();
 
-		await act(async () => store.applySnapshot({
-			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
-			process: { processId: "process-one", command: "echo one", output: "one\n", state: "completed", truncated: false },
-		}));
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+				process: {
+					processId: "process-one",
+					command: "echo one",
+					output: "one\n",
+					state: "completed",
+					truncated: false,
+				},
+			}),
+		);
 		// The chat tab reactivates in the pane while Process stays in the sidebar.
-		expect(activeWorkspace(container).querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] [aria-selected="true"]')?.getAttribute("aria-label")).toBe("Chat project task");
+		expect(
+			activeWorkspace(container)
+				.querySelector<HTMLElement>('.workspace-tabbar[data-pane-id] [aria-selected="true"]')
+				?.getAttribute("aria-label"),
+		).toBe("Chat project task");
 		expect(activeWorkspace(container).querySelector('[role="tab"][aria-label="Process"]')).not.toBeNull();
 
 		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
 		await act(async () => button(toolsStrip, "Process").click());
-		expect(container.querySelector(".tool-sidebar-panel:not([hidden]) .process-panel")?.textContent).toContain("Command completed");
+		expect(container.querySelector(".tool-sidebar-panel:not([hidden]) .process-panel")?.textContent).toContain(
+			"Command completed",
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -5418,39 +6013,78 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.render(<App api={api} store={store} />));
 		await flush();
 
-		const running = { ...session("chat-existing", "chat", "/work/chat-project", "Chat project task"), state: "running" as const };
-		await act(async () => store.applySnapshot({
-			...snapshot(running),
-			activeTurnId: "turn-running",
-			process: { processId: "process-one", command: "echo one", output: "one\n", state: "running", truncated: false },
-		}));
+		const running = {
+			...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+			state: "running" as const,
+		};
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(running),
+				activeTurnId: "turn-running",
+				process: {
+					processId: "process-one",
+					command: "echo one",
+					output: "one\n",
+					state: "running",
+					truncated: false,
+				},
+			}),
+		);
 		const sessionStrip = activeWorkspace(container).querySelector<HTMLElement>(".workspace-tabbar[data-pane-id]")!;
 		const toolsStrip = activeWorkspace(container).querySelector<HTMLElement>(".tool-sidebar-tabbar")!;
 		const chatTab = () => button(sessionStrip, "Chat project task");
 		const processTab = () => button(toolsStrip, "Process");
 		await act(async () => chatTab().click());
 
-		await act(async () => store.applySnapshot({
-			...snapshot(running),
-			activeTurnId: "turn-running",
-			process: { processId: "process-two", command: "echo two", output: "two\n", state: "running", truncated: false },
-		}));
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(running),
+				activeTurnId: "turn-running",
+				process: {
+					processId: "process-two",
+					command: "echo two",
+					output: "two\n",
+					state: "running",
+					truncated: false,
+				},
+			}),
+		);
 		expect(processTab().getAttribute("aria-selected")).toBe("true");
-		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain("echo two");
+		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain(
+			"echo two",
+		);
 
-		await act(async () => store.applySnapshot({
-			...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
-			process: { processId: "process-two", command: "echo two", output: "two\n", state: "completed", truncated: false },
-		}));
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(session("chat-existing", "chat", "/work/chat-project", "Chat project task")),
+				process: {
+					processId: "process-two",
+					command: "echo two",
+					output: "two\n",
+					state: "completed",
+					truncated: false,
+				},
+			}),
+		);
 		expect(chatTab().getAttribute("aria-selected")).toBe("true");
 
-		await act(async () => store.applySnapshot({
-			...snapshot(running),
-			activeTurnId: "turn-next",
-			process: { processId: "process-three", command: "echo three", output: "", state: "running", truncated: false },
-		}));
+		await act(async () =>
+			store.applySnapshot({
+				...snapshot(running),
+				activeTurnId: "turn-next",
+				process: {
+					processId: "process-three",
+					command: "echo three",
+					output: "",
+					state: "running",
+					truncated: false,
+				},
+			}),
+		);
 		expect(processTab().getAttribute("aria-selected")).toBe("true");
-		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain("echo three");
+		expect(container.querySelector(".process-panel:not([hidden]) .process-command")?.textContent).toContain(
+			"echo three",
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -5476,7 +6110,9 @@ describe("Chat desktop shell", () => {
 			expect(container.querySelector<HTMLElement>(".tool-sidebar")!.hidden).toBe(false);
 			expect(container.querySelector(".terminal-panel")).toBe(terminal);
 			expect(api.createTerminal).toHaveBeenCalledTimes(1);
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("opens one Review tab in Code mode and reselects it instead of duplicating it", async () => {
@@ -5498,8 +6134,11 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".review-panel.is-visible")?.textContent).toContain("No changes");
 
 		const reviewStartPage = await openToolStartPage(container);
-		await act(async () => [...reviewStartPage.querySelectorAll<HTMLButtonElement>("button")]
-			.find((candidate) => candidate.querySelector("span")?.textContent === "Review")!.click());
+		await act(async () =>
+			[...reviewStartPage.querySelectorAll<HTMLButtonElement>("button")]
+				.find((candidate) => candidate.querySelector("span")?.textContent === "Review")!
+				.click(),
+		);
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(3);
 		expect(api.getWorkspaceReview).toHaveBeenCalledTimes(1);
 		await act(async () => button(container, "Close Review").click());
@@ -5550,7 +6189,14 @@ describe("Chat desktop shell", () => {
 	it("browses the active Code workspace with replaceable previews and fixed file tabs", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 320,
+			bottom: 600,
+			left: 0,
+			width: 320,
+			height: 600,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5568,7 +6214,9 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Files");
 		await flush();
 		expect(api.listWorkspaceDirectory).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "" });
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("Open file");
+		expect(
+			activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent,
+		).toContain("Open file");
 		expect(container.querySelector('.file-tree-row [title=".env"]')).not.toBeNull();
 
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!.click());
@@ -5582,7 +6230,8 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".tool-tab.is-preview")).not.toBeNull();
 
 		await act(async () =>
-			container.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!
+			container
+				.querySelector<HTMLButtonElement>('.file-tree-row [title="README.md"]')!
 				.dispatchEvent(new MouseEvent("dblclick", { bubbles: true })),
 		);
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
@@ -5600,7 +6249,11 @@ describe("Chat desktop shell", () => {
 		expect(api.writeClipboardText).toHaveBeenCalledWith({ text: "# README.md\n\nWorkspace preview." });
 		await act(async () => button(container, "Open file actions").click());
 		await act(async () => button(container, "Open in default app").click());
-		expect(api.openWorkspaceFile).toHaveBeenCalledWith({ sessionId: "code-existing", relativePath: "README.md", action: "default" });
+		expect(api.openWorkspaceFile).toHaveBeenCalledWith({
+			sessionId: "code-existing",
+			relativePath: "README.md",
+			action: "default",
+		});
 
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="docs"]')!.click());
 		await flush();
@@ -5631,7 +6284,9 @@ describe("Chat desktop shell", () => {
 		await addTool(container, "Files");
 		await flush();
 		expect(activeWorkspace(container).querySelectorAll('[role="tab"]')).toHaveLength(4);
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("README.md");
+		expect(
+			activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent,
+		).toContain("README.md");
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		await act(async () => root.unmount());
 	});
@@ -5639,7 +6294,14 @@ describe("Chat desktop shell", () => {
 	it("does not toast when a workspace preview target is not a file", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 320,
+			bottom: 600,
+			left: 0,
+			width: 320,
+			height: 600,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
@@ -5667,7 +6329,14 @@ describe("Chat desktop shell", () => {
 	it("edits workspace text safely and protects unsaved file tabs", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 320,
+			bottom: 600,
+			left: 0,
+			width: 320,
+			height: 600,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
@@ -5728,7 +6397,11 @@ describe("Chat desktop shell", () => {
 		await flush();
 		editor = codeEditor(container, "Edit README.md");
 		expect(editor.state.doc.toString()).toBe("# Edited README");
-		await act(async () => editor.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true })));
+		await act(async () =>
+			editor.contentDOM.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }),
+			),
+		);
 		await flush();
 		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith({
 			sessionId: "code-existing",
@@ -5745,7 +6418,12 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".file-preview-notice")?.textContent).toBe("File saved");
 
 		let finishWrite!: (result: { readonly revision: string; readonly byteLength: number }) => void;
-		vi.mocked(api.writeWorkspaceFile).mockImplementationOnce(() => new Promise((resolve) => { finishWrite = resolve; }));
+		vi.mocked(api.writeWorkspaceFile).mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					finishWrite = resolve;
+				}),
+		);
 		await act(async () => changeCodeEditor(editor, "first version"));
 		await act(async () => button(container, "Save file").click());
 		await flush();
@@ -5758,7 +6436,11 @@ describe("Chat desktop shell", () => {
 		expect(editor.state.doc.toString()).toBe("newer version");
 		expect(container.querySelector(".tool-tab.is-dirty")).not.toBeNull();
 		expect(button(container, "Close README.md").disabled).toBe(false);
-		await act(async () => editor.contentDOM.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true })));
+		await act(async () =>
+			editor.contentDOM.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }),
+			),
+		);
 		await flush();
 		expect(container.querySelector(".tool-tab.is-dirty")).toBeNull();
 		await act(async () => button(container, "Copy contents").click());
@@ -5813,7 +6495,14 @@ describe("Chat desktop shell", () => {
 	it("creates, renames, moves, and trashes workspace files without losing drafts", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, right: 320, bottom: 600, left: 0, width: 320, height: 600,
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 320,
+			bottom: 600,
+			left: 0,
+			width: 320,
+			height: 600,
 			toJSON: () => ({}),
 		});
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
@@ -5830,12 +6519,20 @@ describe("Chat desktop shell", () => {
 		};
 		vi.mocked(api.listWorkspaceDirectory).mockImplementation(async ({ relativePath }) => {
 			const entries = [
-				...[...directories].filter((path) => parent(path) === relativePath).map((path) => ({
-					name: path.split("/").at(-1)!, relativePath: path, kind: "directory" as const,
-				})),
-				...[...files].filter((path) => parent(path) === relativePath).map((path) => ({
-					name: path.split("/").at(-1)!, relativePath: path, kind: "file" as const,
-				})),
+				...[...directories]
+					.filter((path) => parent(path) === relativePath)
+					.map((path) => ({
+						name: path.split("/").at(-1)!,
+						relativePath: path,
+						kind: "directory" as const,
+					})),
+				...[...files]
+					.filter((path) => parent(path) === relativePath)
+					.map((path) => ({
+						name: path.split("/").at(-1)!,
+						relativePath: path,
+						kind: "file" as const,
+					})),
 			];
 			return entries;
 		});
@@ -5843,9 +6540,14 @@ describe("Chat desktop shell", () => {
 			if (input.action === "create") {
 				const relativePath = input.parentRelativePath ? `${input.parentRelativePath}/${input.name}` : input.name;
 				(input.kind === "directory" ? directories : files).add(relativePath);
-				return { action: "create", kind: input.kind, relativePath, absolutePath: `/work/code-project/${relativePath}` };
+				return {
+					action: "create",
+					kind: input.kind,
+					relativePath,
+					absolutePath: `/work/code-project/${relativePath}`,
+				};
 			}
-			const kind = directories.has(input.relativePath) ? "directory" as const : "file" as const;
+			const kind = directories.has(input.relativePath) ? ("directory" as const) : ("file" as const);
 			if (input.action === "trash") {
 				for (const values of [directories, files]) {
 					for (const value of [...values]) {
@@ -5853,11 +6555,14 @@ describe("Chat desktop shell", () => {
 					}
 				}
 				return {
-					action: "trash", kind, previousRelativePath: input.relativePath,
+					action: "trash",
+					kind,
+					previousRelativePath: input.relativePath,
 					previousAbsolutePath: `/work/code-project/${input.relativePath}`,
 				};
 			}
-			const nextParent = input.action === "rename" ? parent(input.relativePath) : input.destinationDirectoryRelativePath;
+			const nextParent =
+				input.action === "rename" ? parent(input.relativePath) : input.destinationDirectoryRelativePath;
 			const name = input.action === "rename" ? input.name : input.relativePath.split("/").at(-1)!;
 			const relativePath = nextParent ? `${nextParent}/${name}` : name;
 			remapEntries(directories, input.relativePath, relativePath);
@@ -5883,54 +6588,85 @@ describe("Chat desktop shell", () => {
 		await flush();
 
 		await openRootTreeMenu(container);
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click(),
+		);
 		expect(container.querySelector(".file-tree-name-input")).not.toBeNull();
 		expect(api.mutateWorkspaceEntry).not.toHaveBeenCalled();
 		await act(async () => {
-			container.querySelector(".file-tree-name-input")!.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+			container
+				.querySelector(".file-tree-name-input")!
+				.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
 		});
 		expect(container.querySelector(".file-tree-name-input")).toBeNull();
 		expect(api.mutateWorkspaceEntry).not.toHaveBeenCalled();
 
 		await openRootTreeMenu(container);
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click(),
+		);
 		await submitTreeName(container, "scratch.ts");
 		await flush();
 		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
-			action: "create", sessionId: "code-existing", parentRelativePath: "", name: "scratch.ts", kind: "file",
+			action: "create",
+			sessionId: "code-existing",
+			parentRelativePath: "",
+			name: "scratch.ts",
+			kind: "file",
 		});
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("scratch.ts");
+		expect(
+			activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent,
+		).toContain("scratch.ts");
 		expect(container.querySelector(".tool-tab.is-preview")).toBeNull();
 		let editor = codeEditor(container, "Edit scratch.ts");
 		await act(async () => changeCodeEditor(editor, "export const draft = true;"));
 
 		await openTreeMenu(container, "scratch.ts");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click(),
+		);
 		await submitTreeName(container, "renamed.ts");
 		await flush();
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("renamed.ts");
+		expect(
+			activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent,
+		).toContain("renamed.ts");
 		editor = codeEditor(container, "Edit renamed.ts");
 		expect(editor.state.doc.toString()).toBe("export const draft = true;");
 
 		await act(async () => button(container, "Save file").click());
 		await flush();
-		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith(expect.objectContaining({
-			relativePath: "renamed.ts", text: "export const draft = true;",
-		}));
+		expect(api.writeWorkspaceFile).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				relativePath: "renamed.ts",
+				text: "export const draft = true;",
+			}),
+		);
 
 		await act(async () => changeCodeEditor(editor, "discard this draft"));
 		await openTreeMenu(container, "renamed.ts");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		await act(async () =>
+			button(
+				container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!,
+				"Move to Trash",
+			).click(),
+		);
 		let dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		expect(dialog.textContent).toContain("Unsaved changes in 1 open file will be discarded.");
 		await act(async () => button(dialog, "Cancel").click());
 		expect(codeEditor(container, "Edit renamed.ts").state.doc.toString()).toBe("discard this draft");
 		await openTreeMenu(container, "renamed.ts");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		await act(async () =>
+			button(
+				container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!,
+				"Move to Trash",
+			).click(),
+		);
 		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		await act(async () => button(dialog, "Move to Trash").click());
 		await flush();
-		expect([...activeWorkspace(container).querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toContain("Open file");
+		expect([...activeWorkspace(container).querySelectorAll('[role="tab"]')].map((tab) => tab.textContent)).toContain(
+			"Open file",
+		);
 		expect(container.querySelector('[aria-label="Edit renamed.ts"]')).toBeNull();
 		await act(async () => container.querySelector<HTMLButtonElement>('.file-tree-row [title="src"]')!.click());
 		await flush();
@@ -5948,34 +6684,53 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelectorAll(".tool-tab.is-preview")).toHaveLength(0);
 
 		await openTreeMenu(container, "src");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Rename").click(),
+		);
 		await submitTreeName(container, "source");
 		await flush();
 		let stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
-			fixedPaths: string[]; expandedPaths: string[];
+			fixedPaths: string[];
+			expandedPaths: string[];
 		};
 		expect(stored.fixedPaths).toEqual(expect.arrayContaining(["source/a.ts", "source/nested/b.ts"]));
 		expect(stored.expandedPaths).toContain("source/nested");
 
 		await openTreeMenu(container, "source");
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "Move to Trash").click());
+		await act(async () =>
+			button(
+				container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!,
+				"Move to Trash",
+			).click(),
+		);
 		dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="file-trash-title"]')!;
 		await act(async () => button(dialog, "Move to Trash").click());
 		await flush();
-		expect([...activeWorkspace(container).querySelectorAll('[role="tab"]')].some((tab) => /a\.ts|b\.ts/u.test(tab.textContent ?? ""))).toBe(false);
+		expect(
+			[...activeWorkspace(container).querySelectorAll('[role="tab"]')].some((tab) =>
+				/a\.ts|b\.ts/u.test(tab.textContent ?? ""),
+			),
+		).toBe(false);
 		stored = JSON.parse(localStorage.getItem("metis.file-browser.v1:code-existing")!) as {
-			fixedPaths: string[]; expandedPaths: string[];
+			fixedPaths: string[];
+			expandedPaths: string[];
 		};
 		expect(stored.expandedPaths.some((path) => path.startsWith("source"))).toBe(false);
 
 		await openTreeMenu(container, "docs");
 		const mutationCalls = vi.mocked(api.mutateWorkspaceEntry).mock.calls.length;
-		await act(async () => button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click());
+		await act(async () =>
+			button(container.querySelector<HTMLElement>('[role="menu"][aria-label="File actions"]')!, "New file").click(),
+		);
 		expect(vi.mocked(api.mutateWorkspaceEntry).mock.calls.length).toBe(mutationCalls);
 		await submitTreeName(container, "inside-docs.ts");
 		await flush();
 		expect(api.mutateWorkspaceEntry).toHaveBeenLastCalledWith({
-			action: "create", sessionId: "code-existing", parentRelativePath: "docs", name: "inside-docs.ts", kind: "file",
+			action: "create",
+			sessionId: "code-existing",
+			parentRelativePath: "docs",
+			name: "inside-docs.ts",
+			kind: "file",
 		});
 		await act(async () => root.unmount());
 	});
@@ -6018,9 +6773,11 @@ describe("Chat desktop shell", () => {
 		expect(browserMenu.textContent).not.toContain("Browser");
 		await flush();
 		expect(api.createBrowser).toHaveBeenCalledTimes(1);
-		expect(api.createBrowser).toHaveBeenCalledWith(expect.objectContaining({
-			profileId: DEFAULT_BROWSER_PROFILE_ID,
-		}));
+		expect(api.createBrowser).toHaveBeenCalledWith(
+			expect.objectContaining({
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			}),
+		);
 		expect(container.querySelector('[aria-label="Browser address"]')).not.toBeNull();
 		expect(container.querySelector(".browser-start-page")?.textContent).toContain("Tools");
 		const browserId = vi.mocked(api.createBrowser).mock.calls.at(-1)![0].browserId;
@@ -6034,22 +6791,26 @@ describe("Chat desktop shell", () => {
 			url: "example.com",
 		});
 
-		act(() => emitBrowser({
-			type: "state",
-			state: {
-				browserId,
-				profileId: DEFAULT_BROWSER_PROFILE_ID,
-				url: "https://example.com/",
-				title: "Example Domain",
-				faviconUrl: null,
-				loading: false,
-				canGoBack: true,
-				canGoForward: false,
-				zoomPercent: 100,
-			},
-		}));
+		act(() =>
+			emitBrowser({
+				type: "state",
+				state: {
+					browserId,
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					url: "https://example.com/",
+					title: "Example Domain",
+					faviconUrl: null,
+					loading: false,
+					canGoBack: true,
+					canGoForward: false,
+					zoomPercent: 100,
+				},
+			}),
+		);
 		await flush();
-		expect(activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent).toContain("Example Domain");
+		expect(
+			activeWorkspace(container).querySelector('.tool-sidebar-tabbar [aria-selected="true"]')?.textContent,
+		).toContain("Example Domain");
 		expect(button(container, "Back").disabled).toBe(false);
 		expect(button(container, "Forward").disabled).toBe(true);
 
@@ -6060,11 +6821,13 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector<HTMLImageElement>(".browser-view-preview")?.src).toBe(
 			"data:image/png;base64,cHJldmlldw==",
 		);
-		expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
-			type: "present",
-			browserId,
-			visible: false,
-		}));
+		expect(api.controlBrowser).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "present",
+				browserId,
+				visible: false,
+			}),
+		);
 		const menu = container.querySelector('[role="menu"]')!;
 		expect(menu.textContent).toContain("Find in page");
 		expect(menu.textContent).toContain("Print");
@@ -6102,9 +6865,7 @@ describe("Chat desktop shell", () => {
 			forward: false,
 			findNext: false,
 		});
-		await act(async () =>
-			findInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
-		);
+		await act(async () => findInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		expect(api.controlBrowser).toHaveBeenLastCalledWith({
 			type: "stop-find",
 			sessionId: "chat-existing",
@@ -6131,29 +6892,29 @@ describe("Chat desktop shell", () => {
 		const zoomInput = container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')!;
 		expect(zoomInput).not.toBeNull();
 		changeInput(zoomInput, "137");
-		await act(async () =>
-			zoomInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })),
-		);
+		await act(async () => zoomInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
 		expect(api.controlBrowser).toHaveBeenCalledWith({
 			type: "set-zoom",
 			sessionId: "chat-existing",
 			browserId,
 			zoomPercent: 137,
 		});
-		act(() => emitBrowser({
-			type: "state",
-			state: {
-				browserId,
-				profileId: DEFAULT_BROWSER_PROFILE_ID,
-				url: "https://example.com/",
-				title: "Example Domain",
-				faviconUrl: null,
-				loading: false,
-				canGoBack: true,
-				canGoForward: false,
-				zoomPercent: 110,
-			},
-		}));
+		act(() =>
+			emitBrowser({
+				type: "state",
+				state: {
+					browserId,
+					profileId: DEFAULT_BROWSER_PROFILE_ID,
+					url: "https://example.com/",
+					title: "Example Domain",
+					faviconUrl: null,
+					loading: false,
+					canGoBack: true,
+					canGoForward: false,
+					zoomPercent: 110,
+				},
+			}),
+		);
 		await flush();
 		expect(container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')?.value).toBe("110");
 		await act(async () => button(container, "More browser actions").click());
@@ -6161,7 +6922,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(container, "More browser actions").click());
 		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-action="clear-data"]')!.click());
 		expect(container.querySelector(".browser-clear-dialog")).not.toBeNull();
-		await act(async () => container.querySelector<HTMLButtonElement>('[data-browser-confirm-clear]')!.click());
+		await act(async () => container.querySelector<HTMLButtonElement>("[data-browser-confirm-clear]")!.click());
 		await flush();
 		expect(api.controlBrowser).toHaveBeenCalledWith({
 			type: "clear-data",
@@ -6170,9 +6931,7 @@ describe("Chat desktop shell", () => {
 		});
 		expect(container.querySelector(".browser-toolbar-notice")?.textContent).toContain("Browser data cleared");
 
-		await act(async () =>
-			window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true })),
-		);
+		await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key: "f", metaKey: true })));
 		await flush();
 		expect(container.querySelector('input[aria-label="Find in page"]')).not.toBeNull();
 		await act(async () => button(container, "Close find").click());
@@ -6182,19 +6941,19 @@ describe("Chat desktop shell", () => {
 			["=", "zoom-in"],
 			["0", "zoom-reset"],
 		] as const) {
-			await act(async () =>
-				window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true })),
-			);
+			await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { key, metaKey: true })));
 			expect(api.controlBrowser).toHaveBeenCalledWith({ type, sessionId: "chat-existing", browserId });
 		}
 
 		await act(async () => button(activeWorkspace(container), "New browser tab").click());
 		await flush();
-		expect(api.controlBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
-			type: "present",
-			browserId,
-			visible: false,
-		}));
+		expect(api.controlBrowser).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				type: "present",
+				browserId,
+				visible: false,
+			}),
+		);
 		const callsWhileHidden = vi.mocked(api.controlBrowser).mock.calls.length;
 		window.dispatchEvent(new KeyboardEvent("keydown", { key: "p", metaKey: true }));
 		expect(api.controlBrowser).toHaveBeenCalledTimes(callsWhileHidden);
@@ -6215,7 +6974,12 @@ describe("Chat desktop shell", () => {
 		const { api } = createHarness();
 		vi.mocked(api.listBrowserProfiles).mockResolvedValue([
 			{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default", sourceId: null, sourceProfileId: null },
-			{ profileId: "22222222-2222-4222-8222-222222222222", name: "Work", sourceId: "chrome", sourceProfileId: "Profile 2" },
+			{
+				profileId: "22222222-2222-4222-8222-222222222222",
+				name: "Work",
+				sourceId: "chrome",
+				sourceProfileId: "Profile 2",
+			},
 		]);
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -6225,20 +6989,28 @@ describe("Chat desktop shell", () => {
 
 		await addTool(container, "Browser");
 		await flush();
-		expect(api.createBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
-			profileId: DEFAULT_BROWSER_PROFILE_ID,
-		}));
+		expect(api.createBrowser).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+			}),
+		);
 		await act(async () => button(container, "Browser profile: Metis — Default profile").click());
 		await flush();
 		expect(document.body.textContent).toContain("Google Chrome — Work");
 		await act(async () => button(document.body, "Google Chrome — Work").click());
 		await flush();
 
-		expect(api.createBrowser).toHaveBeenLastCalledWith(expect.objectContaining({
-			profileId: "22222222-2222-4222-8222-222222222222",
-		}));
+		expect(api.createBrowser).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				profileId: "22222222-2222-4222-8222-222222222222",
+			}),
+		);
 		expect(localStorage.getItem("metis.browser-profile.v1")).toBe("22222222-2222-4222-8222-222222222222");
-		expect(container.querySelector('.browser-panel.is-visible button[aria-label="Browser profile: Google Chrome — Work"] svg')).not.toBeNull();
+		expect(
+			container.querySelector(
+				'.browser-panel.is-visible button[aria-label="Browser profile: Google Chrome — Work"] svg',
+			),
+		).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 

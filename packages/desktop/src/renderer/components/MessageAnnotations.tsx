@@ -1,5 +1,5 @@
 import type { ItemView } from "@metis/app-protocol";
-import { ChatText, ArrowUpRight, X } from "@phosphor-icons/react";
+import { ArrowUpRight, ChatText, X } from "@phosphor-icons/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
@@ -35,7 +35,7 @@ export function MessageAnnotations({
 		const outside = (event: PointerEvent) => {
 			if (!panel.contains(event.target as Node) && !trigger.current?.contains(event.target as Node)) setOpen(false);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key !== "Escape") return;
 			event.preventDefault();
 			event.stopPropagation();
@@ -51,14 +51,14 @@ export function MessageAnnotations({
 					});
 		if (trigger.current) visibility?.observe(trigger.current);
 		document.addEventListener("pointerdown", outside);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		window.addEventListener("resize", position);
 		document.addEventListener("scroll", position, true);
 		return () => {
 			observer.disconnect();
 			visibility?.disconnect();
 			document.removeEventListener("pointerdown", outside);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 			window.removeEventListener("resize", position);
 			document.removeEventListener("scroll", position, true);
 			if (trigger.current?.isConnected) trigger.current.focus();

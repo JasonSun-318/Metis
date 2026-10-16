@@ -7,7 +7,17 @@ export function AskUserAnswerSummary({ result }: { readonly result?: ToolResultB
 	if (!result || result.isError) return null;
 	const answers = askAnswers(result);
 	if (answers.length === 0) return null;
-	return <DrawerDetails className="ask-user-answer-summary" summary={t("Your answers")}>
-		<dl>{answers.map((answer, index) => <div key={index}><dt>{answer.question}</dt><dd>{answer.answer}</dd></div>)}</dl>
-	</DrawerDetails>;
+	return (
+		<DrawerDetails className="ask-user-answer-summary" summary={t("Your answers")}>
+			<dl>
+				{answers.map((answer, index) => (
+					/* biome-ignore lint/suspicious/noArrayIndexKey: Answers are an immutable ordered result without question IDs; rows contain no local state. */
+					<div key={index}>
+						<dt>{answer.question}</dt>
+						<dd>{answer.answer}</dd>
+					</div>
+				))}
+			</dl>
+		</DrawerDetails>
+	);
 }

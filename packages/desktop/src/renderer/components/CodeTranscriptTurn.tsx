@@ -1,13 +1,13 @@
-import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
-import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -17,20 +17,36 @@ import {
 	commandText,
 	isCommandTool,
 	messageText,
-	toolResultImagesFromCalls,
-	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
 	type ToolResultBlock,
+	toolResultImagesFromCalls,
+	toolTranscriptPresentation,
 } from "./transcript-turn-model.ts";
 
-function VisibleBlock({ block, markdown = false, quoteItemId }: { readonly block: ItemContentBlockView; readonly markdown?: boolean; readonly quoteItemId?: string }) {
+function VisibleBlock({
+	block,
+	markdown = false,
+	quoteItemId,
+}: {
+	readonly block: ItemContentBlockView;
+	readonly markdown?: boolean;
+	readonly quoteItemId?: string;
+}) {
 	const { t } = useTranslation();
 	switch (block.type) {
 		case "text":
-			return markdown ? <Markdown text={block.text} quoteItemId={quoteItemId} /> : <p data-quote-item={quoteItemId}>{block.text}</p>;
+			return markdown ? (
+				<Markdown text={block.text} quoteItemId={quoteItemId} />
+			) : (
+				<p data-quote-item={quoteItemId}>{block.text}</p>
+			);
 		case "image":
-			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={16} /> {t("Image")} · {block.image.mediaType}</p>;
+			return (
+				<p className="transcript-attachment">
+					<ImageSquare aria-hidden="true" size={16} /> {t("Image")} · {block.image.mediaType}
+				</p>
+			);
 		case "notice":
 			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
 		case "thinking":
@@ -42,7 +58,13 @@ function VisibleBlock({ block, markdown = false, quoteItemId }: { readonly block
 	}
 }
 
-function CodeToolDetails({ call, lines, rawInput, rawOutput, rawOutputIsError }: {
+function CodeToolDetails({
+	call,
+	lines,
+	rawInput,
+	rawOutput,
+	rawOutputIsError,
+}: {
 	readonly call?: ToolCallBlock;
 	readonly lines: readonly ToolDetailLine[];
 	readonly rawInput?: string;
@@ -53,35 +75,44 @@ function CodeToolDetails({ call, lines, rawInput, rawOutput, rawOutputIsError }:
 	if (lines.length === 0 && !input && rawOutput === undefined) return null;
 	return (
 		<div className="code-command-details">
-			{lines.length > 0 && <dl className="tool-safe-details">
-				{lines.map((line, index) => <div className="tool-safe-row" key={`${line.label ?? "detail"}-${index}`}>
-					{line.label && <dt>{line.label}</dt>}
-					<dd>{line.value}</dd>
-				</div>)}
-			</dl>}
+			{lines.length > 0 && (
+				<dl className="tool-safe-details">
+					{lines.map((line, index) => (
+						<div className="tool-safe-row" key={`${line.label ?? "detail"}-${index}`}>
+							{line.label && <dt>{line.label}</dt>}
+							<dd>{line.value}</dd>
+						</div>
+					))}
+				</dl>
+			)}
 			{input && <pre className="code-command-input">{call && isCommandTool(call.name) ? `$ ${input}` : input}</pre>}
 			{rawOutput !== undefined && (
-				<pre className={rawOutputIsError ? "code-command-output code-command-output-error" : "code-command-output"}>{rawOutput}</pre>
+				<pre className={rawOutputIsError ? "code-command-output code-command-output-error" : "code-command-output"}>
+					{rawOutput}
+				</pre>
 			)}
 		</div>
 	);
 }
 
-function CodeToolStep({ call, result }: {
-	readonly call: ToolCallBlock;
-	readonly result?: ToolResultBlock;
-}) {
+function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly result?: ToolResultBlock }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const presentation = toolTranscriptPresentation(call, result, t);
 	const running = call.state === "running" || call.state === "pending";
 	const Icon = isCommandTool(call.name) ? TerminalWindow : Wrench;
 	return (
-		<details className={isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool"} open={open}>
-			<summary onClick={(event) => {
-				event.preventDefault();
-				setOpen((current) => !current);
-			}}>
+		<details
+			className={isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool"}
+			open={open}
+		>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
+			<summary
+				onClick={(event) => {
+					event.preventDefault();
+					setOpen((current) => !current);
+				}}
+			>
 				<Icon aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
@@ -106,10 +137,13 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 	const presentation = toolTranscriptPresentation(undefined, result, t);
 	return (
 		<details className="code-command code-command-tool" open={open}>
-			<summary onClick={(event) => {
-				event.preventDefault();
-				setOpen((current) => !current);
-			}}>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
+			<summary
+				onClick={(event) => {
+					event.preventDefault();
+					setOpen((current) => !current);
+				}}
+			>
 				<Wrench aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
@@ -142,14 +176,22 @@ function CodeExecutionTitle({ text }: { readonly text: string }) {
 	return (
 		<span className="code-execution-title-roller">
 			{leaving !== null && (
-				<span aria-hidden="true" className="code-execution-title-leave">{leaving}</span>
+				<span aria-hidden="true" className="code-execution-title-leave">
+					{leaving}
+				</span>
 			)}
-			<span className={`code-execution-title-enter${leaving !== null ? " from-top" : ""}`} key={text}>{text}</span>
+			<span className={`code-execution-title-enter${leaving !== null ? " from-top" : ""}`} key={text}>
+				{text}
+			</span>
 		</span>
 	);
 }
 
-function CodeExecution({ calls, results, orphanResults }: {
+function CodeExecution({
+	calls,
+	results,
+	orphanResults,
+}: {
 	readonly calls: readonly ToolCallBlock[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 	readonly orphanResults: readonly ToolResultBlock[];
@@ -158,21 +200,20 @@ function CodeExecution({ calls, results, orphanResults }: {
 	const [open, setOpen] = useState(false);
 	return (
 		<details className="code-execution" open={open}>
-			<summary onClick={(event) => {
-				event.preventDefault();
-				setOpen((current) => !current);
-			}}>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
+			<summary
+				onClick={(event) => {
+					event.preventDefault();
+					setOpen((current) => !current);
+				}}
+			>
 				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div className="code-execution-card">
 					{calls.map((call) => (
-						<CodeToolStep
-							call={call}
-							key={call.toolCallId}
-							result={results.get(call.toolCallId)}
-						/>
+						<CodeToolStep call={call} key={call.toolCallId} result={results.get(call.toolCallId)} />
 					))}
 					{orphanResults.map((result) => (
 						<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
@@ -229,56 +270,75 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
 
-		return (
-			<>
-				{segments.map((segment, segmentIndex) => {
-					if (segment.type === "user") {
-						const copyText = messageText(segment.item);
-						return (
-							<div className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
-								<MessageAttachments attachments={segment.item.attachments} />
-								<MessageFileSelections selections={segment.item.fileSelections} />
-								{segment.item.content.length > 0 && <div className="code-turn-user-bubble" data-quote-item={segment.item.itemId}>{segment.item.content.map((block, blockIndex) => <VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />)}</div>}
-								<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
-								{onCopy && copyText.trim() !== "" && (
-									<div className="turn-actions">
-										<TurnCopyButton onCopy={onCopy} text={copyText} />
-									</div>
-								)}
-							</div>
-						);
-					}
-						if (segment.type === "tools") {
-						return (
-							<div key={`tools-${segmentIndex}`}>
-								<CodeExecution
-									calls={segment.calls}
-									orphanResults={segment.orphanResults}
-									results={results}
-								/>
-							{segment.calls.filter((call) => call.name === "ask_user").map((call) => <AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />)}
-								{sessionId ? (
-									<ToolResultImages
-										images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
-										sessionId={sessionId}
-									/>
-								) : null}
-							</div>
-						);
-						}
-						if (segment.answer && final?.state === "streaming") return null;
-						return (
+	return (
+		<>
+			{segments.map((segment, segmentIndex) => {
+				if (segment.type === "user") {
+					const copyText = messageText(segment.item);
+					return (
 						<div
-							className={segment.answer ? "code-turn-answer" : "code-turn-status"}
-							data-transcript-answer={segment.answer ? true : undefined}
-							key={`content-${segmentIndex}`}
+							className={`code-turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`}
+							key={segment.item.itemId}
+							data-user-message={segment.item.itemId}
 						>
-							{segment.blocks.map((block, blockIndex) => (
-								<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} markdown={segment.markdown} quoteItemId={items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId} />
-							))}
+							<MessageAttachments attachments={segment.item.attachments} />
+							<MessageFileSelections selections={segment.item.fileSelections} />
+							{segment.item.content.length > 0 && (
+								<div className="code-turn-user-bubble" data-quote-item={segment.item.itemId}>
+									{segment.item.content.map((block, blockIndex) => (
+										<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />
+									))}
+								</div>
+							)}
+							<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
+							{onCopy && copyText.trim() !== "" && (
+								<div className="turn-actions">
+									<TurnCopyButton onCopy={onCopy} text={copyText} />
+								</div>
+							)}
 						</div>
 					);
-				})}
+				}
+				if (segment.type === "tools") {
+					return (
+						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript segments are append-only; positional keys preserve disclosure state while the active segment streams. */
+						<div key={`tools-${segmentIndex}`}>
+							<CodeExecution calls={segment.calls} orphanResults={segment.orphanResults} results={results} />
+							{segment.calls
+								.filter((call) => call.name === "ask_user")
+								.map((call) => (
+									<AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />
+								))}
+							{sessionId ? (
+								<ToolResultImages
+									images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
+									sessionId={sessionId}
+								/>
+							) : null}
+						</div>
+					);
+				}
+				if (segment.answer && final?.state === "streaming") return null;
+				return (
+					<div
+						className={segment.answer ? "code-turn-answer" : "code-turn-status"}
+						data-transcript-answer={segment.answer ? true : undefined}
+						// biome-ignore lint/suspicious/noArrayIndexKey: Transcript segments are append-only; positional keys preserve disclosure state while the active segment streams.
+						key={`content-${segmentIndex}`}
+					>
+						{segment.blocks.map((block, blockIndex) => (
+							<VisibleBlock
+								block={block}
+								key={`${block.type}-${blockIndex}`}
+								markdown={segment.markdown}
+								quoteItemId={
+									items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId
+								}
+							/>
+						))}
+					</div>
+				);
+			})}
 			{deliveredFiles.length > 0 && !running && onOpenDeliveredFile ? (
 				<DeliveredFileCards
 					files={deliveredFiles}
@@ -299,12 +359,12 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 							<GitFork aria-hidden="true" size={13} />
 						</button>
 					)}
-					{onCopy && finalCopyText.trim() !== "" && (
-						<TurnCopyButton onCopy={onCopy} text={finalCopyText} />
-					)}
+					{onCopy && finalCopyText.trim() !== "" && <TurnCopyButton onCopy={onCopy} text={finalCopyText} />}
 				</div>
 			)}
-			{running && <TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />}
+			{running && (
+				<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+			)}
 		</>
 	);
 }, sameTurnProps);

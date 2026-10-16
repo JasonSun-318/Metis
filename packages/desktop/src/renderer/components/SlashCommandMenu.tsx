@@ -60,17 +60,22 @@ export function SlashCommandMenu({
 }: SlashCommandMenuProps) {
 	const { t } = useTranslation();
 	const normalizedQuery = query.trim().toLocaleLowerCase();
-	const options = useMemo<MenuOption[]>(() => [
-		...composerSlashCommands
-			.filter((command) => command.includes(normalizedQuery))
-			.map((command) => ({ kind: "command" as const, key: command, command })),
-		...skills
-			.filter((skill) => `skill:${skill.name}`.toLocaleLowerCase().includes(normalizedQuery))
-			.map((skill) => ({ kind: "skill" as const, key: `skill:${skill.name}`, skill })),
-	], [normalizedQuery, skills]);
+	const options = useMemo<MenuOption[]>(
+		() => [
+			...composerSlashCommands
+				.filter((command) => command.includes(normalizedQuery))
+				.map((command) => ({ kind: "command" as const, key: command, command })),
+			...skills
+				.filter((skill) => `skill:${skill.name}`.toLocaleLowerCase().includes(normalizedQuery))
+				.map((skill) => ({ kind: "skill" as const, key: `skill:${skill.name}`, skill })),
+		],
+		[normalizedQuery, skills],
+	);
 	const [activeIndex, setActiveIndex] = useState(0);
 	const rootRef = useRef<HTMLDivElement>(null);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(options.length): Changing the query or option count resets keyboard selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(normalizedQuery): Changing the query or option count resets keyboard selection.
 	useEffect(() => setActiveIndex(0), [normalizedQuery, options.length]);
 	useEffect(() => {
 		const onPointerDown = (event: PointerEvent) => {
@@ -95,8 +100,8 @@ export function SlashCommandMenu({
 			if (event.key === "ArrowDown" || event.key === "ArrowUp") {
 				event.preventDefault();
 				event.stopPropagation();
-				setActiveIndex((current) =>
-					(current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length,
+				setActiveIndex(
+					(current) => (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length,
 				);
 				return;
 			}
@@ -112,7 +117,14 @@ export function SlashCommandMenu({
 	if (options.length === 0) return null;
 	const firstSkillIndex = options.findIndex((option) => option.kind === "skill");
 	return (
-		<div aria-activedescendant={`slash-option-${activeIndex}`} aria-label={t("Slash commands")} className="slash-command-menu" ref={rootRef} role="listbox">
+		<div
+			aria-activedescendant={`slash-option-${activeIndex}`}
+			aria-label={t("Slash commands")}
+			className="slash-command-menu"
+			ref={rootRef}
+			role="listbox"
+			tabIndex={0}
+		>
 			{options.map((option, index) => {
 				if (option.kind === "skill") {
 					return (
@@ -128,7 +140,10 @@ export function SlashCommandMenu({
 								type="button"
 							>
 								<Scroll aria-hidden="true" size={16} />
-								<span><strong>{`skill:${option.skill.name}`}</strong><small>{option.skill.description}</small></span>
+								<span>
+									<strong>{`skill:${option.skill.name}`}</strong>
+									<small>{option.skill.description}</small>
+								</span>
 							</button>
 						</div>
 					);
@@ -142,7 +157,9 @@ export function SlashCommandMenu({
 						className={index === activeIndex ? "is-active" : undefined}
 						id={`slash-option-${index}`}
 						key={option.key}
-						onClick={() => { if (!disabled) onSelectCommand(option.command); }}
+						onClick={() => {
+							if (!disabled) onSelectCommand(option.command);
+						}}
 						onPointerMove={() => setActiveIndex(index)}
 						role="option"
 						type="button"

@@ -1,8 +1,8 @@
 import { CaretDown, Check } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
 
 export interface MenuSelectOption<T extends string> {
 	readonly value: T;
@@ -16,6 +16,7 @@ export function MenuSelect<T extends string>({
 	ariaLabel,
 	className = "",
 	disabled = false,
+	id: triggerId,
 	menuAlign = "start",
 	menuMinWidth = 156,
 	onChange,
@@ -29,6 +30,7 @@ export function MenuSelect<T extends string>({
 	readonly ariaLabel: string;
 	readonly className?: string;
 	readonly disabled?: boolean;
+	readonly id?: string;
 	readonly menuAlign?: "start" | "end";
 	readonly menuMinWidth?: number;
 	readonly onChange: (value: T) => void;
@@ -86,7 +88,9 @@ export function MenuSelect<T extends string>({
 		updatePosition();
 		queueMicrotask(() => {
 			const selectedItem = menu.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)');
-			(selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({ preventScroll: true });
+			(selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({
+				preventScroll: true,
+			});
 		});
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
@@ -126,17 +130,18 @@ export function MenuSelect<T extends string>({
 				const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
 				if (items.length === 0) return;
 				const current = items.indexOf(document.activeElement as HTMLButtonElement);
-				const next = event.key === "Home"
-					? items[0]
-					: event.key === "End"
-						? items.at(-1)
-						: event.key === "ArrowDown"
-							? items[(current + 1) % items.length]
-							: items[(current <= 0 ? items.length : current) - 1];
+				const next =
+					event.key === "Home"
+						? items[0]
+						: event.key === "End"
+							? items.at(-1)
+							: event.key === "ArrowDown"
+								? items[(current + 1) % items.length]
+								: items[(current <= 0 ? items.length : current) - 1];
 				next?.focus();
 			}}
-				ref={menu}
-				popover="manual"
+			ref={menu}
+			popover="manual"
 			role="listbox"
 			style={position}
 		>
@@ -160,8 +165,13 @@ export function MenuSelect<T extends string>({
 						<span className="menu-select-option-label">
 							{option.icon}
 							{option.description ? (
-								<span className="menu-select-option-copy"><span>{option.label}</span><small>{option.description}</small></span>
-							) : <span>{option.label}</span>}
+								<span className="menu-select-option-copy">
+									<span>{option.label}</span>
+									<small>{option.description}</small>
+								</span>
+							) : (
+								<span>{option.label}</span>
+							)}
 						</span>
 						{active && <Check aria-hidden="true" size={16} weight="bold" />}
 					</button>
@@ -180,6 +190,7 @@ export function MenuSelect<T extends string>({
 				aria-label={ariaLabel}
 				className="menu-select-trigger"
 				disabled={disabled}
+				id={triggerId}
 				onClick={() => setOpen((current) => !current)}
 				onKeyDown={(event) => {
 					if (!open || event.key !== "Escape") return;

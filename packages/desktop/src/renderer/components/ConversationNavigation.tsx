@@ -32,6 +32,7 @@ export function ConversationNavigation({
 	const [viewport, setViewport] = useState({ top: 0, height: 420 });
 	const selectedIndex = Math.max(0, Math.min(entries.length - 1, previewIndex ?? activeIndex));
 	const previewOpen = previewIndex !== null;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(entries.length): History length changes mount or resize the navigation rail and require measuring and centering again.
 	useLayoutEffect(() => {
 		const element = track.current;
 		if (!element) return;
@@ -41,6 +42,7 @@ export function ConversationNavigation({
 		measure();
 		return () => observer.disconnect();
 	}, [entries.length]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(entries.length): History length changes mount or resize the navigation rail and require measuring and centering again.
 	useLayoutEffect(() => {
 		const element = track.current;
 		if (!element || previewOpen) return;
@@ -153,7 +155,9 @@ export function ConversationNavigation({
 							<span
 								key={entries[index]!.itemId}
 								data-navigation-turn={entries[index]!.itemId}
-								className={(previewOpen ? index === selectedIndex : index === activeIndex) ? "is-current" : undefined}
+								className={
+									(previewOpen ? index === selectedIndex : index === activeIndex) ? "is-current" : undefined
+								}
 								style={{ top: `${index * 10 + 10}px`, width: `${width}px` }}
 							/>
 						);
@@ -177,7 +181,10 @@ export function ConversationNavigation({
 					<strong>{title}</strong>
 					{selected.answer && (
 						<span className="conversation-navigation-excerpt">
-							{selected.answer.replace(/^#{1,6}\s+/gm, "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/\n{2,}/g, "\n")}
+							{selected.answer
+								.replace(/^#{1,6}\s+/gm, "")
+								.replace(/\*\*([^*]+)\*\*/g, "$1")
+								.replace(/\n{2,}/g, "\n")}
 						</span>
 					)}
 					{selected.attachments.length > 0 && (

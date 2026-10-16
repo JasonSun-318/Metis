@@ -57,7 +57,7 @@ export function knowledgeNoteMarkdown(content: string, note: KnowledgeNote): str
 					}
 					if (!path) return original;
 					const text = wiki ? (wiki.split("|")[1] ?? wiki.split("#")[0]) : (label ?? target);
-					return `[${text.replace(/([\[\]\\])/g, "\\$1")}](#knowledge-note/${encodeURIComponent(path)})`;
+					return `[${text.replace(/([[\]\\])/g, "\\$1")}](#knowledge-note/${encodeURIComponent(path)})`;
 				},
 			);
 		})
@@ -96,6 +96,8 @@ export function KnowledgePanel({
 	const requestRevision = useRef(0);
 	const contentPath = useRef("");
 	const library = libraries.find((item) => item.id === selectedId);
+	const libraryId = library?.id;
+	const libraryPath = library?.path;
 	const note = graph.notes.find((item) => item.path === selectedPath);
 
 	useEffect(() => {
@@ -104,15 +106,18 @@ export function KnowledgePanel({
 	useEffect(() => {
 		if (library) localStorage.setItem(VIEW_KEY, library.id);
 	}, [library]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(selectedId): Switching libraries resets note selection and search.
 	useEffect(() => {
 		setSelectedPath(null);
 		setContent(undefined);
 		setQuery("");
 	}, [selectedId]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(refresh): Retry explicitly restarts library scanning.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(libraryPath): Moving a library restarts scanning its file roots.
 	useEffect(() => {
 		setGraph(EMPTY_GRAPH);
 		setError(undefined);
-		if (!visible || !library) {
+		if (!visible || !libraryId) {
 			setLoading(false);
 			return;
 		}
@@ -123,7 +128,7 @@ export function KnowledgePanel({
 			if (scanning) return;
 			scanning = true;
 			try {
-				const result = await api.scanKnowledgeLibrary({ libraryId: library.id });
+				const result = await api.scanKnowledgeLibrary({ libraryId });
 				if (active) {
 					// Keep the previous object when nothing changed so the graph layout is not restarted.
 					setGraph((current) => (JSON.stringify(current) === JSON.stringify(result) ? current : result));
@@ -151,17 +156,18 @@ export function KnowledgePanel({
 			window.clearInterval(timer);
 			window.removeEventListener("focus", focus);
 		};
-	}, [api, library?.id, library?.path, visible, refresh]);
+	}, [api, libraryId, libraryPath, visible, refresh]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(scanRevision): A successful scan refreshes the open note even when the graph is unchanged.
 	useEffect(() => {
 		const request = ++requestRevision.current;
-		const key = `${library?.id}:${selectedPath}`;
+		const key = `${libraryId}:${selectedPath}`;
 		if (contentPath.current !== key) {
 			setContent(undefined);
 			setReadError(undefined);
 		}
 		contentPath.current = key;
-		if (!visible || !library || !selectedPath) return;
-		void api.readKnowledgeNote({ libraryId: library.id, path: selectedPath }).then(
+		if (!visible || !libraryId || !selectedPath) return;
+		void api.readKnowledgeNote({ libraryId, path: selectedPath }).then(
 			(result) => {
 				if (request === requestRevision.current) {
 					setContent(result.content);
@@ -176,7 +182,7 @@ export function KnowledgePanel({
 		return () => {
 			++requestRevision.current;
 		};
-	}, [api, library?.id, selectedPath, visible, scanRevision]);
+	}, [api, libraryId, selectedPath, visible, scanRevision]);
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLocaleLowerCase();
 		const notes = graph.notes.filter(
@@ -267,10 +273,10 @@ export function KnowledgePanel({
 				</details>
 			)}
 			{catalogLoading || loading ? (
-				<div className="knowledge-empty" role="status">
+				<output className="status-block knowledge-empty">
 					<ArrowsClockwise aria-hidden="true" className="is-spinning" size={24} />
 					{t("Loading…")}
-				</div>
+				</output>
 			) : !library ? (
 				<div className="knowledge-empty">
 					<Books aria-hidden="true" size={32} weight="light" />
@@ -314,6 +320,8 @@ export function KnowledgePanel({
 							</p>
 						)}
 						{content !== undefined && note ? (
+							/* biome-ignore lint/a11y/useKeyWithClickEvents: Native links generate keyboard clicks; the wrapper only resolves internal knowledge links. */
+							/* biome-ignore lint/a11y/noStaticElementInteractions: This container delegates clicks only from native links, including keyboard-generated link activation. */
 							<div
 								className="knowledge-markdown turn-answer"
 								onClick={(event) => {
@@ -327,14 +335,14 @@ export function KnowledgePanel({
 								<Markdown text={knowledgeNoteMarkdown(content, note)} />
 							</div>
 						) : !readError ? (
-							<p role="status">{t("Loading…")}</p>
+							<output className="status-paragraph">{t("Loading…")}</output>
 						) : null}
 					</div>
 				</div>
 			) : (
 				<>
 					<div className="knowledge-view-controls">
-						<div className="knowledge-view-switch" role="group" aria-label={t("Knowledge view")}>
+						<fieldset className="control-group knowledge-view-switch" aria-label={t("Knowledge view")}>
 							<button type="button" aria-pressed={mode === "graph"} onClick={() => setMode("graph")}>
 								<Graph aria-hidden="true" size={14} />
 								{t("Graph")}
@@ -343,7 +351,7 @@ export function KnowledgePanel({
 								<FileText aria-hidden="true" size={14} />
 								{t("Knowledge notes")}
 							</button>
-						</div>
+						</fieldset>
 						<div className="knowledge-search">
 							<MagnifyingGlass aria-hidden="true" size={14} />
 							<input

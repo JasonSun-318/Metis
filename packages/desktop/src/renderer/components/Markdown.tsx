@@ -1,6 +1,15 @@
 import type { TFunction } from "i18next";
 import { marked, type Token, type Tokens } from "marked";
-import { cloneElement, createElement, Fragment, isValidElement, type ReactElement, type ReactNode, useMemo, useRef } from "react";
+import {
+	cloneElement,
+	createElement,
+	Fragment,
+	isValidElement,
+	type ReactElement,
+	type ReactNode,
+	useMemo,
+	useRef,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { lexMarkdownBlocks, type MarkdownLexCache } from "./markdown-lexer.ts";
 
@@ -131,6 +140,7 @@ function block(token: Token, index: number, t: TFunction): ReactNode {
 						</thead>
 						<tbody>
 							{token.rows.map((row: Tokens.TableCell[], rowIndex: number) => (
+								/* biome-ignore lint/suspicious/noArrayIndexKey: Markdown tokens and table rows stream in source order; positional keys preserve the active block while its text grows. */
 								<tr key={`row-${rowIndex}`}>{row.map((cell, cellIndex) => tableCell(cell, cellIndex, t))}</tr>
 							))}
 						</tbody>
@@ -186,6 +196,7 @@ export function Markdown({
 					offset += token.raw.length;
 					const content = block(token, index, t);
 					return content === null ? null : (
+						/* biome-ignore lint/suspicious/noArrayIndexKey: Markdown tokens and table rows stream in source order; positional keys preserve the active block while its text grows. */
 						<div className="markdown-source-block" data-source-start={start} data-source-end={offset} key={index}>
 							{content}
 						</div>
@@ -216,9 +227,16 @@ export function Markdown({
 			return <p>{text}</p>;
 		}
 	}, [i18n.resolvedLanguage, t, text, sourcePositions]);
-	const sourcedContent = useMemo(() => !quoteItemId ? content : (Array.isArray(content) ? content : [content]).map((node) =>
-		isValidElement(node) && typeof node.type === "string"
-			? cloneElement(node as ReactElement<Record<string, unknown>>, { "data-quote-item": quoteItemId }) : node,
-	), [content, quoteItemId]);
+	const sourcedContent = useMemo(
+		() =>
+			!quoteItemId
+				? content
+				: (Array.isArray(content) ? content : [content]).map((node) =>
+						isValidElement(node) && typeof node.type === "string"
+							? cloneElement(node as ReactElement<Record<string, unknown>>, { "data-quote-item": quoteItemId })
+							: node,
+					),
+		[content, quoteItemId],
+	);
 	return <>{sourcedContent}</>;
 }

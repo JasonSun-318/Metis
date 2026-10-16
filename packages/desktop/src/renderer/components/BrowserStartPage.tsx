@@ -31,15 +31,27 @@ export function BrowserStartPage({ tools, history, onNavigate }: BrowserStartPag
 				{recent.length > 0 ? (
 					<div className="browser-start-recent">
 						{recent.map((entry) => (
-							<button className="browser-start-recent-page" key={entry.url} onClick={() => onNavigate(entry.url)} title={entry.url} type="button">
+							<button
+								className="browser-start-recent-page"
+								key={entry.url}
+								onClick={() => onNavigate(entry.url)}
+								title={entry.url}
+								type="button"
+							>
 								<span className="browser-start-favicon">
-									{entry.faviconUrl?.startsWith("data:image/") ? <img alt="" src={entry.faviconUrl} /> : <Globe aria-hidden="true" size={26} weight="light" />}
+									{entry.faviconUrl?.startsWith("data:image/") ? (
+										<img alt="" src={entry.faviconUrl} />
+									) : (
+										<Globe aria-hidden="true" size={26} weight="light" />
+									)}
 								</span>
 								<span className="browser-start-page-title">{entry.title || entry.url}</span>
 							</button>
 						))}
 					</div>
-				) : <p className="browser-start-empty">{t("Pages you visit will appear here")}</p>}
+				) : (
+					<p className="browser-start-empty">{t("Pages you visit will appear here")}</p>
+				)}
 			</section>
 		</div>
 	);

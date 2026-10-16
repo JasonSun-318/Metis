@@ -23,6 +23,7 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 	const themeRef = useRef(theme);
 	themeRef.current = theme;
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(process.processId): A different process recreates the terminal, replays its output, and refits the viewport.
 	useEffect(() => {
 		const host = hostRef.current;
 		if (!host) return;
@@ -43,16 +44,16 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 		terminalRef.current = terminal;
 		renderedOutput.current = "";
 		let frame = 0;
-		const fit = () => {
+		const fitTerminal = () => {
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
 				if (host.clientWidth && host.clientHeight) addon.fit();
 			});
 		};
-		fitRef.current = fit;
-		const observer = new ResizeObserver(fit);
+		fitRef.current = fitTerminal;
+		const observer = new ResizeObserver(fitTerminal);
 		observer.observe(host);
-		fit();
+		fitTerminal();
 		return () => {
 			cancelAnimationFrame(frame);
 			observer.disconnect();
@@ -62,6 +63,7 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 		};
 	}, [process.processId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(process.processId): A different process recreates the terminal, replays its output, and refits the viewport.
 	useEffect(() => {
 		const terminal = terminalRef.current;
 		if (!terminal) return;
@@ -76,6 +78,7 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 		if (terminalRef.current) terminalRef.current.options.theme = TERMINAL_THEMES[theme];
 	}, [theme]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(process.processId): A different process recreates the terminal, replays its output, and refits the viewport.
 	useEffect(() => {
 		if (visible) fitRef.current?.();
 	}, [visible, process.processId]);
@@ -83,16 +86,42 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 	return (
 		<section aria-label="Process" className="process-panel" hidden={!visible} id={panelId} role="tabpanel">
 			<div className="process-toolbar">
-				<span className={`process-state is-${process.state}`} role="status">
+				<output className={`process-state is-${process.state}`}>
 					<span aria-hidden="true" />
-					{t(process.state === "running" ? "Command running" : process.state === "completed" ? "Command completed" : "Command stopped with an error")}
-				</span>
-				<button aria-label={t("Copy output")} className="icon-button" disabled={!process.output} onClick={() => { void navigator.clipboard.writeText(process.output).catch(onError); }} title={t("Copy output")} type="button"><Copy aria-hidden="true" size={14} /></button>
+					{t(
+						process.state === "running"
+							? "Command running"
+							: process.state === "completed"
+								? "Command completed"
+								: "Command stopped with an error",
+					)}
+				</output>
+				<button
+					aria-label={t("Copy output")}
+					className="icon-button"
+					disabled={!process.output}
+					onClick={() => {
+						void navigator.clipboard.writeText(process.output).catch(onError);
+					}}
+					title={t("Copy output")}
+					type="button"
+				>
+					<Copy aria-hidden="true" size={14} />
+				</button>
 			</div>
-			<pre className="process-command"><span aria-hidden="true">$ </span>{process.command}</pre>
-			{process.truncated && <p className="process-notice">{t("Showing the latest output; earlier output was truncated.")}</p>}
-			{!process.output && <p className="process-notice">{t(process.state === "running" ? "Waiting for command output…" : "This command produced no output.")}</p>}
-			<div aria-label={t("Command output")} className="process-output terminal-host" ref={hostRef} />
+			<pre className="process-command">
+				<span aria-hidden="true">$ </span>
+				{process.command}
+			</pre>
+			{process.truncated && (
+				<p className="process-notice">{t("Showing the latest output; earlier output was truncated.")}</p>
+			)}
+			{!process.output && (
+				<p className="process-notice">
+					{t(process.state === "running" ? "Waiting for command output…" : "This command produced no output.")}
+				</p>
+			)}
+			<section aria-label={t("Command output")} className="process-output terminal-host" ref={hostRef} />
 		</section>
 	);
 }

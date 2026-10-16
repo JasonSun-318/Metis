@@ -10,7 +10,9 @@ import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
 vi.mock("../src/renderer/components/SessionChatView.tsx", () => ({ SessionChatView: () => null }));
-vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({ UniversalFilePreviewer: () => null }));
+vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({
+	UniversalFilePreviewer: () => null,
+}));
 
 const ALPHA_1 = "11111111-1111-4111-8111-111111111111";
 const BETA = "22222222-2222-4222-8222-222222222222";
@@ -32,7 +34,10 @@ function mount() {
 	} as unknown as MetisDesktopApi;
 	const chatView = { api, store: new AppStore() } as unknown as SessionChatViewContext;
 	const onChatSession = vi.fn();
-	const sessionsById = new Map<string, ComponentProps<typeof SessionWorkspaceView>["sessionsById"] extends ReadonlyMap<string, infer V> ? V : never>([
+	const sessionsById = new Map<
+		string,
+		ComponentProps<typeof SessionWorkspaceView>["sessionsById"] extends ReadonlyMap<string, infer V> ? V : never
+	>([
 		[ALPHA_1, { sessionId: ALPHA_1, cwd: "/work/alpha", mode: "code", state: "idle", unread: false }],
 		[BETA, { sessionId: BETA, cwd: "/work/beta", mode: "code", state: "running", unread: false }],
 		[ALPHA_2, { sessionId: ALPHA_2, cwd: "/work/alpha", mode: "code", state: "idle", unread: false }],
@@ -65,7 +70,7 @@ function mount() {
 					sessionTitleFor={(sessionId) => TITLES[sessionId] ?? "Task"}
 					store={chatView.store}
 					theme="dark"
-						toolsSidebarOpen={false}
+					toolsSidebarOpen={false}
 					visible
 					{...props}
 				/>,
@@ -114,7 +119,9 @@ describe("workspace tab strip", () => {
 		await view.render({ chatSessionId: null, chatIsDraft: true, mode: "chat" });
 		const draftIcon = () => view.container.querySelector('[role="tab"][aria-label="New task"] > svg')!;
 		expect(draftIcon().getAttribute("data-mode")).toBe("chat");
-		expect(view.container.querySelector('[role="tab"][aria-label="Alpha one"] > svg')?.getAttribute("data-mode")).toBe("code");
+		expect(
+			view.container.querySelector('[role="tab"][aria-label="Alpha one"] > svg')?.getAttribute("data-mode"),
+		).toBe("code");
 		await view.render({ chatSessionId: null, chatIsDraft: true, mode: "code" });
 		expect(draftIcon().getAttribute("data-mode")).toBe("code");
 	});
@@ -153,8 +160,8 @@ describe("workspace tab strip", () => {
 		await view.render({ chatSessionId: BETA });
 		await view.render({ chatSessionId: ALPHA_2 });
 		const label = (name: string) =>
-			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find(
-				(candidate) => candidate.textContent?.startsWith(name),
+			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find((candidate) =>
+				candidate.textContent?.startsWith(name),
 			)!;
 		expect(label("alpha").tagName).toBe("BUTTON");
 		expect(label("alpha").getAttribute("aria-expanded")).toBe("true");
@@ -179,8 +186,8 @@ describe("workspace tab strip", () => {
 		await view.render({ chatSessionId: BETA });
 		await view.render({ chatSessionId: ALPHA_2 });
 		const betaLabel = () =>
-			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find(
-				(candidate) => candidate.textContent?.startsWith("beta"),
+			[...view.container.querySelectorAll<HTMLButtonElement>(".tool-tab-group-label")].find((candidate) =>
+				candidate.textContent?.startsWith("beta"),
 			)!;
 		await act(async () => betaLabel().click());
 		expect(view.tabs()).toEqual(["Alpha one", "Alpha two*"]);
@@ -203,7 +210,17 @@ describe("workspace tab strip", () => {
 			const index = Math.max(0, tabs.indexOf(this));
 			const left = this.classList.contains("tool-tab") ? index * 100 : 0;
 			const width = this.classList.contains("tool-tab") ? 100 : 1000;
-			return { x: left, y: 0, top: 0, left, right: left + width, bottom: 0, width, height: 0, toJSON: () => ({}) } as DOMRect;
+			return {
+				x: left,
+				y: 0,
+				top: 0,
+				left,
+				right: left + width,
+				bottom: 0,
+				width,
+				height: 0,
+				toJSON: () => ({}),
+			} as DOMRect;
 		});
 		const view = mount();
 		await view.render({ chatSessionId: ALPHA_1 });
@@ -225,10 +242,14 @@ describe("workspace tab strip", () => {
 		await view.render({ chatSessionId: ALPHA_1 });
 		await view.render({ chatSessionId: ALPHA_2 });
 		const scroll = view.container.querySelector<HTMLElement>(".tool-tabs-scroll")!;
-		await act(async () => scroll.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true, cancelable: true })));
+		await act(async () =>
+			scroll.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, bubbles: true, cancelable: true })),
+		);
 		expect(scroll.scrollLeft).toBe(40);
 		// A mostly-horizontal wheel gestures scrolls natively, untouched.
-		await act(async () => scroll.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 5, bubbles: true, cancelable: true })));
+		await act(async () =>
+			scroll.dispatchEvent(new WheelEvent("wheel", { deltaX: 30, deltaY: 5, bubbles: true, cancelable: true })),
+		);
 		expect(scroll.scrollLeft).toBe(40);
 	});
 
@@ -270,14 +291,24 @@ describe("workspace tab strip", () => {
 		expect(view.onChatSession).toHaveBeenLastCalledWith(ALPHA_1);
 
 		await act(async () => {
-			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, shiftKey: true, bubbles: true }));
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, shiftKey: true, bubbles: true }),
+			);
 		});
 		expect(view.tabs()).toEqual(["Alpha one", "Beta*"]);
 	});
 
 	it("focuses a pane when the user works inside it", async () => {
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, left: 0, right: 1200, bottom: 800, width: 1200, height: 800, toJSON: () => ({}),
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 1200,
+			bottom: 800,
+			width: 1200,
+			height: 800,
+			toJSON: () => ({}),
 		});
 		const view = mount();
 		await view.render({ chatSessionId: ALPHA_1 });
@@ -285,7 +316,9 @@ describe("workspace tab strip", () => {
 		const betaTab = [...view.container.querySelectorAll<HTMLElement>(".tool-tab")].find((tab) =>
 			tab.textContent?.includes("Beta"),
 		)!;
-		await act(async () => betaTab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })));
+		await act(async () =>
+			betaTab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })),
+		);
 		const split = [...view.container.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")].find(
 			(button) => button.textContent === "Split right",
 		)!;

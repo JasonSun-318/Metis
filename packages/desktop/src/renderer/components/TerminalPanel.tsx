@@ -16,14 +16,36 @@ interface TerminalPanelProps {
 
 export const TERMINAL_THEMES = {
 	dark: {
-		background: "#141414", foreground: "#e8e7e2", cursor: "#9a9a9a", selectionBackground: "#585858",
-		black: "#202020", red: "#ff8585", green: "#8fc17b", yellow: "#e4b56a", blue: "#75a9d6",
-		magenta: "#c69bd6", cyan: "#78c2bd", white: "#e8e7e2", brightBlack: "#7d7c77", brightWhite: "#ffffff",
+		background: "#141414",
+		foreground: "#e8e7e2",
+		cursor: "#9a9a9a",
+		selectionBackground: "#585858",
+		black: "#202020",
+		red: "#ff8585",
+		green: "#8fc17b",
+		yellow: "#e4b56a",
+		blue: "#75a9d6",
+		magenta: "#c69bd6",
+		cyan: "#78c2bd",
+		white: "#e8e7e2",
+		brightBlack: "#7d7c77",
+		brightWhite: "#ffffff",
 	},
 	light: {
-		background: "#fcfcfb", foreground: "#2e2b27", cursor: "#69655f", selectionBackground: "#dbe8f4",
-		black: "#252320", red: "#b64235", green: "#397a49", yellow: "#956b24", blue: "#356a9b",
-		magenta: "#80569b", cyan: "#2d7a78", white: "#d9d5ce", brightBlack: "#817d76", brightWhite: "#ffffff",
+		background: "#fcfcfb",
+		foreground: "#2e2b27",
+		cursor: "#69655f",
+		selectionBackground: "#dbe8f4",
+		black: "#252320",
+		red: "#b64235",
+		green: "#397a49",
+		yellow: "#956b24",
+		blue: "#356a9b",
+		magenta: "#80569b",
+		cyan: "#2d7a78",
+		white: "#d9d5ce",
+		brightBlack: "#817d76",
+		brightWhite: "#ffffff",
 	},
 } as const;
 
@@ -62,7 +84,7 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 		terminal.open(host);
 		terminalRef.current = terminal;
 
-		const fit = () => {
+		const fitTerminal = () => {
 			cancelAnimationFrame(frame);
 			frame = requestAnimationFrame(() => {
 				if (!active || host.clientWidth === 0 || host.clientHeight === 0) return;
@@ -73,8 +95,8 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 				void api.resizeTerminal({ terminalId, cols: terminal.cols, rows: terminal.rows }).catch(() => undefined);
 			});
 		};
-		fitRef.current = fit;
-		const observer = new ResizeObserver(fit);
+		fitRef.current = fitTerminal;
+		const observer = new ResizeObserver(fitTerminal);
 		observer.observe(host);
 
 		const removeTerminalListener = api.subscribeTerminal((event) => {
@@ -86,7 +108,9 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			ready = false;
 			terminal.options.disableStdin = true;
 			terminal.options.cursorBlink = false;
-			terminal.write(`\r\n\x1b[90m${translateRef.current("Process exited with code {{code}}", { code: event.exitCode })}\x1b[0m\r\n`);
+			terminal.write(
+				`\r\n\x1b[90m${translateRef.current("Process exited with code {{code}}", { code: event.exitCode })}\x1b[0m\r\n`,
+			);
 		});
 		const input = terminal.onData((data) => {
 			if (!ready) return;
@@ -102,11 +126,12 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 				ready = true;
 				terminal.options.disableStdin = false;
 				setStatus(null);
-				fit();
+				fitTerminal();
 				terminal.focus();
 			},
 			(cause) => {
-				if (active) setStatus(cause instanceof Error ? cause.message : translateRef.current("Terminal could not start"));
+				if (active)
+					setStatus(cause instanceof Error ? cause.message : translateRef.current("Terminal could not start"));
 			},
 		);
 
@@ -118,7 +143,7 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			input.dispose();
 			terminal.dispose();
 			if (terminalRef.current === terminal) terminalRef.current = null;
-			if (fitRef.current === fit) fitRef.current = null;
+			if (fitRef.current === fitTerminal) fitRef.current = null;
 		};
 	}, [api, cwd, terminalId]);
 
@@ -141,17 +166,33 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			role="tabpanel"
 		>
 			<div className="terminal-actions">
-				<button aria-label={t("Scroll to bottom")} aria-describedby={`terminal-scroll-hint-${terminalId}`} className="terminal-action-btn" onClick={() => terminalRef.current?.scrollToBottom()} type="button">
+				<button
+					aria-label={t("Scroll to bottom")}
+					aria-describedby={`terminal-scroll-hint-${terminalId}`}
+					className="terminal-action-btn"
+					onClick={() => terminalRef.current?.scrollToBottom()}
+					type="button"
+				>
 					<ArrowDown aria-hidden="true" size={13} />
-					<span className="terminal-action-tooltip" id={`terminal-scroll-hint-${terminalId}`} role="tooltip">{t("Scroll to bottom")}</span>
+					<span className="terminal-action-tooltip" id={`terminal-scroll-hint-${terminalId}`} role="tooltip">
+						{t("Scroll to bottom")}
+					</span>
 				</button>
-				<button aria-label={t("Clear terminal")} aria-describedby={`terminal-clear-hint-${terminalId}`} className="terminal-action-btn" onClick={() => terminalRef.current?.clear()} type="button">
+				<button
+					aria-label={t("Clear terminal")}
+					aria-describedby={`terminal-clear-hint-${terminalId}`}
+					className="terminal-action-btn"
+					onClick={() => terminalRef.current?.clear()}
+					type="button"
+				>
 					<Trash aria-hidden="true" size={13} />
-					<span className="terminal-action-tooltip" id={`terminal-clear-hint-${terminalId}`} role="tooltip">{t("Clear terminal")}</span>
+					<span className="terminal-action-tooltip" id={`terminal-clear-hint-${terminalId}`} role="tooltip">
+						{t("Clear terminal")}
+					</span>
 				</button>
 			</div>
 			<div className="terminal-host" ref={hostRef} />
-			{status && <div className="terminal-status" role="status">{status}</div>}
+			{status && <output className="status-block terminal-status">{status}</output>}
 		</section>
 	);
 }

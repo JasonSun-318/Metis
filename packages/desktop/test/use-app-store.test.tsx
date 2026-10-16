@@ -24,25 +24,31 @@ describe("useAppStore selector", () => {
 		await act(async () => root.render(<SidebarRevision />));
 		expect(renders).toBe(1);
 
-		await act(async () => store.setSupervisor({
-			state: "ready",
-			serverEpoch: "11111111-1111-4111-8111-111111111111",
-			restartAttempt: 0,
-			failure: null,
-		}));
+		await act(async () =>
+			store.setSupervisor({
+				state: "ready",
+				serverEpoch: "11111111-1111-4111-8111-111111111111",
+				restartAttempt: 0,
+				failure: null,
+			}),
+		);
 		expect(renders).toBe(1);
 
-		await act(async () => store.upsertSession({
-			sessionId: "session-1",
-			mode: "chat",
-			cwdOrigin: "managed",
-			cwd: null,
-			createdAt: "2026-08-31T00:00:00.000Z",
-			updatedAt: "2026-08-31T00:00:00.000Z",
-			state: "idle",
-			archived: false,
-			unread: false,
-		}));
+		await act(async () =>
+			store.upsertSession({
+				sessionId: "session-1",
+				mode: "chat",
+				cwdOrigin: "managed",
+				cwd: null,
+				createdAt: "2026-08-31T00:00:00.000Z",
+				updatedAt: "2026-08-31T00:00:00.000Z",
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			}),
+		);
 		expect(renders).toBe(2);
 		expect(container.textContent).toBe("1");
 		await act(async () => root.unmount());

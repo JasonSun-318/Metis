@@ -1,21 +1,23 @@
 // @vitest-environment jsdom
 
 import type {
-	CatalogEntryView,
-	ComponentPublicView,
-	MarketRecord,
-	PluginInstalledView,
+	PluginCatalogEntryView,
+	PluginComponentPublicView,
 	PluginInspectionView,
+	PluginInstalledView,
+	PluginMarketView,
 	PluginRecord,
 } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { PluginsPanel, type PluginSection } from "../src/renderer/components/PluginsPanel.tsx";
+import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import i18n from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 
-const officialMarket: MarketRecord = {
+type PluginSection = NonNullable<Parameters<typeof PluginsPanel>[0]["initialSection"]>;
+
+const officialMarket: PluginMarketView = {
 	id: "official-market",
 	displayName: "Official Marketplace",
 	url: "https://github.com/anthropics/claude-plugins-official",
@@ -24,7 +26,7 @@ const officialMarket: MarketRecord = {
 	selected: true,
 };
 
-const customMarket: MarketRecord = {
+const customMarket: PluginMarketView = {
 	id: "custom-gh",
 	displayName: "custom-org/plugins",
 	url: "https://github.com/custom-org/plugins",
@@ -33,25 +35,25 @@ const customMarket: MarketRecord = {
 	selected: false,
 };
 
-const devToolsCatalog: CatalogEntryView = {
+const devToolsCatalog: PluginCatalogEntryView = {
 	id: "dev-tools",
 	name: "Dev Tools",
 	description: "Developer tools for Metis",
-	formatHint: "native",
+	formatHint: "claude",
 	sourceSupported: true,
 	installState: "not-installed",
 };
 
-const partialCatalog: CatalogEntryView = {
+const partialCatalog: PluginCatalogEntryView = {
 	id: "partial-tools",
 	name: "Partial Tools",
 	description: "Partially compatible plugin with unsupported components",
-	formatHint: "native",
+	formatHint: "claude",
 	sourceSupported: true,
 	installState: "not-installed",
 };
 
-const unsupportedCatalog: CatalogEntryView = {
+const unsupportedCatalog: PluginCatalogEntryView = {
 	id: "unsupported-addon",
 	name: "Unsupported Addon",
 	description: "Completely unsupported addon",
@@ -64,7 +66,7 @@ const installedOneRecord: PluginRecord = {
 	id: "installed-one",
 	name: "installed-one",
 	displayName: "Installed One",
-	format: "native",
+	format: "claude",
 	repository: "https://github.com/metis-ai/installed-one",
 	subdir: "",
 	commit: "aaa11112222333",
@@ -78,7 +80,7 @@ const installedPendingRecord: PluginRecord = {
 	id: "installed-pending",
 	name: "installed-pending",
 	displayName: "Installed Pending",
-	format: "native",
+	format: "agent-skills",
 	repository: "https://github.com/metis-ai/installed-pending",
 	subdir: "",
 	commit: "bbb22223333444",
@@ -102,7 +104,13 @@ const installedOneDetail: PluginInstalledView = {
 const installedPendingDetail: PluginInstalledView = {
 	plugin: installedPendingRecord,
 	components: [
-		{ componentId: "skill-pending", kind: "skill", displayName: "skill-pending", originalName: "skill-pending", status: "ready" },
+		{
+			componentId: "skill-pending",
+			kind: "skill",
+			displayName: "skill-pending",
+			originalName: "skill-pending",
+			status: "ready",
+		},
 	],
 	activation: "next-turn",
 	runtimeErrors: [],
@@ -121,7 +129,8 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 }
 
 function setInput(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-	const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+	const prototype =
+		element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
 	Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
 	element.dispatchEvent(new Event("input", { bubbles: true }));
 }
@@ -143,7 +152,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		return {
 			listSkills: vi.fn().mockResolvedValue({ skills: [] }),
 			getSkill: vi.fn(),
-			saveSkill: vi.fn(),
+			upsertSkill: vi.fn(),
 			removeSkill: vi.fn(),
 			reloadSkills: vi.fn().mockResolvedValue({ skills: [] }),
 			openSkillFolder: vi.fn(),
@@ -154,7 +163,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 			resolveDroppedFiles: vi.fn(),
 			listMcpServers: vi.fn().mockResolvedValue({ servers: [] }),
 			listMcpProjects: vi.fn().mockResolvedValue({ projects: [] }),
-			inspectMcpServers: vi.fn().mockResolvedValue({ servers: [] }),
+			inspectMcpImport: vi.fn().mockResolvedValue({ servers: [] }),
 			importMcpServers: vi.fn(),
 			getMcpServer: vi.fn(),
 			getMcpCatalogItem: vi.fn(),
@@ -199,26 +208,71 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 			inspectPlugin: vi.fn().mockImplementation(({ entryId }) => {
 				const isPartial = entryId === "partial-tools";
 				const isUnsupported = entryId === "unsupported-addon";
-				const components: ComponentPublicView[] = isUnsupported
-					? [{ componentId: "bad-hook", kind: "hook", displayName: "bad-hook", originalName: "bad-hook", status: "unsupported", reason: "Unsupported hook" }]
+				const components: PluginComponentPublicView[] = isUnsupported
+					? [
+							{
+								componentId: "bad-hook",
+								kind: "hook",
+								displayName: "bad-hook",
+								originalName: "bad-hook",
+								status: "unsupported",
+								reason: "Unsupported hook",
+							},
+						]
 					: isPartial
 						? [
-								{ componentId: "valid-skill", kind: "skill", displayName: "valid-skill", originalName: "valid-skill", status: "ready" },
-								{ componentId: "broken-mcp", kind: "mcp", displayName: "broken-mcp", originalName: "broken-mcp", status: "unsupported", reason: "broken-mcp is unsupported on this platform" },
-						  ]
+								{
+									componentId: "valid-skill",
+									kind: "skill",
+									displayName: "valid-skill",
+									originalName: "valid-skill",
+									status: "ready",
+								},
+								{
+									componentId: "broken-mcp",
+									kind: "mcp",
+									displayName: "broken-mcp",
+									originalName: "broken-mcp",
+									status: "unsupported",
+									reason: "broken-mcp is unsupported on this platform",
+								},
+							]
 						: [
-								{ componentId: "git-helper", kind: "skill", displayName: "git-helper", originalName: "git-helper", status: "ready" },
-								{ componentId: "db-mcp", kind: "mcp", displayName: "db-mcp", originalName: "db-mcp", status: "ready" },
-								{ componentId: "lint-hook", kind: "hook", displayName: "lint-hook", originalName: "lint-hook", status: "ready" },
-						  ];
+								{
+									componentId: "git-helper",
+									kind: "skill",
+									displayName: "git-helper",
+									originalName: "git-helper",
+									status: "ready",
+								},
+								{
+									componentId: "db-mcp",
+									kind: "mcp",
+									displayName: "db-mcp",
+									originalName: "db-mcp",
+									status: "ready",
+								},
+								{
+									componentId: "lint-hook",
+									kind: "hook",
+									displayName: "lint-hook",
+									originalName: "lint-hook",
+									status: "ready",
+								},
+							];
 
 				const inspection: PluginInspectionView = {
 					inspectionId: `insp-${entryId}`,
 					plugin: {
 						id: entryId,
 						name: entryId,
-						displayName: entryId === "partial-tools" ? "Partial Tools" : entryId === "unsupported-addon" ? "Unsupported Addon" : "Dev Tools",
-						format: isUnsupported ? "claude" : "native",
+						displayName:
+							entryId === "partial-tools"
+								? "Partial Tools"
+								: entryId === "unsupported-addon"
+									? "Unsupported Addon"
+									: "Dev Tools",
+						format: "claude",
 						description: `${entryId} description`,
 						repository: `https://github.com/test/${entryId}`,
 						subdir: "",
@@ -226,7 +280,15 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 						sourceId: "official-market",
 					},
 					components,
-					issues: isPartial ? [{ level: "warning", message: "broken-mcp is unsupported on this platform" }] : [],
+					issues: isPartial
+						? [
+								{
+									componentId: "broken-mcp",
+									status: "warning",
+									message: "broken-mcp is unsupported on this platform",
+								},
+							]
+						: [],
 					sourceCommit: "comm1234",
 					registryRevision: 1,
 				};
@@ -245,7 +307,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 				if (pluginId === "installed-pending") return Promise.resolve(installedPendingDetail);
 				return Promise.resolve(installedOneDetail);
 			}),
-			setPluginEnabled: vi.fn().mockImplementation(({ pluginId, enabled }) => {
+			setPluginEnabled: vi.fn().mockImplementation(({ enabled }) => {
 				return Promise.resolve({
 					plugin: {
 						...installedOneDetail,
@@ -311,6 +373,9 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 					updatedAt: "2026-07-29T00:00:00.000Z",
 					state: "idle",
 					archived: false,
+					unread: false,
+					useMemory: true,
+					contributeMemory: true,
 				},
 			],
 			nextAfterSessionId: null,
@@ -326,7 +391,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 				<PluginsPanel
 					api={api}
 					initialSection={initialSection}
-					onCreateSkillWithMetis={() => {}}
+					onCreateSkillWithMetis={async () => {}}
 					onSkillsChanged={() => {}}
 					preferences={new Map()}
 					serverReady={true}
@@ -352,7 +417,9 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 
 		const sectionSwitch = container.querySelector(".plugins-section-switch");
 		expect(sectionSwitch).not.toBeNull();
-		const pluginsTab = [...sectionSwitch!.querySelectorAll("button")].find((btn) => btn.textContent?.includes("Plugins"));
+		const pluginsTab = [...sectionSwitch!.querySelectorAll("button")].find((btn) =>
+			btn.textContent?.includes("Plugins"),
+		);
 		expect(pluginsTab).toBeDefined();
 
 		// Switch to Plugins tab
@@ -374,24 +441,36 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		expect(container.querySelector(".plugins-sub-tab")).toBeNull();
 		expect(container.querySelector(".plugins-page-header .plugins-new-btn")?.textContent).toContain("Add Market");
 		expect(container.querySelector(".plugins-page-header .plugins-reload")).not.toBeNull();
-		expect(container.querySelector('.plugins-list-controls input[type="search"]')?.getAttribute("placeholder")).toBe("Search markets…");
+		expect(container.querySelector('.plugins-list-controls input[type="search"]')?.getAttribute("placeholder")).toBe(
+			"Search markets…",
+		);
 		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
 	});
 
 	it("uses repository paths for old and new market names in either locale", async () => {
-		const api = createMockApi({ listPluginMarkets: vi.fn().mockResolvedValue({
-			markets: [officialMarket, { ...customMarket, displayName: "plugins", url: "https://github.com/openai/plugins" }],
-			selectedSourceId: officialMarket.id, registryRevision: 1,
-		}) });
+		const api = createMockApi({
+			listPluginMarkets: vi.fn().mockResolvedValue({
+				markets: [
+					officialMarket,
+					{ ...customMarket, displayName: "plugins", url: "https://github.com/openai/plugins" },
+				],
+				selectedSourceId: officialMarket.id,
+				registryRevision: 1,
+			}),
+		});
 		const { container } = await renderPanel(api, "plugins", false);
 		const names = () => [...container.querySelectorAll(".plugins-source-open strong")].map((el) => el.textContent);
 		expect(names()).toEqual(["anthropics/claude-plugins-official", "openai/plugins"]);
-		await act(async () => { await i18n.changeLanguage("zh-CN"); });
+		await act(async () => {
+			await i18n.changeLanguage("zh-CN");
+		});
 		expect(names()).toEqual(["anthropics/claude-plugins-official", "openai/plugins"]);
 	});
 
 	it("removes the default market while retaining access to installed plugins", async () => {
-		const api = createMockApi({ removePluginMarket: vi.fn().mockResolvedValue({ markets: [], selectedSourceId: null, registryRevision: 2 }) });
+		const api = createMockApi({
+			removePluginMarket: vi.fn().mockResolvedValue({ markets: [], selectedSourceId: null, registryRevision: 2 }),
+		});
 		const { container } = await renderPanel(api, "plugins", false);
 		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-market-remove-btn")!.click());
 		expect(api.removePluginMarket).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "official-market" }));
@@ -421,23 +500,32 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		expect(container.textContent).toContain("Dev Tools");
 
 		await act(async () => button(container, "Markets").click());
-		const customOption = [...container.querySelectorAll<HTMLButtonElement>(".plugins-source-open")].find((el) => el.textContent?.includes("custom-org/plugins"));
+		const customOption = [...container.querySelectorAll<HTMLButtonElement>(".plugins-source-open")].find((el) =>
+			el.textContent?.includes("custom-org/plugins"),
+		);
 		expect(customOption).toBeDefined();
 		await act(async () => customOption!.click());
 		await flush();
 
-		expect(api.selectPluginMarket).toHaveBeenCalledWith(
-			expect.objectContaining({ sourceId: "custom-gh" }),
-		);
+		expect(api.selectPluginMarket).toHaveBeenCalledWith(expect.objectContaining({ sourceId: "custom-gh" }));
 		expect(api.getPluginCatalog).toHaveBeenCalledWith({ sourceId: "custom-gh" });
 		expect(container.textContent).toContain("Partial Tools");
 	});
 
 	it("adds a new GitHub market from repo url dialog", async () => {
 		const api = createMockApi({
-			listPluginMarkets: vi.fn()
-				.mockResolvedValueOnce({ markets: [officialMarket], selectedSourceId: "official-market", registryRevision: 1 })
-				.mockResolvedValue({ markets: [officialMarket, customMarket], selectedSourceId: "custom-gh", registryRevision: 2 }),
+			listPluginMarkets: vi
+				.fn()
+				.mockResolvedValueOnce({
+					markets: [officialMarket],
+					selectedSourceId: "official-market",
+					registryRevision: 1,
+				})
+				.mockResolvedValue({
+					markets: [officialMarket, customMarket],
+					selectedSourceId: "custom-gh",
+					registryRevision: 2,
+				}),
 		});
 
 		const { container } = await renderPanel(api, "plugins");
@@ -470,9 +558,15 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 
 	it("shows the localized GitHub limit reason and leaves the add dialog retryable", async () => {
 		await i18n.changeLanguage("zh-CN");
-		const api = createMockApi({ addPluginMarket: vi.fn().mockRejectedValue(new Error(
-			"GitHub request limit reached. Please wait and try again, or use a different network or proxy.",
-		)) });
+		const api = createMockApi({
+			addPluginMarket: vi
+				.fn()
+				.mockRejectedValue(
+					new Error(
+						"GitHub request limit reached. Please wait and try again, or use a different network or proxy.",
+					),
+				),
+		});
 		const { container } = await renderPanel(api, "plugins");
 		await act(async () => button(container, "添加市场").click());
 		const dialog = document.body.querySelector(".plugins-add-market-dialog")!;
@@ -553,7 +647,7 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 					id: "dev-tools",
 					name: "dev-tools",
 					displayName: "Dev Tools",
-					format: "native",
+					format: "claude",
 					description: "Malformed plugin manifest",
 					repository: "https://github.com/test/dev-tools",
 					subdir: "",
@@ -561,8 +655,21 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 					sourceId: "official-market",
 				},
 				components: [
-					{ componentId: "valid-skill", kind: "skill", displayName: "valid-skill", originalName: "valid-skill", status: "ready" },
-					{ componentId: "broken-mcp", kind: "mcp", displayName: "broken-mcp", originalName: "broken-mcp", status: "unsupported", reason: "broken-mcp is unsupported on this platform" },
+					{
+						componentId: "valid-skill",
+						kind: "skill",
+						displayName: "valid-skill",
+						originalName: "valid-skill",
+						status: "ready",
+					},
+					{
+						componentId: "broken-mcp",
+						kind: "mcp",
+						displayName: "broken-mcp",
+						originalName: "broken-mcp",
+						status: "unsupported",
+						reason: "broken-mcp is unsupported on this platform",
+					},
 				],
 				issues: [
 					{
@@ -625,8 +732,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
-			el.textContent?.includes("Manage plugins"),
+		const installedSubTab = [...container.querySelectorAll<HTMLButtonElement>(".plugins-manage-installed")].find(
+			(el) => el.textContent?.includes("Manage plugins"),
 		);
 		expect(installedSubTab).toBeDefined();
 		await act(async () => installedSubTab!.click());
@@ -738,8 +845,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		});
 		const { container } = await renderPanel(api, "plugins");
 
-		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
-			el.textContent?.includes("Manage plugins"),
+		const installedSubTab = [...container.querySelectorAll<HTMLButtonElement>(".plugins-manage-installed")].find(
+			(el) => el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -771,8 +878,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
-			el.textContent?.includes("Manage plugins"),
+		const installedSubTab = [...container.querySelectorAll<HTMLButtonElement>(".plugins-manage-installed")].find(
+			(el) => el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -796,7 +903,9 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const updateDialog = document.body.querySelector(".plugins-update-dialog");
 		expect(updateDialog).not.toBeNull();
 		// Visible error must be present
-		expect(updateDialog!.querySelector(".mcp-dialog-error")?.textContent).toContain("Failed to inspect plugin update");
+		expect(updateDialog!.querySelector(".mcp-dialog-error")?.textContent).toContain(
+			"Failed to inspect plugin update",
+		);
 		// Update button must be disabled
 		const updateBtn = button(updateDialog!, "Update");
 		expect(updateBtn.disabled).toBe(true);
@@ -857,8 +966,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
-			el.textContent?.includes("管理插件") || el.textContent?.includes("Manage plugins"),
+		const installedSubTab = [...container.querySelectorAll<HTMLButtonElement>(".plugins-manage-installed")].find(
+			(el) => el.textContent?.includes("管理插件") || el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -912,7 +1021,14 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 					inspectionId: "insp-partial",
 					components: [
 						{ componentId: "c1", kind: "skill", displayName: "Skill 1", originalName: "s1", status: "ready" },
-						{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported", reason: "Unsupported in update" },
+						{
+							componentId: "c2",
+							kind: "unsupported",
+							displayName: "Unsup",
+							originalName: "u",
+							status: "unsupported",
+							reason: "Unsupported in update",
+						},
 					],
 					issues: [{ componentId: "manifest", status: "warning", message: "Update manifest warning" }],
 					registryRevision: 1,
@@ -923,8 +1039,8 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		const { container } = await renderPanel(api, "plugins");
 
 		// Switch to Installed sub-tab
-		const installedSubTab = [...container.querySelectorAll(".plugins-manage-installed")].find((el) =>
-			el.textContent?.includes("Manage plugins"),
+		const installedSubTab = [...container.querySelectorAll<HTMLButtonElement>(".plugins-manage-installed")].find(
+			(el) => el.textContent?.includes("Manage plugins"),
 		);
 		await act(async () => installedSubTab!.click());
 		await flush();
@@ -976,7 +1092,13 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 			inspection: {
 				inspectionId: "insp-all-unsup",
 				components: [
-					{ componentId: "c2", kind: "unsupported", displayName: "Unsup", originalName: "u", status: "unsupported" },
+					{
+						componentId: "c2",
+						kind: "unsupported",
+						displayName: "Unsup",
+						originalName: "u",
+						status: "unsupported",
+					},
 				],
 				issues: [],
 				registryRevision: 1,
@@ -1005,7 +1127,14 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 				inspectionId: "insp-invalid-json-update",
 				components: [
 					{ componentId: "c1", kind: "skill", displayName: "Skill 1", originalName: "s1", status: "ready" },
-					{ componentId: "c2", kind: "mcp", displayName: "MCP 2", originalName: "mcp-2", status: "unsupported", reason: "MCP definition is invalid" },
+					{
+						componentId: "c2",
+						kind: "mcp",
+						displayName: "MCP 2",
+						originalName: "mcp-2",
+						status: "unsupported",
+						reason: "MCP definition is invalid",
+					},
 				],
 				issues: [
 					{

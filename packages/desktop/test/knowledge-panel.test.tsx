@@ -2,8 +2,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { KnowledgePanel, knowledgeNoteMarkdown } from "../src/renderer/components/KnowledgePanel.tsx";
 import { Composer } from "../src/renderer/components/Composer.tsx";
+import { KnowledgePanel, knowledgeNoteMarkdown } from "../src/renderer/components/KnowledgePanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
@@ -123,7 +123,7 @@ describe("Knowledge sidebar and conversation links", () => {
 		const container = await mount(api);
 		await click(container.querySelector('[role="button"][aria-label="Home"]')!);
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain("File is no longer readable");
-		expect(container.querySelector('[role="status"]')).toBeNull();
+		expect(container.querySelector('output, [role="status"]')).toBeNull();
 		await click(button(container, "Back to knowledge library"));
 		expect(container.querySelector('[aria-label="Knowledge graph"]')).not.toBeNull();
 	});
@@ -145,7 +145,7 @@ describe("Knowledge sidebar and conversation links", () => {
 				await vi.advanceTimersByTimeAsync(0);
 			});
 			expect(container.textContent).toContain("Nested content");
-			expect(container.querySelector('[role="status"]')).toBeNull();
+			expect(container.querySelector('output, [role="status"]')).toBeNull();
 			await act(async () => {
 				resolveRead({ path: "topic/deep/Note.md", content: "Updated content" });
 			});

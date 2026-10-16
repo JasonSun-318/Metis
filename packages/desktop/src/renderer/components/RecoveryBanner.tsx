@@ -1,7 +1,10 @@
 import type { SessionSummary } from "@metis/app-protocol";
 import { SystemNotice, systemErrorNoticeForCode } from "./SystemNotice.tsx";
 
-export function RecoveryBanner({ errorCode, session }: {
+export function RecoveryBanner({
+	errorCode,
+	session,
+}: {
 	readonly errorCode?: string;
 	readonly session: SessionSummary;
 }) {

@@ -1,6 +1,6 @@
 import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
 import { Warning } from "@phosphor-icons/react";
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
@@ -18,9 +18,7 @@ function approvalErrorMessage(cause: unknown): string {
 	return message;
 }
 
-function priorReviewCopy(
-	outcome: PermissionApprovalInteraction["priorReviewerOutcome"],
-): string {
+function priorReviewCopy(outcome: PermissionApprovalInteraction["priorReviewerOutcome"]): string {
 	if (outcome === "deny") return "Automatic security review denied this action.";
 	if (outcome === "unavailable") return "Automatic security review could not complete.";
 	return "Automatic security review could not approve this action.";
@@ -53,22 +51,25 @@ export function PermissionApprovalPanel({
 	const allowOnceBlocked = sandboxBlocked;
 	const alwaysAllowBlocked = !interaction.scopeComplete || sandboxBlocked;
 	const hostOrExternal = interaction.executionTarget !== "sandbox";
-	const descriptionIds = [
-		"permission-approval-execution-target",
-		"permission-approval-reason",
-		interaction.details.length > 0 ? "permission-approval-details" : undefined,
-		interaction.priorReviewer ? "permission-approval-prior-review" : undefined,
-		sandboxBlocked ? "permission-approval-sandbox-blocked" : undefined,
-		!interaction.scopeComplete ? "permission-approval-incomplete" : undefined,
-	]
-		.filter(Boolean)
-		.join(" ") || undefined;
+	const descriptionIds =
+		[
+			"permission-approval-execution-target",
+			"permission-approval-reason",
+			interaction.details.length > 0 ? "permission-approval-details" : undefined,
+			interaction.priorReviewer ? "permission-approval-prior-review" : undefined,
+			sandboxBlocked ? "permission-approval-sandbox-blocked" : undefined,
+			!interaction.scopeComplete ? "permission-approval-incomplete" : undefined,
+		]
+			.filter(Boolean)
+			.join(" ") || undefined;
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(interaction.interactionId): Each approval needs its own focus lifecycle and fresh response state.
 	useEffect(() => {
 		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		queueMicrotask(() => firstControl.current?.focus());
 		return () => previous?.focus();
 	}, [interaction.interactionId]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(interaction.interactionId): Each approval needs its own focus lifecycle and fresh response state.
 	useEffect(() => {
 		setDismissedInteractionId(null);
 		setBusy(false);
@@ -132,7 +133,9 @@ export function PermissionApprovalPanel({
 						{interaction.details.map((row, index) => (
 							<div key={`${row.label}:${index}`}>
 								<dt>{t(row.label)}</dt>
-								<dd><code>{row.value}</code></dd>
+								<dd>
+									<code>{row.value}</code>
+								</dd>
 							</div>
 						))}
 					</dl>
@@ -160,7 +163,11 @@ export function PermissionApprovalPanel({
 				<p className="sr-only" aria-live="polite">
 					{busy ? t("Sending your decision…") : error ? t(error) : ""}
 				</p>
-				{error && <p className="error-copy" role="alert">{t(error)}</p>}
+				{error && (
+					<p className="error-copy" role="alert">
+						{t(error)}
+					</p>
+				)}
 				<footer>
 					{denyOnce && (
 						<button

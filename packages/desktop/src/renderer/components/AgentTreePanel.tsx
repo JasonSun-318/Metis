@@ -30,7 +30,10 @@ import { MenuSelect } from "./MenuSelect.tsx";
 import { Transcript } from "./Transcript.tsx";
 
 interface AgentTreePanelProps {
-	readonly api: MetisDesktopApi;
+	readonly api: Pick<
+		MetisDesktopApi,
+		"archiveAgent" | "deleteAgent" | "interruptAgent" | "listAgents" | "readAgentItems"
+	>;
 	readonly onError: (cause: unknown) => void;
 	readonly sessionId: string;
 	readonly store: AppStore;
@@ -58,7 +61,9 @@ const TASK_OPTION_SUMMARY_CHARS = 48;
 
 function taskOptionSummary(summary: string): string {
 	const chars = Array.from(summary);
-	return chars.length <= TASK_OPTION_SUMMARY_CHARS ? summary : `${chars.slice(0, TASK_OPTION_SUMMARY_CHARS).join("")}…`;
+	return chars.length <= TASK_OPTION_SUMMARY_CHARS
+		? summary
+		: `${chars.slice(0, TASK_OPTION_SUMMARY_CHARS).join("")}…`;
 }
 
 function agentUsage(agent: AgentSummaryView): { readonly tokens: number; readonly toolUses: number } {
@@ -165,8 +170,8 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 	const [archivedAgents, setArchivedAgents] = useState<readonly AgentSummaryView[]>([]);
 	const [showArchived, setShowArchived] = useState(false);
 	const [collapsedAgents, setCollapsedAgents] = useState<ReadonlySet<string>>(new Set());
-	const [nextAgentCursor, setNextAgentCursor] = useState<string | null>(() =>
-		projection.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
+	const [nextAgentCursor, setNextAgentCursor] = useState<string | null>(
+		() => projection.nextAgentAfterId ?? (baseAgents.length >= 100 ? (baseAgents.at(-1)?.agentId ?? null) : null),
 	);
 	const [nextArchivedCursor, setNextArchivedCursor] = useState<string | null>(null);
 	const [loadingAgents, setLoadingAgents] = useState(false);
@@ -179,7 +184,8 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 	);
 	const selectedAgent = agents.find((agent) => agent.agentId === selectedAgentId);
 	const readableSelectedAgentId = selectedAgent ? selectedAgentId : null;
-	const requestedTaskId = selectedTaskId ?? selectedAgent?.currentTask?.taskId ?? selectedAgent?.latestTask?.taskId ?? null;
+	const requestedTaskId =
+		selectedTaskId ?? selectedAgent?.currentTask?.taskId ?? selectedAgent?.latestTask?.taskId ?? null;
 	const tree = useMemo(() => buildAgentTree(agents, sessionId), [agents, sessionId]);
 	const visibleTreeAgents = useMemo(() => {
 		const flattened: AgentSummaryView[] = [];
@@ -412,7 +418,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 		const startedAt =
 			agent.currentTask?.status === "running"
 				? agent.currentTask.updatedAt
-				: (agent.currentTask ?? agent.latestTask)?.createdAt ?? agent.createdAt;
+				: ((agent.currentTask ?? agent.latestTask)?.createdAt ?? agent.createdAt);
 		return formatElapsed(now - Date.parse(startedAt));
 	};
 
@@ -450,12 +456,17 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			});
 			if (!isCurrent()) return;
 			setArchivedAgents((current) =>
-				archived ? mergeAgents(current, [result.agent]) : current.filter((entry) => entry.agentId !== agent.agentId),
+				archived
+					? mergeAgents(current, [result.agent])
+					: current.filter((entry) => entry.agentId !== agent.agentId),
 			);
 			setOlderAgents((current) =>
-				archived ? current.filter((entry) => entry.agentId !== agent.agentId) : mergeAgents(current, [result.agent]),
+				archived
+					? current.filter((entry) => entry.agentId !== agent.agentId)
+					: mergeAgents(current, [result.agent]),
 			);
-			if (archived && selectedAgentId === agent.agentId && !showArchived) store.selectAgentTranscript(sessionId, null);
+			if (archived && selectedAgentId === agent.agentId && !showArchived)
+				store.selectAgentTranscript(sessionId, null);
 		});
 
 	const remove = (agent: AgentSummaryView) => {
@@ -525,7 +536,12 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 			}
 			if (!isCurrent()) return;
 			if (includeArchived) {
-				setArchivedAgents((current) => mergeAgents(current, page.agents.filter((agent) => agent.archived)));
+				setArchivedAgents((current) =>
+					mergeAgents(
+						current,
+						page.agents.filter((agent) => agent.archived),
+					),
+				);
 				setNextArchivedCursor(page.nextAfterAgentId);
 			} else {
 				setOlderAgents((current) => mergeAgents(current, page.agents));
@@ -598,9 +614,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 				if (node.children.length > 0 && !collapsedAgents.has(node.agent.agentId)) {
 					toggleCollapsed(node.agent.agentId);
 				} else {
-					focusTreeItem(
-						visibleTreeAgents.find((agent) => agent.agentId === node.agent.parentSessionId)?.agentId,
-					);
+					focusTreeItem(visibleTreeAgents.find((agent) => agent.agentId === node.agent.parentSessionId)?.agentId);
 				}
 		}
 	};
@@ -635,10 +649,9 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 				)}
 				{!hasChildren && <span aria-hidden="true" className="subagent-fold-spacer" />}
 				<button
-					aria-label={t(
-						agent.archived ? "View summary for {{name}}" : "View transcript for {{name}}",
-						{ name: agent.name },
-					)}
+					aria-label={t(agent.archived ? "View summary for {{name}}" : "View transcript for {{name}}", {
+						name: agent.name,
+					})}
 					className="subagent-card-open"
 					onClick={() => openTranscript(agent.agentId)}
 					ref={(node) => {
@@ -655,9 +668,13 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						</span>
 						<span className="subagent-type-tag">{agent.agentType}</span>
 						{elapsed && <span className="subagent-meta-item">{t("{{time}} elapsed", { time: elapsed })}</span>}
-						{usage.tokens > 0 && <span className="subagent-meta-item">{t("{{count}} tokens", { count: usage.tokens })}</span>}
+						{usage.tokens > 0 && (
+							<span className="subagent-meta-item">{t("{{count}} tokens", { count: usage.tokens })}</span>
+						)}
 						{usage.toolUses > 0 && (
-							<span className="subagent-meta-item">{usage.toolUses === 1 ? t("1 tool use") : t("{{count}} tool uses", { count: usage.toolUses })}</span>
+							<span className="subagent-meta-item">
+								{usage.toolUses === 1 ? t("1 tool use") : t("{{count}} tool uses", { count: usage.toolUses })}
+							</span>
 						)}
 						{agent.archived && <span className="subagent-meta-item">{t("Archived")}</span>}
 						{taskSummary && <span className="subagent-card-summary">{taskSummary}</span>}
@@ -689,7 +706,12 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							<Archive aria-hidden="true" size={12} />
 							<span>{t(agent.archived ? "Unarchive agent" : "Archive agent")}</span>
 						</button>
-						<button className="subagent-action-button subagent-action-delete" disabled={mutatingAgent} onClick={() => remove(agent)} type="button">
+						<button
+							className="subagent-action-button subagent-action-delete"
+							disabled={mutatingAgent}
+							onClick={() => remove(agent)}
+							type="button"
+						>
 							<Trash aria-hidden="true" size={12} />
 							<span>{t("Delete")}</span>
 						</button>
@@ -700,7 +722,7 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 	};
 
 	const renderNodes = (nodes: readonly AgentTreeNode[]): ReactNode =>
-			nodes.map((node) => (
+		nodes.map((node) => (
 			<div
 				aria-expanded={node.children.length > 0 ? !collapsedAgents.has(node.agent.agentId) : undefined}
 				aria-level={node.agent.depth}
@@ -716,13 +738,15 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 				}}
 				role="treeitem"
 				tabIndex={
-					focusedAgentId === node.agent.agentId || (!focusedAgentId && visibleTreeAgents[0]?.agentId === node.agent.agentId)
+					focusedAgentId === node.agent.agentId ||
+					(!focusedAgentId && visibleTreeAgents[0]?.agentId === node.agent.agentId)
 						? 0
 						: -1
 				}
 			>
 				{renderCard(node)}
 				{node.children.length > 0 && !collapsedAgents.has(node.agent.agentId) && (
+					/* biome-ignore lint/a11y/useSemanticElements: Nested ARIA tree branches require a group of treeitems rather than a form fieldset. */
 					<div className="subagent-tree-children" role="group">
 						{renderNodes(node.children)}
 					</div>
@@ -755,10 +779,9 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 						</div>
 						{selectedAgent && isActive(selectedAgent) && (
 							<button
-								aria-label={t(
-									stopping.has(selectedAgent.agentId) ? "Stopping…" : "Stop {{name}}",
-									{ name: selectedAgent.name },
-								)}
+								aria-label={t(stopping.has(selectedAgent.agentId) ? "Stopping…" : "Stop {{name}}", {
+									name: selectedAgent.name,
+								})}
 								className="subagent-detail-stop"
 								disabled={stopping.has(selectedAgent.agentId)}
 								onClick={() => void stop(selectedAgent.agentId)}
@@ -803,7 +826,9 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							<MenuSelect
 								ariaLabel={t("Task")}
 								className="subagent-task-menu"
-								onChange={(taskId) => store.selectAgentTranscript(sessionId, selectedAgent.agentId, taskId || null)}
+								onChange={(taskId) =>
+									store.selectAgentTranscript(sessionId, selectedAgent.agentId, taskId || null)
+								}
 								options={[
 									{ value: "", label: t("Latest task") },
 									...[...selectedAgent.tasks].reverse().map((task) => ({
@@ -847,20 +872,26 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 							<span>{t(showArchived ? "Hide archived" : "Show archived")}</span>
 						</button>
 					</header>
-					<section aria-label={t("Agent tree")} className="subagent-section" role="tree">
-						{tree.length > 0 ? (
-							renderNodes(tree)
-						) : (
-							<p className="subagent-section-empty">{t("No agents yet")}</p>
-						)}
-					</section>
+					<div aria-label={t("Agent tree")} className="subagent-section" role="tree">
+						{tree.length > 0 ? renderNodes(tree) : <p className="subagent-section-empty">{t("No agents yet")}</p>}
+					</div>
 					{nextAgentCursor && (
-						<button className="subagent-load-more" disabled={loadingAgents} onClick={() => void loadAgentPage(false)} type="button">
+						<button
+							className="subagent-load-more"
+							disabled={loadingAgents}
+							onClick={() => void loadAgentPage(false)}
+							type="button"
+						>
 							{t(loadingAgents ? "Loading…" : "Load older agents")}
 						</button>
 					)}
 					{showArchived && nextArchivedCursor && (
-						<button className="subagent-load-more" disabled={loadingAgents} onClick={() => void loadAgentPage(true)} type="button">
+						<button
+							className="subagent-load-more"
+							disabled={loadingAgents}
+							onClick={() => void loadAgentPage(true)}
+							type="button"
+						>
 							{t(loadingAgents ? "Loading…" : "Load more archived")}
 						</button>
 					)}

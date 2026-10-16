@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
-import type { DeclarativeHookView, McpCatalogEntryView, McpServerSummaryView, SessionSummary, SkillDetailView, SkillSourceView } from "@metis/app-protocol";
+import type {
+	DeclarativeHookView,
+	McpCatalogEntryView,
+	McpServerSummaryView,
+	SessionSummary,
+	SkillDetailView,
+	SkillSourceView,
+} from "@metis/app-protocol";
 import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { AppStore } from "../src/renderer/store/app-store.ts";
@@ -23,10 +30,17 @@ function session(
 		updatedAt: "2026-07-29T00:00:00.000Z",
 		state,
 		archived: false,
+		unread: false,
+		useMemory: true,
+		contributeMemory: true,
 	};
 }
 
-function skill(name: string, source: SkillSourceView, instructions = "## Workflow\n\nUse this Skill carefully."): SkillDetailView {
+function skill(
+	name: string,
+	source: SkillSourceView,
+	instructions = "## Workflow\n\nUse this Skill carefully.",
+): SkillDetailView {
 	const content = `---\nname: ${name}\ndescription: ${name} description\n---\n\n${instructions}\n`;
 	return {
 		name,
@@ -79,18 +93,22 @@ const sampleHook: DeclarativeHookView = {
 };
 
 function api() {
-	const details = new Map([systemSkill, userSkill, projectSkill].map((detail) => [`${detail.source}:${detail.name}`, detail]));
+	const details = new Map(
+		[systemSkill, userSkill, projectSkill].map((detail) => [`${detail.source}:${detail.name}`, detail]),
+	);
 	const hooks = [sampleHook];
 	return {
 		listSkills: vi.fn().mockResolvedValue({
 			skills: [...details.values()].map(({ name, description, source }) => ({ name, description, source })),
 		}),
 		getSkill: vi.fn().mockImplementation(({ source, name }) => Promise.resolve(details.get(`${source}:${name}`))),
-		upsertSkill: vi.fn().mockImplementation(({ source, name, content }) => Promise.resolve({
-			...skill(name, source),
-			content,
-			instructions: content.split("---\n").at(-1)?.trim() ?? content,
-		})),
+		upsertSkill: vi.fn().mockImplementation(({ source, name, content }) =>
+			Promise.resolve({
+				...skill(name, source),
+				content,
+				instructions: content.split("---\n").at(-1)?.trim() ?? content,
+			}),
+		),
 		removeSkill: vi.fn().mockResolvedValue({
 			skills: [systemSkill, projectSkill].map(({ name, description, source }) => ({ name, description, source })),
 		}),
@@ -107,8 +125,24 @@ function api() {
 		inspectMcpImport: vi.fn().mockResolvedValue({
 			sourceRevision: "d".repeat(64),
 			candidates: [
-				{ id: "docs", name: "docs", transport: "http", enabled: true, existingRevision: null, bearerTokenConfigured: true, credentialNames: ["DOCS_KEY"] },
-				{ id: "github", name: "github", transport: "http", enabled: true, existingRevision: mcpServer.revision, bearerTokenConfigured: false, credentialNames: [] },
+				{
+					id: "docs",
+					name: "docs",
+					transport: "http",
+					enabled: true,
+					existingRevision: null,
+					bearerTokenConfigured: true,
+					credentialNames: ["DOCS_KEY"],
+				},
+				{
+					id: "github",
+					name: "github",
+					transport: "http",
+					enabled: true,
+					existingRevision: mcpServer.revision,
+					bearerTokenConfigured: false,
+					credentialNames: [],
+				},
 			],
 		}),
 		importMcpServers: vi.fn().mockResolvedValue({ servers: [mcpServer] }),
@@ -128,7 +162,13 @@ function api() {
 		}),
 		upsertMcpServer: vi.fn().mockResolvedValue({ servers: [mcpServer] }),
 		removeMcpServer: vi.fn().mockResolvedValue({ servers: [] }),
-		restartMcpServer: vi.fn().mockResolvedValue({ server: mcpServer, tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }], resources: [], resourceTemplates: [], prompts: [] }),
+		restartMcpServer: vi.fn().mockResolvedValue({
+			server: mcpServer,
+			tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }],
+			resources: [],
+			resourceTemplates: [],
+			prompts: [],
+		}),
 		setMcpCredential: vi.fn(),
 		clearMcpCredential: vi.fn(),
 		listHooks: vi.fn().mockResolvedValue({ hooks, loadErrors: [] }),
@@ -136,6 +176,9 @@ function api() {
 		deleteHook: vi.fn().mockResolvedValue({ hooks: [], loadErrors: [] }),
 		listPluginMarkets: vi.fn().mockResolvedValue({ markets: [] }),
 		addPluginMarket: vi.fn().mockResolvedValue({ market: null }),
+		selectPluginMarket: vi.fn(),
+		refreshPluginMarket: vi.fn(),
+		getPluginCatalog: vi.fn(),
 		removePluginMarket: vi.fn().mockResolvedValue({ removed: true }),
 		listPluginsCatalog: vi.fn().mockResolvedValue({ catalog: [] }),
 		inspectPlugin: vi.fn().mockResolvedValue({ inspection: null }),
@@ -144,6 +187,8 @@ function api() {
 		getInstalledPlugin: vi.fn().mockResolvedValue({ plugin: null }),
 		uninstallPlugin: vi.fn().mockResolvedValue({ removed: true }),
 		setPluginEnabled: vi.fn().mockResolvedValue({ plugin: null }),
+		removePlugin: vi.fn(),
+		inspectPluginUpdate: vi.fn(),
 		checkPluginUpdates: vi.fn().mockResolvedValue({ updates: [] }),
 		updatePlugin: vi.fn().mockResolvedValue({ updated: null }),
 		getPluginSettings: vi.fn().mockResolvedValue({ settings: {} }),
@@ -160,13 +205,16 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 }
 
 function setInput(element: HTMLInputElement | HTMLTextAreaElement, value: string): void {
-	const prototype = element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+	const prototype =
+		element instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
 	Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(element, value);
 	element.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function field<T extends HTMLInputElement | HTMLTextAreaElement>(container: ParentNode, label: string): T {
-	const match = [...container.querySelectorAll("label")].find((candidate) => candidate.firstChild?.textContent?.trim() === label);
+	const match = [...container.querySelectorAll("label")].find(
+		(candidate) => candidate.firstChild?.textContent?.trim() === label,
+	);
 	const input = match?.querySelector<T>("input, textarea");
 	if (!input) throw new Error(`Missing field: ${label}`);
 	return input;
@@ -178,16 +226,38 @@ async function flush(): Promise<void> {
 	});
 }
 
-async function renderPanel(desktop = api(), live = true, onSkillsChanged = vi.fn(), sessionState: SessionSummary["state"] = "idle", onCreateSkillWithMetis = vi.fn().mockResolvedValue(undefined), cwdOrigin: SessionSummary["cwdOrigin"] = "user-selected") {
+async function renderPanel(
+	desktop = api(),
+	live = true,
+	onSkillsChanged = vi.fn(),
+	sessionState: SessionSummary["state"] = "idle",
+	onCreateSkillWithMetis = vi.fn().mockResolvedValue(undefined),
+	cwdOrigin: SessionSummary["cwdOrigin"] = "user-selected",
+) {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	const store = new AppStore();
-	if (live) store.setSessions({ sessions: [session("live", "/work/project", sessionState, cwdOrigin)], nextAfterSessionId: null });
+	if (live)
+		store.setSessions({
+			sessions: [session("live", "/work/project", sessionState, cwdOrigin)],
+			nextAfterSessionId: null,
+		});
 	const state = live ? { ...store.getSnapshot(), activeSessionId: "live" } : store.getSnapshot();
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
 	const renderState = async (nextState: ReturnType<AppStore["getSnapshot"]>) => {
-		await act(async () => root.render(<PluginsPanel api={desktop} onCreateSkillWithMetis={onCreateSkillWithMetis} onSkillsChanged={onSkillsChanged} preferences={new Map()} serverReady state={nextState} />));
+		await act(async () =>
+			root.render(
+				<PluginsPanel
+					api={desktop}
+					onCreateSkillWithMetis={onCreateSkillWithMetis}
+					onSkillsChanged={onSkillsChanged}
+					preferences={new Map()}
+					serverReady
+					state={nextState}
+				/>,
+			),
+		);
 		await flush();
 	};
 	await renderState(state);
@@ -221,7 +291,12 @@ describe("PluginsPanel", () => {
 		expect(container.querySelector('[data-plugin-detail="mcp"]')?.textContent).toContain("repo_search");
 		await act(async () => button(container, "repo_search").click());
 		await flush();
-		expect(desktop.getMcpCatalogItem).toHaveBeenCalledWith({ sessionId: "live", server: "github", kind: "tool", id: "repo_search" });
+		expect(desktop.getMcpCatalogItem).toHaveBeenCalledWith({
+			sessionId: "live",
+			server: "github",
+			kind: "tool",
+			id: "repo_search",
+		});
 		expect(container.querySelector('[data-plugin-detail="mcp"]')?.textContent).toContain("query");
 		expect(desktop.listSkills).toHaveBeenCalledWith({ sessionId: "live" });
 		expect(desktop.listMcpServers).toHaveBeenCalledWith({ sessionId: "live" });
@@ -241,7 +316,9 @@ describe("PluginsPanel", () => {
 		expect(desktop.listSkills).toHaveBeenLastCalledWith({ sessionId: "live" });
 		expect(changed).toHaveBeenCalledOnce();
 		await act(async () => button(container, "MCP").click());
-		expect([...container.querySelectorAll("button")].some((item) => item.getAttribute("aria-label") === "Reload Skills")).toBe(false);
+		expect(
+			[...container.querySelectorAll("button")].some((item) => item.getAttribute("aria-label") === "Reload Skills"),
+		).toBe(false);
 		await act(async () => root.unmount());
 
 		const runningDesktop = api();
@@ -308,38 +385,52 @@ describe("PluginsPanel", () => {
 		await act(async () => button(container, "pdf").click());
 		await flush();
 		expect([...container.querySelectorAll("button")].some((item) => item.textContent?.trim() === "Edit")).toBe(false);
-		expect([...container.querySelectorAll("button")].some((item) => item.textContent?.trim() === "Delete")).toBe(false);
-		expect([...container.querySelectorAll("button")].some((item) => item.textContent?.trim() === "Open containing folder")).toBe(false);
+		expect([...container.querySelectorAll("button")].some((item) => item.textContent?.trim() === "Delete")).toBe(
+			false,
+		);
+		expect(
+			[...container.querySelectorAll("button")].some(
+				(item) => item.textContent?.trim() === "Open containing folder",
+			),
+		).toBe(false);
 		expect(desktop.openSkillFolder).not.toHaveBeenCalled();
 
 		await act(async () => button(container, "Back to Skills").click());
 		await act(async () => button(container, "writing-plans").click());
 		await flush();
 		await act(async () => button(container, "Open containing folder").click());
-		expect(desktop.openSkillFolder).toHaveBeenCalledWith({ cwd: "/work/project", source: "user", name: "writing-plans" });
+		expect(desktop.openSkillFolder).toHaveBeenCalledWith({
+			cwd: "/work/project",
+			source: "user",
+			name: "writing-plans",
+		});
 		await act(async () => button(container, "Edit").click());
 		const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
 		const edited = `${userSkill.content}\n## Extra\n\nKeep it short.\n`;
 		await act(async () => setInput(dialog.querySelector("textarea")!, edited));
 		await act(async () => button(dialog, "Save").click());
 		await flush();
-		expect(desktop.upsertSkill).toHaveBeenCalledWith(expect.objectContaining({
-			cwd: "/work/project",
-			source: "user",
-			name: "writing-plans",
-			expectedRevision: userSkill.revision,
-			content: edited,
-		}));
+		expect(desktop.upsertSkill).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: "/work/project",
+				source: "user",
+				name: "writing-plans",
+				expectedRevision: userSkill.revision,
+				content: edited,
+			}),
+		);
 
 		await act(async () => button(container, "Delete").click());
 		expect(desktop.removeSkill).not.toHaveBeenCalled();
 		await act(async () => button(container.querySelector('[role="dialog"]')!, "Move to Trash").click());
 		await flush();
-		expect(desktop.removeSkill).toHaveBeenCalledWith(expect.objectContaining({
-			cwd: "/work/project",
-			source: "user",
-			name: "writing-plans",
-		}));
+		expect(desktop.removeSkill).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: "/work/project",
+				source: "user",
+				name: "writing-plans",
+			}),
+		);
 		expect(changed).toHaveBeenCalledTimes(2);
 		await act(async () => root.unmount());
 	});
@@ -410,16 +501,21 @@ describe("PluginsPanel", () => {
 		expect(fields).toHaveLength(3);
 		await act(async () => setInput(fields[0]!, "daily-brief"));
 		await act(async () => setInput(fields[1]!, "Summarize the day when the user asks for a daily brief."));
-		await act(async () => setInput(fields[2]!, "Collect the completed work and blockers, then write a concise brief."));
+		await act(async () =>
+			setInput(fields[2]!, "Collect the completed work and blockers, then write a concise brief."),
+		);
 		await act(async () => button(dialog, "Create").click());
 		await flush();
-		expect(desktop.upsertSkill).toHaveBeenCalledWith(expect.objectContaining({
-			cwd: null,
-			source: "user",
-			name: "daily-brief",
-			expectedRevision: null,
-			content: '---\nname: daily-brief\ndescription: "Summarize the day when the user asks for a daily brief."\n---\n\nCollect the completed work and blockers, then write a concise brief.\n',
-		}));
+		expect(desktop.upsertSkill).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: null,
+				source: "user",
+				name: "daily-brief",
+				expectedRevision: null,
+				content:
+					'---\nname: daily-brief\ndescription: "Summarize the day when the user asks for a daily brief."\n---\n\nCollect the completed work and blockers, then write a concise brief.\n',
+			}),
+		);
 
 		await act(async () => button(container, "Back to Skills").click());
 		await act(async () => button(container, "MCP").click());
@@ -456,11 +552,13 @@ describe("PluginsPanel", () => {
 		dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
 		await act(async () => button(dialog, "Save").click());
 		await flush();
-		expect(desktop.upsertSkill).toHaveBeenLastCalledWith(expect.objectContaining({
-			cwd: "/work/chosen-project",
-			source: "project",
-			name: "project-brief",
-		}));
+		expect(desktop.upsertSkill).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				cwd: "/work/chosen-project",
+				source: "project",
+				name: "project-brief",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -486,13 +584,15 @@ describe("PluginsPanel", () => {
 		expect(dialog.textContent).toContain("Demo Skill");
 		await act(async () => button(dialog, "Import selected").click());
 		await flush();
-		expect(desktop.importSkills).toHaveBeenCalledWith(expect.objectContaining({
-			cwd: null,
-			source: "user",
-			input: { kind: "archive", path: "/tmp/demo.skill" },
-			sourceRevision: "c".repeat(64),
-			candidateIds: ["demo"],
-		}));
+		expect(desktop.importSkills).toHaveBeenCalledWith(
+			expect.objectContaining({
+				cwd: null,
+				source: "user",
+				input: { kind: "archive", path: "/tmp/demo.skill" },
+				sourceRevision: "c".repeat(64),
+				candidateIds: ["demo"],
+			}),
+		);
 		expect(changed).toHaveBeenCalledOnce();
 		expect(container.querySelector('[role="dialog"]')).toBeNull();
 		await act(async () => root.unmount());
@@ -509,7 +609,9 @@ describe("PluginsPanel", () => {
 		const footer = dialog.querySelector<HTMLElement>(".mcp-dialog-actions")!;
 		expect(button(footer, "Cancel")).not.toBeNull();
 		expect(button(footer, "Inspect")).not.toBeNull();
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[type="url"]')!, "https://github.com/acme/skills"));
+		await act(async () =>
+			setInput(dialog.querySelector<HTMLInputElement>('input[type="url"]')!, "https://github.com/acme/skills"),
+		);
 		await act(async () => button(dialog, "Inspect").click());
 		await flush();
 		expect(desktop.inspectSkillImport).toHaveBeenCalledWith({
@@ -550,17 +652,19 @@ describe("PluginsPanel", () => {
 		expect(inspected).not.toContain("tenant-secret");
 		await act(async () => button(dialog, "Add selected").click());
 		await flush();
-		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "live",
-			scope: "user",
-			name: "docs",
-			expectedRevision: null,
-			server: expect.objectContaining({ transport: "http", url: "https://mcp.example.test/docs" }),
-			credential: {
-				bearerToken: "bearer-secret",
-				environment: { DOCS_KEY: "docs-secret", TENANT_KEY: "tenant-secret" },
-			},
-		}));
+		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "live",
+				scope: "user",
+				name: "docs",
+				expectedRevision: null,
+				server: expect.objectContaining({ transport: "http", url: "https://mcp.example.test/docs" }),
+				credential: {
+					bearerToken: "bearer-secret",
+					environment: { DOCS_KEY: "docs-secret", TENANT_KEY: "tenant-secret" },
+				},
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -595,13 +699,15 @@ describe("PluginsPanel", () => {
 		await act(async () => setInput(rows[1]!.querySelectorAll<HTMLInputElement>("input")[0]!, "TENANT_KEY"));
 		await act(async () => button(dialog, "Save").click());
 		await flush();
-		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "live",
-			scope: "user",
-			name: "local-tools",
-			server: expect.objectContaining({ transport: "stdio", command: "npx" }),
-			credential: { environment: { API_KEY: "first", TENANT_KEY: "second" } },
-		}));
+		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "live",
+				scope: "user",
+				name: "local-tools",
+				server: expect.objectContaining({ transport: "stdio", command: "npx" }),
+				credential: { environment: { API_KEY: "first", TENANT_KEY: "second" } },
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -633,24 +739,28 @@ describe("PluginsPanel", () => {
 		});
 		await act(async () => button(dialog, "Save").click());
 		await flush();
-		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(expect.objectContaining({
-			name: "private-docs",
-			server: expect.objectContaining({
-				transport: "http",
-				url: "https://mcp.example.test/private",
-				envHttpHeaders: { Authorization: "PRIVATE_TOKEN" },
+		expect(desktop.upsertMcpServer).toHaveBeenCalledWith(
+			expect.objectContaining({
+				name: "private-docs",
+				server: expect.objectContaining({
+					transport: "http",
+					url: "https://mcp.example.test/private",
+					envHttpHeaders: { Authorization: "PRIVATE_TOKEN" },
+				}),
+				credential: { environment: { PRIVATE_TOKEN: "secret" } },
 			}),
-			credential: { environment: { PRIVATE_TOKEN: "secret" } },
-		}));
+		);
 		await act(async () => root.unmount());
 	});
 
 	it("keeps a custom project MCP bound to the project chosen in its creation dialog", async () => {
 		const desktop = api();
 		const created = { ...mcpServer, name: "project-docs", scope: "project" as const };
-		desktop.listMcpServers.mockImplementation((target) => Promise.resolve({
-			servers: "cwd" in target && target.cwd === "/work/chosen-project" ? [created] : [mcpServer],
-		}));
+		desktop.listMcpServers.mockImplementation((target) =>
+			Promise.resolve({
+				servers: "cwd" in target && target.cwd === "/work/chosen-project" ? [created] : [mcpServer],
+			}),
+		);
 		desktop.upsertMcpServer.mockResolvedValue({ servers: [created] });
 		const { container, root } = await renderPanel(desktop);
 		await act(async () => button(container, "MCP").click());
@@ -672,11 +782,13 @@ describe("PluginsPanel", () => {
 		dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
 		await act(async () => button(dialog, "Save").click());
 		await flush();
-		expect(desktop.upsertMcpServer).toHaveBeenLastCalledWith(expect.objectContaining({
-			cwd: "/work/chosen-project",
-			scope: "project",
-			name: "project-docs",
-		}));
+		expect(desktop.upsertMcpServer).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				cwd: "/work/chosen-project",
+				scope: "project",
+				name: "project-docs",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -689,7 +801,10 @@ describe("PluginsPanel", () => {
 		await act(async () => button(document.body.querySelector(".plugins-new-menu")!, "Project").click());
 		const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!;
 		await act(async () => button(dialog, "Import JSON").click());
-		store.setSessions({ sessions: [session("live", "/work/project"), session("other", "/work/other")], nextAfterSessionId: null });
+		store.setSessions({
+			sessions: [session("live", "/work/project"), session("other", "/work/other")],
+			nextAfterSessionId: null,
+		});
 		await renderState({ ...store.getSnapshot(), activeSessionId: "other" });
 		const text = '{"mcpServers":{"docs":{"url":"https://mcp.example.test/docs"}}}';
 		await act(async () => setInput(field(dialog, "MCP JSON or JSONC"), text));
@@ -706,16 +821,18 @@ describe("PluginsPanel", () => {
 		await act(async () => replace.click());
 		await act(async () => button(dialog, "Import selected").click());
 		await flush();
-		expect(desktop.importMcpServers).toHaveBeenCalledWith(expect.objectContaining({
-			sessionId: "live",
-			scope: "project",
-			text,
-			sourceRevision: "d".repeat(64),
-			candidates: [
-				{ id: "docs", expectedRevision: null },
-				{ id: "github", expectedRevision: mcpServer.revision },
-			],
-		}));
+		expect(desktop.importMcpServers).toHaveBeenCalledWith(
+			expect.objectContaining({
+				sessionId: "live",
+				scope: "project",
+				text,
+				sourceRevision: "d".repeat(64),
+				candidates: [
+					{ id: "docs", expectedRevision: null },
+					{ id: "github", expectedRevision: mcpServer.revision },
+				],
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -723,7 +840,10 @@ describe("PluginsPanel", () => {
 		let resolveRestart!: (value: Awaited<ReturnType<ReturnType<typeof api>["restartMcpServer"]>>) => void;
 		const desktop = api();
 		desktop.restartMcpServer.mockImplementation(
-			() => new Promise((resolve) => { resolveRestart = resolve; }),
+			() =>
+				new Promise((resolve) => {
+					resolveRestart = resolve;
+				}),
 		);
 		const { container, root } = await renderPanel(desktop);
 		await act(async () => button(container, "MCP").click());
@@ -733,13 +853,15 @@ describe("PluginsPanel", () => {
 		await act(async () => button(container, "Restart").click());
 		expect(button(container, "Delete").disabled).toBe(true);
 		expect(button(container, "Authentication").disabled).toBe(true);
-		await act(async () => resolveRestart({
-			server: mcpServer,
-			tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }],
-			resources: [],
-			resourceTemplates: [],
-			prompts: [],
-		}));
+		await act(async () =>
+			resolveRestart({
+				server: mcpServer,
+				tools: [{ id: "repo_search", name: "repo_search", description: "Search repositories" }],
+				resources: [],
+				resourceTemplates: [],
+				prompts: [],
+			}),
+		);
 		await flush();
 		expect(button(container, "Delete").disabled).toBe(false);
 		await act(async () => root.unmount());
@@ -748,12 +870,28 @@ describe("PluginsPanel", () => {
 	it("ignores late detail responses without polling an open MCP detail", async () => {
 		const alpha = { ...mcpServer, name: "alpha" };
 		const beta = { ...mcpServer, name: "beta" };
-		let resolveAlpha!: (value: { server: McpServerSummaryView; tools: McpCatalogEntryView[]; resources: never[]; resourceTemplates: never[]; prompts: never[] }) => void;
+		let resolveAlpha!: (value: {
+			server: McpServerSummaryView;
+			tools: McpCatalogEntryView[];
+			resources: never[];
+			resourceTemplates: never[];
+			prompts: never[];
+		}) => void;
 		const desktop = api();
 		desktop.listMcpServers.mockResolvedValue({ servers: [alpha, beta] });
-		desktop.getMcpServer.mockImplementation(({ name }) => name === "alpha"
-			? new Promise((resolve) => { resolveAlpha = resolve; })
-			: Promise.resolve({ server: beta, tools: [{ id: "beta_tool", name: "beta_tool" }], resources: [], resourceTemplates: [], prompts: [] }));
+		desktop.getMcpServer.mockImplementation(({ name }) =>
+			name === "alpha"
+				? new Promise((resolve) => {
+						resolveAlpha = resolve;
+					})
+				: Promise.resolve({
+						server: beta,
+						tools: [{ id: "beta_tool", name: "beta_tool" }],
+						resources: [],
+						resourceTemplates: [],
+						prompts: [],
+					}),
+		);
 		const { container, root } = await renderPanel(desktop);
 		vi.useFakeTimers();
 		await act(async () => button(container, "MCP").click());
@@ -763,15 +901,29 @@ describe("PluginsPanel", () => {
 		await act(async () => button(container, "beta").click());
 		await act(async () => Promise.resolve());
 		expect(container.textContent).toContain("beta_tool");
-		await act(async () => resolveAlpha({ server: alpha, tools: [{ id: "alpha_tool", name: "alpha_tool" }], resources: [], resourceTemplates: [], prompts: [] }));
+		await act(async () =>
+			resolveAlpha({
+				server: alpha,
+				tools: [{ id: "alpha_tool", name: "alpha_tool" }],
+				resources: [],
+				resourceTemplates: [],
+				prompts: [],
+			}),
+		);
 		expect(container.textContent).not.toContain("alpha_tool");
 
 		const callsAfterOpeningDetail = desktop.listMcpServers.mock.calls.length;
-		await act(async () => { vi.advanceTimersByTime(5_000); await Promise.resolve(); });
+		await act(async () => {
+			vi.advanceTimersByTime(5_000);
+			await Promise.resolve();
+		});
 		expect(desktop.listMcpServers).toHaveBeenCalledTimes(callsAfterOpeningDetail);
 		await act(async () => button(container, "Back to MCP").click());
 		const callsAfterClosingDetail = desktop.listMcpServers.mock.calls.length;
-		await act(async () => { vi.advanceTimersByTime(10_000); await Promise.resolve(); });
+		await act(async () => {
+			vi.advanceTimersByTime(10_000);
+			await Promise.resolve();
+		});
 		expect(desktop.listMcpServers).toHaveBeenCalledTimes(callsAfterClosingDetail);
 		await act(async () => root.unmount());
 	});
@@ -782,14 +934,22 @@ describe("PluginsPanel", () => {
 		let resolveAlpha!: (value: Awaited<ReturnType<ReturnType<typeof api>["getMcpCatalogItem"]>>) => void;
 		const desktop = api();
 		desktop.listMcpServers.mockResolvedValue({ servers: [alpha, beta] });
-		desktop.getMcpServer.mockImplementation(({ name }) => Promise.resolve({
-			server: name === "alpha" ? alpha : beta,
-			tools: [{ id: `${name}_tool`, name: `${name}_tool` }],
-			resources: [], resourceTemplates: [], prompts: [],
-		}));
-		desktop.getMcpCatalogItem.mockImplementation(({ server }) => server === "alpha"
-			? new Promise((resolve) => { resolveAlpha = resolve; })
-			: Promise.resolve({ kind: "tool", id: "beta_tool", name: "beta_tool", inputSchema: '{"title":"beta"}' }));
+		desktop.getMcpServer.mockImplementation(({ name }) =>
+			Promise.resolve({
+				server: name === "alpha" ? alpha : beta,
+				tools: [{ id: `${name}_tool`, name: `${name}_tool` }],
+				resources: [],
+				resourceTemplates: [],
+				prompts: [],
+			}),
+		);
+		desktop.getMcpCatalogItem.mockImplementation(({ server }) =>
+			server === "alpha"
+				? new Promise((resolve) => {
+						resolveAlpha = resolve;
+					})
+				: Promise.resolve({ kind: "tool", id: "beta_tool", name: "beta_tool", inputSchema: '{"title":"beta"}' }),
+		);
 		const { container, root } = await renderPanel(desktop);
 		await act(async () => button(container, "MCP").click());
 		await flush();
@@ -801,7 +961,9 @@ describe("PluginsPanel", () => {
 		await flush();
 		await act(async () => button(container, "beta_tool").click());
 		await flush();
-		await act(async () => resolveAlpha({ kind: "tool", id: "alpha_tool", name: "alpha_tool", inputSchema: '{"title":"alpha"}' }));
+		await act(async () =>
+			resolveAlpha({ kind: "tool", id: "alpha_tool", name: "alpha_tool", inputSchema: '{"title":"alpha"}' }),
+		);
 		expect(container.textContent).not.toContain('"alpha"');
 		await act(async () => root.unmount());
 	});
@@ -823,9 +985,11 @@ describe("PluginsPanel", () => {
 		expect(container.textContent).toContain("write_to_file");
 
 		await act(async () => button(container, "Disable").click());
-		expect(desktop.upsertHook).toHaveBeenCalledWith(expect.objectContaining({
-			hook: expect.objectContaining({ id: "hook-1", enabled: false }),
-		}));
+		expect(desktop.upsertHook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				hook: expect.objectContaining({ id: "hook-1", enabled: false }),
+			}),
+		);
 
 		await act(async () => button(container, "Back to Hooks").click());
 		await flush();
@@ -850,26 +1014,37 @@ describe("PluginsPanel", () => {
 		// 点击 Event 下拉
 		await act(async () => button(dialog, "Event").click());
 		await flush();
-		const stopOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((el) => el.textContent?.includes("Before finishing") || el.textContent?.includes("Stop"));
+		const stopOption = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
+			(el) => el.textContent?.includes("Before finishing") || el.textContent?.includes("Stop"),
+		);
 		expect(stopOption).toBeDefined();
 		await act(async () => stopOption!.click());
 		await flush();
 
 		// 填写表单
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]')!, "notify-done"));
-		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="node"]')!, "/usr/bin/say"));
+		await act(async () =>
+			setInput(
+				dialog.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]')!,
+				"notify-done",
+			),
+		);
+		await act(async () =>
+			setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="node"]')!, "/usr/bin/say"),
+		);
 		await act(async () => setInput(dialog.querySelector<HTMLInputElement>('input[placeholder="60"]')!, "45"));
 		await act(async () => button(dialog, "Create").click());
 		await flush();
 
-		expect(desktop.upsertHook).toHaveBeenCalledWith(expect.objectContaining({
-			hook: expect.objectContaining({
-				name: "notify-done",
-				event: "Stop",
-				command: "/usr/bin/say",
-				timeoutSeconds: 45,
+		expect(desktop.upsertHook).toHaveBeenCalledWith(
+			expect.objectContaining({
+				hook: expect.objectContaining({
+					name: "notify-done",
+					event: "Stop",
+					command: "/usr/bin/say",
+					timeoutSeconds: 45,
+				}),
 			}),
-		}));
+		);
 
 		await act(async () => root.unmount());
 	});

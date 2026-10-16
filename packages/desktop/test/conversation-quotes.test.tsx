@@ -3,15 +3,15 @@ import type { ItemView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
 import { Composer, type ComposerSubmission } from "../src/renderer/components/Composer.tsx";
 import {
 	ConversationQuoteProvider,
-	useConversationQuotes,
 	type DraftConversationQuote,
+	useConversationQuotes,
 } from "../src/renderer/components/ConversationQuoteContext.tsx";
-import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
-import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { selectedConversationQuote } from "../src/renderer/components/TranscriptQuoteSelection.tsx";
+import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { composerPayload, composerRequestKey } from "../src/renderer/composer-submission.ts";
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -186,7 +186,9 @@ describe("sent conversation annotations", () => {
 			state: "completed",
 			content: [{ type: "text", text: "Explain this" }],
 			createdAt: "2026-10-15T00:00:00Z",
-			conversationQuotes: [{ ...quote.input, selectedText: "<img src=x onerror=alert(1)>", sourceLiveItemId: "live:alias" }],
+			conversationQuotes: [
+				{ ...quote.input, selectedText: "<img src=x onerror=alert(1)>", sourceLiveItemId: "live:alias" },
+			],
 		};
 		const Turn = mode === "chat" ? TranscriptTurn : CodeTranscriptTurn;
 		const jump = vi.fn();

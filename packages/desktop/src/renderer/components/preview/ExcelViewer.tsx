@@ -1,20 +1,20 @@
 import { MagnifyingGlass, SpinnerGap, Table } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
 	cellKey,
+	type ExcelSelection,
+	type ExcelWorkbookView,
 	excelSelectionContext,
 	expandExcelSelection,
 	mergesInRowRange,
 	paintedCellsForRow,
 	parseExcelBytes,
-	type ExcelSelection,
-	type ExcelWorkbookView,
 } from "./excel-grid.ts";
 import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
-import { useDocumentSelection } from "./use-document-selection.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
+import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface ExcelViewerProps {
 	readonly file?: UniversalPreviewTarget;
@@ -51,7 +51,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 	const [dragging, setDragging] = useState(false);
 	const lastCell = useRef({ row: 0, col: 0 });
 	const pointer = useRef({ x: 0, y: 0 });
-	const viewportRef = useRef<HTMLDivElement>(null);
+	const viewportRef = useRef<HTMLElement>(null);
 	const isDraggingRef = useRef(false);
 	const startPosRef = useRef({ x: 0, y: 0, scrollLeft: 0, scrollTop: 0 });
 	const [isPanning, setIsPanning] = useState(false);
@@ -82,6 +82,8 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 	const colWidth = Math.max(56, Math.round(COL_WIDTH * scale));
 	const indexWidth = Math.max(36, Math.round(INDEX_WIDTH * scale));
 	const query = searchQuery.trim().toLowerCase();
+	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): New workbook bytes invalidate the previous cell selection.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(activeSheetName): Switching sheets clears the previous cell selection and scroll position.
 	useEffect(() => {
 		setRange(null);
 		rangeRef.current = null;
@@ -89,7 +91,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		setDragging(false);
 		selection.clear();
 		if (viewportRef.current) viewportRef.current.scrollTo?.(0, 0);
-	}, [activeSheetName, bytes]);
+	}, [activeSheetName, bytes, selection.clear]);
 	const virtualizer = useVirtualizer({
 		count: sheet?.rowCount ?? 0,
 		getScrollElement: () => viewportRef.current,
@@ -97,7 +99,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		overscan: 16,
 	});
 
-	const handleMouseDown = (event: React.MouseEvent<HTMLDivElement>) => {
+	const handleMouseDown = (event: React.MouseEvent<HTMLElement>) => {
 		if (event.button !== 1) return;
 		event.preventDefault();
 		if (event.target instanceof HTMLInputElement || event.target instanceof HTMLButtonElement) return;
@@ -113,7 +115,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		};
 	};
 
-	const handleMouseMove = (event: React.MouseEvent<HTMLDivElement>) => {
+	const handleMouseMove = (event: React.MouseEvent<HTMLElement>) => {
 		if (!isDraggingRef.current) return;
 		const viewport = viewportRef.current;
 		if (!viewport) return;
@@ -126,25 +128,31 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		setIsPanning(false);
 	};
 
-	const cellAt = (x: number, y: number) => {
-		const viewport = viewportRef.current;
-		if (!viewport || !sheet || !sheet.rowCount || !sheet.colCount) return null;
-		const body = viewport.querySelector(".excel-grid-body");
-		if (!body) return null;
-		const rect = body.getBoundingClientRect();
-		return {
-			row: Math.max(0, Math.min(sheet.rowCount - 1, Math.floor((y - rect.top) / rowHeight))),
-			col: Math.max(0, Math.min(sheet.colCount - 1, Math.floor((x - rect.left - indexWidth) / colWidth))),
-		};
-	};
-	const moveSelection = (x: number, y: number) => {
-		const last = cellAt(x, y);
-		if (!last || !sheet) return;
-		lastCell.current = last;
-		const next = expandExcelSelection(sheet, firstCell.current, last);
-		rangeRef.current = next;
-		setRange(next);
-	};
+	const cellAt = useCallback(
+		(x: number, y: number) => {
+			const viewport = viewportRef.current;
+			if (!viewport || !sheet || !sheet.rowCount || !sheet.colCount) return null;
+			const body = viewport.querySelector(".excel-grid-body");
+			if (!body) return null;
+			const rect = body.getBoundingClientRect();
+			return {
+				row: Math.max(0, Math.min(sheet.rowCount - 1, Math.floor((y - rect.top) / rowHeight))),
+				col: Math.max(0, Math.min(sheet.colCount - 1, Math.floor((x - rect.left - indexWidth) / colWidth))),
+			};
+		},
+		[colWidth, indexWidth, rowHeight, sheet],
+	);
+	const moveSelection = useCallback(
+		(x: number, y: number) => {
+			const last = cellAt(x, y);
+			if (!last || !sheet) return;
+			lastCell.current = last;
+			const next = expandExcelSelection(sheet, firstCell.current, last);
+			rangeRef.current = next;
+			setRange(next);
+		},
+		[cellAt, sheet],
+	);
 	const offerRequest = () => {
 		const current = rangeRef.current;
 		if (!sheet || !current) return;
@@ -172,10 +180,11 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 		};
 		if (dragging) frame = requestAnimationFrame(tick);
 		return () => cancelAnimationFrame(frame);
-	}, [sheet, rowHeight, colWidth, indexWidth, dragging]);
+	}, [dragging, moveSelection, rowHeight]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(rowHeight): Zoom changes require measuring virtual rows again.
 	useEffect(() => {
 		virtualizer.measure();
-	}, [rowHeight]);
+	}, [rowHeight, virtualizer]);
 	const visibleRows = virtualizer.getVirtualItems();
 	const sheetNames = workbook?.sheetNames ?? [];
 	const gridWidth = sheet ? indexWidth + sheet.colCount * colWidth : 0;
@@ -219,7 +228,8 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 						: ""}
 				</span>
 			</div>
-			<div
+			<section
+				aria-label={`${fileName}: ${activeSheetName}`}
 				className={`preview-viewport excel-viewport${isPanning ? " is-panning" : ""}`}
 				onMouseDown={handleMouseDown}
 				onMouseLeave={handleMouseUp}
@@ -297,6 +307,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 				onMouseMove={handleMouseMove}
 				onMouseUp={handleMouseUp}
 				ref={viewportRef}
+				// biome-ignore lint/a11y/noNoninteractiveTabindex: The scrollable sheet receives focus for arrow-key cell selection and Escape.
 				tabIndex={0}
 			>
 				{loading ? (
@@ -320,6 +331,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 								#
 							</div>
 							{Array.from({ length: sheet.colCount }, (_, col) => (
+								/* biome-ignore lint/suspicious/noArrayIndexKey: Columns have fixed worksheet positions and do not reorder within a sheet. */
 								<div className="excel-col-header" key={col} style={{ width: colWidth, minWidth: colWidth }}>
 									{getColumnLetter(col + sheet.startCol)}
 								</div>
@@ -384,7 +396,7 @@ export function ExcelViewer({ fileName, file, byteLength, bytes, onClose, onOpen
 						</div>
 					</div>
 				)}
-			</div>
+			</section>
 			{selection.popover}
 			{sheetNames.length > 1 && (
 				<nav aria-label={t("Sheets")} className="excel-sheet-tabs">

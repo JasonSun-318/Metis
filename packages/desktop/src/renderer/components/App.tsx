@@ -1,15 +1,15 @@
-import {
-	type AgentMode,
-	type InteractionResponseInput,
-	type ModelOptionView,
-	type ModelSettingsView,
-	type PermissionPresetView,
-	type PlanView,
-	type ScheduleTaskView,
-	type SessionDeliveredFileView,
-	type SessionSummary,
-	type SkillSummaryView,
-	type ThinkingSelectionView,
+import type {
+	AgentMode,
+	InteractionResponseInput,
+	ModelOptionView,
+	ModelSettingsView,
+	PermissionPresetView,
+	PlanView,
+	ScheduleTaskView,
+	SessionDeliveredFileView,
+	SessionSummary,
+	SkillSummaryView,
+	ThinkingSelectionView,
 } from "@metis/app-protocol";
 import { ArrowLeft, ArrowRight, SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -27,25 +27,25 @@ import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
 import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
-import { SessionWorkspaceWorkflow, sessionProjectKey, type NewTaskDraft } from "../session-workspace-workflow.ts";
+import { type NewTaskDraft, SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
 import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import type { ComposerSubmission } from "./Composer.tsx";
+import { ConversationQuoteProvider } from "./ConversationQuoteContext.tsx";
+import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
 import { NewTaskHome, recentProjectsFromGroups } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
-import { ConversationQuoteProvider } from "./ConversationQuoteContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
-import { clampToolsSidebarWidth } from "./SessionWorkspace.tsx";
-import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
+import type { SessionChatSubmit, SessionChatViewContext } from "./SessionChatView.tsx";
 import {
 	buildSessionTree,
 	clampSessionSidebarPreferredWidth,
@@ -56,13 +56,12 @@ import {
 	type SidebarDestination,
 	sessionSidebarDefaultWidth,
 } from "./SessionSidebar.tsx";
+import { clampToolsSidebarWidth, SessionWorkspaceView, type WorkspaceProject } from "./SessionWorkspace.tsx";
 import { SettingsDialog } from "./SettingsDialog.tsx";
-import type { SessionChatSubmit, SessionChatViewContext } from "./SessionChatView.tsx";
 import type { SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
-import { SystemNotice, systemErrorNotice, type SystemNoticeTone } from "./SystemNotice.tsx";
+import { SystemNotice, type SystemNoticeTone, systemErrorNotice } from "./SystemNotice.tsx";
 import { ThinkingSelector } from "./ThinkingSelector.tsx";
-import { SessionWorkspaceView, type WorkspaceProject } from "./SessionWorkspace.tsx";
 
 interface AppProps {
 	readonly api: MetisDesktopApi;
@@ -110,6 +109,7 @@ export function App({ api, store }: AppProps) {
 	const { i18n, t } = useTranslation();
 	const state = useAppStore(store);
 	const sidebarRevision = useAppStore(store, selectSidebarRevision);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(sidebarRevision): The store revision invalidates sidebar projections backed by mutable maps.
 	const sidebarState = useMemo<SessionSidebarState>(
 		() => ({
 			sessionsById: state.sessionsById,
@@ -162,14 +162,20 @@ export function App({ api, store }: AppProps) {
 	const pinnedSessionIds = workspaceState.pinnedSessionIds;
 	const [sessionsSidebarOpen, setSessionsSidebarOpen] = useState(true);
 	const [sessionSidebarPreferredWidth, setSessionSidebarPreferredWidth] = useState(loadSessionSidebarPreferredWidth);
-	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() => clampSessionSidebarWidth(sessionSidebarPreferredWidth));
+	const [sessionSidebarWidth, setSessionSidebarWidth] = useState(() =>
+		clampSessionSidebarWidth(sessionSidebarPreferredWidth),
+	);
 	const [knowledgeRequest, setKnowledgeRequest] = useState<{ id: number; sessionId: string }>();
 	const [previewRequest, setPreviewRequest] = useState<UniversalPreviewTarget | null>(null);
-	const [planPreviewRequest, setPlanPreviewRequest] = useState<{ readonly sessionId: string; readonly plan: PlanView } | null>(null);
+	const [planPreviewRequest, setPlanPreviewRequest] = useState<{
+		readonly sessionId: string;
+		readonly plan: PlanView;
+	} | null>(null);
 	const chatFocusNonce = useRef(0);
 	const [chatFocusRequest, setChatFocusRequest] = useState<{ nonce: number; sessionId: string | null } | null>(null);
 	const requestChatFocus = useCallback((sessionId: string | null) => {
-		setChatFocusRequest({ nonce: chatFocusNonce.current += 1, sessionId });
+		chatFocusNonce.current += 1;
+		setChatFocusRequest({ nonce: chatFocusNonce.current, sessionId });
 	}, []);
 	const [theme, setTheme] = useState<AppTheme>(() => loadTheme(localStorage));
 	const [generalPreferences, setGeneralPreferences] = useState(() => loadGeneralPreferences(localStorage));
@@ -180,7 +186,10 @@ export function App({ api, store }: AppProps) {
 		),
 	);
 	const [resolvedTheme, setResolvedTheme] = useState<"dark" | "light">(() =>
-		resolveTheme(loadTheme(localStorage), globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
+		resolveTheme(
+			loadTheme(localStorage),
+			globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false },
+		),
 	);
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [skills, setSkills] = useState<readonly SkillSummaryView[]>([]);
@@ -193,11 +202,13 @@ export function App({ api, store }: AppProps) {
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [updateNotice, setUpdateNotice] = useState<TransientSystemNotice | null>(null);
-	const [composerControl, setComposerControl] = useState<{ readonly id: number; readonly target: "model" | "thinking" | "mcp" | null }>({ id: 0, target: null });
+	const [composerControl, setComposerControl] = useState<{
+		readonly id: number;
+		readonly target: "model" | "thinking" | "mcp" | null;
+	}>({ id: 0, target: null });
 	const dirtyToolSessionIds = [...workspaceState.dirtySessionIds];
 	const toolCleanupSessionIds = workspaceState.cleanupSessionIds;
 	const [checkingUpdate, setCheckingUpdate] = useState(false);
-	const [updateCheckFailure, setUpdateCheckFailure] = useState<"failed" | "unsupported" | null>(null);
 	const updateCheckTask = useRef<Promise<void> | null>(null);
 	const [updateState, setUpdateState] = useState<DesktopUpdateState>({ status: "unavailable" });
 	const [fullscreen, setFullscreen] = useState(false);
@@ -220,9 +231,12 @@ export function App({ api, store }: AppProps) {
 	useEffect(() => {
 		let cancelled = false;
 		if (api.isFullScreen) {
-			void api.isFullScreen().then((isFull) => {
-				if (!cancelled) setFullscreen(isFull);
-			}).catch(() => undefined);
+			void api
+				.isFullScreen()
+				.then((isFull) => {
+					if (!cancelled) setFullscreen(isFull);
+				})
+				.catch(() => undefined);
 		}
 		const unsubscribe = api.subscribeFullScreen?.((isFull) => {
 			if (!cancelled) setFullscreen(isFull);
@@ -233,17 +247,14 @@ export function App({ api, store }: AppProps) {
 		};
 	}, [api]);
 	const modelSettingsGeneration = useRef(0);
-	const handlePreviewDeliveredFile = useCallback(
-		(sessionId: string, file: SessionDeliveredFileView) => {
-			setPreviewRequest({
-				source: "delivered",
-				sessionId,
-				fileId: file.fileId,
-				name: file.name,
-			});
-		},
-		[],
-	);
+	const handlePreviewDeliveredFile = useCallback((sessionId: string, file: SessionDeliveredFileView) => {
+		setPreviewRequest({
+			source: "delivered",
+			sessionId,
+			fileId: file.fileId,
+			name: file.name,
+		});
+	}, []);
 	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
 		const clamped = clampSessionSidebarWidth(width);
 		setSessionSidebarWidth(clamped);
@@ -271,7 +282,9 @@ export function App({ api, store }: AppProps) {
 	useEffect(() => {
 		const apply = () => {
 			applyThemeToDocument(theme);
-			setResolvedTheme(resolveTheme(theme, globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }));
+			setResolvedTheme(
+				resolveTheme(theme, globalThis.matchMedia?.("(prefers-color-scheme: light)") ?? { matches: false }),
+			);
 		};
 		apply();
 		saveTheme(localStorage, theme);
@@ -290,7 +303,8 @@ export function App({ api, store }: AppProps) {
 	const skillListGeneration = useRef(0);
 	const scheduleSubscriptionGeneration = useRef(0);
 	const scheduleSnapshotRequest = useRef<Promise<void> | null>(null);
-	const visibleSessionId = !settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
+	const visibleSessionId =
+		!settingsOpen && destination === "tasks" && newTaskDraft === null ? state.activeSessionId : null;
 	workspaceVisibleSession.current = visibleSessionId;
 	const reportError = useCallback((cause: unknown) => {
 		setError(cause instanceof Error ? cause.message : "Metis could not complete the request.");
@@ -313,7 +327,8 @@ export function App({ api, store }: AppProps) {
 			receivedEvent = true;
 			if (!disposed) setUpdateState(state);
 		});
-		void api.getUpdateState()
+		void api
+			.getUpdateState()
 			.then((state) => {
 				if (!disposed && !receivedEvent) setUpdateState(state);
 			})
@@ -326,7 +341,6 @@ export function App({ api, store }: AppProps) {
 	const checkDesktopUpdate = useCallback(() => {
 		if (updateCheckTask.current) return;
 		setUpdateNotice(null);
-		setUpdateCheckFailure(null);
 		setCheckingUpdate(true);
 		const task = api
 			.checkForUpdate()
@@ -340,10 +354,8 @@ export function App({ api, store }: AppProps) {
 			.catch((error: unknown) => {
 				const message = error instanceof Error ? error.message : String(error);
 				if (message.includes("unavailable in this build") || message.includes("not supported in this build")) {
-					setUpdateCheckFailure("unsupported");
 					setUpdateNotice({ tone: "info", title: "Update checks are not supported in this build" });
 				} else {
-					setUpdateCheckFailure("failed");
 					setUpdateNotice({
 						tone: "error",
 						title: "Update check failed",
@@ -356,7 +368,7 @@ export function App({ api, store }: AppProps) {
 				setCheckingUpdate(false);
 			});
 		updateCheckTask.current = task;
-	}, [api, t]);
+	}, [api]);
 	const startDesktopUpdate = useCallback(() => {
 		void api.startUpdate().catch(reportError);
 	}, [api, reportError]);
@@ -370,11 +382,13 @@ export function App({ api, store }: AppProps) {
 	);
 
 	useEffect(() => {
-		void api.setWorkspaceEditState({
-			dirty: dirtyToolSessionIds.length > 0,
-			language: i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en",
-			visibleSessionId,
-		}).catch(reportError);
+		void api
+			.setWorkspaceEditState({
+				dirty: dirtyToolSessionIds.length > 0,
+				language: i18n.resolvedLanguage?.startsWith("zh") ? "zh" : "en",
+				visibleSessionId,
+			})
+			.catch(reportError);
 	}, [api, dirtyToolSessionIds.length, i18n.resolvedLanguage, reportError, visibleSessionId]);
 
 	const homeComposerFormRef = useRef<HTMLFormElement>(null);
@@ -389,7 +403,10 @@ export function App({ api, store }: AppProps) {
 	const toolsSidebarClosingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	// Closing runs the drawer slide-out first; tests skip the animation entirely.
 	const setToolsSidebar = useCallback((open: boolean) => {
-		const runtime = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; process?: { env?: { NODE_ENV?: string } } };
+		const runtime = globalThis as unknown as {
+			IS_REACT_ACT_ENVIRONMENT?: boolean;
+			process?: { env?: { NODE_ENV?: string } };
+		};
 		if (runtime.IS_REACT_ACT_ENVIRONMENT || runtime.process?.env?.NODE_ENV === "test") {
 			setToolsSidebarOpen(open);
 			return;
@@ -410,9 +427,12 @@ export function App({ api, store }: AppProps) {
 			toolsSidebarClosingTimeoutRef.current = null;
 		}, 200);
 	}, []);
-	useEffect(() => () => {
-		if (toolsSidebarClosingTimeoutRef.current) clearTimeout(toolsSidebarClosingTimeoutRef.current);
-	}, []);
+	useEffect(
+		() => () => {
+			if (toolsSidebarClosingTimeoutRef.current) clearTimeout(toolsSidebarClosingTimeoutRef.current);
+		},
+		[],
+	);
 	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
 	const toolsSidebarPreferredWidthRef = useRef(393);
 	// Bumped by the Cmd/Ctrl+W shortcut that the main process forwards.
@@ -429,9 +449,7 @@ export function App({ api, store }: AppProps) {
 	}, []);
 	const submitFileSelection = useCallback((sessionId: string, input: ConversationSubmission) => {
 		const submit = conversationSubmitsRef.current.get(sessionId);
-		return submit
-			? submit(input)
-			: Promise.reject(new Error("This conversation is not ready to send"));
+		return submit ? submit(input) : Promise.reject(new Error("This conversation is not ready to send"));
 	}, []);
 	const pendingHomeTransition = useRef<{
 		source: DOMRectReadOnly;
@@ -508,9 +526,7 @@ export function App({ api, store }: AppProps) {
 
 	useEffect(() => {
 		let active = true;
-		void api
-			.setScheduleKeepAwake(localStorage.getItem(SCHEDULE_KEEP_AWAKE_KEY) === "true")
-			.catch(reportError);
+		void api.setScheduleKeepAwake(localStorage.getItem(SCHEDULE_KEEP_AWAKE_KEY) === "true").catch(reportError);
 		void workspaceWorkflow.start().then(() => {
 			if (active) void requestScheduleSnapshot();
 		});
@@ -535,10 +551,7 @@ export function App({ api, store }: AppProps) {
 		(session: SessionSummary, pinned: boolean) => workspaceWorkflow.pinSession(session, pinned),
 		[workspaceWorkflow],
 	);
-	const copySessionTitle = useCallback(
-		(title: string) => api.writeClipboardText({ text: title }),
-		[api],
-	);
+	const copySessionTitle = useCallback((title: string) => api.writeClipboardText({ text: title }), [api]);
 	const previewProjectDelete = useCallback(
 		(group: ProjectSessionGroup) => workspaceWorkflow.previewProjectDelete({ mode: group.mode, cwd: group.cwd }),
 		[workspaceWorkflow],
@@ -548,40 +561,43 @@ export function App({ api, store }: AppProps) {
 		codeProjectSetupRequest.current = null;
 		setCodeProjectSetupOpen(false);
 	}, []);
-	const restoreWindowsNavigation = useCallback(async (target: WindowsNavigationLocation) => {
-		setNavigationBusy(true);
-		try {
-			cancelHomeTransition();
-			closeCodeProjectSetup();
-			setError(null);
-			if (target.view === "settings") {
-				setSettingsOpen(true);
-				return;
-			}
-			setSettingsOpen(false);
-			if (target.view === "tasks") {
-				setDestination("tasks");
-				if (target.sessionId && store.getSnapshot().sessionsById.has(target.sessionId)) {
-					await workspaceWorkflow.openVisibleSession(target.sessionId);
-				} else {
-					workspaceWorkflow.startNewTask(target.mode);
+	const restoreWindowsNavigation = useCallback(
+		async (target: WindowsNavigationLocation) => {
+			setNavigationBusy(true);
+			try {
+				cancelHomeTransition();
+				closeCodeProjectSetup();
+				setError(null);
+				if (target.view === "settings") {
+					setSettingsOpen(true);
+					return;
 				}
-				return;
+				setSettingsOpen(false);
+				if (target.view === "tasks") {
+					setDestination("tasks");
+					if (target.sessionId && store.getSnapshot().sessionsById.has(target.sessionId)) {
+						await workspaceWorkflow.openVisibleSession(target.sessionId);
+					} else {
+						workspaceWorkflow.startNewTask(target.mode);
+					}
+					return;
+				}
+				if (workspaceWorkflow.getSnapshot().mode !== target.mode) {
+					await workspaceWorkflow.selectMode(target.mode);
+				}
+				if (target.view === "skills") {
+					setPluginSection(target.section);
+					setDestination("skills");
+					return;
+				}
+				setSelectedScheduleTaskId(target.taskId);
+				setDestination("schedules");
+			} finally {
+				setNavigationBusy(false);
 			}
-			if (workspaceWorkflow.getSnapshot().mode !== target.mode) {
-				await workspaceWorkflow.selectMode(target.mode);
-			}
-			if (target.view === "skills") {
-				setPluginSection(target.section);
-				setDestination("skills");
-				return;
-			}
-			setSelectedScheduleTaskId(target.taskId);
-			setDestination("schedules");
-		} finally {
-			setNavigationBusy(false);
-		}
-	}, [cancelHomeTransition, closeCodeProjectSetup, store, workspaceWorkflow]);
+		},
+		[cancelHomeTransition, closeCodeProjectSetup, store, workspaceWorkflow],
+	);
 	const navigateBack = useCallback(() => {
 		const target = navigationBack.at(-1);
 		if (!target || navigationBusy) return;
@@ -596,22 +612,32 @@ export function App({ api, store }: AppProps) {
 		setNavigationBack((entries) => [...entries.slice(-49), currentNavigationLocation]);
 		void restoreWindowsNavigation(target).catch(reportError);
 	}, [currentNavigationLocation, navigationBusy, navigationForward, reportError, restoreWindowsNavigation]);
-	const createEmptySessionInProject = useCallback(async (projectMode: AgentMode, cwd: string): Promise<void> => {
-		rememberCurrentNavigation();
-		if (projectMode === "code") {
-			cancelHomeTransition();
+	const createEmptySessionInProject = useCallback(
+		async (projectMode: AgentMode, cwd: string): Promise<void> => {
+			rememberCurrentNavigation();
+			if (projectMode === "code") {
+				cancelHomeTransition();
+				setDestination("tasks");
+				closeCodeProjectSetup();
+				workspaceWorkflow.startNewTask("code");
+				workspaceWorkflow.setDraftFolder(cwd);
+				requestChatFocus(null);
+				return;
+			}
 			setDestination("tasks");
-			closeCodeProjectSetup();
-			workspaceWorkflow.startNewTask("code");
-			workspaceWorkflow.setDraftFolder(cwd);
-			requestChatFocus(null);
-			return;
-		}
-		setDestination("tasks");
-		await workspaceWorkflow.createSessionInProject(projectMode, cwd);
-		const created = store.getSnapshot().activeSessionId;
-		if (created) requestChatFocus(created);
-	}, [cancelHomeTransition, closeCodeProjectSetup, rememberCurrentNavigation, requestChatFocus, store, workspaceWorkflow]);
+			await workspaceWorkflow.createSessionInProject(projectMode, cwd);
+			const created = store.getSnapshot().activeSessionId;
+			if (created) requestChatFocus(created);
+		},
+		[
+			cancelHomeTransition,
+			closeCodeProjectSetup,
+			rememberCurrentNavigation,
+			requestChatFocus,
+			store,
+			workspaceWorkflow,
+		],
+	);
 	const createEmptyProjectSession = useCallback(
 		(group: ProjectSessionGroup): Promise<void> => createEmptySessionInProject(group.mode, group.cwd),
 		[createEmptySessionInProject],
@@ -630,20 +656,30 @@ export function App({ api, store }: AppProps) {
 		[workspaceWorkflow],
 	);
 
-	const openVisibleSession = useCallback(async (sessionId: string) => {
-		if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== sessionId) {
-			rememberCurrentNavigation();
-		}
-		cancelHomeTransition();
-		setDestination("tasks");
-		closeCodeProjectSetup();
-		requestChatFocus(sessionId);
-		try {
-			await workspaceWorkflow.openVisibleSession(sessionId);
-		} catch {
-			// The workflow reports the error while preserving the current projection.
-		}
-	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, requestChatFocus, workspaceWorkflow]);
+	const openVisibleSession = useCallback(
+		async (sessionId: string) => {
+			if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== sessionId) {
+				rememberCurrentNavigation();
+			}
+			cancelHomeTransition();
+			setDestination("tasks");
+			closeCodeProjectSetup();
+			requestChatFocus(sessionId);
+			try {
+				await workspaceWorkflow.openVisibleSession(sessionId);
+			} catch {
+				// The workflow reports the error while preserving the current projection.
+			}
+		},
+		[
+			cancelHomeTransition,
+			closeCodeProjectSetup,
+			currentNavigationLocation,
+			rememberCurrentNavigation,
+			requestChatFocus,
+			workspaceWorkflow,
+		],
+	);
 	const forkFromReply = useCallback(
 		async (sessionId: string, entryId: string) => {
 			try {
@@ -674,34 +710,50 @@ export function App({ api, store }: AppProps) {
 		codeProjectSetupRequest.current = request;
 		setCodeProjectSetupOpen(true);
 	}, [workspaceWorkflow]);
-	const setHomeDraftFolder = useCallback((projectMode: AgentMode, cwd: string | null) => {
-		const draft = workspaceWorkflow.getSnapshot().draft;
-		if (!draft || draft.mode !== projectMode || draft.sessionId !== null) return;
-		workspaceWorkflow.setDraftFolder(cwd);
-	}, [workspaceWorkflow]);
-	const selectHomeProject = useCallback((projectMode: AgentMode, cwd: string) => {
-		setHomeDraftFolder(projectMode, cwd);
-	}, [setHomeDraftFolder]);
-	const clearHomeProject = useCallback((projectMode: AgentMode) => {
-		setHomeDraftFolder(projectMode, null);
-	}, [setHomeDraftFolder]);
-	const selectCodeProject = useCallback((cwd: string, request: CodeProjectSetupRequest | null) => {
-		const current = workspaceWorkflow.getSnapshot().draft;
-		const active = codeProjectSetupRequest.current;
-		if (
-			!request ||
-			active?.generation !== request.generation ||
-			active.draft !== request.draft ||
-			current !== request.draft ||
-			current.mode !== "code" ||
-			current.sessionId !== null
-		) return;
-		workspaceWorkflow.setDraftFolder(cwd);
-		closeCodeProjectSetup();
-	}, [closeCodeProjectSetup, workspaceWorkflow]);
-	const handleCodeProjectCreated = useCallback((cwd: string, request: CodeProjectSetupRequest | null) => {
-		selectCodeProject(cwd, request);
-	}, [selectCodeProject]);
+	const setHomeDraftFolder = useCallback(
+		(projectMode: AgentMode, cwd: string | null) => {
+			const draft = workspaceWorkflow.getSnapshot().draft;
+			if (!draft || draft.mode !== projectMode || draft.sessionId !== null) return;
+			workspaceWorkflow.setDraftFolder(cwd);
+		},
+		[workspaceWorkflow],
+	);
+	const selectHomeProject = useCallback(
+		(projectMode: AgentMode, cwd: string) => {
+			setHomeDraftFolder(projectMode, cwd);
+		},
+		[setHomeDraftFolder],
+	);
+	const clearHomeProject = useCallback(
+		(projectMode: AgentMode) => {
+			setHomeDraftFolder(projectMode, null);
+		},
+		[setHomeDraftFolder],
+	);
+	const selectCodeProject = useCallback(
+		(cwd: string, request: CodeProjectSetupRequest | null) => {
+			const current = workspaceWorkflow.getSnapshot().draft;
+			const active = codeProjectSetupRequest.current;
+			if (
+				!request ||
+				active?.generation !== request.generation ||
+				active.draft !== request.draft ||
+				current !== request.draft ||
+				current.mode !== "code" ||
+				current.sessionId !== null
+			)
+				return;
+			workspaceWorkflow.setDraftFolder(cwd);
+			closeCodeProjectSetup();
+		},
+		[closeCodeProjectSetup, workspaceWorkflow],
+	);
+	const handleCodeProjectCreated = useCallback(
+		(cwd: string, request: CodeProjectSetupRequest | null) => {
+			selectCodeProject(cwd, request);
+		},
+		[selectCodeProject],
+	);
 
 	const startNewTask = useCallback(() => {
 		if (currentNavigationLocation.view !== "tasks" || currentNavigationLocation.sessionId !== null) {
@@ -713,54 +765,75 @@ export function App({ api, store }: AppProps) {
 		setError(null);
 		workspaceWorkflow.startNewTask();
 		requestChatFocus(null);
-	}, [cancelHomeTransition, closeCodeProjectSetup, currentNavigationLocation, rememberCurrentNavigation, requestChatFocus, workspaceWorkflow]);
-	const cancelNewTask = () => {
-		cancelHomeTransition();
-		closeCodeProjectSetup();
-		setError(null);
-		workspaceWorkflow.cancelNewTask();
-	};
+	}, [
+		cancelHomeTransition,
+		closeCodeProjectSetup,
+		currentNavigationLocation,
+		rememberCurrentNavigation,
+		requestChatFocus,
+		workspaceWorkflow,
+	]);
 
-	const focusWorkspaceSession = useCallback((sessionId: string | null) => {
-		if (sessionId === null) {
-			startNewTask();
-			return;
-		}
-		void openVisibleSession(sessionId);
-	}, [openVisibleSession, startNewTask]);
+	const focusWorkspaceSession = useCallback(
+		(sessionId: string | null) => {
+			if (sessionId === null) {
+				startNewTask();
+				return;
+			}
+			void openVisibleSession(sessionId);
+		},
+		[openVisibleSession, startNewTask],
+	);
 
-	const sessionTitleFor = useCallback((sessionId: string) => {
-		const session = store.getSnapshot().sessionsById.get(sessionId);
-		return session ? sessionDisplayTitle(session) : t("New task");
-	}, [store, t]);
+	const sessionTitleFor = useCallback(
+		(sessionId: string) => {
+			const session = store.getSnapshot().sessionsById.get(sessionId);
+			return session ? sessionDisplayTitle(session) : t("New task");
+		},
+		[store, t],
+	);
 
 	// Tabs are grouped by project in the strip. Managed sessions live under
 	// uuid-named directories, so they have no project to show.
-	const projectFor = useCallback((sessionId: string): WorkspaceProject | null => {
-		const session = store.getSnapshot().sessionsById.get(sessionId);
-		if (!session?.cwd || session.cwdOrigin === "managed") return null;
-		// One folder is one group across modes, so its label must not depend on
-		// which mode's session happens to lead the group: prefer the Code alias,
-		// then the Chat alias, then the folder name.
-		const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
-		const alias =
-			projectPreferences.get(sessionProjectKey("code", session.cwd))?.alias ??
-			projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
-		return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
-	}, [projectPreferences, store]);
+	const projectFor = useCallback(
+		(sessionId: string): WorkspaceProject | null => {
+			const session = store.getSnapshot().sessionsById.get(sessionId);
+			if (!session?.cwd || session.cwdOrigin === "managed") return null;
+			// One folder is one group across modes, so its label must not depend on
+			// which mode's session happens to lead the group: prefer the Code alias,
+			// then the Chat alias, then the folder name.
+			const name = session.cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? session.cwd;
+			const alias =
+				projectPreferences.get(sessionProjectKey("code", session.cwd))?.alias ??
+				projectPreferences.get(sessionProjectKey("chat", session.cwd))?.alias;
+			return { key: session.cwd, cwd: session.cwd, name: alias ?? name };
+		},
+		[projectPreferences, store],
+	);
 
-	const changeMode = useCallback((nextMode: AgentMode) => {
-		if (nextMode === mode) return;
-		rememberCurrentNavigation();
-		cancelHomeTransition();
-		setDestination("tasks");
-		closeCodeProjectSetup();
-		setError(null);
-		void workspaceWorkflow.selectMode(nextMode).then(() => {
-			const landedDraft = workspaceWorkflow.getSnapshot().draft;
-			requestChatFocus(landedDraft ? landedDraft.sessionId : store.getSnapshot().activeSessionId);
-		});
-	}, [cancelHomeTransition, closeCodeProjectSetup, mode, rememberCurrentNavigation, requestChatFocus, store, workspaceWorkflow]);
+	const changeMode = useCallback(
+		(nextMode: AgentMode) => {
+			if (nextMode === mode) return;
+			rememberCurrentNavigation();
+			cancelHomeTransition();
+			setDestination("tasks");
+			closeCodeProjectSetup();
+			setError(null);
+			void workspaceWorkflow.selectMode(nextMode).then(() => {
+				const landedDraft = workspaceWorkflow.getSnapshot().draft;
+				requestChatFocus(landedDraft ? landedDraft.sessionId : store.getSnapshot().activeSessionId);
+			});
+		},
+		[
+			cancelHomeTransition,
+			closeCodeProjectSetup,
+			mode,
+			rememberCurrentNavigation,
+			requestChatFocus,
+			store,
+			workspaceWorkflow,
+		],
+	);
 
 	const visibleNewTaskDraft = destination === "tasks" && newTaskDraft?.mode === mode ? newTaskDraft : null;
 	const homeProjects = useMemo(
@@ -768,7 +841,7 @@ export function App({ api, store }: AppProps) {
 		[mode, projectPreferences, state],
 	);
 	const recentCodeProjects = useMemo(
-		() => mode === "code" ? recentProjectsFromGroups(homeProjects) : [],
+		() => (mode === "code" ? recentProjectsFromGroups(homeProjects) : []),
 		[homeProjects, mode],
 	);
 	const activeCodeProjectSetupRequest = codeProjectSetupRequest.current;
@@ -776,11 +849,14 @@ export function App({ api, store }: AppProps) {
 	const submitNewTaskDraft = async (input: ComposerSubmission) => {
 		if (!visibleNewTaskDraft) return;
 		const home = homeComposerFormRef.current;
-		const ticket = home && !reducedMotion ? {
-			source: home.getBoundingClientRect(),
-			home,
-			sessionId: visibleNewTaskDraft.sessionId,
-		} : null;
+		const ticket =
+			home && !reducedMotion
+				? {
+						source: home.getBoundingClientRect(),
+						home,
+						sessionId: visibleNewTaskDraft.sessionId,
+					}
+				: null;
 		pendingHomeTransition.current = ticket;
 		try {
 			await workspaceWorkflow.submitNewTask(input);
@@ -803,9 +879,10 @@ export function App({ api, store }: AppProps) {
 
 	const createSkillWithMetis = async (target: SkillCreationTarget) => {
 		rememberCurrentNavigation();
-		const prompt = target.source === "project"
-			? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
-			: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
+		const prompt =
+			target.source === "project"
+				? `I want to create a project-level Skill in ${target.cwd}. Use the create-skill Skill and ask me for the information you need before creating it.`
+				: "I want to create a user-level Skill. Use the create-skill Skill and ask me for the information you need before creating it.";
 		setDestination("tasks");
 		workspaceWorkflow.startNewTask("chat");
 		workspaceWorkflow.setDraftFolder(target.cwd);
@@ -817,36 +894,48 @@ export function App({ api, store }: AppProps) {
 		? state.sessionsById.get(workspaceState.openingSessionId)
 		: undefined;
 	const newTaskOpen = visibleNewTaskDraft !== null;
-	const visibleActiveSession = destination === "tasks" && activeSession && (activeSession.mode === mode || openingSession?.mode === mode) && !newTaskOpen
-		? activeSession
-		: undefined;
-	const toolsSession = visibleActiveSession ?? (visibleNewTaskDraft?.sessionId
-		? state.sessionsById.get(visibleNewTaskDraft.sessionId)
-			?? { sessionId: visibleNewTaskDraft.sessionId, cwd: visibleNewTaskDraft.folder }
-		: undefined);
+	const visibleActiveSession =
+		destination === "tasks" &&
+		activeSession &&
+		(activeSession.mode === mode || openingSession?.mode === mode) &&
+		!newTaskOpen
+			? activeSession
+			: undefined;
+	const toolsSession =
+		visibleActiveSession ??
+		(visibleNewTaskDraft?.sessionId
+			? (state.sessionsById.get(visibleNewTaskDraft.sessionId) ?? {
+					sessionId: visibleNewTaskDraft.sessionId,
+					cwd: visibleNewTaskDraft.folder,
+				})
+			: undefined);
 	const toolsSidebarAvailable = toolsSession !== undefined;
 	// The sidebar remembers its width per session, like the old tools sidebar.
 	const toolsSidebarSessionRef = useRef<string | undefined>(undefined);
-	const updateToolsSidebarWidth = useCallback((width: number) => {
-		const clamped = clampToolsSidebarWidth(width);
-		toolsSidebarPreferredWidthRef.current = clamped;
-		setToolsSidebarWidth(clamped);
-		const sessionId = toolsSession?.sessionId;
-		if (sessionId) {
-			try {
-				localStorage.setItem(`metis.tools-sidebar-width.v2:${sessionId}`, String(clamped));
-			} catch {
-				// Ignore storage failures; the width still applies in memory.
+	const updateToolsSidebarWidth = useCallback(
+		(width: number) => {
+			const clamped = clampToolsSidebarWidth(width);
+			toolsSidebarPreferredWidthRef.current = clamped;
+			setToolsSidebarWidth(clamped);
+			const sessionId = toolsSession?.sessionId;
+			if (sessionId) {
+				try {
+					localStorage.setItem(`metis.tools-sidebar-width.v2:${sessionId}`, String(clamped));
+				} catch {
+					// Ignore storage failures; the width still applies in memory.
+				}
 			}
-		}
-	}, [toolsSession?.sessionId]);
+		},
+		[toolsSession?.sessionId],
+	);
 	useEffect(() => {
 		const sessionId = toolsSession?.sessionId;
 		if (sessionId === toolsSidebarSessionRef.current) return;
 		toolsSidebarSessionRef.current = sessionId;
 		let stored = 393;
 		try {
-			const parsed = sessionId === undefined ? NaN : Number(localStorage.getItem(`metis.tools-sidebar-width.v2:${sessionId}`));
+			const parsed =
+				sessionId === undefined ? NaN : Number(localStorage.getItem(`metis.tools-sidebar-width.v2:${sessionId}`));
 			if (Number.isFinite(parsed) && parsed > 0) stored = parsed;
 		} catch {
 			// Fall back to the default width when storage is unavailable.
@@ -875,9 +964,10 @@ export function App({ api, store }: AppProps) {
 		// Managed sessions live under uuid-named directories, so the cwd
 		// basename is not a project name — fall back to the app name like the
 		// sidebar's task grouping does.
-		const cwd = visibleActiveSession?.cwdOrigin === "managed"
-			? null
-			: (visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null);
+		const cwd =
+			visibleActiveSession?.cwdOrigin === "managed"
+				? null
+				: (visibleActiveSession?.cwd ?? visibleNewTaskDraft?.folder ?? null);
 		if (!cwd) return "Metis";
 		const name = cwd.split(/[\\/]/u).filter(Boolean).at(-1) ?? cwd;
 		return projectPreferences.get(sessionProjectKey(contextMode, cwd))?.alias ?? name;
@@ -906,8 +996,12 @@ export function App({ api, store }: AppProps) {
 		}
 		const target = conversationComposerFormRef.current;
 		pendingHomeTransition.current = null;
-		if (!target || !visibleActiveSession ||
-				(pending.sessionId !== null && pending.sessionId !== visibleActiveSession.sessionId)) return;
+		if (
+			!target ||
+			!visibleActiveSession ||
+			(pending.sessionId !== null && pending.sessionId !== visibleActiveSession.sessionId)
+		)
+			return;
 		homeTransitionAnimation.current?.cancel();
 		const animation = animateNewTaskComposer(target, pending.source, reducedMotion);
 		homeTransitionAnimation.current = animation;
@@ -929,10 +1023,12 @@ export function App({ api, store }: AppProps) {
 		window.addEventListener("resize", resize);
 		return () => window.removeEventListener("resize", resize);
 	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(sessionSidebarWidth): Resizing the sidebar cancels the previous home transition geometry.
 	useEffect(() => {
 		homeTransitionAnimation.current?.cancel();
 		homeTransitionAnimation.current = null;
 	}, [sessionSidebarWidth]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(visibleActiveSession?.sessionId): Switching sessions clears composer controls and the plan preview.
 	useEffect(() => {
 		requestComposerControl(null);
 		setPlanPreviewRequest(null);
@@ -941,6 +1037,7 @@ export function App({ api, store }: AppProps) {
 	// feeds the new-task draft composer.
 	const skillSessionId = visibleNewTaskDraft?.sessionId;
 	const shouldListSkills = destination === "tasks" && newTaskOpen;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(skillCatalogEpoch): Catalog changes invalidate the draft composer skill list.
 	useEffect(() => {
 		const generation = ++skillListGeneration.current;
 		if (!bootstrapped || !serverReady || !shouldListSkills) {
@@ -948,7 +1045,8 @@ export function App({ api, store }: AppProps) {
 			return;
 		}
 		setSkills([]);
-		void api.listSkills(skillSessionId ? { sessionId: skillSessionId } : { cwd: visibleNewTaskDraft?.folder ?? null })
+		void api
+			.listSkills(skillSessionId ? { sessionId: skillSessionId } : { cwd: visibleNewTaskDraft?.folder ?? null })
 			.then((result) => {
 				if (generation === skillListGeneration.current) setSkills(result.skills);
 			})
@@ -960,14 +1058,24 @@ export function App({ api, store }: AppProps) {
 		return () => {
 			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
 		};
-	}, [api, bootstrapped, reportError, serverReady, shouldListSkills, skillCatalogEpoch, skillSessionId, visibleNewTaskDraft?.folder]);
+	}, [
+		api,
+		bootstrapped,
+		reportError,
+		serverReady,
+		shouldListSkills,
+		skillCatalogEpoch,
+		skillSessionId,
+		visibleNewTaskDraft?.folder,
+	]);
 	// The new-task page configures the model and thinking effort through the
 	// global defaults (new sessions inherit them), so keep the settings view
 	// fresh whenever the server is ready and after the settings dialog closes.
 	useEffect(() => {
 		if (!bootstrapped || !serverReady || settingsOpen) return;
 		const generation = ++modelSettingsGeneration.current;
-		void api.getModelSettings()
+		void api
+			.getModelSettings()
 			.then((result) => {
 				if (generation === modelSettingsGeneration.current) setModelSettings(result);
 			})
@@ -983,7 +1091,7 @@ export function App({ api, store }: AppProps) {
 	const interactiveSessionId =
 		destination === "tasks" && openingSession?.mode === mode
 			? openingSession.sessionId
-			: visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId ?? undefined;
+			: (visibleActiveSession?.sessionId ?? visibleNewTaskDraft?.sessionId ?? undefined);
 	const visibleInteraction = firstInteractionForSession(
 		state.interactionOrder,
 		state.interactionsById,
@@ -998,8 +1106,7 @@ export function App({ api, store }: AppProps) {
 		(sessionIds: readonly string[], chatSessionIds: readonly string[]) => {
 			workspaceWorkflow.setLiveSessions(sessionIds);
 			setChatPaneSessionIds((current) =>
-				current.length === chatSessionIds.length &&
-					current.every((id, index) => id === chatSessionIds[index])
+				current.length === chatSessionIds.length && current.every((id, index) => id === chatSessionIds[index])
 					? current
 					: chatSessionIds,
 			);
@@ -1037,14 +1144,17 @@ export function App({ api, store }: AppProps) {
 				!chatPaneSessions.has(interaction.sessionId),
 		);
 	const visibleNotifications = state.notifications.filter(
-		(notification) => notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId,
+		(notification) =>
+			notification.sessionId === undefined || notification.sessionId === visibleActiveSession?.sessionId,
 	);
 	const latestNotification = visibleNotifications.at(-1);
-	const latestTurnErrorCode = state.turnOrder.length > 0
-		? state.turnsById.get(state.turnOrder[state.turnOrder.length - 1]!)?.error?.name
-		: undefined;
+	const latestTurnErrorCode =
+		state.turnOrder.length > 0
+			? state.turnsById.get(state.turnOrder[state.turnOrder.length - 1]!)?.error?.name
+			: undefined;
 	const errorNotice = error ? systemErrorNotice(error) : undefined;
-	const writableSessionId = visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
+	const writableSessionId =
+		visibleActiveSession?.scheduled === undefined ? visibleActiveSession?.sessionId : undefined;
 
 	const respond = useCallback(
 		async (response: InteractionResponseInput) => {
@@ -1095,7 +1205,10 @@ export function App({ api, store }: AppProps) {
 	// New sessions inherit the global defaults, so the new-task page edits them
 	// directly instead of requiring an existing configuration session.
 	const updateGlobalModelDefaults = useCallback(
-		async (model: { readonly provider: string; readonly modelId: string } | null, thinkingSelection: ThinkingSelectionView) => {
+		async (
+			model: { readonly provider: string; readonly modelId: string } | null,
+			thinkingSelection: ThinkingSelectionView,
+		) => {
 			try {
 				const next = await api.updateModelSettings({
 					requestId: crypto.randomUUID(),
@@ -1137,17 +1250,14 @@ export function App({ api, store }: AppProps) {
 			);
 	}, [modelSettings]);
 	const globalThinkingSelection = modelSettings?.defaultThinkingSelection ?? "off";
-	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(
-		() => {
-			const selected = modelSettings?.defaultModel;
-			if (!selected) return ["off"];
-			const model = modelSettings.providers
-				.find((provider) => provider.provider === selected.provider)
-				?.models.find((candidate) => candidate.modelId === selected.modelId);
-			return model ? [...model.thinkingLevels] : ["off"];
-		},
-		[modelSettings],
-	);
+	const globalThinkingAvailable = useMemo<ThinkingSelectionView[]>(() => {
+		const selected = modelSettings?.defaultModel;
+		if (!selected) return ["off"];
+		const model = modelSettings.providers
+			.find((provider) => provider.provider === selected.provider)
+			?.models.find((candidate) => candidate.modelId === selected.modelId);
+		return model ? [...model.thinkingLevels] : ["off"];
+	}, [modelSettings]);
 
 	const changePermissionPreset = useCallback(
 		async (sessionId: string, permissionPreset: PermissionPresetView) => {
@@ -1182,9 +1292,11 @@ export function App({ api, store }: AppProps) {
 		}
 	}, [api, reportError, store, t, workspaceWorkflow]);
 
-	const configurationSession = visibleActiveSession ?? (
-		newTaskOpen && visibleNewTaskDraft?.sessionId && activeSession?.sessionId === visibleNewTaskDraft.sessionId ? activeSession : undefined
-	);
+	const configurationSession =
+		visibleActiveSession ??
+		(newTaskOpen && visibleNewTaskDraft?.sessionId && activeSession?.sessionId === visibleNewTaskDraft.sessionId
+			? activeSession
+			: undefined);
 
 	const openPlan = useCallback((sessionId: string, plan: PlanView) => {
 		setPlanPreviewRequest({ sessionId, plan });
@@ -1214,9 +1326,12 @@ export function App({ api, store }: AppProps) {
 		return { disabledSlashCommands: commands, disabledSlashReasons: reasons };
 	}, [configurationSession, newTaskOpen, writableSessionId]);
 
-	const handleSlashCommand = useCallback(async (command: ComposerSlashCommand) => {
-		if (command === "model" || command === "thinking" || command === "mcp") requestComposerControl(command);
-	}, [requestComposerControl]);
+	const handleSlashCommand = useCallback(
+		async (command: ComposerSlashCommand) => {
+			if (command === "model" || command === "thinking" || command === "mcp") requestComposerControl(command);
+		},
+		[requestComposerControl],
+	);
 	const modelControl = configurationSession ? (
 		<ModelSelector
 			available={state.availableModels}
@@ -1259,28 +1374,33 @@ export function App({ api, store }: AppProps) {
 	const permissionSessionId = visibleNewTaskDraft?.sessionId;
 	const permissionSessionOpen = permissionSessionId === undefined || state.activeSessionId === permissionSessionId;
 	const draftCreatePending = workspaceState.draftCreatePending;
-	const permissionView = permissionSessionId && permissionSessionOpen
-		? {
-			constrainedByParent: state.constrainedByParent,
-			sandboxHealth: state.sandboxHealth,
-			activeReview: state.activeReview,
-		}
-		: {
-			constrainedByParent: false,
-			sandboxHealth: "healthy" as const,
-			activeReview: undefined,
-		};
+	const permissionView =
+		permissionSessionId && permissionSessionOpen
+			? {
+					constrainedByParent: state.constrainedByParent,
+					sandboxHealth: state.sandboxHealth,
+					activeReview: state.activeReview,
+				}
+			: {
+					constrainedByParent: false,
+					sandboxHealth: "healthy" as const,
+					activeReview: undefined,
+				};
 	const permissionControl = visibleNewTaskDraft ? (
 		<PermissionSelector
 			activeReview={permissionView.activeReview}
 			constrainedByParent={permissionView.constrainedByParent}
 			disabled={draftBusy || !serverReady || draftCreatePending || !permissionSessionOpen}
-			onChange={(permissionPreset) => permissionSessionId
-				? changePermissionPreset(permissionSessionId, permissionPreset)
-				: workspaceWorkflow.setDraftPermission(permissionPreset)}
+			onChange={(permissionPreset) =>
+				permissionSessionId
+					? changePermissionPreset(permissionSessionId, permissionPreset)
+					: workspaceWorkflow.setDraftPermission(permissionPreset)
+			}
 			onSetupSandbox={api.platform === "win32" ? setupWindowsSandbox : undefined}
 			sandboxHealth={permissionView.sandboxHealth}
-			value={permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset}
+			value={
+				permissionSessionId && permissionSessionOpen ? state.permissionPreset : visibleNewTaskDraft.permissionPreset
+			}
 		/>
 	) : undefined;
 	const openMcpManagement = useCallback(() => {
@@ -1297,8 +1417,10 @@ export function App({ api, store }: AppProps) {
 		}
 	}, [api, reportError]);
 	const openSettings = useCallback(() => {
-		settingsReturnFocusRef.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
-			? document.activeElement : document.querySelector<HTMLElement>(".account-menu-trigger");
+		settingsReturnFocusRef.current =
+			document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+				? document.activeElement
+				: document.querySelector<HTMLElement>(".account-menu-trigger");
 		rememberCurrentNavigation();
 		setSettingsOpen(true);
 	}, [rememberCurrentNavigation]);
@@ -1310,16 +1432,20 @@ export function App({ api, store }: AppProps) {
 		}
 		requestAnimationFrame(() => settingsReturnFocusRef.current?.focus());
 	}, [api.platform]);
-	const deleteScheduledTask = useCallback(async (input: Parameters<MetisDesktopApi["deleteSchedule"]>[0]) => {
-		const result = await api.deleteSchedule(input);
-		scheduleStore.removeTask(result.taskId);
-		setSelectedScheduleTaskId((current) => current === result.taskId ? null : current);
-		return result;
-	}, [api, scheduleStore]);
+	const deleteScheduledTask = useCallback(
+		async (input: Parameters<MetisDesktopApi["deleteSchedule"]>[0]) => {
+			const result = await api.deleteSchedule(input);
+			scheduleStore.removeTask(result.taskId);
+			setSelectedScheduleTaskId((current) => (current === result.taskId ? null : current));
+			return result;
+		},
+		[api, scheduleStore],
+	);
 	const sidebarScheduleTasks = useMemo(
-		() => scheduleState.taskOrder
-			.map((id) => scheduleState.tasksById.get(id))
-			.filter((task): task is ScheduleTaskView => task !== undefined),
+		() =>
+			scheduleState.taskOrder
+				.map((id) => scheduleState.tasksById.get(id))
+				.filter((task): task is ScheduleTaskView => task !== undefined),
 		[scheduleState.taskOrder, scheduleState.tasksById],
 	);
 	const openSkillsDestination = useCallback(() => {
@@ -1336,18 +1462,24 @@ export function App({ api, store }: AppProps) {
 		setDestination("schedules");
 		setSelectedScheduleTaskId(null);
 	}, [currentNavigationLocation, rememberCurrentNavigation]);
-	const openSchedule = useCallback((taskId: string) => {
-		if (currentNavigationLocation.view !== "schedules" || currentNavigationLocation.taskId !== taskId) {
-			rememberCurrentNavigation();
-		}
-		setDestination("schedules");
-		setSelectedScheduleTaskId(taskId);
-	}, [currentNavigationLocation, rememberCurrentNavigation]);
+	const openSchedule = useCallback(
+		(taskId: string) => {
+			if (currentNavigationLocation.view !== "schedules" || currentNavigationLocation.taskId !== taskId) {
+				rememberCurrentNavigation();
+			}
+			setDestination("schedules");
+			setSelectedScheduleTaskId(taskId);
+		},
+		[currentNavigationLocation, rememberCurrentNavigation],
+	);
 	const [sidebarClosing, setSidebarClosing] = useState(false);
 	const sidebarClosingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const hideSessionSidebar = useCallback(() => {
-		const runtime = globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean; process?: { env?: { NODE_ENV?: string } } };
+		const runtime = globalThis as unknown as {
+			IS_REACT_ACT_ENVIRONMENT?: boolean;
+			process?: { env?: { NODE_ENV?: string } };
+		};
 		const isActEnv = Boolean(runtime.IS_REACT_ACT_ENVIRONMENT || runtime.process?.env?.NODE_ENV === "test");
 		if (isActEnv) {
 			setSessionsSidebarOpen(false);
@@ -1381,47 +1513,50 @@ export function App({ api, store }: AppProps) {
 		(group: ProjectSessionGroup) => workspaceState.busyProjectKeys.has(sessionProjectKey(group.mode, group.cwd)),
 		[workspaceState.busyProjectKeys],
 	);
-	const sidebarWorkspace = useMemo(() => ({
-		busy: !bootstrapped || draftBusy || !serverReady,
-		mode,
-		newTaskOpen,
-		onCreateProjectSession: createEmptyProjectSession,
-		onDeleteProject: deleteProject,
-		onDeleteSession: deleteSession,
-		onModeChange: changeMode,
-		onNewTask: startNewTask,
-		onOpen: openVisibleSession,
-		onCopySessionTitle: copySessionTitle,
-		onPinProject: pinProject,
-		onPinSession: pinSession,
-		onPreviewProjectDelete: previewProjectDelete,
-		onRenameProject: renameProject,
-		onRenameSession: renameSession,
-		pinnedSessionIds,
-		preferences: projectPreferences,
-		projectBusy: sidebarProjectBusy,
-	}), [
-		bootstrapped,
-		changeMode,
-		copySessionTitle,
-		createEmptyProjectSession,
-		deleteProject,
-		deleteSession,
-		draftBusy,
-		mode,
-		newTaskOpen,
-		openVisibleSession,
-		pinProject,
-		pinSession,
-		pinnedSessionIds,
-		previewProjectDelete,
-		projectPreferences,
-		renameProject,
-		renameSession,
-		serverReady,
-		sidebarProjectBusy,
-		startNewTask,
-	]);
+	const sidebarWorkspace = useMemo(
+		() => ({
+			busy: !bootstrapped || draftBusy || !serverReady,
+			mode,
+			newTaskOpen,
+			onCreateProjectSession: createEmptyProjectSession,
+			onDeleteProject: deleteProject,
+			onDeleteSession: deleteSession,
+			onModeChange: changeMode,
+			onNewTask: startNewTask,
+			onOpen: openVisibleSession,
+			onCopySessionTitle: copySessionTitle,
+			onPinProject: pinProject,
+			onPinSession: pinSession,
+			onPreviewProjectDelete: previewProjectDelete,
+			onRenameProject: renameProject,
+			onRenameSession: renameSession,
+			pinnedSessionIds,
+			preferences: projectPreferences,
+			projectBusy: sidebarProjectBusy,
+		}),
+		[
+			bootstrapped,
+			changeMode,
+			copySessionTitle,
+			createEmptyProjectSession,
+			deleteProject,
+			deleteSession,
+			draftBusy,
+			mode,
+			newTaskOpen,
+			openVisibleSession,
+			pinProject,
+			pinSession,
+			pinnedSessionIds,
+			previewProjectDelete,
+			projectPreferences,
+			renameProject,
+			renameSession,
+			serverReady,
+			sidebarProjectBusy,
+			startNewTask,
+		],
+	);
 
 	const isCollapsed = !sessionsSidebarOpen || sidebarClosing;
 	const toggleSessionsSidebar = () => {
@@ -1431,54 +1566,57 @@ export function App({ api, store }: AppProps) {
 
 	// Shared context handed to every visible SessionChatView. Kept referentially
 	// stable so memoized chat views only re-render on their own bucket changes.
-	const chatView = useMemo<SessionChatViewContext>(() => ({
-		api,
-		bootstrapped,
-		composerFormRef: conversationComposerFormRef,
-		registerSubmit: registerChatSubmit,
-		unregisterSubmit: unregisterChatSubmit,
-		onChangeModel: changeModel,
-		onChangePermissionPreset: changePermissionPreset,
-		onChangeThinking: changeThinking,
-		onClearError: clearError,
-		onError: reportError,
-		onFork: forkFromReply,
-		onManageMcp: openMcpManagement,
-		onManageSkills: openSkillsDestination,
-		onNotice: setNotice,
-		onOpenKnowledge: openKnowledge,
-		onOpenPlan: openPlan,
-		onPickFiles: pickAttachmentFiles,
-		onPreviewDeliveredFile: handlePreviewDeliveredFile,
-		onResolveDroppedFiles: api.resolveDroppedFiles,
-		onRespond: respond,
-		onSetupSandbox: api.platform === "win32" ? setupWindowsSandbox : undefined,
-		reducedMotion,
-		skillCatalogEpoch,
-		store,
-	}), [
-		api,
-		bootstrapped,
-		changeModel,
-		changePermissionPreset,
-		changeThinking,
-		clearError,
-		forkFromReply,
-		handlePreviewDeliveredFile,
-		openKnowledge,
-		openMcpManagement,
-		openPlan,
-		openSkillsDestination,
-		pickAttachmentFiles,
-		reducedMotion,
-		registerChatSubmit,
-		reportError,
-		respond,
-		setupWindowsSandbox,
-		skillCatalogEpoch,
-		store,
-		unregisterChatSubmit,
-	]);
+	const chatView = useMemo<SessionChatViewContext>(
+		() => ({
+			api,
+			bootstrapped,
+			composerFormRef: conversationComposerFormRef,
+			registerSubmit: registerChatSubmit,
+			unregisterSubmit: unregisterChatSubmit,
+			onChangeModel: changeModel,
+			onChangePermissionPreset: changePermissionPreset,
+			onChangeThinking: changeThinking,
+			onClearError: clearError,
+			onError: reportError,
+			onFork: forkFromReply,
+			onManageMcp: openMcpManagement,
+			onManageSkills: openSkillsDestination,
+			onNotice: setNotice,
+			onOpenKnowledge: openKnowledge,
+			onOpenPlan: openPlan,
+			onPickFiles: pickAttachmentFiles,
+			onPreviewDeliveredFile: handlePreviewDeliveredFile,
+			onResolveDroppedFiles: api.resolveDroppedFiles,
+			onRespond: respond,
+			onSetupSandbox: api.platform === "win32" ? setupWindowsSandbox : undefined,
+			reducedMotion,
+			skillCatalogEpoch,
+			store,
+		}),
+		[
+			api,
+			bootstrapped,
+			changeModel,
+			changePermissionPreset,
+			changeThinking,
+			clearError,
+			forkFromReply,
+			handlePreviewDeliveredFile,
+			openKnowledge,
+			openMcpManagement,
+			openPlan,
+			openSkillsDestination,
+			pickAttachmentFiles,
+			reducedMotion,
+			registerChatSubmit,
+			reportError,
+			respond,
+			setupWindowsSandbox,
+			skillCatalogEpoch,
+			store,
+			unregisterChatSubmit,
+		],
+	);
 
 	const homePage = visibleNewTaskDraft ? (
 		<>
@@ -1545,209 +1683,267 @@ export function App({ api, store }: AppProps) {
 	) : null;
 
 	return (
-		<FileSelectionProvider
-			enabled={Boolean(serverReady && !visibleInteraction)}
-			onSubmit={submitFileSelection}
-		>
-		<ConversationQuoteProvider enabled={Boolean(serverReady && !visibleInteraction)}>
-
-		{api.platform === "win32" && (
-			<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
-				<button
-					aria-label={t(sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar")}
-					aria-pressed={sessionsSidebarOpen && !sidebarClosing}
-					className="sessions-sidebar-toggle-fixed"
-					onClick={toggleSessionsSidebar}
-					type="button"
-				>
-					<SidebarSimple aria-hidden="true" size={16} />
-				</button>
-				<button
-					aria-label={t("Go back")}
-					disabled={navigationBusy || navigationBack.length === 0}
-					onClick={navigateBack}
-					type="button"
-				>
-					<ArrowLeft aria-hidden="true" size={16} />
-				</button>
-				<button
-					aria-label={t("Go forward")}
-					disabled={navigationBusy || navigationForward.length === 0}
-					onClick={navigateForward}
-					type="button"
-				>
-					<ArrowRight aria-hidden="true" size={16} />
-				</button>
-			</nav>
-		)}
-		<div
-			aria-hidden={settingsOpen || undefined}
-			className={`app-shell${isCollapsed ? " sessions-sidebar-collapsed" : ""}`}
-			data-fullscreen={fullscreen || undefined}
-			inert={settingsOpen || undefined}
-			style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
-		>
-			{sessionsSidebarOpen && <SessionSidebar
-				destination={destination}
-				isClosing={sidebarClosing}
-				onDeleteSchedule={deleteScheduledTask}
-				onSettings={openSettings}
-				onUpdate={startDesktopUpdate}
-				onCheckUpdate={checkDesktopUpdate}
-				checkingUpdate={checkingUpdate}
-				onSkills={openSkillsDestination}
-				onSchedules={openSchedulesDestination}
-				onOpenSchedule={openSchedule}
-				onWidthChange={updateSessionSidebarWidth}
-				footerExtra={(
-					<ReleaseNotesPopover
-						loadChangelog={api.getChangelog}
-						availableVersion={"version" in updateState ? updateState.version : null}
-					/>
-				)}
-				scheduleTasks={sidebarScheduleTasks}
-				selectedScheduleTaskId={selectedScheduleTaskId}
-				state={sidebarState}
-				updateState={updateState}
-				width={sessionSidebarWidth}
-				workspace={sidebarWorkspace}
-			/>}
-			<main
-				className="workspace"
-			>
-				<header
-				className="workspace-titlebar"
-				data-active-session-id={visibleActiveSession?.sessionId}
-			>
-					{api.platform !== "win32" && (
+		<FileSelectionProvider enabled={Boolean(serverReady && !visibleInteraction)} onSubmit={submitFileSelection}>
+			<ConversationQuoteProvider enabled={Boolean(serverReady && !visibleInteraction)}>
+				{api.platform === "win32" && (
+					<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
 						<button
-							aria-label={t(sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar")}
+							aria-label={t(
+								sessionsSidebarOpen && !sidebarClosing ? "Hide sessions sidebar" : "Show sessions sidebar",
+							)}
 							aria-pressed={sessionsSidebarOpen && !sidebarClosing}
 							className="sessions-sidebar-toggle-fixed"
 							onClick={toggleSessionsSidebar}
 							type="button"
 						>
-							<SidebarSimple aria-hidden="true" size={17} />
+							<SidebarSimple aria-hidden="true" size={16} />
 						</button>
-					)}
-					<div className="workspace-titlebar-tabs" ref={setTitlebarTabsSlot} style={{ right: toolsTitlebarReserved }} />
-					{toolsSidebarAvailable && (
-						<div
-							className={`workspace-titlebar-tools${toolsSidebarOpen ? " is-open" : ""}${toolsSidebarClosing ? " is-closing" : ""}`}
+						<button
+							aria-label={t("Go back")}
+							disabled={navigationBusy || navigationBack.length === 0}
+							onClick={navigateBack}
+							type="button"
 						>
-							<div className="workspace-titlebar-tools-slot" ref={setTitlebarToolsSlot} style={toolsSidebarOpen ? { width: toolsSidebarWidth } : undefined} />
-							<button
-								aria-label={t(toolsSidebarOpen && !toolsSidebarClosing ? "Hide tools sidebar" : "Show tools sidebar")}
-								aria-pressed={toolsSidebarOpen && !toolsSidebarClosing}
-								className="details-sidebar-toggle"
-								onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
-								type="button"
-							>
-								<SidebarSimple aria-hidden="true" size={17} />
-							</button>
+							<ArrowLeft aria-hidden="true" size={16} />
+						</button>
+						<button
+							aria-label={t("Go forward")}
+							disabled={navigationBusy || navigationForward.length === 0}
+							onClick={navigateForward}
+							type="button"
+						>
+							<ArrowRight aria-hidden="true" size={16} />
+						</button>
+					</nav>
+				)}
+				<div
+					aria-hidden={settingsOpen || undefined}
+					className={`app-shell${isCollapsed ? " sessions-sidebar-collapsed" : ""}`}
+					data-fullscreen={fullscreen || undefined}
+					inert={settingsOpen || undefined}
+					style={{ "--sidebar-width": `${sessionSidebarWidth}px` } as CSSProperties}
+				>
+					{sessionsSidebarOpen && (
+						<SessionSidebar
+							destination={destination}
+							isClosing={sidebarClosing}
+							onDeleteSchedule={deleteScheduledTask}
+							onSettings={openSettings}
+							onUpdate={startDesktopUpdate}
+							onCheckUpdate={checkDesktopUpdate}
+							checkingUpdate={checkingUpdate}
+							onSkills={openSkillsDestination}
+							onSchedules={openSchedulesDestination}
+							onOpenSchedule={openSchedule}
+							onWidthChange={updateSessionSidebarWidth}
+							footerExtra={
+								<ReleaseNotesPopover
+									loadChangelog={api.getChangelog}
+									availableVersion={"version" in updateState ? updateState.version : null}
+								/>
+							}
+							scheduleTasks={sidebarScheduleTasks}
+							selectedScheduleTaskId={selectedScheduleTaskId}
+							state={sidebarState}
+							updateState={updateState}
+							width={sessionSidebarWidth}
+							workspace={sidebarWorkspace}
+						/>
+					)}
+					<main className="workspace">
+						<header className="workspace-titlebar" data-active-session-id={visibleActiveSession?.sessionId}>
+							{api.platform !== "win32" && (
+								<button
+									aria-label={t(
+										sessionsSidebarOpen && !sidebarClosing
+											? "Hide sessions sidebar"
+											: "Show sessions sidebar",
+									)}
+									aria-pressed={sessionsSidebarOpen && !sidebarClosing}
+									className="sessions-sidebar-toggle-fixed"
+									onClick={toggleSessionsSidebar}
+									type="button"
+								>
+									<SidebarSimple aria-hidden="true" size={17} />
+								</button>
+							)}
+							<div
+								className="workspace-titlebar-tabs"
+								ref={setTitlebarTabsSlot}
+								style={{ right: toolsTitlebarReserved }}
+							/>
+							{toolsSidebarAvailable && (
+								<div
+									className={`workspace-titlebar-tools${toolsSidebarOpen ? " is-open" : ""}${toolsSidebarClosing ? " is-closing" : ""}`}
+								>
+									<div
+										className="workspace-titlebar-tools-slot"
+										ref={setTitlebarToolsSlot}
+										style={toolsSidebarOpen ? { width: toolsSidebarWidth } : undefined}
+									/>
+									<button
+										aria-label={t(
+											toolsSidebarOpen && !toolsSidebarClosing ? "Hide tools sidebar" : "Show tools sidebar",
+										)}
+										aria-pressed={toolsSidebarOpen && !toolsSidebarClosing}
+										className="details-sidebar-toggle"
+										onClick={() => setToolsSidebar(!(toolsSidebarOpen && !toolsSidebarClosing))}
+										type="button"
+									>
+										<SidebarSimple aria-hidden="true" size={17} />
+									</button>
+								</div>
+							)}
+						</header>
+						<div className="system-notice-stack">
+							{state.supervisor.state === "failed" && (
+								<SystemNotice
+									action={{ label: "Retry", onClick: () => void api.retryServer().catch(reportError) }}
+									message={state.supervisor.failure || "App Server could not recover."}
+									title="Metis service stopped"
+									tone="error"
+								/>
+							)}
+							{state.supervisor.state === "restarting" && (
+								<SystemNotice title="App Server is recovering. Your saved session is safe." tone="info" />
+							)}
+							{visibleActiveSession && (
+								<RecoveryBanner errorCode={latestTurnErrorCode} session={visibleActiveSession} />
+							)}
+							{errorNotice && (
+								<SystemNotice
+									message={errorNotice.message}
+									onDismiss={clearError}
+									title={errorNotice.title}
+									tone="error"
+								/>
+							)}
+							{!errorNotice && updateNotice && (
+								<SystemNotice
+									message={updateNotice.message}
+									onDismiss={() => setUpdateNotice(null)}
+									title={updateNotice.title}
+									tone={updateNotice.tone}
+								/>
+							)}
+							{!errorNotice && !updateNotice && notice && (
+								<SystemNotice onDismiss={() => setNotice(null)} title={notice} tone="info" />
+							)}
+							{latestNotification && !errorNotice && !updateNotice && !notice && (
+								<SystemNotice
+									key={latestNotification.notificationId}
+									onDismiss={() =>
+										store.dismissNotifications(
+											visibleNotifications.map((notification) => notification.notificationId),
+										)
+									}
+									title={
+										latestNotification.translation
+											? t(latestNotification.translation.key, latestNotification.translation.values)
+											: latestNotification.message
+									}
+									tone={latestNotification.level}
+								/>
+							)}
 						</div>
-					)}
-				</header>
-				<div className="system-notice-stack">
-					{state.supervisor.state === "failed" && (
-						<SystemNotice
-							action={{ label: "Retry", onClick: () => void api.retryServer().catch(reportError) }}
-							message={state.supervisor.failure || "App Server could not recover."}
-							title="Metis service stopped"
-							tone="error"
-						/>
-					)}
-					{state.supervisor.state === "restarting" && (
-						<SystemNotice title="App Server is recovering. Your saved session is safe." tone="info" />
-					)}
-					{visibleActiveSession && <RecoveryBanner errorCode={latestTurnErrorCode} session={visibleActiveSession} />}
-					{errorNotice && (
-						<SystemNotice message={errorNotice.message} onDismiss={clearError} title={errorNotice.title} tone="error" />
-					)}
-					{!errorNotice && updateNotice && (
-						<SystemNotice message={updateNotice.message} onDismiss={() => setUpdateNotice(null)} title={updateNotice.title} tone={updateNotice.tone} />
-					)}
-					{!errorNotice && !updateNotice && notice && (
-						<SystemNotice onDismiss={() => setNotice(null)} title={notice} tone="info" />
-					)}
-					{latestNotification && !errorNotice && !updateNotice && !notice && (
-						<SystemNotice
-							key={latestNotification.notificationId}
-							onDismiss={() => store.dismissNotifications(visibleNotifications.map((notification) => notification.notificationId))}
-							title={latestNotification.translation ? t(latestNotification.translation.key, latestNotification.translation.values) : latestNotification.message}
-							tone={latestNotification.level}
-						/>
-					)}
+						{!bootstrapped ? null : destination === "skills" ? (
+							<PluginsPanel
+								api={api}
+								initialSection={pluginSection}
+								onCreateSkillWithMetis={createSkillWithMetis}
+								onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)}
+								preferences={projectPreferences}
+								serverReady={serverReady}
+								state={state}
+							/>
+						) : destination === "schedules" && mode === "chat" ? (
+							<ScheduledTasksPanel
+								api={api}
+								onCreateWithMetis={createScheduleWithMetis}
+								onOpenSession={openScheduledSession}
+								onSelectTask={setSelectedScheduleTaskId}
+								selectedTaskId={selectedScheduleTaskId}
+								serverReady={serverReady}
+								sessions={state.sessionOrder
+									.map((id) => state.sessionsById.get(id))
+									.filter((session): session is SessionSummary => session !== undefined)}
+								store={scheduleStore}
+							/>
+						) : null}
+						{bootstrapped ? (
+							<SessionWorkspaceView
+								api={api}
+								chat={newTaskOpen || !visibleActiveSession ? homePage : null}
+								chatView={chatView}
+								chatCwd={toolsSession?.cwd ?? null}
+								chatFocusRequest={chatFocusRequest}
+								inlineInteractions={inlineInteractions}
+								chatIsDraft={newTaskOpen}
+								chatSessionId={toolsSession?.sessionId ?? null}
+								cleanupSessionIds={toolCleanupSessionIds}
+								closeTabRequest={closeTabRequest}
+								mode={mode}
+								onActivateSession={activateBrowserSession}
+								onChatSession={focusWorkspaceSession}
+								onCleanupSessionIdsHandled={handleToolCleanupHandled}
+								onDirtySessionIdsChange={handleDirtySessionIdsChange}
+								onError={reportError}
+								onLiveSessionsChange={handleLiveSessionsChange}
+								onNewSession={(target) => {
+									if (target) void createEmptySessionInProject(target.mode, target.cwd);
+									else startNewTask();
+								}}
+								planPreviewRequest={planPreviewRequest}
+								previewRequest={previewRequest}
+								knowledgeRequest={knowledgeRequest}
+								process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
+								projectFor={projectFor}
+								sessionsById={state.sessionsById}
+								sessionTitleFor={sessionTitleFor}
+								store={store}
+								theme={resolvedTheme}
+								titlebarTabsSlot={titlebarTabsSlot}
+								titlebarToolsSlot={toolsSidebarAvailable ? titlebarToolsSlot : null}
+								toolsSidebarOpen={toolsSidebarAvailable && toolsSidebarOpen}
+								toolsSidebarClosing={toolsSidebarAvailable && toolsSidebarClosing}
+								toolsSidebarWidth={toolsSidebarWidth}
+								onToolsSidebarOpenChange={setToolsSidebar}
+								onToolsSidebarWidthChange={updateToolsSidebarWidth}
+								visible={
+									!settingsOpen &&
+									destination === "tasks" &&
+									(newTaskOpen || visibleActiveSession !== undefined)
+								}
+							/>
+						) : null}
+						<div className="sr-only" aria-live="polite">
+							{t(message)}
+						</div>
+					</main>
+					<InteractionHost
+						interaction={globalInteraction}
+						key={globalInteraction?.interactionId ?? "none"}
+						onRespond={respond}
+						sandboxHealth={
+							globalInteraction
+								? state.sessions.get(globalInteraction.sessionId)?.sandboxHealth
+								: state.sandboxHealth
+						}
+					/>
 				</div>
-				{!bootstrapped ? null : destination === "skills" ? (
-					<PluginsPanel api={api} initialSection={pluginSection} onCreateSkillWithMetis={createSkillWithMetis} onSkillsChanged={() => setSkillCatalogEpoch((value) => value + 1)} preferences={projectPreferences} serverReady={serverReady} state={state} />
-				) : destination === "schedules" && mode === "chat" ? (
-					<ScheduledTasksPanel api={api} onCreateWithMetis={createScheduleWithMetis} onOpenSession={openScheduledSession} onSelectTask={setSelectedScheduleTaskId} selectedTaskId={selectedScheduleTaskId} serverReady={serverReady} sessions={state.sessionOrder.map((id) => state.sessionsById.get(id)).filter((session): session is SessionSummary => session !== undefined)} store={scheduleStore} />
-				) : null}
-				{bootstrapped ? (
-					<SessionWorkspaceView
+				{settingsOpen ? (
+					<SettingsDialog
 						api={api}
-						chat={newTaskOpen || !visibleActiveSession ? homePage : null}
-						chatView={chatView}
-						chatCwd={toolsSession?.cwd ?? null}
-						chatFocusRequest={chatFocusRequest}
-						inlineInteractions={inlineInteractions}
-						chatIsDraft={newTaskOpen}
-						chatSessionId={toolsSession?.sessionId ?? null}
-						cleanupSessionIds={toolCleanupSessionIds}
-						closeTabRequest={closeTabRequest}
-						mode={mode}
-						onActivateSession={activateBrowserSession}
-						onChatSession={focusWorkspaceSession}
-						onCleanupSessionIdsHandled={handleToolCleanupHandled}
-						onDirtySessionIdsChange={handleDirtySessionIdsChange}
-						onError={reportError}
-						onLiveSessionsChange={handleLiveSessionsChange}
-						onNewSession={(target) => {
-							if (target) void createEmptySessionInProject(target.mode, target.cwd);
-							else startNewTask();
-						}}
-						planPreviewRequest={planPreviewRequest}
-						previewRequest={previewRequest}
-						knowledgeRequest={knowledgeRequest}
-						process={visibleActiveSession?.sessionId === state.activeSessionId ? state.process : undefined}
-						projectFor={projectFor}
-						sessionsById={state.sessionsById}
-						sessionTitleFor={sessionTitleFor}
-						store={store}
-						theme={resolvedTheme}
-						titlebarTabsSlot={titlebarTabsSlot}
-						titlebarToolsSlot={toolsSidebarAvailable ? titlebarToolsSlot : null}
-						toolsSidebarOpen={toolsSidebarAvailable && toolsSidebarOpen}
-						toolsSidebarClosing={toolsSidebarAvailable && toolsSidebarClosing}
-						toolsSidebarWidth={toolsSidebarWidth}
-						onToolsSidebarOpenChange={setToolsSidebar}
-						onToolsSidebarWidthChange={updateToolsSidebarWidth}
-						visible={!settingsOpen && destination === "tasks" && (newTaskOpen || visibleActiveSession !== undefined)}
+						generalPreferences={generalPreferences}
+						onClose={closeSettings}
+						onGeneralPreferencesChange={setGeneralPreferences}
+						onThemeChange={setTheme}
+						serverReady={serverReady}
+						sessionId={state.activeSessionId ?? undefined}
+						theme={theme}
 					/>
 				) : null}
-					<div className="sr-only" aria-live="polite">{t(message)}</div>
-			</main>
-			<InteractionHost
-				interaction={globalInteraction}
-				key={globalInteraction?.interactionId ?? "none"}
-				onRespond={respond}
-				sandboxHealth={globalInteraction ? state.sessions.get(globalInteraction.sessionId)?.sandboxHealth : state.sandboxHealth}
-			/>
-		</div>
-		{settingsOpen ? (
-			<SettingsDialog
-				api={api}
-				generalPreferences={generalPreferences}
-				onClose={closeSettings}
-				onGeneralPreferencesChange={setGeneralPreferences}
-				onThemeChange={setTheme}
-				serverReady={serverReady}
-				sessionId={state.activeSessionId ?? undefined}
-				theme={theme}
-			/>
-		) : null}
-		</ConversationQuoteProvider>
+			</ConversationQuoteProvider>
 		</FileSelectionProvider>
 	);
 }

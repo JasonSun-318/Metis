@@ -19,7 +19,9 @@ it("opens separately, handles Escape, and restores focus to its trigger", async 
 		const [open, setOpen] = useState(false);
 		return (
 			<>
-				<button onClick={() => setOpen(true)}>Manage</button>
+				<button type="button" onClick={() => setOpen(true)}>
+					Manage
+				</button>
 				{open && (
 					<MemoryDialog title="Memories" onClose={() => setOpen(false)}>
 						<input aria-label="Search" />
@@ -89,7 +91,9 @@ it("does not dismiss while a save is pending", async () => {
 			),
 		);
 		expect(container.querySelector<HTMLButtonElement>(".memory-dialog-close")!.disabled).toBe(true);
-		await act(async () => container.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })));
+		await act(async () =>
+			container.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })),
+		);
 		expect(onClose).not.toHaveBeenCalled();
 	} finally {
 		await act(async () => root.unmount());

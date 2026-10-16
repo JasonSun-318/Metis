@@ -19,9 +19,10 @@ const CHANGELOG: DesktopChangelog = {
 };
 
 function findButton(container: ParentNode, label: string): HTMLButtonElement {
-	const match = [...container.querySelectorAll<HTMLButtonElement>("button"), ...document.querySelectorAll<HTMLButtonElement>(".release-notes-popover button")].find(
-		(button) => button.getAttribute("aria-label") === label || button.textContent?.trim() === label,
-	);
+	const match = [
+		...container.querySelectorAll<HTMLButtonElement>("button"),
+		...document.querySelectorAll<HTMLButtonElement>(".release-notes-popover button"),
+	].find((button) => button.getAttribute("aria-label") === label || button.textContent?.trim() === label);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
 }
@@ -57,7 +58,15 @@ describe("ReleaseNotesPopover", () => {
 			await view(root, vi.fn().mockResolvedValue(CHANGELOG));
 			const trigger = findButton(container, "Open unread release notes");
 			vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue({
-				left: 280, right: 306, top: 700, bottom: 728, width: 26, height: 28, x: 280, y: 700, toJSON: () => ({}),
+				left: 280,
+				right: 306,
+				top: 700,
+				bottom: 728,
+				width: 26,
+				height: 28,
+				x: 280,
+				y: 700,
+				toJSON: () => ({}),
 			});
 			await act(async () => trigger.click());
 			const panel = document.querySelector<HTMLElement>(".release-notes-popover")!;
@@ -65,7 +74,9 @@ describe("ReleaseNotesPopover", () => {
 			expect(panel.style.left).toBe("8px");
 			expect(panel.style.bottom).toBe("76px");
 			expect(document.activeElement).toBe(findButton(panel, "Close release notes"));
-			await act(async () => panel.querySelector("summary")!.dispatchEvent(new Event("pointerdown", { bubbles: true })));
+			await act(async () =>
+				panel.querySelector("summary")!.dispatchEvent(new Event("pointerdown", { bubbles: true })),
+			);
 			expect(document.querySelector(".release-notes-popover")).toBe(panel);
 			viewportWidth = 300;
 			await act(async () => window.dispatchEvent(new Event("resize")));
@@ -73,7 +84,9 @@ describe("ReleaseNotesPopover", () => {
 			await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 			expect(document.querySelector(".release-notes-popover")).toBeNull();
 			expect(document.activeElement).toBe(trigger);
-		} finally { await act(async () => root.unmount()); }
+		} finally {
+			await act(async () => root.unmount());
+		}
 	});
 
 	it.each(["failure", "stale history"])("keeps a discovered update unread when refresh returns %s", async (result) => {
@@ -86,7 +99,9 @@ describe("ReleaseNotesPopover", () => {
 		try {
 			await view(root, loadChangelog);
 			if (result === "failure") loadChangelog.mockRejectedValue(new Error("offline"));
-			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			await act(async () =>
+				root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />),
+			);
 			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
 			await act(async () => findButton(container, "Open unread release notes").click());
 			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
@@ -107,14 +122,17 @@ describe("ReleaseNotesPopover", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		let root = createRoot(container);
-		const loadChangelog = vi.fn()
+		const loadChangelog = vi
+			.fn()
 			.mockResolvedValueOnce({ schemaVersion: 1, releases: [CHANGELOG.releases[1]!] })
 			.mockResolvedValue(CHANGELOG);
 		try {
 			await view(root, loadChangelog);
 			await act(async () => root.unmount());
 			root = createRoot(container);
-			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			await act(async () =>
+				root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />),
+			);
 			expect(loadChangelog).toHaveBeenCalledTimes(2);
 			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
 		} finally {
@@ -128,12 +146,20 @@ describe("ReleaseNotesPopover", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		let resolveOld!: (changelog: DesktopChangelog) => void;
-		const loadChangelog = vi.fn()
-			.mockImplementationOnce(() => new Promise<DesktopChangelog>((resolve) => { resolveOld = resolve; }))
+		const loadChangelog = vi
+			.fn()
+			.mockImplementationOnce(
+				() =>
+					new Promise<DesktopChangelog>((resolve) => {
+						resolveOld = resolve;
+					}),
+			)
 			.mockResolvedValue(CHANGELOG);
 		try {
 			await view(root, loadChangelog);
-			await act(async () => root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />));
+			await act(async () =>
+				root.render(<ReleaseNotesPopover loadChangelog={loadChangelog} availableVersion="0.82.0" />),
+			);
 			await act(async () => findButton(container, "Open unread release notes").click());
 			await act(async () => resolveOld({ schemaVersion: 1, releases: [CHANGELOG.releases[1]!] }));
 			expect(document.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
@@ -184,7 +210,8 @@ describe("ReleaseNotesPopover", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const loadChangelog = vi.fn()
+		const loadChangelog = vi
+			.fn()
 			.mockResolvedValueOnce({ schemaVersion: 1, releases: [CHANGELOG.releases[1]!] })
 			.mockResolvedValueOnce(CHANGELOG);
 		await view(root, loadChangelog);
@@ -199,7 +226,8 @@ describe("ReleaseNotesPopover", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const loadChangelog = vi.fn()
+		const loadChangelog = vi
+			.fn()
 			.mockRejectedValueOnce(new Error("offline"))
 			.mockRejectedValueOnce(new Error("still offline"))
 			.mockResolvedValueOnce(CHANGELOG)
@@ -240,7 +268,9 @@ describe("ReleaseNotesPopover", () => {
 			trigger.click();
 			await new Promise((resolve) => setTimeout(resolve, 0));
 		});
-		expect(document.querySelector('[role="status"]')?.textContent).toBe("No release notes are available yet.");
+		expect(document.querySelector('output, [role="status"]')?.textContent).toBe(
+			"No release notes are available yet.",
+		);
 		await act(async () => document.body.dispatchEvent(new Event("pointerdown", { bubbles: true })));
 		expect(document.querySelector('[role="dialog"]')).toBeNull();
 		expect(document.activeElement).toBe(trigger);

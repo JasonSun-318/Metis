@@ -1,7 +1,7 @@
+import type { CustomAgentTypeView } from "@metis/app-protocol";
 import { CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { CustomAgentTypeView } from "@metis/app-protocol";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
@@ -42,7 +42,10 @@ function draftFromType(view: CustomAgentTypeView): AgentTypeDraft {
 	};
 }
 
-export function AgentTypesSettingsPanel({ api, serverReady }: {
+export function AgentTypesSettingsPanel({
+	api,
+	serverReady,
+}: {
 	readonly api: Pick<MetisDesktopApi, "listAgentTypes" | "upsertAgentType" | "removeAgentType">;
 	readonly serverReady: boolean;
 }) {
@@ -59,6 +62,7 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 
 	const reload = useCallback(() => setRequest((value) => value + 1), []);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(request): Retry requests explicitly reload the agent type catalog.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
@@ -81,18 +85,9 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 		};
 	}, [api, request, serverReady]);
 
-	const builtIn = useMemo(
-		() => types.filter((type) => type.builtIn && matchesFilter(type, filter)),
-		[filter, types],
-	);
-	const custom = useMemo(
-		() => types.filter((type) => !type.builtIn && matchesFilter(type, filter)),
-		[filter, types],
-	);
-	const promptBytes = useMemo(
-		() => (draft ? new TextEncoder().encode(draft.systemPrompt).byteLength : 0),
-		[draft],
-	);
+	const builtIn = useMemo(() => types.filter((type) => type.builtIn && matchesFilter(type, filter)), [filter, types]);
+	const custom = useMemo(() => types.filter((type) => !type.builtIn && matchesFilter(type, filter)), [filter, types]);
+	const promptBytes = useMemo(() => (draft ? new TextEncoder().encode(draft.systemPrompt).byteLength : 0), [draft]);
 
 	const startCreate = () => {
 		setDraft({ ...EMPTY_DRAFT });
@@ -149,7 +144,8 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 	};
 
 	const remove = async (view: CustomAgentTypeView) => {
-		if (!window.confirm(t("Delete agent type {{id}}? Existing agents keep their type name.", { id: view.id }))) return;
+		if (!window.confirm(t("Delete agent type {{id}}? Existing agents keep their type name.", { id: view.id })))
+			return;
 		try {
 			await api.removeAgentType({ requestId: crypto.randomUUID(), id: view.id });
 			if (draft?.id === view.id) setDraft(null);
@@ -160,7 +156,7 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 	};
 
 	if (loading) {
-		return <div aria-label={t("Agent types")} className="settings-loading" role="status" />;
+		return <output aria-label={t("Agent types")} className="status-block settings-loading" />;
 	}
 	if (loadError) {
 		return (
@@ -179,7 +175,11 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 		return (
 			<div className="settings-page agent-types-page">
 				<section aria-label={t("Agent types")} className="settings-section agent-types-editor">
-					{formError && <p className="agent-types-form-error settings-inline-error" role="alert">{formError}</p>}
+					{formError && (
+						<p className="agent-types-form-error settings-inline-error" role="alert">
+							{formError}
+						</p>
+					)}
 					<div className="agent-types-row">
 						<label className="agent-types-field">
 							<span>{t("Display name")}</span>
@@ -210,7 +210,9 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 					</label>
 					<div className="agent-types-field">
 						<span>{t("Allowed tools")}</span>
-						<p className="agent-types-hint">{t("Effective tools are the intersection of this cap and the parent's delegatable tools.")}</p>
+						<p className="agent-types-hint">
+							{t("Effective tools are the intersection of this cap and the parent's delegatable tools.")}
+						</p>
 						<div className="agent-types-tools">
 							{TOOL_PALETTE.map((tool) => (
 								<label className="agent-types-tool" key={tool}>
@@ -239,7 +241,9 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 							<MenuSelect
 								ariaLabel={t("Write policy")}
 								disabled={!serverReady || saving}
-								onChange={(value) => setDraft({ ...draft, writePolicy: value as AgentTypeDraft["writePolicy"] })}
+								onChange={(value) =>
+									setDraft({ ...draft, writePolicy: value as AgentTypeDraft["writePolicy"] })
+								}
 								options={[
 									{ label: t("Inherit"), value: "inherit" },
 									{ label: t("Deny writes"), value: "deny" },
@@ -265,13 +269,25 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 							rows={6}
 							value={draft.systemPrompt}
 						/>
-						<span className="agent-types-hint">{promptBytes.toLocaleString()} / {MAX_SYSTEM_PROMPT_BYTES.toLocaleString()} UTF-8 bytes</span>
+						<span className="agent-types-hint">
+							{promptBytes.toLocaleString()} / {MAX_SYSTEM_PROMPT_BYTES.toLocaleString()} UTF-8 bytes
+						</span>
 					</label>
 					<div className="agent-types-actions">
-						<button className="settings-primary-button" disabled={!serverReady || saving} onClick={() => void save()} type="button">
+						<button
+							className="settings-primary-button"
+							disabled={!serverReady || saving}
+							onClick={() => void save()}
+							type="button"
+						>
 							{t("Save")}
 						</button>
-						<button className="settings-secondary-button" disabled={saving} onClick={() => setDraft(null)} type="button">
+						<button
+							className="settings-secondary-button"
+							disabled={saving}
+							onClick={() => setDraft(null)}
+							type="button"
+						>
 							{t("Cancel")}
 						</button>
 					</div>
@@ -330,7 +346,9 @@ export function AgentTypesSettingsPanel({ api, serverReady }: {
 					<span className="agent-types-count">{custom.length}</span>
 				</h2>
 				{custom.length === 0 ? (
-					<p className="agent-types-empty">{t("No custom agent types yet. Duplicate a built-in or create a new one.")}</p>
+					<p className="agent-types-empty">
+						{t("No custom agent types yet. Duplicate a built-in or create a new one.")}
+					</p>
 				) : (
 					<div className="agent-types-list">
 						{custom.map((view) => (

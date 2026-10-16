@@ -2,13 +2,13 @@ import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@m
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
-import { messageText } from "./transcript-turn-model.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
-import { PlanCard } from "./PlanCard.tsx";
-import { TranscriptTurn } from "./TranscriptTurn.tsx";
-import { TranscriptQuoteSelection } from "./TranscriptQuoteSelection.tsx";
+import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
 import { useConversationQuotes } from "./ConversationQuoteContext.tsx";
+import { PlanCard } from "./PlanCard.tsx";
+import { TranscriptQuoteSelection } from "./TranscriptQuoteSelection.tsx";
+import { TranscriptTurn } from "./TranscriptTurn.tsx";
+import { messageText } from "./transcript-turn-model.ts";
 
 interface TranscriptProps {
 	readonly quoteSessionId?: string;
@@ -50,7 +50,11 @@ export function shouldFollowTranscript(scrollHeight: number, scrollTop: number, 
 	return scrollHeight - scrollTop - clientHeight <= 48;
 }
 
-function transcriptRows(appearance: AgentMode, itemIds: readonly string[], itemsById: ReadonlyMap<string, ItemView>): TranscriptRow[] {
+function transcriptRows(
+	appearance: AgentMode,
+	itemIds: readonly string[],
+	itemsById: ReadonlyMap<string, ItemView>,
+): TranscriptRow[] {
 	const rows: TranscriptRow[] = [];
 	const byKey = new Map<string, number>();
 	for (const itemId of itemIds) {
@@ -70,7 +74,32 @@ function transcriptRows(appearance: AgentMode, itemIds: readonly string[], items
 	return rows;
 }
 
-export function Transcript({ quoteSessionId, showNavigation = false, waitingForAnswer = false, activeTurnId, activeTurnStartedAt, appearance, ariaLabel = "Conversation transcript", autoLoadOlder = false, hasOlder, itemIds, itemsById, latestLabel, loadingOlder, onCancelPlan, onCopy, onFork, onOpenDeliveredFile, onOpenPlan, onPreviewDeliveredFile, onLoadOlder, onRevisePlan, onStartPlan, olderLabel = "Load older messages", planActionsBusy = false }: TranscriptProps) {
+export function Transcript({
+	quoteSessionId,
+	showNavigation = false,
+	waitingForAnswer = false,
+	activeTurnId,
+	activeTurnStartedAt,
+	appearance,
+	ariaLabel = "Conversation transcript",
+	autoLoadOlder = false,
+	hasOlder,
+	itemIds,
+	itemsById,
+	latestLabel,
+	loadingOlder,
+	onCancelPlan,
+	onCopy,
+	onFork,
+	onOpenDeliveredFile,
+	onOpenPlan,
+	onPreviewDeliveredFile,
+	onLoadOlder,
+	onRevisePlan,
+	onStartPlan,
+	olderLabel = "Load older messages",
+	planActionsBusy = false,
+}: TranscriptProps) {
 	const { t } = useTranslation();
 	const quoteContext = useConversationQuotes();
 	const rootRef = useRef<HTMLElement>(null);
@@ -97,14 +126,32 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
 	const [pendingJump, setPendingJump] = useState<string | null>(null);
 	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
-	const navigation = useMemo<ConversationNavigationEntry[]>(() => !showNavigation ? [] : transcript.flatMap((row, rowIndex) => {
-		const items = row.itemIds.flatMap((id) => { const item = itemsById.get(id); return item ? [item] : []; });
-		const user = items.find((item) => item.role === "user");
-		if (!user) return [];
-		const answer = [...items].reverse().find((item) => item.role === "assistant" && messageText(item).trim() !== "");
-		return [{ itemId: user.itemId, rowIndex, text: messageText(user).slice(0, 1200),
-			answer: answer ? messageText(answer).slice(0, 1200) : "", attachments: user.attachments?.map((file) => file.name) ?? [] }];
-	}), [showNavigation, transcript, itemsById]);
+	const navigation = useMemo<ConversationNavigationEntry[]>(
+		() =>
+			!showNavigation
+				? []
+				: transcript.flatMap((row, rowIndex) => {
+						const items = row.itemIds.flatMap((id) => {
+							const item = itemsById.get(id);
+							return item ? [item] : [];
+						});
+						const user = items.find((item) => item.role === "user");
+						if (!user) return [];
+						const answer = [...items]
+							.reverse()
+							.find((item) => item.role === "assistant" && messageText(item).trim() !== "");
+						return [
+							{
+								itemId: user.itemId,
+								rowIndex,
+								text: messageText(user).slice(0, 1200),
+								answer: answer ? messageText(answer).slice(0, 1200) : "",
+								attachments: user.attachments?.map((file) => file.name) ?? [],
+							},
+						];
+					}),
+		[showNavigation, transcript, itemsById],
+	);
 	const virtualizer = useVirtualizer({
 		count: transcript.length,
 		getScrollElement: () => scrollRef.current,
@@ -131,10 +178,12 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 		const startedAt = performance.now();
 		const alignMessage = () => {
 			const scroll = scrollRef.current;
-			const target = Array.from(scroll?.querySelectorAll<HTMLElement>("[data-user-message], [data-quote-item]") ?? [])
-				.find((node) => (node.dataset.userMessage ?? node.dataset.quoteItem) === pendingJump);
+			const target = Array.from(
+				scroll?.querySelectorAll<HTMLElement>("[data-user-message], [data-quote-item]") ?? [],
+			).find((node) => (node.dataset.userMessage ?? node.dataset.quoteItem) === pendingJump);
 			if (scroll && target) {
-				const desired = scroll.scrollTop + target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 56;
+				const desired =
+					scroll.scrollTop + target.getBoundingClientRect().top - scroll.getBoundingClientRect().top - 56;
 				const offset = Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, desired));
 				if (Math.abs(offset - scroll.scrollTop) > 1) {
 					stableFrames = 0;
@@ -192,23 +241,34 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 		const scroll = scrollRef.current;
 		if (scroll) scroll.scrollTop = scroll.scrollHeight;
 	};
-	const loadOlderAtTop = async (scroll: HTMLDivElement, requested = false) => {
-		if (!hasOlder || loadingOlder || loadingOlderRef.current || (!requested && (!autoLoadOlder || scroll.scrollTop > 48))) return;
-		if (requested) followLatest.current = false;
-		loadingOlderRef.current = true;
-		const previousHeight = scroll.scrollHeight;
-		const previousTop = scroll.scrollTop;
-		try {
-			await onLoadOlder();
-		} finally {
-			await new Promise<void>((resolve) => requestAnimationFrame(() => {
-				if (scrollRef.current === scroll)
-					scroll.scrollTop = previousTop + Math.max(0, scroll.scrollHeight - previousHeight);
-				loadingOlderRef.current = false;
-				resolve();
-			}));
-		}
-	};
+	const loadOlderAtTop = useCallback(
+		async (scroll: HTMLDivElement, requested = false) => {
+			if (
+				!hasOlder ||
+				loadingOlder ||
+				loadingOlderRef.current ||
+				(!requested && (!autoLoadOlder || scroll.scrollTop > 48))
+			)
+				return;
+			if (requested) followLatest.current = false;
+			loadingOlderRef.current = true;
+			const previousHeight = scroll.scrollHeight;
+			const previousTop = scroll.scrollTop;
+			try {
+				await onLoadOlder();
+			} finally {
+				await new Promise<void>((resolve) =>
+					requestAnimationFrame(() => {
+						if (scrollRef.current === scroll)
+							scroll.scrollTop = previousTop + Math.max(0, scroll.scrollHeight - previousHeight);
+						loadingOlderRef.current = false;
+						resolve();
+					}),
+				);
+			}
+		},
+		[autoLoadOlder, hasOlder, loadingOlder, onLoadOlder],
+	);
 
 	const jumpToQuote = useCallback((itemId: string, liveItemId?: string) => {
 		followLatest.current = false;
@@ -237,14 +297,16 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 		quoteRequestedCount.current = itemIds.length;
 		const sourceSession = previousSessionId.current;
 		setQuoteLoading(true);
-		void loadOlderAtTop(scroll, true).catch(() => {
-			if (sourceSession !== previousSessionId.current) return;
-			setQuoteNotice(t("Original message is unavailable"));
-			setQuoteJump(null);
-		}).finally(() => {
-			if (sourceSession === previousSessionId.current) setQuoteLoading(false);
-		});
-	}, [quoteJump, quoteLoading, hasOlder, loadingOlder, itemIds.length, transcript, virtualizer, t]);
+		void loadOlderAtTop(scroll, true)
+			.catch(() => {
+				if (sourceSession !== previousSessionId.current) return;
+				setQuoteNotice(t("Original message is unavailable"));
+				setQuoteJump(null);
+			})
+			.finally(() => {
+				if (sourceSession === previousSessionId.current) setQuoteLoading(false);
+			});
+	}, [quoteJump, quoteLoading, hasOlder, loadingOlder, loadOlderAtTop, itemIds.length, transcript, virtualizer, t]);
 
 	const measuredRows = virtualizer.getVirtualItems();
 	const rows =
@@ -260,26 +322,58 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 				}));
 
 	return (
-		<section ref={rootRef} className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`} aria-label={t(ariaLabel)}>
-			{showNavigation && <ConversationNavigation key={lastItem?.sessionId ?? "empty"} entries={navigation} activeIndex={activeNavigationIndex}
-				hasOlder={hasOlder} loadingOlder={loadingOlder} onLoadOlder={() => { const scroll = scrollRef.current; if (scroll) void loadOlderAtTop(scroll, true); }} onJump={jumpToMessage} />}
+		<section
+			ref={rootRef}
+			className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`}
+			aria-label={t(ariaLabel)}
+		>
+			{showNavigation && (
+				<ConversationNavigation
+					key={lastItem?.sessionId ?? "empty"}
+					entries={navigation}
+					activeIndex={activeNavigationIndex}
+					hasOlder={hasOlder}
+					loadingOlder={loadingOlder}
+					onLoadOlder={() => {
+						const scroll = scrollRef.current;
+						if (scroll) void loadOlderAtTop(scroll, true);
+					}}
+					onJump={jumpToMessage}
+				/>
+			)}
 			{hasOlder && !autoLoadOlder && (
-				<button className="history-button button-secondary" disabled={loadingOlder} onClick={() => void onLoadOlder()} type="button">
+				<button
+					className="history-button button-secondary"
+					disabled={loadingOlder}
+					onClick={() => void onLoadOlder()}
+					type="button"
+				>
 					{loadingOlder ? t("Loading…") : t(olderLabel)}
 				</button>
 			)}
 			<div
 				aria-busy={loadingOlder || undefined}
 				className="transcript-scroll"
-				onWheel={() => { setPendingJump(null); setQuoteJump(null); }}
+				onWheel={() => {
+					setPendingJump(null);
+					setQuoteJump(null);
+				}}
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
-					if (!pendingJump) followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+					if (!pendingJump)
+						followLatest.current = shouldFollowTranscript(
+							scroll.scrollHeight,
+							scroll.scrollTop,
+							scroll.clientHeight,
+						);
 					if (navigation.length > 0 && !pendingJump) {
 						const rowIndex = virtualizer.getVirtualItemForOffset(scroll.scrollTop + 56)?.index ?? 0;
 						let index = 0;
 						for (let cursor = navigation.length - 1; cursor >= 0; cursor -= 1) {
-							if (navigation[cursor]!.rowIndex <= rowIndex) { index = cursor; break; }
+							if (navigation[cursor]!.rowIndex <= rowIndex) {
+								index = cursor;
+								break;
+							}
 						}
 						setActiveNavigationIndex(Math.max(0, index));
 					}
@@ -299,7 +393,10 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 						if (items.length === 0) return null;
 						const planBlock = items
 							.flatMap((item) => item.content)
-							.find((block): block is Extract<ItemView["content"][number], { type: "plan" }> => block.type === "plan");
+							.find(
+								(block): block is Extract<ItemView["content"][number], { type: "plan" }> =>
+									block.type === "plan",
+							);
 						if (planBlock) {
 							return (
 								<article
@@ -322,11 +419,19 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 							);
 						}
 						const compaction = items.some((item) => item.content.some((block) => block.type === "compaction"));
-						const running = activeTurnId !== null && activeTurnId !== undefined &&
+						const running =
+							activeTurnId !== null &&
+							activeTurnId !== undefined &&
 							items.some((item) => item.turnId === activeTurnId);
 						return (
 							<article
-								className={compaction ? "transcript-compaction-row" : appearance === "chat" ? "transcript-turn" : "code-transcript-turn"}
+								className={
+									compaction
+										? "transcript-compaction-row"
+										: appearance === "chat"
+											? "transcript-turn"
+											: "code-transcript-turn"
+								}
 								data-index={row.index}
 								data-transcript-item={appearance === "code" ? transcriptRow.itemIds.at(-1) : undefined}
 								data-transcript-turn={transcriptRow.key}
@@ -334,18 +439,61 @@ export function Transcript({ quoteSessionId, showNavigation = false, waitingForA
 								ref={virtualizer.measureElement}
 								style={{ transform: `translateY(${row.start}px)` }}
 							>
-								{compaction ? <div role="separator"><span>{t("Compacted")}</span></div> : appearance === "chat"
-									? <TranscriptTurn items={items} onJumpToQuote={jumpToQuote} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />
-									: <CodeTranscriptTurn items={items} onJumpToQuote={jumpToQuote} onCopy={onCopy} onFork={onFork} onOpenDeliveredFile={onOpenDeliveredFile} onPreviewDeliveredFile={onPreviewDeliveredFile} running={running} waitingForAnswer={running && waitingForAnswer} startedAt={activeTurnStartedAt} />}
+								{compaction ? (
+									<div>
+										<hr aria-label={t("Compacted")} className="sr-only" />
+										<span aria-hidden="true">{t("Compacted")}</span>
+									</div>
+								) : appearance === "chat" ? (
+									<TranscriptTurn
+										items={items}
+										onJumpToQuote={jumpToQuote}
+										onCopy={onCopy}
+										onFork={onFork}
+										onOpenDeliveredFile={onOpenDeliveredFile}
+										onPreviewDeliveredFile={onPreviewDeliveredFile}
+										running={running}
+										waitingForAnswer={running && waitingForAnswer}
+										startedAt={activeTurnStartedAt}
+									/>
+								) : (
+									<CodeTranscriptTurn
+										items={items}
+										onJumpToQuote={jumpToQuote}
+										onCopy={onCopy}
+										onFork={onFork}
+										onOpenDeliveredFile={onOpenDeliveredFile}
+										onPreviewDeliveredFile={onPreviewDeliveredFile}
+										running={running}
+										waitingForAnswer={running && waitingForAnswer}
+										startedAt={activeTurnStartedAt}
+									/>
+								)}
 							</article>
 						);
 					})}
 				</div>
 			</div>
-			<TranscriptQuoteSelection key={quoteSessionId ?? "readonly"} root={rootRef} sessionId={quoteSessionId} items={itemsById} onSelectText={() => { followLatest.current = false; setPendingJump(null); setQuoteJump(null); }} />
-			{(quoteJump || quoteNotice) && <div className="transcript-quote-notice" role="status">{quoteJump ? t("Finding original message…") : quoteNotice}</div>}
+			<TranscriptQuoteSelection
+				key={quoteSessionId ?? "readonly"}
+				root={rootRef}
+				sessionId={quoteSessionId}
+				items={itemsById}
+				onSelectText={() => {
+					followLatest.current = false;
+					setPendingJump(null);
+					setQuoteJump(null);
+				}}
+			/>
+			{(quoteJump || quoteNotice) && (
+				<output className="status-block transcript-quote-notice">
+					{quoteJump ? t("Finding original message…") : quoteNotice}
+				</output>
+			)}
 			{latestLabel && hasNewItems && (
-				<button className="transcript-latest" onClick={scrollToLatest} type="button">{t(latestLabel)}</button>
+				<button className="transcript-latest" onClick={scrollToLatest} type="button">
+					{t(latestLabel)}
+				</button>
 			)}
 		</section>
 	);

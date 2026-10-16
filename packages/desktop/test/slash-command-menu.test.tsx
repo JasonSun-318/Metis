@@ -49,17 +49,19 @@ describe("SlashCommandMenu", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onSelectCommand = vi.fn();
-		await act(async () => root.render(
-			<SlashCommandMenu
-				disabledCommands={new Set(["compact"])}
-				disabledReasons={{ compact: "Stop the active task before compacting" }}
-				onDismiss={vi.fn()}
-				onSelectCommand={onSelectCommand}
-				onSelectSkill={vi.fn()}
-				query=""
-				skills={[]}
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<SlashCommandMenu
+					disabledCommands={new Set(["compact"])}
+					disabledReasons={{ compact: "Stop the active task before compacting" }}
+					onDismiss={vi.fn()}
+					onSelectCommand={onSelectCommand}
+					onSelectSkill={vi.fn()}
+					query=""
+					skills={[]}
+				/>,
+			),
+		);
 		const options = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')];
 		expect(options[0]?.getAttribute("aria-disabled")).toBe("true");
 		await act(async () => options[0]?.click());

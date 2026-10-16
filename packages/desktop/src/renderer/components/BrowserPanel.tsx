@@ -1,6 +1,6 @@
 import {
-	ArrowCounterClockwise,
 	ArrowClockwise,
+	ArrowCounterClockwise,
 	ArrowDown,
 	ArrowLeft,
 	ArrowRight,
@@ -76,10 +76,12 @@ function BrowserDownloadRow({
 	readonly onAction: (type: DesktopDownloadControlType, downloadId: string) => void;
 }) {
 	const { t } = useTranslation();
-	const percent = download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
-	const size = download.totalBytes > 0
-		? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
-		: formatBrowserBytes(download.receivedBytes);
+	const percent =
+		download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
+	const size =
+		download.totalBytes > 0
+			? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
+			: formatBrowserBytes(download.receivedBytes);
 	const stateLabel =
 		download.state === "progressing"
 			? t("Downloading")
@@ -94,7 +96,9 @@ function BrowserDownloadRow({
 		<div className="browser-download-row" data-download-state={download.state}>
 			<div className="browser-download-main">
 				<div className="browser-download-info">
-					<span className="browser-download-name" title={download.filename}>{download.filename}</span>
+					<span className="browser-download-name" title={download.filename}>
+						{download.filename}
+					</span>
 					<span className="browser-download-meta">
 						{size} · {stateLabel}
 						{percent !== null && download.state === "progressing" ? ` · ${percent}%` : ""}
@@ -102,28 +106,79 @@ function BrowserDownloadRow({
 				</div>
 				<div className="browser-download-actions">
 					{download.state === "progressing" && (
-						<button aria-label={t("Pause download")} onClick={() => onAction("pause", download.downloadId)} role="menuitem" type="button"><Pause aria-hidden="true" size={12} /></button>
+						<button
+							aria-label={t("Pause download")}
+							onClick={() => onAction("pause", download.downloadId)}
+							role="menuitem"
+							type="button"
+						>
+							<Pause aria-hidden="true" size={12} />
+						</button>
 					)}
 					{download.state === "paused" && (
-						<button aria-label={t("Resume download")} onClick={() => onAction("resume", download.downloadId)} role="menuitem" type="button"><Play aria-hidden="true" size={12} /></button>
+						<button
+							aria-label={t("Resume download")}
+							onClick={() => onAction("resume", download.downloadId)}
+							role="menuitem"
+							type="button"
+						>
+							<Play aria-hidden="true" size={12} />
+						</button>
 					)}
 					{(download.state === "progressing" || download.state === "paused") && (
-						<button aria-label={t("Cancel download")} onClick={() => onAction("cancel", download.downloadId)} role="menuitem" type="button"><X aria-hidden="true" size={12} /></button>
+						<button
+							aria-label={t("Cancel download")}
+							onClick={() => onAction("cancel", download.downloadId)}
+							role="menuitem"
+							type="button"
+						>
+							<X aria-hidden="true" size={12} />
+						</button>
 					)}
 					{download.state === "completed" && (
 						<>
-							<button aria-label={t("Open file")} onClick={() => onAction("open", download.downloadId)} role="menuitem" type="button"><ArrowSquareOut aria-hidden="true" size={12} /></button>
-							<button aria-label={t("Show in folder")} onClick={() => onAction("reveal", download.downloadId)} role="menuitem" type="button"><Folder aria-hidden="true" size={12} /></button>
+							<button
+								aria-label={t("Open file")}
+								onClick={() => onAction("open", download.downloadId)}
+								role="menuitem"
+								type="button"
+							>
+								<ArrowSquareOut aria-hidden="true" size={12} />
+							</button>
+							<button
+								aria-label={t("Show in folder")}
+								onClick={() => onAction("reveal", download.downloadId)}
+								role="menuitem"
+								type="button"
+							>
+								<Folder aria-hidden="true" size={12} />
+							</button>
 						</>
 					)}
 					{(download.state === "interrupted" || download.state === "cancelled") && (
-						<button aria-label={t("Retry download")} onClick={() => onAction("retry", download.downloadId)} role="menuitem" type="button"><ArrowCounterClockwise aria-hidden="true" size={12} /></button>
+						<button
+							aria-label={t("Retry download")}
+							onClick={() => onAction("retry", download.downloadId)}
+							role="menuitem"
+							type="button"
+						>
+							<ArrowCounterClockwise aria-hidden="true" size={12} />
+						</button>
 					)}
-					<button aria-label={t("Remove from list")} onClick={() => onAction("remove", download.downloadId)} role="menuitem" type="button"><Trash aria-hidden="true" size={12} /></button>
+					<button
+						aria-label={t("Remove from list")}
+						onClick={() => onAction("remove", download.downloadId)}
+						role="menuitem"
+						type="button"
+					>
+						<Trash aria-hidden="true" size={12} />
+					</button>
 				</div>
 			</div>
 			{(download.state === "progressing" || download.state === "paused") && (
-				<div aria-hidden="true" className="browser-download-progress"><i style={{ width: `${percent ?? 0}%` }} /></div>
+				<div aria-hidden="true" className="browser-download-progress">
+					<i style={{ width: `${percent ?? 0}%` }} />
+				</div>
 			)}
 		</div>
 	);
@@ -141,7 +196,11 @@ const emptyState = (browserId: string, profileId: string): DesktopBrowserState =
 	zoomPercent: 100,
 });
 
-function BrowserClearDialog({ busy, onCancel, onConfirm }: {
+function BrowserClearDialog({
+	busy,
+	onCancel,
+	onConfirm,
+}: {
 	readonly busy: boolean;
 	readonly onCancel: () => void;
 	readonly onConfirm: () => void;
@@ -169,15 +228,40 @@ function BrowserClearDialog({ busy, onCancel, onConfirm }: {
 				<h2 id="browser-clear-title">{t("Clear browsing data?")}</h2>
 				<p>{t("This clears cookies and site data for the current browser profile. Open tabs will stay open.")}</p>
 				<div className="browser-clear-actions">
-					<button disabled={busy} onClick={onCancel} type="button">{t("Cancel")}</button>
-					<button className="is-danger" data-browser-confirm-clear disabled={busy} onClick={onConfirm} type="button">{t(busy ? "Clearing…" : "Clear data")}</button>
+					<button disabled={busy} onClick={onCancel} type="button">
+						{t("Cancel")}
+					</button>
+					<button
+						className="is-danger"
+						data-browser-confirm-clear
+						disabled={busy}
+						onClick={onConfirm}
+						type="button"
+					>
+						{t(busy ? "Clearing…" : "Clear data")}
+					</button>
 				</div>
 			</form>
 		</dialog>
 	);
 }
 
-export function BrowserPanel({ api, sessionId, browserId, controlState, handoffReason, onError, onOpenProfile, onProfileImported, onState, profile, profiles, visible, covered = false, startPageTools }: BrowserPanelProps) {
+export function BrowserPanel({
+	api,
+	sessionId,
+	browserId,
+	controlState,
+	handoffReason,
+	onError,
+	onOpenProfile,
+	onProfileImported,
+	onState,
+	profile,
+	profiles,
+	visible,
+	covered = false,
+	startPageTools,
+}: BrowserPanelProps) {
 	const { t } = useTranslation();
 	const modalPresent = useModalPresence();
 	const availableProfiles = profiles ?? [profile];
@@ -390,7 +474,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		const request = ++previewRequestRef.current;
 		void (async () => {
 			try {
-					await api.controlBrowser({ ...action, sessionId, browserId });
+				await api.controlBrowser({ ...action, sessionId, browserId });
 				if (!moreOpenRef.current) return;
 				const preview = await capturePreview(request);
 				if (preview && moreOpenRef.current) setPagePreview(preview);
@@ -421,7 +505,9 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		setNotice(null);
 		setStatus(null);
 		void api.controlBrowser({ type, sessionId, browserId }).catch((cause) => {
-			setStatus(translateRef.current(type === "capture-page" ? "Screenshot could not be saved" : "Browser action failed"));
+			setStatus(
+				translateRef.current(type === "capture-page" ? "Screenshot could not be saved" : "Browser action failed"),
+			);
 			onErrorRef.current(cause);
 		});
 	}
@@ -441,7 +527,9 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 
 	function find(forward: boolean, findNext: boolean, text = findText) {
 		// Electron starts a new find session when findNext is true; follow-up navigation uses false.
-		void api.controlBrowser({ type: "find", sessionId, browserId, text, forward, findNext }).catch(onErrorRef.current);
+		void api
+			.controlBrowser({ type: "find", sessionId, browserId, text, forward, findNext })
+			.catch(onErrorRef.current);
 	}
 
 	function runCommand(command: DesktopBrowserCommand) {
@@ -451,9 +539,11 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		if (command === "find") openFind();
 		else if (command === "zoom-in" || command === "zoom-out" || command === "zoom-reset") {
 			runZoomAction({ type: command });
-		}
-		else runPageAction(command);
+		} else runPageAction(command);
 	}
+
+	const runCommandRef = useRef(runCommand);
+	runCommandRef.current = runCommand;
 
 	function clearBrowserData() {
 		if (clearBusy) return;
@@ -498,7 +588,8 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				return;
 			}
 			if (event.type === "command") {
-				if (event.browserId === browserId && visibleRef.current && !coveredRef.current) runCommand(event.command);
+				if (event.browserId === browserId && visibleRef.current && !coveredRef.current)
+					runCommandRef.current(event.command);
 				return;
 			}
 			if (event.type !== "state") return;
@@ -565,7 +656,7 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			if (!downloadsRef.current?.contains(target)) setDownloadsOpen(false);
 			if (!historyRef.current?.contains(target)) setHistoryOpen(false);
 		};
-		const escape = (event: KeyboardEvent) => {
+		const handleEscape = (event: KeyboardEvent) => {
 			if (event.key === "Escape") {
 				setMoreOpen(false);
 				setDownloadsOpen(false);
@@ -573,10 +664,10 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			}
 		};
 		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", escape);
+		document.addEventListener("keydown", handleEscape);
 		return () => {
 			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", escape);
+			document.removeEventListener("keydown", handleEscape);
 		};
 	}, [moreOpen, downloadsOpen, historyOpen]);
 
@@ -593,11 +684,11 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			else if (event.key === "0") command = "zoom-reset";
 			if (!command) return;
 			event.preventDefault();
-			runCommand(command);
+			runCommandRef.current(command);
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [api, browserId, clearConfirmOpen, covered, importOpen, visible]);
+	}, [visible, covered, clearConfirmOpen, importOpen]);
 
 	useEffect(() => {
 		let frame = 0;
@@ -664,35 +755,54 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 			presentRef.current = null;
 			const bounds = boundsRef.current;
 			if (bounds && shouldPresentRef.current) {
-				void api.controlBrowser({ type: "present", sessionId, browserId, visible: false, bounds }).catch(() => undefined);
+				void api
+					.controlBrowser({ type: "present", sessionId, browserId, visible: false, bounds })
+					.catch(() => undefined);
 			}
 		};
-	}, [api, browserId]);
+	}, [api, browserId, sessionId]);
 
 	useLayoutEffect(() => {
 		if (!visible || !covered || state.url === "") return;
 		let active = true;
 		void api.captureBrowserPreview({ sessionId, browserId }).then(
-			(preview) => { if (active) setPagePreview(preview); },
-			(cause) => { if (active) onErrorRef.current(cause); },
+			(preview) => {
+				if (active) setPagePreview(preview);
+			},
+			(cause) => {
+				if (active) onErrorRef.current(cause);
+			},
 		);
-		return () => { active = false; };
+		return () => {
+			active = false;
+		};
 	}, [api, browserId, covered, sessionId, state.url, visible]);
 
 	useLayoutEffect(() => {
 		shouldPresentRef.current =
-			visible
-			&& !covered
-			&& !modalPresent
-			&& state.url !== ""
-			&& !moreOpen
-			&& !downloadsOpen
-			&& !historyOpen
-			&& !clearConfirmOpen
-			&& !importOpen
-			&& status === null;
+			visible &&
+			!covered &&
+			!modalPresent &&
+			state.url !== "" &&
+			!moreOpen &&
+			!downloadsOpen &&
+			!historyOpen &&
+			!clearConfirmOpen &&
+			!importOpen &&
+			status === null;
 		presentRef.current?.();
-	}, [clearConfirmOpen, covered, downloadsOpen, historyOpen, importOpen, modalPresent, moreOpen, state.url, status, visible]);
+	}, [
+		clearConfirmOpen,
+		covered,
+		downloadsOpen,
+		historyOpen,
+		importOpen,
+		modalPresent,
+		moreOpen,
+		state.url,
+		status,
+		visible,
+	]);
 
 	const takeControl = () => {
 		if (takeoverBusyRef.current) return;
@@ -716,19 +826,20 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		});
 	};
 
-	const handoffMessage = handoffReason === "login"
-		? t("Sign in on this page, then continue when you are done.")
-		: handoffReason === "otp"
-			? t("Enter the verification code on this page, then continue.")
-			: handoffReason === "passkey"
-				? t("Complete the passkey prompt, then continue.")
-				: handoffReason === "device_approval"
-					? t("Approve this sign-in on your device, then continue.")
-					: handoffReason === "captcha"
-						? t("Complete the human verification on this page, then continue.")
-						: handoffReason === "sensitive_action"
-							? t("Review and complete the sensitive action yourself, then continue.")
-							: t("Complete the requested step on this page, then continue.");
+	const handoffMessage =
+		handoffReason === "login"
+			? t("Sign in on this page, then continue when you are done.")
+			: handoffReason === "otp"
+				? t("Enter the verification code on this page, then continue.")
+				: handoffReason === "passkey"
+					? t("Complete the passkey prompt, then continue.")
+					: handoffReason === "device_approval"
+						? t("Approve this sign-in on your device, then continue.")
+						: handoffReason === "captcha"
+							? t("Complete the human verification on this page, then continue.")
+							: handoffReason === "sensitive_action"
+								? t("Review and complete the sensitive action yourself, then continue.")
+								: t("Complete the requested step on this page, then continue.");
 
 	const navigate = (url: string) => {
 		const target = url.trim();
@@ -737,12 +848,12 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 		setAddress(target);
 		setStatus(null);
 		setNotice(null);
-		void (creationRef.current ?? Promise.resolve()).then(() =>
-			api.controlBrowser({ type: "navigate", sessionId, browserId, url: target }),
-		).catch((cause) => {
-			setStatus(t("Browser could not load this page"));
-			onErrorRef.current(cause);
-		});
+		void (creationRef.current ?? Promise.resolve())
+			.then(() => api.controlBrowser({ type: "navigate", sessionId, browserId, url: target }))
+			.catch((cause) => {
+				setStatus(t("Browser could not load this page"));
+				onErrorRef.current(cause);
+			});
 	};
 	const control = (type: "back" | "forward" | "reload" | "open-external") => {
 		setStatus(null);
@@ -770,15 +881,42 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 						const selected = availableProfiles.find((candidate) => candidate.profileId === profileId);
 						if (selected) onOpenProfile?.(selected);
 					}}
-					options={availableProfiles.map((candidate) => ({ value: candidate.profileId, label: profileLabel(candidate) }))}
+					options={availableProfiles.map((candidate) => ({
+						value: candidate.profileId,
+						label: profileLabel(candidate),
+					}))}
 					popoverClassName="browser-profile-popover"
 					triggerIcon={<User aria-hidden="true" size={13} weight="fill" />}
 					value={profile.profileId}
 				/>
 				<div className="browser-navigation">
-					<button aria-label={t("Back")} className="browser-toolbar-button" disabled={!state.canGoBack} onClick={() => control("back")} type="button"><ArrowLeft aria-hidden="true" size={14} /></button>
-					<button aria-label={t("Forward")} className="browser-forward browser-toolbar-button" disabled={!state.canGoForward} onClick={() => control("forward")} type="button"><ArrowRight aria-hidden="true" size={14} /></button>
-					<button aria-label={t("Reload")} className="browser-toolbar-button" disabled={state.url === ""} onClick={() => control("reload")} type="button"><ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} /></button>
+					<button
+						aria-label={t("Back")}
+						className="browser-toolbar-button"
+						disabled={!state.canGoBack}
+						onClick={() => control("back")}
+						type="button"
+					>
+						<ArrowLeft aria-hidden="true" size={14} />
+					</button>
+					<button
+						aria-label={t("Forward")}
+						className="browser-forward browser-toolbar-button"
+						disabled={!state.canGoForward}
+						onClick={() => control("forward")}
+						type="button"
+					>
+						<ArrowRight aria-hidden="true" size={14} />
+					</button>
+					<button
+						aria-label={t("Reload")}
+						className="browser-toolbar-button"
+						disabled={state.url === ""}
+						onClick={() => control("reload")}
+						type="button"
+					>
+						<ArrowClockwise aria-hidden="true" className={state.loading ? "is-spinning" : undefined} size={14} />
+					</button>
 				</div>
 				<form
 					className="browser-address-form"
@@ -789,10 +927,32 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 				>
 					<div className="browser-address-field">
 						<span className="sr-only">{t("Browser address")}</span>
-						<input aria-label={t("Browser address")} onChange={(event) => { addressEditedRef.current = true; setAddress(event.target.value); }} onKeyDown={(event) => {
-							if (event.key === "Escape") { addressEditedRef.current = false; setAddress(pageUrlRef.current); }
-						}} placeholder={t("Enter URL")} ref={addressInputRef} spellCheck={false} value={address} />
-						<button aria-label={t("Open in default browser")} className="browser-address-open" disabled={state.url === ""} onClick={() => control("open-external")} type="button"><ArrowSquareOut aria-hidden="true" size={13} /></button>
+						<input
+							aria-label={t("Browser address")}
+							onChange={(event) => {
+								addressEditedRef.current = true;
+								setAddress(event.target.value);
+							}}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") {
+									addressEditedRef.current = false;
+									setAddress(pageUrlRef.current);
+								}
+							}}
+							placeholder={t("Enter URL")}
+							ref={addressInputRef}
+							spellCheck={false}
+							value={address}
+						/>
+						<button
+							aria-label={t("Open in default browser")}
+							className="browser-address-open"
+							disabled={state.url === ""}
+							onClick={() => control("open-external")}
+							type="button"
+						>
+							<ArrowSquareOut aria-hidden="true" size={13} />
+						</button>
 					</div>
 				</form>
 				<div className="browser-history" ref={historyRef}>
@@ -834,7 +994,9 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 										type="button"
 									>
 										<span className="browser-download-name">{entry.title}</span>
-										<span className="browser-download-meta">{formatHistoryTime(entry.visitedAt)} · {entry.url}</span>
+										<span className="browser-download-meta">
+											{formatHistoryTime(entry.visitedAt)} · {entry.url}
+										</span>
 									</button>
 								))
 							)}
@@ -863,22 +1025,64 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 								<p className="browser-downloads-empty">{t("No downloads yet")}</p>
 							) : (
 								downloads.map((download) => (
-									<BrowserDownloadRow download={download} key={download.downloadId} onAction={runDownloadAction} />
+									<BrowserDownloadRow
+										download={download}
+										key={download.downloadId}
+										onAction={runDownloadAction}
+									/>
 								))
 							)}
 						</div>
 					)}
 				</div>
 				<div className="browser-more" ref={moreRef}>
-					<button aria-busy={previewBusy} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={t("More browser actions")} className="browser-toolbar-button" disabled={previewBusy} onClick={toggleMore} type="button"><DotsThreeVertical aria-hidden="true" size={16} weight="bold" /></button>
+					<button
+						aria-busy={previewBusy}
+						aria-expanded={moreOpen}
+						aria-haspopup="menu"
+						aria-label={t("More browser actions")}
+						className="browser-toolbar-button"
+						disabled={previewBusy}
+						onClick={toggleMore}
+						type="button"
+					>
+						<DotsThreeVertical aria-hidden="true" size={16} weight="bold" />
+					</button>
 					{moreOpen && (
 						<div className="browser-more-menu" role="menu">
-							<button data-browser-action="find" disabled={state.url === ""} onClick={openFind} role="menuitem" type="button"><MagnifyingGlass aria-hidden="true" size={14} /><span>{t("Find in page")}</span><kbd>⌘F</kbd></button>
-							<button disabled={state.url === ""} onClick={() => runPageAction("print")} role="menuitem" type="button"><Printer aria-hidden="true" size={14} /><span>{t("Print")}</span><kbd>⌘P</kbd></button>
-							<div className="browser-menu-separator" role="separator" />
-							<div aria-label={t("Zoom")} className="browser-zoom-row" role="group">
+							<button
+								data-browser-action="find"
+								disabled={state.url === ""}
+								onClick={openFind}
+								role="menuitem"
+								type="button"
+							>
+								<MagnifyingGlass aria-hidden="true" size={14} />
+								<span>{t("Find in page")}</span>
+								<kbd>⌘F</kbd>
+							</button>
+							<button
+								disabled={state.url === ""}
+								onClick={() => runPageAction("print")}
+								role="menuitem"
+								type="button"
+							>
+								<Printer aria-hidden="true" size={14} />
+								<span>{t("Print")}</span>
+								<kbd>⌘P</kbd>
+							</button>
+							<hr className="browser-menu-separator" />
+							<fieldset aria-label={t("Zoom")} className="control-group browser-zoom-row">
 								<span>{t("Zoom")}</span>
-								<button aria-label={t("Zoom out")} disabled={zoomBusy || state.url === "" || state.zoomPercent === 25} onClick={() => runZoomAction({ type: "zoom-out" })} role="menuitem" type="button"><Minus aria-hidden="true" size={13} /></button>
+								<button
+									aria-label={t("Zoom out")}
+									disabled={zoomBusy || state.url === "" || state.zoomPercent === 25}
+									onClick={() => runZoomAction({ type: "zoom-out" })}
+									role="menuitem"
+									type="button"
+								>
+									<Minus aria-hidden="true" size={13} />
+								</button>
 								<label className="browser-zoom-value">
 									<input
 										aria-label={t("Zoom percentage")}
@@ -902,41 +1106,102 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 									/>
 									<span aria-hidden="true">%</span>
 								</label>
-								<button aria-label={t("Zoom in")} disabled={zoomBusy || state.url === "" || state.zoomPercent === 500} onClick={() => runZoomAction({ type: "zoom-in" })} role="menuitem" type="button"><Plus aria-hidden="true" size={13} /></button>
-								<button aria-label={t("Reset zoom")} disabled={zoomBusy || state.url === "" || state.zoomPercent === 100} onClick={() => runZoomAction({ type: "zoom-reset" })} role="menuitem" type="button"><ArrowCounterClockwise aria-hidden="true" size={13} /></button>
-							</div>
-							<button disabled={state.url === ""} onClick={() => runPageAction("capture-page")} role="menuitem" type="button"><Camera aria-hidden="true" size={14} /><span>{t("Screenshot")}</span></button>
-							<div className="browser-menu-separator" role="separator" />
-							<button onClick={() => { setMoreOpen(false); setImportOpen(true); }} role="menuitem" type="button"><DownloadSimple aria-hidden="true" size={14} /><span>{t("Import browser data…")}</span></button>
-							<button data-browser-action="clear-data" onClick={() => { setMoreOpen(false); setClearConfirmOpen(true); }} role="menuitem" type="button"><Trash aria-hidden="true" size={14} /><span>{t("Clear browsing data")}</span></button>
+								<button
+									aria-label={t("Zoom in")}
+									disabled={zoomBusy || state.url === "" || state.zoomPercent === 500}
+									onClick={() => runZoomAction({ type: "zoom-in" })}
+									role="menuitem"
+									type="button"
+								>
+									<Plus aria-hidden="true" size={13} />
+								</button>
+								<button
+									aria-label={t("Reset zoom")}
+									disabled={zoomBusy || state.url === "" || state.zoomPercent === 100}
+									onClick={() => runZoomAction({ type: "zoom-reset" })}
+									role="menuitem"
+									type="button"
+								>
+									<ArrowCounterClockwise aria-hidden="true" size={13} />
+								</button>
+							</fieldset>
+							<button
+								disabled={state.url === ""}
+								onClick={() => runPageAction("capture-page")}
+								role="menuitem"
+								type="button"
+							>
+								<Camera aria-hidden="true" size={14} />
+								<span>{t("Screenshot")}</span>
+							</button>
+							<hr className="browser-menu-separator" />
+							<button
+								onClick={() => {
+									setMoreOpen(false);
+									setImportOpen(true);
+								}}
+								role="menuitem"
+								type="button"
+							>
+								<DownloadSimple aria-hidden="true" size={14} />
+								<span>{t("Import browser data…")}</span>
+							</button>
+							<button
+								data-browser-action="clear-data"
+								onClick={() => {
+									setMoreOpen(false);
+									setClearConfirmOpen(true);
+								}}
+								role="menuitem"
+								type="button"
+							>
+								<Trash aria-hidden="true" size={14} />
+								<span>{t("Clear browsing data")}</span>
+							</button>
 						</div>
 					)}
 				</div>
 			</div>
 			{controlState === "agent" && (
-				<div aria-label={t("Browser automation active")} className="browser-control-bar browser-automation-bar" role="status">
+				<output
+					aria-label={t("Browser automation active")}
+					className="status-block browser-control-bar browser-automation-bar"
+				>
 					<span>{t("Metis is controlling this page")}</span>
 					<button disabled={takeoverBusy} onClick={takeControl} type="button">
 						{t(takeoverBusy ? "Taking control…" : "Take control")}
 					</button>
-				</div>
+				</output>
 			)}
 			{controlState === "handoff" && (
-				<div aria-label={t("Your action is needed")} className="browser-control-bar browser-handoff-bar" role="alert">
+				<div
+					aria-label={t("Your action is needed")}
+					className="browser-control-bar browser-handoff-bar"
+					role="alert"
+				>
 					<div>
-						<h2 ref={handoffHeadingRef} tabIndex={-1}>{t("Your action is needed")}</h2>
+						<h2 ref={handoffHeadingRef} tabIndex={-1}>
+							{t("Your action is needed")}
+						</h2>
 						<p>{handoffMessage}</p>
 					</div>
 					<div className="browser-control-actions">
-						<button disabled={handoffBusy} onClick={() => resolveHandoff("cancel")} type="button">{t("Cancel")}</button>
-						<button className="is-primary" disabled={handoffBusy} onClick={() => resolveHandoff("complete")} type="button">
+						<button disabled={handoffBusy} onClick={() => resolveHandoff("cancel")} type="button">
+							{t("Cancel")}
+						</button>
+						<button
+							className="is-primary"
+							disabled={handoffBusy}
+							onClick={() => resolveHandoff("complete")}
+							type="button"
+						>
 							{t(handoffBusy ? "Continuing…" : "Done, continue")}
 						</button>
 					</div>
 				</div>
 			)}
 			{findOpen && (
-				<div aria-label={t("Find in page")} className="browser-find-panel" role="search">
+				<search aria-label={t("Find in page")} className="browser-find-panel">
 					<div className="browser-find-query">
 						<MagnifyingGlass aria-hidden="true" size={13} />
 						<input
@@ -958,45 +1223,84 @@ export function BrowserPanel({ api, sessionId, browserId, controlState, handoffR
 							spellCheck={false}
 							value={findText}
 						/>
-						<button aria-label={t("Close find")} onClick={closeFind} type="button"><X aria-hidden="true" size={13} /></button>
+						<button aria-label={t("Close find")} onClick={closeFind} type="button">
+							<X aria-hidden="true" size={13} />
+						</button>
 					</div>
 					<div className="browser-find-controls">
-						<button aria-label={t("Previous match")} disabled={findResult.matches === 0} onClick={() => find(false, false)} type="button"><ArrowUp aria-hidden="true" size={13} /></button>
-						<button aria-label={t("Next match")} disabled={findResult.matches === 0} onClick={() => find(true, false)} type="button"><ArrowDown aria-hidden="true" size={13} /></button>
-						<output className="browser-find-count">{t("{{active}} / {{total}} results", { active: findResult.activeMatchOrdinal, total: findResult.matches })}</output>
+						<button
+							aria-label={t("Previous match")}
+							disabled={findResult.matches === 0}
+							onClick={() => find(false, false)}
+							type="button"
+						>
+							<ArrowUp aria-hidden="true" size={13} />
+						</button>
+						<button
+							aria-label={t("Next match")}
+							disabled={findResult.matches === 0}
+							onClick={() => find(true, false)}
+							type="button"
+						>
+							<ArrowDown aria-hidden="true" size={13} />
+						</button>
+						<output className="browser-find-count">
+							{t("{{active}} / {{total}} results", {
+								active: findResult.activeMatchOrdinal,
+								total: findResult.matches,
+							})}
+						</output>
 					</div>
-				</div>
+				</search>
 			)}
 			<div className="browser-view-anchor" ref={anchorRef}>
-				{pagePreview && <img alt="" aria-hidden="true" className="browser-view-preview" draggable={false} src={pagePreview} />}
+				{pagePreview && (
+					<img alt="" aria-hidden="true" className="browser-view-preview" draggable={false} src={pagePreview} />
+				)}
 			</div>
-			{state.url === "" && (startPageTools ? <BrowserStartPage tools={startPageTools} history={history} onNavigate={navigate} /> : (
-				<div className="browser-empty">
-					<div className="browser-empty-content">
-						<Globe aria-hidden="true" size={25} weight="light" />
-						<strong>{t("Start browsing")}</strong>
-						<span>{t("Enter a URL to open a page")}</span>
+			{state.url === "" &&
+				(startPageTools ? (
+					<BrowserStartPage tools={startPageTools} history={history} onNavigate={navigate} />
+				) : (
+					<div className="browser-empty">
+						<div className="browser-empty-content">
+							<Globe aria-hidden="true" size={25} weight="light" />
+							<strong>{t("Start browsing")}</strong>
+							<span>{t("Enter a URL to open a page")}</span>
+						</div>
 					</div>
-				</div>
-			))}
-			{clearConfirmOpen && <BrowserClearDialog busy={clearBusy} onCancel={() => setClearConfirmOpen(false)} onConfirm={clearBrowserData} />}
+				))}
+			{clearConfirmOpen && (
+				<BrowserClearDialog
+					busy={clearBusy}
+					onCancel={() => setClearConfirmOpen(false)}
+					onConfirm={clearBrowserData}
+				/>
+			)}
 			{importOpen && (
 				<BrowserImportDialog
 					api={api}
 					onCancel={() => setImportOpen(false)}
 					onImported={(result) => {
 						const summary = [
-							result.cookies ? t("Imported {{count}} Cookies ({{skipped}} skipped).", { count: result.cookies.imported, skipped: result.cookies.skipped }) : "",
+							result.cookies
+								? t("Imported {{count}} Cookies ({{skipped}} skipped).", {
+										count: result.cookies.imported,
+										skipped: result.cookies.skipped,
+									})
+								: "",
 							result.history ? t("{{count}} history entries retained.", { count: result.history.retained }) : "",
-						].filter(Boolean).join(" ");
+						]
+							.filter(Boolean)
+							.join(" ");
 						setImportOpen(false);
 						setNotice(summary);
 						onProfileImported(result.profile);
 					}}
 				/>
 			)}
-			{notice && <div className="browser-toolbar-notice" role="status">{notice}</div>}
-			{status && <div className="browser-status" role="status">{status}</div>}
+			{notice && <output className="status-block browser-toolbar-notice">{notice}</output>}
+			{status && <output className="status-block browser-status">{status}</output>}
 		</section>
 	);
 }

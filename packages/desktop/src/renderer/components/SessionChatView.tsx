@@ -292,7 +292,8 @@ export const SessionChatView = memo(function SessionChatView({
 	const forkItem = useCallback((entryId: string) => onFork(sessionId, entryId), [onFork, sessionId]);
 	const copyText = useCallback((text: string) => void api.writeClipboardText({ text }).catch(onError), [api, onError]);
 	const openDeliveredFile = useCallback(
-		(fileId: string, action: "default" | "reveal") => void api.openDeliveredFile({ sessionId, fileId, action }).catch(onError),
+		(fileId: string, action: "default" | "reveal") =>
+			void api.openDeliveredFile({ sessionId, fileId, action }).catch(onError),
 		[api, onError, sessionId],
 	);
 	const openPlan = useCallback((plan: PlanView) => onOpenPlan(sessionId, plan), [onOpenPlan, sessionId]);
@@ -349,6 +350,10 @@ export const SessionChatView = memo(function SessionChatView({
 		[api, sessionId],
 	);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(skillCatalogEpoch): Skill catalog changes invalidate the context budget and skill list.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(mcpContextKey): MCP changes refresh the context budget with current tool definitions.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(assistantUsageKey): Completed requests refresh the context budget with actual token usage.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(activeModelKey): Changing models refreshes the server-computed context budget.
 	useEffect(() => {
 		if (!writableSessionId || !serverReady || !visible || compactingStartedAt !== null) return;
 		void loadContextStatus();
@@ -378,9 +383,10 @@ export const SessionChatView = memo(function SessionChatView({
 			reasons.status = "Open a task to use this command";
 		} else if (compactBlocked) {
 			commands.add("compact");
-			reasons.compact = compactingStartedAt !== null
-				? "Conversation compaction is already running"
-				: "Stop the active task before compacting";
+			reasons.compact =
+				compactingStartedAt !== null
+					? "Conversation compaction is already running"
+					: "Stop the active task before compacting";
 		}
 		if (writableSessionId && (collaborationModeValue === "plan" || collaborationModeBlocked)) {
 			commands.add("plan");
@@ -397,7 +403,15 @@ export const SessionChatView = memo(function SessionChatView({
 			reasons.thinking = "Open a task to use this command";
 		}
 		return { disabledSlashCommands: commands, disabledSlashReasons: reasons };
-	}, [collaborationModeBlocked, collaborationModeValue, compactBlocked, compactingStartedAt, currentProposedPlan, session, writableSessionId]);
+	}, [
+		collaborationModeBlocked,
+		collaborationModeValue,
+		compactBlocked,
+		compactingStartedAt,
+		currentProposedPlan,
+		session,
+		writableSessionId,
+	]);
 
 	const openSessionStatus = useCallback(async () => {
 		if (!writableSessionId) return;
@@ -428,7 +442,16 @@ export const SessionChatView = memo(function SessionChatView({
 		} finally {
 			setCompactingStartedAt(null);
 		}
-	}, [api, closeSessionStatus, compactBlocked, onClearError, onError, onNotice, requestComposerControl, writableSessionId]);
+	}, [
+		api,
+		closeSessionStatus,
+		compactBlocked,
+		onClearError,
+		onError,
+		onNotice,
+		requestComposerControl,
+		writableSessionId,
+	]);
 
 	const mutateSessionGoal = useCallback(
 		async (input: { objective?: string; status?: "active" | "paused" } | { clear: true }) => {
@@ -496,13 +519,23 @@ export const SessionChatView = memo(function SessionChatView({
 			}
 			requestComposerControl(command);
 		},
-		[changeCollaborationMode, closeSessionStatus, collaborationModeValue, compactConversation, onNotice, openSessionStatus, requestComposerControl],
+		[
+			changeCollaborationMode,
+			closeSessionStatus,
+			collaborationModeValue,
+			compactConversation,
+			onNotice,
+			openSessionStatus,
+			requestComposerControl,
+		],
 	);
 
 	// Keep the session's skill and MCP catalogs fresh while the pane is shown.
+	const hasSession = session !== undefined;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(skillCatalogEpoch): Skill catalog changes invalidate the context budget and skill list.
 	useEffect(() => {
 		const generation = ++skillListGeneration.current;
-		if (!bootstrapped || !serverReady || !visible || !session) {
+		if (!bootstrapped || !serverReady || !visible || !hasSession) {
 			setSkills([]);
 			return;
 		}
@@ -520,12 +553,12 @@ export const SessionChatView = memo(function SessionChatView({
 		return () => {
 			if (generation === skillListGeneration.current) skillListGeneration.current += 1;
 		};
-	}, [api, bootstrapped, onError, serverReady, session !== undefined, sessionId, skillCatalogEpoch, visible]);
+	}, [api, bootstrapped, onError, serverReady, hasSession, sessionId, skillCatalogEpoch, visible]);
 
 	useEffect(() => {
 		const generation = ++mcpListGeneration.current;
 		let timer: ReturnType<typeof setTimeout> | undefined;
-		if (!bootstrapped || !serverReady || !visible || !session) {
+		if (!bootstrapped || !serverReady || !visible || !hasSession) {
 			setMcpServers([]);
 			return;
 		}
@@ -556,7 +589,7 @@ export const SessionChatView = memo(function SessionChatView({
 			if (generation === mcpListGeneration.current) mcpListGeneration.current += 1;
 			if (timer) clearTimeout(timer);
 		};
-	}, [api, bootstrapped, onError, serverReady, session !== undefined, sessionId, visible]);
+	}, [api, bootstrapped, onError, serverReady, hasSession, sessionId, visible]);
 
 	// Drop ask_user draft answers once their interaction or session goes away.
 	useEffect(() => {
@@ -597,24 +630,25 @@ export const SessionChatView = memo(function SessionChatView({
 			value={projection.permissionPreset}
 		/>
 	) : undefined;
-	const collaborationControl = collaborationModeValue === "plan" && session ? (
-		<div className="collaboration-mode-control">
-			<span aria-hidden="true" className="collaboration-mode-separator" />
-			<button
-				aria-label={t("Exit Plan mode")}
-				className="collaboration-mode-indicator"
-				disabled={collaborationModeBlocked}
-				onClick={() => void changeCollaborationMode("default").catch(() => undefined)}
-				type="button"
-			>
-				<span aria-hidden="true" className="collaboration-mode-icon">
-					<Lightbulb className="collaboration-mode-active-icon" size={14} />
-					<XCircle className="collaboration-mode-exit-icon" size={14} weight="fill" />
-				</span>
-				<span>{t("Plan")}</span>
-			</button>
-		</div>
-	) : undefined;
+	const collaborationControl =
+		collaborationModeValue === "plan" && session ? (
+			<div className="collaboration-mode-control">
+				<span aria-hidden="true" className="collaboration-mode-separator" />
+				<button
+					aria-label={t("Exit Plan mode")}
+					className="collaboration-mode-indicator"
+					disabled={collaborationModeBlocked}
+					onClick={() => void changeCollaborationMode("default").catch(() => undefined)}
+					type="button"
+				>
+					<span aria-hidden="true" className="collaboration-mode-icon">
+						<Lightbulb className="collaboration-mode-active-icon" size={14} />
+						<XCircle className="collaboration-mode-exit-icon" size={14} weight="fill" />
+					</span>
+					<span>{t("Plan")}</span>
+				</button>
+			</div>
+		) : undefined;
 	const planRevisionChip = planRevisionTarget ? (
 		<div className="composer-plan-context">
 			<span className="composer-plan-revision-chip">
@@ -638,7 +672,10 @@ export const SessionChatView = memo(function SessionChatView({
 	)
 		? ("failed" as const)
 		: mcpServers.some(
-					(server) => server.effective && server.enabled && (server.state === "connecting" || server.state === "reconnecting"),
+					(server) =>
+						server.effective &&
+						server.enabled &&
+						(server.state === "connecting" || server.state === "reconnecting"),
 				)
 			? ("connecting" as const)
 			: undefined;
@@ -676,15 +713,17 @@ export const SessionChatView = memo(function SessionChatView({
 				)}
 				<div className="conversation-composer">
 					<Composer
-						knowledge={serverReady && writableSessionId ? { api, sessionId: writableSessionId, onOpen: onOpenKnowledge } : undefined}
+						knowledge={
+							serverReady && writableSessionId
+								? { api, sessionId: writableSessionId, onOpen: onOpenKnowledge }
+								: undefined
+						}
 						appearance={session?.mode ?? "chat"}
 						collaborationControl={collaborationControl}
 						contextControl={planRevisionChip}
 						contextUsageExpanded={sessionStatusPanel?.sessionId === sessionId && !sessionStatusPanel.closing}
 						contextUsagePercent={
-							contextStatus && contextStatus.sessionId === sessionId
-								? contextUsagePercent(contextStatus)
-								: null
+							contextStatus && contextStatus.sessionId === sessionId ? contextUsagePercent(contextStatus) : null
 						}
 						onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
 						commandPanel={

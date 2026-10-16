@@ -1,18 +1,17 @@
 import type {
 	PluginActivationStatus,
 	PluginCatalogEntryView,
-	PluginComponentPublicView,
 	PluginComponentStatus,
-	PluginInstalledView,
 	PluginInspectionView,
+	PluginInstalledView,
 	PluginIssue,
 	PluginMarketView,
 	PluginRecord,
 	PluginUpdateInspectionView,
 } from "@metis/app-protocol";
 import {
-	ArrowSquareOut,
 	ArrowLeft,
+	ArrowSquareOut,
 	ArrowsClockwise,
 	CaretRight,
 	CheckCircle,
@@ -41,7 +40,10 @@ function message(cause: unknown): string {
 }
 
 function marketName(market: PluginMarketView): string {
-	return market.url.replace(/^https:\/\/github\.com\//iu, "").replace(/\/$/u, "").replace(/\.git$/u, "");
+	return market.url
+		.replace(/^https:\/\/github\.com\//iu, "")
+		.replace(/\/$/u, "")
+		.replace(/\.git$/u, "");
 }
 
 function isFatalInspectionIssue(issue: PluginIssue): boolean {
@@ -195,7 +197,9 @@ export function PluginMarketplacePanel({
 		if (viewMode === "browse" && selectedMarketId) {
 			loadCatalog(selectedMarketId);
 		}
-		return () => { marketGeneration.current += 1; };
+		return () => {
+			marketGeneration.current += 1;
+		};
 	}, [viewMode, selectedMarketId, loadCatalog]);
 
 	// Switch to installed plugin detail when selectedPluginId is provided
@@ -215,8 +219,7 @@ export function PluginMarketplacePanel({
 		let active = true;
 		setDetailLoading(true);
 		setDetailError(null);
-		api
-			.getInstalledPlugin({ pluginId: detailPluginId })
+		api.getInstalledPlugin({ pluginId: detailPluginId })
 			.then((detail) => {
 				if (active) setDetailPlugin(detail);
 			})
@@ -236,7 +239,10 @@ export function PluginMarketplacePanel({
 		async (sourceId: string) => {
 			if (!serverReady) return;
 			setCatalogQuery("");
-			if (sourceId === selectedMarketId) { setViewMode("browse"); return; }
+			if (sourceId === selectedMarketId) {
+				setViewMode("browse");
+				return;
+			}
 			try {
 				const res = await api.selectPluginMarket({
 					requestId: crypto.randomUUID(),
@@ -298,22 +304,29 @@ export function PluginMarketplacePanel({
 	);
 
 	// Removing a source preserves installed plugins and their runtime capabilities.
-	const handleRemoveMarket = useCallback(async (sourceId: string) => {
-		if (!serverReady || marketRemovingId) return;
-		setMarketRemovingId(sourceId);
-		setMarketError(null);
-		try {
-			const res = await api.removePluginMarket({ requestId: crypto.randomUUID(), sourceId, expectedRevision: registryRevision });
-			setMarkets(res.markets);
-			setSelectedMarketId(res.selectedSourceId ?? "");
-			setRegistryRevision(res.registryRevision);
-			if (sourceId === selectedMarketId) setViewMode("markets");
-		} catch (err) {
-			setMarketError(message(err));
-		} finally {
-			setMarketRemovingId(null);
-		}
-	}, [api, registryRevision, selectedMarketId, serverReady, marketRemovingId]);
+	const handleRemoveMarket = useCallback(
+		async (sourceId: string) => {
+			if (!serverReady || marketRemovingId) return;
+			setMarketRemovingId(sourceId);
+			setMarketError(null);
+			try {
+				const res = await api.removePluginMarket({
+					requestId: crypto.randomUUID(),
+					sourceId,
+					expectedRevision: registryRevision,
+				});
+				setMarkets(res.markets);
+				setSelectedMarketId(res.selectedSourceId ?? "");
+				setRegistryRevision(res.registryRevision);
+				if (sourceId === selectedMarketId) setViewMode("markets");
+			} catch (err) {
+				setMarketError(message(err));
+			} finally {
+				setMarketRemovingId(null);
+			}
+		},
+		[api, registryRevision, selectedMarketId, serverReady, marketRemovingId],
+	);
 
 	// Inspect a plugin entry
 	const handleInspectEntry = useCallback(
@@ -488,9 +501,7 @@ export function PluginMarketplacePanel({
 		const q = catalogQuery.trim().toLowerCase();
 		if (!q) return catalogEntries;
 		return catalogEntries.filter(
-			(entry) =>
-				entry.name.toLowerCase().includes(q) ||
-				(entry.description && entry.description.toLowerCase().includes(q)),
+			(entry) => entry.name.toLowerCase().includes(q) || entry.description?.toLowerCase().includes(q),
 		);
 	}, [catalogEntries, catalogQuery]);
 
@@ -499,64 +510,166 @@ export function PluginMarketplacePanel({
 		const q = installedQuery.trim().toLowerCase();
 		if (!q) return installedList;
 		return installedList.filter(
-			(plugin) =>
-				plugin.name.toLowerCase().includes(q) ||
-				plugin.displayName.toLowerCase().includes(q),
+			(plugin) => plugin.name.toLowerCase().includes(q) || plugin.displayName.toLowerCase().includes(q),
 		);
 	}, [installedList, installedQuery]);
 
 	const selectedMarket = markets.find((m) => m.id === selectedMarketId);
-	const visibleMarkets = markets.filter((market) => `${marketName(market)} ${market.url}`.toLowerCase().includes(marketQuery.trim().toLowerCase()));
-	const searchLabel = viewMode === "markets" ? "Search markets…" : viewMode === "browse" ? "Search plugins…" : "Search installed plugins…";
-	const reloading = viewMode === "markets" ? marketsLoading : viewMode === "browse" ? marketRefreshing || catalogLoading : installedLoading;
+	const visibleMarkets = markets.filter((market) =>
+		`${marketName(market)} ${market.url}`.toLowerCase().includes(marketQuery.trim().toLowerCase()),
+	);
+	const searchLabel =
+		viewMode === "markets"
+			? "Search markets…"
+			: viewMode === "browse"
+				? "Search plugins…"
+				: "Search installed plugins…";
+	const reloading =
+		viewMode === "markets"
+			? marketsLoading
+			: viewMode === "browse"
+				? marketRefreshing || catalogLoading
+				: installedLoading;
 
 	return (
 		<div className="plugins-market-panel">
-			{headerActionsTarget && createPortal(<>
-				<button aria-label={t(reloading ? "Reloading…" : "Reload")} className="plugins-reload" disabled={!serverReady || reloading || !!marketRemovingId}
-					onClick={viewMode === "markets" ? loadMarkets : viewMode === "browse" ? handleRefreshMarket : loadInstalled} type="button">
-					<ArrowsClockwise aria-hidden="true" className={reloading ? "plugins-spin" : undefined} size={16} />{t("Reload")}
-				</button>
-				<button className="plugins-new-btn" disabled={!serverReady || !!marketRemovingId} onClick={() => { setAddMarketError(null); setAddMarketOpen(true); }} type="button">
-					<Plus aria-hidden="true" size={16} /><span>{t("Add Market")}</span>
-				</button>
-			</>, headerActionsTarget)}
+			{headerActionsTarget &&
+				createPortal(
+					<>
+						<button
+							aria-label={t(reloading ? "Reloading…" : "Reload")}
+							className="plugins-reload"
+							disabled={!serverReady || reloading || !!marketRemovingId}
+							onClick={
+								viewMode === "markets"
+									? loadMarkets
+									: viewMode === "browse"
+										? handleRefreshMarket
+										: loadInstalled
+							}
+							type="button"
+						>
+							<ArrowsClockwise aria-hidden="true" className={reloading ? "plugins-spin" : undefined} size={16} />
+							{t("Reload")}
+						</button>
+						<button
+							className="plugins-new-btn"
+							disabled={!serverReady || !!marketRemovingId}
+							onClick={() => {
+								setAddMarketError(null);
+								setAddMarketOpen(true);
+							}}
+							type="button"
+						>
+							<Plus aria-hidden="true" size={16} />
+							<span>{t("Add Market")}</span>
+						</button>
+					</>,
+					headerActionsTarget,
+				)}
 			<div className="plugins-list-controls plugins-installed-controls">
 				<div className="plugins-search">
 					<MagnifyingGlass aria-hidden="true" size={16} />
-					<input aria-label={t(searchLabel)} placeholder={t(searchLabel)} type="search"
-						onChange={(event) => viewMode === "markets" ? setMarketQuery(event.target.value) : viewMode === "browse" ? setCatalogQuery(event.target.value) : setInstalledQuery(event.target.value)}
-						value={viewMode === "markets" ? marketQuery : viewMode === "browse" ? catalogQuery : installedQuery} />
+					<input
+						aria-label={t(searchLabel)}
+						placeholder={t(searchLabel)}
+						type="search"
+						onChange={(event) =>
+							viewMode === "markets"
+								? setMarketQuery(event.target.value)
+								: viewMode === "browse"
+									? setCatalogQuery(event.target.value)
+									: setInstalledQuery(event.target.value)
+						}
+						value={viewMode === "markets" ? marketQuery : viewMode === "browse" ? catalogQuery : installedQuery}
+					/>
 				</div>
 			</div>
 			<div className="plugins-market-navigation">
-				{viewMode !== "markets" ? <button className="plugins-market-back" onClick={() => { setViewMode("markets"); setMarketError(null); }} type="button"><ArrowLeft aria-hidden="true" size={15} />{t("Markets")}</button> : <span>{t("Markets")}</span>}
-				{viewMode === "browse" && <span className="plugins-current-market" title={selectedMarket?.url}>{selectedMarket ? marketName(selectedMarket) : ""}</span>}
-				{viewMode === "installed" ? <span>{t("Manage plugins")}</span> : <button className="plugins-manage-installed" onClick={() => setViewMode("installed")} type="button">{t("Manage plugins")}<span className="plugins-count-pill">{installedList.length}</span></button>}
+				{viewMode !== "markets" ? (
+					<button
+						className="plugins-market-back"
+						onClick={() => {
+							setViewMode("markets");
+							setMarketError(null);
+						}}
+						type="button"
+					>
+						<ArrowLeft aria-hidden="true" size={15} />
+						{t("Markets")}
+					</button>
+				) : (
+					<span>{t("Markets")}</span>
+				)}
+				{viewMode === "browse" && (
+					<span className="plugins-current-market" title={selectedMarket?.url}>
+						{selectedMarket ? marketName(selectedMarket) : ""}
+					</span>
+				)}
+				{viewMode === "installed" ? (
+					<span>{t("Manage plugins")}</span>
+				) : (
+					<button className="plugins-manage-installed" onClick={() => setViewMode("installed")} type="button">
+						{t("Manage plugins")}
+						<span className="plugins-count-pill">{installedList.length}</span>
+					</button>
+				)}
 			</div>
-			{marketError && <p className="mcp-dialog-error" role="alert">{marketError}</p>}
+			{marketError && (
+				<p className="mcp-dialog-error" role="alert">
+					{marketError}
+				</p>
+			)}
 			{viewMode === "markets" ? (
-				<div className="plugins-full-list plugins-market-sources" aria-label={t("Markets")}>
-					{marketsLoading ? <p className="plugins-catalog-message" role="status">{t("Loading markets…")}</p> : visibleMarkets.length === 0 ? <p className="plugins-catalog-message">{t(marketQuery ? "No markets match your search." : "No markets added. Add a GitHub market to discover plugins.")}</p> : visibleMarkets.map((market) => (
-						<div className="plugins-source-row" key={market.id}>
-							<button className="plugins-list-row plugins-source-open" disabled={!serverReady || !!marketRemovingId} onClick={() => handleSelectMarket(market.id)} type="button">
-								<span className="plugins-row-icon"><Package aria-hidden="true" size={22} /></span>
-								<span className="plugins-row-copy"><strong>{marketName(market)}</strong><small>{market.url}</small></span>
-								<CaretRight aria-hidden="true" size={17} />
-							</button>
-							<button aria-label={t("Remove market {{name}}", { name: marketName(market) })} title={t("Remove market; installed plugins are kept")}
-								className="plugins-market-remove-btn" disabled={!serverReady || !!marketRemovingId} onClick={() => handleRemoveMarket(market.id)} type="button"><Trash aria-hidden="true" size={16} /></button>
-						</div>
-					))}
-				</div>
+				<section className="plugins-full-list plugins-market-sources" aria-label={t("Markets")}>
+					{marketsLoading ? (
+						<output className="status-paragraph plugins-catalog-message">{t("Loading markets…")}</output>
+					) : visibleMarkets.length === 0 ? (
+						<p className="plugins-catalog-message">
+							{t(
+								marketQuery
+									? "No markets match your search."
+									: "No markets added. Add a GitHub market to discover plugins.",
+							)}
+						</p>
+					) : (
+						visibleMarkets.map((market) => (
+							<div className="plugins-source-row" key={market.id}>
+								<button
+									className="plugins-list-row plugins-source-open"
+									disabled={!serverReady || !!marketRemovingId}
+									onClick={() => handleSelectMarket(market.id)}
+									type="button"
+								>
+									<span className="plugins-row-icon">
+										<Package aria-hidden="true" size={22} />
+									</span>
+									<span className="plugins-row-copy">
+										<strong>{marketName(market)}</strong>
+										<small>{market.url}</small>
+									</span>
+									<CaretRight aria-hidden="true" size={17} />
+								</button>
+								<button
+									aria-label={t("Remove market {{name}}", { name: marketName(market) })}
+									title={t("Remove market; installed plugins are kept")}
+									className="plugins-market-remove-btn"
+									disabled={!serverReady || !!marketRemovingId}
+									onClick={() => handleRemoveMarket(market.id)}
+									type="button"
+								>
+									<Trash aria-hidden="true" size={16} />
+								</button>
+							</div>
+						))
+					)}
+				</section>
 			) : viewMode === "browse" ? (
 				<>
 					{/* Catalog List */}
 					<div className="plugins-full-list" role="listbox">
 						{catalogLoading ? (
-							<p className="plugins-catalog-message" role="status">
-								{t("Loading catalog…")}
-							</p>
+							<output className="status-paragraph plugins-catalog-message">{t("Loading catalog…")}</output>
 						) : catalogError ? (
 							<div className="plugins-catalog-message" role="alert">
 								<p>{catalogError}</p>
@@ -592,7 +705,10 @@ export function PluginMarketplacePanel({
 									<button
 										className="plugins-inspect-action-btn"
 										disabled={!serverReady}
-										onClick={() => { if (entry.installedPluginId) setDetailPluginId(entry.installedPluginId); else handleInspectEntry(entry); }}
+										onClick={() => {
+											if (entry.installedPluginId) setDetailPluginId(entry.installedPluginId);
+											else handleInspectEntry(entry);
+										}}
 										type="button"
 									>
 										{t(entry.installedPluginId ? "Manage" : "Inspect")}
@@ -607,9 +723,9 @@ export function PluginMarketplacePanel({
 					{/* Installed List */}
 					<div className="plugins-full-list" role="listbox">
 						{installedLoading ? (
-							<p className="plugins-catalog-message" role="status">
+							<output className="status-paragraph plugins-catalog-message">
 								{t("Loading installed plugins…")}
-							</p>
+							</output>
 						) : installedError ? (
 							<div className="plugins-catalog-message" role="alert">
 								<p>{installedError}</p>
@@ -791,9 +907,7 @@ function AddMarketDialog({
 				<X aria-hidden="true" size={17} />
 			</button>
 			<h2 id="add-market-title">{t("Add Market")}</h2>
-			<p id="add-market-description">
-				{t("Enter GitHub repository URL or owner/repo")}
-			</p>
+			<p id="add-market-description">{t("Enter GitHub repository URL or owner/repo")}</p>
 			<form onSubmit={handleSubmit}>
 				<label>
 					<span>{t("GitHub Address")}</span>
@@ -813,13 +927,7 @@ function AddMarketDialog({
 					</p>
 				)}
 				<div className="mcp-dialog-actions">
-					<button
-						className="button-secondary"
-						disabled={pending}
-						onClick={onCancel}
-						ref={cancelRef}
-						type="button"
-					>
+					<button className="button-secondary" disabled={pending} onClick={onCancel} ref={cancelRef} type="button">
 						{t("Cancel")}
 					</button>
 					<button className="button-primary" disabled={pending || !url.trim()} type="submit">
@@ -859,12 +967,8 @@ function InspectPluginDialog({
 
 	// Capability evaluation
 	const components = inspection?.components ?? [];
-	const unsupportedComponents = components.filter(
-		(c) => c.status === "unsupported" || c.kind === "unsupported",
-	);
-	const supportedComponents = components.filter(
-		(c) => c.status !== "unsupported" && c.kind !== "unsupported",
-	);
+	const unsupportedComponents = components.filter((c) => c.status === "unsupported" || c.kind === "unsupported");
+	const supportedComponents = components.filter((c) => c.status !== "unsupported" && c.kind !== "unsupported");
 	const hasUnsupported = unsupportedComponents.length > 0;
 	const allUnsupported = supportedComponents.length === 0;
 	const blockedByInspection = Boolean(inspection?.issues.some(isFatalInspectionIssue));
@@ -887,28 +991,21 @@ function InspectPluginDialog({
 			>
 				<X aria-hidden="true" size={17} />
 			</button>
-			<h2 id="inspect-plugin-title">
-				{inspection?.plugin.displayName || entry.name}
-			</h2>
-			<p id="inspect-plugin-description">
-				{inspection?.plugin.description || entry.description}
-			</p>
+			<h2 id="inspect-plugin-title">{inspection?.plugin.displayName || entry.name}</h2>
+			<p id="inspect-plugin-description">{inspection?.plugin.description || entry.description}</p>
 
 			{loading ? (
-				<p className="plugins-detail-loading" role="status">
-					{t("Loading plugin details…")}
-				</p>
+				<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
 			) : error ? (
 				<p className="mcp-dialog-error" role="alert">
 					{error}
 				</p>
 			) : installResult ? (
+				/* biome-ignore lint/a11y/useSemanticElements: This status banner groups block content and actions; output only accepts phrasing content. */
 				<div className="plugins-install-success-banner" role="status">
 					<CheckCircle aria-hidden="true" color="var(--success-action)" size={24} />
 					<div>
-						<strong>
-							{t("Plugin installed", { name: installResult.name })}
-						</strong>
+						<strong>{t("Plugin installed", { name: installResult.name })}</strong>
 						<p>
 							{installResult.activation === "next-turn"
 								? t(
@@ -995,6 +1092,7 @@ function InspectPluginDialog({
 							<h3>{t("Issues and limitations")}</h3>
 							<ul className="plugins-issues-list">
 								{inspection.issues.map((issue, idx) => (
+									/* biome-ignore lint/suspicious/noArrayIndexKey: Issues belong to one immutable inspection snapshot and have no unique issue IDs or local row state. */
 									<li className={`plugins-issue-item status-${issue.status}`} key={idx}>
 										<Warning aria-hidden="true" size={15} />
 										<span>{issue.message}</span>
@@ -1009,11 +1107,7 @@ function InspectPluginDialog({
 						<div className="plugins-partial-notice">
 							<Warning aria-hidden="true" size={18} />
 							<div>
-								<p>
-									{t(
-										"This plugin contains unsupported components which will be skipped.",
-									)}
-								</p>
+								<p>{t("This plugin contains unsupported components which will be skipped.")}</p>
 								<label className="plugins-partial-checkbox">
 									<input
 										checked={allowPartial}
@@ -1030,11 +1124,7 @@ function InspectPluginDialog({
 					{allUnsupported && (
 						<div className="plugins-unsupported-banner" role="alert">
 							<XCircle aria-hidden="true" size={18} />
-							<p>
-								{t(
-									"No compatible components can be installed from this plugin.",
-								)}
-							</p>
+							<p>{t("No compatible components can be installed from this plugin.")}</p>
 						</div>
 					)}
 
@@ -1120,17 +1210,11 @@ function InstalledPluginDetailDialog({
 			>
 				<X aria-hidden="true" size={17} />
 			</button>
-			<h2 id="installed-detail-title">
-				{detail?.plugin.displayName || detail?.plugin.name || t("Plugin Details")}
-			</h2>
-			<p id="installed-detail-description">
-				{detail?.plugin.repository || ""}
-			</p>
+			<h2 id="installed-detail-title">{detail?.plugin.displayName || detail?.plugin.name || t("Plugin Details")}</h2>
+			<p id="installed-detail-description">{detail?.plugin.repository || ""}</p>
 
 			{loading ? (
-				<p className="plugins-detail-loading" role="status">
-					{t("Loading plugin details…")}
-				</p>
+				<output className="status-paragraph plugins-detail-loading">{t("Loading plugin details…")}</output>
 			) : error ? (
 				<p className="mcp-dialog-error" role="alert">
 					{error}
@@ -1142,18 +1226,12 @@ function InstalledPluginDetailDialog({
 							{updateError}
 						</p>
 					)}
-					{updateMessage && (
-						<p className="plugins-update-status" role="status">
-							{updateMessage}
-						</p>
-					)}
+					{updateMessage && <output className="status-paragraph plugins-update-status">{updateMessage}</output>}
 					{/* Status overview */}
 					<div className="plugins-status-card">
 						<div className="plugins-status-card-row">
 							<span>{t("Configuration")}:</span>
-							<span
-								className={`plugins-badge ${detail.plugin.enabled ? "badge-enabled" : "badge-disabled"}`}
-							>
+							<span className={`plugins-badge ${detail.plugin.enabled ? "badge-enabled" : "badge-disabled"}`}>
 								{t(detail.plugin.enabled ? "Enabled" : "Disabled")}
 							</span>
 						</div>
@@ -1283,28 +1361,13 @@ function InstalledPluginDetailDialog({
 
 					{/* Actions */}
 					<div className="mcp-dialog-actions plugins-installed-actions">
-						<button
-							className="button-secondary"
-							disabled={pending}
-							onClick={onToggleEnabled}
-							type="button"
-						>
+						<button className="button-secondary" disabled={pending} onClick={onToggleEnabled} type="button">
 							{detail.plugin.enabled ? t("Disable") : t("Enable")}
 						</button>
-						<button
-							className="button-secondary"
-							disabled={pending}
-							onClick={onCheckUpdate}
-							type="button"
-						>
+						<button className="button-secondary" disabled={pending} onClick={onCheckUpdate} type="button">
 							{t("Check for Updates")}
 						</button>
-						<button
-							className="mcp-danger"
-							disabled={pending}
-							onClick={onUninstall}
-							type="button"
-						>
+						<button className="mcp-danger" disabled={pending} onClick={onUninstall} type="button">
 							{t("Uninstall")}
 						</button>
 						<button
@@ -1340,18 +1403,16 @@ function UpdatePluginDialog({
 	const closeRef = useRef<HTMLButtonElement>(null);
 	const [allowPartial, setAllowPartial] = useState(false);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(updateInfo.inspection?.inspectionId): Each new inspection resets consent for a partial installation.
 	useEffect(() => {
 		setAllowPartial(false);
 	}, [updateInfo.inspection?.inspectionId]);
 
 	const inspection = updateInfo.inspection;
 	const components = inspection?.components ?? [];
-	const hasUnsupported = components.some(
-		(c) => c.status === "unsupported" || c.kind === "unsupported",
-	);
+	const hasUnsupported = components.some((c) => c.status === "unsupported" || c.kind === "unsupported");
 	const allUnsupported =
-		Boolean(inspection) &&
-		components.every((c) => c.status === "unsupported" || c.kind === "unsupported");
+		Boolean(inspection) && components.every((c) => c.status === "unsupported" || c.kind === "unsupported");
 	const blockedByInspection = Boolean(inspection?.issues.some(isFatalInspectionIssue));
 
 	return (
@@ -1423,6 +1484,7 @@ function UpdatePluginDialog({
 							<h3>{t("Issues and limitations")}</h3>
 							<ul className="plugins-issues-list">
 								{inspection.issues.map((issue, index) => (
+									/* biome-ignore lint/suspicious/noArrayIndexKey: Issues belong to one immutable inspection snapshot and have no unique issue IDs or local row state. */
 									<li className={`plugins-issue-item status-${issue.status}`} key={index}>
 										<Warning aria-hidden="true" size={15} />
 										<span>{issue.message}</span>
@@ -1445,24 +1507,14 @@ function UpdatePluginDialog({
 					{allUnsupported && (
 						<div className="plugins-unsupported-banner" role="alert">
 							<XCircle aria-hidden="true" size={18} />
-							<p>
-								{t(
-									"No compatible components can be installed from this plugin.",
-								)}
-							</p>
+							<p>{t("No compatible components can be installed from this plugin.")}</p>
 						</div>
 					)}
 				</div>
 			)}
 
 			<div className="mcp-dialog-actions">
-				<button
-					className="button-secondary"
-					disabled={pending}
-					onClick={onClose}
-					ref={closeRef}
-					type="button"
-				>
+				<button className="button-secondary" disabled={pending} onClick={onClose} ref={closeRef} type="button">
 					{t("Cancel")}
 				</button>
 				{allUnsupported || blockedByInspection ? (
@@ -1520,10 +1572,9 @@ function RemovePluginDialog({
 			</button>
 			<h2 id="remove-plugin-title">{t("Uninstall Plugin?")}</h2>
 			<p id="remove-plugin-description">
-				{t(
-					"Uninstall {{name}}? Manual configurations and other plugins will not be affected.",
-					{ name: plugin.displayName || plugin.name },
-				)}
+				{t("Uninstall {{name}}? Manual configurations and other plugins will not be affected.", {
+					name: plugin.displayName || plugin.name,
+				})}
 			</p>
 			{error && (
 				<p className="mcp-dialog-error" role="alert">
@@ -1531,21 +1582,10 @@ function RemovePluginDialog({
 				</p>
 			)}
 			<div className="mcp-dialog-actions">
-				<button
-					className="button-secondary"
-					disabled={pending}
-					onClick={onCancel}
-					ref={cancelRef}
-					type="button"
-				>
+				<button className="button-secondary" disabled={pending} onClick={onCancel} ref={cancelRef} type="button">
 					{t("Cancel")}
 				</button>
-				<button
-					className="mcp-danger"
-					disabled={pending}
-					onClick={onConfirm}
-					type="button"
-				>
+				<button className="mcp-danger" disabled={pending} onClick={onConfirm} type="button">
 					{t(pending ? "Uninstalling…" : "Uninstall")}
 				</button>
 			</div>

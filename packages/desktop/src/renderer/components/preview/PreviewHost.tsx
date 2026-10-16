@@ -37,7 +37,9 @@ interface LoadedPreview {
 	readonly bytes: Uint8Array;
 }
 
-function previewInput(file: UniversalPreviewTarget): DesktopPreviewFileInput | null {
+function previewInput(
+	file: Pick<UniversalPreviewTarget, "source" | "sessionId" | "fileId" | "relativePath">,
+): DesktopPreviewFileInput | null {
 	if (file.source === "delivered" && file.fileId) {
 		return { source: "delivered", sessionId: file.sessionId, fileId: file.fileId };
 	}
@@ -90,7 +92,11 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const [data, setData] = useState<LoadedPreview | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const input = useMemo(() => previewInput(file), [file.source, file.sessionId, file.fileId, file.relativePath]);
+	const { source, sessionId, fileId, relativePath } = file;
+	const input = useMemo(
+		() => previewInput({ source, sessionId, fileId, relativePath }),
+		[source, sessionId, fileId, relativePath],
+	);
 	const liveText = file.source === "workspace";
 	const loadedKey = useRef<string | null>(null);
 	const [revision, setRevision] = useState(0);
@@ -133,6 +139,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		}
 	};
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(revision): Workspace completion events invalidate live preview bytes.
 	useEffect(() => {
 		if (!active || kind === "unsupported") {
 			setLoading(false);

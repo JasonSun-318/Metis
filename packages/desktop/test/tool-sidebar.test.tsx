@@ -9,7 +9,9 @@ import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
-vi.mock("../src/renderer/components/SessionChatView.tsx", () => ({ SessionChatView: () => <input aria-label="Chat input" /> }));
+vi.mock("../src/renderer/components/SessionChatView.tsx", () => ({
+	SessionChatView: () => <input aria-label="Chat input" />,
+}));
 vi.mock("../src/renderer/components/TerminalPanel.tsx", () => ({
 	TerminalPanel: ({ terminalId, visible }: { terminalId: string; visible: boolean }) => (
 		<div className={`terminal-panel${visible ? " is-visible" : ""}`} data-terminal-id={terminalId}>
@@ -18,20 +20,42 @@ vi.mock("../src/renderer/components/TerminalPanel.tsx", () => ({
 	),
 }));
 vi.mock("../src/renderer/components/BrowserPanel.tsx", () => ({
-	BrowserPanel: ({ browserId, visible, covered, startPageTools }: { browserId: string; visible: boolean; covered?: boolean; startPageTools?: ReactNode }) => (
-		<div className="browser-panel" data-browser-id={browserId} data-visible={visible} data-covered={covered}>{startPageTools}</div>
+	BrowserPanel: ({
+		browserId,
+		visible,
+		covered,
+		startPageTools,
+	}: {
+		browserId: string;
+		visible: boolean;
+		covered?: boolean;
+		startPageTools?: ReactNode;
+	}) => (
+		<div className="browser-panel" data-browser-id={browserId} data-visible={visible} data-covered={covered}>
+			{startPageTools}
+		</div>
 	),
 }));
-vi.mock("../src/renderer/components/KnowledgePanel.tsx", () => ({ KnowledgePanel: () => <div>Knowledge content</div> }));
-vi.mock("../src/renderer/components/PlanPreview.tsx", () => ({ PlanPreview: ({ plan }: { plan: PlanView }) => <div>{plan.markdown}</div> }));
-vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({ UniversalFilePreviewer: () => <div>File preview</div> }));
+vi.mock("../src/renderer/components/KnowledgePanel.tsx", () => ({
+	KnowledgePanel: () => <div>Knowledge content</div>,
+}));
+vi.mock("../src/renderer/components/PlanPreview.tsx", () => ({
+	PlanPreview: ({ plan }: { plan: PlanView }) => <div>{plan.markdown}</div>,
+}));
+vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({
+	UniversalFilePreviewer: () => <div>File preview</div>,
+}));
 
 type WorkspaceProps = ComponentProps<typeof SessionWorkspaceView>;
 const SESSION = "11111111-1111-4111-8111-111111111111";
 const OTHER = "22222222-2222-4222-8222-222222222222";
 const plan: PlanView = {
-	planId: "plan-1", revision: 1, title: "Original plan", markdown: "Original content",
-	status: "proposed", createdAt: "2026-10-13T00:00:00.000Z",
+	planId: "plan-1",
+	revision: 1,
+	title: "Original plan",
+	markdown: "Original content",
+	status: "proposed",
+	createdAt: "2026-10-13T00:00:00.000Z",
 };
 let roots: Root[] = [];
 
@@ -60,18 +84,33 @@ function mount() {
 	const store = new AppStore();
 	const onToolsSidebarOpenChange = vi.fn();
 	let props: WorkspaceProps = {
-		api, chat: null, chatCwd: "/work/one", chatFocusRequest: null, chatIsDraft: false,
-		chatSessionId: SESSION, cleanupSessionIds: [], mode: "code",
-		onActivateSession: vi.fn(), onChatSession: vi.fn(), onCleanupSessionIdsHandled: vi.fn(),
-		onDirtySessionIdsChange: vi.fn(), onError: vi.fn(), onLiveSessionsChange: vi.fn(),
+		api,
+		chat: null,
+		chatCwd: "/work/one",
+		chatFocusRequest: null,
+		chatIsDraft: false,
+		chatSessionId: SESSION,
+		cleanupSessionIds: [],
+		mode: "code",
+		onActivateSession: vi.fn(),
+		onChatSession: vi.fn(),
+		onCleanupSessionIdsHandled: vi.fn(),
+		onDirtySessionIdsChange: vi.fn(),
+		onError: vi.fn(),
+		onLiveSessionsChange: vi.fn(),
 		chatView: { api, store } as WorkspaceProps["chatView"],
 		sessionsById: new Map([
 			[SESSION, { sessionId: SESSION, cwd: "/work/one", mode: "code" }],
 			[OTHER, { sessionId: OTHER, cwd: "/work/two", mode: "code" }],
 		]),
-		sessionTitleFor: (id) => id === SESSION ? "One" : "Two",
-		store, theme: "dark", visible: true, toolsSidebarOpen: true,
-		titlebarTabsSlot: chatSlot, titlebarToolsSlot: toolsSlot, onToolsSidebarOpenChange,
+		sessionTitleFor: (id) => (id === SESSION ? "One" : "Two"),
+		store,
+		theme: "dark",
+		visible: true,
+		toolsSidebarOpen: true,
+		titlebarTabsSlot: chatSlot,
+		titlebarToolsSlot: toolsSlot,
+		onToolsSidebarOpenChange,
 	};
 	const render = async (next: Partial<WorkspaceProps> = {}) => {
 		props = { ...props, ...next };
@@ -99,11 +138,23 @@ afterEach(async () => {
 describe("per-session tools sidebar", () => {
 	it("uses the chat space left beside the sidebar when checking a split", async () => {
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
-			x: 0, y: 0, top: 0, left: 0, right: 1000, bottom: 800, width: 1000, height: 800, toJSON: () => ({}),
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 1000,
+			bottom: 800,
+			width: 1000,
+			height: 800,
+			toJSON: () => ({}),
 		});
 		const view = mount();
 		await view.render({ toolsSidebarWidth: 393 });
-		await act(async () => button(view.chatSlot, "One").closest(".tool-tab")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+		await act(async () =>
+			button(view.chatSlot, "One")
+				.closest(".tool-tab")!
+				.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
+		);
 		expect(button(view.container, "Split right").disabled).toBe(true);
 		expect(button(view.container, "Split right").title).toBe("Not enough room to split");
 		await view.render({ toolsSidebarOpen: false });
@@ -149,9 +200,15 @@ describe("per-session tools sidebar", () => {
 		await view.render();
 		await view.addTerminal();
 		await act(async () => button(view.toolsSlot, "Terminal").focus());
-		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true })));
+		await act(async () =>
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, bubbles: true })),
+		);
 		expect(button(view.toolsSlot, "New tab").getAttribute("aria-selected")).toBe("true");
-		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, shiftKey: true, bubbles: true })));
+		await act(async () =>
+			document.dispatchEvent(
+				new KeyboardEvent("keydown", { key: "Tab", ctrlKey: true, shiftKey: true, bubbles: true }),
+			),
+		);
 		expect(button(view.toolsSlot, "Terminal").getAttribute("aria-selected")).toBe("true");
 	});
 	it("closes the tool selected with keyboard focus in the titlebar", async () => {
@@ -169,7 +226,11 @@ describe("per-session tools sidebar", () => {
 		const view = mount();
 		await view.render();
 		await view.addTerminal();
-		await act(async () => view.container.querySelector(".tool-sidebar")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+		await act(async () =>
+			view.container
+				.querySelector(".tool-sidebar")!
+				.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })),
+		);
 		await act(async () => button(view.chatSlot, "One").click());
 		await view.render({ closeTabRequest: 1 });
 		expect(view.api.closeTerminal).not.toHaveBeenCalled();
@@ -180,7 +241,11 @@ describe("per-session tools sidebar", () => {
 		const view = mount();
 		await view.render();
 		await view.addTerminal();
-		await act(async () => view.container.querySelector(".tool-sidebar")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+		await act(async () =>
+			view.container
+				.querySelector(".tool-sidebar")!
+				.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })),
+		);
 		await view.render({ toolsSidebarOpen: false });
 		await view.render({ closeTabRequest: 1 });
 		expect(view.api.closeTerminal).not.toHaveBeenCalled();
@@ -209,9 +274,13 @@ describe("per-session tools sidebar", () => {
 		const view = mount();
 		await view.render({ planPreviewRequest: { sessionId: SESSION, plan } });
 		view.onToolsSidebarOpenChange.mockClear();
-		await view.render({ toolsSidebarOpen: false, planPreviewRequest: {
-			sessionId: SESSION, plan: { ...plan, revision: 2, title: "Revised plan", markdown: "Revised content" },
-		} });
+		await view.render({
+			toolsSidebarOpen: false,
+			planPreviewRequest: {
+				sessionId: SESSION,
+				plan: { ...plan, revision: 2, title: "Revised plan", markdown: "Revised content" },
+			},
+		});
 		expect(view.onToolsSidebarOpenChange).toHaveBeenLastCalledWith(true);
 		expect(view.container.textContent).toContain("Revised content");
 		expect(view.container.textContent).not.toContain("Original content");
@@ -237,9 +306,14 @@ describe("per-session tools sidebar", () => {
 		const view = mount();
 		await view.render();
 		await view.addTerminal();
-		await act(async () => button(view.toolsSlot, "Terminal").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })));
+		await act(async () =>
+			button(view.toolsSlot, "Terminal").dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
+		);
 		expect(document.querySelector(".workspace-tab-menu")).not.toBeNull();
-		expect(view.container.querySelector<HTMLElement>(".terminal-panel")?.closest<HTMLElement>(".tool-sidebar-panel")?.hidden).toBe(false);
+		expect(
+			view.container.querySelector<HTMLElement>(".terminal-panel")?.closest<HTMLElement>(".tool-sidebar-panel")
+				?.hidden,
+		).toBe(false);
 		expect(view.container.querySelector(".terminal-panel.is-visible")).not.toBeNull();
 	});
 });

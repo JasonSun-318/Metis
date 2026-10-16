@@ -1,5 +1,5 @@
 import type { ModelOptionView, SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, Check, CaretRight } from "@phosphor-icons/react";
+import { CaretDown, CaretRight, Check } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { providerDisplayName } from "../provider-names.ts";
@@ -57,25 +57,28 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 		);
 	}, [activeModels, modelQuery]);
 
-	const close = (restoreFocus = false) => {
+	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
 		setActiveProvider(null);
 		setProviderQuery("");
 		setModelQuery("");
 		if (restoreFocus) triggerRef.current?.focus();
-	};
-	const selectModel = useCallback(async (model: ModelOptionView) => {
-		setOpen(false);
-		setActiveProvider(null);
-		setProviderQuery("");
-		setModelQuery("");
-		setPending(true);
-		try {
-			await onChange(model);
-		} finally {
-			setPending(false);
-		}
-	}, [onChange]);
+	}, []);
+	const selectModel = useCallback(
+		async (model: ModelOptionView) => {
+			setOpen(false);
+			setActiveProvider(null);
+			setProviderQuery("");
+			setModelQuery("");
+			setPending(true);
+			try {
+				await onChange(model);
+			} finally {
+				setPending(false);
+			}
+		},
+		[onChange],
+	);
 
 	useEffect(() => {
 		if (disabled) setOpen(false);
@@ -124,7 +127,7 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [activeModels, activeProvider, open, selectModel, visibleModels]);
+	}, [activeProvider, close, open, selectModel, visibleModels]);
 
 	return (
 		<div className="composer-selector model-selector model-control" ref={rootRef}>
@@ -156,28 +159,30 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 					/>
 					{visibleProviders.length === 0 ? (
 						<p className="model-selector-empty">{t("No matches")}</p>
-					) : visibleProviders.map(([provider, name]) => {
-						const isSelected = provider === value?.provider;
-						const expanded = provider === activeProvider;
-						return (
-							<button
-								aria-checked={isSelected}
-								aria-expanded={expanded}
-								className="model-selector-provider"
-								key={provider}
-								onClick={() => setActiveProvider(expanded ? null : provider)}
-								role="menuitemradio"
-								type="button"
-							>
-								<span>{name}</span>
-								{isSelected ? (
-									<Check aria-hidden="true" size={16} weight="bold" />
-								) : (
-									<CaretRight aria-hidden="true" size={14} />
-								)}
-							</button>
-						);
-					})}
+					) : (
+						visibleProviders.map(([provider, name]) => {
+							const isSelected = provider === value?.provider;
+							const expanded = provider === activeProvider;
+							return (
+								<button
+									aria-checked={isSelected}
+									aria-expanded={expanded}
+									className="model-selector-provider"
+									key={provider}
+									onClick={() => setActiveProvider(expanded ? null : provider)}
+									role="menuitemradio"
+									type="button"
+								>
+									<span>{name}</span>
+									{isSelected ? (
+										<Check aria-hidden="true" size={16} weight="bold" />
+									) : (
+										<CaretRight aria-hidden="true" size={14} />
+									)}
+								</button>
+							);
+						})
+					)}
 				</div>
 			)}
 			{open && activeProvider !== null && (
@@ -195,27 +200,29 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 					/>
 					{visibleModels.length === 0 ? (
 						<p className="model-selector-empty">{t("No matches")}</p>
-					) : visibleModels.map((model, index) => {
-						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
-						return (
-							<button
-								aria-checked={isSelected}
-								key={`${model.provider}/${model.modelId}`}
-								onClick={() => {
-									if (!isSelected) void selectModel(model).catch(() => undefined);
-								}}
-								role="menuitemradio"
-								type="button"
-							>
-								<span>{model.name}</span>
-								{isSelected ? (
-									<Check aria-hidden="true" size={16} weight="bold" />
-								) : index < 9 ? (
-									<kbd>{index + 1}</kbd>
-								) : null}
-							</button>
-						);
-					})}
+					) : (
+						visibleModels.map((model, index) => {
+							const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
+							return (
+								<button
+									aria-checked={isSelected}
+									key={`${model.provider}/${model.modelId}`}
+									onClick={() => {
+										if (!isSelected) void selectModel(model).catch(() => undefined);
+									}}
+									role="menuitemradio"
+									type="button"
+								>
+									<span>{model.name}</span>
+									{isSelected ? (
+										<Check aria-hidden="true" size={16} weight="bold" />
+									) : index < 9 ? (
+										<kbd>{index + 1}</kbd>
+									) : null}
+								</button>
+							);
+						})
+					)}
 				</div>
 			)}
 		</div>

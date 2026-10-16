@@ -1,4 +1,3 @@
-import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import {
 	CaretRight,
@@ -14,11 +13,12 @@ import {
 } from "@phosphor-icons/react";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
+import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
-import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -26,11 +26,11 @@ import {
 	commandText,
 	isCommandTool,
 	messageText,
-	toolResultImagesFromBlocks,
-	toolTranscriptPresentation,
 	type ToolCallBlock,
 	type ToolDetailLine,
 	type ToolResultBlock,
+	toolResultImagesFromBlocks,
+	toolTranscriptPresentation,
 } from "./transcript-turn-model.ts";
 
 function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
@@ -39,7 +39,11 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 		case "text":
 			return <p>{block.text}</p>;
 		case "image":
-			return <p className="transcript-attachment"><ImageSquare aria-hidden="true" size={18} /> {t("Image")} · {block.image.mediaType}</p>;
+			return (
+				<p className="transcript-attachment">
+					<ImageSquare aria-hidden="true" size={18} /> {t("Image")} · {block.image.mediaType}
+				</p>
+			);
 		case "notice":
 			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
 		case "thinking":
@@ -55,10 +59,12 @@ function SafeToolDetails({ lines }: { readonly lines: readonly ToolDetailLine[] 
 	if (lines.length === 0) return null;
 	return (
 		<dl className="tool-safe-details">
-			{lines.map((line, index) => <div className="tool-safe-row" key={`${line.label ?? "detail"}-${index}`}>
-				{line.label && <dt>{line.label}</dt>}
-				<dd>{line.value}</dd>
-			</div>)}
+			{lines.map((line, index) => (
+				<div className="tool-safe-row" key={`${line.label ?? "detail"}-${index}`}>
+					{line.label && <dt>{line.label}</dt>}
+					<dd>{line.value}</dd>
+				</div>
+			))}
 		</dl>
 	);
 }
@@ -74,7 +80,9 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 				<div className="tool-step-static-label">
 					<Wrench aria-hidden="true" size={17} />
 					<span>{presentation.label}</span>
-					{call.state === "running" && <CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />}
+					{call.state === "running" && (
+						<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
+					)}
 				</div>
 				<SafeToolDetails lines={presentation.detailLines} />
 				{presentation.rawOutputIsError && presentation.rawOutput !== undefined && (
@@ -93,13 +101,25 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 			<summary>
 				<TerminalWindow aria-hidden="true" size={17} />
 				<span>{presentation.label}</span>
-				{call.state === "running" && <CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />}
+				{call.state === "running" && (
+					<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
+				)}
 			</summary>
 			{(command || presentation.rawOutput !== undefined) && (
 				<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 					<div className="tool-step-details">
 						{command && <pre className="tool-step-input">{command}</pre>}
-						{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
+						{presentation.rawOutput !== undefined && (
+							<pre
+								className={
+									presentation.rawOutputIsError
+										? "tool-step-output tool-step-output-error"
+										: "tool-step-output"
+								}
+							>
+								{presentation.rawOutput}
+							</pre>
+						)}
 					</div>
 				</div>
 			)}
@@ -156,6 +176,9 @@ function ExecutionChain({
 		wasRunning.current = running;
 	}, [running]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(results): Streaming content, results, and expansion styles require measuring the execution drawer again.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(canExpand): Streaming content, results, and expansion styles require measuring the execution drawer again.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(activity): Streaming content, results, and expansion styles require measuring the execution drawer again.
 	useLayoutEffect(() => {
 		if (!open || showAll) return;
 		const viewport = viewportRef.current;
@@ -187,44 +210,68 @@ function ExecutionChain({
 			}}
 			open={open}
 		>
-			<summary onClick={() => {
-				if (open) setShowAll(false);
-			}}>
+			<summary>
 				<span aria-live="polite">{t(running ? "Execution process" : "Execution complete")}</span>
 				<CaretRight aria-hidden="true" className="execution-chain-caret" size={16} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<div>
-					<div className={`execution-chain-content${showAll ? "" : " is-preview"}${canExpand && !showAll ? " is-capped" : ""}`}>
+					<div
+						className={`execution-chain-content${showAll ? "" : " is-preview"}${canExpand && !showAll ? " is-capped" : ""}`}
+					>
 						<div className="execution-chain-viewport" ref={viewportRef}>
 							<div className="execution-chain-timeline" ref={timelineRef}>
 								{activity.map((block, index) => {
 									if (block.type === "thinking") {
 										return (
+											/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
 											<div className="activity-step" key={`thinking-${index}`}>
-												<span className="activity-step-icon"><ClockCounterClockwise aria-hidden="true" size={17} /></span>
+												<span className="activity-step-icon">
+													<ClockCounterClockwise aria-hidden="true" size={17} />
+												</span>
 												<p>{block.text}</p>
 											</div>
 										);
 									}
 									if (block.type === "text") {
 										return (
+											/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
 											<div className="activity-step activity-step-message" key={`text-${index}`}>
-												<div><Markdown text={block.text} /></div>
+												<div>
+													<Markdown text={block.text} />
+												</div>
 											</div>
 										);
 									}
 									if (block.type === "tool_call") {
-										return <ToolStep call={block} key={`tool-${block.toolCallId}`} result={results.get(block.toolCallId)} />;
+										return (
+											<ToolStep
+												call={block}
+												key={`tool-${block.toolCallId}`}
+												result={results.get(block.toolCallId)}
+											/>
+										);
 									}
 									if (block.type === "tool_result") {
 										const presentation = toolTranscriptPresentation(undefined, block, t);
 										return (
 											<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
-												<span className="activity-step-icon"><CheckCircle aria-hidden="true" size={17} /></span>
+												<span className="activity-step-icon">
+													<CheckCircle aria-hidden="true" size={17} />
+												</span>
 												<p>{presentation.label}</p>
 												<SafeToolDetails lines={presentation.detailLines} />
-												{presentation.rawOutput !== undefined && <pre className={presentation.rawOutputIsError ? "tool-step-output tool-step-output-error" : "tool-step-output"}>{presentation.rawOutput}</pre>}
+												{presentation.rawOutput !== undefined && (
+													<pre
+														className={
+															presentation.rawOutputIsError
+																? "tool-step-output tool-step-output-error"
+																: "tool-step-output"
+														}
+													>
+														{presentation.rawOutput}
+													</pre>
+												)}
 											</div>
 										);
 									}
@@ -240,14 +287,20 @@ function ExecutionChain({
 					</div>
 					{running ? (
 						<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
-					) : (!canExpand || showAll) && (
-						<div className="execution-chain-done">
-							<CheckCircle aria-hidden="true" size={17} />
-							<span>{t("Done")}</span>
-						</div>
+					) : (
+						(!canExpand || showAll) && (
+							<div className="execution-chain-done">
+								<CheckCircle aria-hidden="true" size={17} />
+								<span>{t("Done")}</span>
+							</div>
+						)
 					)}
 					{canExpand && showAll && (
-						<button className="execution-chain-show-more is-show-less" onClick={() => setShowAll(false)} type="button">
+						<button
+							className="execution-chain-show-more is-show-less"
+							onClick={() => setShowAll(false)}
+							type="button"
+						>
 							{t("Show less")}
 						</button>
 					)}
@@ -261,9 +314,12 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 	const { t } = useTranslation();
 	const [copied, setCopied] = useState(false);
 	const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-	useEffect(() => () => {
-		if (resetTimer.current) clearTimeout(resetTimer.current);
-	}, []);
+	useEffect(
+		() => () => {
+			if (resetTimer.current) clearTimeout(resetTimer.current);
+		},
+		[],
+	);
 	const copy = () => {
 		onCopy(text);
 		setCopied(true);
@@ -312,7 +368,17 @@ function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnProps): b
 
 // Rows are re-created per render, so items compare element-wise — item objects
 // are replaced (never mutated) when the reducer applies an event.
-export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = false, items, running: runtimeRunning = false, startedAt, onFork, onCopy, onJumpToQuote, onOpenDeliveredFile, onPreviewDeliveredFile }: TranscriptTurnProps) {
+export const TranscriptTurn = memo(function TranscriptTurn({
+	waitingForAnswer = false,
+	items,
+	running: runtimeRunning = false,
+	startedAt,
+	onFork,
+	onCopy,
+	onJumpToQuote,
+	onOpenDeliveredFile,
+	onPreviewDeliveredFile,
+}: TranscriptTurnProps) {
 	const { t } = useTranslation();
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
@@ -329,67 +395,101 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 		}
 	}
 
-		return (
-			<>
-				{segments.map((segment, index) => {
-					if (segment.type === "user") {
-						const copyText = messageText(segment.item);
-						return (
-							<div className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`} key={segment.item.itemId} data-user-message={segment.item.itemId}>
-								<MessageAttachments attachments={segment.item.attachments} />
-								<MessageFileSelections selections={segment.item.fileSelections} />
-								{segment.item.content.length > 0 && <div className="message message-user" data-quote-item={segment.item.itemId}>
-									{segment.item.content.map((block, blockIndex) => <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />)}
-								</div>}
-								<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
-								{onCopy && copyText.trim() !== "" && (
-									<div className="turn-actions">
-										<TurnCopyButton onCopy={onCopy} text={copyText} />
-									</div>
-								)}
-							</div>
-						);
-					}
-					if (segment.type === "answer") {
-						return (
-							<div className="turn-answer" data-quote-item={segment.item.itemId} data-transcript-answer key={`answer-${segment.item.itemId}`}>
-								{segment.item.content.map((block, blockIndex) =>
-									block.type === "text"
-										? <Markdown key={`${block.type}-${blockIndex}`} text={block.text} />
-										: <StaticBlock block={block} key={`${block.type}-${blockIndex}`} />,
-								)}
-							</div>
-						);
-					}
-					if (segment.type === "intermediate") {
-						return (
-							<div className="turn-intermediate" key={`intermediate-${index}`}>
-								{segment.blocks.map((block, blockIndex) => <Markdown key={`text-${blockIndex}`} text={block.text} quoteItemId={items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId} />)}
-							</div>
-						);
-					}
+	return (
+		<>
+			{segments.map((segment, index) => {
+				if (segment.type === "user") {
+					const copyText = messageText(segment.item);
 					return (
-						<div key={`activity-${index}`}>
-							<ExecutionChain
-								activity={segment.blocks}
-								items={items}
-								results={results}
-								running={index === activeActivityIndex}
-								startedAt={startedAt}
-								waitingForAnswer={waitingForAnswer}
-							/>
-							{segment.calls.filter((call) => call.name === "ask_user").map((call) => <AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />)}
-							{sessionId ? (
-								<ToolResultImages
-									images={toolResultImagesFromBlocks(segment.blocks, results)}
-									sessionId={sessionId}
-								/>
-							) : null}
+						<div
+							className={`turn-user${segment.item.itemId === enteringUserId ? " is-entering" : ""}`}
+							key={segment.item.itemId}
+							data-user-message={segment.item.itemId}
+						>
+							<MessageAttachments attachments={segment.item.attachments} />
+							<MessageFileSelections selections={segment.item.fileSelections} />
+							{segment.item.content.length > 0 && (
+								<div className="message message-user" data-quote-item={segment.item.itemId}>
+									{segment.item.content.map((block, blockIndex) => (
+										<StaticBlock block={block} key={`${block.type}-${blockIndex}`} />
+									))}
+								</div>
+							)}
+							<MessageAnnotations quotes={segment.item.conversationQuotes} onJumpToSource={onJumpToQuote} />
+							{onCopy && copyText.trim() !== "" && (
+								<div className="turn-actions">
+									<TurnCopyButton onCopy={onCopy} text={copyText} />
+								</div>
+							)}
 						</div>
 					);
-				})}
+				}
+				if (segment.type === "answer") {
+					return (
+						<div
+							className="turn-answer"
+							data-quote-item={segment.item.itemId}
+							data-transcript-answer
+							key={`answer-${segment.item.itemId}`}
+						>
+							{segment.item.content.map((block, blockIndex) =>
+								block.type === "text" ? (
+									<Markdown key={`${block.type}-${blockIndex}`} text={block.text} />
+								) : (
+									<StaticBlock block={block} key={`${block.type}-${blockIndex}`} />
+								),
+							)}
+						</div>
+					);
+				}
+				if (segment.type === "intermediate") {
+					return (
+						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
+						<div className="turn-intermediate" key={`intermediate-${index}`}>
+							{segment.blocks.map((block, blockIndex) => (
+								<Markdown
+									// biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams.
+									key={`text-${blockIndex}`}
+									text={block.text}
+									quoteItemId={
+										items.find((item) => item.role === "assistant" && item.content.includes(block))?.itemId
+									}
+								/>
+							))}
+						</div>
+					);
+				}
+				return (
+					/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
+					<div key={`activity-${index}`}>
+						<ExecutionChain
+							activity={segment.blocks}
+							items={items}
+							results={results}
+							running={index === activeActivityIndex}
+							startedAt={startedAt}
+							waitingForAnswer={waitingForAnswer}
+						/>
+						{segment.calls
+							.filter((call) => call.name === "ask_user")
+							.map((call) => (
+								<AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />
+							))}
+						{sessionId ? (
+							<ToolResultImages
+								images={toolResultImagesFromBlocks(segment.blocks, results)}
+								sessionId={sessionId}
+							/>
+						) : null}
+					</div>
+				);
+			})}
 			{deliveredFiles.length > 0 && !runtimeRunning && onOpenDeliveredFile ? (
-				<DeliveredFileCards files={deliveredFiles} onOpen={onOpenDeliveredFile} onPreview={onPreviewDeliveredFile} />
+				<DeliveredFileCards
+					files={deliveredFiles}
+					onOpen={onOpenDeliveredFile}
+					onPreview={onPreviewDeliveredFile}
+				/>
 			) : null}
 			{final && final.state === "completed" && (onFork || (onCopy && finalCopyText.trim() !== "")) && (
 				<div className="turn-actions">
@@ -404,9 +504,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({ waitingForAnswer = 
 							<GitFork aria-hidden="true" size={13} />
 						</button>
 					)}
-					{onCopy && finalCopyText.trim() !== "" && (
-						<TurnCopyButton onCopy={onCopy} text={finalCopyText} />
-					)}
+					{onCopy && finalCopyText.trim() !== "" && <TurnCopyButton onCopy={onCopy} text={finalCopyText} />}
 				</div>
 			)}
 			{runtimeRunning && activeActivityIndex < 0 && (

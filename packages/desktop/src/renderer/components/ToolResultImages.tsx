@@ -1,5 +1,5 @@
 import type { DurableImageRefView } from "@metis/app-protocol";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 
@@ -15,7 +15,6 @@ export function ToolResultImages({
 	readonly images: readonly DurableImageRefView[];
 }) {
 	const { t } = useTranslation();
-	const imageKey = useMemo(() => images.map((image) => image.hash).join(","), [images]);
 	const [urls, setUrls] = useState<ReadonlyMap<string, string>>(new Map());
 	const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
 
@@ -38,7 +37,7 @@ export function ToolResultImages({
 		return () => {
 			current = false;
 		};
-	}, [sessionId, imageKey, images]);
+	}, [sessionId, images]);
 
 	if (images.length === 0) return null;
 	return (

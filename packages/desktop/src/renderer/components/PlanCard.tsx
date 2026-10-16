@@ -35,7 +35,7 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 			</div>
 			<footer className="plan-card-actions">
 				<button
-					aria-label={t("Open plan") + `: ${actionLabel}`}
+					aria-label={`${t("Open plan")}: ${actionLabel}`}
 					data-plan-action="open"
 					onClick={() => onOpen(plan)}
 					type="button"
@@ -45,7 +45,7 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 				{isProposed && (
 					<>
 						<button
-							aria-label={t("Start execution") + `: ${actionLabel}`}
+							aria-label={`${t("Start execution")}: ${actionLabel}`}
 							data-plan-action="start"
 							disabled={busy}
 							onClick={() => onStart(plan)}
@@ -54,7 +54,7 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 							{t("Start execution")}
 						</button>
 						<button
-							aria-label={t("Revise plan") + `: ${actionLabel}`}
+							aria-label={`${t("Revise plan")}: ${actionLabel}`}
 							data-plan-action="revise"
 							disabled={busy}
 							onClick={() => onRevise(plan)}
@@ -63,7 +63,7 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 							{t("Revise plan")}
 						</button>
 						<button
-							aria-label={t("Cancel plan") + `: ${actionLabel}`}
+							aria-label={`${t("Cancel plan")}: ${actionLabel}`}
 							data-plan-action="cancel"
 							disabled={busy}
 							onClick={() => onCancel(plan)}

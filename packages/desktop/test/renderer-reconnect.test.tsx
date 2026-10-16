@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
+import type { ConnectionEventsParams, ItemView, SessionSnapshot } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import type { ConnectionEventsParams, ItemView, SessionSnapshot } from "@metis/app-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InteractionHost } from "../src/renderer/components/InteractionHost.tsx";
 import { RecoveryBanner } from "../src/renderer/components/RecoveryBanner.tsx";
@@ -35,6 +35,9 @@ function snapshot(serverEpoch: string, cursor: number, text: string): SessionSna
 			updatedAt: "2026-07-16T00:00:00.000Z",
 			state: "running",
 			archived: false,
+			unread: false,
+			useMemory: true,
+			contributeMemory: true,
 		},
 		collaborationMode: "default",
 		permissionPreset: "ask",
@@ -135,6 +138,9 @@ describe("renderer reconnect behavior", () => {
 						updatedAt: "2026-07-16T00:00:01.000Z",
 						state: "interrupted",
 						archived: false,
+						unread: false,
+						useMemory: true,
+						contributeMemory: true,
 					}}
 				/>,
 			);
@@ -243,46 +249,51 @@ describe("renderer reconnect behavior", () => {
 
 	it("allows complete approvals with omitted summary rows and still offers Allow once when incomplete", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		for (const [fixture] of [
-			[{
+		for (const fixture of [
+			{
 				toolLabel: "read",
 				details: [{ label: "Path", value: "/tmp/target-0" }],
 				scopeComplete: true,
 				riskLevel: "medium" as const,
 				executionTarget: "sandbox" as const,
-			}, false],
-			[{
+			},
+			{
 				toolLabel: "mcp__service__publish",
 				details: [{ label: "Details", value: "No target details were provided" }],
 				scopeComplete: false,
 				riskLevel: "critical" as const,
 				executionTarget: "host" as const,
-			}, false],
-		] as const) {
+			},
+		]) {
 			const container = document.createElement("div");
 			document.body.append(container);
 			const root = createRoot(container);
-			await act(async () => root.render(
-				<InteractionHost
-					interaction={{
-						interactionId: "00000000-0000-4000-8000-000000000209",
-						sessionId: "session-1",
-						title: "Approve operation?",
-						message: "Review the requested operation.",
-						createdAt: "2026-07-16T00:00:00.000Z",
-						kind: "session_permission_approval",
-						requestId: "00000000-0000-4000-8000-000000000209",
-						actionId: "action-op-1",
-						reason: "Review the requested operation.",
-						choices: ["allow-once", "deny-once"],
-						...fixture,
-					}}
-					onRespond={vi.fn().mockResolvedValue(undefined)}
-				/>,
-			));
+			await act(async () =>
+				root.render(
+					<InteractionHost
+						interaction={{
+							interactionId: "00000000-0000-4000-8000-000000000209",
+							sessionId: "session-1",
+							title: "Approve operation?",
+							message: "Review the requested operation.",
+							createdAt: "2026-07-16T00:00:00.000Z",
+							kind: "session_permission_approval",
+							requestId: "00000000-0000-4000-8000-000000000209",
+							actionId: "action-op-1",
+							reason: "Review the requested operation.",
+							choices: ["allow-once", "deny-once"],
+							...fixture,
+						}}
+						onRespond={vi.fn().mockResolvedValue(undefined)}
+					/>,
+				),
+			);
 
-			expect([...container.querySelectorAll<HTMLButtonElement>("button")]
-				.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(false);
+			expect(
+				[...container.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+					button.textContent?.includes("Allow once"),
+				)?.disabled,
+			).toBe(false);
 			expect(container.querySelector('[role="alert"]') === null).toBe(fixture.scopeComplete);
 			await act(async () => root.unmount());
 			container.remove();
@@ -294,32 +305,37 @@ describe("renderer reconnect behavior", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(
-			<InteractionHost
-				interaction={{
-					interactionId: "00000000-0000-4000-8000-000000000210",
-					sessionId: "session-1",
-					title: "Approve publish?",
-					message: "Publish content",
-					createdAt: "2026-07-16T00:00:00.000Z",
-					kind: "session_permission_approval",
-					requestId: "00000000-0000-4000-8000-000000000210",
-					actionId: "action-publish-1",
-					toolLabel: "mcp__service__publish",
-					riskLevel: "critical",
-					executionTarget: "host",
-					reason: "Publish content",
-					scopeComplete: true,
-					details: [{ label: "Details", value: "Publish content" }],
-					choices: ["allow-once", "deny-once"],
-				}}
-				onRespond={vi.fn().mockResolvedValue(undefined)}
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<InteractionHost
+					interaction={{
+						interactionId: "00000000-0000-4000-8000-000000000210",
+						sessionId: "session-1",
+						title: "Approve publish?",
+						message: "Publish content",
+						createdAt: "2026-07-16T00:00:00.000Z",
+						kind: "session_permission_approval",
+						requestId: "00000000-0000-4000-8000-000000000210",
+						actionId: "action-publish-1",
+						toolLabel: "mcp__service__publish",
+						riskLevel: "critical",
+						executionTarget: "host",
+						reason: "Publish content",
+						scopeComplete: true,
+						details: [{ label: "Details", value: "Publish content" }],
+						choices: ["allow-once", "deny-once"],
+					}}
+					onRespond={vi.fn().mockResolvedValue(undefined)}
+				/>,
+			),
+		);
 
 		expect(container.textContent).not.toContain("private payload");
-		expect([...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent?.includes("Allow once"))?.disabled).toBe(false);
+		expect(
+			[...container.querySelectorAll<HTMLButtonElement>("button")].find((button) =>
+				button.textContent?.includes("Allow once"),
+			)?.disabled,
+		).toBe(false);
 		await act(async () => root.unmount());
 		container.remove();
 	});

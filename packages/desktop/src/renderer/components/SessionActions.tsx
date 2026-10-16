@@ -56,10 +56,10 @@ export function SessionActions({
 		}
 	}, [allowRename, onCopy, onPin]);
 
-	const closeMenu = (restoreFocus = true) => {
+	const closeMenu = useCallback((restoreFocus = true) => {
 		setMenuOpen(false);
 		if (restoreFocus) queueMicrotask(() => trigger.current?.focus());
-	};
+	}, []);
 	const cancelDialog = () => {
 		if (pending) return;
 		setDialog(null);
@@ -89,7 +89,7 @@ export function SessionActions({
 			window.removeEventListener("resize", updateMenuPosition);
 			window.removeEventListener("scroll", updateMenuPosition, true);
 		};
-	}, [allowRename, menuOpen, updateMenuPosition]);
+	}, [closeMenu, menuOpen, updateMenuPosition]);
 	useLayoutEffect(() => {
 		if (menuOpen) updateMenuPosition();
 	}, [menuOpen, updateMenuPosition]);
@@ -139,7 +139,11 @@ export function SessionActions({
 	};
 
 	return (
-		<div className={`session-actions${variant === "header" ? " session-actions-header" : ""}`} data-open={menuOpen} ref={root}>
+		<div
+			className={`session-actions${variant === "header" ? " session-actions-header" : ""}`}
+			data-open={menuOpen}
+			ref={root}
+		>
 			<button
 				aria-expanded={menuOpen}
 				aria-haspopup="menu"
@@ -152,113 +156,169 @@ export function SessionActions({
 				ref={trigger}
 				type="button"
 			>
-				{variant === "header"
-					? <CaretDown aria-hidden="true" size={13} />
-					: <DotsThree aria-hidden="true" size={17} weight="bold" />}
+				{variant === "header" ? (
+					<CaretDown aria-hidden="true" size={13} />
+				) : (
+					<DotsThree aria-hidden="true" size={17} weight="bold" />
+				)}
 			</button>
-			{menuOpen && createPortal((
-				<div
-					aria-label={t("{{name}} session actions", { name: displayName })}
-					className="session-action-menu"
-					onKeyDown={(event) => {
-						if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-						event.preventDefault();
-						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
-						const current = items.indexOf(document.activeElement as HTMLButtonElement);
-						const target = event.key === "Home"
-							? items[0]
-							: event.key === "End"
-								? items.at(-1)
-								: event.key === "ArrowDown"
-									? items[(current + 1) % items.length]
-									: items[(current <= 0 ? items.length : current) - 1];
-						target?.focus();
-					}}
-					ref={menu}
-					role="menu"
-					style={menuPosition}
-				>
-					{onPin && (
+			{menuOpen &&
+				createPortal(
+					<div
+						aria-label={t("{{name}} session actions", { name: displayName })}
+						className="session-action-menu"
+						onKeyDown={(event) => {
+							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+							event.preventDefault();
+							const items = Array.from(
+								event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+							);
+							const current = items.indexOf(document.activeElement as HTMLButtonElement);
+							const target =
+								event.key === "Home"
+									? items[0]
+									: event.key === "End"
+										? items.at(-1)
+										: event.key === "ArrowDown"
+											? items[(current + 1) % items.length]
+											: items[(current <= 0 ? items.length : current) - 1];
+							target?.focus();
+						}}
+						ref={menu}
+						role="menu"
+						style={menuPosition}
+					>
+						{onPin && (
+							<button
+								disabled={pending}
+								onClick={() => {
+									onPin(session, !pinned);
+									closeMenu();
+								}}
+								role="menuitem"
+								type="button"
+							>
+								{pinned ? (
+									<PushPin aria-hidden="true" size={15} />
+								) : (
+									<PushPinSimple aria-hidden="true" size={15} />
+								)}
+								{t(pinned ? "Unpin" : "Pin")}
+							</button>
+						)}
+						{onCopy && (
+							<button disabled={pending} onClick={() => void copyTitle()} role="menuitem" type="button">
+								<CopySimple aria-hidden="true" size={15} /> {t("Copy title")}
+							</button>
+						)}
+						{allowRename && (
+							<button
+								onClick={() => {
+									setName(displayName);
+									setError(null);
+									setMenuOpen(false);
+									setDialog("rename");
+								}}
+								role="menuitem"
+								type="button"
+							>
+								<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
+							</button>
+						)}
 						<button
-							disabled={pending}
+							className="session-delete-menu-item"
+							disabled={deleteDisabled}
 							onClick={() => {
-								onPin(session, !pinned);
-								closeMenu();
-							}}
-							role="menuitem"
-							type="button"
-						>
-							{pinned
-								? <PushPin aria-hidden="true" size={15} />
-								: <PushPinSimple aria-hidden="true" size={15} />}
-							{t(pinned ? "Unpin" : "Pin")}
-						</button>
-					)}
-					{onCopy && (
-						<button disabled={pending} onClick={() => void copyTitle()} role="menuitem" type="button">
-							<CopySimple aria-hidden="true" size={15} /> {t("Copy title")}
-						</button>
-					)}
-					{allowRename && (
-						<button
-							onClick={() => {
-								setName(displayName);
 								setError(null);
 								setMenuOpen(false);
-								setDialog("rename");
+								setDialog("delete");
 							}}
 							role="menuitem"
 							type="button"
 						>
-							<PencilSimple aria-hidden="true" size={15} /> {t("Rename")}
+							<Trash aria-hidden="true" size={15} /> {t("Delete")}
 						</button>
-					)}
-					<button
-						className="session-delete-menu-item"
-						disabled={deleteDisabled}
-						onClick={() => {
-							setError(null);
-							setMenuOpen(false);
-							setDialog("delete");
-						}}
-						role="menuitem"
-						type="button"
-					>
-						<Trash aria-hidden="true" size={15} /> {t("Delete")}
-					</button>
-					{error && <p className="session-action-menu-error" role="alert">{t(error)}</p>}
-				</div>
-			), document.body)}
+						{error && (
+							<p className="session-action-menu-error" role="alert">
+								{t(error)}
+							</p>
+						)}
+					</div>,
+					document.body,
+				)}
 			{dialog === "rename" && (
-				<DialogFrame cancellable={!pending} descriptionId="session-rename-description" initialFocus={renameInput} onCancel={cancelDialog} titleId="session-rename-title">
+				<DialogFrame
+					cancellable={!pending}
+					descriptionId="session-rename-description"
+					initialFocus={renameInput}
+					onCancel={cancelDialog}
+					titleId="session-rename-title"
+				>
 					<h2 id="session-rename-title">{t("Rename session")}</h2>
-					<p id="session-rename-description">{t("Change the session name shown in Metis. Messages are unchanged.")}</p>
+					<p id="session-rename-description">
+						{t("Change the session name shown in Metis. Messages are unchanged.")}
+					</p>
 					<form onSubmit={(event) => void submitRename(event)}>
 						<label htmlFor="session-rename-input">{t("Session name")}</label>
-						<input autoComplete="off" id="session-rename-input" onChange={(event) => setName([...event.target.value].slice(0, 80).join(""))} ref={renameInput} value={name} />
+						<input
+							autoComplete="off"
+							id="session-rename-input"
+							onChange={(event) => setName([...event.target.value].slice(0, 80).join(""))}
+							ref={renameInput}
+							value={name}
+						/>
 						{error && <p role="alert">{t(error)}</p>}
 						<div className="project-dialog-actions">
-							<button className="button-secondary" disabled={pending} onClick={cancelDialog} type="button">{t("Cancel")}</button>
-							<button disabled={pending || !name.trim()} type="submit">{t(pending ? "Renaming…" : "Rename")}</button>
+							<button className="button-secondary" disabled={pending} onClick={cancelDialog} type="button">
+								{t("Cancel")}
+							</button>
+							<button disabled={pending || !name.trim()} type="submit">
+								{t(pending ? "Renaming…" : "Rename")}
+							</button>
 						</div>
 					</form>
 				</DialogFrame>
 			)}
 			{dialog === "delete" && (
-				<DialogFrame cancellable={!pending} descriptionId="session-delete-description" initialFocus={cancelButton} onCancel={cancelDialog} titleId="session-delete-title">
+				<DialogFrame
+					cancellable={!pending}
+					descriptionId="session-delete-description"
+					initialFocus={cancelButton}
+					onCancel={cancelDialog}
+					titleId="session-delete-title"
+				>
 					<h2 id="session-delete-title">{t("Delete session?")}</h2>
 					<div id="session-delete-description">
 						<p>{t("{{name}} and its session-owned data will move to Trash.", { name: displayName })}</p>
 						<ul>
-							<li>{t("Images, attachments, tool outputs, Subagents, document work, and recovery files are included.")}</li>
+							<li>
+								{t(
+									"Images, attachments, tool outputs, Subagents, document work, and recovery files are included.",
+								)}
+							</li>
 							<li>{t("Project memory, Skills, schedules, other sessions, and source files are unchanged.")}</li>
 						</ul>
 						{error && <p role="alert">{t(error)}</p>}
-						{pending && <p role="status">{t("Moving session data to Trash…")}</p>}
+						{pending && <output className="status-paragraph">{t("Moving session data to Trash…")}</output>}
 					</div>
 					<div className="project-dialog-actions">
-						<button className="button-secondary" disabled={pending} onClick={cancelDialog} ref={cancelButton} type="button">{t("Cancel")}</button>
-						<button className="project-delete-confirm" disabled={pending || deleteDisabled} onClick={() => void confirmDelete()} type="button">{t(pending ? "Deleting…" : "Move to Trash")}</button>
+						<button
+							className="button-secondary"
+							disabled={pending}
+							onClick={cancelDialog}
+							ref={cancelButton}
+							type="button"
+						>
+							{t("Cancel")}
+						</button>
+						<button
+							className="project-delete-confirm"
+							disabled={pending || deleteDisabled}
+							onClick={() => void confirmDelete()}
+							type="button"
+						>
+							{t(pending ? "Deleting…" : "Move to Trash")}
+						</button>
 					</div>
 				</DialogFrame>
 			)}

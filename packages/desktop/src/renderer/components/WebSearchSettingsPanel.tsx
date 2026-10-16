@@ -12,7 +12,11 @@ const PROVIDERS: readonly { readonly value: WebSearchProvider; readonly label: s
 	{ value: "serpapi", label: "SerpApi" },
 ];
 
-export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
+export function WebSearchSettingsPanel({
+	api,
+	serverReady,
+	onDirtyChange,
+}: {
 	readonly api: Pick<
 		MetisDesktopApi,
 		"getWebSearchSettings" | "revealWebSearchCredential" | "updateWebSearchSettings"
@@ -61,10 +65,18 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 		return () => clearTimeout(timer);
 	}, [notice]);
 
-	const dirty = Boolean(savedSettings && (settings?.enabled !== savedSettings.enabled || settings?.provider !== savedSettings.provider || apiKey.length > 0));
-	useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+	const dirty = Boolean(
+		savedSettings &&
+			(settings?.enabled !== savedSettings.enabled ||
+				settings?.provider !== savedSettings.provider ||
+				apiKey.length > 0),
+	);
+	useEffect(() => {
+		onDirtyChange?.(dirty);
+	}, [dirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
-	if (!settings && !error) return <div aria-label={t("Search settings")} className="settings-loading" role="status" />;
+	if (!settings && !error)
+		return <output aria-label={t("Search settings")} className="status-block settings-loading" />;
 
 	const save = async (credentialAction: "set" | "keep" | "remove") => {
 		if (!settings) return;
@@ -80,11 +92,12 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 			const next = await api.updateWebSearchSettings({
 				enabled: settings.enabled,
 				provider: settings.provider,
-				credential: credentialAction === "set"
-					? { action: "set", value: apiKey.trim() }
-					: credentialAction === "remove"
-						? { action: "remove" }
-						: { action: "keep" },
+				credential:
+					credentialAction === "set"
+						? { action: "set", value: apiKey.trim() }
+						: credentialAction === "remove"
+							? { action: "remove" }
+							: { action: "keep" },
 			});
 			setSettings(next);
 			setSavedSettings(next);
@@ -173,6 +186,7 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 								checked={settings?.enabled ?? false}
 								disabled={!serverReady || busy}
 								onChange={(event) => update({ enabled: event.target.checked })}
+								aria-checked={settings?.enabled ?? false}
 								role="switch"
 								type="checkbox"
 							/>
@@ -202,10 +216,16 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 				<div className="general-setting-row web-search-api-row">
 					<div className="general-setting-copy">
 						<span>{t("API key")}</span>
-						<p>{settings?.authConfigured ? t("Credential is stored locally by Metis.") : t("API keys are stored locally on this device.")}</p>
+						<p>
+							{settings?.authConfigured
+								? t("Credential is stored locally by Metis.")
+								: t("API keys are stored locally on this device.")}
+						</p>
 					</div>
 					<div className="general-setting-control web-search-api-key">
-						<label className="sr-only" htmlFor="web-search-api-key">{t("API key")}</label>
+						<label className="sr-only" htmlFor="web-search-api-key">
+							{t("API key")}
+						</label>
 						<div className="web-search-api-key-field">
 							<input
 								autoComplete="off"
@@ -241,9 +261,14 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 				</div>
 
 				<div className="settings-form-actions web-search-actions">
-					{dirty && <span className="settings-unsaved-label" role="status">{t("Unsaved changes")}</span>}
+					{dirty && <output className="settings-unsaved-label">{t("Unsaved changes")}</output>}
 					{settings?.authConfigured ? (
-						<button className="settings-danger-button" disabled={busy} onClick={() => void save("remove")} type="button">
+						<button
+							className="settings-danger-button"
+							disabled={busy}
+							onClick={() => void save("remove")}
+							type="button"
+						>
 							{t("Clear credentials")}
 						</button>
 					) : null}
@@ -257,7 +282,12 @@ export function WebSearchSettingsPanel({ api, serverReady, onDirtyChange }: {
 					</button>
 				</div>
 
-				{error ? <p className="settings-action-message error web-search-message" role="alert"><XCircle aria-hidden="true" size={15} />{error}</p> : null}
+				{error ? (
+					<p className="settings-action-message error web-search-message" role="alert">
+						<XCircle aria-hidden="true" size={15} />
+						{error}
+					</p>
+				) : null}
 			</div>
 			{notice ? <FloatingSystemNotice title={notice} tone="success" /> : null}
 		</section>

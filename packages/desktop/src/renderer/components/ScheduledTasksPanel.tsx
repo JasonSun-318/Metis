@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import scheduleEmptyIcon from "../assets/scheduled-tasks-empty.svg";
-import { localeForIntl } from "../i18n.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
+import { localeForIntl } from "../i18n.ts";
 import type { ScheduleStore } from "../store/schedule-store.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ScheduledTaskDetail, scheduleLabel } from "./ScheduledTaskDetail.tsx";
@@ -34,12 +34,12 @@ function NewTaskMenu({
 }) {
 	const { t } = useTranslation();
 	return (
-			<MenuSelect<NewTaskAction>
-				ariaLabel={t("Create scheduled task")}
-				className={`scheduled-task-new-menu ${className ?? ""}`.trim()}
-				disabled={disabled}
-				menuAlign="end"
-				menuMinWidth={204}
+		<MenuSelect<NewTaskAction>
+			ariaLabel={t("Create scheduled task")}
+			className={`scheduled-task-new-menu ${className ?? ""}`.trim()}
+			disabled={disabled}
+			menuAlign="end"
+			menuMinWidth={204}
 			onChange={(action) => {
 				if (action === "assisted") onAssisted();
 				else if (action === "manual") onManual();
@@ -127,14 +127,24 @@ function AssistedScheduleWorkspaceDialog({
 				<div className="scheduled-task-workspace-options">
 					<button disabled={busy} onClick={() => void chooseFolder()} type="button">
 						<FolderSimple aria-hidden="true" size={21} />
-						<span><strong>{t("Choose folder")}</strong><small>{t("Work directly in a folder on your computer.")}</small></span>
+						<span>
+							<strong>{t("Choose folder")}</strong>
+							<small>{t("Work directly in a folder on your computer.")}</small>
+						</span>
 					</button>
 					<button disabled={busy} onClick={() => void create(null)} type="button">
 						<ChatCircleDots aria-hidden="true" size={21} />
-						<span><strong>{t("Use default workspace")}</strong><small>{t("Use a dedicated workspace managed by Metis.")}</small></span>
+						<span>
+							<strong>{t("Use default workspace")}</strong>
+							<small>{t("Use a dedicated workspace managed by Metis.")}</small>
+						</span>
 					</button>
 				</div>
-				{error && <p className="scheduled-task-form-error" role="alert">{t(error)}</p>}
+				{error && (
+					<p className="scheduled-task-form-error" role="alert">
+						{t(error)}
+					</p>
+				)}
 			</div>
 		</dialog>
 	);
@@ -145,7 +155,16 @@ function nextRunLabel(task: ScheduleTaskView, locale: string, t: (key: string) =
 	return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }).format(new Date(task.nextRunAt));
 }
 
-export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onSelectTask, selectedTaskId, serverReady, sessions, store }: {
+export function ScheduledTasksPanel({
+	api,
+	onCreateWithMetis,
+	onOpenSession,
+	onSelectTask,
+	selectedTaskId,
+	serverReady,
+	sessions,
+	store,
+}: {
 	readonly api: MetisDesktopApi;
 	readonly onCreateWithMetis: (cwd: string | null) => Promise<void>;
 	readonly onOpenSession: (sessionId: string) => void;
@@ -177,10 +196,12 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 	const listGeneration = useRef(0);
 	const selectedTask = selectedTaskId ? scheduleState.tasksById.get(selectedTaskId) : undefined;
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(reload): Retry and task mutations reload schedules and available models.
 	useEffect(() => {
 		if (!serverReady) return;
 		setModelsLoading(true);
-		void api.listModels()
+		void api
+			.listModels()
 			.then((result) => {
 				setModels(result.models);
 				setModelError(null);
@@ -192,12 +213,15 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 			.finally(() => setModelsLoading(false));
 	}, [api, reload, serverReady]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(scheduleState.version): Schedule events invalidate the task list.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(reload): Retry and task mutations reload schedules and available models.
 	useEffect(() => {
 		if (!serverReady) return;
 		const generation = ++listGeneration.current;
 		const timer = setTimeout(() => {
 			setLoading(true);
-			void api.listSchedules({ limit: 50, sort, ...(query.trim() ? { query: query.trim() } : {}) })
+			void api
+				.listSchedules({ limit: 50, sort, ...(query.trim() ? { query: query.trim() } : {}) })
 				.then((page) => {
 					if (generation !== listGeneration.current) return;
 					setTasks(page.tasks);
@@ -205,7 +229,8 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 					setListError(null);
 				})
 				.catch((cause) => {
-					if (generation === listGeneration.current) setListError(cause instanceof Error ? cause.message : "Scheduled tasks could not be loaded.");
+					if (generation === listGeneration.current)
+						setListError(cause instanceof Error ? cause.message : "Scheduled tasks could not be loaded.");
 				})
 				.finally(() => {
 					if (generation === listGeneration.current) setLoading(false);
@@ -218,7 +243,12 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 		if (!nextAfterTaskId || loadingMore) return;
 		setLoadingMore(true);
 		try {
-			const page = await api.listSchedules({ afterTaskId: nextAfterTaskId, limit: 50, sort, ...(query.trim() ? { query: query.trim() } : {}) });
+			const page = await api.listSchedules({
+				afterTaskId: nextAfterTaskId,
+				limit: 50,
+				sort,
+				...(query.trim() ? { query: query.trim() } : {}),
+			});
 			setTasks((current) => [...current, ...page.tasks]);
 			setNextAfterTaskId(page.nextAfterTaskId);
 		} catch (cause) {
@@ -264,38 +294,183 @@ export function ScheduledTasksPanel({ api, onCreateWithMetis, onOpenSession, onS
 					api={api}
 					onBack={() => onSelectTask(null)}
 					onChanged={(task) => store.upsertTask(task)}
-					onDeleted={(taskId) => { store.removeTask(taskId); onSelectTask(null); }}
+					onDeleted={(taskId) => {
+						store.removeTask(taskId);
+						onSelectTask(null);
+					}}
 					onEdit={() => setDialogTask(selectedTask)}
 					onOpenSession={onOpenSession}
 					task={selectedTask}
 				/>
-				{dialogTask && <ScheduledTaskDialog api={api} models={models} onClose={() => setDialogTask(undefined)} onSaved={saveTask} sessions={sessions} task={dialogTask} />}
+				{dialogTask && (
+					<ScheduledTaskDialog
+						api={api}
+						models={models}
+						onClose={() => setDialogTask(undefined)}
+						onSaved={saveTask}
+						sessions={sessions}
+						task={dialogTask}
+					/>
+				)}
 			</>
 		);
 	}
 
 	return (
 		<section className="scheduled-tasks-panel">
-					<header className="scheduled-tasks-header"><div><h1>{t("Scheduled tasks")}</h1><p>{t("Run tasks on a schedule or whenever you need them. Type /schedule in any existing task to set one up.")}</p></div><div><MenuSelect ariaLabel={t("Sort scheduled tasks")} className="scheduled-task-sort" onChange={setSort} options={SORT_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))} prefix={t("Sort by ")} value={sort} /><NewTaskMenu disabled={!serverReady || modelsLoading || models.length === 0} onAssisted={() => setWorkspaceDialogOpen(true)} onManual={() => setDialogTask(null)} /></div></header>
-			<div className="scheduled-tasks-scroll"><div className="scheduled-tasks-layout">
-				<div className="scheduled-tasks-toolbar"><MagnifyingGlass aria-hidden="true" size={16} /><input aria-label={t("Search scheduled tasks")} onChange={(event) => setQuery(event.target.value)} placeholder={t("Search scheduled tasks…")} value={query} /></div>
-						<div className="scheduled-tasks-notice"><span><Info aria-hidden="true" size={16} />{t("Scheduled tasks run only while Metis is open and your computer is awake and online.")}</span><label><Sun aria-hidden="true" size={16} />{t("Keep awake")} <input checked={keepAwake} disabled={keepAwakeBusy} onChange={(event) => void toggleKeepAwake(event.target.checked)} role="switch" type="checkbox" /></label></div>
-				{error && <div className="scheduled-tasks-error" role="alert"><span>{t(error)}</span><button onClick={retry} type="button">{t("Retry")}</button></div>}
-				{!modelsLoading && models.length === 0 && !modelError && <div className="scheduled-task-warning" role="status">{t("Configure a model provider before creating a scheduled task.")}</div>}
-				<div className="scheduled-tasks-content">
-										{loading && tasks.length === 0 ? <div className="scheduled-task-loading" role="status">{t("Loading scheduled tasks…")}</div> : tasks.length === 0 ? <div className="scheduled-tasks-empty"><TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} /><h2>{t(query ? "No matching scheduled tasks" : "Create your first scheduled task")}</h2><p>{t(query ? "Try another name or description." : "Set a task to run once or on a recurring schedule.")}</p>{!query && <button className="settings-primary-button" disabled={!serverReady || modelsLoading || models.length === 0} onClick={() => setDialogTask(null)} type="button">{t("Create scheduled task")}</button>}</div> : <div className="scheduled-task-cards">{tasks.map((task) => (
-						<button className="scheduled-task-card" key={task.id} onClick={() => onSelectTask(task.id)} type="button">
-							<span className="scheduled-task-card-heading"><strong>{task.name}</strong><span className={`scheduled-task-state state-${task.status}`}>{t(task.activeRunId ? "Running" : task.status.replace("_", " "))}</span></span>
-							{task.description && <p>{task.description}</p>}
-							<span className="scheduled-task-card-summary"><span>{scheduleLabel(task.schedule, t)}</span>{task.unreadCount > 0 && <i aria-label={t("{{count}} unread runs", { count: task.unreadCount })}>{task.unreadCount}</i>}</span>
-							<span className="scheduled-task-card-next">{t("Next: {{value}}", { value: nextRunLabel(task, intlLocale, t) })}</span>
-						</button>
-					))}</div>}
-					{nextAfterTaskId && <button className="scheduled-task-load-more" disabled={loadingMore} onClick={() => void loadMore()} type="button">{t(loadingMore ? "Loading…" : "Load more")}</button>}
+			<header className="scheduled-tasks-header">
+				<div>
+					<h1>{t("Scheduled tasks")}</h1>
+					<p>
+						{t(
+							"Run tasks on a schedule or whenever you need them. Type /schedule in any existing task to set one up.",
+						)}
+					</p>
 				</div>
-				</div></div>
-				{workspaceDialogOpen && <AssistedScheduleWorkspaceDialog api={api} onClose={() => setWorkspaceDialogOpen(false)} onCreate={onCreateWithMetis} />}
-				{dialogTask !== undefined && <ScheduledTaskDialog api={api} models={models} onClose={() => setDialogTask(undefined)} onSaved={saveTask} sessions={sessions} {...(dialogTask ? { task: dialogTask } : {})} />}
+				<div>
+					<MenuSelect
+						ariaLabel={t("Sort scheduled tasks")}
+						className="scheduled-task-sort"
+						onChange={setSort}
+						options={SORT_OPTIONS.map((option) => ({ ...option, label: t(option.label) }))}
+						prefix={t("Sort by ")}
+						value={sort}
+					/>
+					<NewTaskMenu
+						disabled={!serverReady || modelsLoading || models.length === 0}
+						onAssisted={() => setWorkspaceDialogOpen(true)}
+						onManual={() => setDialogTask(null)}
+					/>
+				</div>
+			</header>
+			<div className="scheduled-tasks-scroll">
+				<div className="scheduled-tasks-layout">
+					<div className="scheduled-tasks-toolbar">
+						<MagnifyingGlass aria-hidden="true" size={16} />
+						<input
+							aria-label={t("Search scheduled tasks")}
+							onChange={(event) => setQuery(event.target.value)}
+							placeholder={t("Search scheduled tasks…")}
+							value={query}
+						/>
+					</div>
+					<div className="scheduled-tasks-notice">
+						<span>
+							<Info aria-hidden="true" size={16} />
+							{t("Scheduled tasks run only while Metis is open and your computer is awake and online.")}
+						</span>
+						<label>
+							<Sun aria-hidden="true" size={16} />
+							{t("Keep awake")}{" "}
+							<input
+								checked={keepAwake}
+								disabled={keepAwakeBusy}
+								onChange={(event) => void toggleKeepAwake(event.target.checked)}
+								aria-checked={keepAwake}
+								role="switch"
+								type="checkbox"
+							/>
+						</label>
+					</div>
+					{error && (
+						<div className="scheduled-tasks-error" role="alert">
+							<span>{t(error)}</span>
+							<button onClick={retry} type="button">
+								{t("Retry")}
+							</button>
+						</div>
+					)}
+					{!modelsLoading && models.length === 0 && !modelError && (
+						<output className="status-block scheduled-task-warning">
+							{t("Configure a model provider before creating a scheduled task.")}
+						</output>
+					)}
+					<div className="scheduled-tasks-content">
+						{loading && tasks.length === 0 ? (
+							<output className="status-block scheduled-task-loading">{t("Loading scheduled tasks…")}</output>
+						) : tasks.length === 0 ? (
+							<div className="scheduled-tasks-empty">
+								<TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} />
+								<h2>{t(query ? "No matching scheduled tasks" : "Create your first scheduled task")}</h2>
+								<p>
+									{t(
+										query
+											? "Try another name or description."
+											: "Set a task to run once or on a recurring schedule.",
+									)}
+								</p>
+								{!query && (
+									<button
+										className="settings-primary-button"
+										disabled={!serverReady || modelsLoading || models.length === 0}
+										onClick={() => setDialogTask(null)}
+										type="button"
+									>
+										{t("Create scheduled task")}
+									</button>
+								)}
+							</div>
+						) : (
+							<div className="scheduled-task-cards">
+								{tasks.map((task) => (
+									<button
+										className="scheduled-task-card"
+										key={task.id}
+										onClick={() => onSelectTask(task.id)}
+										type="button"
+									>
+										<span className="scheduled-task-card-heading">
+											<strong>{task.name}</strong>
+											<span className={`scheduled-task-state state-${task.status}`}>
+												{t(task.activeRunId ? "Running" : task.status.replace("_", " "))}
+											</span>
+										</span>
+										{task.description && <p>{task.description}</p>}
+										<span className="scheduled-task-card-summary">
+											<span>{scheduleLabel(task.schedule, t)}</span>
+											{task.unreadCount > 0 && (
+												<i role="img" aria-label={t("{{count}} unread runs", { count: task.unreadCount })}>
+													{task.unreadCount}
+												</i>
+											)}
+										</span>
+										<span className="scheduled-task-card-next">
+											{t("Next: {{value}}", { value: nextRunLabel(task, intlLocale, t) })}
+										</span>
+									</button>
+								))}
+							</div>
+						)}
+						{nextAfterTaskId && (
+							<button
+								className="scheduled-task-load-more"
+								disabled={loadingMore}
+								onClick={() => void loadMore()}
+								type="button"
+							>
+								{t(loadingMore ? "Loading…" : "Load more")}
+							</button>
+						)}
+					</div>
+				</div>
+			</div>
+			{workspaceDialogOpen && (
+				<AssistedScheduleWorkspaceDialog
+					api={api}
+					onClose={() => setWorkspaceDialogOpen(false)}
+					onCreate={onCreateWithMetis}
+				/>
+			)}
+			{dialogTask !== undefined && (
+				<ScheduledTaskDialog
+					api={api}
+					models={models}
+					onClose={() => setDialogTask(undefined)}
+					onSaved={saveTask}
+					sessions={sessions}
+					{...(dialogTask ? { task: dialogTask } : {})}
+				/>
+			)}
 		</section>
 	);
 }

@@ -25,16 +25,7 @@ function mount(props: Partial<Parameters<typeof PermissionSelector>[0]> = {}) {
 	const root = createRoot(container);
 	roots.push(root);
 	const onChange = vi.fn().mockResolvedValue(undefined);
-	act(() =>
-		root.render(
-			<PermissionSelector
-				disabled={false}
-				onChange={onChange}
-				value="auto"
-				{...props}
-			/>,
-		),
-	);
+	act(() => root.render(<PermissionSelector disabled={false} onChange={onChange} value="auto" {...props} />));
 	return { container, onChange, root };
 }
 
@@ -43,8 +34,8 @@ async function openMenu(container: HTMLElement) {
 }
 
 function option(container: HTMLElement, label: string) {
-	const match = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find((candidate) =>
-		candidate.querySelector("strong")?.textContent === label,
+	const match = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(
+		(candidate) => candidate.querySelector("strong")?.textContent === label,
 	);
 	if (!match) throw new Error(`Missing option: ${label}`);
 	return match;
@@ -60,7 +51,9 @@ describe("PermissionSelector", () => {
 		expect(option(container, "Auto").textContent).toContain(
 			"Runs in the workspace sandbox. The current model reviews risky actions when needed.",
 		);
-		expect(option(container, "Full").textContent).toContain("Runs without a sandbox or tool approvals, including file deletion and network actions.");
+		expect(option(container, "Full").textContent).toContain(
+			"Runs without a sandbox or tool approvals, including file deletion and network actions.",
+		);
 		expect(container.textContent).not.toMatch(/without Metis approval/i);
 		expect(container.textContent).not.toContain("Full access");
 	});
@@ -71,18 +64,16 @@ describe("PermissionSelector", () => {
 			activeReview: { actionId: "action-1", reviewer: "model", riskLevel: "high" },
 			value: "auto",
 		});
-		expect(container.querySelector('[role="status"]')?.textContent).toBe("正在检查安全性…");
+		expect(container.querySelector('output, [role="status"]')?.textContent).toBe("正在检查安全性…");
 		await openMenu(container);
 		expect(option(container, "询问").textContent).toContain("在工作区沙箱中运行，需要时向你询问。");
-		expect(option(container, "自动").textContent).toContain(
-			"在工作区沙箱中运行。当前模型会在需要时进行安全审查。",
-		);
+		expect(option(container, "自动").textContent).toContain("在工作区沙箱中运行。当前模型会在需要时进行安全审查。");
 		expect(option(container, "完全访问").textContent).toContain("不使用沙箱，不弹工具审批；包括删除文件及联网操作。");
 	});
 
 	it("shows a parent ceiling without rewriting the saved preset", async () => {
 		const { container, onChange } = mount({ constrainedByParent: true, value: "full" });
-		expect(container.querySelector('[role="status"]')?.textContent).toContain("A parent session limits");
+		expect(container.querySelector('output, [role="status"]')?.textContent).toContain("A parent session limits");
 		await openMenu(container);
 		expect(option(container, "Full").getAttribute("aria-checked")).toBe("true");
 		expect(onChange).not.toHaveBeenCalled();
@@ -90,7 +81,7 @@ describe("PermissionSelector", () => {
 
 	it("disables Ask and Auto when the sandbox is unhealthy instead of falling back to the host", async () => {
 		const { container, onChange } = mount({ sandboxHealth: "unavailable", value: "full" });
-		expect(container.querySelector('[role="status"]')?.textContent).toContain("Ask and Auto stay disabled");
+		expect(container.querySelector('output, [role="status"]')?.textContent).toContain("Ask and Auto stay disabled");
 		expect(container.textContent).not.toMatch(/without Metis approval/i);
 		await openMenu(container);
 		expect(option(container, "Ask").disabled).toBe(true);
@@ -104,8 +95,8 @@ describe("PermissionSelector", () => {
 		const onSetupSandbox = vi.fn().mockResolvedValue(undefined);
 		const { container } = mount({ onSetupSandbox, sandboxHealth: "unavailable", value: "full" });
 		await openMenu(container);
-		const setup = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
-			(candidate) => candidate.textContent?.includes("Set up Windows sandbox"),
+		const setup = [...container.querySelectorAll<HTMLButtonElement>("button")].find((candidate) =>
+			candidate.textContent?.includes("Set up Windows sandbox"),
 		);
 		expect(setup).toBeDefined();
 		await act(async () => setup!.click());
@@ -116,7 +107,7 @@ describe("PermissionSelector", () => {
 		const { container } = mount({
 			activeReview: { actionId: "action-9", reviewer: "model", riskLevel: "critical" },
 		});
-		const status = container.querySelector('[role="status"]');
+		const status = container.querySelector('output, [role="status"]');
 		expect(status?.textContent).toBe("Checking security…");
 		expect(container.textContent).not.toContain("action-9");
 		expect(container.textContent).not.toMatch(/base64|reasoning|prompt/i);
@@ -131,7 +122,9 @@ describe("PermissionSelector", () => {
 		const trigger = container.querySelector<HTMLButtonElement>(".composer-selector-trigger")!;
 		await act(async () => trigger.focus());
 		await act(async () => trigger.click());
-		await act(async () => { await Promise.resolve(); });
+		await act(async () => {
+			await Promise.resolve();
+		});
 		expect(document.activeElement).toBe(option(container, "Ask"));
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
 		expect(document.activeElement).toBe(option(container, "Auto"));

@@ -27,7 +27,8 @@ export function systemErrorNotice(message: string): SystemNoticeCopy {
 	if (/\b404\b|not found/iu.test(detail) && /api|endpoint|model|openai|provider/iu.test(detail)) {
 		return {
 			title: "Model configuration needs attention",
-			message: "The model endpoint returned 404. Check the provider protocol, Base URL, and model ID in Model Settings.",
+			message:
+				"The model endpoint returned 404. Check the provider protocol, Base URL, and model ID in Model Settings.",
 		};
 	}
 	if (/\b401\b|unauthorized|invalid api key|authentication/iu.test(detail)) {
@@ -62,9 +63,10 @@ export function systemErrorNotice(message: string): SystemNoticeCopy {
 	}
 	return {
 		title: "Request failed",
-		message: detail && detail !== "Metis could not complete the request."
-			? detail
-			: "The request did not complete. Try again; if it keeps failing, check the selected model and connection.",
+		message:
+			detail && detail !== "Metis could not complete the request."
+				? detail
+				: "The request did not complete. Try again; if it keeps failing, check the selected model and connection.",
 	};
 }
 
@@ -100,21 +102,38 @@ export function SystemNotice({ action, message, onDismiss, title, tone }: System
 	const Icon = icons[tone];
 	const onDismissRef = useRef(onDismiss);
 	onDismissRef.current = onDismiss;
+	const dismissible = onDismiss !== undefined;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(tone): Notice content changes restart the dismissal timer.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(title): Notice content changes restart the dismissal timer.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(message): Notice content changes restart the dismissal timer.
 	useEffect(() => {
-		if (!onDismiss) return;
+		if (!dismissible) return;
 		const timer = setTimeout(() => onDismissRef.current?.(), 5_000);
 		return () => clearTimeout(timer);
-	}, [message, onDismiss !== undefined, title, tone]);
+	}, [message, dismissible, title, tone]);
 	return (
-		<div className="system-notice" data-tone={tone} role={tone === "error" || tone === "warning" ? "alert" : "status"}>
+		<div
+			className="system-notice"
+			data-tone={tone}
+			role={tone === "error" || tone === "warning" ? "alert" : "status"}
+		>
 			<Icon aria-hidden="true" className="system-notice-icon" size={18} weight="regular" />
 			<div className="system-notice-copy">
 				<strong>{t(title)}</strong>
 				{message && <span>{t(message)}</span>}
 			</div>
-			{action && <button className="system-notice-action" onClick={action.onClick} type="button">{t(action.label)}</button>}
+			{action && (
+				<button className="system-notice-action" onClick={action.onClick} type="button">
+					{t(action.label)}
+				</button>
+			)}
 			{onDismiss && (
-				<button aria-label={t("Dismiss notification")} className="system-notice-dismiss" onClick={onDismiss} type="button">
+				<button
+					aria-label={t("Dismiss notification")}
+					className="system-notice-dismiss"
+					onClick={onDismiss}
+					type="button"
+				>
 					<X aria-hidden="true" size={14} />
 				</button>
 			)}
@@ -123,5 +142,9 @@ export function SystemNotice({ action, message, onDismiss, title, tone }: System
 }
 
 export function FloatingSystemNotice(props: SystemNoticeProps) {
-	return <div className="system-notice-stack is-global"><SystemNotice {...props} /></div>;
+	return (
+		<div className="system-notice-stack is-global">
+			<SystemNotice {...props} />
+		</div>
+	);
 }

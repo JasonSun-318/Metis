@@ -18,17 +18,21 @@ describe("Composer slash commands", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onSubmit = vi.fn(async () => undefined);
-		await act(async () => root.render(
-			<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
-		));
+		await act(async () =>
+			root.render(
+				<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
+			),
+		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		editor.innerHTML = "<div>first line</div><div>second<br>continued</div><p>third line</p>";
 		await act(async () => editor.dispatchEvent(new Event("input", { bubbles: true })));
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
 
-		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-			text: "first line\nsecond\ncontinued\nthird line",
-		}));
+		expect(onSubmit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: "first line\nsecond\ncontinued\nthird line",
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -37,9 +41,11 @@ describe("Composer slash commands", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onSubmit = vi.fn(async () => undefined);
-		await act(async () => root.render(
-			<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
-		));
+		await act(async () =>
+			root.render(
+				<Composer disabled={false} onInterrupt={async () => undefined} onSubmit={onSubmit} running={false} />,
+			),
+		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		const range = document.createRange();
 		range.selectNodeContents(editor);
@@ -48,7 +54,7 @@ describe("Composer slash commands", () => {
 		window.getSelection()?.addRange(range);
 		const paste = new Event("paste", { bubbles: true, cancelable: true });
 		Object.defineProperty(paste, "clipboardData", {
-			value: { files: [], getData: (type: string) => type === "text/plain" ? "alpha\nbeta\ngamma" : "" },
+			value: { files: [], getData: (type: string) => (type === "text/plain" ? "alpha\nbeta\ngamma" : "") },
 		});
 		await act(async () => editor.dispatchEvent(paste));
 
@@ -67,9 +73,17 @@ describe("Composer slash commands", () => {
 		const root = createRoot(container);
 		const onSlashCommand = vi.fn();
 		const onSubmit = vi.fn(async () => undefined);
-		await act(async () => root.render(
-			<Composer disabled={false} onInterrupt={async () => undefined} onSlashCommand={onSlashCommand} onSubmit={onSubmit} running={false} />,
-		));
+		await act(async () =>
+			root.render(
+				<Composer
+					disabled={false}
+					onInterrupt={async () => undefined}
+					onSlashCommand={onSlashCommand}
+					onSubmit={onSubmit}
+					running={false}
+				/>,
+			),
+		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/com"));
 		expect(container.querySelectorAll('[role="option"]')).toHaveLength(1);
@@ -95,13 +109,17 @@ describe("Composer slash commands", () => {
 		await act(async () => root.render(<Composer {...props} />));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/skill:codebase-design"));
-		expect(container.querySelector(".composer-input-line .composer-skill-token")?.textContent).toContain("codebase-design");
+		expect(container.querySelector(".composer-input-line .composer-skill-token")?.textContent).toContain(
+			"codebase-design",
+		);
 		await act(async () => type(editor, "review this"));
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
-		expect(onSubmit).toHaveBeenLastCalledWith(expect.objectContaining({
-			text: "review this",
-			skill: expect.objectContaining({ name: "codebase-design" }),
-		}));
+		expect(onSubmit).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				text: "review this",
+				skill: expect.objectContaining({ name: "codebase-design" }),
+			}),
+		);
 
 		await act(async () => type(editor, "/unknown"));
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
@@ -140,32 +158,42 @@ describe("Composer slash commands", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onSubmit = vi.fn(async () => undefined);
-		await act(async () => root.render(
-			<Composer
-				disabled={false}
-				onInterrupt={async () => undefined}
-				onSubmit={onSubmit}
-				running={false}
-				skills={[{ name: "codebase-design", description: "Design deep modules" }]}
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<Composer
+					disabled={false}
+					onInterrupt={async () => undefined}
+					onSubmit={onSubmit}
+					running={false}
+					skills={[{ name: "codebase-design", description: "Design deep modules" }]}
+				/>,
+			),
+		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "Plan carefully"));
 
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
-		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-			.find((item) => item.textContent?.trim() === "Skills")!.click());
-		await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-			.find((item) => item.textContent?.trim() === "codebase-design")!.click());
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+				.find((item) => item.textContent?.trim() === "Skills")!
+				.click(),
+		);
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+				.find((item) => item.textContent?.trim() === "codebase-design")!
+				.click(),
+		);
 
 		expect(container.querySelector(".composer-skill-token")).not.toBeNull();
 		expect(container.querySelector(".composer-skill-token")?.textContent).toContain("codebase-design");
 
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
-		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-			text: "Plan carefully",
-			skill: expect.objectContaining({ name: "codebase-design" }),
-		}));
+		expect(onSubmit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: "Plan carefully",
+				skill: expect.objectContaining({ name: "codebase-design" }),
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -174,15 +202,17 @@ describe("Composer slash commands", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onGoalCommand = vi.fn(async () => undefined);
-		await act(async () => root.render(
-			<Composer
-				disabled={false}
-				onGoalCommand={onGoalCommand}
-				onInterrupt={async () => undefined}
-				onSubmit={async () => undefined}
-				running={false}
-			/>,
-		));
+		await act(async () =>
+			root.render(
+				<Composer
+					disabled={false}
+					onGoalCommand={onGoalCommand}
+					onInterrupt={async () => undefined}
+					onSubmit={async () => undefined}
+					running={false}
+				/>,
+			),
+		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/goal Build desktop features"));
 		expect(container.querySelector(".composer-goal-token")).not.toBeNull();
@@ -200,10 +230,16 @@ describe("Composer slash commands", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		const onSubmit = vi.fn(async () => undefined);
-		const render = (id: number, text: string) => root.render(
-			<Composer disabled={false} running={false} onInterrupt={async () => undefined}
-				onSubmit={onSubmit} prefillRequest={{ id, text }} />,
-		);
+		const render = (id: number, text: string) =>
+			root.render(
+				<Composer
+					disabled={false}
+					running={false}
+					onInterrupt={async () => undefined}
+					onSubmit={onSubmit}
+					prefillRequest={{ id, text }}
+				/>,
+			);
 		await act(async () => render(1, "Prepare a report"));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		expect(editor.textContent).toBe("Prepare a report");
@@ -223,14 +259,19 @@ describe("Composer slash commands", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const props = { disabled: false, running: false, onInterrupt: async () => undefined,
-			onSubmit: vi.fn(async () => undefined) };
+		const props = {
+			disabled: false,
+			running: false,
+			onInterrupt: async () => undefined,
+			onSubmit: vi.fn(async () => undefined),
+		};
 		await act(async () => root.render(<Composer {...props} />));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/goal Keep original goal"));
 		const goal = editor.querySelector('[data-token-kind="goal"]');
-		await act(async () => root.render(<Composer {...props}
-			prefillRequest={{ id: 1, text: "Add a report outline" }} />));
+		await act(async () =>
+			root.render(<Composer {...props} prefillRequest={{ id: 1, text: "Add a report outline" }} />),
+		);
 		expect(editor.querySelector('[data-token-kind="goal"]')).toBe(goal);
 		expect(editor.textContent).toContain("Keep original goal");
 		expect(editor.textContent).toContain("Add a report outline");
@@ -244,23 +285,36 @@ describe("Composer slash commands", () => {
 		const root = createRoot(container);
 		const attachment = { path: "/tmp/report.pdf", name: "report.pdf" };
 		const onSubmit = vi.fn(async () => undefined);
-		const props = { disabled: false, running: false, onInterrupt: async () => undefined,
-			onSubmit, onPickFiles: async () => [attachment] };
+		const props = {
+			disabled: false,
+			running: false,
+			onInterrupt: async () => undefined,
+			onSubmit,
+			onPickFiles: async () => [attachment],
+		};
 		await act(async () => root.render(<Composer {...props} />));
 		const form = container.querySelector<HTMLFormElement>("form")!;
 		const file = new File(["report"], "report.pdf", { type: "application/pdf" });
 		const drop = new Event("drop", { bubbles: true, cancelable: true });
 		Object.defineProperty(drop, "dataTransfer", { value: { files: [file] } });
-		await act(async () => root.render(<Composer {...props}
-			onResolveDroppedFiles={() => [attachment]} />));
+		await act(async () => root.render(<Composer {...props} onResolveDroppedFiles={() => [attachment]} />));
 		await act(async () => form.dispatchEvent(drop));
-		await act(async () => root.render(<Composer {...props}
-			onResolveDroppedFiles={() => [attachment]}
-			prefillRequest={{ id: 1, text: "Summarize this report" }} />));
+		await act(async () =>
+			root.render(
+				<Composer
+					{...props}
+					onResolveDroppedFiles={() => [attachment]}
+					prefillRequest={{ id: 1, text: "Summarize this report" }}
+				/>,
+			),
+		);
 		await act(async () => form.requestSubmit());
-		expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
-			text: "Summarize this report", attachments: [expect.objectContaining(attachment)],
-		}));
+		expect(onSubmit).toHaveBeenCalledWith(
+			expect.objectContaining({
+				text: "Summarize this report",
+				attachments: [expect.objectContaining(attachment)],
+			}),
+		);
 		await act(async () => root.unmount());
 	});
 
@@ -272,9 +326,17 @@ describe("Composer slash commands", () => {
 			{ path: "/tmp/photo.png", name: "photo.png", previewDataUrl: "data:image/png;base64,cHJldmlldw==" },
 			{ path: "/tmp/report.pdf", name: "report.pdf" },
 		];
-		await act(async () => root.render(
-			<Composer disabled={false} onInterrupt={async () => undefined} onPickFiles={onPickFiles} onSubmit={async () => undefined} running={false} />,
-		));
+		await act(async () =>
+			root.render(
+				<Composer
+					disabled={false}
+					onInterrupt={async () => undefined}
+					onPickFiles={onPickFiles}
+					onSubmit={async () => undefined}
+					running={false}
+				/>,
+			),
+		);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add files or photos"]')!.click());
 		await act(async () => Promise.resolve());
@@ -284,7 +346,9 @@ describe("Composer slash commands", () => {
 		expect(container.querySelector(".composer-file-card")?.textContent).toContain("PDF");
 		expect(container.querySelector(".composer-file-card .file-kind-icon.is-pdf")).not.toBeNull();
 
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Remove file photo.png"]')!.click());
+		await act(async () =>
+			container.querySelector<HTMLButtonElement>('[aria-label="Remove file photo.png"]')!.click(),
+		);
 		expect(container.querySelector('.composer-image-preview img[alt="photo.png"]')).toBeNull();
 		expect(container.querySelector(".composer-file-card")?.textContent).toContain("report.pdf");
 		await act(async () => root.unmount());
@@ -306,9 +370,16 @@ describe("Composer context usage ring", () => {
 		};
 		await act(async () => root.render(<Composer {...props} />));
 		expect(container.querySelector(".context-usage-ring")).toBeNull();
-		await act(async () => root.render(
-			<Composer {...props} contextUsageExpanded contextUsagePercent={40} onOpenContextUsage={onOpenContextUsage} />,
-		));
+		await act(async () =>
+			root.render(
+				<Composer
+					{...props}
+					contextUsageExpanded
+					contextUsagePercent={40}
+					onOpenContextUsage={onOpenContextUsage}
+				/>,
+			),
+		);
 		const ring = container.querySelector<HTMLButtonElement>(".context-usage-ring");
 		expect(ring).not.toBeNull();
 		expect(ring?.getAttribute("aria-expanded")).toBe("true");

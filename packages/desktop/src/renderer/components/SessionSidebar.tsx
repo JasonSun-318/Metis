@@ -13,16 +13,16 @@ import {
 	groupSessionsByDate,
 	groupSessionsByUnread,
 	loadSessionGroupingPreferences,
-	saveSessionGroupingPreferences,
 	type SessionGroupBy,
+	saveSessionGroupingPreferences,
 	sessionsForMode,
 } from "../store/session-grouping.ts";
-import { ProjectActions } from "./ProjectActions.tsx";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
+import { ProjectActions } from "./ProjectActions.tsx";
+import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
-import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
-import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 export type SidebarDestination = "tasks" | "skills" | "schedules";
 
@@ -40,7 +40,10 @@ export function clampSessionSidebarPreferredWidth(value: number): number {
 }
 
 export function clampSessionSidebarWidth(value: number, viewportWidth = window.innerWidth): number {
-	const maximum = Math.max(SESSION_SIDEBAR_NARROW_WIDTH, Math.min(SESSION_SIDEBAR_MAX_WIDTH, Math.floor(viewportWidth / 3)));
+	const maximum = Math.max(
+		SESSION_SIDEBAR_NARROW_WIDTH,
+		Math.min(SESSION_SIDEBAR_MAX_WIDTH, Math.floor(viewportWidth / 3)),
+	);
 	return Math.min(maximum, clampSessionSidebarPreferredWidth(value));
 }
 
@@ -88,9 +91,7 @@ export interface SessionSidebarWorkspace {
 		preview: ClientResult<"project/deletePreview">,
 	) => Promise<void>;
 	readonly onPinProject: (group: ProjectSessionGroup, pinned: boolean) => void;
-	readonly onPreviewProjectDelete: (
-		group: ProjectSessionGroup,
-	) => Promise<ClientResult<"project/deletePreview">>;
+	readonly onPreviewProjectDelete: (group: ProjectSessionGroup) => Promise<ClientResult<"project/deletePreview">>;
 	readonly onRenameProject: (group: ProjectSessionGroup, alias: string) => void;
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
@@ -151,7 +152,18 @@ export function taskTitle(session: SessionSummary, locale: Intl.LocalesArgument 
 	return `${taskLabel} · ${new Date(session.createdAt).toLocaleDateString(locale, { month: "short", day: "numeric" })}`;
 }
 
-function SessionButton({ busy, deleteDisabled, onCopy, onDelete, onPin, onRename, pinned, selected, session, onOpen }: {
+function SessionButton({
+	busy,
+	deleteDisabled,
+	onCopy,
+	onDelete,
+	onPin,
+	onRename,
+	pinned,
+	selected,
+	session,
+	onOpen,
+}: {
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
 	readonly onCopy: (title: string) => Promise<void>;
@@ -182,7 +194,10 @@ function SessionButton({ busy, deleteDisabled, onCopy, onDelete, onPin, onRename
 				title={title}
 				type="button"
 			>
-				<span className="session-button-title"><i aria-hidden="true" className={indicator} />{title}</span>
+				<span className="session-button-title">
+					<i aria-hidden="true" className={indicator} />
+					{title}
+				</span>
 			</button>
 			<SessionActions
 				allowRename={!session.scheduled}
@@ -204,7 +219,12 @@ function SessionSection({ children, label }: { readonly children: ReactNode; rea
 	const [open, setOpen] = useState(true);
 	return (
 		<section className="session-section" data-open={open}>
-			<button aria-expanded={open} className="session-section-heading" onClick={() => setOpen((current) => !current)} type="button">
+			<button
+				aria-expanded={open}
+				className="session-section-heading"
+				onClick={() => setOpen((current) => !current)}
+				type="button"
+			>
 				<span>{label}</span>
 				{open ? <CaretDown aria-hidden="true" size={12} /> : <CaretRight aria-hidden="true" size={12} />}
 			</button>
@@ -263,7 +283,19 @@ function ProjectGroup({
 			<div className="project-drawer" inert={!open}>
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
-						<SessionButton busy={busy} deleteDisabled={isDeleteDisabled(session)} key={session.sessionId} onCopy={workspace.onCopySessionTitle} onDelete={workspace.onDeleteSession} onOpen={workspace.onOpen} onPin={workspace.onPinSession} onRename={workspace.onRenameSession} pinned={false} selected={selectedSessionId === session.sessionId} session={session} />
+						<SessionButton
+							busy={busy}
+							deleteDisabled={isDeleteDisabled(session)}
+							key={session.sessionId}
+							onCopy={workspace.onCopySessionTitle}
+							onDelete={workspace.onDeleteSession}
+							onOpen={workspace.onOpen}
+							onPin={workspace.onPinSession}
+							onRename={workspace.onRenameSession}
+							pinned={false}
+							selected={selectedSessionId === session.sessionId}
+							session={session}
+						/>
 					))}
 				</div>
 			</div>
@@ -331,10 +363,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 		}
 	});
 	const grouping = groupingByMode[mode];
-	const allSessions = useMemo(
-		() => modeSessions.filter((session) => session.scheduled === undefined),
-		[modeSessions],
-	);
+	const allSessions = useMemo(() => modeSessions.filter((session) => session.scheduled === undefined), [modeSessions]);
 	const pinnedSessions = useMemo(
 		() => allSessions.filter((session) => pinnedSessionIds.has(session.sessionId)),
 		[allSessions, pinnedSessionIds],
@@ -344,21 +373,24 @@ export const SessionSidebar = memo(function SessionSidebar({
 		[allSessions, pinnedSessionIds],
 	);
 	const hasSessions = allSessions.length > 0;
+	// biome-ignore lint/correctness/useExhaustiveDependencies(mode): Changing destination or mode dismisses the previous project action menu.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(destination): Changing destination or mode dismisses the previous project action menu.
 	useEffect(() => setActiveProjectActions(null), [destination, mode]);
 	const isDeleteDisabled = (session: SessionSummary) =>
 		session.state === "running" ||
 		(state.activeSessionId === session.sessionId && state.activeTurnId !== null) ||
-		state.interactionOrder.some((interactionId) =>
-			state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
+		state.interactionOrder.some(
+			(interactionId) => state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
 		);
 	const selectedSessionId = !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
-	const updateLabel = updateState.status === "available"
-		? t("Update to new version")
-		: updateState.status === "downloading"
-			? t("Downloading update {{progress}}%", { progress: updateState.progress })
-			: updateState.status === "ready"
-				? t("Open installer")
-				: null;
+	const updateLabel =
+		updateState.status === "available"
+			? t("Update to new version")
+			: updateState.status === "downloading"
+				? t("Downloading update {{progress}}%", { progress: updateState.progress })
+				: updateState.status === "ready"
+					? t("Open installer")
+					: null;
 	const renderSession = (session: SessionSummary) => (
 		<SessionButton
 			busy={busy}
@@ -378,76 +410,121 @@ export const SessionSidebar = memo(function SessionSidebar({
 	return (
 		<aside className={`session-sidebar${isClosing ? " is-closing" : ""}`} aria-label={t("Tasks")}>
 			<div className="window-drag-region" />
-			<div className="mode-switch" data-mode={mode} aria-label={t("Workspace mode")} role="group">
+			<fieldset className="control-group mode-switch" data-mode={mode} aria-label={t("Workspace mode")}>
 				<span aria-hidden="true" className="mode-switch-indicator" />
-				<button aria-pressed={mode === "chat"} className={mode === "chat" ? "active" : ""} disabled={busy} onClick={() => onModeChange("chat")} type="button">
+				<button
+					aria-pressed={mode === "chat"}
+					className={mode === "chat" ? "active" : ""}
+					disabled={busy}
+					onClick={() => onModeChange("chat")}
+					type="button"
+				>
 					<ChatCircleDots aria-hidden="true" size={15} />
 					{t("Chat")}
 				</button>
-				<button aria-pressed={mode === "code"} className={mode === "code" ? "active" : ""} disabled={busy} onClick={() => onModeChange("code")} type="button">
+				<button
+					aria-pressed={mode === "code"}
+					className={mode === "code" ? "active" : ""}
+					disabled={busy}
+					onClick={() => onModeChange("code")}
+					type="button"
+				>
 					<Code aria-hidden="true" size={15} />
 					{t("Code")}
 				</button>
-			</div>
-			<button aria-current={newTaskOpen ? "page" : undefined} className="new-task-button" disabled={busy} onClick={onNewTask} type="button">
+			</fieldset>
+			<button
+				aria-current={newTaskOpen ? "page" : undefined}
+				className="new-task-button"
+				disabled={busy}
+				onClick={onNewTask}
+				type="button"
+			>
 				<AnimatedNavIcon kind="task" />
 				{t("New task")}
 			</button>
-			<button aria-current={destination === "skills" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSkills} type="button">
+			<button
+				aria-current={destination === "skills" ? "page" : undefined}
+				className="sidebar-nav-button"
+				disabled={busy}
+				onClick={onSkills}
+				type="button"
+			>
 				<AnimatedNavIcon kind="customize" />
 				{t("Customize")}
 			</button>
-			{mode === "chat" && <button aria-current={destination === "schedules" ? "page" : undefined} className="sidebar-nav-button" disabled={busy} onClick={onSchedules} type="button"><AnimatedNavIcon kind="schedule" />{t("Scheduled tasks")}</button>}
-			<nav aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })} className="project-list" data-empty={!hasSessions || undefined} data-grouping={grouping}>
+			{mode === "chat" && (
+				<button
+					aria-current={destination === "schedules" ? "page" : undefined}
+					className="sidebar-nav-button"
+					disabled={busy}
+					onClick={onSchedules}
+					type="button"
+				>
+					<AnimatedNavIcon kind="schedule" />
+					{t("Scheduled tasks")}
+				</button>
+			)}
+			<nav
+				aria-label={t("{{mode}} sessions", { mode: t(mode === "chat" ? "Chat" : "Code") })}
+				className="project-list"
+				data-empty={!hasSessions || undefined}
+				data-grouping={grouping}
+			>
 				{grouping === "project" && <span className="session-grouping-label">{t("Projects")}</span>}
 				<SessionGroupingMenu
 					onChange={(nextGrouping: SessionGroupBy) => {
-							setGroupingByMode((current) => {
-								const next = { ...current, [mode]: nextGrouping };
-								try {
-									saveSessionGroupingPreferences(localStorage, next);
-								} catch {
-									// The preference remains renderer-local when storage is unavailable.
-								}
-								return next;
-							});
+						setGroupingByMode((current) => {
+							const next = { ...current, [mode]: nextGrouping };
+							try {
+								saveSessionGroupingPreferences(localStorage, next);
+							} catch {
+								// The preference remains renderer-local when storage is unavailable.
+							}
+							return next;
+						});
 					}}
 					value={grouping}
 				/>
-				{!hasSessions && <p className="empty-copy">{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}</p>}
-				{pinnedSessions.length > 0 && (
-					<SessionSection label={t("Pinned")}>
-						{pinnedSessions.map(renderSession)}
-					</SessionSection>
+				{!hasSessions && (
+					<p className="empty-copy">
+						{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}
+					</p>
 				)}
-				{grouping === "project" && tree.projects.map((group) => (
-					<ProjectGroup
-						actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
-						group={group}
-						key={JSON.stringify([group.mode, group.cwd])}
-						onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
-						onDeactivateActions={() => setActiveProjectActions(null)}
-						isDeleteDisabled={isDeleteDisabled}
-						selectedSessionId={selectedSessionId}
-						workspace={workspace}
-					/>
-				))}
+				{pinnedSessions.length > 0 && (
+					<SessionSection label={t("Pinned")}>{pinnedSessions.map(renderSession)}</SessionSection>
+				)}
+				{grouping === "project" &&
+					tree.projects.map((group) => (
+						<ProjectGroup
+							actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
+							group={group}
+							key={JSON.stringify([group.mode, group.cwd])}
+							onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
+							onDeactivateActions={() => setActiveProjectActions(null)}
+							isDeleteDisabled={isDeleteDisabled}
+							selectedSessionId={selectedSessionId}
+							workspace={workspace}
+						/>
+					))}
 				{grouping === "project" && tree.tasks.length > 0 && (
 					<section className="loose-tasks">
 						<h2>{t("Tasks")}</h2>
 						{tree.tasks.map(renderSession)}
 					</section>
 				)}
-				{grouping === "date" && groupSessionsByDate(sessions, new Date(), locale).map((section) => (
-					<SessionSection key={`${mode}:date:${section.key}`} label={t(section.label)}>
-						{section.sessions.map(renderSession)}
-					</SessionSection>
-				))}
-				{grouping === "unread" && groupSessionsByUnread(sessions).map((section) => (
-					<SessionSection key={`${mode}:unread:${section.key}`} label={t(section.label)}>
-						{section.sessions.map(renderSession)}
-					</SessionSection>
-				))}
+				{grouping === "date" &&
+					groupSessionsByDate(sessions, new Date(), locale).map((section) => (
+						<SessionSection key={`${mode}:date:${section.key}`} label={t(section.label)}>
+							{section.sessions.map(renderSession)}
+						</SessionSection>
+					))}
+				{grouping === "unread" &&
+					groupSessionsByUnread(sessions).map((section) => (
+						<SessionSection key={`${mode}:unread:${section.key}`} label={t(section.label)}>
+							{section.sessions.map(renderSession)}
+						</SessionSection>
+					))}
 				{grouping === "none" && sessions.map(renderSession)}
 				{mode === "chat" && (visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
 					<section aria-label={t("Scheduled tasks")} className="scheduled-task-quick-list">
@@ -455,7 +532,9 @@ export const SessionSidebar = memo(function SessionSidebar({
 						{visibleScheduleTasks.slice(0, 6).map((task) => (
 							<div className="session-row scheduled-task-quick-row" key={task.id}>
 								<button
-									aria-current={destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined}
+									aria-current={
+										destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined
+									}
 									aria-label={task.name}
 									className="scheduled-task-quick-open"
 									disabled={busy}
@@ -467,7 +546,12 @@ export const SessionSidebar = memo(function SessionSidebar({
 									<small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>
 									{task.unreadCount > 0 && <i>{task.unreadCount}</i>}
 								</button>
-								<ScheduledTaskActions deleteDisabled={task.activeRunId !== undefined} disabled={busy} onDelete={onDeleteSchedule} task={task} />
+								<ScheduledTaskActions
+									deleteDisabled={task.activeRunId !== undefined}
+									disabled={busy}
+									onDelete={onDeleteSchedule}
+									task={task}
+								/>
 							</div>
 						))}
 						{scheduledSessions.map(renderSession)}
@@ -488,8 +572,19 @@ export const SessionSidebar = memo(function SessionSidebar({
 					</button>
 				</div>
 			)}
-			<div className="sidebar-footer"><AccountMenu onSettings={onSettings} onCheckUpdate={onCheckUpdate} checkingUpdate={checkingUpdate || updateState.status === "checking"} updateDownloading={updateState.status === "downloading"} />{footerExtra}</div>
-			<div
+			<div className="sidebar-footer">
+				<AccountMenu
+					onSettings={onSettings}
+					onCheckUpdate={onCheckUpdate}
+					checkingUpdate={checkingUpdate || updateState.status === "checking"}
+					updateDownloading={updateState.status === "downloading"}
+				/>
+				{footerExtra}
+			</div>
+			<hr
+				aria-valuenow={width}
+				aria-valuemin={SESSION_SIDEBAR_NARROW_WIDTH}
+				aria-valuemax={clampSessionSidebarWidth(SESSION_SIDEBAR_MAX_WIDTH)}
 				aria-label={t("Resize sessions sidebar")}
 				aria-orientation="vertical"
 				className="session-sidebar-resizer"
@@ -514,7 +609,8 @@ export const SessionSidebar = memo(function SessionSidebar({
 						onWidthChange(start.width + event.clientX - start.x);
 						resizeRef.current = null;
 					}
-					if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+					if (event.currentTarget.hasPointerCapture(event.pointerId))
+						event.currentTarget.releasePointerCapture(event.pointerId);
 				}}
 				onPointerCancel={(event) => {
 					const start = resizeRef.current;
@@ -526,7 +622,6 @@ export const SessionSidebar = memo(function SessionSidebar({
 					if (start?.pointerId === event.pointerId) onWidthChange(start.width, false);
 					resizeRef.current = null;
 				}}
-				role="separator"
 				tabIndex={0}
 			/>
 		</aside>

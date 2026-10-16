@@ -84,14 +84,11 @@ export function AutoCommandAllowlistPanel({
 			setError(t("The allowlist can hold at most {{max}} commands.", { max: MAX_AUTO_COMMAND_RULES }));
 			return;
 		}
-		await save([
-			...view.rules,
-			...suggestions.map((suggestion) => ({ command: suggestion, allowNetwork: false })),
-		]);
+		await save([...view.rules, ...suggestions.map((suggestion) => ({ command: suggestion, allowNetwork: false }))]);
 	};
 
 	if (!view && !error) {
-		return <div aria-label={t("Loading Auto command rules")} className="settings-loading" role="status" />;
+		return <output aria-label={t("Loading Auto command rules")} className="status-block settings-loading" />;
 	}
 
 	const present = new Set(view?.rules.map((rule) => rule.command) ?? []);
@@ -149,7 +146,11 @@ export function AutoCommandAllowlistPanel({
 							<span aria-hidden="true" className="auto-command-allowlist-toggle-track" />
 							<span className="auto-command-allowlist-toggle-text">{t("Allow network access")}</span>
 						</label>
-						<button className="settings-primary-button" disabled={busy || !normalizeCommand(command)} type="submit">
+						<button
+							className="settings-primary-button"
+							disabled={busy || !normalizeCommand(command)}
+							type="submit"
+						>
 							{t("Add command")}
 						</button>
 					</form>
@@ -170,7 +171,9 @@ export function AutoCommandAllowlistPanel({
 									<button
 										aria-label={t("Remove {{command}}", { command: rule.command })}
 										disabled={busy}
-										onClick={() => void save(view.rules.filter((candidate) => candidate.command !== rule.command))}
+										onClick={() =>
+											void save(view.rules.filter((candidate) => candidate.command !== rule.command))
+										}
 										type="button"
 									>
 										{t("Remove {{command}}", { command: rule.command })}

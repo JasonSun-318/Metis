@@ -4,7 +4,7 @@ import type { DeclarativeHookView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { HookEditorDialog, type HookDraft } from "../src/renderer/components/HookEditorDialog.tsx";
+import { type HookDraft, HookEditorDialog } from "../src/renderer/components/HookEditorDialog.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
@@ -77,7 +77,8 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		await flush();
 		await act(async () => {
 			Array.from(container.querySelectorAll<HTMLButtonElement>('[role="option"]'))
-				.find((option) => option.textContent === "User prompt submit")!.click();
+				.find((option) => option.textContent === "User prompt submit")!
+				.click();
 		});
 		await flush();
 		expect(container.querySelector('input[placeholder="bash|read|write"]')).toBeNull();
@@ -152,7 +153,9 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		});
 		await flush();
 
-		const nameInput = container.querySelector<HTMLInputElement>('input[placeholder="For example, check tool calls"]')!;
+		const nameInput = container.querySelector<HTMLInputElement>(
+			'input[placeholder="For example, check tool calls"]',
+		)!;
 		const commandInput = container.querySelector<HTMLInputElement>('input[placeholder="node"]')!;
 		const matcherInput = container.querySelector<HTMLInputElement>('input[placeholder="bash|read|write"]')!;
 

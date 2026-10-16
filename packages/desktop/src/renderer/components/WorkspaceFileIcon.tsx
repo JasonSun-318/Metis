@@ -1,7 +1,5 @@
-import type { DesktopWorkspaceEntry } from "../../shared/desktop-api.ts";
 import {
 	File,
-	FileArchive,
 	FileC,
 	FileCode,
 	FileCpp,
@@ -28,6 +26,7 @@ import {
 	FileZip,
 } from "@phosphor-icons/react";
 import type { ComponentType } from "react";
+import type { DesktopWorkspaceEntry } from "../../shared/desktop-api.ts";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 interface WorkspaceFileIconProps {
@@ -63,7 +62,7 @@ function iconForFile(path: string): IconDefinition {
 		return { Component: FileCode, type: "docker" };
 	}
 
-	const extension = name.includes(".") ? name.split(".").at(-1) ?? "" : "";
+	const extension = name.includes(".") ? (name.split(".").at(-1) ?? "") : "";
 	switch (extension) {
 		case "ts":
 		case "cts":
@@ -169,8 +168,21 @@ function iconForFile(path: string): IconDefinition {
 
 export function WorkspaceFileIcon({ expanded = false, kind = "file", path, size = 14 }: WorkspaceFileIconProps) {
 	if (kind === "directory") {
-		return <AnimatedNavIcon kind="folder" expanded={expanded} className="file-kind-icon workspace-file-icon is-folder file-kind-folder" size={size} />;
+		return (
+			<AnimatedNavIcon
+				kind="folder"
+				expanded={expanded}
+				className="file-kind-icon workspace-file-icon is-folder file-kind-folder"
+				size={size}
+			/>
+		);
 	}
 	const { Component, type } = iconForFile(path);
-	return <Component aria-hidden="true" className={`file-kind-icon workspace-file-icon is-${type} file-kind-${type}`} size={size} />;
+	return (
+		<Component
+			aria-hidden="true"
+			className={`file-kind-icon workspace-file-icon is-${type} file-kind-${type}`}
+			size={size}
+		/>
+	);
 }

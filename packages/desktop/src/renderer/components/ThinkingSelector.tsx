@@ -1,11 +1,11 @@
 import type { SessionSnapshot } from "@metis/app-protocol";
 import { CaretDown, Question } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
-	readonly available: SessionSnapshot["availableThinkingSelections"];
+	readonly available: Readonly<SessionSnapshot["availableThinkingSelections"]>;
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabled: boolean;
 	readonly onChange: (selection: SessionSnapshot["thinkingSelection"]) => void;
@@ -22,7 +22,7 @@ const smoothstep = (minimum: number, maximum: number, value: number) => {
 const hash = (x: number, y: number, seed = 0) => Math.abs(Math.sin(x * 12.9898 + y * 78.233 + seed) * 43758.5453) % 1;
 
 export function highestThinkingSelection(
-	available: SessionSnapshot["availableThinkingSelections"],
+	available: Readonly<SessionSnapshot["availableThinkingSelections"]>,
 ): SessionSnapshot["thinkingSelection"] | undefined {
 	return available.filter((selection) => selection !== "off").at(-1);
 }
@@ -53,7 +53,7 @@ function HighestEffortField({ reducedMotion }: { readonly reducedMotion: boolean
 			context.clearRect(0, 0, width, height);
 			const elapsed = reducedMotion ? 4000 : Math.max(0, time - startedAt);
 			const cell = width < 190 ? 3 : 4;
-			const gap = .8;
+			const gap = 0.8;
 			const columns = Math.ceil(width / cell);
 			const rows = Math.ceil(height / cell);
 			const reveal = reducedMotion ? 1 : smoothstep(0, 1, elapsed / 1000);
@@ -70,29 +70,30 @@ function HighestEffortField({ reducedMotion }: { readonly reducedMotion: boolean
 					const x = column * cell;
 					const y = row * cell;
 					const normalizedX = (x + cell / 2) / width;
-					const revealAlpha = smoothstep(frontier - .1, frontier + .07, normalizedX);
-					if (revealAlpha <= .002) continue;
+					const revealAlpha = smoothstep(frontier - 0.1, frontier + 0.07, normalizedX);
+					if (revealAlpha <= 0.002) continue;
 
 					const base = hash(column, row);
 					const phase = hash(column, row, 31.17);
 					const tempo = 500 + hash(column, row, 7.13) * 1500;
 					const cycleProgress = ((elapsed + phase * tempo) % tempo) / tempo;
-					const pulseCenter = .2 + hash(column, row, Math.floor(elapsed / tempo) * 13.11) * .55;
-					const pulseDistance = (cycleProgress - pulseCenter) / (.09 + hash(column, row, 5.37) * .08);
+					const pulseCenter = 0.2 + hash(column, row, Math.floor(elapsed / tempo) * 13.11) * 0.55;
+					const pulseDistance = (cycleProgress - pulseCenter) / (0.09 + hash(column, row, 5.37) * 0.08);
 					const pulse = Math.exp(-pulseDistance * pulseDistance * 1.45);
-					const wave = Math.pow(.5 + .5 * Math.cos((normalizedX + flow + row * .06 + base * .02) * Math.PI * 2), 5);
-					const brightness = Math.max(pulse * (.42 + wave * .58), wave * (.38 + base * .28));
-					const revealGlow = reveal < .995
-						? Math.exp(-((normalizedX - frontier) ** 2) / .012) * (1 - smoothstep(.7, 1, reveal))
-						: 0;
-					const highlight = clamp(Math.max(brightness, revealGlow * (.4 + base * .4)), 0, 1);
-					const purple = smoothstep(.1, .88, normalizedX);
+					const wave = (0.5 + 0.5 * Math.cos((normalizedX + flow + row * 0.06 + base * 0.02) * Math.PI * 2)) ** 5;
+					const brightness = Math.max(pulse * (0.42 + wave * 0.58), wave * (0.38 + base * 0.28));
+					const revealGlow =
+						reveal < 0.995
+							? Math.exp(-((normalizedX - frontier) ** 2) / 0.012) * (1 - smoothstep(0.7, 1, reveal))
+							: 0;
+					const highlight = clamp(Math.max(brightness, revealGlow * (0.4 + base * 0.4)), 0, 1);
+					const purple = smoothstep(0.1, 0.88, normalizedX);
 					const red = mix(78, 94 + base * 28, purple);
 					const green = mix(78, 70 + phase * 28, purple);
 					const blue = mix(76, 114 + base * 34, purple);
-					const peak = highlight > .68;
+					const peak = highlight > 0.68;
 					context.fillStyle = `rgb(${Math.round(mix(red, peak ? 226 : 181, highlight))} ${Math.round(mix(green, peak ? 214 : 163, highlight))} ${Math.round(mix(blue, peak ? 240 : 211, highlight))})`;
-					context.globalAlpha = revealAlpha * smoothstep(.04, .38, normalizedX) * (.7 + base * .2);
+					context.globalAlpha = revealAlpha * smoothstep(0.04, 0.38, normalizedX) * (0.7 + base * 0.2);
 					context.fillRect(x + gap / 2, y + gap / 2, cell - gap, cell - gap);
 				}
 			}
@@ -113,10 +114,18 @@ function HighestEffortField({ reducedMotion }: { readonly reducedMotion: boolean
 		return () => cancelAnimationFrame(frame);
 	}, [reducedMotion]);
 
-	return <canvas aria-hidden="true" className="effort-highest-field" ref={canvasRef} />;
+	return <canvas tabIndex={-1} aria-hidden="true" className="effort-highest-field" ref={canvasRef} />;
 }
 
-export function ThinkingSelector({ actualThinkingLevel, available, commandRequest, disabled, onChange, reducedMotion, value }: ThinkingSelectorProps) {
+export function ThinkingSelector({
+	actualThinkingLevel,
+	available,
+	commandRequest,
+	disabled,
+	onChange,
+	reducedMotion,
+	value,
+}: ThinkingSelectorProps) {
 	const { t } = useTranslation();
 	const currentIndex = Math.max(0, available.indexOf(value));
 	const [open, setOpen] = useState(false);
@@ -130,7 +139,8 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 	const samplesRef = useRef<Array<{ readonly time: number; readonly value: number }>>([]);
 	const springFrameRef = useRef(0);
 	const maximumIndex = Math.max(0, available.length - 1);
-	const selectionLabel = (selection: string) => t(selection === "xhigh" ? "XHigh" : `${selection.charAt(0).toUpperCase()}${selection.slice(1)}`);
+	const selectionLabel = (selection: string) =>
+		t(selection === "xhigh" ? "XHigh" : `${selection.charAt(0).toUpperCase()}${selection.slice(1)}`);
 	const label = selectionLabel(value);
 	const previewSelection = available[Math.round(previewIndex)] ?? value;
 	const previewLabel = selectionLabel(previewSelection);
@@ -138,36 +148,45 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 	const highest = highestThinkingSelection(available);
 	const highestActive = highest !== undefined && previewSelection === highest;
 	const triggerHighestActive = highest !== undefined && value === highest;
-	const commit = (index: number) => {
-		const selection = available[index];
-		if (selection && selection !== value) onChange(selection);
-	};
+	const commit = useCallback(
+		(index: number) => {
+			const selection = available[index];
+			if (selection && selection !== value) onChange(selection);
+		},
+		[available, onChange, value],
+	);
 
-	const close = (restoreFocus = false, commitPending = true) => {
-		const pendingIndex = commitPending && (draggingRef.current || springFrameRef.current !== 0)
-			? Math.round(previewRef.current)
-			: undefined;
-		cancelAnimationFrame(springFrameRef.current);
-		springFrameRef.current = 0;
-		draggingRef.current = false;
-		previewRef.current = currentIndex;
-		setPreviewIndex(currentIndex);
-		setOpen(false);
-		if (pendingIndex !== undefined) commit(pendingIndex);
-		if (restoreFocus) triggerRef.current?.focus();
-	};
+	const close = useCallback(
+		(restoreFocus = false, commitPending = true) => {
+			const pendingIndex =
+				commitPending && (draggingRef.current || springFrameRef.current !== 0)
+					? Math.round(previewRef.current)
+					: undefined;
+			cancelAnimationFrame(springFrameRef.current);
+			springFrameRef.current = 0;
+			draggingRef.current = false;
+			previewRef.current = currentIndex;
+			setPreviewIndex(currentIndex);
+			setOpen(false);
+			if (pendingIndex !== undefined) commit(pendingIndex);
+			if (restoreFocus) triggerRef.current?.focus();
+		},
+		[commit, currentIndex],
+	);
 
 	useEffect(() => {
 		if (disabled) close(false, false);
-	}, [disabled]);
+	}, [close, disabled]);
 
 	useEffect(() => {
 		if (commandRequest === undefined || commandRequest.id === lastCommandRequest.current) return;
 		lastCommandRequest.current = commandRequest.id;
 		if (commandRequest.open && !disabled) setOpen(true);
 		else close(false, false);
-	}, [commandRequest, disabled]);
+	}, [close, commandRequest, disabled]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(value): Selection or available levels changing cancels stale preview animation even at the same index.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(available): Selection or available levels changing cancels stale preview animation even at the same index.
 	useEffect(() => {
 		if (draggingRef.current) return;
 		cancelAnimationFrame(springFrameRef.current);
@@ -194,7 +213,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
 		};
-	}, [currentIndex, open]);
+	}, [close, open]);
 
 	const updatePreview = (nextValue: number) => {
 		const next = clamp(nextValue, 0, maximumIndex);
@@ -212,9 +231,9 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 		if (samples.length > 1) {
 			const first = samples[0];
 			const last = samples.at(-1)!;
-			velocity = clamp((last.value - first.value) / Math.max((last.time - first.time) / 1000, .016), -8, 8);
+			velocity = clamp((last.value - first.value) / Math.max((last.time - first.time) / 1000, 0.016), -8, 8);
 		}
-		if (Math.abs(target - previewRef.current) < .001 || reducedMotion) {
+		if (Math.abs(target - previewRef.current) < 0.001 || reducedMotion) {
 			updatePreview(target);
 			commit(target);
 			return;
@@ -222,12 +241,12 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 		let position = previewRef.current;
 		let previousTime = performance.now();
 		const animate = (time: number) => {
-			const delta = Math.min((time - previousTime) / 1000, .032);
+			const delta = Math.min((time - previousTime) / 1000, 0.032);
 			previousTime = time;
 			velocity += (-920 * (position - target) - 40 * velocity) * delta;
 			position = clamp(position + velocity * delta, 0, maximumIndex);
 			updatePreview(position);
-			if (Math.abs(position - target) < .001 && Math.abs(velocity) < .01) {
+			if (Math.abs(position - target) < 0.001 && Math.abs(velocity) < 0.01) {
 				springFrameRef.current = 0;
 				updatePreview(target);
 				commit(target);
@@ -243,13 +262,16 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 		const nearest = Math.round(rawValue);
 		const delta = rawValue - nearest;
 		const distance = Math.abs(delta);
-		if (distance < .001 || distance > .5) return rawValue;
-		const pull = 1 - distance / .5;
-		return rawValue - delta * (.68 + .42 * pull) * pull * pull;
+		if (distance < 0.001 || distance > 0.5) return rawValue;
+		const pull = 1 - distance / 0.5;
+		return rawValue - delta * (0.68 + 0.42 * pull) * pull * pull;
 	};
 
 	return (
-		<div className={`composer-selector thinking-control${(open ? highestActive : triggerHighestActive) ? " thinking-highest" : ""}`} ref={rootRef}>
+		<div
+			className={`composer-selector thinking-control${(open ? highestActive : triggerHighestActive) ? " thinking-highest" : ""}`}
+			ref={rootRef}
+		>
 			<button
 				aria-describedby="thinking-selection-detail"
 				aria-expanded={open}
@@ -257,7 +279,7 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 				aria-label={t("Select effort, current {{label}}", { label })}
 				className="composer-selector-trigger"
 				disabled={disabled}
-				onClick={() => open ? close() : setOpen(true)}
+				onClick={() => (open ? close() : setOpen(true))}
 				ref={triggerRef}
 				type="button"
 			>
@@ -267,17 +289,33 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			{open && (
 				<div aria-label={t("Effort")} className="effort-popover" role="dialog">
 					<div className="effort-title">
-						<span>{t("Effort")} <strong className={highestActive ? "is-highest" : undefined}><span className={`effort-label is-${previewDirection}`} key={previewSelection}>{previewLabel}</span></strong></span>
+						<span>
+							{t("Effort")}{" "}
+							<strong className={highestActive ? "is-highest" : undefined}>
+								<span className={`effort-label is-${previewDirection}`} key={previewSelection}>
+									{previewLabel}
+								</span>
+							</strong>
+						</span>
 						<span title={t("Higher effort can improve difficult answers but may take longer.")}>
 							<Question aria-hidden="true" size={16} />
 						</span>
 					</div>
-					<div className="effort-axis"><span>{t("Faster")}</span><span>{t("Smarter")}</span></div>
+					<div className="effort-axis">
+						<span>{t("Faster")}</span>
+						<span>{t("Smarter")}</span>
+					</div>
 					<div className={`effort-slider-shell${highestActive ? " is-highest" : ""}`}>
-						<span aria-hidden="true" className="effort-slider-fill" style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }} />
+						<span
+							aria-hidden="true"
+							className="effort-slider-fill"
+							style={{ width: `calc(8px + (100% - 16px) * ${fill / 100})` }}
+						/>
 						{highestActive && <HighestEffortField reducedMotion={reducedMotion} />}
 						<div aria-hidden="true" className="effort-ticks">
-							{available.map((selection) => <span className={selection === highest ? "is-highest" : undefined} key={selection} />)}
+							{available.map((selection) => (
+								<span className={selection === highest ? "is-highest" : undefined} key={selection} />
+							))}
 						</div>
 						<input
 							aria-label={t("Effort")}
@@ -342,7 +380,9 @@ export function ThinkingSelector({ actualThinkingLevel, available, commandReques
 			)}
 			<span className="sr-only" id="thinking-selection-detail">
 				{triggerHighestActive
-					? t("Uses the highest supported reasoning level ({{level}}).", { level: selectionLabel(actualThinkingLevel) })
+					? t("Uses the highest supported reasoning level ({{level}}).", {
+							level: selectionLabel(actualThinkingLevel),
+						})
 					: t("Provider thinking level {{level}}.", { level: selectionLabel(actualThinkingLevel) })}
 			</span>
 		</div>

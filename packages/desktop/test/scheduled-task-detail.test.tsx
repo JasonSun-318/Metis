@@ -46,7 +46,9 @@ const RUN: ScheduleRunView = {
 };
 
 async function flush() {
-	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
 }
 
 afterEach(() => {
@@ -57,9 +59,7 @@ afterEach(() => {
 describe("ScheduledTaskDetail", () => {
 	it("reuses the Run now request id after a lost response", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const runScheduleNow = vi.fn()
-			.mockRejectedValueOnce(new Error("response lost"))
-			.mockResolvedValue({ run: RUN });
+		const runScheduleNow = vi.fn().mockRejectedValueOnce(new Error("response lost")).mockResolvedValue({ run: RUN });
 		const api = {
 			listScheduleRuns: vi.fn().mockResolvedValue({ runs: [], nextBeforeRunId: null }),
 			runScheduleNow,
@@ -68,9 +68,23 @@ describe("ScheduledTaskDetail", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTaskDetail api={api} onBack={() => undefined} onChanged={() => undefined} onDeleted={() => undefined} onEdit={() => undefined} onOpenSession={() => undefined} task={TASK} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTaskDetail
+					api={api}
+					onBack={() => undefined}
+					onChanged={() => undefined}
+					onDeleted={() => undefined}
+					onEdit={() => undefined}
+					onOpenSession={() => undefined}
+					task={TASK}
+				/>,
+			),
+		);
 		await flush();
-		const runNow = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("Run now"))!;
+		const runNow = [...container.querySelectorAll("button")].find((button) =>
+			button.textContent?.includes("Run now"),
+		)!;
 		await act(async () => runNow.click());
 		await flush();
 		await act(async () => runNow.click());
@@ -82,7 +96,9 @@ describe("ScheduledTaskDetail", () => {
 
 	it("opens validated run sessions and deletes history only when the user checks the exact option", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const deleteSchedule = vi.fn().mockResolvedValue({ taskId: TASK.id, deleted: true, deletedSessionCount: 1, retainedSessionCount: 0 });
+		const deleteSchedule = vi
+			.fn()
+			.mockResolvedValue({ taskId: TASK.id, deleted: true, deletedSessionCount: 1, retainedSessionCount: 0 });
 		const api = {
 			listScheduleRuns: vi.fn().mockResolvedValue({ runs: [RUN], nextBeforeRunId: null }),
 			getScheduleRun: vi.fn().mockResolvedValue({ run: RUN }),
@@ -94,9 +110,23 @@ describe("ScheduledTaskDetail", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<ScheduledTaskDetail api={api} onBack={() => undefined} onChanged={() => undefined} onDeleted={onDeleted} onEdit={() => undefined} onOpenSession={onOpenSession} task={TASK} />));
+		await act(async () =>
+			root.render(
+				<ScheduledTaskDetail
+					api={api}
+					onBack={() => undefined}
+					onChanged={() => undefined}
+					onDeleted={onDeleted}
+					onEdit={() => undefined}
+					onOpenSession={onOpenSession}
+					task={TASK}
+				/>,
+			),
+		);
 		await flush();
-		const history = [...container.querySelectorAll("button")].find((button) => button.textContent?.includes("succeeded"))!;
+		const history = [...container.querySelectorAll("button")].find((button) =>
+			button.textContent?.includes("succeeded"),
+		)!;
 		await act(async () => history.click());
 		expect(onOpenSession).toHaveBeenCalledWith(RUN.sessionId);
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Delete task"]')!.click());

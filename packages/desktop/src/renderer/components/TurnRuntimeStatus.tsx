@@ -7,7 +7,10 @@ const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hang
 export function estimateOutputTokens(text: string): number {
 	let cjk = 0;
 	let other = 0;
-	for (const character of text) CJK.test(character) ? (cjk += 1) : (other += 1);
+	for (const character of text) {
+		if (CJK.test(character)) cjk += 1;
+		else other += 1;
+	}
 	return cjk + Math.ceil(other / 4);
 }
 
@@ -42,7 +45,13 @@ export function advanceDisplayedTokens(current: number, target: number): number 
 	return current + Math.sign(difference) * Math.min(step, Math.abs(difference));
 }
 
-export function TurnRuntimeStatus({ items, running, startedAt, waitingForAnswer = false, variant = "turn" }: {
+export function TurnRuntimeStatus({
+	items,
+	running,
+	startedAt,
+	waitingForAnswer = false,
+	variant = "turn",
+}: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
 	readonly waitingForAnswer?: boolean;
@@ -72,22 +81,24 @@ export function TurnRuntimeStatus({ items, running, startedAt, waitingForAnswer 
 	}, [running, startedAtMs, variant, waitingForAnswer]);
 
 	if (!running) return null;
-	if (waitingForAnswer) return <div className="turn-runtime-status is-waiting" role="status">{t("Waiting for your answer")}</div>;
+	if (waitingForAnswer)
+		return <output className="status-block turn-runtime-status is-waiting">{t("Waiting for your answer")}</output>;
 	return (
-		<div
+		<output
 			aria-label={t(variant === "compaction" ? "Compacting conversation…" : "Thinking…")}
-			className="turn-runtime-status"
+			className="status-block turn-runtime-status"
 			data-runtime-tokens={variant === "turn" ? displayedTokens : undefined}
-			role="status"
 		>
 			<span aria-hidden="true" className="turn-runtime-spinner">
-				{[0, 1, 2, 3, 4, 5].map((dot) => <span key={dot} />)}
+				{[0, 1, 2, 3, 4, 5].map((dot) => (
+					<span key={dot} />
+				))}
 			</span>
 			<span aria-hidden="true">
 				{variant === "compaction"
 					? `${elapsedSeconds}s · ${t("Compacting conversation…")}`
 					: `${elapsedSeconds}s · ${t("{{count}} tokens", { count: displayedTokens })} · ${t("Thinking…")}`}
 			</span>
-		</div>
+		</output>
 	);
 }

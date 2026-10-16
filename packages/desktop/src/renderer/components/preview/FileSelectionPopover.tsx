@@ -37,6 +37,7 @@ export function FileSelectionPopover({
 	const [sending, setSending] = useState(false);
 	const pending = useRef(false);
 	const alive = useRef(true);
+	// biome-ignore lint/correctness/useExhaustiveDependencies(range): A new selection anchor starts outside instruction editing mode.
 	useLayoutEffect(() => {
 		setEditing(false);
 	}, [range]);

@@ -12,15 +12,17 @@ let roots: Root[] = [];
 function apiFixture(running = false, platform: "darwin" | "win32" = "darwin") {
 	return {
 		platform,
-		listBrowserImportSources: vi.fn(async () => [{
-			sourceId: "chrome" as const,
-			name: "Google Chrome",
-			running,
-			profiles: [
-				{ sourceProfileId: "Default", name: "Personal", email: "person@example.com" },
-				{ sourceProfileId: "Profile 2", name: "Work", email: "work@example.com" },
-			],
-		}]),
+		listBrowserImportSources: vi.fn(async () => [
+			{
+				sourceId: "chrome" as const,
+				name: "Google Chrome",
+				running,
+				profiles: [
+					{ sourceProfileId: "Default", name: "Personal", email: "person@example.com" },
+					{ sourceProfileId: "Profile 2", name: "Work", email: "work@example.com" },
+				],
+			},
+		]),
 		importBrowserData: vi.fn(async () => ({
 			profile: {
 				profileId: "20000000-0000-4000-8000-000000000001",
@@ -44,14 +46,17 @@ function renderDialog(api: MetisDesktopApi, onImported = vi.fn()) {
 }
 
 async function flush() {
-	await act(async () => { await Promise.resolve(); });
+	await act(async () => {
+		await Promise.resolve();
+	});
 }
 
 async function select(container: ParentNode, label: string, option: string) {
 	const trigger = container.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 	act(() => trigger.click());
-	const item = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-		.find((candidate) => candidate.textContent?.includes(option));
+	const item = [...container.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((candidate) =>
+		candidate.textContent?.includes(option),
+	);
 	expect(item).toBeDefined();
 	act(() => item!.click());
 }
@@ -73,17 +78,20 @@ describe("BrowserImportDialog", () => {
 		const { container, onImported } = renderDialog(api);
 		await flush();
 		await select(container, "Source profile", "Work");
-		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Import")!;
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
 		await act(async () => importButton.click());
 		expect(api.importBrowserData).toHaveBeenCalledWith({
 			sourceId: "chrome",
 			sourceProfileId: "Profile 2",
 			dataTypes: { cookies: true, history: true },
 		});
-		expect(onImported).toHaveBeenCalledWith(expect.objectContaining({
-			profile: expect.objectContaining({ sourceProfileId: "Profile 2" }),
-		}));
+		expect(onImported).toHaveBeenCalledWith(
+			expect.objectContaining({
+				profile: expect.objectContaining({ sourceProfileId: "Profile 2" }),
+			}),
+		);
 		expect(container.textContent).not.toMatch(/password|autofill/iu);
 	});
 
@@ -96,8 +104,9 @@ describe("BrowserImportDialog", () => {
 		expect(container.textContent).not.toContain("Import website sign-in state");
 		expect([...container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')]).toHaveLength(1);
 
-		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Import")!;
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
 		await act(async () => importButton.click());
 		expect(api.importBrowserData).toHaveBeenCalledWith({
 			sourceId: "chrome",
@@ -110,8 +119,9 @@ describe("BrowserImportDialog", () => {
 		const { container } = renderDialog(apiFixture(true));
 		await flush();
 		expect(container.textContent).toContain("Close Google Chrome before importing");
-		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Import")!;
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
 		expect(importButton.disabled).toBe(true);
 	});
 
@@ -121,8 +131,9 @@ describe("BrowserImportDialog", () => {
 		for (const checkbox of container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')) {
 			act(() => checkbox.click());
 		}
-		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")]
-			.find((button) => button.textContent === "Import")!;
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
 		expect(importButton.disabled).toBe(true);
 	});
 });

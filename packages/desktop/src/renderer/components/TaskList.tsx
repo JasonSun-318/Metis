@@ -22,13 +22,19 @@ function TaskContent({ task }: { readonly task: SessionTaskView }) {
 				)}
 				<span className="sr-only">{t(task.completed ? "Completed" : "Working")}</span>
 			</span>
-			<span className="task-list-text" title={task.task}>{task.task}</span>
+			<span className="task-list-text" title={task.task}>
+				{task.task}
+			</span>
 		</>
 	);
 }
 
 function TaskRow({ task }: { readonly task: SessionTaskView }) {
-	return <li className={`task-list-row${task.completed ? " is-completed" : ""}`}><TaskContent task={task} /></li>;
+	return (
+		<li className={`task-list-row${task.completed ? " is-completed" : ""}`}>
+			<TaskContent task={task} />
+		</li>
+	);
 }
 
 export function TaskList({ tasks }: TaskListProps) {
@@ -76,7 +82,12 @@ export function TaskList({ tasks }: TaskListProps) {
 						onClick={() => setExpanded(false)}
 						type="button"
 					>
-						<span>{t("Tasks")}<small>{completed}/{tasks.length}</small></span>
+						<span>
+							{t("Tasks")}
+							<small>
+								{completed}/{tasks.length}
+							</small>
+						</span>
 						<CaretDown aria-hidden="true" size={14} />
 					</button>
 				) : (
@@ -95,7 +106,10 @@ export function TaskList({ tasks }: TaskListProps) {
 				)}
 				<div aria-hidden={!expanded} className="task-list-drawer" inert={!expanded}>
 					<ul aria-live="polite" className={`task-list-items${tasks.length > 5 ? " is-scrollable" : ""}`}>
-						{tasks.map((task, index) => <TaskRow key={index} task={task} />)}
+						{tasks.map((task, index) => (
+							/* biome-ignore lint/suspicious/noArrayIndexKey: The protocol supplies an ordered task snapshot without IDs; these rows have no local state. */
+							<TaskRow key={index} task={task} />
+						))}
 					</ul>
 				</div>
 			</section>

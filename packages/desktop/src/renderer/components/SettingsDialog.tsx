@@ -1,4 +1,14 @@
-import { ArrowLeft, Brain, Browser, Cpu, GearSix, Robot, ShieldCheck, Sparkle, UserCircle } from "@phosphor-icons/react";
+import {
+	ArrowLeft,
+	Brain,
+	Browser,
+	Cpu,
+	GearSix,
+	Robot,
+	ShieldCheck,
+	Sparkle,
+	UserCircle,
+} from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -13,9 +23,28 @@ import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
 import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 
-type SettingsPage = "profile" | "general" | "model" | "personalization" | "memory" | "agentTypes" | "permissions" | "browser" | "usage";
+type SettingsPage =
+	| "profile"
+	| "general"
+	| "model"
+	| "personalization"
+	| "memory"
+	| "agentTypes"
+	| "permissions"
+	| "browser"
+	| "usage";
 
-export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose, onGeneralPreferencesChange, onThemeChange, serverReady, sessionId, theme }: {
+export function SettingsDialog({
+	api,
+	closeDelayMs,
+	generalPreferences,
+	onClose,
+	onGeneralPreferencesChange,
+	onThemeChange,
+	serverReady,
+	sessionId,
+	theme,
+}: {
 	readonly api: MetisDesktopApi;
 	readonly closeDelayMs?: number;
 	readonly generalPreferences: GeneralPreferences;
@@ -37,7 +66,9 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 	const pageScrollRef = useRef<HTMLDivElement>(null);
 	const closingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-	const delay = closeDelayMs ?? ((globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === "test" ? 0 : 160);
+	const delay =
+		closeDelayMs ??
+		((globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV === "test" ? 0 : 160);
 
 	const finishClose = useCallback(() => {
 		if (closing) return;
@@ -57,7 +88,9 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 		if (dirty) setPendingDestination(target);
 		else setPage(target);
 	};
-	useEffect(() => { firstNavRef.current?.focus(); }, []);
+	useEffect(() => {
+		firstNavRef.current?.focus();
+	}, []);
 	useEffect(() => {
 		if (!pendingDestination) return;
 		const dialog = unsavedDialog.current!;
@@ -80,6 +113,7 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 		};
 	}, []);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(page): Changing the settings page resets its scroll position.
 	useEffect(() => {
 		if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
 	}, [page]);
@@ -93,9 +127,11 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 				return;
 			}
 			if (event.key !== "Tab") return;
-			const focusable = [...(dialogRef.current?.querySelectorAll<HTMLElement>(
-				'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
-			) ?? [])].filter((element) => element.offsetParent !== null);
+			const focusable = [
+				...(dialogRef.current?.querySelectorAll<HTMLElement>(
+					'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+				) ?? []),
+			].filter((element) => element.offsetParent !== null);
 			if (focusable.length === 0) return;
 			const first = focusable[0]!;
 			const last = focusable.at(-1)!;
@@ -112,32 +148,89 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 	}, [triggerClose]);
 
 	const pages = [
-		{ id: "profile" as const, label: "Profile", description: "Review your profile and token usage.", icon: UserCircle },
-		{ id: "general" as const, label: "General", description: "Manage language, appearance, fonts, motion, and web search.", icon: GearSix },
-		{ id: "model" as const, label: "Model", description: "Configure model providers and defaults for new tasks.", icon: Cpu },
-		{ id: "personalization" as const, label: "Personalization", description: "Set instructions Metis keeps in mind across new tasks.", icon: Sparkle },
-		{ id: "memory" as const, label: "Memory", description: "Configure long-term memory and review recent changes.", icon: Brain },
-		{ id: "agentTypes" as const, label: "Agent types", description: "Review built-in subagents and configure custom ones.", icon: Robot },
-		{ id: "permissions" as const, label: "Permissions", description: "Control which simple commands Auto mode can run without review.", icon: ShieldCheck },
-		{ id: "browser" as const, label: "Browser", description: "Import browser data and manage history and downloads.", icon: Browser },
+		{
+			id: "profile" as const,
+			label: "Profile",
+			description: "Review your profile and token usage.",
+			icon: UserCircle,
+		},
+		{
+			id: "general" as const,
+			label: "General",
+			description: "Manage language, appearance, fonts, motion, and web search.",
+			icon: GearSix,
+		},
+		{
+			id: "model" as const,
+			label: "Model",
+			description: "Configure model providers and defaults for new tasks.",
+			icon: Cpu,
+		},
+		{
+			id: "personalization" as const,
+			label: "Personalization",
+			description: "Set instructions Metis keeps in mind across new tasks.",
+			icon: Sparkle,
+		},
+		{
+			id: "memory" as const,
+			label: "Memory",
+			description: "Configure long-term memory and review recent changes.",
+			icon: Brain,
+		},
+		{
+			id: "agentTypes" as const,
+			label: "Agent types",
+			description: "Review built-in subagents and configure custom ones.",
+			icon: Robot,
+		},
+		{
+			id: "permissions" as const,
+			label: "Permissions",
+			description: "Control which simple commands Auto mode can run without review.",
+			icon: ShieldCheck,
+		},
+		{
+			id: "browser" as const,
+			label: "Browser",
+			description: "Import browser data and manage history and downloads.",
+			icon: Browser,
+		},
 	];
 	const activePageId = page === "usage" ? "profile" : page;
 	const activePage = pages.find((item) => item.id === activePageId) ?? pages[0]!;
 
 	return (
-		<div className={`settings-backdrop ${closing ? "is-closing" : ""}`} onClick={(e) => { if (e.target === e.currentTarget) triggerClose(); }}>
-			<div aria-label={t("Settings")} aria-modal="true" className="settings-dialog" data-platform={api.platform} ref={dialogRef} role="dialog">
+		<div
+			className={`settings-backdrop ${closing ? "is-closing" : ""}`}
+			onPointerDown={(e) => {
+				if (e.target === e.currentTarget) triggerClose();
+			}}
+		>
+			<div
+				aria-label={t("Settings")}
+				aria-modal="true"
+				className="settings-dialog"
+				data-platform={api.platform}
+				ref={dialogRef}
+				role="dialog"
+			>
 				<aside className="settings-navigation" data-platform={api.platform}>
 					<div className="settings-navigation-top" />
 					<div className="settings-navigation-actions">
-						<button aria-label={t("Back to app")} className="settings-back-button" onClick={triggerClose} type="button">
+						<button
+							aria-label={t("Back to app")}
+							className="settings-back-button"
+							onClick={triggerClose}
+							type="button"
+						>
 							<ArrowLeft aria-hidden="true" size={16} />
 							<span>{t("Back to app")}</span>
 						</button>
 					</div>
 					<div className="settings-nav-divider" />
 					<nav aria-label={t("Settings pages")}>
-						{pages.map(({ id, label, icon: Icon }, index) => {
+						{pages.map(({ id, label, icon: Icon }) => {
 							const isActive = page === id || (id === "profile" && page === "usage");
 							return (
 								<button
@@ -174,14 +267,16 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 									api={api}
 									generalPreferences={generalPreferences}
 									onDirtyChange={setDirty}
-										onGeneralPreferencesChange={onGeneralPreferencesChange}
+									onGeneralPreferencesChange={onGeneralPreferencesChange}
 									onThemeChange={onThemeChange}
 									serverReady={serverReady}
 									theme={theme}
 								/>
 							) : null}
 							{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
-							{page === "personalization" ? <PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} /> : null}
+							{page === "personalization" ? (
+								<PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} />
+							) : null}
 							{page === "memory" ? (
 								<MemorySettingsPanel
 									api={api}
@@ -207,21 +302,45 @@ export function SettingsDialog({ api, closeDelayMs, generalPreferences, onClose,
 						</div>
 					</div>
 				</div>
-				{pendingDestination && <dialog aria-labelledby="settings-unsaved-title" aria-describedby="settings-unsaved-copy" className="settings-unsaved-dialog" onCancel={(event) => { event.preventDefault(); setPendingDestination(null); }} ref={unsavedDialog}>
-					<h2 id="settings-unsaved-title">{t("Unsaved changes")}</h2>
-					<p id="settings-unsaved-copy">{t("Your changes have not been saved. Keep editing to save them, or discard them to leave.")}</p>
-					<div className="settings-form-actions">
-						<button className="settings-primary-button" onClick={() => setPendingDestination(null)} type="button">{t("Keep editing")}</button>
-						<button className="settings-secondary-button" onClick={() => {
-							const target = pendingDestination;
+				{pendingDestination && (
+					<dialog
+						aria-labelledby="settings-unsaved-title"
+						aria-describedby="settings-unsaved-copy"
+						className="settings-unsaved-dialog"
+						onCancel={(event) => {
+							event.preventDefault();
 							setPendingDestination(null);
-							setDirty(false);
-							if (target === "close") finishClose();
-							else setPage(target);
-						}} type="button">{t("Discard changes")}</button>
-					</div>
-				</dialog>}
-
+						}}
+						ref={unsavedDialog}
+					>
+						<h2 id="settings-unsaved-title">{t("Unsaved changes")}</h2>
+						<p id="settings-unsaved-copy">
+							{t("Your changes have not been saved. Keep editing to save them, or discard them to leave.")}
+						</p>
+						<div className="settings-form-actions">
+							<button
+								className="settings-primary-button"
+								onClick={() => setPendingDestination(null)}
+								type="button"
+							>
+								{t("Keep editing")}
+							</button>
+							<button
+								className="settings-secondary-button"
+								onClick={() => {
+									const target = pendingDestination;
+									setPendingDestination(null);
+									setDirty(false);
+									if (target === "close") finishClose();
+									else setPage(target);
+								}}
+								type="button"
+							>
+								{t("Discard changes")}
+							</button>
+						</div>
+					</dialog>
+				)}
 			</div>
 		</div>
 	);

@@ -47,10 +47,7 @@ function mount(api: MetisDesktopApi) {
 	document.body.append(container);
 	const root = createRoot(container);
 	roots.push(root);
-	const render = async (
-		controlState: "idle" | "agent" | "handoff",
-		handoffReason?: DesktopBrowserHandoffReason,
-	) => {
+	const render = async (controlState: "idle" | "agent" | "handoff", handoffReason?: DesktopBrowserHandoffReason) => {
 		await act(async () => {
 			root.render(
 				<BrowserPanel
@@ -98,10 +95,12 @@ describe("BrowserPanel agent control", () => {
 		const { render } = mount(api);
 		await render("idle");
 		await vi.waitFor(() =>
-			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
-				type: "present",
-				visible: true,
-			})),
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					visible: true,
+				}),
+			),
 		);
 
 		vi.mocked(api.controlBrowser).mockClear();
@@ -112,10 +111,12 @@ describe("BrowserPanel agent control", () => {
 			await Promise.resolve();
 		});
 		await vi.waitFor(() =>
-			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
-				type: "present",
-				visible: false,
-			})),
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					visible: false,
+				}),
+			),
 		);
 
 		vi.mocked(api.controlBrowser).mockClear();
@@ -124,41 +125,53 @@ describe("BrowserPanel agent control", () => {
 			await Promise.resolve();
 		});
 		await vi.waitFor(() =>
-			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
-				type: "present",
-				visible: true,
-			})),
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					visible: true,
+				}),
+			),
 		);
 	});
 
 	it("shows a safe activity bar, keeps native presentation, and requests takeover once", async () => {
 		let resolveTakeover!: () => void;
-		const takeBrowserControl = vi.fn().mockReturnValue(new Promise<void>((resolve) => {
-			resolveTakeover = resolve;
-		}));
+		const takeBrowserControl = vi.fn().mockReturnValue(
+			new Promise<void>((resolve) => {
+				resolveTakeover = resolve;
+			}),
+		);
 		const api = browserApi({ takeBrowserControl });
 		const { container, render } = mount(api);
 		await render("agent");
 
-		expect(container.querySelector('[role="status"]')?.getAttribute("aria-label")).toBe("Browser automation active");
-		expect(container.querySelector('[role="status"]')?.textContent).toContain("Metis is controlling this page");
+		expect(container.querySelector('output, [role="status"]')?.getAttribute("aria-label")).toBe(
+			"Browser automation active",
+		);
+		expect(container.querySelector('output, [role="status"]')?.textContent).toContain(
+			"Metis is controlling this page",
+		);
 		expect(container.querySelector(".browser-toolbar")?.hasAttribute("inert")).toBe(true);
 		await act(async () => {
 			await Promise.resolve();
 		});
 		expect(api.captureBrowserPreview).not.toHaveBeenCalled();
 		await vi.waitFor(() =>
-			expect(api.controlBrowser).toHaveBeenCalledWith(expect.objectContaining({
-				type: "present",
-				sessionId: SESSION_ID,
-				browserId: BROWSER_ID,
-				visible: true,
-			})),
+			expect(api.controlBrowser).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "present",
+					sessionId: SESSION_ID,
+					browserId: BROWSER_ID,
+					visible: true,
+				}),
+			),
 		);
-		expect(api.controlBrowser).not.toHaveBeenCalledWith(expect.objectContaining({
-			type: "present",
-			visible: false,
-		}));
+		expect(api.controlBrowser).not.toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "present",
+				visible: false,
+			}),
+		);
 
 		const takeover = button(container, "Take control");
 		await act(async () => {

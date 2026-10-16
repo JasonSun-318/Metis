@@ -3,11 +3,11 @@ import * as pdfjsLib from "pdfjs-dist";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
+import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { pdfCMapUrl, pdfStandardFontDataUrl, pdfWorkerSrc } from "./pdf-assets.ts";
-import { type PreviewSize, type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { pdfTextSelection } from "./pdf-selection.ts";
+import { type PreviewSize, type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 
 const workerSrc = pdfWorkerSrc();
@@ -196,6 +196,9 @@ export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDe
 		};
 	}, [bytes, t]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(resizing): Mode, viewport size, and resize completion require restoring the saved page anchor after layout.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(size): Mode, viewport size, and resize completion require restoring the saved page anchor after layout.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(mode): Mode, viewport size, and resize completion require restoring the saved page anchor after layout.
 	useLayoutEffect(() => {
 		const container = scrollRef.current;
 		const page = container?.querySelector<HTMLElement>(`[data-page="${anchor.current.page}"]`);
@@ -278,6 +281,7 @@ export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDe
 				) : (
 					Array.from({ length: doc.numPages }, (_, index) => (
 						<PdfPage
+							// biome-ignore lint/suspicious/noArrayIndexKey: PDF pages have fixed ordinal identities and never reorder within the document.
 							key={index}
 							doc={doc}
 							number={index + 1}

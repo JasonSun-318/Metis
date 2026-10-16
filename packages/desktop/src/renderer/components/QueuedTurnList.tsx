@@ -36,12 +36,23 @@ export function QueuedTurnList({ disabled, running, turns, onDelete, onEdit, onS
 				const canStart = index === 0;
 				const attachmentNames = turn.attachments.map(({ name }) => name).join(", ");
 				return (
-					<div aria-label={t("Queued message {{index}}", { index: index + 1 })} className={`queued-turn-row is-${turn.state}`} key={turn.queueItemId} role="group">
+					<fieldset
+						aria-label={t("Queued message {{index}}", { index: index + 1 })}
+						className={`control-group ${`queued-turn-row is-${turn.state}`}`}
+						key={turn.queueItemId}
+					>
 						<div className="queued-turn-copy">
-							<span className="queued-turn-state">{t(turn.state === "sending" ? "Sending…" : turn.state === "paused" ? "Paused" : "Queued")}</span>
-							<span className="queued-turn-text" title={turn.text || attachmentNames}>{turn.text || attachmentNames}</span>
+							<span className="queued-turn-state">
+								{t(turn.state === "sending" ? "Sending…" : turn.state === "paused" ? "Paused" : "Queued")}
+							</span>
+							<span className="queued-turn-text" title={turn.text || attachmentNames}>
+								{turn.text || attachmentNames}
+							</span>
 							{turn.attachments.length > 0 && turn.text && (
-								<span className="queued-turn-attachments" title={attachmentNames}><Paperclip aria-hidden="true" size={12} />{attachmentNames}</span>
+								<span className="queued-turn-attachments" title={attachmentNames}>
+									<Paperclip aria-hidden="true" size={12} />
+									{attachmentNames}
+								</span>
 							)}
 						</div>
 						<div className="queued-turn-actions">
@@ -49,16 +60,37 @@ export function QueuedTurnList({ disabled, running, turns, onDelete, onEdit, onS
 								aria-label={t(running ? "Guide with queued message" : "Send queued message")}
 								className="queued-turn-send"
 								disabled={unavailable || (!running && !canStart)}
-								onClick={() => void run(turn.queueItemId, () => onSend(turn, running ? "steer" : "start")).catch(() => undefined)}
+								onClick={() =>
+									void run(turn.queueItemId, () => onSend(turn, running ? "steer" : "start")).catch(
+										() => undefined,
+									)
+								}
 								title={!running && !canStart ? t("Queued messages are sent in order") : undefined}
 								type="button"
 							>
-								<ArrowBendUpLeft aria-hidden="true" size={14} />{t(running ? "Guide" : "Send")}
+								<ArrowBendUpLeft aria-hidden="true" size={14} />
+								{t(running ? "Guide" : "Send")}
 							</button>
-							<button aria-label={t("Edit queued message")} className="queued-turn-edit" disabled={unavailable} onClick={() => void run(turn.queueItemId, () => onEdit(turn)).catch(() => undefined)} type="button"><PencilSimple aria-hidden="true" size={14} />{t("Edit")}</button>
-							<button aria-label={t("Delete queued message")} disabled={unavailable} onClick={() => void run(turn.queueItemId, () => onDelete(turn)).catch(() => undefined)} type="button"><Trash aria-hidden="true" size={14} /></button>
+							<button
+								aria-label={t("Edit queued message")}
+								className="queued-turn-edit"
+								disabled={unavailable}
+								onClick={() => void run(turn.queueItemId, () => onEdit(turn)).catch(() => undefined)}
+								type="button"
+							>
+								<PencilSimple aria-hidden="true" size={14} />
+								{t("Edit")}
+							</button>
+							<button
+								aria-label={t("Delete queued message")}
+								disabled={unavailable}
+								onClick={() => void run(turn.queueItemId, () => onDelete(turn)).catch(() => undefined)}
+								type="button"
+							>
+								<Trash aria-hidden="true" size={14} />
+							</button>
 						</div>
-					</div>
+					</fieldset>
 				);
 			})}
 		</section>

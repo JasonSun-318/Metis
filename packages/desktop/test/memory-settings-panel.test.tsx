@@ -109,27 +109,25 @@ const noteView: MemoryNoteView = {
 
 function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 	return {
-		listSessions: vi
-			.fn()
-			.mockResolvedValue({
-				sessions: [
-					{
-						sessionId: "99999999-8888-4777-8666-555544443333",
-						name: "Memory test",
-						mode: "code",
-						cwdOrigin: "user-selected",
-						cwd: "/work/metis",
-						createdAt: "2026-09-18T00:00:00Z",
-						updatedAt: "2026-09-18T00:00:00Z",
-						state: "idle",
-						archived: false,
-						unread: false,
-						useMemory: true,
-						contributeMemory: true,
-					},
-				],
-				nextAfterSessionId: null,
-			}),
+		listSessions: vi.fn().mockResolvedValue({
+			sessions: [
+				{
+					sessionId: "99999999-8888-4777-8666-555544443333",
+					name: "Memory test",
+					mode: "code",
+					cwdOrigin: "user-selected",
+					cwd: "/work/metis",
+					createdAt: "2026-09-18T00:00:00Z",
+					updatedAt: "2026-09-18T00:00:00Z",
+					state: "idle",
+					archived: false,
+					unread: false,
+					useMemory: true,
+					contributeMemory: true,
+				},
+			],
+			nextAfterSessionId: null,
+		}),
 		getMemorySettings: vi.fn().mockResolvedValue(memorySettings),
 		updateMemorySettings: vi.fn().mockResolvedValue(memorySettings),
 		listMemoryNotes: vi.fn().mockResolvedValue({ notes: [noteSummary] }),
@@ -178,6 +176,8 @@ describe("MemorySettingsPanel", () => {
 		expect(toggle(container, "Enable long-term memory").checked).toBe(true);
 		expect(toggle(container, "Remember project progress").checked).toBe(true);
 		expect(toggle(container, "Consolidate memory while idle").checked).toBe(false);
+		expect(toggle(container, "Enable long-term memory").getAttribute("aria-checked")).toBe("true");
+		expect(toggle(container, "Consolidate memory while idle").getAttribute("aria-checked")).toBe("false");
 		expect(container.querySelector("dialog")).toBeNull();
 		await openPanel(container, "Storage location");
 		expect(container.querySelector(".memory-vault-path")?.textContent).toContain("/tmp/agent/memory/global");
@@ -197,6 +197,8 @@ describe("MemorySettingsPanel", () => {
 
 		await act(async () => toggle(container, "Enable long-term memory").click());
 		await act(async () => toggle(container, "Consolidate memory while idle").click());
+		expect(toggle(container, "Enable long-term memory").getAttribute("aria-checked")).toBe("false");
+		expect(toggle(container, "Consolidate memory while idle").getAttribute("aria-checked")).toBe("true");
 		await act(async () => button(container, "Save").click());
 		await flush();
 
@@ -274,7 +276,9 @@ describe("MemorySettingsPanel", () => {
 			await openPanel(container, "关闭最近变更");
 			await openPanel(container, "高级设置");
 			const model = container.querySelector<HTMLSelectElement>('select[aria-label="记忆模型"]')!;
-			expect(document.getElementById(model.getAttribute("aria-describedby")!)?.textContent).toContain("仅用于整理记忆");
+			expect(document.getElementById(model.getAttribute("aria-describedby")!)?.textContent).toContain(
+				"仅用于整理记忆",
+			);
 			await openPanel(container, "关闭高级设置");
 			await openPanel(container, "管理已保存的记忆");
 			const search = container.querySelector<HTMLInputElement>('input[type="search"]')!;
@@ -703,7 +707,9 @@ describe("MemorySettingsPanel", () => {
 			await act(async () => button(container, "Run now").click());
 			await flush();
 			expect(container.textContent).toContain("gated");
-			expect([...container.querySelectorAll("button")].some((b) => b.textContent?.includes("failed run"))).toBe(false);
+			expect([...container.querySelectorAll("button")].some((b) => b.textContent?.includes("failed run"))).toBe(
+				false,
+			);
 		} finally {
 			await act(async () => root.unmount());
 		}

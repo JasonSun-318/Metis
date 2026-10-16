@@ -4,8 +4,8 @@ import { marked } from "marked";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import i18n from "../src/renderer/i18n.ts";
 import { Markdown } from "../src/renderer/components/Markdown.tsx";
+import i18n from "../src/renderer/i18n.ts";
 
 const DOCS = [
 	"# Title\n\nHere is **some** text and `code`.\n\n```js\nconst x = 1;\nconsole.log(x);\n```\n\n- item one\n- item two\n- item three\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n> a quote\n\nfinal paragraph\n",

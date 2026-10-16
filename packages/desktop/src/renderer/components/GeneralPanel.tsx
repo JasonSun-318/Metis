@@ -51,7 +51,7 @@ export function GeneralPanel({
 							<p>{t("Choose the interface display language.")}</p>
 						</div>
 						<div className="general-setting-control">
-							<div aria-label={t("Language")} className="settings-segmented" role="group">
+							<fieldset aria-label={t("Language")} className="control-group settings-segmented">
 								{APP_LOCALES.map((option) => (
 									<button
 										aria-pressed={locale === option.value}
@@ -62,7 +62,7 @@ export function GeneralPanel({
 										{option.label}
 									</button>
 								))}
-							</div>
+							</fieldset>
 						</div>
 					</div>
 					<div className="general-setting-row">
@@ -71,7 +71,10 @@ export function GeneralPanel({
 							<p>{t("Select light, dark, or follow system theme.")}</p>
 						</div>
 						<div className="general-setting-control">
-							<div aria-label={t("Appearance")} className="settings-segmented appearance-segmented" role="group">
+							<fieldset
+								aria-label={t("Appearance")}
+								className="control-group settings-segmented appearance-segmented"
+							>
 								{APP_THEMES.map(({ value, label }) => {
 									const Icon = themeIcons[value];
 									return (
@@ -87,7 +90,7 @@ export function GeneralPanel({
 										</button>
 									);
 								})}
-							</div>
+							</fieldset>
 						</div>
 					</div>
 					<div className="general-setting-row">
@@ -96,7 +99,7 @@ export function GeneralPanel({
 							<p>{t("Reduce animation in streaming responses and interface elements.")}</p>
 						</div>
 						<div className="general-setting-control">
-							<div aria-label={t("Motion")} className="settings-segmented" role="group">
+							<fieldset aria-label={t("Motion")} className="control-group settings-segmented">
 								{(["system", "reduced"] as const).map((motion) => (
 									<button
 										aria-pressed={generalPreferences.motion === motion}
@@ -107,7 +110,7 @@ export function GeneralPanel({
 										{t(motion === "system" ? "System" : "Reduced")}
 									</button>
 								))}
-							</div>
+							</fieldset>
 						</div>
 					</div>
 				</div>
@@ -128,7 +131,9 @@ export function GeneralPanel({
 								ariaLabel={t("Content font size")}
 								className="general-font-select"
 								menuAlign="end"
-								onChange={(contentFontSize) => onGeneralPreferencesChange({ ...generalPreferences, contentFontSize })}
+								onChange={(contentFontSize) =>
+									onGeneralPreferencesChange({ ...generalPreferences, contentFontSize })
+								}
 								options={CONTENT_FONT_SIZE_OPTIONS}
 								value={generalPreferences.contentFontSize}
 							/>
@@ -156,7 +161,9 @@ export function GeneralPanel({
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
 							<span>{t("Code font")}</span>
-							<p>{t("Font used for Code replies, greetings, and questions. Code and tools remain monospaced.")}</p>
+							<p>
+								{t("Font used for Code replies, greetings, and questions. Code and tools remain monospaced.")}
+							</p>
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
