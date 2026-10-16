@@ -1,11 +1,9 @@
 import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import {
 	CaretRight,
-	Check,
 	CheckCircle,
 	CircleNotch,
 	ClockCounterClockwise,
-	Copy,
 	GitFork,
 	ImageSquare,
 	TerminalWindow,
@@ -14,6 +12,7 @@ import {
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
+import { CopyFeedbackIcon } from "./CopyFeedbackIcon.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
@@ -334,7 +333,7 @@ export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: strin
 			title={t("Copy this message")}
 			type="button"
 		>
-			{copied ? <Check aria-hidden="true" size={13} /> : <Copy aria-hidden="true" size={13} />}
+			<CopyFeedbackIcon copied={copied} />
 		</button>
 	);
 }

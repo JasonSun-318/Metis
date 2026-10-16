@@ -2,6 +2,7 @@ import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@m
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useTranscriptScrollFade } from "../hooks/use-transcript-scroll-fade.ts";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
 import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
 import { useConversationQuotes } from "./ConversationQuoteContext.tsx";
@@ -104,6 +105,8 @@ export function Transcript({
 	const quoteContext = useConversationQuotes();
 	const rootRef = useRef<HTMLElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
+	const scrollContentRef = useRef<HTMLDivElement>(null);
+	useTranscriptScrollFade(scrollRef, scrollContentRef);
 	const [quoteJump, setQuoteJump] = useState<readonly string[] | null>(null);
 	const [quoteLoading, setQuoteLoading] = useState(false);
 	const [quoteNotice, setQuoteNotice] = useState("");
@@ -382,7 +385,11 @@ export function Transcript({
 				}}
 				ref={scrollRef}
 			>
-				<div className="transcript-space" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+				<div
+					className="transcript-space"
+					ref={scrollContentRef}
+					style={{ height: `${virtualizer.getTotalSize()}px` }}
+				>
 					{rows.map((row) => {
 						const transcriptRow = transcript[row.index];
 						if (!transcriptRow) return null;

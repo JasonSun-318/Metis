@@ -31,6 +31,13 @@
 	--code-meta-size: calc(var(--content-font-size) - 1px);
 	--code-mono-size: calc(var(--content-font-size) - 2px);
 
+	/* Shared control feedback; geometry and theme colors stay component-owned. */
+	--motion-duration-fast: 120ms;
+	--motion-duration-control: 160ms;
+	--motion-duration-switch: 220ms;
+	--motion-ease-out: cubic-bezier(.16, 1, .3, 1);
+	--motion-ease-switch: cubic-bezier(.2, .9, .25, 1.05);
+
 	/* semantic palette (dark) */
 	--app-bg: #121212;
 	--sidebar: #141414;
