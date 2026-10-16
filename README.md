@@ -27,7 +27,7 @@ Shared desktop modules and app-protocol source remain independent of those
 runtimes. An exceptional import requires a trailing
 `// boundary-allow: <reason>` comment explaining the boundary crossing.
 
-Follow [AGENTS.md](AGENTS.md), the existing module patterns, and Biome's tab
+Follow the existing module patterns and Biome's tab
 indentation and 120-column formatting for files covered by its configuration.
 Use strict, erasable TypeScript, explicit interfaces, and top-level imports.
 Keep deliberate lazy loading where browser compatibility, optional native
