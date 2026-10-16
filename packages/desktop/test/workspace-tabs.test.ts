@@ -15,7 +15,6 @@ import {
 	moveTabGroup,
 	moveToolTab,
 	normalizeTabGroups,
-	paneForTab,
 	relatedInsertIndex,
 	removeTab,
 	removeTabs,
@@ -60,7 +59,8 @@ function split(
 	tabId: string,
 	direction: "left" | "right" | "up" | "down",
 ): SessionWorkspace {
-	return splitTab(workspace, tabId, paneForTab(workspace, tabId)!.id, direction);
+	const pane = workspace.panes.find((candidate) => candidate.tabs.some((tab) => tab.id === tabId));
+	return splitTab(workspace, tabId, pane!.id, direction);
 }
 
 describe("defaultWorkspace", () => {
@@ -249,14 +249,16 @@ describe("moveTab", () => {
 	});
 });
 
-describe("workspaceTabs / findTabLocation / paneForTab", () => {
+describe("workspaceTabs / findTabLocation", () => {
 	it("locates tabs across panes", () => {
 		const { workspace: seeded, chatId } = seededWorkspace();
 		let workspace = addTab(seeded, extra("t1"));
 		workspace = split(workspace, "t1", "right");
 		expect(workspaceTabs(workspace).map((tab) => tab.id)).toEqual([chatId, "t1"]);
 		expect(findTabLocation(workspace, "t1")).toEqual({ paneIndex: 1, tabIndex: 0 });
-		expect(paneForTab(workspace, "t1")!.id).toBe(workspace.panes[1]!.id);
+		expect(workspace.panes.find((pane) => pane.tabs.some((tab) => tab.id === "t1"))!.id).toBe(
+			workspace.panes[1]!.id,
+		);
 	});
 });
 

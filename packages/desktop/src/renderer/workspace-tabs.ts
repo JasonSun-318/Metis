@@ -95,7 +95,6 @@ export type WorkspaceTab =
 	| PreviewTab
 	| PlanTab;
 
-export const MAX_WORKSPACE_ROWS = 2;
 export const MAX_ROW_PANES = 3;
 export type SplitDirection = "left" | "right" | "up" | "down";
 
@@ -200,10 +199,6 @@ function updateToolStrip(
 
 export function activePane(workspace: SessionWorkspace): WorkspacePane {
 	return workspace.panes.find((pane) => pane.id === workspace.activePaneId) ?? workspace.panes[0]!;
-}
-
-export function paneForTab(workspace: SessionWorkspace, tabId: string): WorkspacePane | undefined {
-	return workspace.panes.find((pane) => pane.tabs.some((tab) => tab.id === tabId));
 }
 
 function collapseEmptyPanes(workspace: SessionWorkspace): SessionWorkspace {

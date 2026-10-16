@@ -3903,8 +3903,7 @@ test("packaged General settings and Personalization persist across restart", asy
 	let phase = "connecting";
 	const consoleErrors: string[] = [];
 	const captureConsoleErrors = (target: Page) => target.on("console", (message) => {
-		// Shared CI runners can refuse WebGL contexts under GPU memory pressure;
-		// SideRays degrades to a static background, which is not a defect.
+		// Shared CI runners can refuse WebGL contexts under GPU memory pressure.
 		if (message.type() === "error" && message.text() !== "unable to create webgl context") {
 			consoleErrors.push(message.text());
 		}
