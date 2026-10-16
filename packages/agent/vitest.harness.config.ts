@@ -21,6 +21,8 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: [
+			{ find: /^@metis\/ai$/, replacement: aiSrcIndex },
+			{ find: /^@metis\/ai\/compat$/, replacement: aiSrcCompat },
 		],
 	},
 });

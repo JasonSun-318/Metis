@@ -300,14 +300,22 @@ export class AgentHarness<
 		});
 	}
 
-	private startRunPromise(): () => void {
+	private startRunPromise(): () => Promise<void> {
 		let finish = () => {};
 		this.runPromise = new Promise<void>((resolve) => {
 			finish = resolve;
 		});
-		return () => {
-			this.runPromise = undefined;
-			finish();
+		return async () => {
+			try {
+				await this.flushPendingSessionWrites();
+			} catch (error) {
+				throw normalizeHarnessError(error, "session");
+			} finally {
+				this.runAbortController = undefined;
+				this.phase = "idle";
+				this.runPromise = undefined;
+				finish();
+			}
 		};
 	}
 
@@ -506,7 +514,6 @@ export class AgentHarness<
 		}
 		if (event.type === "agent_end") {
 			await this.flushPendingSessionWrites();
-			this.phase = "idle";
 			await this.emitAny(event, signal);
 			await this.emitOwn({ type: "settled", nextTurnCount: this.nextTurnQueue.length }, signal);
 			return;
@@ -587,22 +594,14 @@ export class AgentHarness<
 				}
 			}
 		})();
-		try {
-			const newMessages = await runResultPromise;
-			for (let i = newMessages.length - 1; i >= 0; i--) {
-				const message = newMessages[i]!;
-				if (message.role === "assistant") {
-					return message;
-				}
-			}
-			throw new AgentHarnessError("invalid_state", "AgentHarness prompt completed without an assistant message");
-		} finally {
-			try {
-				await this.flushPendingSessionWrites();
-			} finally {
-				this.runAbortController = undefined;
+		const newMessages = await runResultPromise;
+		for (let i = newMessages.length - 1; i >= 0; i--) {
+			const message = newMessages[i]!;
+			if (message.role === "assistant") {
+				return message;
 			}
 		}
+		throw new AgentHarnessError("invalid_state", "AgentHarness prompt completed without an assistant message");
 	}
 
 	async prompt(text: string, options?: { images?: ImageContent[] }): Promise<AssistantMessage> {
@@ -613,10 +612,9 @@ export class AgentHarness<
 			const turnState = await this.createTurnState();
 			return await this.executeTurn(turnState, text, options);
 		} catch (error) {
-			this.phase = "idle";
 			throw normalizeHarnessError(error, "unknown");
 		} finally {
-			finishRunPromise();
+			await finishRunPromise();
 		}
 	}
 
@@ -630,10 +628,9 @@ export class AgentHarness<
 			if (!skill) throw new AgentHarnessError("invalid_argument", `Unknown skill: ${name}`);
 			return await this.executeTurn(turnState, formatSkillInvocation(skill, additionalInstructions));
 		} catch (error) {
-			this.phase = "idle";
 			throw normalizeHarnessError(error, "unknown");
 		} finally {
-			finishRunPromise();
+			await finishRunPromise();
 		}
 	}
 
@@ -647,10 +644,9 @@ export class AgentHarness<
 			if (!template) throw new AgentHarnessError("invalid_argument", `Unknown prompt template: ${name}`);
 			return await this.executeTurn(turnState, formatPromptTemplateInvocation(template, args));
 		} catch (error) {
-			this.phase = "idle";
 			throw normalizeHarnessError(error, "unknown");
 		} finally {
-			finishRunPromise();
+			await finishRunPromise();
 		}
 	}
 
@@ -688,6 +684,7 @@ export class AgentHarness<
 	): Promise<{ summary: string; firstKeptEntryId: string; tokensBefore: number; details?: unknown }> {
 		if (this.phase !== "idle") throw new AgentHarnessError("busy", "compact() requires idle harness");
 		this.phase = "compaction";
+		const finishRunPromise = this.startRunPromise();
 		try {
 			const model = this.model;
 			if (!model) throw new AgentHarnessError("invalid_state", "No model set for compaction");
@@ -725,7 +722,7 @@ export class AgentHarness<
 		} catch (error) {
 			throw normalizeHarnessError(error, "compaction");
 		} finally {
-			this.phase = "idle";
+			await finishRunPromise();
 		}
 	}
 
@@ -735,6 +732,7 @@ export class AgentHarness<
 	): Promise<NavigateTreeResult> {
 		if (this.phase !== "idle") throw new AgentHarnessError("busy", "navigateTree() requires idle harness");
 		this.phase = "branch_summary";
+		const finishRunPromise = this.startRunPromise();
 		try {
 			const oldLeafId = await this.session.getLeafId();
 			if (oldLeafId === targetId) return { cancelled: false };
@@ -822,7 +820,7 @@ export class AgentHarness<
 		} catch (error) {
 			throw normalizeHarnessError(error, "branch_summary");
 		} finally {
-			this.phase = "idle";
+			await finishRunPromise();
 		}
 	}
 
@@ -996,6 +994,7 @@ export class AgentHarness<
 		return { clearedSteer, clearedFollowUp };
 	}
 
+	/** Wait for the active operation, its awaited listeners, and queued session writes to settle. */
 	async waitForIdle(): Promise<void> {
 		await this.runPromise;
 	}

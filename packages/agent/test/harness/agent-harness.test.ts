@@ -418,6 +418,151 @@ describe("AgentHarness", () => {
 		expect(listenerFinished).toBe(true);
 	});
 
+	it.each(["agent_end", "settled"] as const)("rejects overlapping prompts during %s listeners", async (eventType) => {
+		const registration = newFaux();
+		registration.setResponses([() => fauxAssistantMessage("first"), () => fauxAssistantMessage("second")]);
+		const entered = deferred();
+		const barrier = deferred();
+		const harness = new AgentHarness({
+			models,
+			env: new NodeExecutionEnv({ cwd: process.cwd() }),
+			session: new Session(new InMemorySessionStorage()),
+			model: registration.getModel(),
+		});
+		harness.subscribe(async (event) => {
+			if (event.type !== eventType) return;
+			entered.resolve();
+			await barrier.promise;
+		});
+
+		const running = harness.prompt("hello");
+		await entered.promise;
+		const overlap = harness.prompt("overlap").then(
+			() => undefined,
+			(error: unknown) => error,
+		);
+		barrier.resolve();
+		await running;
+		expect(await overlap).toMatchObject({ code: "busy" });
+	});
+
+	it("waits for tree navigation listeners and persists their queued mutations before becoming idle", async () => {
+		const registration = newFaux();
+		const session = new Session(new InMemorySessionStorage());
+		await session.appendMessage({ role: "user", content: "first", timestamp: 1 });
+		const targetId = await session.getLeafId();
+		if (!targetId) throw new Error("missing navigation target");
+		await session.appendMessage({ role: "user", content: "second", timestamp: 2 });
+		const harness = new AgentHarness({
+			models,
+			env: new NodeExecutionEnv({ cwd: process.cwd() }),
+			session,
+			model: registration.getModel(),
+		});
+		const entered = deferred();
+		const barrier = deferred();
+		harness.subscribe(async (event) => {
+			if (event.type !== "session_tree") return;
+			await harness.setThinkingLevel("high");
+			entered.resolve();
+			await barrier.promise;
+		});
+
+		const navigation = harness.navigateTree(targetId);
+		await entered.promise;
+		let idle = false;
+		const waiting = harness.waitForIdle().then(() => {
+			idle = true;
+		});
+		try {
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(idle).toBe(false);
+		} finally {
+			barrier.resolve();
+			await Promise.all([navigation, waiting]);
+		}
+		expect(await session.getEntries()).toContainEqual(
+			expect.objectContaining({ type: "thinking_level_change", thinkingLevel: "high" }),
+		);
+	});
+
+	it("waits for compaction listeners and persists their queued mutations before becoming idle", async () => {
+		const registration = newFaux();
+		const session = new Session(new InMemorySessionStorage());
+		await session.appendMessage({ role: "user", content: "history", timestamp: 1 });
+		const harness = new AgentHarness({
+			models,
+			env: new NodeExecutionEnv({ cwd: process.cwd() }),
+			session,
+			model: registration.getModel(),
+		});
+		harness.on("session_before_compact", ({ preparation }) => ({
+			compaction: {
+				summary: "summary",
+				firstKeptEntryId: preparation.firstKeptEntryId,
+				tokensBefore: preparation.tokensBefore,
+			},
+		}));
+		const entered = deferred();
+		const barrier = deferred();
+		harness.subscribe(async (event) => {
+			if (event.type !== "session_compact") return;
+			await harness.setThinkingLevel("high");
+			entered.resolve();
+			await barrier.promise;
+		});
+
+		const compaction = harness.compact();
+		await entered.promise;
+		let idle = false;
+		const waiting = harness.waitForIdle().then(() => {
+			idle = true;
+		});
+		try {
+			await Promise.resolve();
+			await Promise.resolve();
+			expect(idle).toBe(false);
+		} finally {
+			barrier.resolve();
+			await Promise.all([compaction, waiting]);
+		}
+		expect(await session.getEntries()).toContainEqual(
+			expect.objectContaining({ type: "thinking_level_change", thinkingLevel: "high" }),
+		);
+	});
+
+	it("releases the run after a pending session write fails and retries that write on the next operation", async () => {
+		const registration = newFaux();
+		registration.setResponses([() => fauxAssistantMessage("first"), () => fauxAssistantMessage("second")]);
+		const session = new Session(new InMemorySessionStorage());
+		const harness = new AgentHarness({
+			models,
+			env: new NodeExecutionEnv({ cwd: process.cwd() }),
+			session,
+			model: registration.getModel(),
+		});
+		const originalAppend = session.appendThinkingLevelChange.bind(session);
+		let failNextWrite = true;
+		session.appendThinkingLevelChange = async (level) => {
+			if (failNextWrite) {
+				failNextWrite = false;
+				throw new Error("write failed");
+			}
+			return originalAppend(level);
+		};
+		const unsubscribe = harness.subscribe(async (event) => {
+			if (event.type === "settled") await harness.setThinkingLevel("high");
+		});
+		await expect(harness.prompt("hello")).rejects.toMatchObject({ code: "session", message: "write failed" });
+		await harness.waitForIdle();
+		unsubscribe();
+		await harness.prompt("retry");
+		expect(await session.getEntries()).toContainEqual(
+			expect.objectContaining({ type: "thinking_level_change", thinkingLevel: "high" }),
+		);
+	});
+
 	it("runs tool_call and tool_result hooks through the direct loop", async () => {
 		const registration = newFaux();
 		registration.setResponses([
