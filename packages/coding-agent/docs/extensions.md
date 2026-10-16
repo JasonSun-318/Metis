@@ -2877,8 +2877,6 @@ All examples in [examples/extensions/](../examples/extensions/).
 | `snake.ts` | Snake game | `registerCommand`, `ui.custom`, keyboard handling |
 | `space-invaders.ts` | Space Invaders game | `registerCommand`, `ui.custom` |
 | `doom-overlay/` | Doom in overlay | `ui.custom` with overlay |
-| **Providers** |||
-| `custom-provider-anthropic/` | Custom Anthropic proxy | `registerProvider` |
 | **Messages & Communication** |||
 | `message-renderer.ts` | Custom message rendering | `registerMessageRenderer`, `sendMessage` |
 | `entry-renderer.ts` | TUI-only custom entry rendering | `registerEntryRenderer`, `appendEntry` |

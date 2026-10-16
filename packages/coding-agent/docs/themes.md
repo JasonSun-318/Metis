@@ -117,7 +117,7 @@ vim ~/.metis/agent/themes/my-theme.json
 
 3. Select the theme via `/settings`.
 
-**Hot reload:** When you edit the currently active custom theme file, metis reloads it automatically for immediate visual feedback.
+**Hot reload:** Metis watches the custom themes directory and reloads the active theme when its `.json` file in that directory changes.
 
 ## Theme Format
 

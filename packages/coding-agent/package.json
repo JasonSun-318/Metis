@@ -33,7 +33,6 @@
 		"dist",
 		"docs",
 		"examples",
-		"containerization.md",
 		"npm-shrinkwrap.json"
 	],
 	"scripts": {

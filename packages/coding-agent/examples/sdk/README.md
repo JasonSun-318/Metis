@@ -15,7 +15,7 @@ The runtime example shows how to build a recreate function that closes over proc
 | `05-tools.ts` | Built-in tool allowlists |
 | `06-extensions.ts` | Logging, blocking, result modification |
 | `07-context-files.ts` | AGENTS.md context files |
-| `08-slash-commands.ts` | File-based slash commands |
+| `08-prompt-templates.ts` | File-based prompt templates |
 | `09-api-keys-and-oauth.ts` | API key resolution, OAuth config |
 | `10-settings.ts` | Override compaction, retry, terminal settings |
 | `11-sessions.ts` | In-memory, persistent, continue, list sessions |
@@ -113,7 +113,7 @@ await session.prompt("Hello");
 | `cwd` | `process.cwd()` | Working directory |
 | `agentDir` | `~/.metis/agent` | Config directory |
 | `model` | From settings/first available | Model to use |
-| `thinkingLevel` | From settings/"off" | off, low, medium, high |
+| `thinkingLevel` | From settings/"off" | off, minimal, low, medium, high, xhigh, max |
 | `tools` | `["read", "bash", "edit", "write"]` built-ins | Allowlist tool names across built-in, extension, and custom tools |
 | `customTools` | `[]` | Additional tool definitions |
 | `resourceLoader` | DefaultResourceLoader | Resource loader for extensions, skills, prompts, themes, and context files |

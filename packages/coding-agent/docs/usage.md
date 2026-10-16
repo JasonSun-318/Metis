@@ -222,7 +222,7 @@ cat README.md | metis -p "Summarize this text"
 |--------|-------------|
 | `--agent-mode <chat\|code>` | Classify a newly created session (default: `code`) |
 | `--cwd <path>` | Bind a newly created session to an existing directory |
-| `--permission-mode <ask\|auto\|full>` | Set permissions for a newly created session (default: Auto) |
+| `--permission-preset <ask\|auto\|full>` | Set permissions for a newly created session (default: `auto`) |
 | `-c`, `--continue` | Continue the most recent session |
 | `-r`, `--resume` | Browse and select a session |
 | `--session <path\|id>` | Use a specific session file or partial UUID |

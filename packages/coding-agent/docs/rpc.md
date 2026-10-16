@@ -435,6 +435,12 @@ Execute a shell command and add output to conversation context.
 {"type": "bash", "command": "ls -la"}
 ```
 
+Optional `excludeFromContext` keeps the result out of later model context:
+
+```json
+{"type": "bash", "command": "ls -la", "excludeFromContext": true}
+```
+
 Response:
 ```json
 {
@@ -481,8 +487,8 @@ drwxr-xr-x ...
 ````
 
 This means:
-1. Bash output is included in the LLM context on the **next prompt**, not immediately
-2. Multiple bash commands can be executed before a prompt; all outputs will be included
+1. Bash output is included in the LLM context on the **next prompt**, not immediately, unless `excludeFromContext` is true
+2. Multiple bash commands can be executed before a prompt; outputs that are not excluded are included together
 3. No event is emitted for the `BashExecutionMessage` itself
 
 #### abort_bash
@@ -778,9 +784,39 @@ Response:
   "success": true,
   "data": {
     "commands": [
-      {"name": "session-name", "description": "Set or clear session name", "source": "extension", "path": "/home/user/.metis/agent/extensions/session.ts"},
-      {"name": "fix-tests", "description": "Fix failing tests", "source": "prompt", "location": "project", "path": "/home/user/myproject/.metis/agent/prompts/fix-tests.md"},
-      {"name": "skill:brave-search", "description": "Web search via Brave API", "source": "skill", "location": "user", "path": "/home/user/.metis/agent/skills/brave-search/SKILL.md"}
+      {
+        "name": "session-name",
+        "description": "Set or clear session name",
+        "source": "extension",
+        "sourceInfo": {
+          "path": "/home/user/.metis/agent/extensions/session.ts",
+          "source": "local",
+          "scope": "user",
+          "origin": "top-level"
+        }
+      },
+      {
+        "name": "fix-tests",
+        "description": "Fix failing tests",
+        "source": "prompt",
+        "sourceInfo": {
+          "path": "/home/user/myproject/.metis/agent/prompts/fix-tests.md",
+          "source": "local",
+          "scope": "project",
+          "origin": "top-level"
+        }
+      },
+      {
+        "name": "skill:brave-search",
+        "description": "Web search via Brave API",
+        "source": "skill",
+        "sourceInfo": {
+          "path": "/home/user/.metis/agent/skills/brave-search/SKILL.md",
+          "source": "local",
+          "scope": "user",
+          "origin": "top-level"
+        }
+      }
     ]
   }
 }
@@ -793,11 +829,12 @@ Each command has:
   - `"extension"`: Registered via `metis.registerCommand()` in an extension
   - `"prompt"`: Loaded from a prompt template `.md` file
   - `"skill"`: Loaded from a skill directory (name is prefixed with `skill:`)
-- `location`: Where it was loaded from (optional, not present for extensions):
-  - `"user"`: User-level (`~/.metis/agent/`)
-  - `"project"`: Project-level (`./.metis/agent/`)
-  - `"path"`: Explicit path via CLI or settings
-- `path`: Absolute file path to the command source (optional)
+- `sourceInfo`: `SourceInfo` for the owning resource:
+  - `path`: Path to the source
+  - `source`: Loader source string
+  - `scope`: `"user"`, `"project"`, or `"temporary"`
+  - `origin`: `"package"` or `"top-level"`
+  - optional: `baseDir`, `sourceIdentity`, `implementationVersion`, `pluginOwner`
 
 **Note**: Built-in TUI commands (`/settings`, `/hotkeys`, etc.) are not included. They are handled only in interactive mode and would not execute if sent via `prompt`.
 
