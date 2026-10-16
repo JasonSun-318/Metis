@@ -213,17 +213,28 @@ async function flush() {
 function changeTextarea(textarea: HTMLElement, value: string) {
 	if (textarea instanceof HTMLTextAreaElement) {
 		Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, value);
-	} else {
-		// The contenteditable editor's value setter preserves selected skill tokens.
-		Reflect.set(textarea, "value", value);
+		textarea.dispatchEvent(new Event("input", { bubbles: true }));
+		return;
+	}
+	const tokens = [...textarea.querySelectorAll<HTMLElement>(".composer-skill-token")];
+	const text = value ? document.createTextNode(value) : null;
+	textarea.replaceChildren(...tokens, ...(text ? [text] : []));
+	if (text) {
+		const range = document.createRange();
+		range.selectNodeContents(text);
+		range.collapse(false);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
 	}
 	textarea.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
 function composerText(editor: HTMLElement): string {
-	const value: unknown = Reflect.get(editor, "value");
-	if (typeof value !== "string") throw new Error("Missing composer value");
-	return value;
+	if (editor instanceof HTMLTextAreaElement) return editor.value;
+	const clone = editor.cloneNode(true) as HTMLElement;
+	for (const token of clone.querySelectorAll(".composer-skill-token")) token.remove();
+	return (clone.textContent ?? "").trim();
 }
 
 function changeInput(input: HTMLInputElement, value: string) {
@@ -3895,14 +3906,14 @@ describe("Chat desktop shell", () => {
 		await act(async () => option.click());
 		expect(api.compactSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
 		expect(container.querySelector('[aria-label="Compacting conversation…"]')).not.toBeNull();
-		expect(textarea.disabled).toBe(true);
+		expect(textarea.getAttribute("contenteditable")).toBe("false");
 
 		await act(async () =>
 			resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }),
 		);
 		await flush();
 		expect(container.querySelector('[aria-label="Compacting conversation…"]')).toBeNull();
-		expect(textarea.disabled).toBe(false);
+		expect(textarea.getAttribute("contenteditable")).toBe("true");
 		await act(async () =>
 			emitEvent({
 				type: "app-server",
@@ -3953,7 +3964,7 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Nothing to compact");
 		expect(container.querySelector(".transcript-compaction-row")).toBeNull();
-		expect(textarea.disabled).toBe(false);
+		expect(textarea.getAttribute("contenteditable")).toBe("true");
 		await act(async () => root.unmount());
 	});
 
