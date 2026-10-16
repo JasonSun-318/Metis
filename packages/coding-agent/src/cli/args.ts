@@ -271,8 +271,8 @@ ${chalk.bold("Commands:")}
   ${APP_NAME} install <source> [-l]     Install extension source and add to settings
   ${APP_NAME} remove <source> [-l]      Remove extension source from settings
   ${APP_NAME} uninstall <source> [-l]   Alias for remove
-  ${APP_NAME} update [source|self|metis]     Update Metis (use --all for Metis and extensions)
-  ${APP_NAME} list                      List installed extensions from settings
+  ${APP_NAME} update [source|self|metis] Update packages (CLI self-update is disabled)
+  ${APP_NAME} list                      List user and project packages
   ${APP_NAME} config [-l]               Open TUI to enable/disable package resources (Tab switches scope)
   ${APP_NAME} mcp <add|list|get|remove>  Manage MCP server configuration
   ${APP_NAME} <command> --help          Show help for install/remove/uninstall/update/list/config/mcp

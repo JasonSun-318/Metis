@@ -19,7 +19,6 @@ interface PackageCommandOptions {
 	updateTarget?: UpdateTarget;
 	showExtensionsSkippedNote: boolean;
 	local: boolean;
-	force: boolean;
 	projectTrustOverride?: boolean;
 	help: boolean;
 	invalidOption?: string;
@@ -45,7 +44,7 @@ function getPackageCommandUsage(command: PackageCommand): string {
 		case "remove":
 			return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
 		case "update":
-			return `${APP_NAME} update [source|self|metis] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
+			return `${APP_NAME} update [source|self|metis] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve]`;
 		case "list":
 			return `${APP_NAME} list [--approve|--no-approve]`;
 	}
@@ -113,22 +112,21 @@ Examples:
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("update")}
 
-Update Metis and installed packages.
+Update packages. CLI self-update is disabled.
 
 Options:
-  --self                  Update Metis only (default when no target is given)
-  --extensions            Update installed packages only
-  --all                   Update Metis and installed packages
-  --extension <source>    Update one package only
+  --extensions            Update packages
+  --extension <source>    Update one package
+  --self                  CLI self-update (disabled; default when no target is given)
+  --all                   Update packages; CLI self-update is disabled
   -a, --approve           Trust project-local files for this command
   -na, --no-approve       Ignore project-local files for this command
-  --force                 Reinstall Metis even if the current version is latest
 
 Short forms:
-  ${APP_NAME} update                Update Metis only
-  ${APP_NAME} update --all          Update Metis and all extensions
+  ${APP_NAME} update --extensions   Update packages
   ${APP_NAME} update <source>       Update one package
-  ${APP_NAME} update metis          Update Metis only (self works as an alias)
+  ${APP_NAME} update                CLI self-update is disabled
+  ${APP_NAME} update metis          CLI self-update is disabled (self is an alias)
 `);
 			return;
 
@@ -159,7 +157,6 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 	}
 
 	let local = false;
-	let force = false;
 	let projectTrustOverride: boolean | undefined;
 	let help = false;
 	let invalidOption: string | undefined;
@@ -222,15 +219,6 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 
 		if (arg === "--no-approve" || arg === "-na") {
 			projectTrustOverride = false;
-			continue;
-		}
-
-		if (arg === "--force") {
-			if (command === "update") {
-				force = true;
-			} else {
-				invalidOption = invalidOption ?? arg;
-			}
 			continue;
 		}
 
@@ -317,7 +305,6 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 		updateTarget,
 		showExtensionsSkippedNote,
 		local,
-		force,
 		projectTrustOverride,
 		help,
 		invalidOption,
