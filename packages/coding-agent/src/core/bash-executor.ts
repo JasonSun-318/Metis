@@ -25,10 +25,6 @@ import { ensureRealDirectoryDurablySync, syncDirectorySync, syncFileSync } from 
 import type { BashOperations } from "./tools/bash.ts";
 import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface BashExecutorOptions {
 	/** Exact one-action permission grant consumed by the execution backend. */
 	actionId?: string;
@@ -52,10 +48,6 @@ export interface BashResult {
 	/** Path to temp file containing full output (if output exceeded truncation threshold) */
 	fullOutputPath?: string;
 }
-
-// ============================================================================
-// Implementation
-// ============================================================================
 
 /**
  * Execute a bash command using custom BashOperations.

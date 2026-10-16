@@ -234,15 +234,7 @@ export function migrateAuthToAuthJson(): string[] {
 	return providers;
 }
 
-/**
- * Migrate sessions from ~/.arcmind/agent/*.jsonl to proper session directories.
- *
- * Bug in v0.30.0: Sessions were saved to ~/.arcmind/agent/ instead of
- * ~/.arcmind/agent/sessions/<encoded-cwd>/. This migration moves them
- * to the correct location based on the cwd in their session header.
- *
- * See: https://github.com/arcmind/arcmind/issues/320
- */
+/** Relocate flat *.jsonl session files into per-cwd session directories. */
 export function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();
 

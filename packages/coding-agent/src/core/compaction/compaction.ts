@@ -25,10 +25,6 @@ import {
 	serializeConversation,
 } from "./utils.ts";
 
-// ============================================================================
-// File Operation Tracking
-// ============================================================================
-
 /** Details stored in CompactionEntry.details for file tracking */
 export interface CompactionDetails {
 	readFiles: string[];
@@ -68,10 +64,6 @@ function extractFileOperations(
 	return fileOps;
 }
 
-// ============================================================================
-// Message Extraction
-// ============================================================================
-
 /**
  * Extract AgentMessage from an entry if it produces one.
  * Returns undefined for entries that don't contribute to LLM context.
@@ -93,10 +85,6 @@ export interface CompactionResult<T = unknown> {
 	details?: T;
 }
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface CompactionSettings {
 	enabled: boolean;
 	reserveTokens: number;
@@ -108,10 +96,6 @@ export const DEFAULT_COMPACTION_SETTINGS: CompactionSettings = {
 	reserveTokens: 16384,
 	keepRecentTokens: 20000,
 };
-
-// ============================================================================
-// Token calculation
-// ============================================================================
 
 /**
  * Calculate total context tokens from usage.
@@ -210,10 +194,6 @@ export function shouldCompact(contextTokens: number, contextWindow: number, sett
 	if (!settings.enabled) return false;
 	return contextTokens > contextWindow - settings.reserveTokens;
 }
-
-// ============================================================================
-// Cut point detection
-// ============================================================================
 
 const ESTIMATED_IMAGE_CHARS = 4800;
 
@@ -434,10 +414,6 @@ export function findCutPoint(
 	};
 }
 
-// ============================================================================
-// Summarization
-// ============================================================================
-
 const SUMMARIZATION_PROMPT = `The messages above are a conversation to summarize. Create a structured context checkpoint summary that another LLM will use to continue the work.
 
 Use this EXACT format:
@@ -608,10 +584,6 @@ export async function generateSummary(
 	return textContent;
 }
 
-// ============================================================================
-// Compaction Preparation (for extensions)
-// ============================================================================
-
 export interface CompactionPreparation {
 	/** UUID of first entry to keep */
 	firstKeptEntryId: string;
@@ -710,10 +682,6 @@ export function prepareCompaction(
 		settings,
 	};
 }
-
-// ============================================================================
-// Main compaction function
-// ============================================================================
 
 const TURN_PREFIX_SUMMARIZATION_PROMPT = `This is the PREFIX of a turn that was too large to keep. The SUFFIX (recent work) is retained.
 

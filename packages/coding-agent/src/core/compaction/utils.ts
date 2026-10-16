@@ -5,10 +5,6 @@
 import type { AgentMessage } from "@metis/agent-core";
 import type { Message } from "@metis/ai";
 
-// ============================================================================
-// File Operation Tracking
-// ============================================================================
-
 export interface FileOperations {
 	read: Set<string>;
 	written: Set<string>;
@@ -80,10 +76,6 @@ export function formatFileOperations(readFiles: string[], modifiedFiles: string[
 	if (sections.length === 0) return "";
 	return `\n\n${sections.join("\n\n")}`;
 }
-
-// ============================================================================
-// Message Serialization
-// ============================================================================
 
 /** Maximum characters for a tool result in serialized summaries. */
 const TOOL_RESULT_MAX_CHARS = 2000;
@@ -160,10 +152,6 @@ export function serializeConversation(messages: Message[]): string {
 
 	return parts.join("\n\n");
 }
-
-// ============================================================================
-// Summarization System Prompt
-// ============================================================================
 
 export const SUMMARIZATION_SYSTEM_PROMPT = `You are a context summarization assistant. Your task is to read a conversation between a user and an AI assistant, then produce a structured summary following the exact format specified.
 
