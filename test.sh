@@ -1,23 +1,15 @@
 #!/usr/bin/env bash
 set -e
 
-AUTH_FILE="$HOME/.metis/agent/auth.json"
-AUTH_BACKUP="$HOME/.metis/agent/auth.json.bak"
+testAgentDir="$(mktemp -d "${TMPDIR:-/tmp}/metis-tests.XXXXXXXX")"
+export METIS_CODING_AGENT_DIR="$testAgentDir"
+unset METIS_CODING_AGENT_SESSION_DIR
 
-# Restore auth.json on exit (success or failure)
+# Keep test configuration separate from the user's credentials and sessions.
 cleanup() {
-    if [[ -f "$AUTH_BACKUP" ]]; then
-        mv "$AUTH_BACKUP" "$AUTH_FILE"
-        echo "Restored auth.json"
-    fi
+    rm -rf "$testAgentDir"
 }
 trap cleanup EXIT
-
-# Move auth.json out of the way
-if [[ -f "$AUTH_FILE" ]]; then
-    mv "$AUTH_FILE" "$AUTH_BACKUP"
-    echo "Moved auth.json to backup"
-fi
 
 # Skip local LLM tests (ollama, lmstudio)
 export METIS_NO_LOCAL_LLM=1
@@ -54,6 +46,9 @@ unset XIAOMI_API_KEY
 unset XIAOMI_TOKEN_PLAN_CN_API_KEY
 unset XIAOMI_TOKEN_PLAN_AMS_API_KEY
 unset XIAOMI_TOKEN_PLAN_SGP_API_KEY
+unset QWEN_TOKEN_PLAN_API_KEY
+unset QWEN_TOKEN_PLAN_CN_API_KEY
+unset BASETEN_API_KEY
 unset COPILOT_GITHUB_TOKEN
 unset GH_TOKEN
 unset GITHUB_TOKEN

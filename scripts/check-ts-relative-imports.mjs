@@ -14,7 +14,7 @@ function collectTypescriptFiles(directory) {
 			continue;
 		}
 
-		if (entry.isFile() && entry.name.endsWith(".ts") && !entry.name.endsWith(".d.ts")) {
+		if (entry.isFile() && /\.(?:[cm]?ts|tsx)$/.test(entry.name) && !/\.d\.[cm]?ts$/.test(entry.name)) {
 			files.push(join(directory, entry.name));
 		}
 	}
@@ -41,7 +41,7 @@ for (const file of files.sort()) {
 	function checkSpecifier(node) {
 		if (!isRelativeJavaScriptSpecifier(node.text)) return;
 		const { line, character } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
-		failures.push(`${file}:${line + 1}:${character + 1}: ${node.text}`);
+		failures.push(`${file.replaceAll("\\", "/")}:${line + 1}:${character + 1}: ${node.text}`);
 	}
 
 	function visit(node) {
@@ -51,11 +51,19 @@ for (const file of files.sort()) {
 			checkSpecifier(node.moduleSpecifier);
 		} else if (
 			ts.isCallExpression(node) &&
-			node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+			(node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+				(ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
 			node.arguments[0] &&
 			ts.isStringLiteralLike(node.arguments[0])
 		) {
 			checkSpecifier(node.arguments[0]);
+		} else if (
+			ts.isImportEqualsDeclaration(node) &&
+			ts.isExternalModuleReference(node.moduleReference) &&
+			node.moduleReference.expression &&
+			ts.isStringLiteralLike(node.moduleReference.expression)
+		) {
+			checkSpecifier(node.moduleReference.expression);
 		} else if (ts.isImportTypeNode(node)) {
 			const specifier = getImportTypeSpecifier(node);
 			if (specifier) checkSpecifier(specifier);
@@ -68,7 +76,7 @@ for (const file of files.sort()) {
 }
 
 if (failures.length > 0) {
-	console.error("Relative .js imports are not allowed in non-declaration .ts files:");
+	console.error("Relative .js imports are not allowed in non-declaration TypeScript files:");
 	for (const failure of failures) console.error(`  ${failure}`);
 	process.exit(1);
 }
