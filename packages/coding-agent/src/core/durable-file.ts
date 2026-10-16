@@ -1,4 +1,3 @@
-import { constants as bufferConstants } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import {
 	type BigIntStats,
@@ -133,47 +132,6 @@ export function readSingleLinkFileFingerprintSync(path: string): SingleLinkFileF
 	try {
 		assertOpenFileUnchanged(path, opened.fd, opened.fingerprint);
 		return opened.fingerprint;
-	} finally {
-		closeSync(opened.fd);
-	}
-}
-
-/** Read a single-link regular file as bytes without following the final path component. */
-export function readSingleLinkFileBytesSync(path: string): Buffer | undefined {
-	const opened = openSingleLinkFileSync(path);
-	if (!opened) return undefined;
-	try {
-		const contents = readFileSync(opened.fd);
-		assertOpenFileUnchanged(path, opened.fd, opened.fingerprint);
-		return contents;
-	} finally {
-		closeSync(opened.fd);
-	}
-}
-
-/** Read at most maxBytes plus one sentinel byte without following aliases. */
-export function readSingleLinkFilePrefixSync(
-	path: string,
-	maxBytes: number,
-): { bytes: Buffer; truncated: boolean } | undefined {
-	if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes >= bufferConstants.MAX_LENGTH) {
-		throw new TypeError("maxBytes must be a bounded non-negative safe integer");
-	}
-	const opened = openSingleLinkFileSync(path);
-	if (!opened) return undefined;
-	try {
-		const bytes = Buffer.alloc(maxBytes + 1);
-		let offset = 0;
-		while (offset < bytes.byteLength) {
-			const count = readSync(opened.fd, bytes, offset, bytes.byteLength - offset, null);
-			if (count === 0) break;
-			offset += count;
-		}
-		assertOpenFileUnchanged(path, opened.fd, opened.fingerprint);
-		return {
-			bytes: bytes.subarray(0, Math.min(offset, maxBytes)),
-			truncated: offset > maxBytes || BigInt(opened.fingerprint.size) > BigInt(maxBytes),
-		};
 	} finally {
 		closeSync(opened.fd);
 	}

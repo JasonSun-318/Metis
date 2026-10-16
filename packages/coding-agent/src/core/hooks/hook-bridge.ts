@@ -41,9 +41,6 @@ import {
  * Stop -> agent_settled.
  */
 
-/** Exit code a PreToolUse hook uses to block the tool call. */
-export const HOOK_BLOCK_EXIT_CODE = 2;
-export const HOOK_STDOUT_LIMIT = 8192;
 export const HOOK_KILL_GRACE_MS = 1000;
 export const EXIT_STDIO_GRACE_MS = 500;
 export { MAX_PIPE_BUFFER_BYTES };

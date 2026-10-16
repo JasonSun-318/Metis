@@ -408,10 +408,6 @@ export function moveSessionFileWithLease(sourcePath: string, destinationPath: st
 	}
 }
 
-function getImageStoreDir(sessionFile: string): string {
-	return getSessionImageDir(sessionFile);
-}
-
 function isImageContent(value: unknown): value is ImageContent {
 	return (
 		typeof value === "object" &&
@@ -815,11 +811,6 @@ function copyReferencedToolOutputsStrictly(
 	}
 
 	return rewritten;
-}
-
-export function stringifySessionEntry(entry: unknown, sessionFile: string): string {
-	const imageDir = getImageStoreDir(sessionFile);
-	return stringifySessionEntryWithImageDir(entry, imageDir);
 }
 
 function stringifySessionEntryWithImageDir(entry: unknown, imageDir: string): string {
