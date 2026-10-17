@@ -84,10 +84,6 @@ export type { BuildSystemPromptOptions } from "../system-prompt.ts";
 export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.ts";
 
-// ============================================================================
-// UI Context
-// ============================================================================
-
 /** Options for extension UI dialogs. */
 export interface ExtensionUIDialogOptions {
 	/** AbortSignal to programmatically dismiss the dialog. */
@@ -277,10 +273,6 @@ export interface ExtensionUIContext {
 	setToolsExpanded(expanded: boolean): void;
 }
 
-// ============================================================================
-// Extension Context
-// ============================================================================
-
 export type ContextUsageBasis = "reported_total" | "estimated_total" | "unavailable";
 
 export type ContextUsageCategory =
@@ -413,10 +405,6 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
 	): Promise<void>;
 }
 
-// ============================================================================
-// Tool Types
-// ============================================================================
-
 /** Rendering options for tool results */
 export interface ToolRenderResultOptions {
 	/** Whether the result view is expanded */
@@ -543,10 +531,6 @@ export function defineTool<TParams extends TSchema, TDetails = unknown, TState =
 	return tool as ToolDefinition<TParams, TDetails, TState> & AnyToolDefinition;
 }
 
-// ============================================================================
-// Startup/Resource Events
-// ============================================================================
-
 export interface ProjectTrustEvent {
 	type: "project_trust";
 	cwd: string;
@@ -584,10 +568,6 @@ export interface ResourcesDiscoverResult {
 	promptPaths?: string[];
 	themePaths?: string[];
 }
-
-// ============================================================================
-// Session Events
-// ============================================================================
 
 /** Fired when a session is started, loaded, or reloaded */
 export interface SessionStartEvent {
@@ -692,10 +672,6 @@ export type SessionEvent =
 	| SessionShutdownEvent
 	| SessionBeforeTreeEvent
 	| SessionTreeEvent;
-
-// ============================================================================
-// Agent Events
-// ============================================================================
 
 /** Fired before each LLM call. Can modify messages. */
 export interface ContextEvent {
@@ -827,10 +803,6 @@ export interface ToolExecutionEndEvent {
 	isError: boolean;
 }
 
-// ============================================================================
-// Model Events
-// ============================================================================
-
 export type ModelSelectSource = "set" | "cycle" | "restore";
 
 /** Fired when a new model is selected */
@@ -848,10 +820,6 @@ export interface ThinkingLevelSelectEvent {
 	previousLevel: ThinkingLevel;
 }
 
-// ============================================================================
-// User Bash Events
-// ============================================================================
-
 /** Fired when user executes a bash command via ! or !! prefix */
 export interface UserBashEvent {
 	type: "user_bash";
@@ -862,10 +830,6 @@ export interface UserBashEvent {
 	/** Current working directory */
 	cwd: string;
 }
-
-// ============================================================================
-// Input Events
-// ============================================================================
 
 /** Source of user input */
 export type InputSource = "interactive" | "rpc" | "extension";
@@ -889,10 +853,6 @@ export type InputEventResult =
 	| { action: "transform"; text: string; images?: ImageContent[]; context?: string }
 	| { action: "handled" }
 	| { action: "block"; reason: string };
-
-// ============================================================================
-// Tool Events
-// ============================================================================
 
 interface ToolCallEventBase {
 	type: "tool_call";
@@ -1101,10 +1061,6 @@ export type ExtensionEvent =
 	| ToolCallEvent
 	| ToolResultEvent;
 
-// ============================================================================
-// Event Results
-// ============================================================================
-
 export interface SessionStartEventResult {
 	context?: string;
 }
@@ -1174,10 +1130,6 @@ export interface SessionBeforeTreeResult {
 	label?: string;
 }
 
-// ============================================================================
-// Message and Entry Rendering
-// ============================================================================
-
 export interface MessageRenderOptions {
 	expanded: boolean;
 }
@@ -1198,10 +1150,6 @@ export type EntryRenderer<T = unknown> = (
 	theme: Theme,
 ) => Component | undefined;
 
-// ============================================================================
-// Command Registration
-// ============================================================================
-
 export interface RegisteredCommand {
 	name: string;
 	sourceInfo: SourceInfo;
@@ -1214,10 +1162,6 @@ export interface ResolvedCommand extends RegisteredCommand {
 	invocationName: string;
 }
 
-// ============================================================================
-// Extension API
-// ============================================================================
-
 /** Handler function type for events */
 // biome-ignore lint/suspicious/noConfusingVoidType: void allows bare return statements
 export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContext) => Promise<R | void> | R | void;
@@ -1226,10 +1170,6 @@ export type ExtensionHandler<E, R = undefined> = (event: E, ctx: ExtensionContex
  * ExtensionAPI passed to extension factory functions.
  */
 export interface ExtensionAPI {
-	// =========================================================================
-	// Event Subscription
-	// =========================================================================
-
 	on(event: "project_trust", handler: ProjectTrustHandler): void;
 	on(event: "resources_discover", handler: ExtensionHandler<ResourcesDiscoverEvent, ResourcesDiscoverResult>): void;
 	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent, SessionStartEventResult>): void;
@@ -1274,18 +1214,10 @@ export interface ExtensionAPI {
 	on(event: "user_bash", handler: ExtensionHandler<UserBashEvent, UserBashEventResult>): void;
 	on(event: "input", handler: ExtensionHandler<InputEvent, InputEventResult>): void;
 
-	// =========================================================================
-	// Tool Registration
-	// =========================================================================
-
 	/** Register a tool that the LLM can call. */
 	registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
 		tool: ToolDefinition<TParams, TDetails, TState>,
 	): void;
-
-	// =========================================================================
-	// Command, Shortcut, Flag Registration
-	// =========================================================================
 
 	/** Register a custom command. */
 	registerCommand(name: string, options: Omit<RegisteredCommand, "name" | "sourceInfo">): void;
@@ -1312,19 +1244,11 @@ export interface ExtensionAPI {
 	/** Get the value of a registered CLI flag. */
 	getFlag(name: string): boolean | string | undefined;
 
-	// =========================================================================
-	// Message Rendering
-	// =========================================================================
-
 	/** Register a custom renderer for CustomMessageEntry. */
 	registerMessageRenderer<T = unknown>(customType: string, renderer: MessageRenderer<T>): void;
 
 	/** Register a custom renderer for CustomEntry. Custom entries do not participate in LLM context. */
 	registerEntryRenderer<T = unknown>(customType: string, renderer: EntryRenderer<T>): void;
-
-	// =========================================================================
-	// Actions
-	// =========================================================================
 
 	/** Send a custom message to the session. */
 	sendMessage<T = unknown>(
@@ -1343,10 +1267,6 @@ export interface ExtensionAPI {
 
 	/** Append a custom entry to the session for state persistence (not sent to LLM). */
 	appendEntry<T = unknown>(customType: string, data?: T): void;
-
-	// =========================================================================
-	// Session Metadata
-	// =========================================================================
 
 	/** Set the session display name (shown in session selector). */
 	setSessionName(name: string): void;
@@ -1372,10 +1292,6 @@ export interface ExtensionAPI {
 	/** Get available slash commands in the current session. */
 	getCommands(): SlashCommandInfo[];
 
-	// =========================================================================
-	// Model and Thinking Level
-	// =========================================================================
-
 	/** Set the current model. Returns false if no API key available. */
 	setModel(model: Model<any>): Promise<boolean>;
 
@@ -1384,10 +1300,6 @@ export interface ExtensionAPI {
 
 	/** Set thinking level (clamped to model capabilities). */
 	setThinkingLevel(level: ThinkingLevel): void;
-
-	// =========================================================================
-	// Provider Registration
-	// =========================================================================
 
 	/**
 	 * Register or override a model provider.
@@ -1401,45 +1313,6 @@ export interface ExtensionAPI {
 	 * runner has bound its context. After that it takes effect immediately, so
 	 * it is safe to call from command handlers or event callbacks without
 	 * requiring a `/reload`.
-	 *
-	 * @example
-	 * // Register a new provider with custom models
-	 * metis.registerProvider("my-proxy", {
-	 *   baseUrl: "https://proxy.example.com",
-	 *   apiKey: "$PROXY_API_KEY",
-	 *   api: "anthropic-messages",
-	 *   models: [
-	 *     {
-	 *       id: "claude-sonnet-4-20250514",
-	 *       name: "Claude 4 Sonnet (proxy)",
-	 *       reasoning: false,
-	 *       input: ["text", "image"],
-	 *       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	 *       contextWindow: 200000,
-	 *       maxTokens: 16384
-	 *     }
-	 *   ]
-	 * });
-	 *
-	 * @example
-	 * // Override baseUrl for an existing provider
-	 * metis.registerProvider("anthropic", {
-	 *   baseUrl: "https://proxy.example.com"
-	 * });
-	 *
-	 * @example
-	 * // Register provider with OAuth support
-	 * metis.registerProvider("corporate-ai", {
-	 *   baseUrl: "https://ai.corp.com",
-	 *   api: "openai-responses",
-	 *   models: [...],
-	 *   oauth: {
-	 *     name: "Corporate AI (SSO)",
-	 *     async login(callbacks) { ... },
-	 *     async refreshToken(credentials) { ... },
-	 *     getApiKey(credentials) { return credentials.access; }
-	 *   }
-	 * });
 	 */
 	registerProvider(name: string, config: ProviderConfig): void;
 
@@ -1461,10 +1334,6 @@ export interface ExtensionAPI {
 	/** Shared event bus for extension communication. */
 	events: EventBus;
 }
-
-// ============================================================================
-// Provider Registration Types
-// ============================================================================
 
 /** Configuration for registering a provider via metis.registerProvider(). */
 export interface ProviderConfig {
@@ -1537,10 +1406,6 @@ export type InlineExtension =
 			name: string;
 			factory: ExtensionFactory;
 	  };
-
-// ============================================================================
-// Loaded Extension Types
-// ============================================================================
 
 export interface RegisteredTool {
 	definition: ToolDefinition;
@@ -1717,10 +1582,6 @@ export interface LoadExtensionsResult {
 	/** Shared runtime - actions are throwing stubs until runner.initialize() */
 	runtime: ExtensionRuntime;
 }
-
-// ============================================================================
-// Extension Error
-// ============================================================================
 
 export interface ExtensionError {
 	extensionPath: string;

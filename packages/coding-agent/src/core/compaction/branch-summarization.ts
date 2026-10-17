@@ -21,10 +21,6 @@ import {
 	serializeConversation,
 } from "./utils.ts";
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface BranchSummaryResult {
 	summary?: string;
 	readFiles?: string[];
@@ -78,10 +74,6 @@ export interface GenerateBranchSummaryOptions {
 	streamFn?: StreamFn;
 }
 
-// ============================================================================
-// Entry Collection
-// ============================================================================
-
 /**
  * Collect entries that should be summarized when navigating from one position to another.
  *
@@ -133,10 +125,6 @@ export function collectEntriesForBranchSummary(
 
 	return { entries, commonAncestorId };
 }
-
-// ============================================================================
-// Entry to Message Conversion
-// ============================================================================
 
 /**
  * Extract AgentMessage from a session entry.
@@ -234,10 +222,6 @@ export function prepareBranchEntries(entries: SessionEntry[], tokenBudget: numbe
 
 	return { messages, fileOps, totalTokens };
 }
-
-// ============================================================================
-// Summary Generation
-// ============================================================================
 
 const BRANCH_SUMMARY_PREAMBLE = `The user explored a different conversation branch before returning here.
 Summary of that exploration:
