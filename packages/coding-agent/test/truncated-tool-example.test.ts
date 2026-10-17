@@ -3,9 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 import truncatedTool from "../examples/extensions/truncated-tool.ts";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../src/core/extensions/types.ts";
 
-vi.mock("node:child_process", () => ({
-	execFileSync: vi.fn(() => "src/app.ts:1:match\n"),
-}));
+vi.mock("node:child_process", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("node:child_process")>();
+	return {
+		...actual,
+		execFileSync: vi.fn(() => "src/app.ts:1:match\n"),
+	};
+});
 
 describe("truncated-tool example", () => {
 	it("passes model-controlled search values as argv instead of shell text", async () => {
