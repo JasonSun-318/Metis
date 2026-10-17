@@ -17,11 +17,3 @@ export function wrapToolDefinition<TDetails = unknown>(
 			definition.execute(toolCallId, params, signal, onUpdate, ctxFactory?.() as ExtensionContext),
 	};
 }
-
-/** Wrap multiple ToolDefinitions into AgentTools for the core runtime. */
-export function wrapToolDefinitions(
-	definitions: ToolDefinition<any, any>[],
-	ctxFactory?: () => ExtensionContext,
-): AgentTool<any>[] {
-	return definitions.map((definition) => wrapToolDefinition(definition, ctxFactory));
-}

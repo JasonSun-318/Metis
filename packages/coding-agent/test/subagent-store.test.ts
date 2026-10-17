@@ -56,6 +56,14 @@ function config(
 }
 
 describe("AgentStore", () => {
+	it("preserves the legacy static agent ID factory", () => {
+		const first = AgentStore.createAgentId();
+		const second = AgentStore.createAgentId();
+		expect(first).toMatch(/^[0-9a-f-]{36}$/);
+		expect(second).toMatch(/^[0-9a-f-]{36}$/);
+		expect(second).not.toBe(first);
+	});
+
 	it("persists one canonical agent header and distinct task ids", () => {
 		const { root, store } = setup();
 		const { config: agentConfig, taskId } = config(root, { agentId: "agent-1", taskId: "task-1" });
