@@ -106,10 +106,6 @@ function selectForkMessages(messages: readonly AgentMessage[], forkTurns: AgentC
 	return (forkTurns === "all" ? groups : groups.slice(-forkTurns)).flat();
 }
 
-function _isTerminalStatus(status: AgentTaskStatus): boolean {
-	return status === "done" || status === "failed" || status === "stopped";
-}
-
 function reduceTasks(entries: readonly FileEntry[], agentId: string): AgentTaskSummary[] {
 	const tasks = new Map<string, AgentTaskSummary>();
 	for (const entry of entries) {

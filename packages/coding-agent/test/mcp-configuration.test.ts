@@ -57,6 +57,31 @@ describe("MCP configuration transaction primitives", () => {
 		} as unknown as McpManager;
 	}
 
+	it("drains post-commit activation errors once", async () => {
+		const coordinator = new McpConfigurationCoordinator({ authStorage: AuthStorage.inMemory() });
+		const manager = runtime("/work/project");
+		const failure = new Error("activation failed");
+		vi.mocked(manager.activateConfiguration).mockImplementation(() => {
+			throw failure;
+		});
+		coordinator.register(manager);
+		await coordinator.mutate({
+			settingsManager: SettingsManager.inMemory(),
+			cwd: "/work/project",
+			scope: "user",
+			changes: [
+				{
+					name: "docs",
+					expectedRevision: null,
+					next: { command: "node", enabled: false },
+					credential: { action: "preserve" },
+				},
+			],
+		});
+		expect(coordinator.drainDiagnostics()).toEqual([failure]);
+		expect(coordinator.drainDiagnostics()).toEqual([]);
+	});
+
 	it("uses an opaque credential version without replacing the legacy scoped key", () => {
 		const identity = { scope: "project", name: "docs", cwd: "/work/project" } as const;
 		const legacy = mcpCredentialKey(identity);
