@@ -1147,7 +1147,6 @@ const zhCN = {
 	"Automatic security review denied this action.": "自动安全审查拒绝了此操作。",
 	"Automatic security review could not complete.": "自动安全审查未能完成。",
 	"The action requires permission review": "此操作需要权限审批",
-	External: "外部",
 	"The last turn was interrupted. Your saved work is intact; send a new message to continue.":
 		"上一次对话被中断。已保存的工作不受影响，请发送新消息继续。",
 	"Task needs attention": "任务需要处理",
@@ -2030,8 +2029,6 @@ const zhCN = {
 	"Submit answers": "提交回答",
 	Command: "命令",
 	"Working directory": "工作目录",
-	"Rule fingerprint": "规则指纹",
-	"{{count}} additional details omitted": "已省略另外 {{count}} 项详情",
 	File: "文件",
 	"File unavailable": "文件不可用",
 	Open: "打开",
@@ -2059,19 +2056,6 @@ const zhCN = {
 	"This action will run outside the sandbox with your current user permissions.":
 		"此操作将在沙箱外以当前用户权限运行。",
 	"This command remains limited to the displayed workspace sandbox.": "此命令仍受所示工作区沙箱限制。",
-	"Always allowed for this project": "当前项目始终允许",
-	"Only exact actions you approved are listed here.": "这里只列出你明确批准的精确操作。",
-	"Open a project to manage its allowed actions.": "打开一个项目后即可管理已允许的操作。",
-	"No actions are always allowed for this project.": "当前项目没有始终允许的操作。",
-	"Loading permissions": "正在加载权限",
-	"Clear all": "全部清除",
-	"Clear all allowed actions?": "清除所有已允许操作？",
-	"Metis will ask again before these exact actions run.": "这些精确操作再次运行前，Metis 会重新询问。",
-	"Remove {{tool}} permission": "移除 {{tool}} 权限",
-	Sandbox: "沙箱",
-	Host: "主机",
-	"{{count}} additional targets are shown only in the complete details above.":
-		"另有 {{count}} 个目标仅显示在上方的完整详情中。",
 	"This tool did not provide enough target details. Deny and retry with a specific target.":
 		"此工具没有提供足够的目标信息，请拒绝并指定明确目标后重试。",
 	"Choose an option.": "请选择一个选项。",

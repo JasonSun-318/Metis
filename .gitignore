@@ -49,7 +49,6 @@ plans/
 .arcmind/hf-sessions-backup/
 collect.sh
 pnpm-lock.yaml
-docs/
 .cursor
 
 # Local agent reviews and execution artifacts

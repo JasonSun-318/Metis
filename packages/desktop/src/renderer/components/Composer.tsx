@@ -504,78 +504,6 @@ export function Composer({
 		[awaitingAnswer, processFiles],
 	);
 
-	useEffect(() => {
-		const el = editorRef.current;
-		if (!el) return;
-
-		// Support .value, .form, and .disabled properties for test runners and compatibility
-		if (!Object.getOwnPropertyDescriptor(el, "form")) {
-			Object.defineProperty(el, "form", {
-				get() {
-					return el.closest("form");
-				},
-				configurable: true,
-			});
-		}
-		if (!Object.getOwnPropertyDescriptor(el, "disabled")) {
-			Object.defineProperty(el, "disabled", {
-				get() {
-					return el.getAttribute("contenteditable") === "false";
-				},
-				set(val: boolean) {
-					el.setAttribute("contenteditable", val ? "false" : "true");
-				},
-				configurable: true,
-			});
-		}
-		if (!Object.getOwnPropertyDescriptor(el, "value")) {
-			Object.defineProperty(el, "value", {
-				get() {
-					return parseComposerContent(el).cleanText;
-				},
-				set(val: string) {
-					if (!val) {
-						const tokens = Array.from(el.querySelectorAll(".composer-skill-token"));
-						if (tokens.length > 0) {
-							el.replaceChildren(...tokens);
-						} else {
-							el.replaceChildren();
-						}
-						syncEditorState();
-						return;
-					}
-					if (val.startsWith("/skill:")) {
-						const skillName = val.slice("/skill:".length).trim();
-						const matchedSkill = skills.find((s) => s.name === skillName || s.name.startsWith(skillName));
-						if (matchedSkill) {
-							el.replaceChildren(
-								createSkillTokenNode(matchedSkill, syncEditorState),
-								document.createTextNode(" "),
-							);
-							syncEditorState();
-							return;
-						}
-					}
-					if (val === "/goal" || val.startsWith("/goal ")) {
-						const goalToken = createGoalTokenNode(syncEditorState);
-						const rest = val.slice("/goal".length).trimStart();
-						el.replaceChildren(goalToken, document.createTextNode(rest ? ` ${rest}` : " "));
-						syncEditorState();
-						return;
-					}
-					const existingTokens = Array.from(el.querySelectorAll(".composer-skill-token"));
-					if (existingTokens.length > 0) {
-						el.replaceChildren(...existingTokens, document.createTextNode(` ${val}`));
-					} else {
-						el.textContent = val;
-					}
-					syncEditorState();
-				},
-				configurable: true,
-			});
-		}
-	}, [skills, syncEditorState]);
-
 	const handleSlashDismiss = useCallback(() => {
 		setDismissedSlashText(editorRef.current?.textContent ?? "");
 		setSlashQuery(undefined);
@@ -672,7 +600,6 @@ export function Composer({
 			if (!editor) return;
 			const parsed = parseComposerContent(editor);
 			if (parsed.cleanText === "" && (parsed.tokenSkills.length > 0 || parsed.hasGoalToken)) {
-				// Remove the last token if text is empty
 				const tokens = editor.querySelectorAll(".composer-skill-token");
 				if (tokens.length > 0) {
 					tokens[tokens.length - 1]?.remove();
@@ -693,7 +620,6 @@ export function Composer({
 
 		if (!hasContent || disabled || awaitingAnswer || submitDisabled || submitting) return;
 
-		// 1. Check Goal Token
 		if (parsed.hasGoalToken && onGoalCommand) {
 			if (disabledSlashCommands.has("goal")) return;
 			const goalObjective = parsed.goalObjective || prompt;
@@ -706,7 +632,6 @@ export function Composer({
 			return;
 		}
 
-		// 2. Check fallback raw /goal command
 		const goalCommand = parseGoalSlash(parsed.rawText);
 		if (goalCommand && onGoalCommand) {
 			if (disabledSlashCommands.has("goal")) return;
@@ -716,7 +641,6 @@ export function Composer({
 			return;
 		}
 
-		// 3. Check exact slash commands (e.g. /compact, /status, /model, /thinking, /mcp)
 		const exactCommand = composerSlashCommands.find((cmd) => parsed.rawText.trim() === `/${cmd}`);
 		if (exactCommand && onSlashCommand) {
 			if (disabledSlashCommands.has(exactCommand)) return;
@@ -726,7 +650,6 @@ export function Composer({
 			return;
 		}
 
-		// 4. Standard submission
 		const selected = (fileSelections?.selections ?? []).filter(
 			(item) => selectionSessionId === undefined || item.sessionId === selectionSessionId,
 		);

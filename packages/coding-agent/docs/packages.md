@@ -27,17 +27,15 @@ metis install /absolute/path/to/package
 metis install ./relative/path/to/package
 
 metis remove npm:@foo/bar
-metis list                     # show installed packages from settings
-metis update                   # update metis only
-metis update --all             # update metis, update packages, and reconcile pinned git refs
-metis update --extensions      # update packages and reconcile pinned git refs only
-metis update --self            # update metis only
-metis update --self --force    # reinstall metis even if current
+metis list                     # user and project packages
+metis update --extensions      # update packages and reconcile pinned git refs
+metis update --all             # update packages; CLI self-update is disabled
+metis update --self            # CLI self-update is disabled
 metis update npm:@foo/bar      # update one package
 metis update --extension npm:@foo/bar
 ```
 
-These commands manage metis packages and `metis update` can update the metis CLI installation. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall).
+These commands manage metis packages. `metis update` updates packages; CLI self-update is disabled. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall).
 
 By default, `install` and `remove` write to user settings (`~/.metis/agent/settings.json`). Use `-l` to write to project settings (`.metis/settings.json`) instead. Project settings can be shared with your team, and metis installs any missing packages automatically on startup after the project is trusted.
 

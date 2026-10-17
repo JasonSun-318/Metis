@@ -20,8 +20,3 @@ export function formatContextTokens(count: number): string {
 	if (count < 1_000_000) return `${Math.round(count / 1000)}K`;
 	return `${(count / 1_000_000).toFixed(1)}M`;
 }
-
-export function formatContextTokenLine(used: number | null, total: number | null): string | null {
-	if (used === null || total === null) return null;
-	return `~${formatContextTokens(used)} / ${formatContextTokens(total)} Tokens`;
-}
