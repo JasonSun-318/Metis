@@ -44,7 +44,7 @@ function getPackageCommandUsage(command: PackageCommand): string {
 		case "remove":
 			return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
 		case "update":
-			return `${APP_NAME} update [source|self|metis] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve]`;
+			return `${APP_NAME} update [source|self|metis] [--self|--extensions|--all] [--extension <source>] [--approve|--no-approve] [--force]`;
 		case "list":
 			return `${APP_NAME} list [--approve|--no-approve]`;
 	}
@@ -119,6 +119,7 @@ Options:
   --extension <source>    Update one package
   --self                  CLI self-update (disabled; default when no target is given)
   --all                   Update packages; CLI self-update is disabled
+  --force                 Accepted for compatibility; has no effect
   -a, --approve           Trust project-local files for this command
   -na, --no-approve       Ignore project-local files for this command
 
@@ -209,6 +210,11 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 			} else {
 				invalidOption = invalidOption ?? arg;
 			}
+			continue;
+		}
+
+		if (arg === "--force" && command === "update") {
+			// Preserve legacy invocations without re-enabling CLI self-update.
 			continue;
 		}
 
