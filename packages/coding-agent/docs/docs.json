@@ -32,6 +32,10 @@
           "path": "permissions.md"
         },
         {
+          "title": "Scheduled Tasks",
+          "path": "scheduled-tasks.md"
+        },
+        {
           "title": "Containerization",
           "path": "containerization.md"
         },

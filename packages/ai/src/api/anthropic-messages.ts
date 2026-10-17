@@ -42,7 +42,7 @@ import {
 	digestCacheValue,
 	selectCacheLayout,
 } from "../utils/prompt-cache-layout.ts";
-import { getMetisProviderEnvValue } from "../utils/provider-env.ts";
+import { resolveCacheRetention } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
@@ -53,20 +53,6 @@ import {
 	mapSimpleToolChoice,
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
-
-/**
- * Resolve cache retention preference.
- * Defaults to "short" and accepts `METIS_CACHE_RETENTION=long`.
- */
-function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (getMetisProviderEnvValue("CACHE_RETENTION", env) === "long") {
-		return "long";
-	}
-	return "short";
-}
 
 function getCacheControl(
 	model: Model<"anthropic-messages">,

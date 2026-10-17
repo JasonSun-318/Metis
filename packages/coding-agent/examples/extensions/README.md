@@ -120,13 +120,6 @@ cp permission-gate.ts ~/.metis/agent/extensions/
 | `session-name.ts` | Name sessions for the session selector via `setSessionName` |
 | `bookmark.ts` | Bookmark entries with labels for `/tree` navigation via `setLabel` |
 
-### Custom Providers
-
-| Extension | Description |
-|-----------|-------------|
-| `custom-provider-anthropic/` | Custom Anthropic provider with OAuth support and custom streaming implementation |
-| `custom-provider-gitlab-duo/` | GitLab Duo provider using metis-ai's built-in Anthropic/OpenAI streaming via proxy |
-
 ### External Dependencies
 
 | Extension | Description |

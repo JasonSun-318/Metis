@@ -2,8 +2,26 @@
  * Shared utilities for Google Generative AI and Google Vertex providers.
  */
 
-import { type Content, FinishReason, FunctionCallingConfigMode, type Part } from "@google/genai";
-import type { Context, ImageContent, Model, StopReason, TextContent, Tool } from "../types.ts";
+import {
+	type Content,
+	FinishReason,
+	FunctionCallingConfigMode,
+	type GenerateContentResponse,
+	type Part,
+} from "@google/genai";
+import { calculateCost } from "../models.ts";
+import type {
+	AssistantMessage,
+	Context,
+	ImageContent,
+	Model,
+	StopReason,
+	TextContent,
+	ThinkingContent,
+	Tool,
+	ToolCall,
+} from "../types.ts";
+import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { transformMessages } from "./transform-messages.ts";
 
@@ -331,6 +349,203 @@ export function mapStopReason(reason: FinishReason): StopReason {
 		default: {
 			const _exhaustive: never = reason;
 			throw new Error(`Unhandled stop reason: ${_exhaustive}`);
+		}
+	}
+}
+
+/**
+ * Map string finish reason to our StopReason (for raw API responses).
+ */
+export function mapStopReasonString(reason: string): StopReason {
+	switch (reason) {
+		case "STOP":
+			return "stop";
+		case "MAX_TOKENS":
+			return "length";
+		default:
+			return "error";
+	}
+}
+
+// Each provider previously owned its own module-level counter.
+const toolCallCounters: Record<GoogleApiType, number> = {
+	"google-generative-ai": 0,
+	"google-vertex": 0,
+};
+
+/**
+ * Consume a `generateContentStream` from Gemini or Vertex.
+ * Client setup stays in the callers; this is only the shared chunk loop.
+ */
+export async function processGenerateContentStream<TApi extends GoogleApiType>(
+	googleStream: AsyncIterable<GenerateContentResponse>,
+	output: AssistantMessage,
+	stream: AssistantMessageEventStream,
+	model: Model<TApi>,
+): Promise<void> {
+	let currentBlock: TextContent | ThinkingContent | null = null;
+	const blocks = output.content;
+	const blockIndex = () => blocks.length - 1;
+	for await (const chunk of googleStream) {
+		// @google/genai documents GenerateContentResponse.responseId as an output-only field
+		// used to identify each response. Keep the first non-empty one from the stream.
+		output.responseId ||= chunk.responseId;
+		const candidate = chunk.candidates?.[0];
+		if (candidate?.content?.parts) {
+			for (const part of candidate.content.parts) {
+				if (part.text !== undefined) {
+					const isThinking = isThinkingPart(part);
+					if (
+						!currentBlock ||
+						(isThinking && currentBlock.type !== "thinking") ||
+						(!isThinking && currentBlock.type !== "text")
+					) {
+						if (currentBlock) {
+							if (currentBlock.type === "text") {
+								stream.push({
+									type: "text_end",
+									contentIndex: blockIndex(),
+									content: currentBlock.text,
+									partial: output,
+								});
+							} else {
+								stream.push({
+									type: "thinking_end",
+									contentIndex: blockIndex(),
+									content: currentBlock.thinking,
+									partial: output,
+								});
+							}
+						}
+						if (isThinking) {
+							currentBlock = { type: "thinking", thinking: "", thinkingSignature: undefined };
+							output.content.push(currentBlock);
+							stream.push({ type: "thinking_start", contentIndex: blockIndex(), partial: output });
+						} else {
+							currentBlock = { type: "text", text: "" };
+							output.content.push(currentBlock);
+							stream.push({ type: "text_start", contentIndex: blockIndex(), partial: output });
+						}
+					}
+					if (currentBlock.type === "thinking") {
+						currentBlock.thinking += part.text;
+						currentBlock.thinkingSignature = retainThoughtSignature(
+							currentBlock.thinkingSignature,
+							part.thoughtSignature,
+						);
+						stream.push({
+							type: "thinking_delta",
+							contentIndex: blockIndex(),
+							delta: part.text,
+							partial: output,
+						});
+					} else {
+						currentBlock.text += part.text;
+						currentBlock.textSignature = retainThoughtSignature(
+							currentBlock.textSignature,
+							part.thoughtSignature,
+						);
+						stream.push({
+							type: "text_delta",
+							contentIndex: blockIndex(),
+							delta: part.text,
+							partial: output,
+						});
+					}
+				}
+
+				if (part.functionCall) {
+					if (currentBlock) {
+						if (currentBlock.type === "text") {
+							stream.push({
+								type: "text_end",
+								contentIndex: blockIndex(),
+								content: currentBlock.text,
+								partial: output,
+							});
+						} else {
+							stream.push({
+								type: "thinking_end",
+								contentIndex: blockIndex(),
+								content: currentBlock.thinking,
+								partial: output,
+							});
+						}
+						currentBlock = null;
+					}
+
+					// Generate unique ID if not provided or if it's a duplicate
+					const providedId = part.functionCall.id;
+					const needsNewId =
+						!providedId || output.content.some((b) => b.type === "toolCall" && b.id === providedId);
+					const toolCallId = needsNewId
+						? `${part.functionCall.name}_${Date.now()}_${++toolCallCounters[model.api]}`
+						: providedId;
+
+					const toolCall: ToolCall = {
+						type: "toolCall",
+						id: toolCallId,
+						name: part.functionCall.name || "",
+						arguments: (part.functionCall.args as Record<string, any>) ?? {},
+						...(part.thoughtSignature && { thoughtSignature: part.thoughtSignature }),
+					};
+
+					output.content.push(toolCall);
+					stream.push({ type: "toolcall_start", contentIndex: blockIndex(), partial: output });
+					stream.push({
+						type: "toolcall_delta",
+						contentIndex: blockIndex(),
+						delta: JSON.stringify(toolCall.arguments),
+						partial: output,
+					});
+					stream.push({ type: "toolcall_end", contentIndex: blockIndex(), toolCall, partial: output });
+				}
+			}
+		}
+
+		if (candidate?.finishReason) {
+			output.stopReason = mapStopReason(candidate.finishReason);
+			if (output.content.some((b) => b.type === "toolCall")) {
+				output.stopReason = "toolUse";
+			}
+		}
+
+		if (chunk.usageMetadata) {
+			output.usage = {
+				cacheReported: chunk.usageMetadata.cachedContentTokenCount != null,
+				input: (chunk.usageMetadata.promptTokenCount || 0) - (chunk.usageMetadata.cachedContentTokenCount || 0),
+				output: (chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
+				cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
+				cacheWrite: 0,
+				reasoning: chunk.usageMetadata.thoughtsTokenCount || 0,
+				totalTokens: chunk.usageMetadata.totalTokenCount || 0,
+				cost: {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					total: 0,
+				},
+			};
+			calculateCost(model, output.usage);
+		}
+	}
+
+	if (currentBlock) {
+		if (currentBlock.type === "text") {
+			stream.push({
+				type: "text_end",
+				contentIndex: blockIndex(),
+				content: currentBlock.text,
+				partial: output,
+			});
+		} else {
+			stream.push({
+				type: "thinking_end",
+				contentIndex: blockIndex(),
+				content: currentBlock.thinking,
+				partial: output,
+			});
 		}
 	}
 }

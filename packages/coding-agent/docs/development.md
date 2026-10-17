@@ -41,7 +41,7 @@ Three execution modes: npm install, standalone binary, tsx from source.
 **Always use `src/config.ts`** for package assets:
 
 ```typescript
-import { getPackageDir, getThemeDir } from "./config.js";
+import { getPackageDir, getThemesDir } from "./config.ts";
 ```
 
 Never use `__dirname` directly for package assets.

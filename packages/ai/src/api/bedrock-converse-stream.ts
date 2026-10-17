@@ -53,7 +53,7 @@ import { providerHeadersToRecord } from "../utils/headers.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.ts";
 import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
-import { getMetisProviderEnvValue, getProviderEnvValue } from "../utils/provider-env.ts";
+import { getProviderEnvValue, resolveCacheRetention } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import {
 	adjustMaxTokensForThinking,
@@ -614,20 +614,6 @@ function mapThinkingLevelToEffort(
 		default:
 			return "high";
 	}
-}
-
-/**
- * Resolve cache retention preference.
- * Defaults to "short" and accepts `METIS_CACHE_RETENTION=long`.
- */
-function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
-	if (cacheRetention) {
-		return cacheRetention;
-	}
-	if (getMetisProviderEnvValue("CACHE_RETENTION", env) === "long") {
-		return "long";
-	}
-	return "short";
 }
 
 /**
