@@ -14,7 +14,7 @@ trap cleanup EXIT
 # Skip local LLM tests (ollama, lmstudio)
 export METIS_NO_LOCAL_LLM=1
 
-# Unset API keys (see packages/ai/src/stream.ts getEnvApiKey)
+# Unset API keys (see packages/ai/src/env-api-keys.ts getEnvApiKey)
 unset ANTHROPIC_API_KEY
 unset ANT_LING_API_KEY
 unset NVIDIA_API_KEY
