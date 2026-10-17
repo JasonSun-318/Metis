@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { getModels, getProviders } from "../src/compat.ts";
 import type { Api, Model } from "../src/types.ts";
+import { getFixtureModels, getFixtureProviders } from "./model-catalog-fixtures.ts";
 
-const EXPECTED_CURRENT_ADAPTIVE_THINKING_MODELS = [
+const EXPECTED_ADAPTIVE_THINKING_FIXTURES = [
 	"anthropic/claude-fable-5",
 	"anthropic/claude-fable-5-1",
 	"anthropic/claude-opus-4-6",
@@ -69,18 +69,18 @@ const EXPECTED_CURRENT_ADAPTIVE_THINKING_MODELS = [
 ];
 
 function getAllModels(): Model<Api>[] {
-	return getProviders().flatMap((provider) => getModels(provider) as Model<Api>[]);
+	return getFixtureProviders().flatMap((provider) => getFixtureModels(provider) as Model<Api>[]);
 }
 
 describe("Anthropic adaptive thinking model metadata", () => {
-	it("marks built-in Anthropic Messages models that use adaptive thinking", () => {
+	it("marks generated Anthropic Messages models that use adaptive thinking", () => {
 		const flaggedModels = getAllModels()
 			.filter((model): model is Model<"anthropic-messages"> => model.api === "anthropic-messages")
 			.filter((model) => model.compat?.forceAdaptiveThinking === true)
 			.map((model) => `${model.provider}/${model.id}`)
 			.sort();
 
-		expect(flaggedModels).toEqual(expect.arrayContaining([...EXPECTED_CURRENT_ADAPTIVE_THINKING_MODELS].sort()));
+		expect(flaggedModels).toEqual(expect.arrayContaining([...EXPECTED_ADAPTIVE_THINKING_FIXTURES].sort()));
 		expect(flaggedModels).toEqual(
 			flaggedModels.filter((modelId) =>
 				/(opus[-.]4[-.][678]|opus[-.]5|sonnet[-.]4[-.]6|sonnet[-.]5|fable[-.]5|deepseek-v4|gpt-oss|minimax-m3|muse-glimmer|qwen3p|kimi-for-coding|\/k3)/.test(

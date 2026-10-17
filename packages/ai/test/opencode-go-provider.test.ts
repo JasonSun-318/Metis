@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Model } from "../src/types.ts";
+import { getFixtureModel } from "./model-catalog-fixtures.ts";
 
 const googleMock = vi.hoisted(() => ({
 	constructor: vi.fn(),
@@ -22,18 +22,7 @@ vi.mock("@google/genai", async (importOriginal) => {
 
 import { opencodeGoProvider } from "../src/providers/opencode-go.ts";
 
-const model: Model<"google-generative-ai"> = {
-	id: "gemini-go-regression",
-	name: "Go Gemini regression",
-	api: "google-generative-ai",
-	provider: "opencode-go",
-	baseUrl: "https://opencode.ai/zen/go/v1",
-	reasoning: false,
-	input: ["text"],
-	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-	contextWindow: 32_000,
-	maxTokens: 1024,
-};
+const model = getFixtureModel("opencode-go", "fixture-gemini", "google-generative-ai");
 
 beforeEach(() => {
 	googleMock.constructor.mockClear();

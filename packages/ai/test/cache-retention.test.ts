@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
 import { stream as streamOpenAICompletions } from "../src/api/openai-completions.ts";
 import { stream as streamOpenAIResponses } from "../src/api/openai-responses.ts";
-import { getModel, stream } from "../src/compat.ts";
-import { MODELS } from "../src/models.generated.ts";
+import { stream } from "../src/compat.ts";
 import type { Context, Model } from "../src/types.ts";
+import { getFixtureModel } from "./model-catalog-fixtures.ts";
 
 class PayloadCaptured extends Error {
 	constructor() {
@@ -49,7 +49,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		it.skipIf(!process.env.ANTHROPIC_API_KEY)(
 			"should use default cache TTL (no ttl field) when METIS_CACHE_RETENTION is not set",
 			async () => {
-				const model = getModel("anthropic", "claude-haiku-4-5");
+				const model = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 				let capturedPayload: any = null;
 
 				const s = stream(model, context, {
@@ -72,7 +72,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 
 		it.skipIf(!process.env.ANTHROPIC_API_KEY)("should use 1h cache TTL when METIS_CACHE_RETENTION=long", async () => {
 			process.env.METIS_CACHE_RETENTION = "long";
-			const model = getModel("anthropic", "claude-haiku-4-5");
+			const model = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			let capturedPayload: any = null;
 
 			const s = stream(model, context, {
@@ -96,7 +96,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 			process.env.METIS_CACHE_RETENTION = "long";
 
 			// Create a model with a different baseUrl (simulating a proxy)
-			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			const baseModel = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			const proxyModel = {
 				...baseModel,
 				baseUrl: "https://my-proxy.example.com/v1",
@@ -132,7 +132,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should omit ttl when supportsLongCacheRetention is false", async () => {
-			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			const baseModel = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			const proxyModel = {
 				...baseModel,
 				baseUrl: "https://my-proxy.example.com/v1",
@@ -161,7 +161,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should omit cache_control when cacheRetention is none", async () => {
-			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			const baseModel = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			let capturedPayload: any = null;
 
 			try {
@@ -185,7 +185,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should add cache_control to string user messages", async () => {
-			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			const baseModel = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			let capturedPayload: any = null;
 
 			try {
@@ -211,7 +211,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should set 1h cache TTL when cacheRetention is long", async () => {
-			const baseModel = getModel("anthropic", "claude-haiku-4-5");
+			const baseModel = getFixtureModel("anthropic", "claude-haiku-4-5", "anthropic-messages");
 			let capturedPayload: any = null;
 
 			try {
@@ -239,7 +239,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		it.skipIf(!process.env.OPENAI_API_KEY)(
 			"should not set prompt_cache_retention when METIS_CACHE_RETENTION is not set",
 			async () => {
-				const model = getModel("openai", "gpt-4o-mini");
+				const model = getFixtureModel("openai", "gpt-4o-mini", "openai-responses");
 				let capturedPayload: any = null;
 
 				const s = stream(model, context, {
@@ -262,7 +262,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 			"should set prompt_cache_retention to 24h when METIS_CACHE_RETENTION=long",
 			async () => {
 				process.env.METIS_CACHE_RETENTION = "long";
-				const model = getModel("openai", "gpt-4o-mini");
+				const model = getFixtureModel("openai", "gpt-4o-mini", "openai-responses");
 				let capturedPayload: any = null;
 
 				const s = stream(model, context, {
@@ -285,7 +285,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 			process.env.METIS_CACHE_RETENTION = "long";
 
 			// Create a model with a different baseUrl (simulating a proxy)
-			const baseModel = getModel("openai", "gpt-4o-mini");
+			const baseModel = getFixtureModel("openai", "gpt-4o-mini", "openai-responses");
 			const proxyModel = {
 				...baseModel,
 				baseUrl: "https://my-proxy.example.com/v1",
@@ -315,7 +315,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 
 		it("should omit prompt_cache_retention when supportsLongCacheRetention is false", async () => {
 			const model = {
-				...getModel("openai", "gpt-4o-mini"),
+				...getFixtureModel("openai", "gpt-4o-mini", "openai-responses"),
 				compat: { supportsLongCacheRetention: false },
 			};
 			let capturedPayload: any = null;
@@ -342,7 +342,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should omit prompt_cache_key when cacheRetention is none", async () => {
-			const model = getModel("openai", "gpt-4o-mini");
+			const model = getFixtureModel("openai", "gpt-4o-mini", "openai-responses");
 			let capturedPayload: any = null;
 
 			try {
@@ -368,7 +368,7 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it("should set prompt_cache_retention when cacheRetention is long", async () => {
-			const model = getModel("openai", "gpt-4o-mini");
+			const model = getFixtureModel("openai", "gpt-4o-mini", "openai-responses");
 			let capturedPayload: any = null;
 
 			try {
@@ -462,12 +462,12 @@ describe("Cache Retention (METIS_CACHE_RETENTION)", () => {
 		});
 
 		it.each([
-			MODELS.opencode["deepseek-v4-flash"],
-			MODELS.opencode["deepseek-v4-pro"],
-			MODELS.opencode["kimi-k2.5"],
-			MODELS.opencode["kimi-k2.6"],
-			MODELS.opencode["minimax-m2.7"],
-			MODELS["opencode-go"]["kimi-k2.6"],
+			getFixtureModel("opencode", "deepseek-v4-flash", "openai-completions"),
+			getFixtureModel("opencode", "deepseek-v4-pro", "openai-completions"),
+			getFixtureModel("opencode", "kimi-k2.5", "openai-completions"),
+			getFixtureModel("opencode", "kimi-k2.6", "openai-completions"),
+			getFixtureModel("opencode", "minimax-m2.7", "openai-completions"),
+			getFixtureModel("opencode-go", "kimi-k2.6", "openai-completions"),
 		] as const)("should omit long cache retention for $provider/$id", async (metadata) => {
 			const model = metadata as Model<"openai-completions">;
 			let capturedPayload: OpenAICompletionsCachePayload | undefined;

@@ -3,9 +3,9 @@ import type { AddressInfo } from "node:net";
 import { Type } from "typebox";
 import { afterEach, describe, expect, it } from "vitest";
 import { stream as streamAnthropic } from "../src/api/anthropic-messages.ts";
-import { getModel, getModels } from "../src/compat.ts";
 import { findEnvKeys, getEnvApiKey } from "../src/env-api-keys.ts";
 import type { Context, Model, Tool } from "../src/types.ts";
+import { getFixtureModel, getFixtureModels } from "./model-catalog-fixtures.ts";
 
 const originalFireworksApiKey = process.env.FIREWORKS_API_KEY;
 
@@ -18,8 +18,8 @@ afterEach(() => {
 });
 
 describe("Fireworks models", () => {
-	it("registers the default Kimi K2.6 model via Anthropic-compatible Messages API", () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
+	it("generates Kimi K2.6 metadata for the Anthropic-compatible Messages API", () => {
+		const model = getFixtureModel("fireworks", "accounts/fireworks/models/kimi-k2p6", "anthropic-messages");
 
 		expect(model).toBeDefined();
 		expect(model.api).toBe("anthropic-messages");
@@ -38,7 +38,7 @@ describe("Fireworks models", () => {
 	});
 
 	it("registers the Fire Pass fast router models", () => {
-		const routers = getModels("fireworks").filter(
+		const routers = getFixtureModels("fireworks").filter(
 			(candidate) => candidate.id.startsWith("accounts/fireworks/routers/") && candidate.id.endsWith("-fast"),
 		);
 
@@ -51,8 +51,8 @@ describe("Fireworks models", () => {
 	});
 
 	it("aligns GLM 5.2 Fast with GLM 5.2's OpenAI-compatible config", () => {
-		const base = getModel("fireworks", "accounts/fireworks/models/glm-5p2");
-		const fast = getModel("fireworks", "accounts/fireworks/routers/glm-5p2-fast");
+		const base = getFixtureModel("fireworks", "accounts/fireworks/models/glm-5p2", "openai-completions");
+		const fast = getFixtureModel("fireworks", "accounts/fireworks/routers/glm-5p2-fast", "openai-completions");
 
 		expect(fast.api).toBe(base.api);
 		expect(fast.baseUrl).toBe(base.baseUrl);
@@ -68,7 +68,7 @@ describe("Fireworks models", () => {
 	});
 
 	it("sets Fireworks-specific compat for session affinity and unsupported tool fields", () => {
-		const model = getModel("fireworks", "accounts/fireworks/models/kimi-k2p6");
+		const model = getFixtureModel("fireworks", "accounts/fireworks/models/kimi-k2p6", "anthropic-messages");
 
 		expect(model.compat).toBeDefined();
 		expect(model.compat?.sendSessionAffinityHeaders).toBe(true);
