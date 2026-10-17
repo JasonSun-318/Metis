@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v23",
-  "title": "Metis App-Server Protocol v23",
+  "$id": "urn:metis:schemas:app-server:v24",
+  "title": "Metis App-Server Protocol v24",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -12254,6 +12254,113 @@
                                                 }
                                               },
                                               "additionalProperties": false
+                                            },
+                                            "codeChanges": {
+                                              "type": "object",
+                                              "required": [
+                                                "version",
+                                                "sequence",
+                                                "files",
+                                                "partial",
+                                                "turn"
+                                              ],
+                                              "properties": {
+                                                "version": {
+                                                  "type": "number",
+                                                  "const": 1
+                                                },
+                                                "sequence": {
+                                                  "type": "integer",
+                                                  "minimum": 1,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "files": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "required": [
+                                                      "path",
+                                                      "kind"
+                                                    ],
+                                                    "properties": {
+                                                      "path": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "x-metis-maxUtf8Bytes": 4096
+                                                      },
+                                                      "kind": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "string",
+                                                            "const": "added"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "modified"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "deleted"
+                                                          }
+                                                        ]
+                                                      },
+                                                      "additions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "deletions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "diff": {
+                                                        "type": "string",
+                                                        "x-metis-maxUtf8Bytes": 16384
+                                                      },
+                                                      "truncated": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "binary": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "unavailable": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "additionalProperties": false
+                                                  },
+                                                  "maxItems": 64
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                },
+                                                "turn": {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "additions",
+                                                    "deletions",
+                                                    "partial"
+                                                  ],
+                                                  "properties": {
+                                                    "additions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "deletions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "partial": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           },
                                           "additionalProperties": false
@@ -13050,6 +13157,113 @@
                                                       "const": "unavailable"
                                                     }
                                                   ]
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            "codeChanges": {
+                                              "type": "object",
+                                              "required": [
+                                                "version",
+                                                "sequence",
+                                                "files",
+                                                "partial",
+                                                "turn"
+                                              ],
+                                              "properties": {
+                                                "version": {
+                                                  "type": "number",
+                                                  "const": 1
+                                                },
+                                                "sequence": {
+                                                  "type": "integer",
+                                                  "minimum": 1,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "files": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "required": [
+                                                      "path",
+                                                      "kind"
+                                                    ],
+                                                    "properties": {
+                                                      "path": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "x-metis-maxUtf8Bytes": 4096
+                                                      },
+                                                      "kind": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "string",
+                                                            "const": "added"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "modified"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "deleted"
+                                                          }
+                                                        ]
+                                                      },
+                                                      "additions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "deletions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "diff": {
+                                                        "type": "string",
+                                                        "x-metis-maxUtf8Bytes": 16384
+                                                      },
+                                                      "truncated": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "binary": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "unavailable": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "additionalProperties": false
+                                                  },
+                                                  "maxItems": 64
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                },
+                                                "turn": {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "additions",
+                                                    "deletions",
+                                                    "partial"
+                                                  ],
+                                                  "properties": {
+                                                    "additions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "deletions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "partial": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
                                                 }
                                               },
                                               "additionalProperties": false
@@ -15303,6 +15517,113 @@
                                                 }
                                               },
                                               "additionalProperties": false
+                                            },
+                                            "codeChanges": {
+                                              "type": "object",
+                                              "required": [
+                                                "version",
+                                                "sequence",
+                                                "files",
+                                                "partial",
+                                                "turn"
+                                              ],
+                                              "properties": {
+                                                "version": {
+                                                  "type": "number",
+                                                  "const": 1
+                                                },
+                                                "sequence": {
+                                                  "type": "integer",
+                                                  "minimum": 1,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "files": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "required": [
+                                                      "path",
+                                                      "kind"
+                                                    ],
+                                                    "properties": {
+                                                      "path": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "x-metis-maxUtf8Bytes": 4096
+                                                      },
+                                                      "kind": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "string",
+                                                            "const": "added"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "modified"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "deleted"
+                                                          }
+                                                        ]
+                                                      },
+                                                      "additions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "deletions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "diff": {
+                                                        "type": "string",
+                                                        "x-metis-maxUtf8Bytes": 16384
+                                                      },
+                                                      "truncated": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "binary": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "unavailable": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "additionalProperties": false
+                                                  },
+                                                  "maxItems": 64
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                },
+                                                "turn": {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "additions",
+                                                    "deletions",
+                                                    "partial"
+                                                  ],
+                                                  "properties": {
+                                                    "additions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "deletions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "partial": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           },
                                           "additionalProperties": false
@@ -16107,6 +16428,113 @@
                                                       "const": "unavailable"
                                                     }
                                                   ]
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            },
+                                            "codeChanges": {
+                                              "type": "object",
+                                              "required": [
+                                                "version",
+                                                "sequence",
+                                                "files",
+                                                "partial",
+                                                "turn"
+                                              ],
+                                              "properties": {
+                                                "version": {
+                                                  "type": "number",
+                                                  "const": 1
+                                                },
+                                                "sequence": {
+                                                  "type": "integer",
+                                                  "minimum": 1,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "files": {
+                                                  "type": "array",
+                                                  "items": {
+                                                    "type": "object",
+                                                    "required": [
+                                                      "path",
+                                                      "kind"
+                                                    ],
+                                                    "properties": {
+                                                      "path": {
+                                                        "type": "string",
+                                                        "minLength": 1,
+                                                        "x-metis-maxUtf8Bytes": 4096
+                                                      },
+                                                      "kind": {
+                                                        "anyOf": [
+                                                          {
+                                                            "type": "string",
+                                                            "const": "added"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "modified"
+                                                          },
+                                                          {
+                                                            "type": "string",
+                                                            "const": "deleted"
+                                                          }
+                                                        ]
+                                                      },
+                                                      "additions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "deletions": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "diff": {
+                                                        "type": "string",
+                                                        "x-metis-maxUtf8Bytes": 16384
+                                                      },
+                                                      "truncated": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "binary": {
+                                                        "type": "boolean"
+                                                      },
+                                                      "unavailable": {
+                                                        "type": "boolean"
+                                                      }
+                                                    },
+                                                    "additionalProperties": false
+                                                  },
+                                                  "maxItems": 64
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                },
+                                                "turn": {
+                                                  "type": "object",
+                                                  "required": [
+                                                    "additions",
+                                                    "deletions",
+                                                    "partial"
+                                                  ],
+                                                  "properties": {
+                                                    "additions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "deletions": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "partial": {
+                                                      "type": "boolean"
+                                                    }
+                                                  },
+                                                  "additionalProperties": false
                                                 }
                                               },
                                               "additionalProperties": false
@@ -18403,7 +18831,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 23
+                      "const": 24
                     },
                     "server": {
                       "type": "object",
@@ -23987,6 +24415,113 @@
                                         }
                                       },
                                       "additionalProperties": false
+                                    },
+                                    "codeChanges": {
+                                      "type": "object",
+                                      "required": [
+                                        "version",
+                                        "sequence",
+                                        "files",
+                                        "partial",
+                                        "turn"
+                                      ],
+                                      "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "const": 1
+                                        },
+                                        "sequence": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "files": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "path",
+                                              "kind"
+                                            ],
+                                            "properties": {
+                                              "path": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "x-metis-maxUtf8Bytes": 4096
+                                              },
+                                              "kind": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "added"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "modified"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "deleted"
+                                                  }
+                                                ]
+                                              },
+                                              "additions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "deletions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "diff": {
+                                                "type": "string",
+                                                "x-metis-maxUtf8Bytes": 16384
+                                              },
+                                              "truncated": {
+                                                "type": "boolean"
+                                              },
+                                              "binary": {
+                                                "type": "boolean"
+                                              },
+                                              "unavailable": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 64
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        },
+                                        "turn": {
+                                          "type": "object",
+                                          "required": [
+                                            "additions",
+                                            "deletions",
+                                            "partial"
+                                          ],
+                                          "properties": {
+                                            "additions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "deletions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -26719,6 +27254,113 @@
                                                   "const": "unavailable"
                                                 }
                                               ]
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        "codeChanges": {
+                                          "type": "object",
+                                          "required": [
+                                            "version",
+                                            "sequence",
+                                            "files",
+                                            "partial",
+                                            "turn"
+                                          ],
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "const": 1
+                                            },
+                                            "sequence": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "files": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "required": [
+                                                  "path",
+                                                  "kind"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "x-metis-maxUtf8Bytes": 4096
+                                                  },
+                                                  "kind": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "added"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "modified"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "deleted"
+                                                      }
+                                                    ]
+                                                  },
+                                                  "additions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "deletions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "diff": {
+                                                    "type": "string",
+                                                    "x-metis-maxUtf8Bytes": 16384
+                                                  },
+                                                  "truncated": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "binary": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "unavailable": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            },
+                                            "turn": {
+                                              "type": "object",
+                                              "required": [
+                                                "additions",
+                                                "deletions",
+                                                "partial"
+                                              ],
+                                              "properties": {
+                                                "additions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "deletions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           },
                                           "additionalProperties": false
@@ -33982,6 +34624,113 @@
                                               "const": "unavailable"
                                             }
                                           ]
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "codeChanges": {
+                                      "type": "object",
+                                      "required": [
+                                        "version",
+                                        "sequence",
+                                        "files",
+                                        "partial",
+                                        "turn"
+                                      ],
+                                      "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "const": 1
+                                        },
+                                        "sequence": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "files": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "path",
+                                              "kind"
+                                            ],
+                                            "properties": {
+                                              "path": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "x-metis-maxUtf8Bytes": 4096
+                                              },
+                                              "kind": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "added"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "modified"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "deleted"
+                                                  }
+                                                ]
+                                              },
+                                              "additions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "deletions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "diff": {
+                                                "type": "string",
+                                                "x-metis-maxUtf8Bytes": 16384
+                                              },
+                                              "truncated": {
+                                                "type": "boolean"
+                                              },
+                                              "binary": {
+                                                "type": "boolean"
+                                              },
+                                              "unavailable": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 64
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        },
+                                        "turn": {
+                                          "type": "object",
+                                          "required": [
+                                            "additions",
+                                            "deletions",
+                                            "partial"
+                                          ],
+                                          "properties": {
+                                            "additions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "deletions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -57083,7 +57832,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 23
+                  "const": 24
                 },
                 "server": {
                   "type": "object",
@@ -62667,6 +63416,113 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               },
                               "additionalProperties": false
@@ -65399,6 +66255,113 @@
                                               "const": "unavailable"
                                             }
                                           ]
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    },
+                                    "codeChanges": {
+                                      "type": "object",
+                                      "required": [
+                                        "version",
+                                        "sequence",
+                                        "files",
+                                        "partial",
+                                        "turn"
+                                      ],
+                                      "properties": {
+                                        "version": {
+                                          "type": "number",
+                                          "const": 1
+                                        },
+                                        "sequence": {
+                                          "type": "integer",
+                                          "minimum": 1,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "files": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "required": [
+                                              "path",
+                                              "kind"
+                                            ],
+                                            "properties": {
+                                              "path": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "x-metis-maxUtf8Bytes": 4096
+                                              },
+                                              "kind": {
+                                                "anyOf": [
+                                                  {
+                                                    "type": "string",
+                                                    "const": "added"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "modified"
+                                                  },
+                                                  {
+                                                    "type": "string",
+                                                    "const": "deleted"
+                                                  }
+                                                ]
+                                              },
+                                              "additions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "deletions": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "diff": {
+                                                "type": "string",
+                                                "x-metis-maxUtf8Bytes": 16384
+                                              },
+                                              "truncated": {
+                                                "type": "boolean"
+                                              },
+                                              "binary": {
+                                                "type": "boolean"
+                                              },
+                                              "unavailable": {
+                                                "type": "boolean"
+                                              }
+                                            },
+                                            "additionalProperties": false
+                                          },
+                                          "maxItems": 64
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        },
+                                        "turn": {
+                                          "type": "object",
+                                          "required": [
+                                            "additions",
+                                            "deletions",
+                                            "partial"
+                                          ],
+                                          "properties": {
+                                            "additions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "deletions": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -72662,6 +73625,113 @@
                                           "const": "unavailable"
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -84236,6 +85306,113 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               },
                               "additionalProperties": false
@@ -85032,6 +86209,113 @@
                                           "const": "unavailable"
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -87285,6 +88569,113 @@
                                     }
                                   },
                                   "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "additionalProperties": false
                                 }
                               },
                               "additionalProperties": false
@@ -88089,6 +89480,113 @@
                                           "const": "unavailable"
                                         }
                                       ]
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "codeChanges": {
+                                  "type": "object",
+                                  "required": [
+                                    "version",
+                                    "sequence",
+                                    "files",
+                                    "partial",
+                                    "turn"
+                                  ],
+                                  "properties": {
+                                    "version": {
+                                      "type": "number",
+                                      "const": 1
+                                    },
+                                    "sequence": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "files": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "required": [
+                                          "path",
+                                          "kind"
+                                        ],
+                                        "properties": {
+                                          "path": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "x-metis-maxUtf8Bytes": 4096
+                                          },
+                                          "kind": {
+                                            "anyOf": [
+                                              {
+                                                "type": "string",
+                                                "const": "added"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "modified"
+                                              },
+                                              {
+                                                "type": "string",
+                                                "const": "deleted"
+                                              }
+                                            ]
+                                          },
+                                          "additions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "deletions": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "diff": {
+                                            "type": "string",
+                                            "x-metis-maxUtf8Bytes": 16384
+                                          },
+                                          "truncated": {
+                                            "type": "boolean"
+                                          },
+                                          "binary": {
+                                            "type": "boolean"
+                                          },
+                                          "unavailable": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      },
+                                      "maxItems": 64
+                                    },
+                                    "partial": {
+                                      "type": "boolean"
+                                    },
+                                    "turn": {
+                                      "type": "object",
+                                      "required": [
+                                        "additions",
+                                        "deletions",
+                                        "partial"
+                                      ],
+                                      "properties": {
+                                        "additions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "deletions": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "partial": {
+                                          "type": "boolean"
+                                        }
+                                      },
+                                      "additionalProperties": false
                                     }
                                   },
                                   "additionalProperties": false
@@ -90864,6 +92362,113 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "codeChanges": {
+                            "type": "object",
+                            "required": [
+                              "version",
+                              "sequence",
+                              "files",
+                              "partial",
+                              "turn"
+                            ],
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "path",
+                                    "kind"
+                                  ],
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "kind": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "added"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "modified"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "deleted"
+                                        }
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "diff": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 16384
+                                    },
+                                    "truncated": {
+                                      "type": "boolean"
+                                    },
+                                    "binary": {
+                                      "type": "boolean"
+                                    },
+                                    "unavailable": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 64
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              },
+                              "turn": {
+                                "type": "object",
+                                "required": [
+                                  "additions",
+                                  "deletions",
+                                  "partial"
+                                ],
+                                "properties": {
+                                  "additions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "deletions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "partial": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -91660,6 +93265,113 @@
                                     "const": "unavailable"
                                   }
                                 ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "codeChanges": {
+                            "type": "object",
+                            "required": [
+                              "version",
+                              "sequence",
+                              "files",
+                              "partial",
+                              "turn"
+                            ],
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "path",
+                                    "kind"
+                                  ],
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "kind": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "added"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "modified"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "deleted"
+                                        }
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "diff": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 16384
+                                    },
+                                    "truncated": {
+                                      "type": "boolean"
+                                    },
+                                    "binary": {
+                                      "type": "boolean"
+                                    },
+                                    "unavailable": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 64
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              },
+                              "turn": {
+                                "type": "object",
+                                "required": [
+                                  "additions",
+                                  "deletions",
+                                  "partial"
+                                ],
+                                "properties": {
+                                  "additions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "deletions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "partial": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "additionalProperties": false
@@ -93913,6 +95625,113 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "codeChanges": {
+                            "type": "object",
+                            "required": [
+                              "version",
+                              "sequence",
+                              "files",
+                              "partial",
+                              "turn"
+                            ],
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "path",
+                                    "kind"
+                                  ],
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "kind": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "added"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "modified"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "deleted"
+                                        }
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "diff": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 16384
+                                    },
+                                    "truncated": {
+                                      "type": "boolean"
+                                    },
+                                    "binary": {
+                                      "type": "boolean"
+                                    },
+                                    "unavailable": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 64
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              },
+                              "turn": {
+                                "type": "object",
+                                "required": [
+                                  "additions",
+                                  "deletions",
+                                  "partial"
+                                ],
+                                "properties": {
+                                  "additions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "deletions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "partial": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
+                              }
+                            },
+                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -94717,6 +96536,113 @@
                                     "const": "unavailable"
                                   }
                                 ]
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "codeChanges": {
+                            "type": "object",
+                            "required": [
+                              "version",
+                              "sequence",
+                              "files",
+                              "partial",
+                              "turn"
+                            ],
+                            "properties": {
+                              "version": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "sequence": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 9007199254740991
+                              },
+                              "files": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "required": [
+                                    "path",
+                                    "kind"
+                                  ],
+                                  "properties": {
+                                    "path": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "x-metis-maxUtf8Bytes": 4096
+                                    },
+                                    "kind": {
+                                      "anyOf": [
+                                        {
+                                          "type": "string",
+                                          "const": "added"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "modified"
+                                        },
+                                        {
+                                          "type": "string",
+                                          "const": "deleted"
+                                        }
+                                      ]
+                                    },
+                                    "additions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "deletions": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "diff": {
+                                      "type": "string",
+                                      "x-metis-maxUtf8Bytes": 16384
+                                    },
+                                    "truncated": {
+                                      "type": "boolean"
+                                    },
+                                    "binary": {
+                                      "type": "boolean"
+                                    },
+                                    "unavailable": {
+                                      "type": "boolean"
+                                    }
+                                  },
+                                  "additionalProperties": false
+                                },
+                                "maxItems": 64
+                              },
+                              "partial": {
+                                "type": "boolean"
+                              },
+                              "turn": {
+                                "type": "object",
+                                "required": [
+                                  "additions",
+                                  "deletions",
+                                  "partial"
+                                ],
+                                "properties": {
+                                  "additions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "deletions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "partial": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
                               }
                             },
                             "additionalProperties": false
@@ -97668,6 +99594,113 @@
                             "const": "unavailable"
                           }
                         ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "codeChanges": {
+                    "type": "object",
+                    "required": [
+                      "version",
+                      "sequence",
+                      "files",
+                      "partial",
+                      "turn"
+                    ],
+                    "properties": {
+                      "version": {
+                        "type": "number",
+                        "const": 1
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 9007199254740991
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "path",
+                            "kind"
+                          ],
+                          "properties": {
+                            "path": {
+                              "type": "string",
+                              "minLength": 1,
+                              "x-metis-maxUtf8Bytes": 4096
+                            },
+                            "kind": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "const": "added"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "modified"
+                                },
+                                {
+                                  "type": "string",
+                                  "const": "deleted"
+                                }
+                              ]
+                            },
+                            "additions": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "deletions": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "diff": {
+                              "type": "string",
+                              "x-metis-maxUtf8Bytes": 16384
+                            },
+                            "truncated": {
+                              "type": "boolean"
+                            },
+                            "binary": {
+                              "type": "boolean"
+                            },
+                            "unavailable": {
+                              "type": "boolean"
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 64
+                      },
+                      "partial": {
+                        "type": "boolean"
+                      },
+                      "turn": {
+                        "type": "object",
+                        "required": [
+                          "additions",
+                          "deletions",
+                          "partial"
+                        ],
+                        "properties": {
+                          "additions": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "deletions": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "partial": {
+                            "type": "boolean"
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false
@@ -101316,6 +103349,113 @@
                                             }
                                           },
                                           "additionalProperties": false
+                                        },
+                                        "codeChanges": {
+                                          "type": "object",
+                                          "required": [
+                                            "version",
+                                            "sequence",
+                                            "files",
+                                            "partial",
+                                            "turn"
+                                          ],
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "const": 1
+                                            },
+                                            "sequence": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "files": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "required": [
+                                                  "path",
+                                                  "kind"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "x-metis-maxUtf8Bytes": 4096
+                                                  },
+                                                  "kind": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "added"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "modified"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "deleted"
+                                                      }
+                                                    ]
+                                                  },
+                                                  "additions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "deletions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "diff": {
+                                                    "type": "string",
+                                                    "x-metis-maxUtf8Bytes": 16384
+                                                  },
+                                                  "truncated": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "binary": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "unavailable": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            },
+                                            "turn": {
+                                              "type": "object",
+                                              "required": [
+                                                "additions",
+                                                "deletions",
+                                                "partial"
+                                              ],
+                                              "properties": {
+                                                "additions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "deletions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -102112,6 +104252,113 @@
                                                   "const": "unavailable"
                                                 }
                                               ]
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        "codeChanges": {
+                                          "type": "object",
+                                          "required": [
+                                            "version",
+                                            "sequence",
+                                            "files",
+                                            "partial",
+                                            "turn"
+                                          ],
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "const": 1
+                                            },
+                                            "sequence": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "files": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "required": [
+                                                  "path",
+                                                  "kind"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "x-metis-maxUtf8Bytes": 4096
+                                                  },
+                                                  "kind": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "added"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "modified"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "deleted"
+                                                      }
+                                                    ]
+                                                  },
+                                                  "additions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "deletions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "diff": {
+                                                    "type": "string",
+                                                    "x-metis-maxUtf8Bytes": 16384
+                                                  },
+                                                  "truncated": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "binary": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "unavailable": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            },
+                                            "turn": {
+                                              "type": "object",
+                                              "required": [
+                                                "additions",
+                                                "deletions",
+                                                "partial"
+                                              ],
+                                              "properties": {
+                                                "additions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "deletions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           },
                                           "additionalProperties": false
@@ -104365,6 +106612,113 @@
                                             }
                                           },
                                           "additionalProperties": false
+                                        },
+                                        "codeChanges": {
+                                          "type": "object",
+                                          "required": [
+                                            "version",
+                                            "sequence",
+                                            "files",
+                                            "partial",
+                                            "turn"
+                                          ],
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "const": 1
+                                            },
+                                            "sequence": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "files": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "required": [
+                                                  "path",
+                                                  "kind"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "x-metis-maxUtf8Bytes": 4096
+                                                  },
+                                                  "kind": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "added"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "modified"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "deleted"
+                                                      }
+                                                    ]
+                                                  },
+                                                  "additions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "deletions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "diff": {
+                                                    "type": "string",
+                                                    "x-metis-maxUtf8Bytes": 16384
+                                                  },
+                                                  "truncated": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "binary": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "unavailable": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            },
+                                            "turn": {
+                                              "type": "object",
+                                              "required": [
+                                                "additions",
+                                                "deletions",
+                                                "partial"
+                                              ],
+                                              "properties": {
+                                                "additions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "deletions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "additionalProperties": false
+                                            }
+                                          },
+                                          "additionalProperties": false
                                         }
                                       },
                                       "additionalProperties": false
@@ -105169,6 +107523,113 @@
                                                   "const": "unavailable"
                                                 }
                                               ]
+                                            }
+                                          },
+                                          "additionalProperties": false
+                                        },
+                                        "codeChanges": {
+                                          "type": "object",
+                                          "required": [
+                                            "version",
+                                            "sequence",
+                                            "files",
+                                            "partial",
+                                            "turn"
+                                          ],
+                                          "properties": {
+                                            "version": {
+                                              "type": "number",
+                                              "const": 1
+                                            },
+                                            "sequence": {
+                                              "type": "integer",
+                                              "minimum": 1,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "files": {
+                                              "type": "array",
+                                              "items": {
+                                                "type": "object",
+                                                "required": [
+                                                  "path",
+                                                  "kind"
+                                                ],
+                                                "properties": {
+                                                  "path": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "x-metis-maxUtf8Bytes": 4096
+                                                  },
+                                                  "kind": {
+                                                    "anyOf": [
+                                                      {
+                                                        "type": "string",
+                                                        "const": "added"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "modified"
+                                                      },
+                                                      {
+                                                        "type": "string",
+                                                        "const": "deleted"
+                                                      }
+                                                    ]
+                                                  },
+                                                  "additions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "deletions": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "diff": {
+                                                    "type": "string",
+                                                    "x-metis-maxUtf8Bytes": 16384
+                                                  },
+                                                  "truncated": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "binary": {
+                                                    "type": "boolean"
+                                                  },
+                                                  "unavailable": {
+                                                    "type": "boolean"
+                                                  }
+                                                },
+                                                "additionalProperties": false
+                                              },
+                                              "maxItems": 64
+                                            },
+                                            "partial": {
+                                              "type": "boolean"
+                                            },
+                                            "turn": {
+                                              "type": "object",
+                                              "required": [
+                                                "additions",
+                                                "deletions",
+                                                "partial"
+                                              ],
+                                              "properties": {
+                                                "additions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "deletions": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "partial": {
+                                                  "type": "boolean"
+                                                }
+                                              },
+                                              "additionalProperties": false
                                             }
                                           },
                                           "additionalProperties": false
@@ -110417,6 +112878,113 @@
                                   "const": "unavailable"
                                 }
                               ]
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "codeChanges": {
+                          "type": "object",
+                          "required": [
+                            "version",
+                            "sequence",
+                            "files",
+                            "partial",
+                            "turn"
+                          ],
+                          "properties": {
+                            "version": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "sequence": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 9007199254740991
+                            },
+                            "files": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "required": [
+                                  "path",
+                                  "kind"
+                                ],
+                                "properties": {
+                                  "path": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "x-metis-maxUtf8Bytes": 4096
+                                  },
+                                  "kind": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string",
+                                        "const": "added"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "modified"
+                                      },
+                                      {
+                                        "type": "string",
+                                        "const": "deleted"
+                                      }
+                                    ]
+                                  },
+                                  "additions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "deletions": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "diff": {
+                                    "type": "string",
+                                    "x-metis-maxUtf8Bytes": 16384
+                                  },
+                                  "truncated": {
+                                    "type": "boolean"
+                                  },
+                                  "binary": {
+                                    "type": "boolean"
+                                  },
+                                  "unavailable": {
+                                    "type": "boolean"
+                                  }
+                                },
+                                "additionalProperties": false
+                              },
+                              "maxItems": 64
+                            },
+                            "partial": {
+                              "type": "boolean"
+                            },
+                            "turn": {
+                              "type": "object",
+                              "required": [
+                                "additions",
+                                "deletions",
+                                "partial"
+                              ],
+                              "properties": {
+                                "additions": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "deletions": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "partial": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "additionalProperties": false
                             }
                           },
                           "additionalProperties": false

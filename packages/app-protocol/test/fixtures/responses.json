@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 23,
+				"protocolVersion": 24,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"

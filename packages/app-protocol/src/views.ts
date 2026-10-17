@@ -476,6 +476,31 @@ export const SessionDeliveredFileViewSchema = StrictObject({
 	availability: Type.Union([Type.Literal("available"), Type.Literal("unavailable")]),
 });
 
+export const CodeChangeCountsViewSchema = StrictObject({
+	additions: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	deletions: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	partial: Type.Boolean(),
+});
+
+export const CodeFileChangeViewSchema = StrictObject({
+	path: Utf8String(4096, { minLength: 1 }),
+	kind: Type.Union([Type.Literal("added"), Type.Literal("modified"), Type.Literal("deleted")]),
+	additions: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	deletions: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	diff: Type.Optional(Utf8String(16 * 1024)),
+	truncated: Type.Optional(Type.Boolean()),
+	binary: Type.Optional(Type.Boolean()),
+	unavailable: Type.Optional(Type.Boolean()),
+});
+
+export const CodeChangesViewSchema = StrictObject({
+	version: Type.Literal(1),
+	sequence: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+	files: Type.Array(CodeFileChangeViewSchema, { maxItems: 64 }),
+	partial: Type.Boolean(),
+	turn: CodeChangeCountsViewSchema,
+});
+
 export const ToolResultBlockViewSchema = StrictObject({
 	type: Type.Literal("tool_result"),
 	toolCallId: OpaqueIdSchema,
@@ -484,6 +509,7 @@ export const ToolResultBlockViewSchema = StrictObject({
 	output: PublicTextSchema,
 	images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 4 })),
 	deliveredFile: Type.Optional(SessionDeliveredFileViewSchema),
+	codeChanges: Type.Optional(CodeChangesViewSchema),
 });
 
 export const NoticeBlockViewSchema = StrictObject({
@@ -1655,6 +1681,9 @@ export type PlanStatusView = Static<typeof PlanStatusSchema>;
 export type PlanView = Static<typeof PlanViewSchema>;
 export type PlanBlockView = Static<typeof PlanBlockViewSchema>;
 export type ItemContentBlockView = Static<typeof ItemContentBlockViewSchema>;
+export type CodeChangeCountsView = Static<typeof CodeChangeCountsViewSchema>;
+export type CodeFileChangeView = Static<typeof CodeFileChangeViewSchema>;
+export type CodeChangesView = Static<typeof CodeChangesViewSchema>;
 export type ItemUsageView = Static<typeof ItemUsageViewSchema>;
 export type ItemView = Static<typeof ItemViewSchema>;
 export type TurnView = Static<typeof TurnViewSchema>;
