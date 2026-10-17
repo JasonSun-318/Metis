@@ -176,16 +176,15 @@ metis [options] [@files...] [messages...]
 metis install <source> [-l]     # Install package, -l for project-local
 metis remove <source> [-l]      # Remove package
 metis uninstall <source> [-l]   # Alias for remove
-metis update [source|self|metis]   # Update metis only, or one package source
-metis update --all              # Update metis and packages; reconcile pinned git refs
-metis update --extensions       # Update packages only; reconcile pinned git refs
-metis update --self             # Update metis only
+metis update --extensions       # Update packages; reconcile pinned git refs
+metis update --all              # Update packages; CLI self-update is disabled
+metis update --self             # CLI self-update is disabled
 metis update --extension <src>  # Update one package
-metis list                      # List installed packages
+metis list                      # List user and project packages
 metis config                    # Enable/disable package resources
 ```
 
-These commands manage metis packages and `metis update` can update the metis CLI installation. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall). `metis config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `metis update` never prompts for project trust.
+These commands manage metis packages. `metis update` updates packages; CLI self-update is disabled. To uninstall metis itself, see [Quickstart](quickstart.md#uninstall). `metis config` and project package commands accept `--approve`/`--no-approve` to trust or ignore project-local settings for one command. `metis update` never prompts for project trust.
 
 See [Metis Packages](packages.md) for package sources and security notes.
 

@@ -403,12 +403,10 @@ metis install ssh://git@github.com/user/repo
 metis install ssh://git@github.com/user/repo@v1    # tag or commit
 metis remove npm:@foo/metis-tools
 metis uninstall npm:@foo/metis-tools          # alias for remove
-metis list
-metis update                               # update metis only
-metis update --all                         # update metis and packages
-metis update --extensions                  # update packages only
-metis update --self                        # update metis only
-metis update --self --force                # reinstall metis even if current
+metis list                                 # user and project packages
+metis update --extensions                  # update packages
+metis update --all                         # update packages; CLI self-update is disabled
+metis update --self                        # CLI self-update is disabled
 metis update npm:@foo/metis-tools             # update one package
 metis config                               # enable/disable extensions, skills, prompts, themes
 ```
@@ -502,13 +500,11 @@ metis [options] [@files...] [messages...]
 metis install <source> [-l]     # Install package, -l for project-local
 metis remove <source> [-l]      # Remove package
 metis uninstall <source> [-l]   # Alias for remove
-metis update [source|self|metis]   # Update metis only, or one package source
-metis update --all              # Update metis and packages
-metis update --extensions       # Update packages only
-metis update --self             # Update metis only
-metis update --self --force     # Reinstall metis even if current
+metis update --extensions       # Update packages
+metis update --all              # Update packages; CLI self-update is disabled
+metis update --self             # CLI self-update is disabled
 metis update --extension <src>  # Update one package
-metis list                      # List installed packages
+metis list                      # List user and project packages
 metis config                    # Enable/disable package resources
 ```
 
