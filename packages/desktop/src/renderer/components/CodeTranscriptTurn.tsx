@@ -1,4 +1,4 @@
-import type { ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { CodeChangesView, ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -8,6 +8,7 @@ import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
+import { CodeChangeCounts, codeStepCounts, ToolCodeChanges } from "./ToolCodeChanges.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
@@ -64,17 +65,20 @@ function CodeToolDetails({
 	rawInput,
 	rawOutput,
 	rawOutputIsError,
+	changes,
 }: {
 	readonly call?: ToolCallBlock;
 	readonly lines: readonly ToolDetailLine[];
 	readonly rawInput?: string;
 	readonly rawOutput?: string;
 	readonly rawOutputIsError: boolean;
+	readonly changes?: CodeChangesView;
 }) {
+	const { t } = useTranslation();
 	const input = commandText(rawInput);
-	if (lines.length === 0 && !input && rawOutput === undefined) return null;
-	return (
-		<div className="code-command-details">
+	if (lines.length === 0 && !input && rawOutput === undefined && !changes) return null;
+	const rawDetails = (
+		<>
 			{lines.length > 0 && (
 				<dl className="tool-safe-details">
 					{lines.map((line, index) => (
@@ -91,6 +95,22 @@ function CodeToolDetails({
 					{rawOutput}
 				</pre>
 			)}
+		</>
+	);
+	return (
+		<div className="code-command-details">
+			{changes && <ToolCodeChanges changes={changes} />}
+			{changes
+				? (lines.length > 0 || input || rawOutput !== undefined) && (
+						<details className="code-tool-raw-details">
+							<summary>
+								<CaretRight aria-hidden="true" size={12} />
+								{t("Tool details")}
+							</summary>
+							{rawDetails}
+						</details>
+					)
+				: rawDetails}
 		</div>
 	);
 }
@@ -115,12 +135,23 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 			>
 				<Icon aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
+				{result?.codeChanges && (
+					<>
+						{result.codeChanges.files.length === 1 && (
+							<span className="code-change-path" title={result.codeChanges.files[0]!.path}>
+								{result.codeChanges.files[0]!.path}
+							</span>
+						)}
+						<CodeChangeCounts counts={codeStepCounts(result.codeChanges)} />
+					</>
+				)}
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<CodeToolDetails
 					call={call}
+					changes={open ? result?.codeChanges : undefined}
 					lines={presentation.detailLines}
 					rawInput={presentation.rawInput}
 					rawOutput={presentation.rawOutput}
@@ -146,10 +177,12 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 			>
 				<Wrench aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
+				{result.codeChanges && <CodeChangeCounts counts={codeStepCounts(result.codeChanges)} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<CodeToolDetails
+					changes={open ? result.codeChanges : undefined}
 					lines={presentation.detailLines}
 					rawOutput={presentation.rawOutput}
 					rawOutputIsError={presentation.rawOutputIsError}
@@ -191,10 +224,12 @@ function CodeExecution({
 	calls,
 	results,
 	orphanResults,
+	turnChanges,
 }: {
 	readonly calls: readonly ToolCallBlock[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 	readonly orphanResults: readonly ToolResultBlock[];
+	readonly turnChanges?: CodeChangesView;
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
@@ -208,6 +243,7 @@ function CodeExecution({
 				}}
 			>
 				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
+				{turnChanges && <CodeChangeCounts counts={turnChanges.turn} turn />}
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
@@ -269,6 +305,12 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
+	const lastToolSegment = segments.reduce((last, segment, index) => (segment.type === "tools" ? index : last), -1);
+	let turnChanges: CodeChangesView | undefined;
+	for (const result of results.values()) {
+		if (result.codeChanges && (!turnChanges || result.codeChanges.sequence > turnChanges.sequence))
+			turnChanges = result.codeChanges;
+	}
 
 	return (
 		<>
@@ -303,7 +345,12 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 					return (
 						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript segments are append-only; positional keys preserve disclosure state while the active segment streams. */
 						<div key={`tools-${segmentIndex}`}>
-							<CodeExecution calls={segment.calls} orphanResults={segment.orphanResults} results={results} />
+							<CodeExecution
+								calls={segment.calls}
+								orphanResults={segment.orphanResults}
+								results={results}
+								turnChanges={segmentIndex === lastToolSegment ? turnChanges : undefined}
+							/>
 							{segment.calls
 								.filter((call) => call.name === "ask_user")
 								.map((call) => (

@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
-import { act } from "react";
+import type { FileDiffMetadata } from "@pierre/diffs";
+import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodeTranscriptTurn } from "../src/renderer/components/CodeTranscriptTurn.tsx";
@@ -12,6 +13,13 @@ import {
 } from "../src/renderer/components/Transcript.tsx";
 import { TranscriptTurn } from "../src/renderer/components/TranscriptTurn.tsx";
 import { messageText } from "../src/renderer/components/transcript-turn-model.ts";
+
+vi.mock("@pierre/diffs/react", () => ({
+	FileDiff: ({ fileDiff }: { readonly fileDiff: FileDiffMetadata }) => (
+		<pre data-testid="visual-diff">{[...fileDiff.deletionLines, ...fileDiff.additionLines].join("")}</pre>
+	),
+	WorkerPoolContextProvider: ({ children }: { readonly children: ReactNode }) => children,
+}));
 
 const SESSION_ID = "11111111-1111-4111-8111-111111111111";
 const TURN_ID = "turn-1";
@@ -1054,6 +1062,90 @@ describe("Transcript", () => {
 		);
 		expect(container.querySelector<HTMLDetailsElement>(".execution-chain")!.open).toBe(true);
 		expect(container.textContent).toContain("正在执行。");
+		await act(async () => root.unmount());
+	});
+
+	it("shows a turn's net total once and each step's independent saved diff", async () => {
+		const content = (id: string, sequence: number, turnCount: number): ItemView[] => [
+			item(`${id}-call`, "assistant", [
+				{
+					type: "tool_call",
+					toolCallId: id,
+					name: "edit",
+					state: "completed",
+					inputPreview: '{"path":"src/app.ts"}',
+				},
+			]),
+			item(`${id}-result`, "tool", [
+				{
+					type: "tool_result",
+					toolCallId: id,
+					name: "edit",
+					isError: false,
+					output: "Successfully edited",
+					codeChanges: {
+						version: 1,
+						sequence,
+						partial: false,
+						turn: { additions: turnCount, deletions: turnCount, partial: false },
+						files: [
+							{
+								path: "src/app.ts",
+								kind: "modified",
+								additions: 1,
+								deletions: 1,
+								diff: `--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-${id}-before\n+${id}-after\n`,
+							},
+						],
+					},
+				},
+			]),
+		];
+		const items = [
+			item("code-diff-user", "user", [{ type: "text", text: "Edit then revert" }]),
+			...content("first-edit", 1, 1),
+			item("code-diff-status", "assistant", [{ type: "text", text: "Checking before reverting" }]),
+			...content("revert-edit", 2, 0),
+			item("code-diff-final", "assistant", [{ type: "text", text: "Reverted" }]),
+		];
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<CodeTranscriptTurn items={items} />));
+		const executions = container.querySelectorAll<HTMLDetailsElement>(".code-execution");
+		expect(executions).toHaveLength(2);
+		expect(container.querySelectorAll(".code-turn-change-counts")).toHaveLength(1);
+		expect(executions[0]?.querySelector(":scope > summary .code-change-counts")).toBeNull();
+		expect(executions[1]?.querySelector(":scope > summary .code-change-additions")?.textContent).toBe("+0");
+		expect(executions[1]?.querySelector(":scope > summary .code-change-deletions")?.textContent).toBe("−0");
+		expect(container.querySelector(".code-tool-changes")).toBeNull();
+		await act(async () => executions[0]!.querySelector<HTMLElement>(":scope > summary")!.click());
+		const step = executions[0]!.querySelector<HTMLDetailsElement>(".code-command")!;
+		expect(step.querySelector("summary .code-change-additions")?.textContent).toBe("+1");
+		expect(step.querySelector("summary .code-change-deletions")?.textContent).toBe("−1");
+		expect(step.querySelector("summary")?.textContent).toContain("src/app.ts");
+		await act(async () => step.querySelector<HTMLElement>("summary")!.click());
+		expect(step.querySelector(".code-tool-changes")?.textContent).toContain("first-edit-before");
+		expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("revert-edit-before");
+		expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("@@");
+		const rawDetails = step.querySelector<HTMLDetailsElement>(".code-tool-raw-details")!;
+		expect(rawDetails.open).toBe(false);
+		expect(rawDetails.querySelector(".code-command-input")?.textContent).toContain('"path": "src/app.ts"');
+		expect(step.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
+		await act(async () => rawDetails.querySelector<HTMLElement>("summary")!.click());
+		expect(rawDetails.open).toBe(true);
+		expect(rawDetails.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps legacy Code steps and Chat transcripts free of invented change counters", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<CodeTranscriptTurn items={turnItems} />));
+		expect(container.querySelector(".code-change-counts")).toBeNull();
+		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
+		expect(container.querySelector(".code-change-counts")).toBeNull();
 		await act(async () => root.unmount());
 	});
 

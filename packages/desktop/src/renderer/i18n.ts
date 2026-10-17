@@ -10,6 +10,14 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	"Net changes in this turn": "本轮净变化",
+	"Tool details": "工具详情",
+	"Changes made by this step": "本步骤的改动",
+	"Some file changes could not be counted": "部分文件的变更无法统计",
+	"{{additions}} lines added, {{deletions}} lines removed": "新增 {{additions}} 行，删除 {{deletions}} 行",
+	"Diff for {{path}}": "{{path}} 的改动",
+	"Diff unavailable for this file": "无法显示此文件的 diff",
+	"Diff preview truncated; line counts include the full change": "diff 预览已截断，行数仍包含完整改动",
 	"Attached files": "附件",
 	"Conversation navigation": "会话导航",
 	"Use arrow keys to preview messages, Enter to jump.": "使用方向键预览消息，回车跳转。",
