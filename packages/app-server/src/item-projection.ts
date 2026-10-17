@@ -16,6 +16,7 @@ import {
 	splitSessionAttachmentPrompt,
 	type ThreadGoal,
 } from "@metis/coding-agent/host";
+import { projectCodeChanges } from "./code-change-projection.ts";
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -443,6 +444,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 	}
 
 	if (message.role === "toolResult") {
+		const codeChanges = projectCodeChanges(message.details);
 		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
 		const blocks = textBlocks(message.content, budget);
 		const output = blocks
@@ -472,6 +474,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 					output: boundedText(output, MAX_ITEM_TEXT_BYTES),
 					...(images.length > 0 ? { images } : {}),
 					...(deliveredFile ? { deliveredFile } : {}),
+					...(codeChanges ? { codeChanges } : {}),
 				},
 			],
 			createdAt,
