@@ -68,6 +68,7 @@ import {
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import { readBoundedUtf8FileSync } from "./bounded-text-file.ts";
+import { CodeChangeTracker } from "./code-changes.ts";
 import {
 	type CompactionResult,
 	calculateContextTokens,
@@ -595,6 +596,8 @@ const agentEventPersistenceContext = new AsyncLocalStorage<AgentEventPersistence
 const durablePromptExecutionContext = new AsyncLocalStorage<DurablePromptExecutionScope>();
 
 export class AgentSession {
+	private readonly _codeChanges = new CodeChangeTracker();
+	private _codeChangeTurnId = randomUUID();
 	readonly agent: Agent;
 	readonly sessionManager: SessionManager;
 	readonly settingsManager: SettingsManager;
@@ -1225,7 +1228,22 @@ export class AgentSession {
 						if (bindBash) this._interactiveBashBoundary!.bind(grant);
 						else claimConsumedExecutionGrant(grant);
 						try {
-							return await tool.execute(toolCallId, params, signal, onUpdate);
+							const execute = () => tool.execute(toolCallId, params, signal, onUpdate);
+							const action = request.action;
+							if (
+								this.sessionManager.getMode() === "code" &&
+								((entry.provenance === "builtin" && ["edit", "write", "bash"].includes(tool.name)) ||
+									action.writePaths.length > 0 ||
+									action.command !== undefined)
+							) {
+								return await this._codeChanges.run(
+									this._durableTurn?.turnId ?? this._codeChangeTurnId,
+									toolCallId,
+									{ cwd: this._cwd, paths: action.writePaths, scanWorkspace: action.command !== undefined },
+									execute,
+								);
+							}
+							return await execute();
 						} finally {
 							if (bindBash) this._interactiveBashBoundary!.unbind(toolCallId);
 						}
@@ -1974,6 +1992,7 @@ export class AgentSession {
 		};
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
+			const codeChanges = this._codeChanges.take(toolCall.id);
 			if (toolCall.name === "read" && this._isBuiltinTool(toolCall.name)) {
 				await this._recordSkillRead(args, isError);
 			}
@@ -1994,7 +2013,7 @@ export class AgentSession {
 					? await this._refreshSkillAfterFileMutation(args)
 					: undefined;
 
-			if (!hookResult && !skillRefreshMessage) {
+			if (!hookResult && !skillRefreshMessage && !codeChanges) {
 				return undefined;
 			}
 
@@ -2002,7 +2021,7 @@ export class AgentSession {
 				content: skillRefreshMessage
 					? [...(hookResult?.content ?? result.content), { type: "text", text: skillRefreshMessage }]
 					: hookResult?.content,
-				details: hookResult?.details,
+				details: codeChanges ? { ...(hookResult?.details ?? result.details), codeChanges } : hookResult?.details,
 				isError: hookResult?.isError ?? isError,
 			};
 		};
@@ -2400,6 +2419,7 @@ export class AgentSession {
 		// When a user message starts, check if it's from either queue and remove it BEFORE emitting
 		// This ensures the UI sees the updated queue state
 		if (event.type === "message_start" && event.message.role === "user") {
+			this._codeChangeTurnId = randomUUID();
 			this._overflowRecoveryAttempted = false;
 			const messageText = this._getUserMessageText(event.message);
 			if (messageText) {
