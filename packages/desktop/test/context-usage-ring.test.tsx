@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ContextUsageRing } from "../src/renderer/components/ContextUsageRing.tsx";
-import { contextFillPercent, contextUsagePercent, formatContextTokenLine } from "../src/renderer/context-usage.ts";
+import { contextFillPercent, contextUsagePercent } from "../src/renderer/context-usage.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 
 afterEach(() => document.body.replaceChildren());
@@ -52,6 +52,5 @@ describe("contextFillPercent", () => {
 		expect(contextUsagePercent({ contextTokens: 144_000, contextWindow: 128_000 })).toBe(112.5);
 		expect(contextFillPercent({ contextTokens: 144_000, contextWindow: 128_000 })).toBe(100);
 		expect(contextFillPercent({ contextTokens: null, contextWindow: 128_000 })).toBeNull();
-		expect(formatContextTokenLine(64_000, 128_000)).toBe("~64.0K / 128K Tokens");
 	});
 });

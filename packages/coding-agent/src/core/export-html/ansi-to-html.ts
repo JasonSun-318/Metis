@@ -1,16 +1,3 @@
-/**
- * ANSI escape code to HTML converter.
- *
- * Converts terminal ANSI color/style codes to HTML with inline styles.
- * Supports:
- * - Standard foreground colors (30-37) and bright variants (90-97)
- * - Standard background colors (40-47) and bright variants (100-107)
- * - 256-color palette (38;5;N and 48;5;N)
- * - RGB true color (38;2;R;G;B and 48;2;R;G;B)
- * - Text styles: bold (1), dim (2), italic (3), underline (4)
- * - Reset (0)
- */
-
 // Standard ANSI color palette (0-15)
 const ANSI_COLORS = [
 	"#000000", // 0: black
@@ -31,9 +18,6 @@ const ANSI_COLORS = [
 	"#ffffff", // 15: bright white
 ];
 
-/**
- * Convert 256-color index to hex.
- */
 function color256ToHex(index: number): string {
 	// Standard colors (0-15)
 	if (index < 16) {
@@ -57,9 +41,6 @@ function color256ToHex(index: number): string {
 	return `#${grayHex}${grayHex}${grayHex}`;
 }
 
-/**
- * Escape HTML special characters.
- */
 function escapeHtml(text: string): string {
 	return text
 		.replace(/&/g, "&amp;")

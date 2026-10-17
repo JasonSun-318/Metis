@@ -1,4 +1,4 @@
-import type { ProviderEnv } from "../types.ts";
+import type { CacheRetention, ProviderEnv } from "../types.ts";
 
 let procEnvCache: Map<string, string> | null = null;
 
@@ -53,4 +53,18 @@ export function getProviderEnvValue(name: string, env?: ProviderEnv): string | u
 
 export function getMetisProviderEnvValue(suffix: string, env?: ProviderEnv): string | undefined {
 	return getProviderEnvValue(`METIS_${suffix}`, env);
+}
+
+/**
+ * Resolve cache retention preference.
+ * Defaults to "short" and accepts `METIS_CACHE_RETENTION=long`.
+ */
+export function resolveCacheRetention(cacheRetention?: CacheRetention, env?: ProviderEnv): CacheRetention {
+	if (cacheRetention) {
+		return cacheRetention;
+	}
+	if (getMetisProviderEnvValue("CACHE_RETENTION", env) === "long") {
+		return "long";
+	}
+	return "short";
 }

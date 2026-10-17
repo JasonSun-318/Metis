@@ -3907,10 +3907,6 @@ export class SessionManager {
 		return entry.id;
 	}
 
-	// =========================================================================
-	// Tree Traversal
-	// =========================================================================
-
 	getLeafId(): string | null {
 		return this.leafId;
 	}
@@ -4173,10 +4169,6 @@ export class SessionManager {
 
 		return roots;
 	}
-
-	// =========================================================================
-	// Branching
-	// =========================================================================
 
 	/**
 	 * Start a new branch from an earlier entry.

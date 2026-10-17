@@ -300,10 +300,6 @@ function referencesManagedWorkEnvironment(command: string): boolean {
 	return /\$(?:\{)?(?:METIS_WORK_DIR|TMPDIR|TMP|TEMP)\b/u.test(command);
 }
 
-// ============================================================================
-// Types
-// ============================================================================
-
 export interface AgentSessionConfig {
 	agent: Agent;
 	sessionManager: SessionManager;
@@ -473,10 +469,6 @@ function estimateMessagesTokens(messages: AgentMessage[]): number {
 	return tokens;
 }
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 /** Standard thinking levels */
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const MAX_DURABLE_TURN_OPERATIONS = 256;
@@ -519,10 +511,6 @@ const IMMEDIATE_EXTERNALIZATION_BUILTINS = new Set([
 	"list_mcp_prompts",
 	"get_mcp_prompt",
 ]);
-
-// ============================================================================
-// AgentSession Class
-// ============================================================================
 
 interface AgentEventPersistenceScope {
 	owner: object;
@@ -2321,10 +2309,6 @@ export class AgentSession {
 		};
 	}
 
-	// =========================================================================
-	// Event Subscription
-	// =========================================================================
-
 	private _emitPermissionReview(event: PermissionReviewBoundaryEvent): void {
 		if (event.phase === "started") {
 			this._emit({
@@ -2930,10 +2914,6 @@ export class AgentSession {
 			throw new AggregateError(errors, "Failed to dispose agent session");
 		}
 	}
-
-	// =========================================================================
-	// Read-only State Access
-	// =========================================================================
 
 	/** Full agent state */
 	get state(): AgentState {
@@ -3659,10 +3639,6 @@ export class AgentSession {
 		this._baseSystemPromptParts = parts;
 		return parts.map((part) => part.content).join("");
 	}
-
-	// =========================================================================
-	// Prompting
-	// =========================================================================
 
 	/** Validate an app-server prompt without retaining provider-ready image payloads. */
 	prepareDurablePrompt(input: DurablePromptInput): void {
@@ -4795,10 +4771,6 @@ export class AgentSession {
 		await this._getIdleWaitPromise();
 	}
 
-	// =========================================================================
-	// Model Management
-	// =========================================================================
-
 	private async _emitModelSelect(
 		nextModel: Model<any>,
 		previousModel: Model<any> | undefined,
@@ -4905,10 +4877,6 @@ export class AgentSession {
 		return { model: nextModel, thinkingLevel: this.thinkingLevel, isScoped: false };
 	}
 
-	// =========================================================================
-	// Thinking Level Management
-	// =========================================================================
-
 	/**
 	 * Set thinking level.
 	 * Clamps to model capabilities based on available thinking levels.
@@ -5002,10 +4970,6 @@ export class AgentSession {
 		return this.model ? (clampThinkingLevel(this.model, level) as ThinkingLevel) : "off";
 	}
 
-	// =========================================================================
-	// Queue Mode Management
-	// =========================================================================
-
 	private syncQueueModesFromSettings(): void {
 		this.agent.steeringMode = this.settingsManager.getSteeringMode();
 		this.agent.followUpMode = this.settingsManager.getFollowUpMode();
@@ -5028,10 +4992,6 @@ export class AgentSession {
 		this.agent.followUpMode = mode;
 		this.settingsManager.setFollowUpMode(mode);
 	}
-
-	// =========================================================================
-	// Compaction
-	// =========================================================================
 
 	/**
 	 * Manually compact the session context.
@@ -6118,10 +6078,6 @@ export class AgentSession {
 		}
 	}
 
-	// =========================================================================
-	// Auto-Retry
-	// =========================================================================
-
 	/**
 	 * Check if an error is retryable (overloaded, rate limit, server errors).
 	 * Context overflow errors are NOT retryable (handled by compaction instead).
@@ -6211,10 +6167,6 @@ export class AgentSession {
 	setAutoRetryEnabled(enabled: boolean): void {
 		this.settingsManager.setRetryEnabled(enabled);
 	}
-
-	// =========================================================================
-	// Bash Execution
-	// =========================================================================
 
 	/**
 	 * Execute a bash command.
@@ -6324,10 +6276,6 @@ export class AgentSession {
 		this._pendingBashMessages = [];
 	}
 
-	// =========================================================================
-	// Session Management
-	// =========================================================================
-
 	/**
 	 * Set a display name for the current session.
 	 */
@@ -6337,10 +6285,6 @@ export class AgentSession {
 		this._emit(event);
 		void this._extensionRunner.emit(event);
 	}
-
-	// =========================================================================
-	// Tree Navigation
-	// =========================================================================
 
 	/**
 	 * Navigate to a different node in the session tree.
@@ -6628,10 +6572,6 @@ export class AgentSession {
 		return filePath;
 	}
 
-	// =========================================================================
-	// Utilities
-	// =========================================================================
-
 	/**
 	 * Get text content of last assistant message.
 	 * Useful for /copy command.
@@ -6660,10 +6600,6 @@ export class AgentSession {
 
 		return text.trim() || undefined;
 	}
-
-	// =========================================================================
-	// Extension System
-	// =========================================================================
 
 	createReplacedSessionContext(): ReplacedSessionContext {
 		const context = Object.defineProperties(

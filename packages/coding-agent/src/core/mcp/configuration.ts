@@ -179,6 +179,7 @@ export class McpConfigurationCoordinator {
 	private readonly authStorage: AuthStorage;
 	private readonly runtimes = new Set<McpManager>();
 	private mutationTail: Promise<void> = Promise.resolve();
+	private readonly diagnostics: Error[] = [];
 
 	constructor(options: { readonly authStorage: AuthStorage }) {
 		this.authStorage = options.authStorage;
@@ -187,6 +188,10 @@ export class McpConfigurationCoordinator {
 	register(manager: McpManager): () => void {
 		this.runtimes.add(manager);
 		return () => this.runtimes.delete(manager);
+	}
+
+	drainDiagnostics(): Error[] {
+		return this.diagnostics.splice(0);
 	}
 
 	mutate(mutation: McpConfigurationMutation): Promise<McpConfigurationResult> {
@@ -412,9 +417,10 @@ export class McpConfigurationCoordinator {
 				}
 			}
 			return previous.filter(({ provider }) => !retained.has(provider));
-		} catch {
+		} catch (error) {
 			// An unreadable or concurrently changing settings file may still reference
 			// the staged generation. Retaining it is safer than breaking a live config.
+			this.diagnostics.push(error instanceof Error ? error : new Error(String(error)));
 			return [];
 		}
 	}
@@ -507,8 +513,8 @@ export class McpConfigurationCoordinator {
 		for (const { manager, prepared: token } of prepared) {
 			try {
 				manager.activateConfiguration(token);
-			} catch {
-				// Activation is best-effort after the configuration is committed.
+			} catch (error) {
+				this.diagnostics.push(error instanceof Error ? error : new Error(String(error)));
 			}
 		}
 
@@ -520,8 +526,8 @@ export class McpConfigurationCoordinator {
 		if (cleanup.length > 0) {
 			try {
 				this.authStorage.applyChanges(cleanup);
-			} catch {
-				// Credential cleanup is best-effort after the configuration is committed.
+			} catch (error) {
+				this.diagnostics.push(error instanceof Error ? error : new Error(String(error)));
 			}
 		}
 

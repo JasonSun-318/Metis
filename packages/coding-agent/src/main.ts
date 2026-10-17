@@ -1,10 +1,3 @@
-/**
- * Main entry point for the coding agent CLI.
- *
- * This file handles CLI argument parsing and translates them into
- * createAgentSession() options. The SDK does the heavy lifting.
- */
-
 import { writeSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { type ImageContent, modelsAreEqual } from "@metis/ai";

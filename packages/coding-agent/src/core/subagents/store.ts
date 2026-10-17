@@ -275,6 +275,10 @@ export class AgentStore implements AgentStoreApi {
 		this.deletedDirectory = join(this.directory, ".deleted");
 	}
 
+	static createAgentId(): string {
+		return createSessionId();
+	}
+
 	static createTaskId(): string {
 		return createSessionId();
 	}
