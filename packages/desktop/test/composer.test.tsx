@@ -8,7 +8,17 @@ import { Composer } from "../src/renderer/components/Composer.tsx";
 afterEach(() => document.body.replaceChildren());
 
 function type(editor: HTMLElement, value: string) {
-	Object.getOwnPropertyDescriptor(editor, "value")?.set?.call(editor, value);
+	const tokens = [...editor.querySelectorAll<HTMLElement>(".composer-skill-token")];
+	const text = value ? document.createTextNode(value) : null;
+	editor.replaceChildren(...tokens, ...(text ? [text] : []));
+	if (text) {
+		const range = document.createRange();
+		range.selectNodeContents(text);
+		range.collapse(false);
+		const selection = window.getSelection();
+		selection?.removeAllRanges();
+		selection?.addRange(range);
+	}
 	editor.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
@@ -109,6 +119,11 @@ describe("Composer slash commands", () => {
 		await act(async () => root.render(<Composer {...props} />));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/skill:codebase-design"));
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((option) => option.querySelector("strong")?.textContent === "skill:codebase-design")!
+				.click(),
+		);
 		expect(container.querySelector(".composer-input-line .composer-skill-token")?.textContent).toContain(
 			"codebase-design",
 		);
@@ -141,6 +156,11 @@ describe("Composer slash commands", () => {
 		await act(async () => root.render(<Composer {...props} />));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
 		await act(async () => type(editor, "/skill:codebase-design"));
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((option) => option.querySelector("strong")?.textContent === "skill:codebase-design")!
+				.click(),
+		);
 		expect(container.querySelector(".composer-skill-token")).not.toBeNull();
 
 		await act(async () => type(editor, "review this"));
@@ -214,7 +234,13 @@ describe("Composer slash commands", () => {
 			),
 		);
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
-		await act(async () => type(editor, "/goal Build desktop features"));
+		await act(async () => type(editor, "/goal"));
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((option) => option.querySelector("strong")?.textContent === "/goal")!
+				.click(),
+		);
+		await act(async () => type(editor, "Build desktop features"));
 		expect(container.querySelector(".composer-goal-token")).not.toBeNull();
 
 		await act(async () => container.querySelector<HTMLFormElement>("form")!.requestSubmit());
@@ -267,7 +293,13 @@ describe("Composer slash commands", () => {
 		};
 		await act(async () => root.render(<Composer {...props} />));
 		const editor = container.querySelector<HTMLElement>("#composer-input")!;
-		await act(async () => type(editor, "/goal Keep original goal"));
+		await act(async () => type(editor, "/goal"));
+		await act(async () =>
+			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
+				.find((option) => option.querySelector("strong")?.textContent === "/goal")!
+				.click(),
+		);
+		await act(async () => type(editor, "Keep original goal"));
 		const goal = editor.querySelector('[data-token-kind="goal"]');
 		await act(async () =>
 			root.render(<Composer {...props} prefillRequest={{ id: 1, text: "Add a report outline" }} />),
