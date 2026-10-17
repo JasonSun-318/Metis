@@ -154,6 +154,7 @@ export const SessionChatView = memo(function SessionChatView({
 	// visible chat pane are covered by the App-level host instead.
 	const modalInteraction = inlineInteraction === undefined ? chat.interaction : undefined;
 	const waitingForAnswer = chat.interaction?.kind === "ask_user";
+	const interactionPending = inlineInteraction !== undefined;
 	const compactBlocked = running || inlineInteraction !== undefined || compactingStartedAt !== null;
 
 	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
@@ -212,7 +213,7 @@ export const SessionChatView = memo(function SessionChatView({
 
 	const deleteQueuedTurn = useCallback(
 		async (turn: QueuedTurnView) => {
-			if (!session) return;
+			if (!session || interactionPending) return;
 			onClearError();
 			try {
 				await api.deleteQueuedTurn({
@@ -227,23 +228,24 @@ export const SessionChatView = memo(function SessionChatView({
 				throw error;
 			}
 		},
-		[api, onClearError, onError, session, sessionId],
+		[api, interactionPending, onClearError, onError, session, sessionId],
 	);
 
 	const editQueuedTurn = useCallback(
 		async (turn: QueuedTurnView) => {
+			if (interactionPending) return;
 			await deleteQueuedTurn(turn);
 			setPrefillRequest((current) => ({ id: (current?.id ?? 0) + 1, text: turn.text }));
 			if (turn.attachments.length > 0) {
 				onNotice("The message was returned to the composer. Add its attachments again before sending.");
 			}
 		},
-		[deleteQueuedTurn, onNotice],
+		[deleteQueuedTurn, interactionPending, onNotice],
 	);
 
 	const sendQueuedTurn = useCallback(
 		async (turn: QueuedTurnView, delivery: "steer" | "start") => {
-			if (!session) return;
+			if (!session || interactionPending) return;
 			onClearError();
 			try {
 				await api.sendQueuedTurn({
@@ -259,7 +261,7 @@ export const SessionChatView = memo(function SessionChatView({
 				throw error;
 			}
 		},
-		[api, onClearError, onError, session, sessionId],
+		[api, interactionPending, onClearError, onError, session, sessionId],
 	);
 
 	const interrupt = useCallback(async () => {
@@ -756,6 +758,7 @@ export const SessionChatView = memo(function SessionChatView({
 							) : undefined
 						}
 						awaitingAnswer={waitingForAnswer}
+						interactionPending={interactionPending}
 						goalControl={
 							<GoalBar
 								goal={projection.goal}
@@ -779,16 +782,21 @@ export const SessionChatView = memo(function SessionChatView({
 						placeholder={t(
 							waitingForAnswer
 								? "Answer the questions above to continue."
-								: planRevisionTarget
-									? "Describe what should change in this plan…"
-									: running || projection.queuedTurns.length > 0
-										? "Add a queued message…"
-										: "Write a message…",
+								: interactionPending
+									? "Approve or reject the action above to continue."
+									: planRevisionTarget
+										? "Describe what should change in this plan…"
+										: running || projection.queuedTurns.length > 0
+											? "Add a queued message…"
+											: "Write a message…",
 						)}
 						prefillRequest={prefillRequest}
 						queuedTurnControl={
 							<QueuedTurnList
-								disabled={!serverReady || !syncReady || compactingStartedAt !== null}
+								disabled={!serverReady || !syncReady || compactingStartedAt !== null || interactionPending}
+								disabledReason={
+									interactionPending ? t("Resolve the pending request to manage queued messages.") : undefined
+								}
 								onDelete={deleteQueuedTurn}
 								onEdit={editQueuedTurn}
 								onSend={sendQueuedTurn}

@@ -10,6 +10,15 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	"Collapse queued messages": "收起排队消息",
+	"Expand queued messages": "展开排队消息",
+	"Collapse approval": "收起权限确认",
+	"Expand approval": "展开权限确认",
+	"Waiting for approval": "等待权限确认",
+	"Collapse goal": "收起目标",
+	"Expand goal": "展开目标",
+	"Resolve the pending request to manage queued messages.": "请先处理待确认事项，再操作排队消息。",
+	"Approve or reject the action above to continue.": "请先允许或拒绝上方操作，再继续发送消息。",
 	"Net changes in this turn": "本轮净变化",
 	"Tool details": "工具详情",
 	"Changes made by this step": "本步骤的改动",

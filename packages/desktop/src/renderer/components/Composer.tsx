@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
+import { ComposerPanelStack } from "./ComposerPanelStack.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
 import { ConversationQuoteChips, useConversationQuotes } from "./ConversationQuoteContext.tsx";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
@@ -274,6 +275,7 @@ export interface ComposerPrefillRequest {
 interface ComposerProps {
 	readonly disabled: boolean;
 	readonly awaitingAnswer?: boolean;
+	readonly interactionPending?: boolean;
 	readonly running: boolean;
 	readonly queueing?: boolean;
 	readonly commandPanel?: ReactNode;
@@ -317,6 +319,7 @@ interface ComposerProps {
 export function Composer({
 	disabled,
 	awaitingAnswer = false,
+	interactionPending = false,
 	running,
 	queueing = false,
 	commandPanel,
@@ -357,6 +360,7 @@ export function Composer({
 	thinkingControl,
 }: ComposerProps) {
 	const { t } = useTranslation();
+	const inputBlocked = awaitingAnswer || interactionPending;
 	const fileSelections = useFileSelections();
 	const conversationQuotes = useConversationQuotes();
 	const [hasInput, setHasInput] = useState(false);
@@ -467,7 +471,7 @@ export function Composer({
 
 	const handlePaste = useCallback(
 		(event: React.ClipboardEvent) => {
-			if (awaitingAnswer) {
+			if (inputBlocked) {
 				event.preventDefault();
 				return;
 			}
@@ -486,12 +490,12 @@ export function Composer({
 				syncEditorState();
 			}
 		},
-		[awaitingAnswer, processFiles, syncEditorState],
+		[inputBlocked, processFiles, syncEditorState],
 	);
 
 	const handleDrop = useCallback(
 		(event: React.DragEvent) => {
-			if (awaitingAnswer) {
+			if (inputBlocked) {
 				event.preventDefault();
 				return;
 			}
@@ -501,7 +505,7 @@ export function Composer({
 				void processFiles(files);
 			}
 		},
-		[awaitingAnswer, processFiles],
+		[inputBlocked, processFiles],
 	);
 
 	const handleSlashDismiss = useCallback(() => {
@@ -618,7 +622,7 @@ export function Composer({
 		const hasContent =
 			prompt.length > 0 || attachments.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken;
 
-		if (!hasContent || disabled || awaitingAnswer || submitDisabled || submitting) return;
+		if (!hasContent || disabled || inputBlocked || submitDisabled || submitting) return;
 
 		if (parsed.hasGoalToken && onGoalCommand) {
 			if (disabledSlashCommands.has("goal")) return;
@@ -682,206 +686,215 @@ export function Composer({
 		}
 	};
 
-	const previouslyAwaitingAnswer = useRef(awaitingAnswer);
+	const previouslyInputBlocked = useRef(inputBlocked);
 	useEffect(() => {
-		if (previouslyAwaitingAnswer.current && !awaitingAnswer) editorRef.current?.focus();
-		previouslyAwaitingAnswer.current = awaitingAnswer;
-	}, [awaitingAnswer]);
+		if (previouslyInputBlocked.current && !inputBlocked) editorRef.current?.focus();
+		previouslyInputBlocked.current = inputBlocked;
+	}, [inputBlocked]);
 
 	const isCode = appearance === "code";
 
 	return (
 		<div className={`composer-dock composer-dock-${appearance}`}>
-			<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
-			{goalControl}
-			{!awaitingAnswer && interactionControl}
-			{commandPanel}
-			{slashQuery !== undefined && (
-				<SlashCommandMenu
-					disabledCommands={disabledSlashCommands}
-					disabledReasons={disabledSlashReasons}
-					onDismiss={handleSlashDismiss}
-					onSelectCommand={handleSelectCommand}
-					onSelectSkill={handleSelectSkill}
-					query={slashQuery}
-					skills={skills}
-				/>
-			)}
-			{queuedTurnControl}
-			{awaitingAnswer && interactionControl}
-			<form
-				className={`composer composer-${appearance}${awaitingAnswer ? " is-awaiting-answer" : ""}`}
-				ref={formRef}
-				onDragOver={(event) => event.preventDefault()}
-				onDrop={handleDrop}
-				onPaste={handlePaste}
-				onSubmit={(event) => void submit(event).catch(() => undefined)}
-			>
-				<label className="sr-only" htmlFor={inputId}>
-					{t("Message Metis")}
-				</label>
-				<div className="composer-box">
-					<FileSelectionChips sessionId={selectionSessionId} />
-					<ConversationQuoteChips sessionId={selectionSessionId} />
-					{attachments.length > 0 && (
-						<section aria-label={t("Message additions")} className="composer-attachments">
-							{attachments.map((attachment) =>
-								attachment.previewDataUrl ? (
-									<div className="composer-image-preview" key={attachment.path}>
-										<img alt={attachment.name} src={attachment.previewDataUrl} />
-										<button
-											aria-label={t("Remove file {{name}}", { name: attachment.name })}
-											onClick={() => removeAttachment(attachment.path)}
-											type="button"
-										>
-											<X aria-hidden="true" size={12} />
-										</button>
-									</div>
-								) : (
-									<div className="composer-file-card" key={attachment.path}>
-										<span className="composer-file-card-icon">
-											<WorkspaceFileIcon path={attachment.name} size={15} />
-										</span>
-										<span className="composer-file-card-copy">
-											<strong title={attachment.name}>{attachment.name}</strong>
-											<small>{attachmentTypeLabel(attachment.name)}</small>
-										</span>
-										<button
-											aria-label={t("Remove file {{name}}", { name: attachment.name })}
-											onClick={() => removeAttachment(attachment.path)}
-											type="button"
-										>
-											<X aria-hidden="true" size={12} />
-										</button>
-									</div>
-								),
-							)}
-						</section>
-					)}
-					{contextControl}
-					<div className="composer-input-line">
-						{/* biome-ignore lint/a11y/useSemanticElements: The contenteditable textbox embeds skill and goal tokens that native text controls cannot render. */}
-						<div
-							aria-label={t("Message Metis")}
-							className="composer-editable-input"
-							aria-disabled={awaitingAnswer || undefined}
-							contentEditable={!disabled && !awaitingAnswer && !submitting}
-							data-empty={!hasInput ? "true" : undefined}
-							data-placeholder={
-								placeholder ??
-								(isCode
-									? t("Describe a task or ask a question")
-									: t(
-											running || queueing
-												? "Add a queued message…"
-												: "Ask Metis anything, or describe a task…",
-										))
-							}
-							id={inputId}
-							onInput={syncEditorState}
-							onKeyDown={handleKeyDown}
-							onSelect={() => {
-								const sel = window.getSelection();
-								if (sel && sel.rangeCount > 0) {
-									selectionOffset.current = sel.getRangeAt(0).startOffset;
-								}
-							}}
-							ref={editorRef}
-							role="textbox"
-							spellCheck={false}
-							tabIndex={0}
+			<div className="composer-surface">
+				<ComposerPanelStack>
+					<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
+					{goalControl}
+					{commandPanel}
+					{slashQuery !== undefined && (
+						<SlashCommandMenu
+							disabledCommands={disabledSlashCommands}
+							disabledReasons={disabledSlashReasons}
+							onDismiss={handleSlashDismiss}
+							onSelectCommand={handleSelectCommand}
+							onSelectSkill={handleSelectSkill}
+							query={slashQuery}
+							skills={skills}
 						/>
-						{isCode && (
-							<div className="composer-code-action">
-								{running && (!hasInput || awaitingAnswer) ? (
+					)}
+					{queuedTurnControl}
+					{interactionControl}
+				</ComposerPanelStack>
+				<form
+					className={`composer composer-${appearance}${awaitingAnswer ? " is-awaiting-answer" : ""}${inputBlocked ? " is-awaiting-interaction" : ""}`}
+					ref={formRef}
+					onDragOver={(event) => event.preventDefault()}
+					onDrop={handleDrop}
+					onPaste={handlePaste}
+					onSubmit={(event) => void submit(event).catch(() => undefined)}
+				>
+					<label className="sr-only" htmlFor={inputId}>
+						{t("Message Metis")}
+					</label>
+					<div className="composer-box">
+						<FileSelectionChips sessionId={selectionSessionId} />
+						<ConversationQuoteChips sessionId={selectionSessionId} />
+						{attachments.length > 0 && (
+							<section aria-label={t("Message additions")} className="composer-attachments">
+								{attachments.map((attachment) =>
+									attachment.previewDataUrl ? (
+										<div className="composer-image-preview" key={attachment.path}>
+											<img alt={attachment.name} src={attachment.previewDataUrl} />
+											<button
+												aria-label={t("Remove file {{name}}", { name: attachment.name })}
+												onClick={() => removeAttachment(attachment.path)}
+												type="button"
+											>
+												<X aria-hidden="true" size={12} />
+											</button>
+										</div>
+									) : (
+										<div className="composer-file-card" key={attachment.path}>
+											<span className="composer-file-card-icon">
+												<WorkspaceFileIcon path={attachment.name} size={15} />
+											</span>
+											<span className="composer-file-card-copy">
+												<strong title={attachment.name}>{attachment.name}</strong>
+												<small>{attachmentTypeLabel(attachment.name)}</small>
+											</span>
+											<button
+												aria-label={t("Remove file {{name}}", { name: attachment.name })}
+												onClick={() => removeAttachment(attachment.path)}
+												type="button"
+											>
+												<X aria-hidden="true" size={12} />
+											</button>
+										</div>
+									),
+								)}
+							</section>
+						)}
+						{contextControl}
+						<div className="composer-input-line">
+							{/* biome-ignore lint/a11y/useSemanticElements: The contenteditable textbox embeds skill and goal tokens that native text controls cannot render. */}
+							<div
+								aria-label={t("Message Metis")}
+								className="composer-editable-input"
+								aria-disabled={inputBlocked || undefined}
+								contentEditable={!disabled && !inputBlocked && !submitting}
+								data-empty={!hasInput ? "true" : undefined}
+								data-placeholder={
+									placeholder ??
+									(isCode
+										? t("Describe a task or ask a question")
+										: t(
+												running || queueing
+													? "Add a queued message…"
+													: "Ask Metis anything, or describe a task…",
+											))
+								}
+								id={inputId}
+								onInput={syncEditorState}
+								onKeyDown={handleKeyDown}
+								onSelect={() => {
+									const sel = window.getSelection();
+									if (sel && sel.rangeCount > 0) {
+										selectionOffset.current = sel.getRangeAt(0).startOffset;
+									}
+								}}
+								ref={editorRef}
+								role="textbox"
+								spellCheck={false}
+								tabIndex={0}
+							/>
+							{isCode && (
+								<div className="composer-code-action">
+									{running && (!hasInput || inputBlocked) ? (
+										<button
+											aria-label={t("Stop task")}
+											className="composer-code-stop"
+											disabled={disabled}
+											onClick={() => void onInterrupt().catch(() => undefined)}
+											type="button"
+										>
+											<Stop aria-hidden="true" size={13} weight="fill" />
+										</button>
+									) : (
+										<button
+											aria-label={t(running || queueing ? "Queue message" : "Send message")}
+											className={`composer-code-submit ${hasInput ? "is-active" : ""}`}
+											disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
+											type="submit"
+										>
+											<svg
+												aria-hidden="true"
+												fill="currentColor"
+												height="13"
+												viewBox="0 0 256 256"
+												width="13"
+											>
+												<path
+													d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"
+													transform="scale(-1, 1) translate(-256, 0)"
+												/>
+											</svg>
+										</button>
+									)}
+								</div>
+							)}
+						</div>
+					</div>
+					<div className="composer-actions">
+						<div className="composer-leading">
+							<ComposerAddMenu
+								commandRequest={commandRequest}
+								disabled={disabled || inputBlocked || submitting}
+								iconSize={isCode ? 13 : 16}
+								knowledge={knowledge}
+								mcpServers={mcpServers}
+								onAddFiles={() => void addFiles().catch(() => undefined)}
+								onManageMcp={() => onManageMcp?.()}
+								onManageSkills={() => onManageSkills?.()}
+								onSelectSkill={handleAddSkill}
+								skills={skills}
+							/>
+							{permissionControl}
+							{collaborationControl}
+							{mcpConnectionState === "connecting" && (
+								<output className="composer-mcp-status">{t("MCP connecting")}</output>
+							)}
+							{mcpConnectionState === "failed" && (
+								<button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">
+									{t("MCP connection failed")}
+								</button>
+							)}
+						</div>
+						<div className="composer-trailing">
+							{onOpenContextUsage && (
+								<ContextUsageRing
+									controls="session-status-panel"
+									expanded={contextUsageExpanded}
+									onClick={onOpenContextUsage}
+									percent={contextUsagePercent ?? null}
+								/>
+							)}
+							{modelControl}
+							{thinkingControl}
+							{!isCode &&
+								(running && (!hasInput || inputBlocked) ? (
 									<button
 										aria-label={t("Stop task")}
-										className="composer-code-stop"
+										className="composer-icon-button composer-stop button-secondary"
 										disabled={disabled}
 										onClick={() => void onInterrupt().catch(() => undefined)}
 										type="button"
 									>
-										<Stop aria-hidden="true" size={13} weight="fill" />
+										<Stop aria-hidden="true" size={16} weight="fill" />
 									</button>
 								) : (
 									<button
 										aria-label={t(running || queueing ? "Queue message" : "Send message")}
-										className={`composer-code-submit ${hasInput ? "is-active" : ""}`}
-										disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput}
+										className="composer-icon-button composer-send"
+										disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
 										type="submit"
 									>
-										<svg aria-hidden="true" fill="currentColor" height="13" viewBox="0 0 256 256" width="13">
-											<path
-												d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"
-												transform="scale(-1, 1) translate(-256, 0)"
-											/>
-										</svg>
+										<ArrowUp aria-hidden="true" size={19} weight="bold" />
 									</button>
-								)}
-							</div>
-						)}
+								))}
+						</div>
 					</div>
-				</div>
-				<div className="composer-actions">
-					<div className="composer-leading">
-						<ComposerAddMenu
-							commandRequest={commandRequest}
-							disabled={disabled || awaitingAnswer || submitting}
-							iconSize={isCode ? 13 : 16}
-							knowledge={knowledge}
-							mcpServers={mcpServers}
-							onAddFiles={() => void addFiles().catch(() => undefined)}
-							onManageMcp={() => onManageMcp?.()}
-							onManageSkills={() => onManageSkills?.()}
-							onSelectSkill={handleAddSkill}
-							skills={skills}
-						/>
-						{permissionControl}
-						{collaborationControl}
-						{mcpConnectionState === "connecting" && (
-							<output className="composer-mcp-status">{t("MCP connecting")}</output>
-						)}
-						{mcpConnectionState === "failed" && (
-							<button className="composer-mcp-status is-error" onClick={() => onManageMcp?.()} type="button">
-								{t("MCP connection failed")}
-							</button>
-						)}
-					</div>
-					<div className="composer-trailing">
-						{onOpenContextUsage && (
-							<ContextUsageRing
-								controls="session-status-panel"
-								expanded={contextUsageExpanded}
-								onClick={onOpenContextUsage}
-								percent={contextUsagePercent ?? null}
-							/>
-						)}
-						{modelControl}
-						{thinkingControl}
-						{!isCode &&
-							(running && (!hasInput || awaitingAnswer) ? (
-								<button
-									aria-label={t("Stop task")}
-									className="composer-icon-button composer-stop button-secondary"
-									disabled={disabled}
-									onClick={() => void onInterrupt().catch(() => undefined)}
-									type="button"
-								>
-									<Stop aria-hidden="true" size={16} weight="fill" />
-								</button>
-							) : (
-								<button
-									aria-label={t(running || queueing ? "Queue message" : "Send message")}
-									className="composer-icon-button composer-send"
-									disabled={disabled || awaitingAnswer || submitDisabled || submitting || !hasInput}
-									type="submit"
-								>
-									<ArrowUp aria-hidden="true" size={19} weight="bold" />
-								</button>
-							))}
-					</div>
-				</div>
-			</form>
+				</form>
+			</div>
 		</div>
 	);
 }

@@ -2195,7 +2195,9 @@ describe("Chat desktop shell", () => {
 
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
-		expect(container.querySelector(".composer-dock > .permission-approval-slot + .composer-chat")).not.toBeNull();
+		expect(container.querySelector(".composer-surface > .composer-panels + .composer-chat")).not.toBeNull();
+		expect(panel.closest(".composer-panels")?.lastElementChild).toBe(panel.parentElement);
+		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("false");
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(panel.getAttribute("aria-modal")).toBeNull();
 		expect(panel.textContent).toContain("Metis wants to use bash");

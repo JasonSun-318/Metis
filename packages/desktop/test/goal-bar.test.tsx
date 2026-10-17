@@ -45,6 +45,33 @@ function mount(
 }
 
 describe("GoalBar", () => {
+	it("folds without changing the goal, keeps its timer live, and opens a new goal", () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-17T00:00:10.000Z"));
+		const { container, onPause, onResume, onClear, root } = mount(activeGoal);
+		act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Collapse goal"]')!.click());
+		const body = container.querySelector<HTMLElement>(".goal-bar-body")!;
+		expect(body.hidden).toBe(true);
+		expect(body.hasAttribute("inert")).toBe(true);
+		expect(container.querySelector(".goal-bar-summary")?.textContent).toBe(activeGoal.objective);
+		act(() => vi.advanceTimersByTime(2_000));
+		expect(container.querySelector(".goal-bar-elapsed")?.textContent).toBe("17s");
+		expect(onPause).not.toHaveBeenCalled();
+		expect(onResume).not.toHaveBeenCalled();
+		expect(onClear).not.toHaveBeenCalled();
+		act(() =>
+			root.render(
+				<GoalBar
+					goal={{ ...activeGoal, goalId: "new-goal" }}
+					onPause={onPause}
+					onResume={onResume}
+					onClear={onClear}
+				/>,
+			),
+		);
+		expect(body.hidden).toBe(false);
+	});
+
 	it("renders nothing without a goal", () => {
 		const { container } = mount(null);
 		expect(container.childElementCount).toBe(0);

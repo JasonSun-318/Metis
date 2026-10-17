@@ -5,7 +5,10 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8");
+const css = readFileSync(path.join(process.cwd(), "src/renderer/styles/app.css"), "utf8").replace(
+	'@import "./composer-panels.css";',
+	readFileSync(path.join(process.cwd(), "src/renderer/styles/composer-panels.css"), "utf8"),
+);
 
 let cachedRules: CSSStyleRule[] | null = null;
 function getRules(): CSSStyleRule[] {
@@ -180,13 +183,16 @@ describe("Composer visual states", () => {
 		expect(css).not.toContain(".permission-approval-panel { width: min(620px, 100%);");
 		expect(rule(".permission-approval-details > div").gridTemplateColumns).toBe("108px minmax(0, 1fr)");
 		expect(rule(".permission-approval-details dd code").whiteSpace).toBe("pre-wrap");
-		expect(rule(".permission-approval-panel > footer button:hover:not(:disabled)").background).toBe(
-			"var(--button-primary-bg-hover)",
+		expect(
+			rule(".permission-approval-panel .permission-approval-body > footer button:hover:not(:disabled)").background,
+		).toBe("var(--button-primary-bg-hover)");
+		expect(
+			rule(".permission-approval-panel .permission-approval-body > footer .button-secondary:hover:not(:disabled)")
+				.background,
+		).toBe("var(--surface-10)");
+		expect(rule(".goal-bar-body[hidden], .permission-approval-body[hidden], .queued-turn-body[hidden]").display).toBe(
+			"none",
 		);
-		expect(rule(".permission-approval-panel > footer .button-secondary:hover:not(:disabled)").background).toBe(
-			"var(--surface-10)",
-		);
-		expect(css).not.toContain("permission-approval-toggle");
 		expect(css).toContain(".permission-approval-slot");
 	});
 

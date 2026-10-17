@@ -1,6 +1,6 @@
 import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
-import { Warning } from "@phosphor-icons/react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { CaretDown, Warning } from "@phosphor-icons/react";
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
@@ -41,6 +41,8 @@ export function PermissionApprovalPanel({
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [dismissedInteractionId, setDismissedInteractionId] = useState<string | null>(null);
+	const [expanded, setExpanded] = useState(true);
+	const bodyId = useId();
 	const titleId = "permission-approval-title";
 	const allowOnce = interaction.choices.includes("allow-once");
 	const alwaysAllow = interaction.choices.includes("always-allow-exact");
@@ -74,6 +76,7 @@ export function PermissionApprovalPanel({
 		setDismissedInteractionId(null);
 		setBusy(false);
 		setError(null);
+		setExpanded(true);
 	}, [interaction.interactionId]);
 
 	if (dismissedInteractionId === interaction.interactionId) {
@@ -107,7 +110,7 @@ export function PermissionApprovalPanel({
 		<div className="permission-approval-slot">
 			<section
 				aria-busy={busy}
-				aria-describedby={descriptionIds}
+				aria-describedby={expanded ? descriptionIds : undefined}
 				aria-labelledby={titleId}
 				className="permission-approval-panel"
 				onKeyDown={handleKeyDown}
@@ -115,97 +118,113 @@ export function PermissionApprovalPanel({
 			>
 				<header>
 					<Warning aria-hidden="true" size={18} />
-					<h2 id={titleId}>{t("Metis wants to use {{tool}}", { tool: interaction.toolLabel })}</h2>
+					<div>
+						<h2 id={titleId}>{t("Metis wants to use {{tool}}", { tool: interaction.toolLabel })}</h2>
+						{!expanded && <small className="permission-approval-summary">{t("Waiting for approval")}</small>}
+					</div>
+					<button
+						aria-controls={bodyId}
+						aria-expanded={expanded}
+						aria-label={t(expanded ? "Collapse approval" : "Expand approval")}
+						className="composer-panel-toggle"
+						disabled={busy}
+						onClick={() => setExpanded((value) => !value)}
+						type="button"
+					>
+						<CaretDown aria-hidden="true" size={16} />
+					</button>
 				</header>
-				<p
-					className={hostOrExternal ? "permission-approval-warning" : "permission-approval-target"}
-					id="permission-approval-execution-target"
-				>
-					{interaction.executionTarget === "sandbox"
-						? t("This command remains limited to the displayed workspace sandbox.")
-						: interaction.executionTarget === "external"
-							? t("This action reaches a network or external service.")
-							: t("This action will run outside the sandbox with your current user permissions.")}
-				</p>
-				<p id="permission-approval-reason">{t(interaction.reason)}</p>
-				{interaction.details.length > 0 && (
-					<dl className="permission-approval-details" id="permission-approval-details">
-						{interaction.details.map((row, index) => (
-							<div key={`${row.label}:${index}`}>
-								<dt>{t(row.label)}</dt>
-								<dd>
-									<code>{row.value}</code>
-								</dd>
-							</div>
-						))}
-					</dl>
-				)}
-				{interaction.riskLevel === "critical" && (
-					<p className="permission-approval-warning" id="permission-approval-irreversible">
-						{t("This operation may not be reversible.")}
+				<div className="permission-approval-body" hidden={!expanded} id={bodyId} inert={!expanded}>
+					<p
+						className={hostOrExternal ? "permission-approval-warning" : "permission-approval-target"}
+						id="permission-approval-execution-target"
+					>
+						{interaction.executionTarget === "sandbox"
+							? t("This command remains limited to the displayed workspace sandbox.")
+							: interaction.executionTarget === "external"
+								? t("This action reaches a network or external service.")
+								: t("This action will run outside the sandbox with your current user permissions.")}
 					</p>
-				)}
-				{interaction.priorReviewer && (
-					<p className="permission-approval-warning" id="permission-approval-prior-review">
-						{t(priorReviewCopy(interaction.priorReviewerOutcome))}
-					</p>
-				)}
-				{sandboxBlocked && (
-					<p className="permission-approval-warning" id="permission-approval-sandbox-blocked" role="alert">
-						{t("Workspace sandbox is unavailable. This action stays blocked instead of running on the host.")}
-					</p>
-				)}
-				{!interaction.scopeComplete && (
-					<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
-						{t("This tool did not provide enough target details. Deny and retry with a specific target.")}
-					</p>
-				)}
-				<p className="sr-only" aria-live="polite">
-					{busy ? t("Sending your decision…") : error ? t(error) : ""}
-				</p>
-				{error && (
-					<p className="error-copy" role="alert">
-						{t(error)}
-					</p>
-				)}
-				<footer>
-					{denyOnce && (
-						<button
-							className="button-secondary"
-							disabled={busy}
-							onClick={() => choose("deny-once")}
-							ref={firstControl}
-							type="button"
-						>
-							{t(CHOICE_LABELS["deny-once"])} <kbd>Esc</kbd>
-						</button>
+					<p id="permission-approval-reason">{t(interaction.reason)}</p>
+					{interaction.details.length > 0 && (
+						<dl className="permission-approval-details" id="permission-approval-details">
+							{interaction.details.map((row, index) => (
+								<div key={`${row.label}:${index}`}>
+									<dt>{t(row.label)}</dt>
+									<dd>
+										<code>{row.value}</code>
+									</dd>
+								</div>
+							))}
+						</dl>
 					)}
-					{alwaysDeny && (
-						<button
-							className="button-secondary"
-							disabled={busy}
-							onClick={() => choose("always-deny-exact")}
-							type="button"
-						>
-							{t(CHOICE_LABELS["always-deny-exact"])}
-						</button>
+					{interaction.riskLevel === "critical" && (
+						<p className="permission-approval-warning" id="permission-approval-irreversible">
+							{t("This operation may not be reversible.")}
+						</p>
 					)}
-					{alwaysAllow && (
-						<button
-							className="button-secondary"
-							disabled={busy || alwaysAllowBlocked}
-							onClick={() => choose("always-allow-exact")}
-							type="button"
-						>
-							{t(CHOICE_LABELS["always-allow-exact"])}
-						</button>
+					{interaction.priorReviewer && (
+						<p className="permission-approval-warning" id="permission-approval-prior-review">
+							{t(priorReviewCopy(interaction.priorReviewerOutcome))}
+						</p>
 					)}
-					{allowOnce && (
-						<button disabled={busy || allowOnceBlocked} onClick={() => choose("allow-once")} type="button">
-							{t(CHOICE_LABELS["allow-once"])}
-						</button>
+					{sandboxBlocked && (
+						<p className="permission-approval-warning" id="permission-approval-sandbox-blocked" role="alert">
+							{t("Workspace sandbox is unavailable. This action stays blocked instead of running on the host.")}
+						</p>
 					)}
-				</footer>
+					{!interaction.scopeComplete && (
+						<p className="permission-approval-warning" id="permission-approval-incomplete" role="alert">
+							{t("This tool did not provide enough target details. Deny and retry with a specific target.")}
+						</p>
+					)}
+					<p className="sr-only" aria-live="polite">
+						{busy ? t("Sending your decision…") : error ? t(error) : ""}
+					</p>
+					{error && (
+						<p className="error-copy" role="alert">
+							{t(error)}
+						</p>
+					)}
+					<footer>
+						{denyOnce && (
+							<button
+								className="button-secondary"
+								disabled={busy}
+								onClick={() => choose("deny-once")}
+								ref={firstControl}
+								type="button"
+							>
+								{t(CHOICE_LABELS["deny-once"])} <kbd>Esc</kbd>
+							</button>
+						)}
+						{alwaysDeny && (
+							<button
+								className="button-secondary"
+								disabled={busy}
+								onClick={() => choose("always-deny-exact")}
+								type="button"
+							>
+								{t(CHOICE_LABELS["always-deny-exact"])}
+							</button>
+						)}
+						{alwaysAllow && (
+							<button
+								className="button-secondary"
+								disabled={busy || alwaysAllowBlocked}
+								onClick={() => choose("always-allow-exact")}
+								type="button"
+							>
+								{t(CHOICE_LABELS["always-allow-exact"])}
+							</button>
+						)}
+						{allowOnce && (
+							<button disabled={busy || allowOnceBlocked} onClick={() => choose("allow-once")} type="button">
+								{t(CHOICE_LABELS["allow-once"])}
+							</button>
+						)}
+					</footer>
+				</div>
 			</section>
 		</div>
 	);

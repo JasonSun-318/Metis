@@ -1,3 +1,5 @@
+@import "./composer-panels.css";
+
 * { box-sizing: border-box; }
 
 .control-group { min-width: 0; margin: 0; border: 0; padding: 0; }
@@ -1648,8 +1650,6 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 	padding: 0 8px 0 11px;
 	min-height: 36px;
 }
-.goal-bar-slot + .permission-approval-slot .permission-approval-panel,
-.task-list-slot + .goal-bar-slot .goal-bar-panel { border-radius: 0; }
 .goal-bar-icon { display: grid; color: var(--text-14); place-items: center; }
 .goal-bar-copy { display: grid; min-width: 0; gap: 1px; }
 .goal-bar-copy strong { color: var(--muted); font-size: 11px; font-weight: 500; }
@@ -1722,11 +1722,11 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .permission-approval-warning { color: var(--warning-soft); margin: 8px 0 0 30px; font-size: 11px; line-height: 1.4; }
 .permission-approval-target { color: var(--text-12); margin: 8px 0 0 30px; font-size: 11px; line-height: 1.4; }
 .permission-approval-complete-details { max-height: 148px; overflow: auto; margin: 10px 0 0 30px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-03); color: var(--text-21); padding: 8px 9px; font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; scrollbar-color: var(--scrollbar-thumb) transparent; white-space: pre-wrap; overflow-wrap: anywhere; }
-.permission-approval-panel > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 10px; }
-.permission-approval-panel > footer button { min-height: 30px; border-radius: 8px; background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 10px; font-size: 12px; font-weight: 550; }
-.permission-approval-panel > footer button:hover:not(:disabled) { background: var(--button-primary-bg-hover); box-shadow: none; }
-.permission-approval-panel > footer .button-secondary { --button-hover-bg: var(--panel-hover); border: 1px solid var(--border-strong); background: var(--surface-08); color: var(--text-25); }
-.permission-approval-panel > footer .button-secondary:hover:not(:disabled) { background: var(--surface-10); }
+.permission-approval-panel .permission-approval-body > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 10px; }
+.permission-approval-panel .permission-approval-body > footer button { min-height: 30px; border-radius: 8px; background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 10px; font-size: 12px; font-weight: 550; }
+.permission-approval-panel .permission-approval-body > footer button:hover:not(:disabled) { background: var(--button-primary-bg-hover); box-shadow: none; }
+.permission-approval-panel .permission-approval-body > footer .button-secondary { --button-hover-bg: var(--panel-hover); border: 1px solid var(--border-strong); background: var(--surface-08); color: var(--text-25); }
+.permission-approval-panel .permission-approval-body > footer .button-secondary:hover:not(:disabled) { background: var(--surface-10); }
 .permission-approval-panel kbd { color: var(--text-14); margin-left: 4px; font: inherit; font-weight: 400; }
 .permission-approval-panel .error-copy { margin: 8px 0 0 30px; }
 .conversation-column { position: relative; }
