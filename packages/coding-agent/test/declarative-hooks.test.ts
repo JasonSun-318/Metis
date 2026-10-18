@@ -160,6 +160,42 @@ describe("declarative hooks config", () => {
 		expect(validateDeclarativeHook(makeHook({ protocol: "legacy", event: "Stop", matcher: "bash" }))).toBeNull();
 	});
 
+	it("keeps legacy matcher strings while filtering invalid command-v1 matchers on load", () => {
+		const legacy = makeHook({ matcher: "[" });
+		const explicitLegacy = makeHook({ protocol: "legacy", event: "Stop", matcher: "[" });
+		const valid = makeHook({ protocol: "command-v1", matcher: "*" });
+		const invalidRegex = makeHook({ name: "bad regex", protocol: "command-v1", matcher: "[" });
+		const invalidEvent = makeHook({ name: "bad event", protocol: "command-v1", event: "Stop", matcher: "*" });
+		fs.writeFileSync(
+			path.join(agentDir, HOOKS_CONFIG_FILENAME),
+			JSON.stringify({ hooks: [legacy, invalidRegex, explicitLegacy, invalidEvent, valid] }),
+		);
+
+		const loaded = loadDeclarativeHooks(agentDir);
+		expect(loaded.hooks).toEqual([legacy, explicitLegacy, valid]);
+		expect(loaded.errors).toEqual([
+			expect.stringContaining("bad regex: Invalid matcher regex:"),
+			"bad event: Hook matcher is not applicable to Stop in command-v1",
+		]);
+	});
+
+	it("rejects invalid matchers before replacing the saved hooks configuration", () => {
+		const valid = makeHook({ protocol: "command-v1", event: "UserPromptSubmit", matcher: " \t" });
+		saveDeclarativeHooks(agentDir, [valid]);
+		const configPath = path.join(agentDir, HOOKS_CONFIG_FILENAME);
+		const original = fs.readFileSync(configPath, "utf8");
+
+		expect(() => saveDeclarativeHooks(agentDir, [makeHook({ protocol: "command-v1", matcher: "[" })])).toThrow(
+			"Invalid matcher regex:",
+		);
+		expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+		expect(() => saveDeclarativeHooks(agentDir, [{ ...valid, matcher: "*" }])).toThrow(
+			"Hook matcher is not applicable to UserPromptSubmit in command-v1",
+		);
+		expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+		expect(loadDeclarativeHooks(agentDir)).toEqual({ hooks: [valid], errors: [] });
+	});
+
 	it("reloading reflects removal of the last hook", () => {
 		const hook = makeHook();
 		saveDeclarativeHooks(agentDir, [hook]);

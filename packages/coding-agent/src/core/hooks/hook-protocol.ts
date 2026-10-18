@@ -1,6 +1,8 @@
 import { type DeclarativeHook, hookMatchesTool } from "./declarative-hooks.ts";
 import type { HookPayload, HookRunResult } from "./hook-bridge.ts";
 
+export { validateHookMatcher } from "./declarative-hooks.ts";
+
 export const MAX_PIPE_BUFFER_BYTES = 32768; // 32 KiB
 export const MAX_HOOK_CONTEXT_BYTES = 8192; // 8 KiB
 export const MAX_EVENT_TOTAL_CONTEXT_BYTES = 32768; // 32 KiB
@@ -176,30 +178,6 @@ export function buildCommandHookPayload(hook: DeclarativeHook, payload: HookPayl
 		...(payload.stopHookActive !== undefined ? { stop_hook_active: payload.stopHookActive } : {}),
 		...(payload.lastAssistantMessage !== undefined ? { last_assistant_message: payload.lastAssistantMessage } : {}),
 	};
-}
-
-/**
- * Validate the matcher string according to hook protocol and event.
- */
-export function validateHookMatcher(hook: Pick<DeclarativeHook, "protocol" | "event" | "matcher">): string | null {
-	if (hook.protocol !== "command-v1") {
-		return null;
-	}
-	if (hook.event === "Stop" || hook.event === "UserPromptSubmit") {
-		if (hook.matcher !== undefined && hook.matcher.trim().length > 0) {
-			return `Hook matcher is not applicable to ${hook.event} in command-v1`;
-		}
-		return null;
-	}
-	if (hook.matcher !== undefined && hook.matcher.trim().length > 0 && hook.matcher.trim() !== "*") {
-		try {
-			new RegExp(hook.matcher);
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			return `Invalid matcher regex: ${message}`;
-		}
-	}
-	return null;
 }
 
 /**

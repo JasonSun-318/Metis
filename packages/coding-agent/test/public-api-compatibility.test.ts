@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { validateHookMatcher as ProtocolValidateHookMatcher } from "../src/core/hooks/hook-protocol.ts";
 import { McpConfigurationCoordinator as HostMcpConfigurationCoordinator } from "../src/host.ts";
 import {
 	AuthStorage,
@@ -9,6 +10,7 @@ import {
 	ShowImagesSelectorComponent,
 	ThemeSelectorComponent,
 	ThinkingSelectorComponent,
+	validateHookMatcher,
 } from "../src/index.ts";
 
 describe("public SDK compatibility", () => {
@@ -67,5 +69,13 @@ describe("public SDK compatibility", () => {
 		expect(HostMcpConfigurationCoordinator).toBe(McpConfigurationCoordinator);
 		const coordinator = new HostMcpConfigurationCoordinator({ authStorage: AuthStorage.inMemory() });
 		expect(coordinator.drainDiagnostics()).toEqual([]);
+	});
+
+	it("keeps matcher validation available through the root and protocol entry points", () => {
+		expect(ProtocolValidateHookMatcher).toBe(validateHookMatcher);
+		expect(validateHookMatcher({ event: "PreToolUse", matcher: "[" })).toBeNull();
+		expect(validateHookMatcher({ protocol: "command-v1", event: "PreToolUse", matcher: "[" })).toContain(
+			"Invalid matcher regex:",
+		);
 	});
 });

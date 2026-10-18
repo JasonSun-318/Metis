@@ -14,7 +14,6 @@ import { replaceFileAtomicallySync } from "../durable-file.ts";
 import { resolvePluginTemplateVariables } from "../mcp/config.ts";
 import { getPluginDataDir, readPluginSnapshot } from "../plugins/registry.ts";
 import type { PluginHookComponent, PluginOwner, PluginSnapshot } from "../plugins/types.ts";
-import { validateHookMatcher } from "./hook-protocol.ts";
 
 export const HOOKS_CONFIG_FILENAME = "hooks.json";
 
@@ -107,6 +106,30 @@ export function hookMatchesTool(hook: DeclarativeHook, toolName: string): boolea
 
 export function createHookId(): string {
 	return randomUUID();
+}
+
+/**
+ * Validate the matcher string according to hook protocol and event.
+ */
+export function validateHookMatcher(hook: Pick<DeclarativeHook, "protocol" | "event" | "matcher">): string | null {
+	if (hook.protocol !== "command-v1") {
+		return null;
+	}
+	if (hook.event === "Stop" || hook.event === "UserPromptSubmit") {
+		if (hook.matcher !== undefined && hook.matcher.trim().length > 0) {
+			return `Hook matcher is not applicable to ${hook.event} in command-v1`;
+		}
+		return null;
+	}
+	if (hook.matcher !== undefined && hook.matcher.trim().length > 0 && hook.matcher.trim() !== "*") {
+		try {
+			new RegExp(hook.matcher);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return `Invalid matcher regex: ${message}`;
+		}
+	}
+	return null;
 }
 
 export function validateDeclarativeHook(hook: DeclarativeHook): string | null {
