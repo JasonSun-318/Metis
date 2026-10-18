@@ -1,5 +1,6 @@
 import type { AssistantMessage, ImageContent } from "@metis/ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExtensionCommandContextActions } from "../src/core/extensions/types.ts";
 import type { SessionShutdownEvent } from "../src/index.ts";
 import { runPrintMode } from "../src/modes/print-mode.ts";
 
@@ -18,7 +19,9 @@ type FakeSession = {
 	bindExtensions: ReturnType<typeof vi.fn>;
 	subscribe: ReturnType<typeof vi.fn>;
 	prompt: ReturnType<typeof vi.fn>;
+	waitForIdle: ReturnType<typeof vi.fn>;
 	reload: ReturnType<typeof vi.fn>;
+	navigateTree: ReturnType<typeof vi.fn>;
 };
 
 type FakeRuntimeHost = {
@@ -71,13 +74,15 @@ function createRuntimeHost(assistantMessage: AssistantMessage): FakeRuntimeHost 
 		bindExtensions: vi.fn(async () => {}),
 		subscribe: vi.fn(() => () => {}),
 		prompt: vi.fn(async () => {}),
+		waitForIdle: vi.fn(async () => {}),
 		reload: vi.fn(async () => {}),
+		navigateTree: vi.fn(async () => ({ cancelled: false })),
 	};
 
 	return {
 		session,
 		newSession: vi.fn(async () => undefined),
-		fork: vi.fn(async () => ({ selectedText: "" })),
+		fork: vi.fn(async () => ({ cancelled: false, selectedText: "" })),
 		switchSession: vi.fn(async () => undefined),
 		dispose: vi.fn(async () => {
 			await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
@@ -138,5 +143,53 @@ describe("runPrintMode", () => {
 		expect(errorSpy).toHaveBeenCalledWith("provider failure");
 		expect(session.extensionRunner.emit).toHaveBeenCalledTimes(1);
 		expect(session.extensionRunner.emit).toHaveBeenCalledWith({ type: "session_shutdown", reason: "quit" });
+	});
+
+	it("binds command context actions with the shared headless contract", async () => {
+		const runtimeHost = createRuntimeHost(createAssistantMessage({ text: "done" }));
+		const { session } = runtimeHost;
+		let actions: ExtensionCommandContextActions | undefined;
+		session.bindExtensions.mockImplementation(
+			async (options: { commandContextActions?: ExtensionCommandContextActions }) => {
+				actions = options.commandContextActions;
+			},
+		);
+
+		await runPrintMode(runtimeHost as unknown as Parameters<typeof runPrintMode>[0], { mode: "text" });
+
+		expect(actions).toBeDefined();
+
+		await actions!.waitForIdle();
+		expect(session.waitForIdle).toHaveBeenCalledWith();
+
+		const newSessionOptions = { parentSession: "parent", withSession: async () => {} };
+		await actions!.newSession(newSessionOptions);
+		expect(runtimeHost.newSession).toHaveBeenCalledWith(newSessionOptions);
+
+		runtimeHost.fork.mockResolvedValue({ cancelled: false, selectedText: "selected" });
+		await expect(actions!.fork("entry-1", { position: "at" })).resolves.toEqual({ cancelled: false });
+		expect(runtimeHost.fork).toHaveBeenCalledWith("entry-1", { position: "at" });
+
+		const navigateOptions = {
+			summarize: true,
+			customInstructions: "custom",
+			replaceInstructions: false,
+			label: "label",
+			unexpected: "dropped",
+		};
+		await expect(actions!.navigateTree("target-1", navigateOptions)).resolves.toEqual({ cancelled: false });
+		expect(session.navigateTree).toHaveBeenCalledWith("target-1", {
+			summarize: true,
+			customInstructions: "custom",
+			replaceInstructions: false,
+			label: "label",
+		});
+
+		const switchOptions = { withSession: async () => {} };
+		await actions!.switchSession("/tmp/next-session.jsonl", switchOptions);
+		expect(runtimeHost.switchSession).toHaveBeenCalledWith("/tmp/next-session.jsonl", switchOptions);
+
+		await actions!.reload();
+		expect(session.reload).toHaveBeenCalledWith();
 	});
 });

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
-import type { ExtensionUIContext } from "../src/core/extensions/types.ts";
+import type { ExtensionCommandContextActions, ExtensionUIContext } from "../src/core/extensions/types.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -358,6 +358,62 @@ describe("RPC prompt response semantics", () => {
 			});
 
 			await sleep(150);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("binds command context actions with the shared headless contract", async () => {
+		const { runtimeHost, cleanup } = createRuntimeHost({ withAuth: true, responseDelayMs: 0 });
+		let actions: ExtensionCommandContextActions | undefined;
+		const bind = vi.spyOn(runtimeHost.session, "bindExtensions").mockImplementation(async (options) => {
+			actions = options.commandContextActions;
+		});
+		const waitForIdle = vi.spyOn(runtimeHost.session, "waitForIdle").mockResolvedValue();
+		const navigateTree = vi
+			.spyOn(runtimeHost.session, "navigateTree")
+			.mockResolvedValue({ cancelled: true, editorText: "editor" });
+		const reload = vi.spyOn(runtimeHost.session, "reload").mockResolvedValue();
+
+		try {
+			void runRpcMode(runtimeHost);
+			await vi.waitFor(() => expect(actions).toBeDefined());
+			expect(bind).toHaveBeenCalledTimes(1);
+
+			await actions!.waitForIdle();
+			expect(waitForIdle).toHaveBeenCalledWith();
+
+			const newSessionOptions = { parentSession: "parent", withSession: async () => {} };
+			await expect(actions!.newSession(newSessionOptions)).resolves.toEqual({ cancelled: true });
+			expect(runtimeHost.newSession).toHaveBeenCalledWith(newSessionOptions);
+
+			const fork = vi.spyOn(runtimeHost, "fork").mockResolvedValue({ cancelled: false, selectedText: "selected" });
+			await expect(actions!.fork("entry-1", { position: "at" })).resolves.toEqual({ cancelled: false });
+			expect(fork).toHaveBeenCalledWith("entry-1", { position: "at" });
+
+			const navigateOptions = {
+				summarize: true,
+				customInstructions: "custom",
+				replaceInstructions: false,
+				label: "label",
+				unexpected: "dropped",
+			};
+			await expect(actions!.navigateTree("target-1", navigateOptions)).resolves.toEqual({ cancelled: true });
+			expect(navigateTree).toHaveBeenCalledWith("target-1", {
+				summarize: true,
+				customInstructions: "custom",
+				replaceInstructions: false,
+				label: "label",
+			});
+
+			const switchOptions = { withSession: async () => {} };
+			await expect(actions!.switchSession("/tmp/next-session.jsonl", switchOptions)).resolves.toEqual({
+				cancelled: true,
+			});
+			expect(runtimeHost.switchSession).toHaveBeenCalledWith("/tmp/next-session.jsonl", switchOptions);
+
+			await actions!.reload();
+			expect(reload).toHaveBeenCalledWith();
 		} finally {
 			await cleanup();
 		}
