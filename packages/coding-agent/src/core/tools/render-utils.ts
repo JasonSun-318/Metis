@@ -2,6 +2,7 @@ import * as os from "node:os";
 import { pathToFileURL } from "node:url";
 import type { ImageContent, TextContent } from "@metis/ai";
 import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@metis/tui";
+import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import { resolvePath } from "../../utils/paths.ts";
@@ -61,6 +62,33 @@ export function getTextOutput(
 	}
 
 	return output;
+}
+
+/**
+ * Render the shared text preview used by the list-style tools.
+ *
+ * Tool-specific detail warnings stay with the callers; this only formats the
+ * text/image output and its collapse hint.
+ */
+export function formatToolResultPreview(
+	result: { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> } | undefined,
+	options: { expanded: boolean },
+	theme: Theme,
+	showImages: boolean,
+	collapsedLineLimit: number,
+): string {
+	const output = getTextOutput(result, showImages).trim();
+	if (!output) return "";
+
+	const lines = output.split("\n");
+	const maxLines = options.expanded ? lines.length : collapsedLineLimit;
+	const displayLines = lines.slice(0, maxLines);
+	const remaining = lines.length - maxLines;
+	let text = `\n${displayLines.map((line) => theme.fg("toolOutput", line)).join("\n")}`;
+	if (remaining > 0) {
+		text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
+	}
+	return text;
 }
 
 export type ToolRenderResultLike<TDetails> = {

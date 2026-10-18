@@ -3,13 +3,12 @@ import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { fileReadPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
 import { pathExists, resolveToCwd } from "./path-utils.ts";
-import { getTextOutput, renderToolPath, str } from "./render-utils.ts";
+import { formatToolResultPreview, renderToolPath, str } from "./render-utils.ts";
 import { wrapToolDefinition } from "./tool-definition-wrapper.ts";
 import { DEFAULT_MAX_BYTES, formatSize, type TruncationResult, truncateHead } from "./truncate.ts";
 
@@ -71,18 +70,7 @@ function formatLsResult(
 	theme: Theme,
 	showImages: boolean,
 ): string {
-	const output = getTextOutput(result, showImages).trim();
-	let text = "";
-	if (output) {
-		const lines = output.split("\n");
-		const maxLines = options.expanded ? lines.length : 20;
-		const displayLines = lines.slice(0, maxLines);
-		const remaining = lines.length - maxLines;
-		text += `\n${displayLines.map((line) => theme.fg("toolOutput", line)).join("\n")}`;
-		if (remaining > 0) {
-			text += `${theme.fg("muted", `\n... (${remaining} more lines,`)} ${keyHint("app.tools.expand", "to expand")}${theme.fg("muted", ")")}`;
-		}
-	}
+	let text = formatToolResultPreview(result, options, theme, showImages, 20);
 
 	const entryLimit = result.details?.entryLimitReached;
 	const truncation = result.details?.truncation;
