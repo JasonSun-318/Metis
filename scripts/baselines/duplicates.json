@@ -1,0 +1,182 @@
+{
+	"version": 1,
+	"threshold": 80,
+	"clusters": [
+		{
+			"hash": "0ce01ceca359f16ae4a9d0cadbc6fac9849ec526730109bbf51137aa8568c57b",
+			"tokens": 104,
+			"occurrences": [
+				{
+					"file": "packages/desktop/src/renderer/components/ComposerAddMenu.tsx",
+					"symbol": "<callback>",
+					"count": 1
+				},
+				{
+					"file": "packages/desktop/src/renderer/components/ThinkingSelector.tsx",
+					"symbol": "<callback>",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "0e48a293905683ca622b519fb3d28e1819af956e1d08bd15273a84b3d24b71bc",
+			"tokens": 93,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/compaction/utils.ts",
+					"symbol": "formatFileOperations",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/compaction/utils.ts",
+					"symbol": "formatFileOperations",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "8834874702a5e1108018dbe33d76c408d1799310f08c55719a180e82974134cc",
+			"tokens": 182,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/prompt-templates.ts",
+					"symbol": "parseFrontmatter",
+					"count": 1
+				},
+				{
+					"file": "packages/agent/src/harness/skills.ts",
+					"symbol": "parseFrontmatter",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "8e12d7bb6b175600dce4221cc58cb08161a2ead973ce60c4a32ffd0fc4b90a2b",
+			"tokens": 185,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/compaction/utils.ts",
+					"symbol": "extractFileOpsFromMessage",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/compaction/utils.ts",
+					"symbol": "extractFileOpsFromMessage",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "cb20c709e8058b28063febaadb104390a180a9467492a11c5f955906bea839ce",
+			"tokens": 103,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/messages.ts",
+					"symbol": "bashExecutionToText",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/messages.ts",
+					"symbol": "bashExecutionToText",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "cba13fddd53f1b8f72b095b0949b9b4307ec3fe9821bfe7b412ad667b7bf195e",
+			"tokens": 87,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/compaction/compaction.ts",
+					"symbol": "estimateTextAndImageContentChars",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/compaction/compaction.ts",
+					"symbol": "estimateTextAndImageContentChars",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "d8c837ee361f5b55ae8f64a0da706be080767f17dfda7b5209cf9e4eb8e54953",
+			"tokens": 86,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/compaction/utils.ts",
+					"symbol": "computeFileLists",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/compaction/utils.ts",
+					"symbol": "computeFileLists",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "d92020e974e0a468eda072493c8d08d9a155cb1af6451bfec93e3fe8bea9b250",
+			"tokens": 121,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/compaction/compaction.ts",
+					"symbol": "estimateContextTokens",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/compaction/compaction.ts",
+					"symbol": "estimateContextTokens",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "e291b2f317369d59a0f9f96bf8bdf059bc4ee2bdb8450ead5c8ffe2b7fd932ec",
+			"tokens": 115,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/session/jsonl-storage.ts",
+					"symbol": "JsonlSessionStorage.getPathToRoot",
+					"count": 1
+				},
+				{
+					"file": "packages/agent/src/harness/session/memory-storage.ts",
+					"symbol": "InMemorySessionStorage.getPathToRoot",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "e434611e699fa0d2d22123cfc07a141bf95bae6f61c5161187c828411eaab232",
+			"tokens": 104,
+			"occurrences": [
+				{
+					"file": "packages/ai/src/utils/validation.ts",
+					"symbol": "formatValidationPath",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/core/model-registry.ts",
+					"symbol": "formatValidationPath",
+					"count": 1
+				}
+			]
+		},
+		{
+			"hash": "fd36d60ad91c2624e6a51c2ec5535d56bc60f43e4731945a9d02bef349cfa8ae",
+			"tokens": 89,
+			"occurrences": [
+				{
+					"file": "packages/agent/src/harness/utils/shell-output.ts",
+					"symbol": "sanitizeBinaryOutput",
+					"count": 1
+				},
+				{
+					"file": "packages/coding-agent/src/utils/shell.ts",
+					"symbol": "sanitizeBinaryOutput",
+					"count": 1
+				}
+			]
+		}
+	]
+}

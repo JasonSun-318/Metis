@@ -34,3 +34,34 @@ node scripts/check-public-api.mjs --update
 ```
 
 The initial baselines were captured from `694f3f17` before the helper extraction.
+
+## Advisory duplicate report
+
+`npm run check:dup` reports newly duplicated implementations against
+`duplicates.json`. It runs in `npm run check` and architecture CI as an advisory
+report: findings and scan errors are printed without failing the normal command;
+CI additionally marks the report step `continue-on-error`. Regression tests for
+the checker itself remain part of the normal required script tests.
+
+Coverage is TypeScript/TSX source under `packages/*/src`, excluding declaration,
+test/fixture and generated files. It compares function ASTs with at least 80
+tokens, ignoring comments, formatting, optional punctuation and the callable's
+own name. Parameters, modifiers, types, identifiers, literal values, parenthesis
+grouping, raw template escapes and JSX text remain significant. It does not
+detect near-duplicates or prove that two functions can safely be merged.
+Nested functions already represented by a duplicated parent, or occupying at
+least 85% of their parent, are suppressed to reduce redundant findings.
+
+The baseline records hashes and counts per file/symbol, without line numbers.
+Moving lines does not create a finding; an extra occurrence in an existing
+cluster, including in the same file, does. Moving or renaming a baselined symbol
+can require review. Existing duplicate counts can fall without failing a check.
+
+Normal reports do not modify source files or their baseline. An incomplete scan
+is diagnostic output, not evidence that the repository has no duplicates. After
+reviewing intentional duplication, update the baseline explicitly and inspect
+its diff:
+
+```sh
+node scripts/check-duplicates.mjs --update
+```

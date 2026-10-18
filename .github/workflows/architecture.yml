@@ -43,5 +43,8 @@ jobs:
         run: npm run check:cycles
       - name: Check public API surfaces
         run: npm run check:public-api
+      - name: Report newly duplicated implementations
+        continue-on-error: true
+        run: npm run check:dup
       - name: Test architecture guards
         run: npm run check:scripts
