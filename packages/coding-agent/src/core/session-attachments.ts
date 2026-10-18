@@ -234,6 +234,8 @@ export function importSessionAttachments(options: {
 	readonly cwd: string;
 	readonly attachments: readonly SessionAttachmentInput[];
 	readonly key?: string;
+	/** Reports files created by this import, excluding existing idempotent copies. */
+	readonly onFileCreated?: (path: string) => void;
 }): SessionAttachment[] {
 	if (options.attachments.length > MAX_SESSION_ATTACHMENTS) {
 		throw new Error(`A prompt can attach at most ${MAX_SESSION_ATTACHMENTS} files`);
@@ -281,7 +283,9 @@ export function importSessionAttachments(options: {
 			if (copied.isSymbolicLink() || !copied.isFile() || copied.size !== sourceMetadata.size) {
 				throw new Error(`Attachment changed while it was being copied: ${attachment.path}`);
 			}
-			imported.push({ name, path: realpathSync(destination), size: sourceMetadata.size });
+			const path = realpathSync(destination);
+			imported.push({ name, path, size: sourceMetadata.size });
+			if (created.includes(destination)) options.onFileCreated?.(path);
 		}
 		return imported;
 	} catch (error) {

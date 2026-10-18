@@ -1,18 +1,38 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.ts";
 import { KeybindingsManager } from "../src/core/keybindings.ts";
 import { runMigrations } from "../src/migrations.ts";
+
+vi.mock("node:fs", async (importOriginal) => {
+	const actual = await importOriginal<typeof fs>();
+	return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 
 describe("keybindings migration", () => {
 	const tempDirs: string[] = [];
 
 	afterEach(() => {
+		vi.restoreAllMocks();
+		vi.unstubAllEnvs();
 		for (const dir of tempDirs.splice(0)) {
 			fs.rmSync(dir, { recursive: true, force: true });
 		}
+	});
+
+	it("preserves the original configuration when atomic replacement fails", () => {
+		const agentDir = createAgentDir({ cursorUp: "ctrl+p" });
+		const configPath = path.join(agentDir, "keybindings.json");
+		const original = fs.readFileSync(configPath, "utf8");
+		vi.stubEnv(ENV_AGENT_DIR, agentDir);
+		vi.mocked(fs.renameSync).mockImplementationOnce(() => {
+			throw new Error("replacement failed");
+		});
+		runMigrations(agentDir);
+		expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+		expect(fs.readdirSync(agentDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
 	});
 
 	function createAgentDir(config: Record<string, unknown>): string {

@@ -43,6 +43,7 @@ import {
 	type PreparedSessionMutation,
 	prepareSessionMutation,
 } from "../src/durable-mutation.ts";
+import { readDeliveredFile } from "../src/read-delivered-file.ts";
 import type {
 	OpenedSessionRuntime,
 	SessionEventListener,
@@ -900,6 +901,43 @@ describe("AppServer", () => {
 		});
 		expect(host.runtimes.get("session-a")?.closed).toBe(true);
 		expect(host.runtimes.get("session-b")?.closed).toBe(false);
+	});
+
+	it("keeps the connection usable after an oversized delivered-file read", async () => {
+		writeSession(sessionsRoot, "session-a", projectDir);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "open-large",
+			method: "session/open",
+			params: { sessionId: "session-a" },
+		});
+		vi.spyOn(host.runtimes.get("session-a")!, "readDeliveredFile").mockImplementation(() =>
+			readDeliveredFile({
+				path: join(projectDir, "large.pdf"),
+				artifact: {
+					fileId: "aaaaaaaaaaaaaaaa",
+					name: "large.pdf",
+					byteLength: 7 * 1024 * 1024,
+					availability: "available",
+					deliveredAt: "2026-08-30T00:00:00.000Z",
+				},
+			}),
+		);
+		const response = await connection.handle({
+			jsonrpc: "2.0",
+			id: "large",
+			method: "session/readDeliveredFile",
+			params: { sessionId: "session-a", fileId: "aaaaaaaaaaaaaaaa" },
+		});
+		expect(response).toHaveProperty("error");
+		expect(JSON.stringify(response).length).toBeLessThan(1024);
+		expect(
+			await connection.handle({ jsonrpc: "2.0", id: "after-large", method: "session/list", params: {} }),
+		).toMatchObject({ result: { sessions: [expect.objectContaining({ sessionId: "session-a" })] } });
 	});
 
 	it("publishes one canonical cwd for aliased project journals", async () => {

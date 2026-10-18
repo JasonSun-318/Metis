@@ -1966,6 +1966,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
 			},
 		});
+		const createdAttachments: string[] = [];
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -1973,13 +1974,19 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					cwd: this.runtime.cwd,
 					attachments: input.attachments,
 					key: input.requestId,
+					onFileCreated: (path) => createdAttachments.push(path),
 				})
 			: [];
-		return await this.runtime.submitPrompt({
-			requestId: input.requestId,
-			text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
-			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
-		});
+		try {
+			return await this.runtime.submitPrompt({
+				requestId: input.requestId,
+				text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
+				...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
+			});
+		} catch (error) {
+			for (const path of createdAttachments) removeSessionAttachment(this.agentDir, this.sessionId, path);
+			throw error;
+		}
 	}
 
 	async steer(input: ClientParams<"turn/steer">): Promise<ClientResult<"turn/steer">> {
@@ -1991,6 +1998,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
 			},
 		});
+		const createdAttachments: string[] = [];
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -1998,14 +2006,20 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					cwd: this.runtime.cwd,
 					attachments: input.attachments,
 					key: input.requestId,
+					onFileCreated: (path) => createdAttachments.push(path),
 				})
 			: [];
-		return await this.runtime.submitPrompt({
-			requestId: input.requestId,
-			text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
-			...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
-			streamingBehavior: input.delivery === "follow_up" ? "followUp" : "steer",
-		});
+		try {
+			return await this.runtime.submitPrompt({
+				requestId: input.requestId,
+				text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
+				...(input.images === undefined ? {} : { images: input.images.map(toRuntimeImage) }),
+				streamingBehavior: input.delivery === "follow_up" ? "followUp" : "steer",
+			});
+		} catch (error) {
+			for (const path of createdAttachments) removeSessionAttachment(this.agentDir, this.sessionId, path);
+			throw error;
+		}
 	}
 
 	async queueTurn(input: ClientParams<"turn/queue">): Promise<ClientResult<"turn/queue">> {
@@ -2017,6 +2031,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				return resolved ? { name: resolved.artifact.name, path: resolved.path } : undefined;
 			},
 		});
+		const createdAttachments: string[] = [];
 		const attachments = input.attachments?.length
 			? importSessionAttachments({
 					agentDir: this.agentDir,
@@ -2024,6 +2039,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					cwd: this.runtime.cwd,
 					attachments: input.attachments,
 					key: input.requestId,
+					onFileCreated: (path) => createdAttachments.push(path),
 				})
 			: [];
 		try {
@@ -2034,8 +2050,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			});
 			return { queuedTurn: queuedTurnView(queuedTurn) };
 		} catch (error) {
-			for (const attachment of attachments) {
-				removeSessionAttachment(this.agentDir, this.sessionId, attachment.path);
+			for (const path of createdAttachments) {
+				removeSessionAttachment(this.agentDir, this.sessionId, path);
 			}
 			throwQueuedTurnError(error, input);
 		}

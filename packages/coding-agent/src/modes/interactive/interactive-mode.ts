@@ -137,8 +137,10 @@ import {
 	webSearchCredentialId,
 	webSearchProviderFromCredentialId,
 } from "../../core/web-search-config.ts";
+import { sanitizeTerminalText } from "../../utils/ansi.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
+import { launchExternalEditor } from "../../utils/external-editor.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
 import { canonicalizePath, getCwdRelativePath, isPathInside, resolvePath } from "../../utils/paths.ts";
@@ -561,6 +563,7 @@ export class InteractiveMode {
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
+	private finishExtensionDialog: ((value?: string) => void) | undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 	private permissionApprovalAbortController?: AbortController;
 
@@ -2303,33 +2306,32 @@ export class InteractiveMode {
 		options: string[],
 		opts?: ExtensionUIDialogOptions,
 	): Promise<string | undefined> {
+		if (this.finishExtensionDialog) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
 				return;
 			}
 
-			const onAbort = () => {
+			let closed = false;
+			const finish = (value?: string) => {
+				if (closed) return;
+				closed = true;
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.finishExtensionDialog = undefined;
 				this.hideExtensionSelector();
-				resolve(undefined);
+				resolve(value);
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const onAbort = () => finish();
 
-			this.extensionSelector = new ExtensionSelectorComponent(
-				title,
-				options,
-				(option) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(option);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(undefined);
-				},
-				{ tui: this.ui, timeout: opts?.timeout, onToggleToolsExpanded: () => this.toggleToolOutputExpansion() },
-			);
+			this.extensionSelector = new ExtensionSelectorComponent(title, options, finish, onAbort, {
+				tui: this.ui,
+				timeout: opts?.timeout,
+				onToggleToolsExpanded: () => this.toggleToolOutputExpansion(),
+			});
+
+			this.finishExtensionDialog = finish;
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.extensionSelector);
@@ -2342,6 +2344,10 @@ export class InteractiveMode {
 	 * Hide the extension selector.
 	 */
 	private hideExtensionSelector(): void {
+		if (this.extensionSelector && this.finishExtensionDialog) {
+			this.finishExtensionDialog();
+			return;
+		}
 		this.extensionSelector?.dispose();
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
@@ -2378,33 +2384,32 @@ export class InteractiveMode {
 		placeholder?: string,
 		opts?: ExtensionUIDialogOptions & { secret?: boolean },
 	): Promise<string | undefined> {
+		if (this.finishExtensionDialog) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
 			if (opts?.signal?.aborted) {
 				resolve(undefined);
 				return;
 			}
 
-			const onAbort = () => {
+			let closed = false;
+			const finish = (value?: string) => {
+				if (closed) return;
+				closed = true;
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.finishExtensionDialog = undefined;
 				this.hideExtensionInput();
-				resolve(undefined);
+				resolve(value);
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const onAbort = () => finish();
 
-			this.extensionInput = new ExtensionInputComponent(
-				title,
-				placeholder,
-				(value) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(value);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(undefined);
-				},
-				{ tui: this.ui, timeout: opts?.timeout, secret: opts?.secret },
-			);
+			this.extensionInput = new ExtensionInputComponent(title, placeholder, finish, onAbort, {
+				tui: this.ui,
+				timeout: opts?.timeout,
+				secret: opts?.secret,
+			});
+
+			this.finishExtensionDialog = finish;
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
 
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.extensionInput);
@@ -2417,6 +2422,10 @@ export class InteractiveMode {
 	 * Hide the extension input.
 	 */
 	private hideExtensionInput(): void {
+		if (this.extensionInput && this.finishExtensionDialog) {
+			this.finishExtensionDialog();
+			return;
+		}
 		this.extensionInput?.dispose();
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
@@ -2429,23 +2438,28 @@ export class InteractiveMode {
 	 * Show a multi-line editor for extensions (with Ctrl+G support).
 	 */
 	private showExtensionEditor(title: string, prefill?: string): Promise<string | undefined> {
+		if (this.finishExtensionDialog) return Promise.resolve(undefined);
 		return new Promise((resolve) => {
+			let closed = false;
+			const finish = (value?: string) => {
+				if (closed) return;
+				closed = true;
+				this.finishExtensionDialog = undefined;
+				this.hideExtensionEditor();
+				resolve(value);
+			};
 			this.extensionEditor = new ExtensionEditorComponent(
 				this.ui,
 				this.keybindings,
 				title,
 				prefill,
-				(value) => {
-					this.hideExtensionEditor();
-					resolve(value);
-				},
-				() => {
-					this.hideExtensionEditor();
-					resolve(undefined);
-				},
+				finish,
+				() => finish(),
 				undefined,
 				this.settingsManager.getExternalEditorCommand(),
 			);
+
+			this.finishExtensionDialog = finish;
 
 			this.editorContainer.clear();
 			this.editorContainer.addChild(this.extensionEditor);
@@ -2458,6 +2472,10 @@ export class InteractiveMode {
 	 * Hide the extension editor.
 	 */
 	private hideExtensionEditor(): void {
+		if (this.extensionEditor && this.finishExtensionDialog) {
+			this.finishExtensionDialog();
+			return;
+		}
 		this.editorContainer.clear();
 		this.editorContainer.addChild(this.editor);
 		this.extensionEditor = undefined;
@@ -3566,6 +3584,7 @@ export class InteractiveMode {
 	 * we update the previous status line instead of appending new ones to avoid log spam.
 	 */
 	private showStatus(message: string): void {
+		message = sanitizeTerminalText(message);
 		const children = this.chatContainer.children;
 		const last = children.length > 0 ? children[children.length - 1] : undefined;
 		const secondLast = children.length > 1 ? children[children.length - 2] : undefined;
@@ -4228,22 +4247,10 @@ export class InteractiveMode {
 			// Stop TUI to release terminal
 			this.ui.stop();
 
-			// Split by space to support editor arguments (e.g., "code --wait")
-			const [editor, ...editorArgs] = editorCmd.split(" ");
-
-			process.stdout.write(`Launching external editor: ${editorCmd}\nMetis will resume when the editor exits.\n`);
-
-			// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
-			// Node/libuv's console input read active after ui.stop() pauses stdin, racing
-			// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
-			const status = await new Promise<number | null>((resolve) => {
-				const child = spawn(editor, [...editorArgs, tmpFile], {
-					stdio: "inherit",
-					shell: process.platform === "win32",
-				});
-				child.on("error", () => resolve(null));
-				child.on("close", (code) => resolve(code));
-			});
+			process.stdout.write(
+				`Launching external editor: ${sanitizeTerminalText(editorCmd)}\nMetis will resume when the editor exits.\n`,
+			);
+			const status = await launchExternalEditor(editorCmd, tmpFile);
 
 			// On successful exit (status 0), replace editor content
 			if (status === 0) {
@@ -4251,6 +4258,8 @@ export class InteractiveMode {
 				this.editor.setText(newContent);
 			}
 			// On non-zero exit, keep original text (no action needed)
+		} catch (error) {
+			this.showError(`Failed to launch external editor: ${error instanceof Error ? error.message : String(error)}`);
 		} finally {
 			// Clean up temp file
 			try {
@@ -4278,13 +4287,15 @@ export class InteractiveMode {
 
 	showError(errorMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${errorMessage}`), 1, 0));
+		this.chatContainer.addChild(new Text(theme.fg("error", `Error: ${sanitizeTerminalText(errorMessage)}`), 1, 0));
 		this.ui.requestRender();
 	}
 
 	showWarning(warningMessage: string): void {
 		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new Text(theme.fg("warning", `Warning: ${warningMessage}`), 1, 0));
+		this.chatContainer.addChild(
+			new Text(theme.fg("warning", `Warning: ${sanitizeTerminalText(warningMessage)}`), 1, 0),
+		);
 		this.ui.requestRender();
 	}
 
@@ -7125,6 +7136,7 @@ export class InteractiveMode {
 	}
 
 	stop(): void {
+		this.finishExtensionDialog?.();
 		if (this.settingsManager.getShowTerminalProgress()) {
 			this.ui.terminal.setProgress(false);
 		}

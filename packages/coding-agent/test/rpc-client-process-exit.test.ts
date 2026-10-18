@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { RpcClient } from "../src/modes/rpc/rpc-client.ts";
 
 const tempDirs: string[] = [];
@@ -15,12 +15,39 @@ function writeChildScript(contents: string): string {
 }
 
 afterEach(() => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 	for (const dir of tempDirs.splice(0)) {
 		rmSync(dir, { recursive: true, force: true });
 	}
 });
 
 describe("RpcClient child process failures", () => {
+	test("cancels event collection when sending the prompt fails", async () => {
+		vi.useFakeTimers();
+		const client = new RpcClient();
+		const unsubscribe = vi.fn();
+		vi.spyOn(client, "onEvent").mockReturnValue(unsubscribe);
+		await expect(client.promptAndWait("hello", undefined, 10)).rejects.toThrow("Client not started");
+		expect(unsubscribe).toHaveBeenCalledOnce();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	test("collects completion emitted before the prompt response", async () => {
+		const client = new RpcClient();
+		let listener: Parameters<RpcClient["onEvent"]>[0] | undefined;
+		const unsubscribe = vi.fn();
+		vi.spyOn(client, "onEvent").mockImplementation((handler) => {
+			listener = handler;
+			return unsubscribe;
+		});
+		vi.spyOn(client, "prompt").mockImplementation(async () => {
+			listener?.({ type: "agent_settled" });
+		});
+		await expect(client.promptAndWait("hello")).resolves.toEqual([{ type: "agent_settled" }]);
+		expect(unsubscribe).toHaveBeenCalledOnce();
+	});
+
 	test("rejects an in-flight request when the child process exits", async () => {
 		const client = new RpcClient({
 			cliPath: writeChildScript(`

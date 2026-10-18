@@ -37,6 +37,35 @@ describe("ToolExecutionComponent parity", () => {
 		initTheme("dark");
 	});
 
+	test("sanitizes renderer arguments and results without mutating tool data", () => {
+		const injected = "safe\x1b]52;c;VEVTVA==\x07\x1b[2J";
+		const args = { nested: [{ value: injected }] };
+		const toolDefinition: ToolDefinition = {
+			...createBaseToolDefinition(),
+			renderCall: (input, _theme, context) => {
+				expect(context.args).toEqual({ nested: [{ value: "safe" }] });
+				return new Text((input as typeof args).nested[0].value, 0, 0);
+			},
+			renderResult: (result) => new Text(String(result.details), 0, 0),
+		};
+		const component = new ToolExecutionComponent(
+			"custom_tool",
+			"tool-safe",
+			args,
+			{},
+			toolDefinition,
+			createFakeTui(),
+			process.cwd(),
+		);
+		component.updateArgs(args);
+		component.updateResult({ content: [{ type: "text", text: injected }], details: injected, isError: false });
+		const rendered = component.render(120).join("\n");
+		expect(rendered).not.toContain("\x1b]52;");
+		expect(rendered).not.toContain("\x1b[2J");
+		expect(stripAnsi(rendered)).toContain("safe");
+		expect(args.nested[0].value).toBe(injected);
+	});
+
 	test("stacks custom call and result renderers like the old implementation", () => {
 		const toolDefinition: ToolDefinition = {
 			...createBaseToolDefinition(),

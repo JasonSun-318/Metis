@@ -1,5 +1,6 @@
-import { readFile, stat } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { extname } from "node:path";
+import { MAX_ENVELOPE_UTF8_BYTES } from "@metis/app-protocol";
 import type { ResolvedSessionDeliveredArtifact } from "@metis/coding-agent/host";
 
 const MIME_MAP: Record<string, string> = {
@@ -29,6 +30,9 @@ const MIME_MAP: Record<string, string> = {
 	css: "text/css",
 };
 
+// Base64 expands by 4/3; leave room for metadata and the RPC envelope.
+const MAX_INLINE_FILE_BYTES = Math.floor((MAX_ENVELOPE_UTF8_BYTES - 64 * 1024) / 4) * 3;
+
 export async function readDeliveredFile(options: ResolvedSessionDeliveredArtifact): Promise<{
 	readonly fileId: string;
 	readonly name: string;
@@ -37,15 +41,33 @@ export async function readDeliveredFile(options: ResolvedSessionDeliveredArtifac
 	readonly mediaType?: string;
 	readonly absolutePath: string;
 }> {
-	const metadata = await stat(options.path);
-	if (metadata.size !== options.artifact.byteLength) throw new Error("Delivered file was not found");
-	const contents = await readFile(options.path);
+	if (options.artifact.byteLength > MAX_INLINE_FILE_BYTES)
+		throw new Error("Delivered file is too large for an inline RPC response");
+	const file = await open(options.path, "r");
+	let contents: Buffer;
+	try {
+		const metadata = await file.stat();
+		if (!metadata.isFile() || metadata.size !== options.artifact.byteLength)
+			throw new Error("Delivered file was not found");
+		// Read one extra byte to detect growth without ever reading an unbounded file.
+		const buffer = Buffer.alloc(metadata.size + 1);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const { bytesRead } = await file.read(buffer, offset, buffer.length - offset, offset);
+			if (bytesRead === 0) break;
+			offset += bytesRead;
+		}
+		if (offset !== metadata.size) throw new Error("Delivered file was not found");
+		contents = buffer.subarray(0, offset);
+	} finally {
+		await file.close();
+	}
 	const ext = extname(options.artifact.name).replace(/^\./u, "").toLowerCase();
 	const mediaType = MIME_MAP[ext] || "application/octet-stream";
 	return {
 		fileId: options.artifact.fileId,
 		name: options.artifact.name,
-		byteLength: metadata.size,
+		byteLength: contents.length,
 		data: contents.toString("base64"),
 		mediaType,
 		absolutePath: options.path,

@@ -1,5 +1,6 @@
 import type { AssistantMessage } from "@metis/ai";
 import { Container, Markdown, type MarkdownTheme, Spacer, Text } from "@metis/tui";
+import { sanitizeTerminalText } from "../../../utils/ansi.ts";
 import { getMarkdownTheme, theme } from "../theme/theme.ts";
 
 const OSC133_ZONE_START = "\x1b]133;A\x07";
@@ -100,7 +101,9 @@ export class AssistantMessageComponent extends Container {
 			if (content.type === "text" && content.text.trim()) {
 				// Assistant text messages with no background - trim the text
 				// Set paddingY=0 to avoid extra spacing before tool executions
-				this.contentContainer.addChild(new Markdown(content.text.trim(), this.outputPad, 0, this.markdownTheme));
+				this.contentContainer.addChild(
+					new Markdown(sanitizeTerminalText(content.text).trim(), this.outputPad, 0, this.markdownTheme),
+				);
 			} else if (content.type === "thinking" && content.thinking.trim()) {
 				// Add spacing only when another visible assistant content block follows.
 				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
@@ -119,7 +122,7 @@ export class AssistantMessageComponent extends Container {
 				} else {
 					// Thinking traces in thinkingText color, italic
 					this.contentContainer.addChild(
-						new Markdown(content.thinking.trim(), this.outputPad, 0, this.markdownTheme, {
+						new Markdown(sanitizeTerminalText(content.thinking).trim(), this.outputPad, 0, this.markdownTheme, {
 							color: (text: string) => theme.fg("thinkingText", text),
 							italic: true,
 						}),
@@ -155,11 +158,15 @@ export class AssistantMessageComponent extends Container {
 						? message.errorMessage
 						: "Operation aborted";
 				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", abortMessage), this.outputPad, 0));
+				this.contentContainer.addChild(
+					new Text(theme.fg("error", sanitizeTerminalText(abortMessage)), this.outputPad, 0),
+				);
 			} else if (message.stopReason === "error") {
 				const errorMsg = message.errorMessage || "Unknown error";
 				this.contentContainer.addChild(new Spacer(1));
-				this.contentContainer.addChild(new Text(theme.fg("error", `Error: ${errorMsg}`), this.outputPad, 0));
+				this.contentContainer.addChild(
+					new Text(theme.fg("error", `Error: ${sanitizeTerminalText(errorMsg)}`), this.outputPad, 0),
+				);
 			}
 		}
 	}

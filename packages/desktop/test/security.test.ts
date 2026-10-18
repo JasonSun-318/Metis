@@ -2580,6 +2580,54 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("rejects forged project paths and expires selections on navigation", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		let finishSelection!: (path: string) => void;
+		const selectProjectFolder = vi
+			.fn()
+			.mockResolvedValueOnce("/selected")
+			.mockImplementationOnce(
+				() =>
+					new Promise<string>((resolve) => {
+						finishSelection = resolve;
+					}),
+			);
+		const createProjectFolder = vi.fn().mockResolvedValue("/selected/Demo");
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			selectProjectFolder,
+			selectAttachmentFiles: async () => [{ path: "/picked/file.txt", name: "file.txt" }],
+			createProjectFolder,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const create = (parentDirectory: string, files: { path: string; name: string }[] = []) =>
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.createProjectFolder)!(event, {
+				parentDirectory,
+				name: "Demo",
+				files,
+			});
+		await expect(create("/forged")).rejects.toThrow("not selected");
+		await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectProjectFolder)!(event);
+		await expect(create("/selected", [{ path: "/private/secret", name: "secret" }])).rejects.toThrow("not selected");
+		const files = (await ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectAttachmentFiles)!(event)) as {
+			path: string;
+			name: string;
+		}[];
+		await expect(create("/selected", files)).resolves.toBe("/selected/Demo");
+		expect(createProjectFolder).toHaveBeenCalledOnce();
+		const pendingSelection = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.selectProjectFolder)!(event);
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		finishSelection("/stale");
+		await expect(pendingSelection).rejects.toThrow("changed");
+		await expect(create("/selected")).rejects.toThrow("not selected");
+		await expect(create("/stale")).rejects.toThrow("not selected");
+		broker.dispose();
+	});
+
 	it("guards the default location and bounded project creation capabilities", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();

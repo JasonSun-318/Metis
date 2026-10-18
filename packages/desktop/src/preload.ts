@@ -76,6 +76,8 @@ const rpcForwarders = createDesktopRpcForwarders((definition, input) =>
 	invokeRaw(definition.channel, definition.method, input),
 );
 
+let pendingDropGrants: Promise<unknown> = Promise.resolve();
+
 const api = {
 	platform: process.platform,
 	...rpcForwarders,
@@ -115,10 +117,6 @@ const api = {
 		invoke(DESKTOP_IPC_CHANNELS.subscribeSession, "session/open", input) as ReturnType<
 			MetisDesktopApi["subscribeSession"]
 		>,
-	readDeliveredFile: (input: ClientParams<"session/readDeliveredFile">) =>
-		invoke(DESKTOP_IPC_CHANNELS.readDeliveredFile, "session/readDeliveredFile", input) as ReturnType<
-			MetisDesktopApi["readDeliveredFile"]
-		>,
 	readPreviewFile: (input) =>
 		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.readPreviewFile, validateReadPreviewFileInput(input)),
 	interruptTurn: (input: ClientParams<"turn/interrupt">) =>
@@ -130,10 +128,20 @@ const api = {
 	},
 	selectProjectFolder: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectProjectFolder),
 	selectAttachmentFiles: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.selectAttachmentFiles),
-	resolveDroppedFiles: (files: readonly File[]) =>
-		files.map((file) => ({ path: webUtils.getPathForFile(file), name: file.name })),
+	resolveDroppedFiles: (files: readonly File[]) => {
+		const selections = files.map((file) => ({ path: webUtils.getPathForFile(file), name: file.name }));
+		pendingDropGrants = ipcRenderer.invoke(
+			DESKTOP_IPC_CHANNELS.registerDroppedFiles,
+			selections.map((file) => file.path),
+		);
+		void pendingDropGrants.catch(() => {});
+		return selections;
+	},
 	getDefaultProjectLocation: () => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation),
-	createProjectFolder: (input) => ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.createProjectFolder, input),
+	createProjectFolder: async (input) => {
+		await pendingDropGrants;
+		return ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.createProjectFolder, input);
+	},
 	createTerminal: (input) =>
 		ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.createTerminal, validateCreateTerminalInput(input)),
 	writeTerminal: async (input) => {

@@ -33,6 +33,26 @@ function createAssistantMessage(
 }
 
 describe("AssistantMessageComponent", () => {
+	test("removes terminal controls from model text, thinking, and errors while retaining UI markers", () => {
+		initTheme("dark");
+		const injected = "hello\x1b]52;c;VEVTVA==\x07\x1b[2J\x9b2J\x00world";
+		const message = createAssistantMessage(
+			[
+				{ type: "text", text: injected },
+				{ type: "thinking", thinking: injected },
+			],
+			{ stopReason: "error" },
+		);
+		message.errorMessage = injected;
+		const rendered = new AssistantMessageComponent(message).render(100).join("\n");
+		expect(rendered).not.toContain("\x1b]52;");
+		expect(rendered).not.toContain("\x1b[2J");
+		expect(rendered).not.toMatch(/[\x00\x9b]/u);
+		expect(stripAnsi(rendered)).toContain("helloworld");
+		expect(rendered).toContain(OSC133_ZONE_START);
+		expect(message.content[0]).toEqual({ type: "text", text: injected });
+	});
+
 	test("adds OSC 133 zone markers to assistant messages without tool calls", () => {
 		initTheme("dark");
 

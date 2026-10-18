@@ -255,8 +255,13 @@ async function launch(): Promise<void> {
 			if (isAppActive()) completionTracker.view(sessionId);
 		},
 	});
-	registerThemeHandlers(ipcMain, () => mainWindow);
-	ipcMain.handle(DESKTOP_IS_FULLSCREEN_CHANNEL, () => {
+	registerThemeHandlers(
+		ipcMain,
+		() => mainWindow,
+		(event) => broker.assertTrustedSender(event),
+	);
+	ipcMain.handle(DESKTOP_IS_FULLSCREEN_CHANNEL, (event) => {
+		broker.assertTrustedSender(event);
 		return mainWindow && !mainWindow.isDestroyed() ? mainWindow.isFullScreen() : false;
 	});
 	async function openMainWindow(): Promise<void> {

@@ -469,31 +469,50 @@ export class RpcClient {
 	 * Collect events until agent becomes idle.
 	 */
 	collectEvents(timeout = 60000): Promise<AgentSessionEvent[]> {
-		return new Promise((resolve, reject) => {
+		return this.createEventCollector(timeout).promise;
+	}
+
+	private createEventCollector(timeout: number): { promise: Promise<AgentSessionEvent[]>; cancel: () => void } {
+		let cancel = () => {};
+		const promise = new Promise<AgentSessionEvent[]>((resolve, reject) => {
 			const events: AgentSessionEvent[] = [];
-			const timer = setTimeout(() => {
+			let settled = false;
+			const finish = (error?: Error) => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
 				unsubscribe();
-				reject(new Error(`Timeout collecting events. Stderr: ${this.stderr}`));
+				if (error) reject(error);
+				else resolve(events);
+			};
+			const timer = setTimeout(() => {
+				finish(new Error(`Timeout collecting events. Stderr: ${this.stderr}`));
 			}, timeout);
 
 			const unsubscribe = this.onEvent((event) => {
 				events.push(event);
 				if (event.type === "agent_settled") {
-					clearTimeout(timer);
-					unsubscribe();
-					resolve(events);
+					finish();
 				}
 			});
+			cancel = () => finish();
 		});
+		return { promise, cancel: () => cancel() };
 	}
 
 	/**
 	 * Send prompt and wait for completion, returning all events.
 	 */
 	async promptAndWait(message: string, images?: ImageContent[], timeout = 60000): Promise<AgentSessionEvent[]> {
-		const eventsPromise = this.collectEvents(timeout);
-		await this.prompt(message, images);
-		return eventsPromise;
+		const collector = this.createEventCollector(timeout);
+		// Observe timeout immediately, including while the prompt response is pending.
+		void collector.promise.catch(() => {});
+		try {
+			await this.prompt(message, images);
+			return await collector.promise;
+		} finally {
+			collector.cancel();
+		}
 	}
 
 	// =========================================================================

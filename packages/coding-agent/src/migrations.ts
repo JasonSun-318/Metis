@@ -4,7 +4,7 @@
 
 import chalk from "chalk";
 import { createHash, randomUUID } from "crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync } from "fs";
 import { basename, dirname, join } from "path";
 import { getAgentDir, getBinDir, getProjectConfigDir } from "./config.ts";
 import {
@@ -413,9 +413,9 @@ function migrateKeybindingsConfigFile(): void {
 		}
 		const { config, migrated } = migrateKeybindingsConfig(parsed as Record<string, unknown>);
 		if (!migrated) return;
-		writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf-8");
+		replaceFileAtomicallySync(configPath, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 	} catch {
-		// Ignore malformed files during migration
+		// Keep malformed files and the previous configuration on replacement failure.
 	}
 }
 

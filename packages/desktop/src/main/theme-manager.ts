@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { app, type BrowserWindow, type IpcMain, nativeTheme } from "electron";
+import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent, nativeTheme } from "electron";
 import { DESKTOP_THEME_CHANNEL, type DesktopThemePreference } from "../shared/desktop-api.ts";
 
 const THEME_FILE_NAME = "theme.json";
@@ -75,8 +75,13 @@ export function applyThemeToWindow(window: BrowserWindow, theme: DesktopThemePre
  * Register the renderer -> main theme channel. The renderer owns the source of
  * truth (localStorage); this handler only mirrors it for window chrome.
  */
-export function registerThemeHandlers(ipcMainHandle: IpcMain, getMainWindow: () => BrowserWindow | null): void {
-	ipcMainHandle.handle(DESKTOP_THEME_CHANNEL, (_event, value: unknown) => {
+export function registerThemeHandlers(
+	ipcMainHandle: IpcMain,
+	getMainWindow: () => BrowserWindow | null,
+	assertTrustedSender: (event: IpcMainInvokeEvent) => void,
+): void {
+	ipcMainHandle.handle(DESKTOP_THEME_CHANNEL, (event, value: unknown) => {
+		assertTrustedSender(event);
 		if (value === "get") return readStoredTheme();
 		if (!isDesktopThemePreference(value)) throw new TypeError("Invalid theme preference");
 		storeTheme(value);

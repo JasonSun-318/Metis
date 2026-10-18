@@ -172,7 +172,9 @@ export interface StreamOptions {
 	 */
 	maxRetries?: number;
 	/**
-	 * Maximum delay in milliseconds to wait for a retry when the server requests a long wait.
+	 * Maximum retry delay in milliseconds for openai-codex-responses.
+	 * Other providers use their SDK retry policy and may ignore this option.
+	 * Exponential backoff is capped at this value.
 	 * If the server's requested delay exceeds this value, the request fails immediately
 	 * with an error containing the requested delay, allowing higher-level retry logic
 	 * to handle it with user visibility.

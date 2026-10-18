@@ -1,14 +1,46 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import * as fs from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readDeliveredFile } from "../src/read-delivered-file.ts";
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+	const actual = await importOriginal<typeof fs>();
+	return { ...actual, open: vi.fn(actual.open), readFile: vi.fn(actual.readFile) };
+});
 
 describe("readDeliveredFile", () => {
 	const roots: string[] = [];
 
 	afterEach(() => {
+		vi.restoreAllMocks();
 		for (const root of roots.splice(0, roots.length)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("rejects oversized artifacts before opening or reading their contents", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-read-deliver-"));
+		roots.push(root);
+		const path = join(root, "large.pdf");
+		writeFileSync(path, "");
+		const byteLength = 7 * 1024 * 1024;
+		truncateSync(path, byteLength);
+		vi.mocked(fs.open).mockClear();
+		vi.mocked(fs.readFile).mockClear();
+		await expect(
+			readDeliveredFile({
+				path,
+				artifact: {
+					fileId: "aaaaaaaaaaaaaaaa",
+					name: "large.pdf",
+					byteLength,
+					deliveredAt: "2026-08-30T00:00:00.000Z",
+					availability: "available",
+				},
+			}),
+		).rejects.toThrow("too large");
+		expect(fs.open).not.toHaveBeenCalled();
+		expect(fs.readFile).not.toHaveBeenCalled();
 	});
 
 	it("reads an authorized delivered artifact and preserves its journal name", async () => {

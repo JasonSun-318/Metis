@@ -43,6 +43,7 @@ describe("production runtime streaming", () => {
 
 	it("projects cache hits, explicit misses, and missing reports without mixing them", async () => {
 		let calls = 0;
+		const finishResponses: (() => void)[] = [];
 		const cacheCounts = [9600, 0, undefined];
 		const provider = createServer(async (request, response) => {
 			for await (const _ of request) {
@@ -50,8 +51,11 @@ describe("production runtime streaming", () => {
 			}
 			const cache = cacheCounts[calls++];
 			response.writeHead(200, { "content-type": "text/event-stream" });
-			response.end(
-				`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 10000, completion_tokens: 400, ...(cache === undefined ? {} : { prompt_tokens_details: { cached_tokens: cache } }) } })}\n\ndata: [DONE]\n\n`,
+			response.flushHeaders();
+			finishResponses.push(() =>
+				response.end(
+					`data: ${JSON.stringify({ choices: [{ delta: { content: "answer" }, finish_reason: "stop" }], usage: { prompt_tokens: 10000, completion_tokens: 400, ...(cache === undefined ? {} : { prompt_tokens_details: { cached_tokens: cache } }) } })}\n\ndata: [DONE]\n\n`,
+				),
 			);
 		});
 		const port = await listen(provider);
@@ -84,6 +88,13 @@ describe("production runtime streaming", () => {
 			titleGenerator: { generate: async () => undefined },
 		});
 		const connection = server.connect();
+		const completedOperations = new Set<string>();
+		connection.onMessage((message) => {
+			if (!("method" in message) || message.method !== "connection/events") return;
+			for (const event of message.params.events) {
+				if (event.type === "turn/completed") for (const id of event.turn.operationIds) completedOperations.add(id);
+			}
+		});
 		try {
 			await connection.handle({
 				jsonrpc: "2.0",
@@ -103,6 +114,12 @@ describe("production runtime streaming", () => {
 				method: "session/open",
 				params: { sessionId: SESSION_REQUEST },
 			});
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "subscribe",
+				method: "session/subscribe",
+				params: { sessionId: SESSION_REQUEST },
+			});
 			for (let i = 0; i < 3; i++) {
 				const start = await connection.handle({
 					jsonrpc: "2.0",
@@ -116,7 +133,11 @@ describe("production runtime streaming", () => {
 				});
 				expect(start).not.toHaveProperty("error");
 				await expect.poll(() => calls).toBe(i + 1);
-				await expect.poll(() => server.catalog.get(SESSION_REQUEST).summary.state).toBe("idle");
+				if (!("result" in start) || !("operationId" in start.result)) throw new Error("Expected accepted turn");
+				const operationId = start.result.operationId;
+				expect(completedOperations.has(operationId)).toBe(false);
+				finishResponses[i]();
+				await expect.poll(() => completedOperations.has(operationId)).toBe(true);
 				const status = await connection.handle({
 					jsonrpc: "2.0",
 					id: `status-${i}`,

@@ -3,7 +3,6 @@
  * Supports Ctrl+G for external editor.
  */
 
-import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -18,6 +17,8 @@ import {
 	type TUI,
 } from "@metis/tui";
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
+import { sanitizeTerminalText } from "../../../utils/ansi.ts";
+import { launchExternalEditor } from "../../../utils/external-editor.ts";
 import { getEditorTheme, theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
@@ -134,25 +135,20 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 			fs.writeFileSync(tmpFile, currentText, "utf-8");
 			this.tui.stop();
 
-			const [editor, ...editorArgs] = editorCmd.split(" ");
-			process.stdout.write(`Launching external editor: ${editorCmd}\nMetis will resume when the editor exits.\n`);
-
-			// Do not use spawnSync here. On Windows, synchronous child_process calls can keep
-			// Node/libuv's console input read active after tui.stop() pauses stdin, racing
-			// vim/nvim for the console input buffer until Ctrl+C cancels the pending read.
-			const status = await new Promise<number | null>((resolve) => {
-				const child = spawn(editor, [...editorArgs, tmpFile], {
-					stdio: "inherit",
-					shell: process.platform === "win32",
-				});
-				child.on("error", () => resolve(null));
-				child.on("close", (code) => resolve(code));
-			});
+			process.stdout.write(
+				`Launching external editor: ${sanitizeTerminalText(editorCmd)}\nMetis will resume when the editor exits.\n`,
+			);
+			const status = await launchExternalEditor(editorCmd, tmpFile);
 
 			if (status === 0) {
 				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
 				this.editor.setText(newContent);
 			}
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.addChild(
+				new Text(theme.fg("error", `Failed to launch external editor: ${sanitizeTerminalText(message)}`), 1, 0),
+			);
 		} finally {
 			try {
 				fs.unlinkSync(tmpFile);

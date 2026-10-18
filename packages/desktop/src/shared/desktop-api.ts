@@ -89,12 +89,12 @@ export const DESKTOP_IPC_CHANNELS = {
 	openSession: "metis:open-session",
 	focusSession: "metis:focus-session",
 	subscribeSession: "metis:subscribe-session",
-	readDeliveredFile: "metis:read-delivered-file",
 	readPreviewFile: "metis:read-preview-file",
 	interruptTurn: "metis:interrupt-turn",
 	respondToInteraction: "metis:respond-to-interaction",
 	selectProjectFolder: "metis:select-project-folder",
 	selectAttachmentFiles: "metis:select-attachment-files",
+	registerDroppedFiles: "metis:register-dropped-files",
 	getDefaultProjectLocation: "metis:get-default-project-location",
 	createProjectFolder: "metis:create-project-folder",
 	getServerState: "metis:get-server-state",
@@ -573,9 +573,6 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	/** Moves focus to an already-subscribed session without rebuilding its snapshot. */
 	focusSession(input: ClientParams<"session/open">): Promise<void>;
 	subscribeSession(input: ClientParams<"session/open">): Promise<ClientResult<"session/subscribe">["snapshot"]>;
-	readDeliveredFile(
-		input: ClientParams<"session/readDeliveredFile">,
-	): Promise<ClientResult<"session/readDeliveredFile">>;
 	readPreviewFile(input: DesktopPreviewFileInput): Promise<DesktopPreviewFile>;
 	interruptTurn(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">>;
 	respondToInteraction(input: InteractionResponseInput): Promise<void>;

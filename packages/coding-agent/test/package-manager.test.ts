@@ -6,6 +6,7 @@ import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DefaultPackageManager, type ProgressEvent, type ResolvedResource } from "../src/core/package-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
+import * as childProcess from "../src/utils/child-process.ts";
 
 function normalizeForMatch(value: string): string {
 	return value.replace(/\\/g, "/");
@@ -1029,6 +1030,53 @@ Content`,
 			).toBe(true);
 			expect(runCommandSpy).toHaveBeenCalledTimes(1);
 			expect(packageManager.getInstalledPath("npm:pnpm-pkg", "user")).toBe(packagePath);
+		});
+
+		it("caches legacy pnpm probes and invalidates them for command changes and installs", async () => {
+			settingsManager.setNpmCommand(["pnpm"]);
+			const paths = [join(tempDir, "first"), join(tempDir, "second")];
+			for (const path of paths) mkdirSync(path);
+			const probe = vi
+				.spyOn(packageManager as any, "runCommandSync")
+				.mockReturnValue(
+					JSON.stringify([{ dependencies: { first: { path: paths[0] }, second: { path: paths[1] } } }]),
+				);
+			expect(packageManager.getInstalledPath("npm:first", "user")).toBe(paths[0]);
+			expect(packageManager.getInstalledPath("npm:second", "user")).toBe(paths[1]);
+			expect(probe).toHaveBeenCalledTimes(1);
+			settingsManager.setNpmCommand(["mise", "exec", "--", "pnpm"]);
+			expect(packageManager.getInstalledPath("npm:first", "user")).toBe(paths[0]);
+			expect(probe).toHaveBeenCalledTimes(2);
+			settingsManager.setNpmCommand(["npm"]);
+			packageManager.getInstalledPath("npm:missing", "user");
+			settingsManager.setNpmCommand(["mise", "exec", "--", "pnpm"]);
+			expect(packageManager.getInstalledPath("npm:first", "user")).toBe(paths[0]);
+			expect(probe).toHaveBeenCalledTimes(4);
+			vi.spyOn(packageManager as any, "runCommand").mockResolvedValue(undefined);
+			await packageManager.install("npm:first");
+			expect(packageManager.getInstalledPath("npm:second", "user")).toBe(paths[1]);
+			expect(probe).toHaveBeenCalledTimes(5);
+		});
+
+		it("bounds failed synchronous probes and reuses the failure across packages", () => {
+			settingsManager.setNpmCommand(["pnpm"]);
+			const probe = vi.spyOn(childProcess, "spawnProcessSync").mockReturnValue({
+				error: new Error("timed out"),
+				status: null,
+				signal: "SIGKILL",
+				stdout: "",
+				stderr: "",
+				pid: 0,
+				output: [],
+			});
+			expect(packageManager.getInstalledPath("npm:first", "user")).toBeUndefined();
+			expect(packageManager.getInstalledPath("npm:second", "user")).toBeUndefined();
+			expect(probe).toHaveBeenCalledOnce();
+			expect(probe).toHaveBeenCalledWith(
+				"pnpm",
+				["list", "-g", "--depth", "0", "--json"],
+				expect.objectContaining({ timeout: 5000, killSignal: "SIGKILL" }),
+			);
 		});
 
 		it("should load legacy pnpm global package paths from pnpm list output", async () => {

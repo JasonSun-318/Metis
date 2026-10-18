@@ -1,8 +1,8 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import type { ServerRequestMethod, ServerResult, ServerRpcRequest } from "@metis/app-protocol";
-import { AgentSession, SessionManager } from "@metis/coding-agent/host";
+import { AgentSession, importSessionAttachments, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSessionRuntimeHost } from "../src/agent-session-runtime-host.ts";
 import { BROWSER_TOOL_NAMES } from "../src/browser-tools.ts";
@@ -33,6 +33,77 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 		vi.restoreAllMocks();
 		for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
 	});
+
+	it.each(["startTurn", "steer", "queueTurn"] as const)(
+		"cleans only newly imported attachments when %s fails",
+		async (method) => {
+			const root = mkdtempSync(join(tmpdir(), "metis-failed-attachments-"));
+			temporaryRoots.push(root);
+			const agentDir = join(root, "agent");
+			const cwd = join(root, "project");
+			mkdirSync(agentDir);
+			mkdirSync(cwd);
+			const source = join(cwd, "report.txt");
+			writeFileSync(source, "retain original");
+			const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
+				id: SESSION_ID,
+				mode: "code",
+				permissionPreset: "full",
+			});
+			const path = manager.getSessionFile()!;
+			manager.close();
+			const opened = await new AgentSessionRuntimeHost({ agentDir }).open({
+				path,
+				relativePath: basename(path),
+				summary: {
+					sessionId: SESSION_ID,
+					mode: "code",
+					cwdOrigin: "user-selected",
+					cwd,
+					createdAt: "2026-08-30T00:00:00.000Z",
+					updatedAt: "2026-08-30T00:00:00.000Z",
+					state: "idle",
+					archived: false,
+					unread: false,
+					useMemory: true,
+					contributeMemory: true,
+				},
+			});
+			try {
+				const runtime = (
+					opened as unknown as { runtime: { submitPrompt(): Promise<never>; enqueueQueuedTurn(): never } }
+				).runtime;
+				vi.spyOn(runtime, "submitPrompt").mockRejectedValue(new Error("submission rejected"));
+				vi.spyOn(runtime, "enqueueQueuedTurn").mockImplementation(() => {
+					throw new Error("submission rejected");
+				});
+				const requestId = "00000000-0000-4000-8000-000000000301";
+				const input = {
+					sessionId: SESSION_ID,
+					requestId,
+					text: "read report",
+					attachments: [{ path: source, name: "report.txt" }],
+					delivery: "steer" as const,
+				};
+				await expect(opened[method](input)).rejects.toThrow();
+				const attachmentDir = join(agentDir, "attachments", SESSION_ID);
+				expect(readdirSync(attachmentDir).filter((name) => name.endsWith(".txt"))).toEqual([]);
+				const [existing] = importSessionAttachments({
+					agentDir,
+					sessionId: SESSION_ID,
+					cwd,
+					attachments: input.attachments,
+					key: requestId,
+				});
+				await expect(opened[method](input)).rejects.toThrow();
+				expect(existsSync(existing.path)).toBe(true);
+				expect(readFileSync(existing.path, "utf8")).toBe("retain original");
+				expect(readFileSync(source, "utf8")).toBe("retain original");
+			} finally {
+				await opened.close();
+			}
+		},
+	);
 
 	it("keeps one browser tool registry across owner attach, release, and reconnect", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-browser-runtime-host-"));

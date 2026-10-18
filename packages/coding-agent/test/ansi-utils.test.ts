@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { stripAnsi } from "../src/utils/ansi.ts";
+import { sanitizeTerminalText, stripAnsi } from "../src/utils/ansi.ts";
+
+describe("sanitizeTerminalText", () => {
+	it("preserves Unicode and text layout while removing incomplete and C1 controls", () => {
+		expect(sanitizeTerminalText("中文\t🙂\r\nnext\rline\x1b\x00\x9d\x9c")).toBe("中文\t🙂\nnext\nline");
+	});
+});
 
 function referenceAnsiRegex(): RegExp {
 	const ST = "(?:\\u0007|\\u001B\\u005C|\\u009C)";

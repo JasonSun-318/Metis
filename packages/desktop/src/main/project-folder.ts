@@ -7,7 +7,7 @@ const MAX_PROJECT_FILES = 16;
 const WINDOWS_RESERVED_NAME = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 const INVALID_PROJECT_NAME = /[<>:"/\\|?*\u0000-\u001f]/u;
 
-function projectInput(value: unknown): DesktopCreateProjectFolderInput {
+export function validateProjectFolderInput(value: unknown): DesktopCreateProjectFolderInput {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
 		throw new TypeError("Invalid project folder input");
 	}
@@ -52,7 +52,7 @@ function projectInput(value: unknown): DesktopCreateProjectFolderInput {
 }
 
 export async function createProjectFolder(value: unknown): Promise<string> {
-	const input = projectInput(value);
+	const input = validateProjectFolderInput(value);
 	const sources = await Promise.all(
 		input.files.map(async (file): Promise<DesktopAttachmentSelection> => {
 			const info = await lstat(file.path);

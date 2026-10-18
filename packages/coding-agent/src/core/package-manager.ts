@@ -798,6 +798,7 @@ export class DefaultPackageManager implements PackageManager {
 	private settingsManager: SettingsManager;
 	private globalNpmRoot: string | undefined;
 	private globalNpmRootCommandKey: string | undefined;
+	private pnpmGlobalPackages: { commandKey: string; paths: Map<string, string>; error?: Error } | undefined;
 	private progressCallback: ProgressCallback | undefined;
 
 	constructor(options: PackageManagerOptions) {
@@ -1755,7 +1756,12 @@ export class DefaultPackageManager implements PackageManager {
 
 	private async runNpmCommand(args: string[], options?: { cwd?: string }): Promise<void> {
 		const npmCommand = this.getNpmCommand();
-		await this.runCommand(npmCommand.command, [...npmCommand.args, ...args], options);
+		try {
+			await this.runCommand(npmCommand.command, [...npmCommand.args, ...args], options);
+		} finally {
+			this.globalNpmRoot = undefined;
+			this.pnpmGlobalPackages = undefined;
+		}
 	}
 
 	private getGitDependencyInstallArgs(): string[] {
@@ -1982,16 +1988,30 @@ export class DefaultPackageManager implements PackageManager {
 
 	private getPnpmGlobalPackagePath(packageName: string): string | undefined {
 		if (this.getPackageManagerName() !== "pnpm") {
+			this.pnpmGlobalPackages = undefined;
 			return undefined;
 		}
 
-		const output = this.runNpmCommandSync(["list", "-g", "--depth", "0", "--json"]);
-		const entries = JSON.parse(output) as Array<{ dependencies?: Record<string, { path?: string }> }>;
-		for (const entry of entries) {
-			const path = entry.dependencies?.[packageName]?.path;
-			if (path) return path;
+		const npmCommand = this.getNpmCommand();
+		const commandKey = [npmCommand.command, ...npmCommand.args].join("\0");
+		if (this.pnpmGlobalPackages?.commandKey !== commandKey) {
+			const cache: NonNullable<DefaultPackageManager["pnpmGlobalPackages"]> = { commandKey, paths: new Map() };
+			this.pnpmGlobalPackages = cache;
+			try {
+				const output = this.runNpmCommandSync(["list", "-g", "--depth", "0", "--json"]);
+				const entries = JSON.parse(output) as Array<{ dependencies?: Record<string, { path?: string }> }>;
+				for (const entry of entries) {
+					for (const [name, dependency] of Object.entries(entry.dependencies ?? {})) {
+						if (typeof dependency.path === "string" && dependency.path && !cache.paths.has(name))
+							cache.paths.set(name, dependency.path);
+					}
+				}
+			} catch (error) {
+				cache.error = error instanceof Error ? error : new Error(String(error));
+			}
 		}
-		return undefined;
+		if (this.pnpmGlobalPackages.error) throw this.pnpmGlobalPackages.error;
+		return this.pnpmGlobalPackages.paths.get(packageName);
 	}
 
 	private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
@@ -2638,6 +2658,8 @@ export class DefaultPackageManager implements PackageManager {
 		const result = spawnProcessSync(command, args, {
 			stdio: ["ignore", "pipe", "pipe"],
 			encoding: "utf-8",
+			timeout: 5_000,
+			killSignal: "SIGKILL",
 			env,
 		});
 		if (result.error || result.status !== 0) {

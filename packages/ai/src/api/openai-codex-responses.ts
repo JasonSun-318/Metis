@@ -136,7 +136,10 @@ function isRetryableError(status: number, errorText: string): boolean {
 	if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
 		return true;
 	}
-	return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
+	return (
+		status >= 500 &&
+		/rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText)
+	);
 }
 
 function getRetryAfterDelayMs(headers: Headers): number | undefined {
@@ -177,11 +180,16 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 			reject(new Error("Request was aborted"));
 			return;
 		}
-		const timeout = setTimeout(resolve, ms);
-		signal?.addEventListener("abort", () => {
+		const onAbort = () => {
 			clearTimeout(timeout);
+			signal?.removeEventListener("abort", onAbort);
 			reject(new Error("Request was aborted"));
-		});
+		};
+		const timeout = setTimeout(() => {
+			signal?.removeEventListener("abort", onAbort);
+			resolve();
+		}, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
 	});
 }
 
@@ -422,36 +430,6 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 					} finally {
 						combinedSignal.cleanup();
 					}
-					await options?.onResponse?.(
-						{ status: response.status, headers: headersToRecord(response.headers) },
-						model,
-					);
-
-					if (response.ok) {
-						break;
-					}
-
-					const errorText = await response.text();
-					if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
-						const retryAfterDelayMs = getRetryAfterDelayMs(response.headers);
-						const delayMs =
-							retryAfterDelayMs === undefined
-								? BASE_DELAY_MS * 2 ** attempt
-								: response.status === 429
-									? capRetryDelayMs(retryAfterDelayMs, options)
-									: retryAfterDelayMs;
-
-						await sleep(delayMs, options?.signal);
-						continue;
-					}
-
-					// Parse error for friendly message on final attempt or non-retryable error
-					const fakeResponse = new Response(errorText, {
-						status: response.status,
-						statusText: response.statusText,
-					});
-					const info = await parseErrorResponse(fakeResponse);
-					throw new Error(info.friendlyMessage || info.message);
 				} catch (error) {
 					if (error instanceof Error) {
 						if (error.name === "AbortError" || error.message === "Request was aborted") {
@@ -460,13 +438,41 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 					}
 					lastError = error instanceof Error ? error : new Error(String(error));
 					// Network errors are retryable
-					if (attempt < maxRetries && !lastError.message.includes("usage limit")) {
-						const delayMs = BASE_DELAY_MS * 2 ** attempt;
+					if (attempt < maxRetries) {
+						const delayMs = capRetryDelayMs(BASE_DELAY_MS * 2 ** attempt, options);
 						await sleep(delayMs, options?.signal);
 						continue;
 					}
 					throw lastError;
 				}
+				await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
+
+				if (response.ok) {
+					break;
+				}
+
+				const errorText = await response.text();
+				if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
+					const retryAfterDelayMs = getRetryAfterDelayMs(response.headers);
+					const maxDelay = options?.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+					if (retryAfterDelayMs !== undefined && maxDelay > 0 && retryAfterDelayMs > maxDelay) {
+						throw new Error(
+							`Server requested retry delay of ${retryAfterDelayMs}ms exceeds maxRetryDelayMs (${maxDelay}ms)`,
+						);
+					}
+					const delayMs = retryAfterDelayMs ?? capRetryDelayMs(BASE_DELAY_MS * 2 ** attempt, options);
+
+					await sleep(delayMs, options?.signal);
+					continue;
+				}
+
+				// Parse error for friendly message on final attempt or non-retryable error
+				const fakeResponse = new Response(errorText, {
+					status: response.status,
+					statusText: response.statusText,
+				});
+				const info = await parseErrorResponse(fakeResponse);
+				throw new Error(info.friendlyMessage || info.message);
 			}
 
 			if (!response?.ok) {
@@ -755,13 +761,13 @@ async function* parseSSE(response: Response, signal?: AbortSignal): AsyncGenerat
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
 
-			let idx = buffer.indexOf("\n\n");
-			while (idx !== -1) {
-				const chunk = buffer.slice(0, idx);
-				buffer = buffer.slice(idx + 2);
+			let boundary = /\r?\n\r?\n/.exec(buffer);
+			while (boundary) {
+				const chunk = buffer.slice(0, boundary.index);
+				buffer = buffer.slice(boundary.index + boundary[0].length);
 
 				const dataLines = chunk
-					.split("\n")
+					.split(/\r?\n/)
 					.filter((l) => l.startsWith("data:"))
 					.map((l) => l.slice(5).trim());
 				if (dataLines.length > 0) {
@@ -777,7 +783,7 @@ async function* parseSSE(response: Response, signal?: AbortSignal): AsyncGenerat
 						}
 					}
 				}
-				idx = buffer.indexOf("\n\n");
+				boundary = /\r?\n\r?\n/.exec(buffer);
 			}
 		}
 	} finally {
@@ -880,6 +886,7 @@ export function resetOpenAICodexWebSocketDebugStats(sessionId?: string): void {
 }
 
 export function closeOpenAICodexWebSocketSessions(sessionId?: string): void {
+	resetOpenAICodexWebSocketDebugStats(sessionId);
 	const closeEntry = (entry: CachedWebSocketConnection) => {
 		if (entry.idleTimer) clearTimeout(entry.idleTimer);
 		closeWebSocketSilently(entry.socket, 1000, "debug_close");
@@ -998,7 +1005,7 @@ function scheduleSessionWebSocketExpiry(sessionId: string, entry: CachedWebSocke
 		clearTimeout(entry.idleTimer);
 	}
 	entry.idleTimer = setTimeout(() => {
-		if (entry.busy) return;
+		if (entry.busy || websocketSessionCache.get(sessionId) !== entry) return;
 		closeWebSocketSilently(entry.socket, 1000, "idle_timeout");
 		websocketSessionCache.delete(sessionId);
 	}, SESSION_WEBSOCKET_CACHE_TTL_MS);
@@ -1120,9 +1127,9 @@ async function acquireWebSocket(
 				entry: cached,
 				reused: true,
 				release: ({ keep } = {}) => {
-					if (!keep || !isWebSocketReusable(cached.socket)) {
+					if (!keep || !isWebSocketReusable(cached.socket) || websocketSessionCache.get(sessionId) !== cached) {
 						closeWebSocketSilently(cached.socket);
-						websocketSessionCache.delete(sessionId);
+						if (websocketSessionCache.get(sessionId) === cached) websocketSessionCache.delete(sessionId);
 						return;
 					}
 					cached.busy = false;
@@ -1147,6 +1154,10 @@ async function acquireWebSocket(
 	}
 
 	const socket = await connectWebSocket(url, headers, signal, connectTimeoutMs, env);
+	// Another request may have filled the cache while this connection was opening.
+	if (websocketSessionCache.has(sessionId)) {
+		return { socket, reused: false, release: () => closeWebSocketSilently(socket) };
+	}
 	const entry: CachedWebSocketConnection = { socket, busy: true, createdAt: Date.now() };
 	websocketSessionCache.set(sessionId, entry);
 	return {
@@ -1154,7 +1165,7 @@ async function acquireWebSocket(
 		entry,
 		reused: false,
 		release: ({ keep } = {}) => {
-			if (!keep || !isWebSocketReusable(entry.socket)) {
+			if (!keep || !isWebSocketReusable(entry.socket) || websocketSessionCache.get(sessionId) !== entry) {
 				closeWebSocketSilently(entry.socket);
 				if (entry.idleTimer) clearTimeout(entry.idleTimer);
 				if (websocketSessionCache.get(sessionId) === entry) {

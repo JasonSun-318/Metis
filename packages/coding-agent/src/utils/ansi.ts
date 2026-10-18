@@ -58,3 +58,26 @@ export function stripAnsi(value: string): string {
 	// and doing it manually has a performance penalty.
 	return value.replace(regex, "");
 }
+
+/** Remove terminal instructions from untrusted text before applying UI styling. */
+export function sanitizeTerminalText(value: string): string {
+	return stripAnsi(value)
+		.replace(/\r\n?/gu, "\n")
+		.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/gu, "");
+}
+
+/** Copy JSON tool arguments/results for display without changing execution data. */
+export function sanitizeTerminalValue<T>(value: T): T {
+	if (typeof value === "string") return sanitizeTerminalText(value) as T;
+	if (Array.isArray(value)) return value.map((item) => sanitizeTerminalValue(item)) as T;
+	if (
+		value &&
+		typeof value === "object" &&
+		(Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+	) {
+		return Object.fromEntries(
+			Object.entries(value).map(([key, item]) => [sanitizeTerminalText(key), sanitizeTerminalValue(item)]),
+		) as T;
+	}
+	return value;
+}

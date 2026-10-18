@@ -2,6 +2,7 @@ import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, t
 import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
 import { createAllToolDefinitions, type ToolName } from "../../../core/tools/index.ts";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
+import { sanitizeTerminalText, sanitizeTerminalValue } from "../../../utils/ansi.ts";
 import { convertToPng } from "../../../utils/image-convert.ts";
 import { theme } from "../theme/theme.ts";
 
@@ -50,9 +51,9 @@ export class ToolExecutionComponent extends Container {
 		cwd: string,
 	) {
 		super();
-		this.toolName = toolName;
+		this.toolName = sanitizeTerminalText(toolName);
 		this.toolCallId = toolCallId;
-		this.args = args;
+		this.args = sanitizeTerminalValue(args);
 		this.toolDefinition = toolDefinition;
 		this.builtInToolDefinition = createAllToolDefinitions(cwd)[toolName as ToolName];
 		this.showImages = options.showImages ?? true;
@@ -145,7 +146,7 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	updateArgs(args: any): void {
-		this.args = args;
+		this.args = sanitizeTerminalValue(args);
 		this.updateDisplay();
 	}
 
@@ -294,7 +295,7 @@ export class ToolExecutionComponent extends Container {
 				} else {
 					try {
 						const component = resultRenderer(
-							{ content: this.result.content as any, details: this.result.details },
+							sanitizeTerminalValue({ content: this.result.content as any, details: this.result.details }),
 							{ expanded: this.expanded, isPartial: this.isPartial },
 							theme,
 							this.getRenderContext(this.resultRendererComponent),
@@ -359,7 +360,7 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private getTextOutput(): string {
-		return getRenderedTextOutput(this.result, this.showImages);
+		return sanitizeTerminalText(getRenderedTextOutput(this.result, this.showImages));
 	}
 
 	private formatToolExecution(): string {

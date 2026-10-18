@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../src/core/agent-session.ts";
 import type { AgentSessionRuntime } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import type { ExtensionUIContext } from "../src/core/extensions/types.ts";
 import { ModelRegistry } from "../src/core/model-registry.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import { SettingsManager } from "../src/core/settings-manager.ts";
@@ -167,6 +168,7 @@ function createRuntimeHost(options: { withAuth: boolean; responseDelayMs: number
 async function startRpcMode(options: { withAuth: boolean; responseDelayMs: number; model?: Model<any> }): Promise<{
 	lineHandler: (line: string) => void;
 	cleanup: () => Promise<void>;
+	runtimeHost: AgentSessionRuntime;
 }> {
 	rpcIo.outputLines = [];
 	rpcIo.lineHandler = undefined;
@@ -175,13 +177,94 @@ async function startRpcMode(options: { withAuth: boolean; responseDelayMs: numbe
 	void runRpcMode(runtimeHost);
 	await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
 
-	return { lineHandler: rpcIo.lineHandler!, cleanup };
+	return { lineHandler: rpcIo.lineHandler!, cleanup, runtimeHost };
 }
 
 describe("RPC prompt response semantics", () => {
+	it("accepts extension UI replies while a serialized command is waiting for them", async () => {
+		const { runtimeHost, cleanup } = createRuntimeHost({ withAuth: true, responseDelayMs: 0 });
+		let ui: ExtensionUIContext | undefined;
+		vi.spyOn(runtimeHost.session, "bindExtensions").mockImplementation(async (options) => {
+			ui = options.uiContext;
+		});
+		vi.spyOn(runtimeHost.session, "compact").mockImplementation(async () => {
+			expect(await ui!.input("Instructions")).toBe("keep details");
+			return { summary: "done", firstKeptEntryId: "entry-1", tokensBefore: 10 };
+		});
+		try {
+			void runRpcMode(runtimeHost);
+			await vi.waitFor(() => expect(rpcIo.lineHandler).toBeDefined());
+			rpcIo.lineHandler!(JSON.stringify({ id: "compact-ui", type: "compact" }));
+			await vi.waitFor(() =>
+				expect(
+					parseOutputLines(rpcIo.outputLines).some(
+						(line) => line.type === "extension_ui_request" && line.method === "input",
+					),
+				).toBe(true),
+			);
+			const request = parseOutputLines(rpcIo.outputLines).find(
+				(line) => line.type === "extension_ui_request" && line.method === "input",
+			)!;
+			rpcIo.lineHandler!(JSON.stringify({ type: "extension_ui_response", id: request.id, value: "keep details" }));
+			await vi.waitFor(() =>
+				expect(parseOutputLines(rpcIo.outputLines)).toContainEqual(
+					expect.objectContaining({ id: "compact-ui", type: "response", success: true }),
+				),
+			);
+		} finally {
+			await cleanup();
+		}
+	});
 	afterEach(() => {
 		rpcIo.outputLines = [];
 		rpcIo.lineHandler = undefined;
+	});
+
+	it("waits for session switching before starting a following prompt", async () => {
+		const { lineHandler, cleanup, runtimeHost } = await startRpcMode({ withAuth: true, responseDelayMs: 0 });
+		let finishSwitch!: () => void;
+		vi.spyOn(runtimeHost, "switchSession").mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				finishSwitch = resolve;
+			});
+			return { cancelled: true };
+		});
+		const prompt = vi.spyOn(runtimeHost.session, "prompt");
+		try {
+			lineHandler(JSON.stringify({ id: "switch", type: "switch_session", sessionPath: "/tmp/next-session.jsonl" }));
+			lineHandler(JSON.stringify({ id: "prompt-after-switch", type: "prompt", message: "hello" }));
+			await vi.waitFor(() => expect(finishSwitch).toBeDefined());
+			expect(prompt).not.toHaveBeenCalled();
+			finishSwitch();
+			await vi.waitFor(() => expect(getPromptResponses(rpcIo.outputLines, "prompt-after-switch")).toHaveLength(1));
+		} finally {
+			finishSwitch?.();
+			await cleanup();
+		}
+	});
+
+	it("handles abort_bash while bash is waiting for completion", async () => {
+		const { lineHandler, cleanup, runtimeHost } = await startRpcMode({ withAuth: true, responseDelayMs: 0 });
+		let finishBash!: () => void;
+		vi.spyOn(runtimeHost.session, "executeBash").mockImplementation(async () => {
+			await new Promise<void>((resolve) => {
+				finishBash = resolve;
+			});
+			return { output: "", exitCode: 0, cancelled: true, truncated: false };
+		});
+		const abort = vi.spyOn(runtimeHost.session, "abortBash").mockImplementation(() => finishBash());
+		try {
+			lineHandler(JSON.stringify({ id: "bash", type: "bash", command: "wait" }));
+			await vi.waitFor(() => expect(finishBash).toBeDefined());
+			lineHandler(JSON.stringify({ id: "abort", type: "abort_bash" }));
+			await vi.waitFor(() => expect(abort).toHaveBeenCalledOnce());
+			await vi.waitFor(() =>
+				expect(parseOutputLines(rpcIo.outputLines).some((line) => line.id === "bash")).toBe(true),
+			);
+		} finally {
+			finishBash?.();
+			await cleanup();
+		}
 	});
 
 	it("emits one failure response when prompt preflight rejects", async () => {

@@ -723,6 +723,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		await shutdown();
 	}
 
+	let commandTail = Promise.resolve();
 	const handleInputLine = async (line: string) => {
 		let parsed: unknown;
 		try {
@@ -756,22 +757,32 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		}
 
 		const command = parsed as RpcCommand;
-		try {
-			const response = await handleCommand(command);
-			if (response) {
-				output(response);
+		const execute = async () => {
+			try {
+				const response = await handleCommand(command);
+				if (response) {
+					output(response);
+					await waitForRawStdoutBackpressure();
+				}
+				await checkShutdownRequested();
+			} catch (commandError: unknown) {
+				output(
+					error(
+						command.id,
+						command.type,
+						commandError instanceof Error ? commandError.message : String(commandError),
+					),
+				);
 				await waitForRawStdoutBackpressure();
 			}
-			await checkShutdownRequested();
-		} catch (commandError: unknown) {
-			output(
-				error(
-					command.id,
-					command.type,
-					commandError instanceof Error ? commandError.message : String(commandError),
-				),
-			);
-			await waitForRawStdoutBackpressure();
+		};
+		// Replies above and cancellation must bypass work that may be waiting for them.
+		if (command?.type === "abort" || command?.type === "abort_bash" || command?.type === "abort_retry") {
+			await execute();
+		} else {
+			const pending = commandTail.then(execute);
+			commandTail = pending.catch(() => {});
+			await pending;
 		}
 	};
 

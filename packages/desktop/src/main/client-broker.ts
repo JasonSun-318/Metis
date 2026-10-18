@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
-import { homedir } from "node:os";
-import { basename, extname, join } from "node:path";
+import { isAbsolute } from "node:path";
 import {
 	type ClientParams,
 	type ClientResult,
@@ -70,6 +68,7 @@ import {
 import type { BrowserManager } from "./browser-manager.ts";
 import { BrowserToolHost } from "./browser-tool-host.ts";
 import { deliveredPreviewDirectories, readDeliveredPreviewBytes } from "./preview-file-reader.ts";
+import { validateProjectFolderInput } from "./project-folder.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
 
@@ -191,64 +190,6 @@ function rpcFailure(response: RpcErrorResponse): Error {
 	return error;
 }
 
-const DELIVERED_FILE_ID_PATTERN = /^[a-f0-9]{16}$/iu;
-
-const DELIVERED_MIME_MAP: Record<string, string> = {
-	pdf: "application/pdf",
-	xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-	xls: "application/vnd.ms-excel",
-	csv: "text/csv",
-	docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-	doc: "application/msword",
-	pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-	ppt: "application/vnd.ms-powerpoint",
-	png: "image/png",
-	jpg: "image/jpeg",
-	jpeg: "image/jpeg",
-	gif: "image/gif",
-	webp: "image/webp",
-	svg: "image/svg+xml",
-	txt: "text/plain",
-	md: "text/markdown",
-	json: "application/json",
-};
-
-async function readDeliveredFileDirect(sessionId: string, fileId: string) {
-	if (!DELIVERED_FILE_ID_PATTERN.test(fileId)) return null;
-	const candidateDirs = [
-		process.env.METIS_AGENT_DIR ? join(process.env.METIS_AGENT_DIR, "attachments", sessionId, "delivered") : null,
-		join(homedir(), ".metis", "agent", "attachments", sessionId, "delivered"),
-		join(homedir(), ".metis", "attachments", sessionId, "delivered"),
-		join(homedir(), ".metis", "agent", "attachments", sessionId),
-		join(homedir(), ".metis", "attachments", sessionId),
-	].filter((d): d is string => d !== null);
-
-	for (const dir of candidateDirs) {
-		try {
-			const names = await readdir(dir);
-			const match = names.find((name) => name.startsWith(fileId));
-			if (!match) continue;
-			const fullPath = join(dir, match);
-			const metadata = await stat(fullPath);
-			if (!metadata.isFile()) continue;
-			const contents = await readFile(fullPath);
-			const ext = extname(fullPath).replace(/^\./u, "").toLowerCase();
-			const mediaType = DELIVERED_MIME_MAP[ext] || "application/octet-stream";
-			return {
-				fileId,
-				name: basename(fullPath),
-				byteLength: metadata.size,
-				data: contents.toString("base64"),
-				mediaType,
-				absolutePath: fullPath,
-			};
-		} catch {
-			// Continue to next candidate directory
-		}
-	}
-	return null;
-}
-
 /** Owns the single narrow, validated renderer-to-app-server capability surface. */
 export class ClientBroker {
 	private readonly ipcMain: Pick<IpcMain, "handle" | "removeHandler">;
@@ -333,6 +274,9 @@ export class ClientBroker {
 	private ownerSubscribed = false;
 	private ownerCleanup: readonly (() => void)[] = [];
 	private disposed = false;
+	private rendererGeneration = 0;
+	private readonly projectParentGrants = new Set<string>();
+	private readonly projectFileGrants = new Set<string>();
 
 	constructor(options: ClientBrokerOptions) {
 		this.ipcMain = options.ipcMain;
@@ -665,14 +609,6 @@ export class ClientBroker {
 				}),
 			);
 		});
-		this.register(DESKTOP_IPC_CHANNELS.readDeliveredFile, 1, async (_event, [input]) =>
-			this.rpcIpcResult(async () => {
-				const params = input as ClientParams<"session/readDeliveredFile">;
-				const direct = await readDeliveredFileDirect(params.sessionId, params.fileId);
-				if (direct) return direct;
-				return this.clientCall("session/readDeliveredFile", params);
-			}),
-		);
 		this.register(DESKTOP_IPC_CHANNELS.readPreviewFile, 1, async (_event, [input]) => {
 			const params = validateReadPreviewFileInput(input);
 			if (params.source === "workspace") return this.workspaceFiles.readPreviewBytes(params);
@@ -697,12 +633,41 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.respondToInteraction, 1, async (_event, [input]) => {
 			this.respondToInteraction(input);
 		});
-		this.register(DESKTOP_IPC_CHANNELS.selectProjectFolder, 0, async () => this.selectProjectFolder());
-		this.register(DESKTOP_IPC_CHANNELS.selectAttachmentFiles, 0, async () => this.selectAttachmentFiles());
-		this.register(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation, 0, async () => this.getDefaultProjectLocation());
-		this.register(DESKTOP_IPC_CHANNELS.createProjectFolder, 1, async (_event, [input]) =>
-			this.createProjectFolder(input as DesktopCreateProjectFolderInput),
-		);
+		this.register(DESKTOP_IPC_CHANNELS.selectProjectFolder, 0, async (event) => {
+			const path = await this.selectForRenderer(event, this.selectProjectFolder);
+			if (path) this.projectParentGrants.add(path);
+			return path;
+		});
+		this.register(DESKTOP_IPC_CHANNELS.selectAttachmentFiles, 0, async (event) => {
+			const files = await this.selectForRenderer(event, this.selectAttachmentFiles);
+			for (const file of files) this.projectFileGrants.add(file.path);
+			return files;
+		});
+		// Only preload calls this channel, using paths resolved from native File objects.
+		// The context bridge exposes no method accepting raw paths for this grant.
+		this.register(DESKTOP_IPC_CHANNELS.registerDroppedFiles, 1, async (_event, [paths]) => {
+			if (
+				!Array.isArray(paths) ||
+				paths.length > 16 ||
+				paths.some((path) => typeof path !== "string" || !isAbsolute(path))
+			) {
+				throw new TypeError("Invalid dropped file selection");
+			}
+			for (const path of paths) this.projectFileGrants.add(path);
+		});
+		this.register(DESKTOP_IPC_CHANNELS.getDefaultProjectLocation, 0, async (event) => {
+			const path = await this.selectForRenderer(event, this.getDefaultProjectLocation);
+			this.projectParentGrants.add(path);
+			return path;
+		});
+		this.register(DESKTOP_IPC_CHANNELS.createProjectFolder, 1, async (_event, [value]) => {
+			const input = validateProjectFolderInput(value);
+			if (!this.projectParentGrants.has(input.parentDirectory))
+				throw new Error("Project parent directory was not selected");
+			if (input.files.some((file) => !this.projectFileGrants.has(file.path)))
+				throw new Error("Project file was not selected");
+			return this.createProjectFolder(input);
+		});
 		this.register(DESKTOP_IPC_CHANNELS.getServerState, 0, async () => this.supervisor.view());
 		this.register(DESKTOP_IPC_CHANNELS.retryServer, 0, async () => {
 			await this.supervisor.retry();
@@ -850,7 +815,7 @@ export class ClientBroker {
 		this.ipcMain.handle(channel, guarded);
 	}
 
-	private assertTrustedSender(event: IpcMainInvokeEvent): void {
+	assertTrustedSender(event: IpcMainInvokeEvent): void {
 		if (
 			!this.owner ||
 			this.owner.isDestroyed() ||
@@ -860,6 +825,20 @@ export class ClientBroker {
 		) {
 			throw new Error("Untrusted desktop IPC sender");
 		}
+	}
+
+	private async selectForRenderer<T>(event: IpcMainInvokeEvent, select: () => Promise<T>): Promise<T> {
+		const generation = this.rendererGeneration;
+		const result = await select();
+		if (generation !== this.rendererGeneration) throw new Error("Desktop renderer changed during selection");
+		this.assertTrustedSender(event);
+		return result;
+	}
+
+	private clearProjectGrants(): void {
+		this.rendererGeneration++;
+		this.projectParentGrants.clear();
+		this.projectFileGrants.clear();
 	}
 
 	private validatedParams<Method extends Exclude<ClientRpcRequest["method"], "initialize">>(
@@ -1183,6 +1162,7 @@ export class ClientBroker {
 	}
 
 	private detachOwner(): void {
+		this.clearProjectGrants();
 		const cleanup = this.ownerCleanup;
 		this.ownerCleanup = [];
 		this.owner = undefined;
@@ -1205,6 +1185,7 @@ export class ClientBroker {
 	}
 
 	private resetRendererResources(): void {
+		this.clearProjectGrants();
 		this.ownerSubscribed = false;
 		this.performCleanup("Desktop renderer reset failed", [
 			() => this.terminalManager.closeAll(),
