@@ -1,0 +1,35 @@
+{
+	"version": 1,
+	"candidates": [
+		{
+			"manifest": "package.json",
+			"section": "devDependencies",
+			"package": "jiti"
+		},
+		{
+			"manifest": "package.json",
+			"section": "devDependencies",
+			"package": "tsx"
+		},
+		{
+			"manifest": "packages/agent/package.json",
+			"section": "devDependencies",
+			"package": "typescript"
+		},
+		{
+			"manifest": "packages/app-protocol/package.json",
+			"section": "devDependencies",
+			"package": "typescript"
+		},
+		{
+			"manifest": "packages/app-server/package.json",
+			"section": "devDependencies",
+			"package": "typescript"
+		},
+		{
+			"manifest": "packages/coding-agent/package.json",
+			"section": "devDependencies",
+			"package": "typescript"
+		}
+	]
+}

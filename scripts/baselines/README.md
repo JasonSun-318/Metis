@@ -65,3 +65,43 @@ its diff:
 ```sh
 node scripts/check-duplicates.mjs --update
 ```
+
+## Advisory unused dependency report
+
+`npm run check:unused-deps` scans the root manifest and declared workspaces,
+including nested workspaces. It reports candidates and additions/removals against
+`unused-deps.json`; it never removes dependencies, executes scanned code or
+updates manifests/lockfiles. Like the duplicate report, it runs in `npm run check`
+and a `continue-on-error` CI step. Findings, missing/invalid baselines and scan
+errors do not fail normal reports. Incomplete scans skip incremental conclusions.
+
+Evidence includes JavaScript/TypeScript production, test, script and config
+imports/reexports, type imports, side effects, literal dynamic imports,
+`require`/`resolve`, tsconfig types/extends, JSX runtimes, config strings and Vitest
+environment directives. Package scripts recognize literal CLI commands, `npx` /
+`npm exec` aliases and Node preload flags. Installed package metadata supplies bin
+names, with built-in mappings for common repository tools. Run after installing
+dependencies for best coverage. Sources belong to their nearest declared
+workspace; sibling usage does not mask an unused declaration. Workspace scripts
+and config usage can also account for tools declared at the root.
+
+Peer, optional and recognized platform dependencies are conservatively retained.
+Computed module references are listed as uncertainty, and affected unreferenced
+dependencies remain candidates marked for manual review. Documentation, build
+output and declarations in package.json are not usage evidence. Shell/YAML
+files, arbitrary loaders and runtime/config indirection are not fully analyzed;
+a reported candidate is not proof that a dependency is safe to remove. For
+example, manually invoked tools documented in comments can still be reported.
+
+The baseline stores only manifest path, dependency section and package name.
+Losing the last detected reference or adding an unused declaration produces an
+incremental candidate; line and version changes alone do not. Refresh explicitly
+only after reviewing candidates (the initial baseline contains six candidates,
+including manually invoked or implicitly used tools that need further review):
+
+```sh
+node scripts/check-unused-deps.mjs --update
+```
+
+An incomplete scan refuses baseline updates. Normal commands never rewrite
+either advisory baseline; pruning old entries also requires an explicit update.

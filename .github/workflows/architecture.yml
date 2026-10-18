@@ -46,5 +46,8 @@ jobs:
       - name: Report newly duplicated implementations
         continue-on-error: true
         run: npm run check:dup
+      - name: Report unused dependency candidates
+        continue-on-error: true
+        run: npm run check:unused-deps
       - name: Test architecture guards
         run: npm run check:scripts
