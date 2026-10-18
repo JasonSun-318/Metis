@@ -3,6 +3,7 @@ import { createReadStream } from "node:fs";
 import { mkdir, open, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DESKTOP_RELEASE_NOTES_MAX_CHARACTERS, type DesktopUpdateState } from "../shared/desktop-api.ts";
+import { trustedBaseUrl } from "./trusted-base-url.ts";
 
 interface UpdateArtifact {
 	readonly url: string;
@@ -61,18 +62,6 @@ const MAX_UPDATE_BYTES = 4 * 1024 * 1024 * 1024;
 const STABLE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
 const DEFAULT_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
-
-function trustedBaseUrl(value: string | null | undefined): URL | undefined {
-	if (!value) return undefined;
-	try {
-		const url = new URL(value);
-		if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return undefined;
-		url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
-		return url;
-	} catch {
-		return undefined;
-	}
-}
 
 function versionParts(value: string): readonly [number, number, number] | undefined {
 	const match = STABLE_VERSION.exec(value);

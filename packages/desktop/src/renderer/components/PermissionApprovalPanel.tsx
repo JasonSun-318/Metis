@@ -2,6 +2,7 @@ import type { InteractionResponseInput, InteractionView, SessionSnapshot } from 
 import { CaretDown, Warning } from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { approvalErrorMessage } from "../approval-error.ts";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 type PermissionApprovalInteraction = Extract<InteractionView, { kind: "session_permission_approval" }>;
@@ -10,12 +11,6 @@ interface PermissionApprovalPanelProps {
 	readonly interaction: PermissionApprovalInteraction;
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
-}
-
-function approvalErrorMessage(cause: unknown): string {
-	const message = cause instanceof Error ? cause.message : "The response could not be sent.";
-	if (/stale|unavailable|cancelled|no longer/i.test(message)) return "This approval is no longer available.";
-	return message;
 }
 
 function priorReviewCopy(outcome: PermissionApprovalInteraction["priorReviewerOutcome"]): string {

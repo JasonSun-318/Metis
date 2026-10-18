@@ -24,6 +24,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { formatElapsed } from "../format-elapsed.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { emptyProjection } from "../store/reducer.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
@@ -115,15 +116,6 @@ export function buildAgentTree(agents: readonly AgentSummaryView[], rootSessionI
 		if (node) tree.push(node);
 	}
 	return tree;
-}
-
-function formatElapsed(milliseconds: number): string {
-	const seconds = Math.max(0, Math.floor(milliseconds / 1_000));
-	if (seconds < 60) return `${seconds}s`;
-	const minutes = Math.floor(seconds / 60);
-	if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
-	const hours = Math.floor(minutes / 60);
-	return `${hours}h ${minutes % 60}m`;
 }
 
 function hasActiveDescendant(agent: AgentSummaryView, agents: readonly AgentSummaryView[]): boolean {

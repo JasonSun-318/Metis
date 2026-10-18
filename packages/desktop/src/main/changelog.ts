@@ -1,21 +1,10 @@
 import { type DesktopChangelog, validateDesktopChangelog } from "../shared/desktop-api.ts";
+import { trustedBaseUrl } from "./trusted-base-url.ts";
 
 export interface DesktopChangelogLoaderOptions {
 	readonly baseUrl?: string | null;
 	readonly platform: NodeJS.Platform;
 	readonly fetch: (input: string, init?: RequestInit) => Promise<Response>;
-}
-
-function trustedBaseUrl(value: string | null | undefined): URL | undefined {
-	if (!value) return undefined;
-	try {
-		const url = new URL(value);
-		if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash) return undefined;
-		url.pathname = `${url.pathname.replace(/\/+$/u, "")}/`;
-		return url;
-	} catch {
-		return undefined;
-	}
 }
 
 /** Loads the public release history without invoking or depending on the updater. */

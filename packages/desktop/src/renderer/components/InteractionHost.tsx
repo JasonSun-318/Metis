@@ -1,6 +1,7 @@
 import type { InteractionResponseInput, InteractionView, SessionSnapshot } from "@metis/app-protocol";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { approvalErrorMessage } from "../approval-error.ts";
 import { type AskUserDraft, AskUserPanel } from "./AskUserPanel.tsx";
 import { PermissionApprovalPanel } from "./PermissionApprovalPanel.tsx";
 
@@ -10,12 +11,6 @@ interface InteractionHostProps {
 	readonly askUserDrafts?: Map<string, AskUserDraft>;
 	readonly disabled?: boolean;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
-}
-
-function approvalErrorMessage(cause: unknown): string {
-	const message = cause instanceof Error ? cause.message : "The response could not be sent.";
-	if (/stale|unavailable|cancelled|no longer/i.test(message)) return "This approval is no longer available.";
-	return message;
 }
 
 export function InteractionHost({
