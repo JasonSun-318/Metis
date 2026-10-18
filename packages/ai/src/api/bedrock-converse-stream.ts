@@ -60,6 +60,7 @@ import {
 	buildBaseOptions,
 	clampMaxTokensToContext,
 	clampReasoning,
+	clampThinkingBudgetToAnswerRoom,
 	mapSimpleToolChoice,
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
@@ -421,7 +422,7 @@ export const streamSimple: StreamFunction<"bedrock-converse-stream", SimpleStrea
 			reasoning: options.reasoning,
 			thinkingBudgets: {
 				...(options.thinkingBudgets || {}),
-				[clampReasoning(options.reasoning)!]: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),
+				[clampReasoning(options.reasoning)!]: clampThinkingBudgetToAnswerRoom(adjusted.thinkingBudget, maxTokens),
 			},
 			toolChoice,
 		} satisfies BedrockOptions);

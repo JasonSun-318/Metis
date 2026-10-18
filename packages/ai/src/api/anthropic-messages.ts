@@ -50,6 +50,7 @@ import {
 	adjustMaxTokensForThinking,
 	buildBaseOptions,
 	clampMaxTokensToContext,
+	clampThinkingBudgetToAnswerRoom,
 	mapSimpleToolChoice,
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
@@ -870,7 +871,7 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 		...base,
 		maxTokens,
 		thinkingEnabled: true,
-		thinkingBudgetTokens: Math.min(adjusted.thinkingBudget, Math.max(0, maxTokens - 1024)),
+		thinkingBudgetTokens: clampThinkingBudgetToAnswerRoom(adjusted.thinkingBudget, maxTokens),
 		toolChoice,
 	} satisfies AnthropicOptions);
 };
