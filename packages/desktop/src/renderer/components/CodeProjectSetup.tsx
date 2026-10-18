@@ -3,7 +3,7 @@ import { type DragEvent, type FormEvent, useEffect, useRef, useState } from "rea
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection, DesktopCreateProjectFolderInput } from "../../shared/desktop-api.ts";
 import codeProjectHand from "../assets/code-project-hand.svg";
-import { DialogFrame } from "./ProjectActions.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { TracedSvgIcon } from "./TracedSvgIcon.tsx";
 
 type SetupStep = "choose" | "create" | "existing";

@@ -3,10 +3,10 @@ import { SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { mountPptxSelectionLayer } from "./pptx-selection.ts";
 import { materializePreviewBlobUrls } from "./preview-blob-urls.ts";
+import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 import { type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 

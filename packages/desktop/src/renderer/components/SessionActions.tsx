@@ -4,7 +4,7 @@ import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEf
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { actionMenuPosition } from "./action-menu-position.ts";
-import { DialogFrame } from "./ProjectActions.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 
 interface SessionActionsProps {
 	readonly allowRename?: boolean;

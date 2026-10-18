@@ -10,9 +10,9 @@ import {
 } from "@phosphor-icons/react";
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { type McpServerDraft, McpServerForm } from "./McpServerDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 
 export type McpCreationTarget =
 	| { readonly scope: "user"; readonly cwd: null }

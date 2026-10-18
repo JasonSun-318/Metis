@@ -32,7 +32,7 @@ import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import i18n from "../i18n.ts";
-import { DialogFrame } from "./ProjectActions.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 
 function message(cause: unknown): string {
 	if (cause instanceof Error) return i18n.t(cause.message);

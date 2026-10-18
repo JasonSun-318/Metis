@@ -27,8 +27,8 @@ import type {
 	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { Markdown } from "./Markdown.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 import { useFileSelections } from "./preview/FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./preview/FileSelectionPopover.tsx";
 import { type DraftFileSelection, selectionFromRange, selectionFromText } from "./preview/file-selection.ts";

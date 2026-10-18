@@ -50,6 +50,7 @@ import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { type HookDraft, HookEditorDialog } from "./HookEditorDialog.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { McpCreationDialog, type McpCreationTarget } from "./McpCreationDialog.tsx";
@@ -60,7 +61,6 @@ import {
 } from "./McpServerDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { PluginMarketplacePanel } from "./PluginMarketplacePanel.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 import { SkillCreationDialog, type SkillCreationTarget } from "./SkillCreationDialog.tsx";
 import { SkillEditorDialog } from "./SkillEditorDialog.tsx";
 

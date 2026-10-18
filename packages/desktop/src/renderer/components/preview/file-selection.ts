@@ -1,5 +1,5 @@
 import type { ClientParams } from "@metis/app-protocol";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
+import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export type FileSelectionInput = NonNullable<ClientParams<"turn/start">["fileSelections"]>[number];
 export interface DraftFileSelection {

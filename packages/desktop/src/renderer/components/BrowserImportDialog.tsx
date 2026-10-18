@@ -7,8 +7,8 @@ import type {
 	DesktopBrowserSourceId,
 	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 
 interface BrowserImportDialogProps {
 	readonly api: MetisDesktopApi;

@@ -26,6 +26,7 @@ import { useAppStore } from "../hooks/use-app-store.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
 import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
+import type { ProjectSessionGroup } from "../session-groups.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
 import { type NewTaskDraft, SessionWorkspaceWorkflow, sessionProjectKey } from "../session-workspace-workflow.ts";
 import type { AppStore, AppStoreSnapshot } from "../store/app-store.ts";
@@ -41,7 +42,7 @@ import { NewTaskHome, recentProjectsFromGroups } from "./NewTaskHome.tsx";
 import { PermissionSelector } from "./PermissionSelector.tsx";
 import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
-import type { UniversalPreviewTarget } from "./preview/UniversalFilePreviewer.tsx";
+import type { UniversalPreviewTarget } from "./preview/preview-kinds.ts";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
 import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
@@ -50,7 +51,6 @@ import {
 	buildSessionTree,
 	clampSessionSidebarPreferredWidth,
 	clampSessionSidebarWidth,
-	type ProjectSessionGroup,
 	SessionSidebar,
 	type SessionSidebarState,
 	type SidebarDestination,

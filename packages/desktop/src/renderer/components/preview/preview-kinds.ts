@@ -1,3 +1,12 @@
+export interface UniversalPreviewTarget {
+	readonly source: "delivered" | "workspace";
+	readonly sessionId: string;
+	readonly fileId?: string;
+	readonly relativePath?: string;
+	readonly name: string;
+	readonly byteLength?: number;
+}
+
 export type PreviewKind = "pdf" | "docx" | "pptx" | "xlsx" | "csv" | "image" | "markdown" | "text" | "unsupported";
 
 const ENGINE_KINDS = new Set<PreviewKind>(["pdf", "docx", "pptx", "xlsx", "csv"]);

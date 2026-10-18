@@ -1,6 +1,6 @@
-import { PreviewHost, type PreviewHostProps, type UniversalPreviewTarget } from "./PreviewHost.tsx";
+import { PreviewHost, type PreviewHostProps } from "./PreviewHost.tsx";
 
-export type { UniversalPreviewTarget };
+export type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export interface UniversalFilePreviewerProps extends Omit<PreviewHostProps, "active"> {
 	readonly active?: boolean;

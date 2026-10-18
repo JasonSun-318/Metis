@@ -5,9 +5,9 @@ import { useFileSelections } from "./FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./FileSelectionPopover.tsx";
 import { type DraftFileSelection, selectionFromRange } from "./file-selection.ts";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import { decodePreviewText, formatPreviewText } from "./preview-bytes.ts";
+import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export interface TextViewerProps {
 	readonly fileName: string;

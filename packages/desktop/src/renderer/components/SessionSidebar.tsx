@@ -5,6 +5,7 @@ import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import type { ProjectSessionGroup } from "../session-groups.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-preferences.ts";
@@ -23,6 +24,8 @@ import { ProjectActions } from "./ProjectActions.tsx";
 import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
+
+export type { ProjectSessionGroup } from "../session-groups.ts";
 
 export type SidebarDestination = "tasks" | "skills" | "schedules";
 
@@ -96,14 +99,6 @@ export interface SessionSidebarWorkspace {
 	readonly projectBusy: (group: ProjectSessionGroup) => boolean;
 	readonly preferences: ProjectPreferenceMap;
 	readonly pinnedSessionIds: ReadonlySet<string>;
-}
-
-export interface ProjectSessionGroup {
-	readonly mode: AgentMode;
-	readonly cwd: string;
-	readonly name: string;
-	readonly pinned: boolean;
-	readonly sessions: readonly SessionSummary[];
 }
 
 export interface SessionTree {

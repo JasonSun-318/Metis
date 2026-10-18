@@ -10,17 +10,10 @@ import { PptxViewer } from "./PptxViewer.tsx";
 import { PreviewFrame } from "./PreviewFrame.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 import { previewBytesCache, previewCacheKey } from "./preview-bytes-cache.ts";
-import { classifyPreviewKind } from "./preview-kinds.ts";
+import { classifyPreviewKind, type UniversalPreviewTarget } from "./preview-kinds.ts";
 import { TextViewer } from "./TextViewer.tsx";
 
-export interface UniversalPreviewTarget {
-	readonly source: "delivered" | "workspace";
-	readonly sessionId: string;
-	readonly fileId?: string;
-	readonly relativePath?: string;
-	readonly name: string;
-	readonly byteLength?: number;
-}
+export type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export interface PreviewHostProps {
 	readonly file: UniversalPreviewTarget;

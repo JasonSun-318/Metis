@@ -1,6 +1,6 @@
 import type { PlanView, SessionProcessView } from "@metis/app-protocol";
 import type { DesktopBrowserHandoffReason } from "../shared/desktop-api.ts";
-import type { UniversalPreviewTarget } from "./components/preview/UniversalFilePreviewer.tsx";
+import type { UniversalPreviewTarget } from "./components/preview/preview-kinds.ts";
 
 export interface ChatTab {
 	readonly kind: "chat";

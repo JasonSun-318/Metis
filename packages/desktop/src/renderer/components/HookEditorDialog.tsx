@@ -2,8 +2,8 @@ import type { DeclarativeHookView, HookEventNameView, HookProtocolView, HookRunM
 import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 
 const HOOK_EVENTS: readonly HookEventNameView[] = [
 	"SessionStart",

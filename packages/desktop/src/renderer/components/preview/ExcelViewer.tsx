@@ -12,8 +12,8 @@ import {
 	paintedCellsForRow,
 	parseExcelBytes,
 } from "./excel-grid.ts";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
+import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
 
 export interface ExcelViewerProps {

@@ -25,10 +25,10 @@ import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { getHomeStarters, type HomeStarter, type HomeStarterId, pickHomeGreeting } from "../new-task-home-content.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
+import type { ProjectSessionGroup } from "../session-groups.ts";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { Composer, type ComposerPrefillRequest, type ComposerSubmission } from "./Composer.tsx";
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
-import type { ProjectSessionGroup } from "./SessionSidebar.tsx";
 import type { ComposerSlashCommand } from "./SlashCommandMenu.tsx";
 
 const starterIcons: Record<HomeStarterId, typeof FileText> = {

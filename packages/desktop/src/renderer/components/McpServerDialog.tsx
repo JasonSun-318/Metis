@@ -2,8 +2,8 @@ import type { ClientParams, McpServerSummaryView } from "@metis/app-protocol";
 import { Plus, Trash, X } from "@phosphor-icons/react";
 import { type FormEvent, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
-import { DialogFrame } from "./ProjectActions.tsx";
 
 type McpServerInput = ClientParams<"mcp/upsert">["server"];
 type McpCredentialInput = NonNullable<ClientParams<"mcp/upsert">["credential"]>;

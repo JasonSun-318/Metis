@@ -4,7 +4,7 @@ import { useFileSelections } from "./FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./FileSelectionPopover.tsx";
 import { type DraftFileSelection, type FileSelectionInput, selectionFromDocument } from "./file-selection.ts";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
-import type { UniversalPreviewTarget } from "./PreviewHost.tsx";
+import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export function useDocumentSelection(file: UniversalPreviewTarget | undefined, bytes: Uint8Array) {
 	const actions = useFileSelections();
