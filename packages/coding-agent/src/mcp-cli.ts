@@ -3,6 +3,7 @@ import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, getAgentDir } from "./config.ts";
 import { AuthStorage } from "./core/auth-storage.ts";
 import { McpConfigurationCoordinator, mcpConfigurationRevision, mcpCredentialState } from "./core/mcp/configuration.ts";
+import { findMcpDefinition, parseMcpEnvironmentName } from "./core/mcp/configuration-helpers.ts";
 import type { McpServerSettings, McpStdioServerSettings } from "./core/settings-manager.ts";
 import {
 	createCommandSettingsManager,
@@ -54,13 +55,6 @@ function parseScope(value: string): McpCliScope {
 	return value;
 }
 
-function parseEnvironmentName(value: string, option: string): string {
-	if (!value.trim() || value.includes("=") || value.includes("\0")) {
-		throw new Error(`${option} requires an environment variable name`);
-	}
-	return value;
-}
-
 function parseApprovalOptions(args: string[]): boolean | undefined {
 	let approve: boolean | undefined;
 	for (const arg of args) {
@@ -105,10 +99,10 @@ function parseAdd(name: string | undefined, args: string[]): McpCliCommand {
 			url = requiredValue(args, index, arg);
 			index++;
 		} else if (arg === "--env") {
-			envVars.push(parseEnvironmentName(requiredValue(args, index, arg), arg));
+			envVars.push(parseMcpEnvironmentName(requiredValue(args, index, arg), arg));
 			index++;
 		} else if (arg === "--bearer-token-env-var") {
-			bearerTokenEnvVar = parseEnvironmentName(requiredValue(args, index, arg), arg);
+			bearerTokenEnvVar = parseMcpEnvironmentName(requiredValue(args, index, arg), arg);
 			index++;
 		} else if (arg === "--scope") {
 			scope = parseScope(requiredValue(args, index, arg));
@@ -155,15 +149,6 @@ function safeConfiguration(server: McpServerSettings): McpServerSettings {
 	const stdio = server as McpStdioServerSettings;
 	if (!stdio.env) return server;
 	return { ...stdio, env: Object.fromEntries(Object.keys(stdio.env).map((name) => [name, "<redacted>"])) };
-}
-
-function findDefinition(
-	name: string,
-	globalServers: Record<string, McpServerSettings>,
-	projectServers: Record<string, McpServerSettings>,
-): { scope: McpCliScope; server: McpServerSettings } | undefined {
-	if (projectServers[name]) return { scope: "project", server: projectServers[name] };
-	return globalServers[name] ? { scope: "user", server: globalServers[name] } : undefined;
 }
 
 export async function handleMcpCliCommand(
@@ -224,7 +209,7 @@ export async function handleMcpCliCommand(
 		}
 
 		if (command.action === "get") {
-			const definition = findDefinition(command.name, globalServers, projectServers);
+			const definition = findMcpDefinition(command.name, projectServers, () => globalServers, "user");
 			if (!definition) throw new Error(`MCP server "${command.name}" is not configured`);
 			console.log(
 				JSON.stringify(

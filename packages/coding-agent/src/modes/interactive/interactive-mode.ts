@@ -81,6 +81,7 @@ import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
 import { type AppKeybinding, KeybindingsManager } from "../../core/keybindings.ts";
 import type { McpCredentialChange } from "../../core/mcp/configuration.ts";
+import { findMcpDefinition, isValidMcpEnvironmentName } from "../../core/mcp/configuration-helpers.ts";
 import type { McpManager, McpServerStatus } from "../../core/mcp/manager.ts";
 import {
 	createDreamPromptAgent,
@@ -5806,10 +5807,12 @@ export class InteractiveMode {
 	}
 
 	private getMcpDefinition(name: string): { scope: SettingsScope; server: McpServerSettings } | undefined {
-		const project = this.settingsManager.getProjectSettings().mcpServers?.[name];
-		if (project) return { scope: "project", server: project };
-		const global = this.settingsManager.getGlobalSettings().mcpServers?.[name];
-		return global ? { scope: "global", server: global } : undefined;
+		return findMcpDefinition(
+			name,
+			this.settingsManager.getProjectSettings().mcpServers,
+			() => this.settingsManager.getGlobalSettings().mcpServers,
+			"global",
+		);
 	}
 
 	private async persistMcpDefinition(
@@ -6319,7 +6322,7 @@ export class InteractiveMode {
 	}
 
 	private validEnvironmentName(value: string): boolean {
-		return Boolean(value) && !value.includes("=") && !value.includes("\0");
+		return isValidMcpEnvironmentName(value);
 	}
 
 	private showMcpConnectionResult(name: string, connectedMessage: string): void {

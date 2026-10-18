@@ -151,6 +151,119 @@ describe("MCP CLI", () => {
 		expect(process.exitCode).toBeUndefined();
 	});
 
+	it("resolves project overrides before user definitions and reports the matching scope", async () => {
+		mkdirSync(join(projectDir, ".metis"), { recursive: true });
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				mcpServers: {
+					shared: { url: "https://global.example.test/mcp" },
+					"global-only": { command: "global-server" },
+				},
+			}),
+		);
+		writeFileSync(
+			join(projectDir, ".metis", "settings.json"),
+			JSON.stringify({ mcpServers: { shared: { url: "https://project.example.test/mcp" } } }),
+		);
+
+		const get = async (name: string): Promise<Record<string, unknown> | undefined> => {
+			vi.mocked(console.log).mockClear();
+			vi.mocked(console.error).mockClear();
+			process.exitCode = undefined;
+			await handleMcpCliCommand(["mcp", "get", name, "--approve"]);
+			if (process.exitCode === 1) return undefined;
+			return JSON.parse(String(vi.mocked(console.log).mock.calls.at(-1)?.[0]));
+		};
+
+		await expect(get("shared")).resolves.toEqual({
+			name: "shared",
+			scope: "project",
+			server: { url: "https://project.example.test/mcp" },
+		});
+		await expect(get("global-only")).resolves.toEqual({
+			name: "global-only",
+			scope: "user",
+			server: { command: "global-server" },
+		});
+		await expect(get("missing")).resolves.toBeUndefined();
+		expect(process.exitCode).toBe(1);
+		expect(
+			vi
+				.mocked(console.error)
+				.mock.calls.map(([message]) => String(message))
+				.join("\n"),
+		).toContain('MCP server "missing" is not configured');
+		expect(vi.mocked(console.log)).not.toHaveBeenCalled();
+	});
+
+	it("preserves surrounding whitespace in accepted environment names", async () => {
+		await handleMcpCliCommand(["mcp", "add", "spacey", "--env", "  LOCAL_TOKEN  ", "--", "node", "server.mjs"]);
+		await handleMcpCliCommand([
+			"mcp",
+			"add",
+			"spacey-http",
+			"--url",
+			"https://mcp.example.test/mcp",
+			"--bearer-token-env-var",
+			"  DOCS_TOKEN  ",
+		]);
+
+		expect(process.exitCode).toBeUndefined();
+		expect(readGlobalSettings().mcpServers).toMatchObject({
+			spacey: { envVars: ["  LOCAL_TOKEN  "] },
+			"spacey-http": { bearerTokenEnvVar: "  DOCS_TOKEN  " },
+		});
+	});
+
+	it("rejects invalid environment names with stable CLI errors", async () => {
+		const cases = [
+			{ args: ["mcp", "add", "bad", "--env", "", "--", "node"], error: "Missing value for --env" },
+			{
+				args: ["mcp", "add", "bad", "--env", "   ", "--", "node"],
+				error: "--env requires an environment variable name",
+			},
+			{
+				args: ["mcp", "add", "bad", "--env", "TOKEN=value", "--", "node"],
+				error: "--env requires an environment variable name",
+			},
+			{
+				args: ["mcp", "add", "bad", "--env", "TO\0KEN", "--", "node"],
+				error: "--env requires an environment variable name",
+			},
+			{
+				args: [
+					"mcp",
+					"add",
+					"bad",
+					"--url",
+					"https://mcp.example.test/mcp",
+					"--bearer-token-env-var",
+					"TOKEN=value",
+				],
+				error: "--bearer-token-env-var requires an environment variable name",
+			},
+			{
+				args: ["mcp", "add", "bad", "--url", "https://mcp.example.test/mcp", "--bearer-token-env-var", "TO\0KEN"],
+				error: "--bearer-token-env-var requires an environment variable name",
+			},
+		];
+
+		for (const testCase of cases) {
+			vi.mocked(console.error).mockClear();
+			process.exitCode = undefined;
+			await handleMcpCliCommand(testCase.args);
+			expect(process.exitCode).toBe(1);
+			expect(
+				vi
+					.mocked(console.error)
+					.mock.calls.map(([message]) => String(message))
+					.join("\n"),
+			).toContain(testCase.error);
+		}
+		expect(vi.mocked(console.log)).not.toHaveBeenCalled();
+	});
+
 	it("writes a stdio definition that the production runtime starts and calls", async () => {
 		const fixture = fileURLToPath(new URL("./fixtures/mcp-stdio-server.mjs", import.meta.url));
 		await handleMcpCliCommand(["mcp", "add", "fixture", "--", process.execPath, fixture]);

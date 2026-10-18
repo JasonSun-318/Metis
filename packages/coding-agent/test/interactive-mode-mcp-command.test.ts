@@ -101,9 +101,37 @@ function createContext(
 }
 
 const handler = Reflect.get(InteractiveMode.prototype, "handleMcpCommand") as (this: object) => Promise<void>;
+const getMcpDefinition = Reflect.get(InteractiveMode.prototype, "getMcpDefinition") as (
+	this: object,
+	name: string,
+) => { scope: string; server: object } | undefined;
 
 describe("InteractiveMode /mcp", () => {
 	beforeAll(() => initTheme("dark"));
+
+	it("resolves project definitions before personal definitions without reading global settings", () => {
+		const context = createContext({
+			globalServers: {
+				docs: { url: "https://global.example.test/mcp" },
+				"global-only": { url: "https://global-only.example.test/mcp" },
+			},
+			projectServers: { docs: { url: "https://project.example.test/mcp" } },
+		});
+
+		expect(getMcpDefinition.call(context.target, "docs")).toEqual({
+			scope: "project",
+			server: { url: "https://project.example.test/mcp" },
+		});
+		expect(context.settingsManager.getGlobalSettings).not.toHaveBeenCalled();
+
+		expect(getMcpDefinition.call(context.target, "global-only")).toEqual({
+			scope: "global",
+			server: { url: "https://global-only.example.test/mcp" },
+		});
+		expect(getMcpDefinition.call(context.target, "missing")).toBeUndefined();
+		expect(context.settingsManager.getGlobalSettings).toHaveBeenCalledTimes(2);
+		expect(context.settingsManager.getProjectSettings).toHaveBeenCalledTimes(3);
+	});
 
 	it("adds and connects an HTTP server from the unified manager", async () => {
 		const context = createContext();
@@ -249,6 +277,70 @@ describe("InteractiveMode /mcp", () => {
 
 		expect(context.credentials.get("mcp:docs")).toMatchObject({ bearerToken: "old-secret" });
 		expect(context.target.showError).toHaveBeenCalledWith("disk full");
+	});
+
+	it("trims environment names and persists project definitions through /mcp", async () => {
+		const context = createContext({
+			projectServers: { docs: { url: "https://docs.example.test/mcp" } },
+			statuses: () => [connectedStatus],
+		});
+		context.target.showExtensionSelector
+			.mockResolvedValueOnce("docs · connected · http · 3 tools")
+			.mockResolvedValueOnce("Authentication")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Close");
+		context.target.showExtensionInput.mockResolvedValueOnce("  PATH  ");
+
+		await handler.call(context.target);
+
+		expect(context.mcp.mutateConfiguration).toHaveBeenCalledWith("project", [
+			expect.objectContaining({
+				name: "docs",
+				next: { url: "https://docs.example.test/mcp", bearerTokenEnvVar: "PATH" },
+				credential: { action: "remove" },
+			}),
+		]);
+		expect(context.target.showStatus).toHaveBeenCalledWith('Updated authentication for MCP server "docs"');
+	});
+
+	it("rejects invalid environment names and returns to the server menu on cancel", async () => {
+		const context = createContext({ globalServers: { docs: { url: "https://docs.example.test/mcp" } } });
+		context.target.showExtensionSelector
+			.mockResolvedValueOnce("docs · connected · http · 3 tools")
+			.mockResolvedValueOnce("Authentication")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Use environment variable")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Back")
+			.mockResolvedValueOnce("Close");
+		context.target.showExtensionInput
+			.mockResolvedValueOnce("BAD=NAME")
+			.mockResolvedValueOnce("   ")
+			.mockResolvedValueOnce("BAD\0NAME")
+			.mockResolvedValueOnce(undefined);
+
+		await handler.call(context.target);
+
+		expect(context.target.showWarning).toHaveBeenCalledTimes(3);
+		expect(context.target.showWarning).toHaveBeenCalledWith(
+			"Environment variable name must not be empty or contain =",
+		);
+		expect(context.target.showExtensionInput).toHaveBeenCalledTimes(4);
+		expect(context.mcp.mutateConfiguration).not.toHaveBeenCalled();
+		expect(context.target.showExtensionSelector.mock.calls.map(([title]: [string]) => title)).toEqual([
+			"MCP servers",
+			"MCP server · docs",
+			"MCP authentication · docs",
+			"MCP authentication · docs",
+			"MCP authentication · docs",
+			"MCP authentication · docs",
+			"MCP authentication · docs",
+			"MCP server · docs",
+			"MCP servers",
+		]);
 	});
 
 	it("does not report success when an entered token is rejected", async () => {
