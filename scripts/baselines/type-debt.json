@@ -1,0 +1,1340 @@
+{
+	"version": 1,
+	"counts": [
+		{
+			"file": "packages/agent/src/agent-loop.ts",
+			"category": "explicit-any",
+			"count": 7
+		},
+		{
+			"file": "packages/agent/src/agent.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/agent/src/harness/agent-harness.ts",
+			"category": "explicit-any",
+			"count": 11
+		},
+		{
+			"file": "packages/agent/src/harness/agent-harness.ts",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/agent/src/harness/compaction/branch-summarization.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/agent/src/harness/compaction/compaction.ts",
+			"category": "explicit-any",
+			"count": 3
+		},
+		{
+			"file": "packages/agent/src/harness/prompt-templates.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/agent/src/harness/session/jsonl-storage.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/agent/src/harness/session/session.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/agent/src/harness/types.ts",
+			"category": "explicit-any",
+			"count": 7
+		},
+		{
+			"file": "packages/agent/src/harness/utils/shell-output.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/agent/src/proxy.ts",
+			"category": "explicit-any",
+			"count": 5
+		},
+		{
+			"file": "packages/agent/src/proxy.ts",
+			"category": "as-any",
+			"count": 4
+		},
+		{
+			"file": "packages/agent/src/proxy.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/agent/src/types.ts",
+			"category": "explicit-any",
+			"count": 14
+		},
+		{
+			"file": "packages/ai/src/api/anthropic-messages.ts",
+			"category": "explicit-any",
+			"count": 4
+		},
+		{
+			"file": "packages/ai/src/api/anthropic-messages.ts",
+			"category": "as-any",
+			"count": 3
+		},
+		{
+			"file": "packages/ai/src/api/anthropic-messages.ts",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/ai/src/api/bedrock-converse-stream.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/ai/src/api/bedrock-converse-stream.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/ai/src/api/google-generative-ai.ts",
+			"category": "explicit-any",
+			"count": 4
+		},
+		{
+			"file": "packages/ai/src/api/google-generative-ai.ts",
+			"category": "as-any",
+			"count": 4
+		},
+		{
+			"file": "packages/ai/src/api/google-generative-ai.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/google-shared.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/google-vertex.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/mistral-conversations.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/mistral-conversations.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/mistral-conversations.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/openai-codex-responses.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/openai-codex-responses.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/openai-codex-responses.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/openai-completions.ts",
+			"category": "explicit-any",
+			"count": 22
+		},
+		{
+			"file": "packages/ai/src/api/openai-completions.ts",
+			"category": "as-any",
+			"count": 22
+		},
+		{
+			"file": "packages/ai/src/api/openai-completions.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/api/openai-responses-shared.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/ai/src/api/simple-options.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/ai/src/compat.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/types.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/ai/src/utils/event-stream.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/utils/event-stream.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/utils/event-stream.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/ai/src/utils/node-http-proxy.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/ai/src/utils/overflow.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/ai/src/utils/prompt-cache-layout.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/ai/src/utils/typebox-helpers.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/utils/typebox-helpers.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/ai/src/utils/validation.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/app-protocol/src/envelope.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/app-protocol/src/schema.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/app-protocol/src/views.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/app-server/src/agent-session-runtime-host.ts",
+			"category": "non-null-assertion",
+			"count": 9
+		},
+		{
+			"file": "packages/app-server/src/browser-tools.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/app-server/src/connection.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/app-server/src/interactions.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/app-server/src/mcp-import.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/app-server/src/outbound-queue.ts",
+			"category": "non-null-assertion",
+			"count": 13
+		},
+		{
+			"file": "packages/app-server/src/plugins.ts",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/app-server/src/process-projector.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/app-server/src/projection/session-projection.ts",
+			"category": "non-null-assertion",
+			"count": 12
+		},
+		{
+			"file": "packages/app-server/src/session-catalog.ts",
+			"category": "non-null-assertion",
+			"count": 6
+		},
+		{
+			"file": "packages/app-server/src/session-registry.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/app-server/src/skill-files.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session-context-usage.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session-runtime.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session-services.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session.ts",
+			"category": "explicit-any",
+			"count": 14
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session.ts",
+			"category": "non-null-assertion",
+			"count": 32
+		},
+		{
+			"file": "packages/coding-agent/src/core/ask-user.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/bash-executor.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/code-changes.ts",
+			"category": "non-null-assertion",
+			"count": 6
+		},
+		{
+			"file": "packages/coding-agent/src/core/compaction/branch-summarization.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/compaction/compaction.ts",
+			"category": "explicit-any",
+			"count": 5
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-view.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/export-html/tool-renderer.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/loader.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/runner.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/runner.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/runner.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/types.ts",
+			"category": "explicit-any",
+			"count": 18
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/types.ts",
+			"category": "suppression:lint/suspicious/noConfusingVoidType",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/client.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/configuration.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/manager.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/tools.ts",
+			"category": "explicit-any",
+			"count": 8
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/tools.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase1.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase2.ts",
+			"category": "non-null-assertion",
+			"count": 8
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/transcript.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/migrate-legacy.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-search.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault.ts",
+			"category": "non-null-assertion",
+			"count": 24
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-registry.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-resolver.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager.ts",
+			"category": "non-null-assertion",
+			"count": 8
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/classify.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"category": "explicit-any",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/prompt-cache-report.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/queued-turn-queue.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/resource-loader.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/schedules/delete.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/schedules/executor.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/schedules/manager.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/schedules/manager.ts",
+			"category": "suppression:lint/suspicious/useAdjacentOverloadSignatures",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/sdk.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/sdk.ts",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-delivered-artifacts.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-file-selections.ts",
+			"category": "non-null-assertion",
+			"count": 6
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-manager.ts",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/coding-agent/src/core/settings-manager.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/manager.ts",
+			"category": "explicit-any",
+			"count": 4
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/store.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/trace.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/coding-agent/src/core/system-prompt.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/timings.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-permission-adapter.ts",
+			"category": "explicit-any",
+			"count": 8
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-permission-adapter.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-result-microcompaction.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/bash.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/bash.ts",
+			"category": "as-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/find.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/find.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/find.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/grep.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/grep.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/grep.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"category": "explicit-any",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/ls.ts",
+			"category": "explicit-any",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/ls.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/read.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/safe-local-file.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/tool-definition-wrapper.ts",
+			"category": "explicit-any",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/main.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/mcp-cli.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/migrations.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/config-selector.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/footer.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/model-selector.ts",
+			"category": "explicit-any",
+			"count": 8
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts",
+			"category": "explicit-any",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector-search.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector.ts",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/tool-execution.ts",
+			"category": "explicit-any",
+			"count": 17
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/tool-execution.ts",
+			"category": "as-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/tree-selector.ts",
+			"category": "non-null-assertion",
+			"count": 11
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+			"category": "explicit-any",
+			"count": 5
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+			"category": "non-null-assertion",
+			"count": 9
+		},
+		{
+			"file": "packages/coding-agent/src/modes/rpc/rpc-client.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/modes/rpc/rpc-mode.ts",
+			"category": "explicit-any",
+			"count": 1
+		},
+		{
+			"file": "packages/coding-agent/src/modes/rpc/rpc-types.ts",
+			"category": "explicit-any",
+			"count": 4
+		},
+		{
+			"file": "packages/coding-agent/src/package-manager-cli.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/coding-agent/src/utils/image-resize-core.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/main/browser-controller.ts",
+			"category": "non-null-assertion",
+			"count": 11
+		},
+		{
+			"file": "packages/desktop/src/main/browser-manager.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/main/browser-profile-store.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/main/browser-tab-runtime.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/main/updater.ts",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/desktop/src/main/workspace-file-manager.ts",
+			"category": "non-null-assertion",
+			"count": 12
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
+			"category": "suppression:lint/a11y/useSemanticElements",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AgentTypesSettingsPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/App.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/App.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AskUserAnswerSummary.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AskUserPanel.tsx",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AskUserPanel.tsx",
+			"category": "suppression:lint/a11y/useAriaPropsSupportedByRole",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AskUserPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/BrowserSettingsPanel.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/CodeTranscriptTurn.tsx",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/CodeTranscriptTurn.tsx",
+			"category": "suppression:lint/a11y/noStaticElementInteractions",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/CodeTranscriptTurn.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Composer.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Composer.tsx",
+			"category": "suppression:lint/a11y/useSemanticElements",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ConversationNavigation.tsx",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ConversationNavigation.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/DeliveredFileCard.tsx",
+			"category": "suppression:lint/a11y/useKeyWithClickEvents",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/DialogFrame.tsx",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/FilePanel.tsx",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/FilePanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/InteractionHost.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/knowledge-graph-labels.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/knowledge-graph-layout.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgeGraph.tsx",
+			"category": "suppression:lint/a11y/noNoninteractiveTabindex",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgeGraph.tsx",
+			"category": "suppression:lint/a11y/useSemanticElements",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgeNoteList.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgePanel.tsx",
+			"category": "suppression:lint/a11y/noStaticElementInteractions",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgePanel.tsx",
+			"category": "suppression:lint/a11y/useKeyWithClickEvents",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgePanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/markdown-lexer.ts",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Markdown.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/MemoryDialog.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/MemorySessionSettings.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ModelSettingsPanel.tsx",
+			"category": "suppression:lint/a11y/useKeyWithClickEvents",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PermissionApprovalPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PersonalizationPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginMarketplacePanel.tsx",
+			"category": "suppression:lint/a11y/useSemanticElements",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginMarketplacePanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginMarketplacePanel.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginsPanel.tsx",
+			"category": "non-null-assertion",
+			"count": 7
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginsPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/ExcelViewer.tsx",
+			"category": "suppression:lint/a11y/noNoninteractiveTabindex",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/ExcelViewer.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/ExcelViewer.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/file-selection.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/FileSelectionPopover.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/FileSelectionPopover.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PdfViewer.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PdfViewer.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PptxViewer.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-blob-urls.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PreviewHost.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/TextViewer.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/use-document-selection.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProcessPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ReviewPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTaskDetail.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTaskDetail.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTaskDialog.tsx",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTaskDialog.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTasksPanel.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionChatView.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionSidebar.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionWorkspace.tsx",
+			"category": "non-null-assertion",
+			"count": 10
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionWorkspace.tsx",
+			"category": "suppression:lint/a11y/noStaticElementInteractions",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionWorkspace.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 10
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SettingsDialog.tsx",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SettingsDialog.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SkillCreationDialog.tsx",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SlashCommandMenu.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SystemNotice.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TaskList.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TaskList.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ThinkingSelector.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ThinkingSelector.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ToolCodeChanges.tsx",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"category": "non-null-assertion",
+			"count": 6
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Transcript.tsx",
+			"category": "non-null-assertion",
+			"count": 6
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TranscriptQuoteSelection.tsx",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TranscriptTurn.tsx",
+			"category": "suppression:lint/correctness/useExhaustiveDependencies",
+			"count": 3
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TranscriptTurn.tsx",
+			"category": "suppression:lint/suspicious/noArrayIndexKey",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/UsagePanel.tsx",
+			"category": "non-null-assertion",
+			"count": 5
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/use-knowledge-graph.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/hooks/use-conversation-plan-flow.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/provider-names.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-view-utils.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/reducer.ts",
+			"category": "non-null-assertion",
+			"count": 48
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"category": "non-null-assertion",
+			"count": 15
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/tui/src/components/box.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/tui/src/components/editor.ts",
+			"category": "non-null-assertion",
+			"count": 12
+		},
+		{
+			"file": "packages/tui/src/fuzzy.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/tui/src/keybindings.ts",
+			"category": "non-null-assertion",
+			"count": 1
+		},
+		{
+			"file": "packages/tui/src/keys.ts",
+			"category": "non-null-assertion",
+			"count": 8
+		},
+		{
+			"file": "packages/tui/src/kill-ring.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		},
+		{
+			"file": "packages/tui/src/stdin-buffer.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/tui/src/terminal.ts",
+			"category": "non-null-assertion",
+			"count": 3
+		},
+		{
+			"file": "packages/tui/src/utils.ts",
+			"category": "non-null-assertion",
+			"count": 4
+		},
+		{
+			"file": "packages/tui/src/word-navigation.ts",
+			"category": "non-null-assertion",
+			"count": 2
+		}
+	]
+}

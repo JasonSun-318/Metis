@@ -137,3 +137,36 @@ After reviewing the report, explicitly refresh and inspect only this baseline:
 ```sh
 node scripts/check-dead-exports.mjs --update
 ```
+
+## Advisory type debt and suppression report
+
+`npm run check:type-debt` counts production TypeScript/TSX under `packages/*/src`
+and compares per-file/category counts with `type-debt.json`. It reports explicit
+`any` types, `as any` / `<any>` assertions, non-null expressions, and Biome
+suppression openings by rule/category. An assertion's `any` is also included in
+the explicit-any total; those categories must not be summed. Suppression counts
+represent rule mentions, not the number of lines suppressed. Closing
+`biome-ignore-end` comments do not add counts.
+
+The scanner uses TypeScript syntax and actual comment trivia, excluding literal
+text, tests/fixtures, declaration files and generated sources. Generated header
+markers must occur in leading comments. Counts do not depend on line numbers;
+an increase in one file cannot be offset by a decrease in another. Replacing debt
+within the same file/category without changing its count is outside this budget's
+coverage. This is an advisory count, not a type-safety or suppression-validity proof.
+
+Normal findings, missing/invalid baselines and incomplete scans remain advisory
+in `npm run check` and architecture CI. Normal runs never change source or the
+baseline; incomplete scans skip incremental conclusions. Existing Biome rule
+levels are unchanged. The checker's regression tests remain required.
+
+Refresh only after reviewing the counts; an incomplete scan refuses the update:
+
+```sh
+node scripts/check-type-debt.mjs --update
+```
+
+The agent and coding-agent `public-api-types.test.ts` suites additionally assert
+selected public queue, session and tool-render signatures. Root `tsgo --noEmit`
+checks those assertions, including negative assignments. They supplement the
+export-surface gate; they are not exhaustive signature compatibility checks.

@@ -54,3 +54,6 @@ jobs:
         run: npm run check:dead-exports
       - name: Test architecture guards
         run: npm run check:scripts
+      - name: Report type debt and suppression increases
+        continue-on-error: true
+        run: npm run check:type-debt

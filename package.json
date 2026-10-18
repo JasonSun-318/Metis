@@ -10,7 +10,7 @@
 	"scripts": {
 		"clean": "npm run clean --workspaces",
 		"build": "cd packages/tui && npm run build && cd ../ai && npm run build && cd ../agent && npm run build && cd ../coding-agent && npm run build && cd ../app-protocol && npm run build && cd ../app-server && npm run build",
-		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:boundaries && npm run check:cycles && npm run check:public-api && npm run check:dup && npm run check:unused-deps && npm run check:dead-exports && npm run check:scripts && npm run check:generated --workspace @metis/app-protocol && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
+		"check": "biome check --write --error-on-warnings . && npm run check:pinned-deps && npm run check:ts-imports && npm run check:boundaries && npm run check:cycles && npm run check:public-api && npm run check:dup && npm run check:unused-deps && npm run check:dead-exports && npm run check:type-debt && npm run check:scripts && npm run check:generated --workspace @metis/app-protocol && npm run check:shrinkwrap && npm run check:install-lock:coding-agent && tsgo --noEmit && npm run check:desktop && npm run check:browser-smoke",
 		"check:desktop": "npm run check:types --workspace @metis/desktop",
 		"check:browser-smoke": "node scripts/check-browser-smoke.mjs",
 		"check:boundaries": "node scripts/check-architecture-boundaries.mjs",
@@ -19,6 +19,7 @@
 		"check:dup": "node scripts/check-duplicates.mjs",
 		"check:unused-deps": "node scripts/check-unused-deps.mjs",
 		"check:dead-exports": "node scripts/check-dead-exports.mjs",
+		"check:type-debt": "node scripts/check-type-debt.mjs",
 		"check:scripts": "node --test scripts/test/*.test.mjs",
 		"check:pinned-deps": "node scripts/check-pinned-deps.mjs",
 		"check:shrinkwrap": "node scripts/generate-coding-agent-shrinkwrap.mjs --check",
