@@ -1,6 +1,6 @@
 import { Text } from "@metis/tui";
 import { type Static, Type } from "typebox";
-import type { Theme } from "../modes/interactive/theme/theme.ts";
+import type { Theme } from "../presentation/theme.ts";
 import type { ToolDefinition } from "./extensions/types.ts";
 import { permissionClaim, permissionDescriptor } from "./tool-permission-adapter.ts";
 import { getTextOutput } from "./tools/render-utils.ts";

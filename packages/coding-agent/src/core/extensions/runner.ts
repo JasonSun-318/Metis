@@ -5,7 +5,7 @@
 import type { AgentMessage } from "@metis/agent-core";
 import type { ImageContent, Model, ProviderHeaders } from "@metis/ai";
 import type { KeyId } from "@metis/tui";
-import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
+import { type Theme, theme } from "../../presentation/theme.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";

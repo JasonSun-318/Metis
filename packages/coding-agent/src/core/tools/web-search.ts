@@ -1,7 +1,7 @@
 import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import { type Static, Type } from "typebox";
-import { keyText } from "../../modes/interactive/components/keybinding-hints.ts";
+import { keyText } from "../../presentation/keybinding-hints.ts";
 import { readBoundedResponseBytes } from "../bounded-response.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
 import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";

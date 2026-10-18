@@ -53,7 +53,7 @@ import {
 	streamSimple,
 } from "@metis/ai/compat";
 import { getProjectConfigDir, VERSION } from "../config.ts";
-import { getThemeByName, theme } from "../modes/interactive/theme/theme.ts";
+import { getThemeByName, theme } from "../presentation/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizeActionPath, isPathInside, resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";

@@ -1,6 +1,6 @@
 import { Text } from "@metis/tui";
 import { Type } from "typebox";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
+import { keyHint } from "../../presentation/keybinding-hints.ts";
 import type { AgentSession } from "../agent-session.ts";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";

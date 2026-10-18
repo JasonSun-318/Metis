@@ -2,7 +2,7 @@ import type { AgentState } from "@metis/agent-core";
 import { existsSync, readFileSync, realpathSync, statSync } from "fs";
 import { basename, join, resolve } from "path";
 import { APP_NAME, getExportTemplateDir } from "../../config.ts";
-import { getResolvedThemeColors, getThemeExportColors } from "../../modes/interactive/theme/theme.ts";
+import { getResolvedThemeColors, getThemeExportColors } from "../../presentation/theme.ts";
 import { normalizePath, resolvePath } from "../../utils/paths.ts";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
 import type { ToolDefinition } from "../extensions/types.ts";

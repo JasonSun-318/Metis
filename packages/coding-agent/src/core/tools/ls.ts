@@ -3,7 +3,7 @@ import type { AgentTool } from "@metis/agent-core";
 import { Text } from "@metis/tui";
 import nodePath from "path";
 import { type Static, Type } from "typebox";
-import type { Theme } from "../../modes/interactive/theme/theme.ts";
+import type { Theme } from "../../presentation/theme.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
 import { assertMemoryReadAllowed, type MemoryReadBoundary } from "../memory/memory-path-guard.ts";
 import { fileReadPermissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";

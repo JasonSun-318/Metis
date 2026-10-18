@@ -1,8 +1,8 @@
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
 import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@metis/tui";
-import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
-import type { Theme } from "../../modes/interactive/theme/theme.ts";
+import { keyHint } from "../../presentation/keybinding-hints.ts";
+import type { Theme } from "../../presentation/theme.ts";
 import { stripAnsi } from "../../utils/ansi.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { sanitizeBinaryOutput } from "../../utils/shell.ts";
