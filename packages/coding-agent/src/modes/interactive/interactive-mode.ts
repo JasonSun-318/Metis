@@ -141,7 +141,7 @@ import {
 import { sanitizeTerminalText } from "../../utils/ansi.ts";
 import { copyToClipboard, readClipboardText } from "../../utils/clipboard.ts";
 import { readClipboardImage } from "../../utils/clipboard-image.ts";
-import { launchExternalEditor } from "../../utils/external-editor.ts";
+import { editTextInExternalEditor } from "../../utils/external-editor.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { processImage } from "../../utils/image-process.ts";
 import { canonicalizePath, getCwdRelativePath, isPathInside, resolvePath } from "../../utils/paths.ts";
@@ -4239,41 +4239,20 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `metis-editor-${Date.now()}.metis.md`);
 
-		try {
-			// Write current content to temp file
-			fs.writeFileSync(tmpFile, currentText, "utf-8");
-
-			// Stop TUI to release terminal
-			this.ui.stop();
-
-			process.stdout.write(
-				`Launching external editor: ${sanitizeTerminalText(editorCmd)}\nMetis will resume when the editor exits.\n`,
-			);
-			const status = await launchExternalEditor(editorCmd, tmpFile);
-
-			// On successful exit (status 0), replace editor content
-			if (status === 0) {
-				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
-				this.editor.setText(newContent);
-			}
-			// On non-zero exit, keep original text (no action needed)
-		} catch (error) {
-			this.showError(`Failed to launch external editor: ${error instanceof Error ? error.message : String(error)}`);
-		} finally {
-			// Clean up temp file
-			try {
-				fs.unlinkSync(tmpFile);
-			} catch {
-				// Ignore cleanup errors
-			}
-
-			// Restart TUI
-			this.ui.start();
-			// Force full re-render since external editor uses alternate screen
-			this.ui.requestRender(true);
-		}
+		await editTextInExternalEditor({
+			command: editorCmd,
+			text: currentText,
+			setText: (text) => this.editor.setText(text),
+			fileNamePrefix: "metis-editor-",
+			fileNameSuffix: ".metis.md",
+			tui: this.ui,
+			onError: (error) => {
+				this.showError(
+					`Failed to launch external editor: ${error instanceof Error ? error.message : String(error)}`,
+				);
+			},
+		});
 	}
 
 	// =========================================================================

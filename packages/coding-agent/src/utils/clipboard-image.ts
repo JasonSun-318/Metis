@@ -135,6 +135,25 @@ function isWSL(env: NodeJS.ProcessEnv = process.env): boolean {
 	}
 }
 
+function buildClipboardImagePowerShellScript(outputPath: string): string {
+	const quotedPath = outputPath.replaceAll("'", "''");
+	return [
+		"Add-Type -AssemblyName System.Windows.Forms",
+		"Add-Type -AssemblyName System.Drawing",
+		`$path = '${quotedPath}'`,
+		"$img = [System.Windows.Forms.Clipboard]::GetImage()",
+		"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
+	].join("; ");
+}
+
+async function saveClipboardImageWithPowerShell(outputPath: string): Promise<boolean> {
+	const script = buildClipboardImagePowerShellScript(outputPath);
+	const result = await runCommand("powershell.exe", ["-NoProfile", "-Command", script], {
+		timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
+	});
+	return result.ok && result.stdout.toString("utf-8").trim() === "ok";
+}
+
 /**
  * On WSL, the Linux clipboard (Wayland/X11) does not receive image data from
  * Windows screenshots (Win+Shift+S). PowerShell can access the Windows clipboard
@@ -154,24 +173,7 @@ async function readClipboardImageViaPowerShell(): Promise<ClipboardImage | null>
 			return null;
 		}
 
-		const psQuotedWinPath = winPath.replaceAll("'", "''");
-		const psScript = [
-			"Add-Type -AssemblyName System.Windows.Forms",
-			"Add-Type -AssemblyName System.Drawing",
-			`$path = '${psQuotedWinPath}'`,
-			"$img = [System.Windows.Forms.Clipboard]::GetImage()",
-			"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
-		].join("; ");
-
-		const result = await runCommand("powershell.exe", ["-NoProfile", "-Command", psScript], {
-			timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
-		});
-		if (!result.ok) {
-			return null;
-		}
-
-		const output = result.stdout.toString("utf-8").trim();
-		if (output !== "ok") {
+		if (!(await saveClipboardImageWithPowerShell(winPath))) {
 			return null;
 		}
 
@@ -189,19 +191,8 @@ async function readClipboardImageViaPowerShell(): Promise<ClipboardImage | null>
 
 async function readClipboardImageViaWindowsPowerShell(): Promise<ClipboardImage | null> {
 	const tmpFile = join(tmpdir(), `metis-clip-${randomUUID()}.png`);
-	const quotedPath = tmpFile.replaceAll("'", "''");
-	const script = [
-		"Add-Type -AssemblyName System.Windows.Forms",
-		"Add-Type -AssemblyName System.Drawing",
-		`$path = '${quotedPath}'`,
-		"$img = [System.Windows.Forms.Clipboard]::GetImage()",
-		"if ($img) { $img.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); Write-Output 'ok' } else { Write-Output 'empty' }",
-	].join("; ");
 
-	const result = await runCommand("powershell.exe", ["-NoProfile", "-Command", script], {
-		timeoutMs: DEFAULT_POWERSHELL_TIMEOUT_MS,
-	});
-	if (!result.ok || result.stdout.toString("utf-8").trim() !== "ok") {
+	if (!(await saveClipboardImageWithPowerShell(tmpFile))) {
 		try {
 			unlinkSync(tmpFile);
 		} catch {

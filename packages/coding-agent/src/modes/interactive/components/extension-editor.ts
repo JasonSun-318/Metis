@@ -3,9 +3,6 @@
  * Supports Ctrl+G for external editor.
  */
 
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import {
 	Container,
 	Editor,
@@ -18,7 +15,7 @@ import {
 } from "@metis/tui";
 import type { KeybindingsManager } from "../../../core/keybindings.ts";
 import { sanitizeTerminalText } from "../../../utils/ansi.ts";
-import { launchExternalEditor } from "../../../utils/external-editor.ts";
+import { editTextInExternalEditor } from "../../../utils/external-editor.ts";
 import { getEditorTheme, theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
 import { keyHint } from "./keybinding-hints.ts";
@@ -129,35 +126,19 @@ export class ExtensionEditorComponent extends Container implements Focusable {
 		}
 
 		const currentText = this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `metis-extension-editor-${Date.now()}.md`);
-
-		try {
-			fs.writeFileSync(tmpFile, currentText, "utf-8");
-			this.tui.stop();
-
-			process.stdout.write(
-				`Launching external editor: ${sanitizeTerminalText(editorCmd)}\nMetis will resume when the editor exits.\n`,
-			);
-			const status = await launchExternalEditor(editorCmd, tmpFile);
-
-			if (status === 0) {
-				const newContent = fs.readFileSync(tmpFile, "utf-8").replace(/\n$/, "");
-				this.editor.setText(newContent);
-			}
-		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			this.addChild(
-				new Text(theme.fg("error", `Failed to launch external editor: ${sanitizeTerminalText(message)}`), 1, 0),
-			);
-		} finally {
-			try {
-				fs.unlinkSync(tmpFile);
-			} catch {
-				// Ignore cleanup errors
-			}
-			this.tui.start();
-			// Force full re-render since external editor uses alternate screen
-			this.tui.requestRender(true);
-		}
+		await editTextInExternalEditor({
+			command: editorCmd,
+			text: currentText,
+			setText: (text) => this.editor.setText(text),
+			fileNamePrefix: "metis-extension-editor-",
+			fileNameSuffix: ".md",
+			tui: this.tui,
+			onError: (error) => {
+				const message = error instanceof Error ? error.message : String(error);
+				this.addChild(
+					new Text(theme.fg("error", `Failed to launch external editor: ${sanitizeTerminalText(message)}`), 1, 0),
+				);
+			},
+		});
 	}
 }
