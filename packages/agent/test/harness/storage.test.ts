@@ -98,6 +98,40 @@ describe("InMemorySessionStorage", () => {
 		expect((await storage.getPathToRoot("child")).map((entry) => entry.id)).toEqual(["root", "child"]);
 		expect(await storage.getPathToRoot(null)).toEqual([]);
 	});
+
+	it("returns root-first entry identities with path error details", async () => {
+		const root: MessageEntry = {
+			type: "message",
+			id: "root",
+			parentId: null,
+			timestamp: "2026-01-01T00:00:00.000Z",
+			message: createUserMessage("root"),
+		};
+		const child: MessageEntry = {
+			...root,
+			id: "child",
+			parentId: "root",
+			message: createAssistantMessage("child"),
+		};
+		const storage = new InMemorySessionStorage({ entries: [root, child] });
+
+		const path = await storage.getPathToRoot("child");
+		expect(path).toEqual([root, child]);
+		expect(path[0]).toBe(await storage.getEntry("root"));
+		expect(path[1]).toBe(await storage.getEntry("child"));
+		expect(await storage.getPathToRoot(null)).toEqual([]);
+		await expect(storage.getPathToRoot("missing")).rejects.toMatchObject({
+			code: "not_found",
+			message: "Entry missing not found",
+		});
+
+		const orphan: MessageEntry = { ...root, id: "orphan", parentId: "missing-parent" };
+		await storage.appendEntry(orphan);
+		await expect(storage.getPathToRoot("orphan")).rejects.toMatchObject({
+			code: "invalid_session",
+			message: "Entry missing-parent not found",
+		});
+	});
 });
 
 describe("JsonlSessionStorage", () => {
@@ -256,6 +290,45 @@ describe("JsonlSessionStorage", () => {
 		expect(await reloaded.getLeafId()).toBe("root");
 		expect((await reloaded.getEntries()).at(-1)).toMatchObject({ type: "leaf", targetId: "root" });
 		expect((await loaded.getPathToRoot("child")).map((entry) => entry.id)).toEqual(["root", "child"]);
+	});
+
+	it("returns root-first entry identities with path error details", async () => {
+		const dir = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: dir });
+		const filePath = join(dir, "session.jsonl");
+		const storage = await JsonlSessionStorage.create(env, filePath, { cwd: dir, sessionId: "session-1" });
+		const root: MessageEntry = {
+			type: "message",
+			id: "root",
+			parentId: null,
+			timestamp: "2026-01-01T00:00:00.000Z",
+			message: createUserMessage("root"),
+		};
+		const child: MessageEntry = {
+			...root,
+			id: "child",
+			parentId: "root",
+			message: createAssistantMessage("child"),
+		};
+		await storage.appendEntry(root);
+		await storage.appendEntry(child);
+
+		const path = await storage.getPathToRoot("child");
+		expect(path).toEqual([root, child]);
+		expect(path[0]).toBe(await storage.getEntry("root"));
+		expect(path[1]).toBe(await storage.getEntry("child"));
+		expect(await storage.getPathToRoot(null)).toEqual([]);
+		await expect(storage.getPathToRoot("missing")).rejects.toMatchObject({
+			code: "not_found",
+			message: "Entry missing not found",
+		});
+
+		const orphan: MessageEntry = { ...root, id: "orphan", parentId: "missing-parent" };
+		await storage.appendEntry(orphan);
+		await expect(storage.getPathToRoot("orphan")).rejects.toMatchObject({
+			code: "invalid_session",
+			message: "Entry missing-parent not found",
+		});
 	});
 
 	it("finds entries by type", async () => {

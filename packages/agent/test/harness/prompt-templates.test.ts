@@ -28,6 +28,55 @@ describe("loadPromptTemplates", () => {
 		]);
 	});
 
+	it("normalizes CRLF and CR frontmatter while trimming body edges", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		await env.writeFile(
+			"crlf.md",
+			"---\r\ndescription: Windows line endings\r\n---\r\n\r\n  Body first line  \r\nSecond line\r\n",
+		);
+		await env.writeFile("cr.md", "---\rdescription: Classic Mac line endings\r---\r\r  Body only  \r");
+
+		const { promptTemplates, diagnostics } = await loadPromptTemplates(env, ["crlf.md", "cr.md"]);
+
+		expect(diagnostics).toEqual([]);
+		expect(promptTemplates).toEqual([
+			{ name: "crlf", description: "Windows line endings", content: "Body first line  \nSecond line" },
+			{ name: "cr", description: "Classic Mac line endings", content: "Body only" },
+		]);
+	});
+
+	it("preserves the opening and closing delimiter rules", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		await env.writeFile("missing-close.md", "---\ndescription: Not closed\nBody");
+		await env.writeFile("indented.md", " ---\ndescription: Indented\n---\nBody");
+
+		const { promptTemplates } = await loadPromptTemplates(env, ["missing-close.md", "indented.md"]);
+
+		expect(promptTemplates).toEqual([
+			{ name: "missing-close", description: "---", content: "---\ndescription: Not closed\nBody" },
+			{ name: "indented", description: " ---", content: " ---\ndescription: Indented\n---\nBody" },
+		]);
+	});
+
+	it("reports YAML parser errors from frontmatter", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		await env.writeFile("broken.md", "---\ndescription: [unterminated\n---\nBody");
+
+		const { promptTemplates, diagnostics } = await loadPromptTemplates(env, "broken.md");
+
+		expect(promptTemplates).toEqual([]);
+		expect(diagnostics).toHaveLength(1);
+		expect(diagnostics[0]).toMatchObject({
+			type: "warning",
+			code: "parse_failed",
+			path: join(root, "broken.md"),
+			message: expect.stringContaining("Flow sequence in block collection"),
+		});
+	});
+
 	it("preserves source info for sourced prompt templates", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });

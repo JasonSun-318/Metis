@@ -35,6 +35,55 @@ Use this skill.
 		]);
 	});
 
+	it("normalizes CRLF frontmatter while trimming body edges", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		await env.createDir("skills/example", { recursive: true });
+		await env.writeFile(
+			"skills/example/SKILL.md",
+			"---\r\nname: example\r\ndescription: Windows line endings\r\n---\r\n\r\n  Use this skill.  \r\n",
+		);
+
+		const { skills, diagnostics } = await loadSkills(env, "skills");
+
+		expect(diagnostics).toEqual([]);
+		expect(skills).toEqual([
+			{
+				name: "example",
+				description: "Windows line endings",
+				content: "Use this skill.",
+				filePath: join(root, "skills/example/SKILL.md"),
+				disableModelInvocation: false,
+			},
+		]);
+	});
+
+	it("reports YAML errors and preserves unterminated frontmatter behavior", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		await env.createDir("skills/broken", { recursive: true });
+		await env.createDir("skills/unterminated", { recursive: true });
+		await env.writeFile("skills/broken/SKILL.md", "---\nname: broken\ndescription: [unterminated\n---\nBody");
+		await env.writeFile("skills/unterminated/SKILL.md", "---\nname: unterminated\ndescription: Not closed\nBody");
+
+		const { skills, diagnostics } = await loadSkills(env, "skills");
+
+		expect(skills).toEqual([]);
+		expect(diagnostics).toHaveLength(2);
+		expect(diagnostics[0]).toMatchObject({
+			type: "warning",
+			code: "parse_failed",
+			path: join(root, "skills/broken/SKILL.md"),
+			message: expect.stringContaining("Flow sequence in block collection"),
+		});
+		expect(diagnostics[1]).toEqual({
+			type: "warning",
+			code: "invalid_metadata",
+			message: "description is required",
+			path: join(root, "skills/unterminated/SKILL.md"),
+		});
+	});
+
 	it("loads skills through symlinked directories", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });

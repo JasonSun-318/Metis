@@ -5,6 +5,7 @@ import {
 	type SessionStorage,
 	type SessionTreeEntry,
 } from "../types.ts";
+import { getPathToRoot } from "./path-to-root.ts";
 import { uuidv7 } from "./uuid.ts";
 
 function updateLabelCache(labelsById: Map<string, string>, entry: SessionTreeEntry): void {
@@ -113,18 +114,7 @@ export class InMemorySessionStorage<TMetadata extends SessionMetadata = SessionM
 	}
 
 	async getPathToRoot(leafId: string | null): Promise<SessionTreeEntry[]> {
-		if (leafId === null) return [];
-		const path: SessionTreeEntry[] = [];
-		let current = this.byId.get(leafId);
-		if (!current) throw new SessionError("not_found", `Entry ${leafId} not found`);
-		while (current) {
-			path.unshift(current);
-			if (!current.parentId) break;
-			const parent = this.byId.get(current.parentId);
-			if (!parent) throw new SessionError("invalid_session", `Entry ${current.parentId} not found`);
-			current = parent;
-		}
-		return path;
+		return getPathToRoot(this.byId, leafId);
 	}
 
 	async getEntries(): Promise<SessionTreeEntry[]> {
