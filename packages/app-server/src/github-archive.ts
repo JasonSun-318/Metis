@@ -2,26 +2,24 @@ import type { Entry, ZipFile } from "yauzl";
 import yauzl from "yauzl";
 import { AppServerError } from "./session-runtime-host.ts";
 
-export const MAX_GITHUB_JSON_BYTES = 4 * 1024 * 1024;
+const MAX_GITHUB_JSON_BYTES = 4 * 1024 * 1024;
 export const MAX_GITHUB_ROUTE_PARTS = 16;
-export const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
+const RETRYABLE_HTTP_STATUS = new Set([408, 425, 429, 500, 502, 503, 504]);
 export const MISSING_GITHUB_COMMIT_STATUS = new Set([404, 422]);
 
-export const DEFAULT_MAX_IMPORT_SOURCE_BYTES = 32 * 1024 * 1024;
-export const DEFAULT_MAX_IMPORT_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-export const DEFAULT_MAX_IMPORT_FILE_BYTES = 16 * 1024 * 1024;
-export const DEFAULT_MAX_IMPORT_ENTRIES = 2048;
+const DEFAULT_MAX_IMPORT_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
+const DEFAULT_MAX_IMPORT_FILE_BYTES = 16 * 1024 * 1024;
+const DEFAULT_MAX_IMPORT_ENTRIES = 2048;
 
 export const MAX_PLUGIN_METADATA_BYTES = 4 * 1024 * 1024;
 export const MAX_PLUGIN_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 export const MAX_PLUGIN_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 export const MAX_PLUGIN_FILE_BYTES = 32 * 1024 * 1024;
 export const MAX_PLUGIN_ARCHIVE_ENTRIES = 10000;
-export const MAX_PLUGIN_PROBE_DEPTH = 6;
 
 export type FetchImplementation = typeof globalThis.fetch;
 
-export interface GitHubSource {
+interface GitHubSource {
 	readonly owner: string;
 	readonly repo: string;
 	readonly route?: { readonly kind: "tree" | "blob"; readonly parts: readonly string[] };
@@ -33,7 +31,7 @@ export interface ImportedArchiveEntry {
 	readonly mode: 0o600 | 0o700;
 }
 
-export interface ArchiveOptions {
+interface ArchiveOptions {
 	readonly stripRoot?: boolean;
 	readonly skipNonRegular?: boolean;
 	readonly maxFileBytes?: number;
@@ -47,7 +45,7 @@ export function validArchivePath(path: string): boolean {
 	return parts.length > 0 && parts.every((part) => part !== "" && part !== "." && part !== "..");
 }
 
-export function regularZipEntry(entry: Entry): boolean {
+function regularZipEntry(entry: Entry): boolean {
 	const directory = entry.fileName.endsWith("/");
 	const madeBy = entry.versionMadeBy >>> 8;
 	if (madeBy !== 3) return true;
@@ -56,11 +54,11 @@ export function regularZipEntry(entry: Entry): boolean {
 	return kind === 0 || kind === (directory ? 0o040000 : 0o100000);
 }
 
-export function importedFileMode(entry: Entry): 0o600 | 0o700 {
+function importedFileMode(entry: Entry): 0o600 | 0o700 {
 	return entry.versionMadeBy >>> 8 === 3 && ((entry.externalFileAttributes >>> 16) & 0o111) !== 0 ? 0o700 : 0o600;
 }
 
-export function openZip(bytes: Buffer): Promise<ZipFile> {
+function openZip(bytes: Buffer): Promise<ZipFile> {
 	return new Promise((resolveZip, reject) => {
 		yauzl.fromBuffer(
 			bytes,
@@ -70,11 +68,7 @@ export function openZip(bytes: Buffer): Promise<ZipFile> {
 	});
 }
 
-export function readZipEntry(
-	zip: ZipFile,
-	entry: Entry,
-	maxBytes: number = DEFAULT_MAX_IMPORT_FILE_BYTES,
-): Promise<Buffer> {
+function readZipEntry(zip: ZipFile, entry: Entry, maxBytes: number = DEFAULT_MAX_IMPORT_FILE_BYTES): Promise<Buffer> {
 	return new Promise((resolveEntry, reject) => {
 		zip.openReadStream(entry, (error, stream) => {
 			if (error) {

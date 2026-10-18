@@ -52,12 +52,6 @@ export interface PluginInstalledView {
 	readonly runtimeErrors: Array<{ readonly componentId: string; readonly message: string }>;
 }
 
-export interface PluginMarketCatalogCache {
-	readonly commit: string;
-	readonly fetchedAt: string;
-	readonly catalog: CatalogEntry[];
-}
-
 export interface CatalogEntryView {
 	readonly installedPluginId?: string;
 	readonly id: string;
@@ -101,7 +95,7 @@ export interface InspectionCacheData {
 	readonly registryRevision: number;
 }
 
-export function makeComponentId(pluginId: string, originalName: string): string {
+function makeComponentId(pluginId: string, originalName: string): string {
 	const prefix = `p-${pluginId.slice(0, 16)}-`;
 	const maxSlugLen = 64 - prefix.length;
 	const slug = originalName

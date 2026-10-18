@@ -1,5 +1,5 @@
 import type { AgentToolResult } from "@metis/agent-core";
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { defineTool, type ToolDefinition } from "../extensions/types.ts";
 import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
@@ -78,10 +78,6 @@ export const WriteParamsSchema = Type.Object(
 	},
 	{ additionalProperties: false },
 );
-
-export type MemorySearchParams = Static<typeof SearchParamsSchema>;
-export type MemoryReadParams = Static<typeof ReadParamsSchema>;
-export type MemoryWriteParams = Static<typeof WriteParamsSchema>;
 
 export interface MemorySearchDetails {
 	ok: boolean;

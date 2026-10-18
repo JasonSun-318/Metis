@@ -1,4 +1,4 @@
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 import type { ToolDefinition } from "../extensions/types.ts";
 import type { SessionManager } from "../session-manager.ts";
 import { permissionClaim, permissionDescriptor } from "../tool-permission-adapter.ts";
@@ -12,25 +12,21 @@ import {
 	writeThreadGoal,
 } from "./store.ts";
 
-export const GetGoalParams = Type.Object({}, { additionalProperties: false });
-export const CreateGoalParams = Type.Object(
+const GetGoalParams = Type.Object({}, { additionalProperties: false });
+const CreateGoalParams = Type.Object(
 	{
 		objective: Type.String({ minLength: 1, maxLength: 4000 }),
 	},
 	{ additionalProperties: false },
 );
-export const UpdateGoalParams = Type.Object(
+const UpdateGoalParams = Type.Object(
 	{
 		status: Type.Union([Type.Literal("complete"), Type.Literal("blocked")]),
 	},
 	{ additionalProperties: false },
 );
 
-export type GetGoalInput = Static<typeof GetGoalParams>;
-export type CreateGoalInput = Static<typeof CreateGoalParams>;
-export type UpdateGoalInput = Static<typeof UpdateGoalParams>;
-
-export interface GoalToolDetails {
+interface GoalToolDetails {
 	readonly goal: ThreadGoal | null;
 	readonly ok: boolean;
 }
@@ -48,7 +44,7 @@ function unavailableGoalOptions(): GoalToolOptions {
 	};
 }
 
-export function resolveGoalToolOptions(options?: GoalToolOptions): GoalToolOptions {
+function resolveGoalToolOptions(options?: GoalToolOptions): GoalToolOptions {
 	return options ?? unavailableGoalOptions();
 }
 

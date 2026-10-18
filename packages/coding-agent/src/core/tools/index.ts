@@ -118,7 +118,7 @@ import { createWebSearchToolDefinition, type WebSearchToolOptions } from "./web-
 import { createWriteToolDefinition, type WriteToolOptions } from "./write.ts";
 
 export type Tool = AgentTool<any>;
-export type ToolDef = ToolDefinition<any, any>;
+type ToolDef = ToolDefinition<any, any>;
 const toolNames = [
 	"read",
 	"bash",
@@ -136,8 +136,7 @@ const toolNames = [
 	"describe_image",
 ] as const;
 export type ToolName = (typeof toolNames)[number];
-export const allToolNames: Set<ToolName> = new Set(toolNames);
-export const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
+const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
@@ -152,7 +151,7 @@ export interface ToolsOptions {
 	goal?: GoalToolOptions;
 }
 
-export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
+function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
 	switch (toolName) {
 		case "read":
 			return createReadToolDefinition(cwd, options?.read);
@@ -191,7 +190,7 @@ export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptio
 	return wrapToolDefinition(createToolDefinition(toolName, cwd, options));
 }
 
-export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
+function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
 		createBashToolDefinition(cwd, options?.bash),
@@ -200,7 +199,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 	];
 }
 
-export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
+function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
 		createGrepToolDefinition(cwd, options?.grep),

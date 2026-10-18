@@ -1,6 +1,5 @@
 import * as os from "node:os";
 import { pathToFileURL } from "node:url";
-import type { ImageContent, TextContent } from "@metis/ai";
 import { getCapabilities, getImageDimensions, hyperlink, imageFallback } from "@metis/tui";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.ts";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
@@ -17,7 +16,7 @@ export function shortenPath(path: unknown): string {
 	return path;
 }
 
-export function linkPath(styledText: string, rawPath: string, cwd: string): string {
+function linkPath(styledText: string, rawPath: string, cwd: string): string {
 	if (!getCapabilities().hyperlinks) return styledText;
 	const absolutePath = resolvePath(rawPath, cwd);
 	return hyperlink(styledText, pathToFileURL(absolutePath).href);
@@ -90,11 +89,6 @@ export function formatToolResultPreview(
 	}
 	return text;
 }
-
-export type ToolRenderResultLike<TDetails> = {
-	content: (TextContent | ImageContent)[];
-	details: TDetails;
-};
 
 export function invalidArgText(theme: Theme): string {
 	return theme.fg("error", "[invalid arg]");
