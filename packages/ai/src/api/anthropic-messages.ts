@@ -33,7 +33,7 @@ import type {
 } from "../types.ts";
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
-import { headersToRecord } from "../utils/headers.ts";
+import { hasHeader, headersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
 import {
@@ -272,15 +272,6 @@ function mergeHeaders(...headerSources: (ProviderHeaders | undefined)[]): Provid
 		}
 	}
 	return merged;
-}
-
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
 }
 
 function assertRequestAuth(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): void {

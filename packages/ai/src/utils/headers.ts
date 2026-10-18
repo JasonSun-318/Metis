@@ -1,5 +1,14 @@
 import type { ProviderHeaders } from "../types.ts";
 
+export function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
+	if (!headers) return false;
+	const expected = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
+	}
+	return false;
+}
+
 export function headersToRecord(headers: Headers): Record<string, string> {
 	const result: Record<string, string> = {};
 	for (const [key, value] of headers.entries()) {

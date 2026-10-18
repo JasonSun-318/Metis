@@ -35,7 +35,7 @@ import type {
 } from "../types.ts";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
-import { headersToRecord } from "../utils/headers.ts";
+import { hasHeader, headersToRecord } from "../utils/headers.ts";
 import { parseStreamingJson } from "../utils/json-parse.ts";
 import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
 import { resolveCacheRetention } from "../utils/provider-env.ts";
@@ -50,26 +50,17 @@ import {
 } from "./simple-options.ts";
 import { transformMessages } from "./transform-messages.ts";
 
-/**
- * Check if conversation messages contain tool calls or tool results.
- * This is needed because Anthropic (via proxy) requires the tools param
- * to be present when messages include tool_calls or tool role messages.
- */
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
-}
-
 function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
 	if (apiKey) return apiKey;
 	if (hasHeader(headers, "authorization") || hasHeader(headers, "cf-aig-authorization")) return "unused";
 	throw new Error(`No API key for provider: ${provider}`);
 }
 
+/**
+ * Check if conversation messages contain tool calls or tool results.
+ * This is needed because Anthropic (via proxy) requires the tools param
+ * to be present when messages include tool_calls or tool role messages.
+ */
 function hasToolHistory(messages: Message[]): boolean {
 	for (const msg of messages) {
 		if (msg.role === "toolResult") {

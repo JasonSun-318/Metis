@@ -16,7 +16,7 @@ import type {
 import { splitDeferredTools } from "../utils/deferred-tools.ts";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.ts";
 import { AssistantMessageEventStream } from "../utils/event-stream.ts";
-import { headersToRecord } from "../utils/headers.ts";
+import { hasHeader, headersToRecord } from "../utils/headers.ts";
 import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
 import { resolveCacheRetention } from "../utils/provider-env.ts";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.ts";
@@ -37,15 +37,6 @@ import { buildBaseOptions, mapSimpleToolChoice } from "./simple-options.ts";
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 // OpenAI Responses rejects max_output_tokens below 16: https://gitee.com/sun124578963_0/metis/issues/6265
 const OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
-
-function hasHeader(headers: ProviderHeaders | undefined, name: string): boolean {
-	if (!headers) return false;
-	const expected = name.toLowerCase();
-	for (const [key, value] of Object.entries(headers)) {
-		if (key.toLowerCase() === expected && value !== null && value.trim().length > 0) return true;
-	}
-	return false;
-}
 
 function getClientApiKey(provider: string, apiKey: string | undefined, headers: ProviderHeaders | undefined): string {
 	if (apiKey) return apiKey;

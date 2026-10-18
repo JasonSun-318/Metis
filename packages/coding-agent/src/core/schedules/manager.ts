@@ -17,6 +17,7 @@ import {
 	trashScheduledTaskData,
 } from "./delete.ts";
 import { createScheduleWorkspace, getScheduleLeaderPath, removeOwnedScheduleWorkspace } from "./paths.ts";
+import { summarizeRun } from "./run-summary.ts";
 import { ScheduleStore } from "./store.ts";
 import {
 	advancePastNow,
@@ -208,24 +209,6 @@ function taskSnapshot(task: ScheduleTask): ScheduleRun["snapshot"] {
 		schedule: task.schedule,
 		timezone: task.timezone,
 		target: task.target,
-	};
-}
-
-function summarizeRun(run: ScheduleRun): NonNullable<ScheduleTask["lastRun"]> {
-	return {
-		id: run.id,
-		taskId: run.taskId,
-		sequence: run.sequence,
-		status: run.status,
-		scheduledFor: run.scheduledFor,
-		createdAt: run.createdAt,
-		...(run.completedAt ? { completedAt: run.completedAt } : {}),
-		...(run.sessionId ? { sessionId: run.sessionId } : {}),
-		...(run.resultPreview !== undefined ? { resultPreview: run.resultPreview } : {}),
-		...(run.error ? { error: run.error } : {}),
-		...(run.reason ? { reason: run.reason } : {}),
-		...(run.skippedCount !== undefined ? { skippedCount: run.skippedCount } : {}),
-		unread: run.unread,
 	};
 }
 

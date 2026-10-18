@@ -114,6 +114,34 @@ const turnItems: ItemView[] = [
 afterEach(() => document.body.replaceChildren());
 
 describe("TranscriptTurn", () => {
+	it.each([
+		["chat", TranscriptTurn],
+		["code", CodeTranscriptTurn],
+	] as const)("updates %s memoized rows when callbacks or items change", async (_appearance, Turn) => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const firstCopy = vi.fn();
+		const nextCopy = vi.fn();
+		const completed = item("memo-reply", "assistant", [{ type: "text", text: "First reply" }]);
+		try {
+			await act(async () => root.render(<Turn items={[completed]} onCopy={firstCopy} />));
+			await act(async () => root.render(<Turn items={[completed]} onCopy={nextCopy} />));
+			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click());
+			expect(firstCopy).not.toHaveBeenCalled();
+			expect(nextCopy).toHaveBeenLastCalledWith("First reply");
+
+			const updated = item("memo-reply", "assistant", [{ type: "text", text: "Updated reply" }]);
+			await act(async () => root.render(<Turn items={[updated]} onCopy={nextCopy} />));
+			expect(container.textContent).toContain("Updated reply");
+			expect(container.textContent).not.toContain("First reply");
+			await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click());
+			expect(nextCopy).toHaveBeenLastCalledWith("Updated reply");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("keeps one ordered execution chain across intermediate progress text", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);

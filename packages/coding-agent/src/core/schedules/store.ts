@@ -14,6 +14,7 @@ import {
 	removeOwnedScheduleWorkspace,
 	removeScheduleRunDirectory,
 } from "./paths.ts";
+import { summarizeRun } from "./run-summary.ts";
 import { advancePastNow, validateScheduleSpec, validateScheduleTimezone } from "./time.ts";
 import {
 	ScheduleError,
@@ -438,24 +439,6 @@ function serializeRun(run: ScheduleRun): string {
 	if (Buffer.byteLength(contents, "utf8") > MAX_RUN_BYTES)
 		throw new ScheduleError("STORE_LIMIT", "Schedule run is too large");
 	return contents;
-}
-
-function summarizeRun(run: ScheduleRun): ScheduleRunSummary {
-	return {
-		id: run.id,
-		taskId: run.taskId,
-		sequence: run.sequence,
-		status: run.status,
-		scheduledFor: run.scheduledFor,
-		createdAt: run.createdAt,
-		...(run.completedAt ? { completedAt: run.completedAt } : {}),
-		...(run.sessionId ? { sessionId: run.sessionId } : {}),
-		...(run.resultPreview !== undefined ? { resultPreview: run.resultPreview } : {}),
-		...(run.error ? { error: run.error } : {}),
-		...(run.reason ? { reason: run.reason } : {}),
-		...(run.skippedCount !== undefined ? { skippedCount: run.skippedCount } : {}),
-		unread: run.unread,
-	};
 }
 
 function errorCode(error: unknown): string | undefined {

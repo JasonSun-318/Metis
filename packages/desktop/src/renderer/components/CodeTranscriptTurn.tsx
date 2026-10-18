@@ -1,4 +1,4 @@
-import type { CodeChangesView, ItemContentBlockView, ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { CodeChangesView, ItemContentBlockView } from "@metis/app-protocol";
 import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,7 @@ import {
 	toolResultImagesFromCalls,
 	toolTranscriptPresentation,
 } from "./transcript-turn-model.ts";
+import { type TranscriptTurnProps as CodeTranscriptTurnProps, sameTurnProps } from "./transcript-turn-props.ts";
 
 function VisibleBlock({
 	block,
@@ -257,33 +258,6 @@ function CodeExecution({
 				</div>
 			</div>
 		</details>
-	);
-}
-
-interface CodeTranscriptTurnProps {
-	readonly items: readonly ItemView[];
-	readonly running?: boolean;
-	readonly waitingForAnswer?: boolean;
-	readonly startedAt?: string;
-	readonly onFork?: (entryId: string) => void;
-	readonly onCopy?: (text: string) => void;
-	readonly onJumpToQuote?: (itemId: string, liveItemId?: string) => void;
-	readonly onOpenDeliveredFile?: (fileId: string, action: "default" | "reveal") => void;
-	readonly onPreviewDeliveredFile?: (file: SessionDeliveredFileView) => void;
-}
-
-function sameTurnProps(left: CodeTranscriptTurnProps, right: CodeTranscriptTurnProps): boolean {
-	return (
-		left.running === right.running &&
-		left.waitingForAnswer === right.waitingForAnswer &&
-		left.startedAt === right.startedAt &&
-		left.onFork === right.onFork &&
-		left.onCopy === right.onCopy &&
-		left.onJumpToQuote === right.onJumpToQuote &&
-		left.onOpenDeliveredFile === right.onOpenDeliveredFile &&
-		left.onPreviewDeliveredFile === right.onPreviewDeliveredFile &&
-		left.items.length === right.items.length &&
-		left.items.every((item, index) => item === right.items[index])
 	);
 }
 
