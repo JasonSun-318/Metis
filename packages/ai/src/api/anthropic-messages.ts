@@ -36,12 +36,8 @@ import { AssistantMessageEventStream } from "../utils/event-stream.ts";
 import { hasHeader, headersToRecord } from "../utils/headers.ts";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.ts";
 import { observePromptCacheRequest } from "../utils/prompt-cache-diagnostics.ts";
-import {
-	type CacheCandidate,
-	digestCacheFrame,
-	digestCacheValue,
-	selectCacheLayout,
-} from "../utils/prompt-cache-layout.ts";
+import { type CacheCandidate, digestCacheValue, selectCacheLayout } from "../utils/prompt-cache-layout.ts";
+import { createCachePrefix } from "../utils/prompt-cache-prefix.ts";
 import { resolveCacheRetention } from "../utils/provider-env.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 
@@ -1221,20 +1217,11 @@ async function applyAnthropicCacheLayout(
 	// Mark prefix digests chain from the prompt-relevant frame only. Request
 	// settings that don't shape the prompt (metadata, sampling) may be
 	// changed by a payload hook without invalidating breakpoints.
-	let chain = await digestCacheValue(anthropicPromptFrame(params));
-	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
-	const extend = (frame: unknown): void | Promise<void> => {
-		const json = JSON.stringify(frame);
-		const result = digestCacheFrame(chain, json);
-		bytes += new TextEncoder().encode(json).length;
-		if (typeof result === "string") {
-			chain = result;
-			return;
-		}
-		return result.then((digest) => {
-			chain = digest;
-		});
-	};
+	const prefix = createCachePrefix(
+		await digestCacheValue(anthropicPromptFrame(params)),
+		new TextEncoder().encode(JSON.stringify(settingsFrame)).length,
+	);
+	const extend = prefix.extend;
 	if (params.tools) {
 		const pending = extend(params.tools);
 		if (pending) await pending;
@@ -1312,13 +1299,13 @@ async function applyAnthropicCacheLayout(
 			candidates.push({
 				originId: origin.id,
 				ordinal,
-				prefixDigest: chain,
+				prefixDigest: prefix.digest,
 				index: candidateIndex++,
 				paramIndex,
 				blockIndex,
-				bytes,
+				bytes: prefix.bytes!,
 			});
-			stableBytes = bytes;
+			stableBytes = prefix.bytes!;
 		}
 	}
 
@@ -1554,17 +1541,8 @@ async function validateAnthropicCacheLayout(
 			return false;
 		}
 	}
-	let chain = await digestCacheValue(anthropicPromptFrame(params));
-	const extend = (frame: unknown): void | Promise<void> => {
-		const result = digestCacheFrame(chain, JSON.stringify(frame));
-		if (typeof result === "string") {
-			chain = result;
-			return;
-		}
-		return result.then((digest) => {
-			chain = digest;
-		});
-	};
+	const prefix = createCachePrefix(await digestCacheValue(anthropicPromptFrame(params)));
+	const extend = prefix.extend;
 	if (params.tools) {
 		const pending = extend(params.tools.map(withoutAnthropicMarkers));
 		if (pending) await pending;
@@ -1605,7 +1583,7 @@ async function validateAnthropicCacheLayout(
 				typeof block === "object" &&
 				block !== null &&
 				(block as { cache_control?: unknown }).cache_control !== undefined;
-			if (mark && (!hasMarker || param.role !== mark.role || chain !== mark.prefixDigest)) return false;
+			if (mark && (!hasMarker || param.role !== mark.role || prefix.digest !== mark.prefixDigest)) return false;
 		}
 	}
 	return true;

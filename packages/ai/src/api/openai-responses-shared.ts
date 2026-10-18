@@ -40,6 +40,7 @@ import {
 	digestCacheValue,
 	selectCacheLayout,
 } from "../utils/prompt-cache-layout.ts";
+import { createCachePrefix } from "../utils/prompt-cache-prefix.ts";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.ts";
 import { transformMessages } from "./transform-messages.ts";
 
@@ -505,20 +506,11 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 	// Mark prefix digests chain from the prompt-relevant frame only. Request
 	// settings that don't shape the prompt (metadata, sampling) may be
 	// changed by a payload hook without invalidating breakpoints.
-	let chain = await digestCacheValue(responsesPromptFrame(params));
-	let bytes = new TextEncoder().encode(JSON.stringify(settingsFrame)).length;
-	const extend = (frame: unknown): void | Promise<void> => {
-		const json = JSON.stringify(frame);
-		const result = digestCacheFrame(chain, json);
-		bytes += new TextEncoder().encode(json).length;
-		if (typeof result === "string") {
-			chain = result;
-			return;
-		}
-		return result.then((digest) => {
-			chain = digest;
-		});
-	};
+	const prefix = createCachePrefix(
+		await digestCacheValue(responsesPromptFrame(params)),
+		new TextEncoder().encode(JSON.stringify(settingsFrame)).length,
+	);
+	const extend = prefix.extend;
 
 	// Last markable block per source, plus the first volatile item that ends
 	// the stable prefix. Leading source-less items (the system prompt) are
@@ -565,13 +557,13 @@ export async function applyResponsesCacheLayout<TParams extends { input?: unknow
 		candidates.push({
 			originId: origin.id,
 			ordinal,
-			prefixDigest: chain,
+			prefixDigest: prefix.digest,
 			index: candidates.length,
 			itemIndex,
 			blockIndex: last.blockIndex,
-			bytes,
+			bytes: prefix.bytes!,
 		});
-		stableBytes = bytes;
+		stableBytes = prefix.bytes!;
 	}
 
 	if (candidates.length === 0) return diagnostic("unmapped");
