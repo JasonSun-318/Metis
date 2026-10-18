@@ -7,7 +7,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
-import { createMcpTestServer } from "../../coding-agent/test/helpers/mcp-test-server.ts";
+import { createMcpTestServer } from "../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server for packaged app smoke coverage
 import {
 	appServerPid,
 	closeServer,

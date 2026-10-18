@@ -118,7 +118,11 @@ function violates(file, specifier) {
 		}
 		return ["agent-core", "ai", "desktop", "tui"].some((name) => isMetisSpecifier(specifier, name));
 	}
-	if (path.startsWith("packages/desktop/src/") || path.startsWith("packages/desktop/test/")) {
+	if (
+		path.startsWith("packages/desktop/src/") ||
+		path.startsWith("packages/desktop/test/") ||
+		path.startsWith("packages/desktop/e2e/")
+	) {
 		return ["agent-core", "ai", "app-server", "coding-agent", "tui"].some((name) =>
 			isMetisSpecifier(specifier, name),
 		);
@@ -135,6 +139,7 @@ for (const directory of [
 	"packages/app-server",
 	"packages/desktop/src",
 	"packages/desktop/test",
+	"packages/desktop/e2e",
 ]) {
 	collectSourceFiles(join(root, directory));
 }

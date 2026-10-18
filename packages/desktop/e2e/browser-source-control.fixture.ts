@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { app } from "electron";
-import { validateToolArguments } from "@metis/ai";
+import { validateToolArguments } from "@metis/ai"; // boundary-allow: validate real browser tool arguments in the source integration fixture
 import { type BrowserToolResult, type ServerRpcRequest, validateResponseFor } from "@metis/app-protocol";
-import { browserToolCall, createBrowserToolDefinitions } from "../../app-server/src/browser-tools.ts";
+import { browserToolCall, createBrowserToolDefinitions } from "../../app-server/src/browser-tools.ts"; // boundary-allow: connect real server browser tools to the desktop host in this integration fixture
 import { BrowserManager } from "../src/main/browser-manager.ts";
 import { BrowserToolHost } from "../src/main/browser-tool-host.ts";
 

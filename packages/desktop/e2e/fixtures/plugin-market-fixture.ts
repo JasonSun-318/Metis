@@ -3,7 +3,7 @@ import { createServer as createHttpServer, type IncomingMessage, type ServerResp
 import { createServer as createHttpsServer } from "node:https";
 import net from "node:net";
 import JSZip from "jszip";
-import { createMcpTestServer, type McpTestServer } from "../../../coding-agent/test/helpers/mcp-test-server.ts";
+import { createMcpTestServer, type McpTestServer } from "../../../coding-agent/test/helpers/mcp-test-server.ts"; // boundary-allow: reuse the MCP test server in plugin market integration fixtures
 import { closeServer, listen } from "../packaged-app-harness.ts";
 
 export const FIXTURE_COMMIT_A = "c0ffee0000000000000000000000000000000001";

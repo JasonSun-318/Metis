@@ -15,6 +15,7 @@ function check(t, script, file, source) {
 	for (const pkg of ["ai", "agent", "tui", "app-protocol", "coding-agent", "app-server", "desktop"]) {
 		mkdirSync(join(root, "packages", pkg, "src"), { recursive: true });
 		mkdirSync(join(root, "packages", pkg, "test"));
+		if (pkg === "desktop") mkdirSync(join(root, "packages", pkg, "e2e"));
 		writeFileSync(
 			join(root, "packages", pkg, "package.json"),
 			JSON.stringify({
@@ -51,6 +52,11 @@ const forbiddenImports = [
 	["packages/app-server/src/example.ts", 'import { internal } from "@metis/coding-agent/host/internal";'],
 	["packages/ai/src/example.ts", 'import { agent } from "../../agent/src/index.ts";'],
 	["packages/desktop/test/example.tsx", 'type Server = import("@metis/app-server").Server;'],
+	["packages/desktop/e2e/example.spec.ts", 'import { server } from "@metis/app-server";'],
+	["packages/desktop/e2e/fixtures/example.ts", 'import { helper } from "../../../coding-agent/test/helper.ts";'],
+	["packages/desktop/e2e/example.spec.ts", 'await import("@metis/coding-agent/host");'],
+	["packages/desktop/e2e/example.spec.ts", 'type Agent = import("@metis/agent-core").Agent;'],
+	["packages/desktop/e2e/example.spec.ts", 'import "@metis/app-server"; // boundary-allow:'],
 	["packages/desktop/src/renderer/example.tsx", 'import "@metis/app-server"; const note = "boundary-allow";'],
 	["packages/desktop/src/renderer/example.tsx", 'import "@metis/app-server"; // boundary-allow'],
 ];
@@ -73,6 +79,13 @@ const allowedImports = [
 	["packages/desktop/src/main/example.ts", 'import { readFile } from "node:fs/promises";'],
 	["packages/desktop/src/shared/example.ts", 'import { api } from "./";'],
 	["packages/app-protocol/src/example.ts", 'import { Type } from "typebox";'],
+	["packages/desktop/e2e/example.spec.ts", 'import type { ClientResult } from "@metis/app-protocol";'],
+	["packages/desktop/e2e/example.spec.ts", 'import { readFile } from "node:fs/promises";'],
+	["packages/desktop/e2e/fixtures/example.ts", 'import { helper } from "../../src/main/helper.ts";'],
+	[
+		"packages/desktop/e2e/fixtures/example.ts",
+		'import { helper } from "../../../coding-agent/test/helper.ts"; // boundary-allow: reuse the MCP test server fixture',
+	],
 	[
 		"packages/desktop/test/example.ts",
 		'import "@metis/app-server"; // boundary-allow: exercise the transport adapter',
@@ -85,6 +98,19 @@ for (const [file, source] of allowedImports) {
 		assert.equal(result.status, 0, result.stderr);
 	});
 }
+
+test("an e2e boundary allowance applies only to its own statement", (t) => {
+	const file = "packages/desktop/e2e/example.spec.ts";
+	const result = check(
+		t,
+		boundaryScript,
+		file,
+		'import "@metis/app-server"; // boundary-allow: exercise the browser tool fixture\nimport "@metis/ai";',
+	);
+	assert.equal(result.status, 1, result.stderr);
+	assert.ok(result.stderr.includes(`${file}:2:`), result.stderr);
+	assert.ok(!result.stderr.includes(`${file}:1:`), result.stderr);
+});
 
 for (const extension of ["ts", "tsx", "mts", "cts"]) {
 	for (const source of [
