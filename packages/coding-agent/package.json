@@ -83,7 +83,6 @@
 		"@types/proper-lockfile": "4.1.4",
 		"@types/semver": "7.7.1",
 		"shx": "0.4.0",
-		"typescript": "5.9.3",
 		"vitest": "4.1.9"
 	},
 	"keywords": [
