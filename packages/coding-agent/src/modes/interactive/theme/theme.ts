@@ -1121,11 +1121,11 @@ function getCliHighlightTheme(t: Theme): CliHighlightTheme {
 	return cachedCliHighlightTheme;
 }
 
-/**
- * Highlight code with syntax coloring based on file extension or language.
- * Returns array of highlighted lines.
- */
-export function highlightCode(code: string, lang?: string): string[] {
+function highlightCodeWithFallback(
+	code: string,
+	lang: string | undefined,
+	fallback: (code: string) => string[],
+): string[] {
 	// Validate language before highlighting to avoid stderr spam from cli-highlight
 	const validLang = lang && supportsLanguage(lang) ? lang : undefined;
 	// Skip highlighting when no valid language is specified. cli-highlight's
@@ -1142,8 +1142,16 @@ export function highlightCode(code: string, lang?: string): string[] {
 	try {
 		return highlight(code, opts).split("\n");
 	} catch {
-		return code.split("\n");
+		return fallback(code);
 	}
+}
+
+/**
+ * Highlight code with syntax coloring based on file extension or language.
+ * Returns array of highlighted lines.
+ */
+export function highlightCode(code: string, lang?: string): string[] {
+	return highlightCodeWithFallback(code, lang, (value) => value.split("\n"));
 }
 
 /**
@@ -1233,26 +1241,10 @@ export function getMarkdownTheme(): MarkdownTheme {
 		italic: (text: string) => theme.italic(text),
 		underline: (text: string) => theme.underline(text),
 		strikethrough: (text: string) => chalk.strikethrough(text),
-		highlightCode: (code: string, lang?: string): string[] => {
-			// Validate language before highlighting to avoid stderr spam from cli-highlight
-			const validLang = lang && supportsLanguage(lang) ? lang : undefined;
-			// Skip highlighting when no valid language is specified. cli-highlight's
-			// auto-detection is unreliable and can misidentify prose as AppleScript,
-			// LiveCodeServer, etc., coloring random English words as keywords.
-			if (!validLang) {
-				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
-			}
-			const opts = {
-				language: validLang,
-				ignoreIllegals: true,
-				theme: getCliHighlightTheme(theme),
-			};
-			try {
-				return highlight(code, opts).split("\n");
-			} catch {
-				return code.split("\n").map((line) => theme.fg("mdCodeBlock", line));
-			}
-		},
+		highlightCode: (code: string, lang?: string): string[] =>
+			highlightCodeWithFallback(code, lang, (value) =>
+				value.split("\n").map((line) => theme.fg("mdCodeBlock", line)),
+			),
 	};
 }
 
