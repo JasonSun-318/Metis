@@ -186,6 +186,25 @@ function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOp
 	}
 }
 
+function isBuiltInToolName(toolName: string): toolName is ToolName {
+	return (toolNames as readonly string[]).includes(toolName);
+}
+
+/**
+ * Build the built-in definition for a single tool name without constructing the
+ * full table. Mirrors `createAllToolDefinitions(cwd, options)[toolName]`,
+ * including the inherited Object.prototype lookup for unknown names.
+ */
+export function lookupToolDefinition(toolName: string, cwd: string, options?: ToolsOptions): ToolDef | undefined {
+	if (isBuiltInToolName(toolName)) {
+		return createToolDefinition(toolName, cwd, options);
+	}
+	// Preserve the original plain-record lookup behavior (for example
+	// "constructor"/"toString" resolve to Object.prototype members and
+	// "__proto__" resolves to Object.prototype).
+	return ({} as Record<string, ToolDef | undefined>)[toolName];
+}
+
 export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
 	return wrapToolDefinition(createToolDefinition(toolName, cwd, options));
 }
