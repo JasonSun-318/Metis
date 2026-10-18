@@ -1,3 +1,5 @@
+import { formatSize as formatSizeFromAgentCore, truncateLine as truncateLineFromAgentCore } from "@metis/agent-core";
+
 export const DEFAULT_MAX_LINES = 2000;
 export const DEFAULT_MAX_BYTES = 50 * 1024; // 50KB
 export const GREP_MAX_LINE_LENGTH = 500; // Max chars per grep match line
@@ -49,13 +51,7 @@ function splitLinesForCounting(content: string): string[] {
  * Format bytes as human-readable size.
  */
 export function formatSize(bytes: number): string {
-	if (bytes < 1024) {
-		return `${bytes}B`;
-	} else if (bytes < 1024 * 1024) {
-		return `${(bytes / 1024).toFixed(1)}KB`;
-	} else {
-		return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
-	}
+	return formatSizeFromAgentCore(bytes);
 }
 
 /**
@@ -259,8 +255,5 @@ export function truncateLine(
 	line: string,
 	maxChars: number = GREP_MAX_LINE_LENGTH,
 ): { text: string; wasTruncated: boolean } {
-	if (line.length <= maxChars) {
-		return { text: line, wasTruncated: false };
-	}
-	return { text: `${line.slice(0, maxChars)}... [truncated]`, wasTruncated: true };
+	return truncateLineFromAgentCore(line, maxChars);
 }
