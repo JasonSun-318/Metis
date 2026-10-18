@@ -57,3 +57,6 @@ jobs:
       - name: Report type debt and suppression increases
         continue-on-error: true
         run: npm run check:type-debt
+      - name: Report presentation boundary regressions
+        continue-on-error: true
+        run: npm run check:presentation-boundaries

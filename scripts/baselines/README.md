@@ -170,3 +170,35 @@ The agent and coding-agent `public-api-types.test.ts` suites additionally assert
 selected public queue, session and tool-render signatures. Root `tsgo --noEmit`
 checks those assertions, including negative assignments. They supplement the
 export-surface gate; they are not exhaustive signature compatibility checks.
+
+## Advisory presentation boundary report
+
+`npm run check:presentation-boundaries` checks direct dependencies from
+`packages/coding-agent/src/core` and `src/presentation`. It reports core-to-modes
+and presentation-to-modes edges (including type dependencies), plus runtime
+presentation-to-core edges. Type-only presentation-to-core dependencies and
+modes-to-presentation compatibility reexports remain allowed. This is a direct
+edge report; it does not replace the existing runtime cycle or package boundary
+guards and does not attempt to remove the extension loader's existing root cycle.
+
+The report parses imports, reexports, import types, literal dynamic imports and
+`require()` calls. It distinguishes erased types from runtime dependencies and
+normalizes relative source paths. Package aliases and arbitrary loader APIs are
+outside this report's coverage. Computed module references, unreadable or
+invalid sources, and incomplete classification are reported as coverage gaps;
+an incomplete scan cannot establish a clean result or refresh the baseline.
+
+Stable baseline identities contain source, target, rule and type/runtime kind.
+Line moves and repeated occurrences of the same edge do not create a new edge;
+a new target or kind does. The report lists added, removed and unchanged edges.
+Normal invocations never modify source or baseline files and remain advisory for
+findings, missing/invalid baselines and scan errors. Architecture CI additionally
+uses `continue-on-error`; regression tests for the report remain required.
+
+The initial baseline records no violations after the second-wave presentation
+move. Refresh only after reviewing an intentional boundary change, then inspect
+the diff:
+
+```sh
+node scripts/check-presentation-boundaries.mjs --update
+```

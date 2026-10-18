@@ -32,6 +32,7 @@
 			"scripts/check-unused-deps.mjs",
 			"scripts/check-dead-exports.mjs",
 			"scripts/check-type-debt.mjs",
+			"scripts/check-presentation-boundaries.mjs",
 			"scripts/lib/source-program.mjs",
 			"scripts/check-ts-relative-imports.mjs",
 			"scripts/test/**/*.mjs",
