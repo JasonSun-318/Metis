@@ -1,0 +1,47 @@
+name: Architecture checks
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/architecture.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "scripts/**"
+      - "packages/**"
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/architecture.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
+      - "scripts/**"
+      - "packages/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.13.0
+          cache: npm
+      - name: Install dependencies for source checks
+        run: npm ci --ignore-scripts
+      - name: Check TypeScript imports
+        run: npm run check:ts-imports
+      - name: Check package boundaries
+        run: npm run check:boundaries
+      - name: Check runtime cycles
+        run: npm run check:cycles
+      - name: Check public API surfaces
+        run: npm run check:public-api
+      - name: Test architecture guards
+        run: npm run check:scripts

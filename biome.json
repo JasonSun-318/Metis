@@ -26,6 +26,9 @@
 	"files": {
 		"includes": [
 			"scripts/check-architecture-boundaries.mjs",
+			"scripts/check-runtime-cycles.mjs",
+			"scripts/check-public-api.mjs",
+			"scripts/lib/source-program.mjs",
 			"scripts/check-ts-relative-imports.mjs",
 			"scripts/test/**/*.mjs",
 			"packages/agent/vitest*.config.ts",
