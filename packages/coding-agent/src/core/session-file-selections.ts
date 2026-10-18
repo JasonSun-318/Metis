@@ -1,3 +1,5 @@
+import { formatVersionedPromptBlock, replaceVersionedPromptBlock } from "./session-prompt-blocks.ts";
+
 /** Quoted file context travels with the ordinary durable user prompt. */
 export interface SessionFileSelection {
 	readonly target?:
@@ -118,30 +120,21 @@ export function assertSessionFileSelections(value: unknown): asserts value is Se
 
 export function formatSessionFileSelections(text: string, files: readonly SessionFileSelection[]): string {
 	assertSessionFileSelections(files);
-	if (files.length === 0) return text;
-	const json = JSON.stringify({ version: 1, instructions, files })
-		.replaceAll("<", "\\u003c")
-		.replaceAll(">", "\\u003e");
-	return `${text}\n\n<file_selections>\n${json}\n</file_selections>`;
+	return formatVersionedPromptBlock(text, "file_selections", instructions, "files", files);
 }
 
 function replaceSelections(text: string, replacement: (files: SessionFileSelection[]) => string): string {
-	return text.replace(/<file_selections>\n([^<]*)\n<\/file_selections>/gu, (block, json: string) => {
-		try {
-			const parsed = JSON.parse(json);
-			if (
-				parsed.version !== 1 ||
-				parsed.instructions !== instructions ||
-				Object.keys(parsed).some((key) => !["version", "instructions", "files"].includes(key))
-			)
-				return block;
-			assertSessionFileSelections(parsed.files);
-			if (!parsed.files.length) return block;
-			return replacement(parsed.files);
-		} catch {
-			return block;
-		}
-	});
+	return replaceVersionedPromptBlock(
+		text,
+		"file_selections",
+		instructions,
+		"files",
+		(value) => {
+			assertSessionFileSelections(value);
+			return value;
+		},
+		replacement,
+	);
 }
 
 export function splitSessionFileSelectionPrompt(text: string): {

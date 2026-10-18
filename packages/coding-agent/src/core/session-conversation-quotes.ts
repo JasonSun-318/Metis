@@ -1,3 +1,5 @@
+import { formatVersionedPromptBlock, replaceVersionedPromptBlock } from "./session-prompt-blocks.ts";
+
 /** Selected conversation text travels as quoted data in the durable user prompt. */
 export interface SessionConversationQuote {
 	readonly sourceItemId: string;
@@ -33,29 +35,21 @@ export function assertSessionConversationQuotes(value: unknown): asserts value i
 
 export function formatSessionConversationQuotes(text: string, quotes: readonly SessionConversationQuote[]): string {
 	assertSessionConversationQuotes(quotes);
-	if (quotes.length === 0) return text;
-	const json = JSON.stringify({ version: 1, instructions, quotes })
-		.replaceAll("<", "\\u003c")
-		.replaceAll(">", "\\u003e");
-	return `${text}\n\n<conversation_quotes>\n${json}\n</conversation_quotes>`;
+	return formatVersionedPromptBlock(text, "conversation_quotes", instructions, "quotes", quotes);
 }
 
 function replaceQuotes(text: string, replacement: (quotes: SessionConversationQuote[]) => string): string {
-	return text.replace(/<conversation_quotes>\n([^<]*)\n<\/conversation_quotes>/gu, (block, json: string) => {
-		try {
-			const value = JSON.parse(json);
-			if (
-				value.version !== 1 ||
-				value.instructions !== instructions ||
-				Object.keys(value).some((key) => !["version", "instructions", "quotes"].includes(key))
-			)
-				return block;
-			assertSessionConversationQuotes(value.quotes);
-			return value.quotes.length ? replacement(value.quotes) : block;
-		} catch {
-			return block;
-		}
-	});
+	return replaceVersionedPromptBlock(
+		text,
+		"conversation_quotes",
+		instructions,
+		"quotes",
+		(value) => {
+			assertSessionConversationQuotes(value);
+			return value;
+		},
+		replacement,
+	);
 }
 
 export function splitSessionConversationQuotePrompt(text: string): {

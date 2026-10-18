@@ -24,6 +24,7 @@ import {
 	splitSessionFileSelectionPrompt,
 } from "./session-file-selections.ts";
 import { assertValidSessionId } from "./session-id.ts";
+import { stringifyPromptJson } from "./session-prompt-blocks.ts";
 
 export const MAX_SESSION_ATTACHMENTS = 16;
 export const MAX_SESSION_ATTACHMENT_BYTES = 128 * 1024 * 1024;
@@ -534,7 +535,7 @@ export function removeUnreferencedSessionDeliveredFiles(
 
 export function formatSessionAttachments(text: string, attachments: readonly SessionAttachment[]): string {
 	if (attachments.length === 0) return text;
-	const block = stringifyAttachmentMetadata(
+	const block = stringifyPromptJson(
 		attachments.map(({ name, path, size }) => ({ name, path, size })),
 		2,
 	);
@@ -543,12 +544,8 @@ export function formatSessionAttachments(text: string, attachments: readonly Ses
 	return prompt ? `${prompt}\n\n${attachmentBlock}` : attachmentBlock;
 }
 
-function stringifyAttachmentMetadata(value: unknown, space?: number): string {
-	return JSON.stringify(value, null, space).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e");
-}
-
 export function formatSessionAttachment(attachment: SessionAttachment): string {
-	return `<attachment>${stringifyAttachmentMetadata(attachment)}</attachment>`;
+	return `<attachment>${stringifyPromptJson(attachment)}</attachment>`;
 }
 
 function parseSessionAttachments(value: unknown): SessionAttachment[] | undefined {

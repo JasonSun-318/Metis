@@ -24,8 +24,12 @@ import {
 	importSessionAttachments,
 	pruneStaleSessionWorkDirs,
 	removeSessionAttachment,
+	replaceSessionAttachmentReferences,
+	type SessionAttachment,
 	splitSessionAttachmentPrompt,
 } from "../src/core/session-attachments.ts";
+import { formatSessionConversationQuotes } from "../src/core/session-conversation-quotes.ts";
+import { formatSessionFileSelections } from "../src/core/session-file-selections.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 
 describe("session attachments", () => {
@@ -274,5 +278,139 @@ describe("session attachments", () => {
 		}
 		expect(existsSync(submitted.path)).toBe(true);
 		expect(existsSync(source)).toBe(true);
+	});
+});
+
+describe("session attachment prompt blocks", () => {
+	it("serializes compact metadata with escaping while projecting name, path, and size for plural blocks", () => {
+		const rich = {
+			name: "报告<&>.pdf",
+			path: "/private/报告a>b<c.pdf",
+			size: 12,
+			mime: "application/pdf",
+			sha256: "abc",
+		} as SessionAttachment;
+		const plural =
+			`<attachments>\n[\n  {\n    "name": "报告\\u003c&\\u003e.pdf",\n` +
+			`    "path": "/private/报告a\\u003eb\\u003cc.pdf",\n    "size": 12\n  }\n]\n</attachments>`;
+
+		expect(formatSessionAttachment(rich)).toBe(
+			'<attachment>{"name":"报告\\u003c&\\u003e.pdf","path":"/private/报告a\\u003eb\\u003cc.pdf",' +
+				'"size":12,"mime":"application/pdf","sha256":"abc"}</attachment>',
+		);
+		expect(formatSessionAttachments("", [rich])).toBe(plural);
+		expect(formatSessionAttachments("  keep  ", [])).toBe("  keep  ");
+		expect(formatSessionAttachments(" \n ", [rich])).toBe(plural);
+		expect(formatSessionAttachments("  \n  keep", [rich])).toBe(`keep\n\n${plural}`);
+	});
+	it("parses legacy singular and plural inline, pretty, object, and whitespace blocks with extra fields", () => {
+		const singular =
+			'<attachment>\n\t{"name":"  first.txt  ","path":"/tmp/first","size":1,' +
+			'"mime":"text/plain","extra":{"nested":true}}\n</attachment>';
+		const pluralInline =
+			'<attachments>[{"name":"a.txt","path":"/tmp/a","size":2,"mime":"x"},' +
+			'{"name":"b.txt","path":"/tmp/b","size":3}]</attachments>';
+		const pluralObject =
+			'<attachments>\n {\n  "name": "one.txt",\n  "path": "/tmp/one",\n  "size": 4,\n' +
+			'  "extra": true\n }\n</attachments>';
+		const pluralPretty =
+			'<attachments>\n\t[\n\t\t{\n\t\t\t"name": "first.docx",\n\t\t\t"path": "/tmp/first.docx",\n' +
+			'\t\t\t"size": 10,\n\t\t\t"mime": "application/vnd.example"\n\t\t},\n\t\t{\n' +
+			'\t\t\t"name": "second.pdf",\n\t\t\t"path": "/tmp/second.pdf",\n\t\t\t"size": 20\n\t\t}\n\t]\n</attachments>';
+
+		expect(formatSessionAttachmentDisplayText(singular)).toBe("[first.txt]");
+		expect(
+			replaceSessionAttachmentReferences(singular, (found) =>
+				found.map(({ name, path, size }) => `${name}|${path}|${size}`).join(","),
+			),
+		).toBe("first.txt|/tmp/first|1");
+		expect(formatSessionAttachmentDisplayText(pluralInline)).toBe("[a.txt] [b.txt]");
+		expect(formatSessionAttachmentDisplayText(pluralObject)).toBe("[one.txt]");
+		expect(formatSessionAttachmentDisplayText(pluralPretty)).toBe("[first.docx] [second.pdf]");
+		expect(splitSessionAttachmentPrompt(`head ${singular} tail`)).toEqual({
+			text: "head  tail",
+			attachments: [{ name: "first.txt", path: "/tmp/first", size: 1 }],
+			fileSelections: [],
+		});
+	});
+	it("preserves malformed, empty, oversized, and nonconforming blocks independently", () => {
+		const oversized = `<attachments>${JSON.stringify(
+			Array.from({ length: 17 }, (_, index) => ({ name: `n${index}`, path: `/p/${index}`, size: index })),
+		)}</attachments>`;
+		const malformed = [
+			"<attachment>{not json}</attachment>",
+			"<attachments>[]</attachments>",
+			"<attachments>{}</attachments>",
+			'<attachments>[{"name":"x","path":"/x","size":-1}]</attachments>',
+			'<attachment>{"name":"x","path":"/x","size":"1"}</attachment>',
+			'<attachment>{"name":"","path":"/x","size":1}</attachment>',
+			'<attachment>{"name":"x","path":"/x","size":1,"extra":</attachment>',
+			oversized,
+		];
+		for (const text of malformed) expect(formatSessionAttachmentDisplayText(text)).toBe(text);
+
+		const valid = '<attachment>{"name":"ok","path":"/ok","size":1}</attachment>';
+		expect(formatSessionAttachmentDisplayText(`<attachments>[]</attachments> ${valid}`)).toBe(
+			`<attachments>[]</attachments> [ok]`,
+		);
+	});
+	it("preserves display order and plural-first collection across multiple blocks", () => {
+		const first = '<attachment>{"name":"a","path":"/a","size":1}</attachment>';
+		const plural = '<attachments>[{"name":"b","path":"/b","size":2},{"name":"c","path":"/c","size":3}]</attachments>';
+		const last = '<attachment>{"name":"d","path":"/d","size":4}</attachment>';
+		const prompt = `head ${first} ${plural} ${last} tail`;
+
+		expect(formatSessionAttachmentDisplayText(`${first} ${plural} ${last}`)).toBe("[a] [b] [c] [d]");
+		expect(splitSessionAttachmentPrompt(prompt)).toEqual({
+			text: "head    tail",
+			// The plural pass runs before the singular pass, so collected attachments are plural-first.
+			attachments: [
+				{ name: "b", path: "/b", size: 2 },
+				{ name: "c", path: "/c", size: 3 },
+				{ name: "a", path: "/a", size: 1 },
+				{ name: "d", path: "/d", size: 4 },
+			],
+			fileSelections: [],
+		});
+	});
+	it("propagates attachment replacement callback errors instead of preserving the block", () => {
+		const block = '<attachment>{"name":"x","path":"/x","size":1}</attachment>';
+		expect(() =>
+			replaceSessionAttachmentReferences(block, () => {
+				throw new Error("attachment replacement failed");
+			}),
+		).toThrow("attachment replacement failed");
+	});
+	it("trims unconditionally and keeps mixed attachment, quote, and selection sequencing", () => {
+		expect(splitSessionAttachmentPrompt("  plain  \n")).toEqual({
+			text: "plain",
+			attachments: [],
+			fileSelections: [],
+		});
+
+		const attachment = { name: "a.txt", path: "/tmp/a", size: 1 };
+		const quote = { sourceItemId: "q1", sourceRole: "assistant" as const, selectedText: "quoted" };
+		const file = {
+			source: "workspace" as const,
+			name: "f.txt",
+			path: "/tmp/f",
+			basis: "source" as const,
+			selectedText: "selected",
+			startLine: 1,
+			endLine: 1,
+		};
+		const mixed =
+			`  head  \n\n${formatSessionAttachments("", [attachment])}\n\nmiddle\n\n` +
+			`${formatSessionConversationQuotes("", [quote])}\n\n${formatSessionFileSelections("", [file])}\n\n  `;
+
+		expect(splitSessionAttachmentPrompt(mixed)).toEqual({
+			text: "head  \n\n\n\nmiddle",
+			attachments: [attachment],
+			fileSelections: [file],
+			conversationQuotes: [quote],
+		});
+		expect(formatSessionAttachmentDisplayText(mixed)).toBe(
+			"  head  \n\n[a.txt]\n\nmiddle\n\n\n\n[1 conversation quote]\n\n\n\n[f.txt:1–1]\n\n  ",
+		);
 	});
 });
