@@ -1,0 +1,2225 @@
+{
+	"version": 1,
+	"candidates": [
+		{
+			"file": "packages/agent/src/harness/compaction/compaction.ts",
+			"export": "CompactionDetails",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/auth/resolve.ts",
+			"export": "AuthResolutionOverrides",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/utils/abort-signals.ts",
+			"export": "CombinedAbortSignal",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/utils/error-body.ts",
+			"export": "MAX_PROVIDER_ERROR_BODY_CHARS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/ai/src/utils/error-body.ts",
+			"export": "NormalizedProviderError",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/utils/error-body.ts",
+			"export": "safeJsonStringify",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/utils/error-body.ts",
+			"export": "truncateErrorText",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/ai/src/utils/node-http-proxy.ts",
+			"export": "UNSUPPORTED_PROXY_PROTOCOL_MESSAGE",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/ai/src/utils/provider-env.ts",
+			"export": "getMetisProviderEnvValue",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/browser-permission-audit.ts",
+			"export": "BrowserPermissionAuditRequest",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/browser-tools.ts",
+			"export": "BrowserHostExecutor",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/browser-tools.ts",
+			"export": "BrowserHostRequest",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/browser-tools.ts",
+			"export": "BrowserToolName",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "ArchiveOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "DEFAULT_MAX_IMPORT_ENTRIES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "DEFAULT_MAX_IMPORT_FILE_BYTES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "DEFAULT_MAX_IMPORT_SOURCE_BYTES",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "DEFAULT_MAX_IMPORT_UNCOMPRESSED_BYTES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "GitHubSource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "importedFileMode",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "MAX_GITHUB_JSON_BYTES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "MAX_PLUGIN_PROBE_DEPTH",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "openZip",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "readZipEntry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "regularZipEntry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/github-archive.ts",
+			"export": "RETRYABLE_HTTP_STATUS",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "MessageProjectionInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "PlanProposalProjectionEntry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "projectAssistantUsage",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "projectDeliveredFileFromToolResult",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/item-projection.ts",
+			"export": "textPrefixWithinBytes",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/mcp-import.ts",
+			"export": "McpImportSelection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/mcp-import.ts",
+			"export": "McpImportSource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/mcp-import.ts",
+			"export": "ResolvedMcpImport",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/mcp-import.ts",
+			"export": "ResolvedMcpImportEntry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/mcp-projection.ts",
+			"export": "publicMcpServer",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-manifests.ts",
+			"export": "canonicalComponentPath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-manifests.ts",
+			"export": "ParsedPluginManifest",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-manifests.ts",
+			"export": "ParsePluginManifestOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-manifests.ts",
+			"export": "skillEntriesAt",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-sources.ts",
+			"export": "InspectedSource",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-sources.ts",
+			"export": "isSourceSupported",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/plugin-sources.ts",
+			"export": "resolveCommitSha",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/plugins.ts",
+			"export": "makeComponentId",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/app-server/src/plugins.ts",
+			"export": "PluginMarketCatalogCache",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/app-server/src/profile-summary.ts",
+			"export": "buildProfileSummary",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/profile-summary.ts",
+			"export": "buildUsageSummary",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/profile-summary.ts",
+			"export": "reduceProfileEntries",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/skill-files.ts",
+			"export": "isImmutableAsarSkill",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/app-server/src/skill-files.ts",
+			"export": "SkillFileContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/cli/config-selector.ts",
+			"export": "ConfigSelectorOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/cli/file-processor.ts",
+			"export": "ProcessedFiles",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/cli/file-processor.ts",
+			"export": "ProcessFileOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/cli/initial-message.ts",
+			"export": "InitialMessageInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/cli/initial-message.ts",
+			"export": "InitialMessageResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/config.ts",
+			"export": "expandTildePath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/config.ts",
+			"export": "getPackageJsonPath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/agent-session.ts",
+			"export": "classifyRuntimeFailure",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/auth-guidance.ts",
+			"export": "getProviderLoginHelp",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/bash-executor.ts",
+			"export": "BashExecutorOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/cache-stats.ts",
+			"export": "CacheWasteTotals",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/cache-stats.ts",
+			"export": "ModelPriceSource",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/cache-stats.ts",
+			"export": "PromptCacheTotals",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/cache-stats.ts",
+			"export": "summarizePromptCacheUsage",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/compaction/branch-summarization.ts",
+			"export": "BranchSummaryDetails",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/compaction/compaction.ts",
+			"export": "CompactionDetails",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/compaction/compaction.ts",
+			"export": "ContextUsageEstimate",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-message-sources.ts",
+			"export": "mailboxOrigin",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
+			"export": "CONTEXT_USAGE_CATEGORY_ORDER",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
+			"export": "EstimateContextUsageBreakdownInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-usage-breakdown.ts",
+			"export": "FIXED_CONTEXT_USAGE_CATEGORIES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-view.ts",
+			"export": "applyContextRewrites",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/context-view.ts",
+			"export": "ContextViewErrorCode",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/export-html/ansi-to-html.ts",
+			"export": "ansiToHtml",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/export-html/index.ts",
+			"export": "ExportOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/export-html/tool-renderer.ts",
+			"export": "ToolHtmlRenderer",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/export-html/tool-renderer.ts",
+			"export": "ToolHtmlRendererDeps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/loader.ts",
+			"export": "clearExtensionCache",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/extensions/loader.ts",
+			"export": "loadExtensions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "CreateGoalInput",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "CreateGoalParams",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "GetGoalInput",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "GetGoalParams",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "GoalToolDetails",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "resolveGoalToolOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "UpdateGoalInput",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/goal/tools.ts",
+			"export": "UpdateGoalParams",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/hooks/declarative-hooks.ts",
+			"export": "createHookId",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/hooks/hook-bridge.ts",
+			"export": "EXIT_STDIO_GRACE_MS",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/hooks/hook-bridge.ts",
+			"export": "HOOK_KILL_GRACE_MS",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/hooks/hook-bridge.ts",
+			"export": "runHookProcess",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/interactive-bash-boundary.ts",
+			"export": "workspaceSandboxProfileKey",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/keybindings.ts",
+			"export": "KEYBINDINGS",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/knowledge-context.ts",
+			"export": "buildKnowledgeContext",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/knowledge-context.ts",
+			"export": "latestKnowledgeContext",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "ExternalizedToolOutput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "importToolOutputFile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "isOwnedToolOutputFile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "LARGE_TOOL_OUTPUT_MAX_CHARS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "persistToolOutputText",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "TOOL_OUTPUT_IMAGE_MAX_BYTES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "TOOL_OUTPUT_IMAGES_MAX_BYTES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/large-tool-output.ts",
+			"export": "TOOL_OUTPUT_PREVIEW_BYTES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/manager.ts",
+			"export": "normalizeMcpToolNames",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/permission-adapter.ts",
+			"export": "McpPermissionAdapterInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/mcp/tools.ts",
+			"export": "mcpContentToAgent",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/llm.ts",
+			"export": "DREAM_MAX_TURNS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase1.ts",
+			"export": "DREAM_MAX_CANDIDATES_PER_SESSION",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase1.ts",
+			"export": "DREAM_PHASE1_SYSTEM_PROMPT",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase2.ts",
+			"export": "DREAM_MAX_WRITES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase2.ts",
+			"export": "DREAM_PHASE2_TIMEOUT_MS",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/phase2.ts",
+			"export": "DreamSearchHit",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/dream/state.ts",
+			"export": "getDreamStatePath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/memory-path-guard.ts",
+			"export": "isAutoMemoryFsPath",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/migrate-legacy.ts",
+			"export": "LegacyMigrationSummary",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-history.ts",
+			"export": "SnapshotRetention",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-project.ts",
+			"export": "findGitRoot",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-search.ts",
+			"export": "memoryTokens",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-snapshot.ts",
+			"export": "buildMemoryProtocol",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
+			"export": "MemoryReadDetails",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
+			"export": "MemoryReadParams",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
+			"export": "MemorySearchDetails",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
+			"export": "MemorySearchParams",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-tools.ts",
+			"export": "MemoryWriteParams",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-types.ts",
+			"export": "INDEX_ENTRY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-types.ts",
+			"export": "SAFE_SLUG",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-usage.ts",
+			"export": "UsageMap",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/memory/vault-usage.ts",
+			"export": "UsageRecord",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"export": "bashExecutionToText",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"export": "BRANCH_SUMMARY_PREFIX",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"export": "BRANCH_SUMMARY_SUFFIX",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"export": "COMPACTION_SUMMARY_PREFIX",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/messages.ts",
+			"export": "COMPACTION_SUMMARY_SUFFIX",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/mode-project-delete.ts",
+			"export": "ModeProjectDeleteHooks",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-registry.ts",
+			"export": "clearApiKeyCache",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-resolver.ts",
+			"export": "InitialModelResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-resolver.ts",
+			"export": "ParsedModelResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/model-resolver.ts",
+			"export": "parseModelPattern",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/package-manager.ts",
+			"export": "getExtensionTempFolder",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "MAX_AUTO_COMMAND_LENGTH",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/auto-command-rules.ts",
+			"export": "MAX_AUTO_COMMAND_RULES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/grant-store.ts",
+			"export": "digestExecutionGrantProfile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/grant-store.ts",
+			"export": "EXECUTION_GRANT_TTL_MS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/grant-store.ts",
+			"export": "executionGrantProfile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/grant-store.ts",
+			"export": "SandboxGrantProfile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "MODEL_PERMISSION_REVIEW_PROMPT",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "ModelPermissionReviewerOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "ModelReviewTransport",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "ModelReviewTransportError",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "ModelReviewTransportRequest",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/model-reviewer.ts",
+			"export": "ModelReviewVerdict",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/normalize.ts",
+			"export": "assertCompleteAction",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/policy.ts",
+			"export": "riskLevelFor",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/reviewer-input.ts",
+			"export": "ModelReviewInput",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/reviewer.ts",
+			"export": "PermissionReviewRouterOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/runtime.ts",
+			"export": "PermissionDeniedError",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/sensitive-paths.ts",
+			"export": "getSensitiveFilesystemPaths",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/permissions/user-reviewer.ts",
+			"export": "UserPermissionReviewerOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/plan-mode.ts",
+			"export": "PlanContextProjectionInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/project-trust.ts",
+			"export": "ResolveProjectTrustedOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/prompt-cache-report.ts",
+			"export": "comparePromptCacheRequests",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/prompt-templates.ts",
+			"export": "LoadPromptTemplatesOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/prompt-templates.ts",
+			"export": "substituteArgs",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/resolve-config-value.ts",
+			"export": "getMissingConfigValueEnvVarNames",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/runtime-recovery-materializer.ts",
+			"export": "MaterializedRuntimeRecovery",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/runtime-recovery.ts",
+			"export": "RuntimeToolResultMessageEvidence",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/schedules/paths.ts",
+			"export": "getScheduleWorkspacePath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-attachments.ts",
+			"export": "collectSessionDeliverableRoots",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-attachments.ts",
+			"export": "deliveredFileStorageName",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-attachments.ts",
+			"export": "getOwnedSessionDeliveredDir",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-attachments.ts",
+			"export": "SESSION_DELIVERED_DIR_NAME",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-attachments.ts",
+			"export": "SESSION_WORK_MAX_AGE_MS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-cwd.ts",
+			"export": "formatMissingSessionCwdError",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-journal.ts",
+			"export": "OpenSessionJournalOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-journal.ts",
+			"export": "SessionJournalHooks",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-journal.ts",
+			"export": "SessionJournalPoisonedError",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-lease.ts",
+			"export": "SessionLeaseErrorCode",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-lease.ts",
+			"export": "SessionLeaseInspection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-manager.ts",
+			"export": "computeCompactionTasksCarry",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-manager.ts",
+			"export": "findMostRecentSession",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-manager.ts",
+			"export": "loadEntriesFromFile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-manager.ts",
+			"export": "PersistedSessionImage",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/session-workspace.ts",
+			"export": "getWorkspacesDir",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/set-tasks.ts",
+			"export": "SetTasksDetails",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/set-tasks.ts",
+			"export": "SetTasksInput",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/set-tasks.ts",
+			"export": "SetTasksParams",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/set-tasks.ts",
+			"export": "TaskItem",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/settings-manager.ts",
+			"export": "FileSettingsStorage",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/settings-manager.ts",
+			"export": "InMemorySettingsStorage",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/slash-commands.ts",
+			"export": "BuiltinSlashCommand",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/agent-type-registry.ts",
+			"export": "AGENT_TYPE_ID_PATTERN",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/agent-type-registry.ts",
+			"export": "MAX_CUSTOM_AGENT_TYPES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/profiles.ts",
+			"export": "ResolvedAgentProfile",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/prompts.ts",
+			"export": "buildCommonAgentContract",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/scheduler.ts",
+			"export": "SubagentScheduler",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/tools.ts",
+			"export": "SubagentToolHost",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/trace.ts",
+			"export": "MAX_TRACE_EVENT_UTF8_BYTES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/trace.ts",
+			"export": "MAX_TRACE_PAGE_UTF8_BYTES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/trace.ts",
+			"export": "ProjectAgentTraceInput",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/trace.ts",
+			"export": "ProjectAgentTraceResult",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/types.ts",
+			"export": "AGENT_TYPES",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/subagents/types.ts",
+			"export": "AgentType",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/submit-plan.ts",
+			"export": "SubmitPlanInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/submit-plan.ts",
+			"export": "SubmitPlanParams",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/system-prompt.ts",
+			"export": "buildSystemPrompt",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/system-prompt.ts",
+			"export": "BuiltSystemPrompt",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/system-prompt.ts",
+			"export": "formatProjectContext",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-permission-adapter.ts",
+			"export": "DescribeToolActionContext",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-permission-adapter.ts",
+			"export": "ToolIdentityInput",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-result-microcompaction.ts",
+			"export": "MICROCOMPACTION_KEEP_RECENT",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-result-microcompaction.ts",
+			"export": "MICROCOMPACTION_TRIGGER_TOKENS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-result-microcompaction.ts",
+			"export": "MicrocompactionOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tool-result-microcompaction.ts",
+			"export": "PrepareMicrocompactionInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
+			"export": "createDescribeImageTool",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
+			"export": "DescribeImageToolDetails",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
+			"export": "DescribeImageToolInput",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/describe-image.ts",
+			"export": "VISION_DESCRIPTION_PROMPT",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
+			"export": "AppliedEditsResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
+			"export": "applyReplacementsPreservingUnchangedLines",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
+			"export": "fuzzyFindText",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
+			"export": "FuzzyMatchResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/edit-diff.ts",
+			"export": "normalizeForFuzzyMatch",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "allToolNames",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "createAllTools",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "createCodingToolDefinitions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "createReadOnlyToolDefinitions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "createTool",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "createToolDefinition",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "GOAL_TOOL_NAMES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/index.ts",
+			"export": "ToolDef",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/output-accumulator.ts",
+			"export": "OutputAccumulatorOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/output-accumulator.ts",
+			"export": "OutputSnapshot",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/path-utils.ts",
+			"export": "expandPath",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/render-utils.ts",
+			"export": "linkPath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/tools/render-utils.ts",
+			"export": "ToolRenderResultLike",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/core/trust-manager.ts",
+			"export": "getProjectTrustParentPath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
+			"export": "createWorkspaceSandboxHealthProbe",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
+			"export": "SANDBOX_RUNTIME_VERSION",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/core/workspace-sandbox-health.ts",
+			"export": "WorkspaceSandboxHealthDependencies",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/migrations.ts",
+			"export": "migrateAuthToAuthJson",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/migrations.ts",
+			"export": "migrateSessionsFromAgentRoot",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/first-time-setup.ts",
+			"export": "FirstTimeSetupOptions",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/footer.ts",
+			"export": "formatCwdForFooter",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/keybinding-hints.ts",
+			"export": "KeyTextFormatOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts",
+			"export": "ModelsCallbacks",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/scoped-models-selector.ts",
+			"export": "ModelsConfig",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector-search.ts",
+			"export": "MatchResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector-search.ts",
+			"export": "matchSession",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector-search.ts",
+			"export": "ParsedSearchQuery",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector-search.ts",
+			"export": "parseSearchQuery",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/session-selector.ts",
+			"export": "deleteSessionFile",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/status-indicator.ts",
+			"export": "CompactionStatusReason",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/trust-selector.ts",
+			"export": "TrustSelection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/components/trust-selector.ts",
+			"export": "TrustSelectorOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+			"export": "formatResumeCommand",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/model-search.ts",
+			"export": "ModelSearchItem",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/provider-auth-options.ts",
+			"export": "getWebSearchLoginProviderOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/provider-auth-options.ts",
+			"export": "isApiKeyLoginProvider",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/provider-auth-options.ts",
+			"export": "LoginProviderCompletionOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "getDefaultTheme",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "getThemeForRgbColor",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalAutoThemeDetectionOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalAutoThemeDetector",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalBackgroundThemeDetectionOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalBackgroundThemeDetector",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalThemeDetection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "TerminalThemeDetectionOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/interactive/theme/theme.ts",
+			"export": "ThemeInfo",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/modes/rpc/rpc-types.ts",
+			"export": "RpcCommandType",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/coding-agent/src/package-manager-cli.ts",
+			"export": "CommandSettingsResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/package-manager-cli.ts",
+			"export": "PackageCommand",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/clipboard-image.ts",
+			"export": "ClipboardImage",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/clipboard-process.ts",
+			"export": "ClipboardCommandOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/clipboard-process.ts",
+			"export": "ClipboardCommandResult",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/html.ts",
+			"export": "DecodedHtmlEntity",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/html.ts",
+			"export": "decodeHtmlEntity",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/image-process.ts",
+			"export": "ProcessImageOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/image-process.ts",
+			"export": "ProcessImageResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/paths.ts",
+			"export": "PathInputOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/syntax-highlight.ts",
+			"export": "HighlightFormatter",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/syntax-highlight.ts",
+			"export": "HighlightOptions",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/syntax-highlight.ts",
+			"export": "HighlightTheme",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/syntax-highlight.ts",
+			"export": "renderHighlightedHtml",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/tools-manager.ts",
+			"export": "BundledToolLookupOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/tools-manager.ts",
+			"export": "getBundledToolPath",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/tools-manager.ts",
+			"export": "getToolPath",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/coding-agent/src/utils/tools-manager.ts",
+			"export": "NativeToolName",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-protocol-scheme.ts",
+			"export": "APP_SCHEME",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-protocol-scheme.ts",
+			"export": "resolveRendererAsset",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"export": "AppServerSupervisorOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"export": "DiagnosticReadable",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"export": "DiagnosticSink",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"export": "ServerRestartedError",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/app-server-supervisor.ts",
+			"export": "ServerUnavailableError",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/background-completion.ts",
+			"export": "CompletionNotification",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/browser-controller.ts",
+			"export": "BrowserControllerDependencies",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/browser-controller.ts",
+			"export": "BrowserDebuggerTransport",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/browser-profile-store.ts",
+			"export": "ImportedProfileIdentity",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/changelog.ts",
+			"export": "DesktopChangelogLoaderOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/chromium-browser-import.ts",
+			"export": "ImportedBrowserData",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/client-broker.ts",
+			"export": "isTrustedRendererUrl",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/diagnostic-log.ts",
+			"export": "DiagnosticLogOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "applyThemeToWindow",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "DARK_WINDOW_BACKGROUND",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "isDesktopThemePreference",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "LIGHT_WINDOW_BACKGROUND",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "resolveTheme",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "storeTheme",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/theme-manager.ts",
+			"export": "WINDOWS_TITLE_BAR_HEIGHT",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/main/updater.ts",
+			"export": "compareStableVersions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/updater.ts",
+			"export": "DesktopUpdaterOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/main/windows-sandbox-setup.ts",
+			"export": "WindowsSandboxSetupResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
+			"export": "AgentTreeNode",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/AgentTreePanel.tsx",
+			"export": "buildAgentTree",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/App.tsx",
+			"export": "sessionDisplayTitle",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ContextUsageRing.tsx",
+			"export": "ContextUsageRingProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ConversationQuoteContext.tsx",
+			"export": "DraftConversationQuote",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/HomeProjectPicker.tsx",
+			"export": "HomeProjectPickerProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/knowledge-graph-labels.ts",
+			"export": "GraphLabel",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/KnowledgePanel.tsx",
+			"export": "knowledgeNoteMarkdown",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/markdown-lexer.ts",
+			"export": "MarkdownLexResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/McpCreationDialog.tsx",
+			"export": "McpProjectOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/McpServerDialog.tsx",
+			"export": "McpCredentialFields",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/memory-dream-settings.ts",
+			"export": "DreamDraftResult",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/MenuSelect.tsx",
+			"export": "MenuSelectOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/NewTaskHome.tsx",
+			"export": "NewTaskRecentProject",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PlanCard.tsx",
+			"export": "PlanCardProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/PluginMarketplacePanel.tsx",
+			"export": "PluginMarketplacePanelProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/DocxViewer.tsx",
+			"export": "DocxViewerProps",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/excel-grid.ts",
+			"export": "ExcelCellView",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/excel-grid.ts",
+			"export": "ExcelMergeView",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/excel-grid.ts",
+			"export": "ExcelPaintedCell",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/excel-grid.ts",
+			"export": "ExcelSheetView",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/ExcelViewer.tsx",
+			"export": "ExcelViewerProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/ImageViewer.tsx",
+			"export": "ImageViewerProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PdfViewer.tsx",
+			"export": "PdfViewerProps",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/pptx-selection.ts",
+			"export": "pptxObjectSelection",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PptxViewer.tsx",
+			"export": "PptxViewerProps",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-bytes-cache.ts",
+			"export": "PREVIEW_CACHE_MAX_BYTES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-bytes-cache.ts",
+			"export": "PreviewBytesCache",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-bytes-cache.ts",
+			"export": "PreviewCacheKey",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-kinds.ts",
+			"export": "isEnginePreviewKind",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/preview-kinds.ts",
+			"export": "PreviewKind",
+			"category": "barrel-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/PreviewToolbar.tsx",
+			"export": "PreviewToolbarProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/TextViewer.tsx",
+			"export": "TextViewerProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/preview/UniversalFilePreviewer.tsx",
+			"export": "UniversalFilePreviewerProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
+			"export": "ActivityWeek",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
+			"export": "buildActivityWeeks",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProfilePanel.tsx",
+			"export": "formatDuration",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ProjectActions.tsx",
+			"export": "DeleteDialogState",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ReleaseNotesPopover.tsx",
+			"export": "RELEASE_NOTES_READ_VERSION_STORAGE_KEY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/review-model.ts",
+			"export": "ReviewTreeDirectory",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/review-model.ts",
+			"export": "ReviewTreeFile",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ScheduledTaskDialog.tsx",
+			"export": "ScheduledTaskDialogProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionChatView.tsx",
+			"export": "SessionChatViewProps",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionSidebar.tsx",
+			"export": "SessionSidebarWorkspace",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionSidebar.tsx",
+			"export": "SessionTree",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SessionSidebar.tsx",
+			"export": "taskTitle",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SkillCreationDialog.tsx",
+			"export": "SkillProjectOption",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SystemNotice.tsx",
+			"export": "SystemNoticeCopy",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/SystemNotice.tsx",
+			"export": "SystemNoticeProps",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/ThinkingSelector.tsx",
+			"export": "highestThinkingSelection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "ChatTranscriptSegment",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "CodeTranscriptSegment",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "CodeTurnPresentation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "TextBlock",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "ThinkingBlock",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "toolLabel",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "ToolTranscriptPresentation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "TurnPresentation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/transcript-turn-model.ts",
+			"export": "VisibleCodeBlock",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Transcript.tsx",
+			"export": "shouldAdjustTranscriptScroll",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/Transcript.tsx",
+			"export": "shouldFollowTranscript",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TranscriptQuoteSelection.tsx",
+			"export": "selectedConversationQuote",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TurnRuntimeStatus.tsx",
+			"export": "advanceDisplayedTokens",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TurnRuntimeStatus.tsx",
+			"export": "estimateOutputTokens",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/TurnRuntimeStatus.tsx",
+			"export": "turnTokenTarget",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/components/use-knowledge-links.ts",
+			"export": "KNOWLEDGE_CHANGED_EVENT",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/general-preferences.ts",
+			"export": "DEFAULT_GENERAL_PREFERENCES",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/general-preferences.ts",
+			"export": "GENERAL_PREFERENCES_STORAGE_KEY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/general-preferences.ts",
+			"export": "MotionPreference",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/hooks/use-conversation-plan-flow.ts",
+			"export": "ConversationPlanFlow",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/hooks/use-session-projection.ts",
+			"export": "SessionProjectionView",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/i18n.ts",
+			"export": "APP_LOCALE_STORAGE_KEY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/i18n.ts",
+			"export": "loadLocale",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "CODE_HOME_GREETINGS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "CODE_HOME_STARTERS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "getHomePeriod",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "HOME_GREETINGS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "HOME_STARTERS",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "HomeGreeting",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/new-task-home-content.ts",
+			"export": "HomePeriod",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/profile-identity.ts",
+			"export": "PROFILE_IDENTITY_STORAGE_KEY",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-view-utils.ts",
+			"export": "SessionIndicator",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
+			"export": "SessionProjectTarget",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
+			"export": "SessionWorkspaceError",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
+			"export": "SessionWorkspaceWorkflowOptions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/session-workspace-workflow.ts",
+			"export": "shouldResnapshotAfterReady",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/app-store.ts",
+			"export": "AgentTranscriptState",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/reducer.ts",
+			"export": "eventSessionId",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/reducer.ts",
+			"export": "MutableAgentTranscriptState",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/reducer.ts",
+			"export": "MutableProjectionState",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/reducer.ts",
+			"export": "ProjectionSyncStatus",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/session-grouping.ts",
+			"export": "SessionGroupingPreferences",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/store/session-grouping.ts",
+			"export": "SessionSection",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/theme.ts",
+			"export": "APP_THEME_STORAGE_KEY",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/theme.ts",
+			"export": "isAppTheme",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "AgentTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "BrowserTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "ChatTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "FileTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "findTabLocation",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "KnowledgeTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "MAX_ROW_PANES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "PlanTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "PreviewTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "ProcessTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "ReviewTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "TabLocation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "TerminalTab",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "ToolStrip",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/renderer/workspace-tabs.ts",
+			"export": "ToolTabLocation",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/app-server-rpc-forwarding.ts",
+			"export": "DesktopRpcForwardingDefinition",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DESKTOP_CHANGELOG_MAX_RELEASES",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopBrowserImportSourceProfile",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopChangelogRelease",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopCloseBrowserInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopCloseTerminalInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopResolveBrowserHandoffInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopRetainWorkspaceSessions",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopWorkspaceMutableKind",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopWorkspaceReviewTextFile",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/desktop/src/shared/desktop-api.ts",
+			"export": "DesktopWriteClipboardTextInput",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/components/editor.ts",
+			"export": "TextChunk",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/components/editor.ts",
+			"export": "wordWrapLine",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/tui/src/native-modifiers.ts",
+			"export": "ModifierKey",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/terminal-image.ts",
+			"export": "calculateImageCellSize",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/tui/src/terminal-image.ts",
+			"export": "ImageCellSize",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/tui/src/terminal.ts",
+			"export": "isAppleTerminalSession",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/terminal.ts",
+			"export": "normalizeAppleTerminalInput",
+			"category": "test-only"
+		},
+		{
+			"file": "packages/tui/src/terminal.ts",
+			"export": "parseKeyboardProtocolNegotiationSequence",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/utils.ts",
+			"export": "extractAnsiCode",
+			"category": "same-file-only"
+		},
+		{
+			"file": "packages/tui/src/utils.ts",
+			"export": "isPunctuationChar",
+			"category": "zero-reference"
+		},
+		{
+			"file": "packages/tui/src/word-navigation.ts",
+			"export": "WordNavigationOptions",
+			"category": "same-file-only"
+		}
+	]
+}

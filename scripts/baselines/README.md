@@ -105,3 +105,35 @@ node scripts/check-unused-deps.mjs --update
 
 An incomplete scan refuses baseline updates. Normal commands never rewrite
 either advisory baseline; pruning old entries also requires an explicit update.
+
+## Advisory internal export report
+
+`npm run check:dead-exports` reports internal export candidates and changes against
+`dead-exports.json`. It runs in `npm run check` and a `continue-on-error` architecture
+CI step. Findings, missing/invalid baselines and scan errors do not block normal
+reports. The check never removes exports or source, runs analyzed code, or writes
+a baseline during a normal invocation. Its regression tests remain required.
+
+Candidates are top-level exports in production TypeScript/TSX under
+`packages/*/src`, excluding generated files, declarations and test fixtures.
+Declared public entrypoints (`main`, `types` and conditional/wildcard exports),
+their reexports and types reachable through public signatures are protected.
+Reference evidence includes production, tests, e2e fixtures, scripts and configs,
+including type references, namespace access and literal dynamic imports.
+
+Candidates are grouped as `zero-reference`, `same-file-only`, `test-only` or
+`barrel-only`. These describe detected references, not proof of dead code or
+permission to delete a test interface. Imports count as evidence; the report is
+not a whole-program reachability analysis. Aliases of the same declaration are
+grouped into one candidate. Computed imports and namespace access
+are reported as coverage uncertainty. External consumers, custom runtime loaders
+and other indirection still require manual review.
+
+The baseline stores file, export name and category, without line numbers. Moving
+lines does not add a candidate; losing the last reference or changing its category
+does. Incomplete scans skip incremental conclusions and refuse baseline updates.
+After reviewing the report, explicitly refresh and inspect only this baseline:
+
+```sh
+node scripts/check-dead-exports.mjs --update
+```

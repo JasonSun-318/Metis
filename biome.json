@@ -30,6 +30,7 @@
 			"scripts/check-public-api.mjs",
 			"scripts/check-duplicates.mjs",
 			"scripts/check-unused-deps.mjs",
+			"scripts/check-dead-exports.mjs",
 			"scripts/lib/source-program.mjs",
 			"scripts/check-ts-relative-imports.mjs",
 			"scripts/test/**/*.mjs",
