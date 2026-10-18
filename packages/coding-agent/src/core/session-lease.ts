@@ -13,6 +13,7 @@ import {
 	replaceFileAtomicallySync,
 	syncDirectorySync,
 } from "./durable-file.ts";
+import { errorCode } from "./error-code.ts";
 
 const UNKNOWN_BOOT_ID = "unknown";
 const PROCESS_START_TOLERANCE_MS = 2_000;
@@ -82,12 +83,6 @@ interface GateToken {
 	bytes: string;
 	reclaimArtifactPath?: string;
 	durable?: boolean;
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 function readBootId(): string {

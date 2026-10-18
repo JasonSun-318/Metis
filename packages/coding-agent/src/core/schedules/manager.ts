@@ -8,6 +8,7 @@ import {
 	ensureRealDirectoryDurablySync,
 	readSingleLinkTextFileSync,
 } from "../durable-file.ts";
+import { errorCode } from "../error-code.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";
 import {
 	finalizeOrphanedScheduledTrash,
@@ -223,12 +224,6 @@ function truncateUtf8(value: string, maximumBytes: number): string {
 		bytes += size;
 	}
 	return result;
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 export class ScheduleManager {

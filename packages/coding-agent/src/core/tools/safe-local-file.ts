@@ -1,16 +1,11 @@
 import { type BigIntStats, constants } from "node:fs";
 import { type FileHandle, lstat, open } from "node:fs/promises";
+import { errorCode } from "../error-code.ts";
 
 type OpenedFile = {
 	readonly handle: FileHandle;
 	readonly initial: BigIntStats;
 };
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
-}
 
 function isSameFile(left: BigIntStats, right: BigIntStats): boolean {
 	return left.dev === right.dev && left.ino === right.ino;

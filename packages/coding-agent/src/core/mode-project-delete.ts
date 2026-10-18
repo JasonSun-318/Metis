@@ -29,6 +29,7 @@ import {
 	replaceFileAtomicallySync,
 	syncDirectorySync,
 } from "./durable-file.ts";
+import { errorCode } from "./error-code.ts";
 import { getOwnedSessionWorkDirs, getSessionAttachmentDir } from "./session-attachments.ts";
 import { assertValidSessionId } from "./session-id.ts";
 import { getOwnedSessionJournalArtifacts } from "./session-journal.ts";
@@ -115,12 +116,6 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 function inside(root: string, candidate: string): boolean {

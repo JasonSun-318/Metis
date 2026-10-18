@@ -263,6 +263,115 @@ Content`,
 			expect(result.prompts.some((r) => r.path === promptPath && !r.enabled)).toBe(true);
 		});
 
+		it("should auto-discover prompt and theme files by suffix", async () => {
+			const promptsDir = join(agentDir, "prompts");
+			const themesDir = join(agentDir, "themes");
+			mkdirSync(promptsDir, { recursive: true });
+			mkdirSync(themesDir, { recursive: true });
+
+			const promptPath = join(promptsDir, "auto.md");
+			const promptJsonPath = join(promptsDir, "not-a-prompt.json");
+			const themePath = join(themesDir, "auto.json");
+			const themeMarkdownPath = join(themesDir, "not-a-theme.md");
+			writeFileSync(promptPath, "Auto prompt");
+			writeFileSync(promptJsonPath, "{}");
+			writeFileSync(themePath, "{}");
+			writeFileSync(themeMarkdownPath, "# not a theme");
+
+			const result = await packageManager.resolve();
+			expect(result.prompts.some((r) => r.path === promptPath && r.enabled)).toBe(true);
+			expect(result.prompts.some((r) => r.path === promptJsonPath)).toBe(false);
+			expect(result.themes.some((r) => r.path === themePath && r.enabled)).toBe(true);
+			expect(result.themes.some((r) => r.path === themeMarkdownPath)).toBe(false);
+		});
+
+		it("should skip hidden, ignored, node_modules, directory, and broken symlink prompt and theme entries", async () => {
+			const promptsDir = join(agentDir, "prompts");
+			const themesDir = join(agentDir, "themes");
+			mkdirSync(promptsDir, { recursive: true });
+			mkdirSync(themesDir, { recursive: true });
+			const fileLinkType = process.platform === "win32" ? "file" : undefined;
+
+			const promptPath = join(promptsDir, "keep.md");
+			const hiddenPromptPath = join(promptsDir, ".hidden.md");
+			const ignoredPromptPath = join(promptsDir, "ignored.md");
+			const promptDirectoryPath = join(promptsDir, "folder.md");
+			const promptNodeModulesPath = join(promptsDir, "node_modules", "inside.md");
+			const linkedPromptTarget = join(tempDir, "linked-prompt.md");
+			const linkedPromptPath = join(promptsDir, "linked.md");
+			const brokenPromptPath = join(promptsDir, "broken.md");
+			writeFileSync(promptPath, "Auto prompt");
+			writeFileSync(hiddenPromptPath, "Hidden prompt");
+			writeFileSync(ignoredPromptPath, "Ignored prompt");
+			mkdirSync(promptDirectoryPath, { recursive: true });
+			mkdirSync(join(promptsDir, "node_modules"), { recursive: true });
+			writeFileSync(promptNodeModulesPath, "Bundled prompt");
+			writeFileSync(join(promptsDir, ".gitignore"), "ignored.md\n");
+			writeFileSync(linkedPromptTarget, "Linked prompt");
+			symlinkSync(linkedPromptTarget, linkedPromptPath, fileLinkType);
+			symlinkSync(join(tempDir, "missing-prompt.md"), brokenPromptPath, fileLinkType);
+
+			const themePath = join(themesDir, "keep.json");
+			const hiddenThemePath = join(themesDir, ".hidden.json");
+			const ignoredThemePath = join(themesDir, "ignored.json");
+			const themeDirectoryPath = join(themesDir, "folder.json");
+			const themeNodeModulesPath = join(themesDir, "node_modules", "inside.json");
+			const linkedThemeTarget = join(tempDir, "linked-theme.json");
+			const linkedThemePath = join(themesDir, "linked.json");
+			const brokenThemePath = join(themesDir, "broken.json");
+			writeFileSync(themePath, "{}");
+			writeFileSync(hiddenThemePath, "{}");
+			writeFileSync(ignoredThemePath, "{}");
+			mkdirSync(themeDirectoryPath, { recursive: true });
+			mkdirSync(join(themesDir, "node_modules"), { recursive: true });
+			writeFileSync(themeNodeModulesPath, "{}");
+			writeFileSync(join(themesDir, ".gitignore"), "ignored.json\n");
+			writeFileSync(linkedThemeTarget, "{}");
+			symlinkSync(linkedThemeTarget, linkedThemePath, fileLinkType);
+			symlinkSync(join(tempDir, "missing-theme.json"), brokenThemePath, fileLinkType);
+
+			const result = await packageManager.resolve();
+			expect(result.prompts.some((r) => r.path === promptPath && r.enabled)).toBe(true);
+			expect(result.prompts.some((r) => r.path === linkedPromptPath && r.enabled)).toBe(true);
+			for (const path of [
+				hiddenPromptPath,
+				ignoredPromptPath,
+				promptDirectoryPath,
+				promptNodeModulesPath,
+				brokenPromptPath,
+			]) {
+				expect(result.prompts.some((r) => r.path === path)).toBe(false);
+			}
+
+			expect(result.themes.some((r) => r.path === themePath && r.enabled)).toBe(true);
+			expect(result.themes.some((r) => r.path === linkedThemePath && r.enabled)).toBe(true);
+			for (const path of [
+				hiddenThemePath,
+				ignoredThemePath,
+				themeDirectoryPath,
+				themeNodeModulesPath,
+				brokenThemePath,
+			]) {
+				expect(result.themes.some((r) => r.path === path)).toBe(false);
+			}
+		});
+
+		it("should auto-discover user and project themes with overrides", async () => {
+			const userThemePath = join(agentDir, "themes", "user.json");
+			const projectThemePath = join(tempDir, ".metis", "themes", "project.json");
+			mkdirSync(join(agentDir, "themes"), { recursive: true });
+			mkdirSync(join(tempDir, ".metis", "themes"), { recursive: true });
+			writeFileSync(userThemePath, "{}");
+			writeFileSync(projectThemePath, "{}");
+
+			settingsManager.setThemePaths(["!themes/user.json"]);
+			settingsManager.setProjectThemePaths(["!themes/project.json"]);
+
+			const result = await packageManager.resolve();
+			expect(result.themes.some((r) => r.path === userThemePath && !r.enabled)).toBe(true);
+			expect(result.themes.some((r) => r.path === projectThemePath && !r.enabled)).toBe(true);
+		});
+
 		it("should resolve directory with package.json metis.extensions in extensions setting", async () => {
 			// Create a package with metis.extensions in package.json
 			const pkgDir = join(tempDir, "my-extensions-pkg");

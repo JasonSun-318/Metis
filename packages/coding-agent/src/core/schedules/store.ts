@@ -2,6 +2,7 @@ import { type Dirent, existsSync, lstatSync, readdirSync, statSync } from "node:
 import { isAbsolute, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { createFileAtomicallySync, readSingleLinkTextFileSync, replaceFileAtomicallySync } from "../durable-file.ts";
+import { errorCode } from "../error-code.ts";
 import { assertValidSessionId } from "../session-id.ts";
 import {
 	ensureScheduleDirectories,
@@ -439,12 +440,6 @@ function serializeRun(run: ScheduleRun): string {
 	if (Buffer.byteLength(contents, "utf8") > MAX_RUN_BYTES)
 		throw new ScheduleError("STORE_LIMIT", "Schedule run is too large");
 	return contents;
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 export class ScheduleStore {

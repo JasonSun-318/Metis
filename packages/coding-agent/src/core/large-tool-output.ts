@@ -5,6 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { ImageContent, TextContent } from "@metis/ai";
 import { ensureDirectoryDurablySync } from "./durable-file.ts";
+import { errorCode } from "./error-code.ts";
 
 export const LARGE_TOOL_OUTPUT_MAX_CHARS = 50_000;
 export const TOOL_OUTPUT_PREVIEW_BYTES = 2 * 1024;
@@ -41,12 +42,6 @@ interface OpenedSourceFile extends FileIdentity {
 	handle: FileHandle;
 	path: string;
 	size: number;
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 function sameIdentity(stats: Stats, identity: FileIdentity): boolean {

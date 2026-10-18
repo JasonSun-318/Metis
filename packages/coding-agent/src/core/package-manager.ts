@@ -415,7 +415,7 @@ function collectAncestorAgentsSkillDirs(startDir: string): string[] {
 	return skillDirs;
 }
 
-function collectAutoPromptEntries(dir: string): string[] {
+function collectAutoFileEntries(dir: string, extension: ".md" | ".json"): string[] {
 	const entries: string[] = [];
 	if (!existsSync(dir)) return entries;
 
@@ -441,7 +441,7 @@ function collectAutoPromptEntries(dir: string): string[] {
 			const relPath = toPosixPath(relative(dir, fullPath));
 			if (ig.ignores(relPath)) continue;
 
-			if (isFile && entry.name.endsWith(".md")) {
+			if (isFile && entry.name.endsWith(extension)) {
 				entries.push(fullPath);
 			}
 		}
@@ -452,41 +452,12 @@ function collectAutoPromptEntries(dir: string): string[] {
 	return entries;
 }
 
+function collectAutoPromptEntries(dir: string): string[] {
+	return collectAutoFileEntries(dir, ".md");
+}
+
 function collectAutoThemeEntries(dir: string): string[] {
-	const entries: string[] = [];
-	if (!existsSync(dir)) return entries;
-
-	const ig = ignore();
-	addIgnoreRules(ig, dir, dir);
-
-	try {
-		const dirEntries = readdirSync(dir, { withFileTypes: true });
-		for (const entry of dirEntries) {
-			if (entry.name.startsWith(".")) continue;
-			if (entry.name === "node_modules") continue;
-
-			const fullPath = join(dir, entry.name);
-			let isFile = entry.isFile();
-			if (entry.isSymbolicLink()) {
-				try {
-					isFile = statSync(fullPath).isFile();
-				} catch {
-					continue;
-				}
-			}
-
-			const relPath = toPosixPath(relative(dir, fullPath));
-			if (ig.ignores(relPath)) continue;
-
-			if (isFile && entry.name.endsWith(".json")) {
-				entries.push(fullPath);
-			}
-		}
-	} catch {
-		// Ignore errors
-	}
-
-	return entries;
+	return collectAutoFileEntries(dir, ".json");
 }
 
 function readMetisManifestFile(packageJsonPath: string): MetisManifest | null {

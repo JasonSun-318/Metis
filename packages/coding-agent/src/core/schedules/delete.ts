@@ -19,6 +19,7 @@ import {
 	replaceFileAtomicallySync,
 	syncDirectorySync,
 } from "../durable-file.ts";
+import { errorCode } from "../error-code.ts";
 import { getOwnedSessionAttachmentDir, getOwnedSessionWorkDirs } from "../session-attachments.ts";
 import { assertValidSessionId } from "../session-id.ts";
 import { getOwnedSessionJournalArtifacts } from "../session-journal.ts";
@@ -63,12 +64,6 @@ export interface ScheduleTrashHooks {
 const MAX_MANIFEST_BYTES = 64 * 1024 * 1024;
 const MAX_TARGETS = 100_000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
-}
 
 function pathExists(path: string): boolean {
 	try {

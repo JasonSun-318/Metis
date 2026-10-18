@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { join } from "node:path";
 import { ensureDirectoryDurablySync } from "../../durable-file.ts";
+import { errorCode } from "../../error-code.ts";
 import { withMemoryRootLock } from "../memory-lock.ts";
 import { MemoryVault } from "../vault.ts";
 import type { MemoryEvents } from "../vault-events.ts";
@@ -47,12 +48,6 @@ function countRunChanges(root: string, runId: string): RunCounts {
 		}
 	}
 	return counts;
-}
-
-function errorCode(error: unknown): string | undefined {
-	return typeof error === "object" && error !== null && "code" in error
-		? String((error as NodeJS.ErrnoException).code)
-		: undefined;
 }
 
 export interface RunDreamOptions {
