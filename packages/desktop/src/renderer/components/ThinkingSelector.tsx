@@ -2,6 +2,7 @@ import type { SessionSnapshot } from "@metis/app-protocol";
 import { CaretDown, Question } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useMenuDismiss } from "../hooks/use-menu-dismiss.ts";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];
@@ -197,23 +198,7 @@ export function ThinkingSelector({
 
 	useEffect(() => () => cancelAnimationFrame(springFrameRef.current), []);
 
-	useEffect(() => {
-		if (!open) return;
-		const onPointerDown = (event: PointerEvent) => {
-			if (!rootRef.current?.contains(event.target as Node)) close();
-		};
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			close(true);
-		};
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [close, open]);
+	useMenuDismiss(open, rootRef, close);
 
 	const updatePreview = (nextValue: number) => {
 		const next = clamp(nextValue, 0, maximumIndex);
