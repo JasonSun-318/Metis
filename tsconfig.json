@@ -11,6 +11,8 @@
 			"@metis/ai/*": ["./packages/ai/src/*.ts", "./packages/ai/src/providers/*.ts"],
 			"@metis/ai/dist/*": ["./packages/ai/src/*"],
 			"@metis/agent-core": ["./packages/agent/src/index.ts"],
+			"@metis/agent-core/harness": ["./packages/agent/src/harness.ts"],
+			"@metis/agent-core/node": ["./packages/agent/src/node.ts"],
 			"@metis/agent-core/*": ["./packages/agent/src/*"],
 			"@metis/app-protocol": ["./packages/app-protocol/src/index.ts"],
 			"@metis/app-protocol/*": ["./packages/app-protocol/src/*"],

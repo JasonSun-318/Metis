@@ -781,6 +781,13 @@ export interface TreePreparation {
 	label?: string;
 }
 
+/**
+ * Legacy branch-summary options shape retained for backwards compatibility.
+ *
+ * @deprecated Use `BranchSummaryGenerationOptions` (exported from `@metis/agent-core/harness`)
+ * when calling `generateBranchSummary`; it requires `models`, `model`, and `signal`.
+ * This legacy shape remains available for existing assignability and extension.
+ */
 export interface GenerateBranchSummaryOptions {
 	model: Model<any>;
 	apiKey: string;
