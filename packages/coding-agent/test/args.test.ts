@@ -33,6 +33,106 @@ describe("parseArgs", () => {
 		});
 	});
 
+	describe("required option values", () => {
+		const requiredValueOptions = [
+			{ option: "--mode", field: "mode" },
+			{ option: "--agent-mode", field: "agentMode" },
+			{ option: "--cwd", field: "cwd" },
+			{ option: "--permission-preset", field: "permissionPreset" },
+			{ option: "--provider", field: "provider" },
+			{ option: "--model", field: "model" },
+			{ option: "--api-key", field: "apiKey" },
+			{ option: "--system-prompt", field: "systemPrompt" },
+			{ option: "--append-system-prompt", field: "appendSystemPrompt" },
+			{ option: "--name", field: "name" },
+			{ option: "--session", field: "session" },
+			{ option: "--session-id", field: "sessionId" },
+			{ option: "--fork", field: "fork" },
+			{ option: "--session-dir", field: "sessionDir" },
+			{ option: "--models", field: "models" },
+			{ option: "--tools", field: "tools" },
+			{ option: "--exclude-tools", field: "excludeTools" },
+			{ option: "--thinking", field: "thinking" },
+			{ option: "--export", field: "export" },
+			{ option: "--extension", field: "extensions" },
+			{ option: "--skill", field: "skills" },
+			{ option: "--prompt-template", field: "promptTemplates" },
+			{ option: "--theme", field: "themes" },
+		] as const;
+
+		test.each(requiredValueOptions)("$option diagnoses a missing value at the end of args", ({ option, field }) => {
+			const result = parseArgs([option]);
+			expect(result[field]).toBeUndefined();
+			expect(result.diagnostics.some((diagnostic) => diagnostic.type === "error")).toBe(true);
+		});
+
+		test.each(requiredValueOptions)(
+			"$option diagnoses a missing value without consuming the next option",
+			({ option, field }) => {
+				const result = parseArgs([option, "--help"]);
+				expect(result.help).toBe(true);
+				expect(result[field]).toBeUndefined();
+				expect(result.diagnostics.some((diagnostic) => diagnostic.type === "error")).toBe(true);
+			},
+		);
+
+		test("does not consume --help as the value of --model", () => {
+			const result = parseArgs(["--model", "--help"]);
+			expect(result.help).toBe(true);
+			expect(result.model).toBeUndefined();
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--model requires a value" }]);
+		});
+
+		test.each(["-n", "-e", "-t", "-xt"])("reports a missing value for %s", (option) => {
+			expect(parseArgs([option]).diagnostics.some((diagnostic) => diagnostic.type === "error")).toBe(true);
+		});
+
+		test("keeps a following unknown extension flag parseable", () => {
+			const result = parseArgs(["--model", "--custom-flag", "value"]);
+			expect(result.model).toBeUndefined();
+			expect(result.unknownFlags.get("custom-flag")).toBe("value");
+			expect(result.diagnostics.some((diagnostic) => diagnostic.type === "error")).toBe(true);
+		});
+
+		test.each([
+			["--system-prompt", "---\ntitle: hello\n---"],
+			["--system-prompt", "-5"],
+			["--system-prompt", "--literal\n"],
+			["--system-prompt", "--literal text"],
+			["--name", "-5"],
+			["--name", "-draft-name"],
+			["--session-dir", "-5"],
+		])("preserves dash-leading value for %s", (option, value) => {
+			const result = parseArgs([option, value]);
+			expect(result.diagnostics).toEqual([]);
+			if (option === "--system-prompt") expect(result.systemPrompt).toBe(value);
+			if (option === "--name") expect(result.name).toBe(value);
+			if (option === "--session-dir") expect(result.sessionDir).toBe(value);
+		});
+	});
+
+	describe("--mode validation", () => {
+		test.each(["text", "json", "rpc"] as const)("parses valid mode %s", (mode) => {
+			const result = parseArgs(["--mode", mode]);
+			expect(result.mode).toBe(mode);
+			expect(result.diagnostics).toEqual([]);
+		});
+
+		test.each(["yaml", "RPC"])("diagnoses invalid mode %s", (mode) => {
+			const result = parseArgs(["--mode", mode]);
+			expect(result.mode).toBeUndefined();
+			expect(result.diagnostics).toEqual([
+				{ type: "error", message: `Invalid mode "${mode}". Valid values: text, json, rpc` },
+			]);
+		});
+
+		test("reports a missing mode", () => {
+			const result = parseArgs(["--mode"]);
+			expect(result.mode).toBeUndefined();
+			expect(result.diagnostics).toEqual([{ type: "error", message: "--mode requires text, json, or rpc" }]);
+		});
+	});
+
 	describe("--agent-mode", () => {
 		test.each(["chat", "code"] as const)("parses %s without changing the output mode", (agentMode) => {
 			const result = parseArgs(["--agent-mode", agentMode, "--mode", "json"]);

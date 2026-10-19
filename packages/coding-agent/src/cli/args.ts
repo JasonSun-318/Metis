@@ -65,6 +65,57 @@ export function isValidThinkingLevel(level: string): level is ThinkingLevel {
 	return (VALID_THINKING_SELECTIONS as readonly string[]).includes(level);
 }
 
+/**
+ * Short options that the parser recognizes. Required values may legitimately
+ * begin with a dash (negative numbers, YAML frontmatter, free text), so only
+ * exact aliases are treated as options when looking ahead.
+ */
+const KNOWN_SHORT_OPTIONS = new Set([
+	"-h",
+	"-v",
+	"-c",
+	"-r",
+	"-n",
+	"-nt",
+	"-nbt",
+	"-t",
+	"-xt",
+	"-p",
+	"-e",
+	"-ne",
+	"-ns",
+	"-np",
+	"-nc",
+	"-a",
+	"-na",
+]);
+
+function takeRequiredValue(
+	args: string[],
+	index: number,
+	option: string,
+	requirement: string,
+	result: Args,
+): { value: string; index: number } | undefined {
+	const value = args[index + 1];
+	const optionName = value?.split("=", 1)[0];
+	// Long option names never contain whitespace and cannot begin with a dash
+	// after the prefix, which keeps `---frontmatter` usable as a value.
+	const looksLikeOption =
+		value !== undefined &&
+		(KNOWN_SHORT_OPTIONS.has(value) ||
+			(optionName !== undefined &&
+				optionName.length > 2 &&
+				optionName.startsWith("--") &&
+				optionName[2] !== "-" &&
+				!/\s/u.test(optionName)));
+	if (value === undefined || looksLikeOption) {
+		result.diagnostics.push({ type: "error", message: `${option} requires ${requirement}` });
+		return undefined;
+	}
+	return { value, index: index + 1 };
+}
+
 export function parseArgs(args: string[]): Args {
 	const result: Args = {
 		messages: [],
@@ -79,10 +130,18 @@ export function parseArgs(args: string[]): Args {
 			result.help = true;
 		} else if (arg === "--version" || arg === "-v") {
 			result.version = true;
-		} else if (arg === "--mode" && i + 1 < args.length) {
-			const mode = args[++i];
-			if (mode === "text" || mode === "json" || mode === "rpc") {
-				result.mode = mode;
+		} else if (arg === "--mode") {
+			const consumed = takeRequiredValue(args, i, "--mode", "text, json, or rpc", result);
+			if (consumed) {
+				i = consumed.index;
+				if (consumed.value === "text" || consumed.value === "json" || consumed.value === "rpc") {
+					result.mode = consumed.value;
+				} else {
+					result.diagnostics.push({
+						type: "error",
+						message: `Invalid mode "${consumed.value}". Valid values: text, json, rpc`,
+					});
+				}
 			}
 		} else if (arg === "--agent-mode") {
 			const mode = args[i + 1];
@@ -126,58 +185,109 @@ export function parseArgs(args: string[]): Args {
 			result.continue = true;
 		} else if (arg === "--resume" || arg === "-r") {
 			result.resume = true;
-		} else if (arg === "--provider" && i + 1 < args.length) {
-			result.provider = args[++i];
-		} else if (arg === "--model" && i + 1 < args.length) {
-			result.model = args[++i];
-		} else if (arg === "--api-key" && i + 1 < args.length) {
-			result.apiKey = args[++i];
-		} else if (arg === "--system-prompt" && i + 1 < args.length) {
-			result.systemPrompt = args[++i];
-		} else if (arg === "--append-system-prompt" && i + 1 < args.length) {
-			result.appendSystemPrompt = result.appendSystemPrompt ?? [];
-			result.appendSystemPrompt.push(args[++i]);
+		} else if (arg === "--provider") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.provider = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--model") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.model = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--api-key") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.apiKey = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--system-prompt") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.systemPrompt = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--append-system-prompt") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.appendSystemPrompt = result.appendSystemPrompt ?? [];
+				result.appendSystemPrompt.push(consumed.value);
+				i = consumed.index;
+			}
 		} else if (arg === "--name" || arg === "-n") {
-			if (i + 1 < args.length) {
-				result.name = args[++i];
-			} else {
-				result.diagnostics.push({ type: "error", message: "--name requires a value" });
+			const consumed = takeRequiredValue(args, i, "--name", "a value", result);
+			if (consumed) {
+				result.name = consumed.value;
+				i = consumed.index;
 			}
 		} else if (arg === "--no-session") {
 			result.noSession = true;
-		} else if (arg === "--session" && i + 1 < args.length) {
-			result.session = args[++i];
-		} else if (arg === "--session-id" && i + 1 < args.length) {
-			result.sessionId = args[++i];
-		} else if (arg === "--fork" && i + 1 < args.length) {
-			result.fork = args[++i];
-		} else if (arg === "--session-dir" && i + 1 < args.length) {
-			result.sessionDir = args[++i];
-		} else if (arg === "--models" && i + 1 < args.length) {
-			result.models = args[++i].split(",").map((s) => s.trim());
+		} else if (arg === "--session") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.session = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--session-id") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.sessionId = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--fork") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.fork = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--session-dir") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.sessionDir = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--models") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.models = consumed.value.split(",").map((s) => s.trim());
+				i = consumed.index;
+			}
 		} else if (arg === "--no-tools" || arg === "-nt") {
 			result.noTools = true;
 		} else if (arg === "--no-builtin-tools" || arg === "-nbt") {
 			result.noBuiltinTools = true;
-		} else if ((arg === "--tools" || arg === "-t") && i + 1 < args.length) {
-			result.tools = args[++i]
-				.split(",")
-				.map((s) => s.trim())
-				.filter((name) => name.length > 0);
-		} else if ((arg === "--exclude-tools" || arg === "-xt") && i + 1 < args.length) {
-			result.excludeTools = args[++i]
-				.split(",")
-				.map((s) => s.trim())
-				.filter((name) => name.length > 0);
-		} else if (arg === "--thinking" && i + 1 < args.length) {
-			const level = args[++i];
-			if (isValidThinkingLevel(level)) {
-				result.thinking = level;
-			} else {
-				result.diagnostics.push({
-					type: "warning",
-					message: `Invalid thinking level "${level}". Valid values: ${VALID_THINKING_SELECTIONS.join(", ")}`,
-				});
+		} else if (arg === "--tools" || arg === "-t") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.tools = consumed.value
+					.split(",")
+					.map((s) => s.trim())
+					.filter((name) => name.length > 0);
+				i = consumed.index;
+			}
+		} else if (arg === "--exclude-tools" || arg === "-xt") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.excludeTools = consumed.value
+					.split(",")
+					.map((s) => s.trim())
+					.filter((name) => name.length > 0);
+				i = consumed.index;
+			}
+		} else if (arg === "--thinking") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				i = consumed.index;
+				if (isValidThinkingLevel(consumed.value)) {
+					result.thinking = consumed.value;
+				} else {
+					result.diagnostics.push({
+						type: "warning",
+						message: `Invalid thinking level "${consumed.value}". Valid values: ${VALID_THINKING_SELECTIONS.join(", ")}`,
+					});
+				}
 			}
 		} else if (arg === "--print" || arg === "-p") {
 			result.print = true;
@@ -186,22 +296,42 @@ export function parseArgs(args: string[]): Args {
 				result.messages.push(next);
 				i++;
 			}
-		} else if (arg === "--export" && i + 1 < args.length) {
-			result.export = args[++i];
-		} else if ((arg === "--extension" || arg === "-e") && i + 1 < args.length) {
-			result.extensions = result.extensions ?? [];
-			result.extensions.push(args[++i]);
+		} else if (arg === "--export") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.export = consumed.value;
+				i = consumed.index;
+			}
+		} else if (arg === "--extension" || arg === "-e") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.extensions = result.extensions ?? [];
+				result.extensions.push(consumed.value);
+				i = consumed.index;
+			}
 		} else if (arg === "--no-extensions" || arg === "-ne") {
 			result.noExtensions = true;
-		} else if (arg === "--skill" && i + 1 < args.length) {
-			result.skills = result.skills ?? [];
-			result.skills.push(args[++i]);
-		} else if (arg === "--prompt-template" && i + 1 < args.length) {
-			result.promptTemplates = result.promptTemplates ?? [];
-			result.promptTemplates.push(args[++i]);
-		} else if (arg === "--theme" && i + 1 < args.length) {
-			result.themes = result.themes ?? [];
-			result.themes.push(args[++i]);
+		} else if (arg === "--skill") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.skills = result.skills ?? [];
+				result.skills.push(consumed.value);
+				i = consumed.index;
+			}
+		} else if (arg === "--prompt-template") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.promptTemplates = result.promptTemplates ?? [];
+				result.promptTemplates.push(consumed.value);
+				i = consumed.index;
+			}
+		} else if (arg === "--theme") {
+			const consumed = takeRequiredValue(args, i, arg, "a value", result);
+			if (consumed) {
+				result.themes = result.themes ?? [];
+				result.themes.push(consumed.value);
+				i = consumed.index;
+			}
 		} else if (arg === "--no-skills" || arg === "-ns") {
 			result.noSkills = true;
 		} else if (arg === "--no-prompt-templates" || arg === "-np") {

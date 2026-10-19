@@ -11,6 +11,7 @@ import type { AgentSessionEvent, SessionStats } from "../../core/agent-session.t
 import type { BashResult } from "../../core/bash-executor.ts";
 import type { CompactionResult } from "../../core/compaction/index.ts";
 import type { SessionEntry, SessionTreeNode } from "../../core/session-manager.ts";
+import { sanitizeTerminalText } from "../../utils/ansi.ts";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.ts";
 import type { RpcCommand, RpcResponse, RpcSessionState, RpcSlashCommand } from "./rpc-types.ts";
 
@@ -520,24 +521,53 @@ export class RpcClient {
 	// =========================================================================
 
 	private handleLine(line: string): void {
+		let data: unknown;
 		try {
-			const data = JSON.parse(line);
-
-			if (data.type === "response") {
-				const pending = typeof data.id === "string" ? this.pendingRequests.get(data.id) : undefined;
-				if (pending) {
-					this.pendingRequests.delete(data.id);
-					pending.resolve(data as RpcResponse);
-				}
-				return;
-			}
-
-			// Otherwise it's an event
-			for (const listener of this.eventListeners) {
-				listener(data as AgentSessionEvent);
-			}
+			data = JSON.parse(line);
 		} catch {
 			// Ignore non-JSON lines
+			return;
+		}
+
+		if (data === null || typeof data !== "object" || Array.isArray(data)) return;
+		const type = (data as { type?: unknown }).type;
+		if (typeof type !== "string") return;
+
+		if (type === "response") {
+			const id = (data as { id?: unknown }).id;
+			if (typeof id === "string") {
+				const pending = this.pendingRequests.get(id);
+				if (pending) {
+					this.pendingRequests.delete(id);
+					pending.resolve(data as RpcResponse);
+				}
+			}
+			return;
+		}
+
+		// Otherwise it's an event. Dispatch each listener independently so one
+		// failing subscriber cannot suppress later listeners.
+		for (const listener of this.eventListeners) {
+			try {
+				listener(data as AgentSessionEvent);
+			} catch (error) {
+				this.reportEventListenerError(error);
+			}
+		}
+	}
+
+	/**
+	 * Retain listener failures in the existing stderr channel without letting
+	 * diagnostics interfere with event dispatch.
+	 */
+	private reportEventListenerError(error: unknown): void {
+		try {
+			const message = sanitizeTerminalText(error instanceof Error ? error.message : String(error));
+			const diagnostic = `[rpc-client] Event listener failed: ${message}\n`;
+			this.stderr += diagnostic;
+			process.stderr.write(diagnostic);
+		} catch {
+			// A diagnostic path must never throw.
 		}
 	}
 
