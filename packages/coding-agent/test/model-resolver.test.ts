@@ -351,6 +351,22 @@ describe("resolveCliModel", () => {
 		expect(result.model?.id).toBe("openai/ghost-model");
 	});
 
+	test("resolves an explicit provider custom model id that is not in the registry", () => {
+		const registry = {
+			getAll: () => allModels,
+		} as unknown as Parameters<typeof resolveCliModel>[0]["modelRegistry"];
+
+		const result = resolveCliModel({
+			cliProvider: "openrouter",
+			cliModel: "openai/ghost-model",
+			modelRegistry: registry,
+		});
+
+		expect(result.error).toBeUndefined();
+		expect(result.model?.provider).toBe("openrouter");
+		expect(result.model?.id).toBe("openai/ghost-model");
+	});
+
 	test("returns a clear error when there are no models", () => {
 		const registry = {
 			getAll: () => [],
@@ -603,21 +619,117 @@ describe("default model selection", () => {
 		expect(defaultModelPerProvider["vercel-ai-gateway"]).toBe("zai/glm-5.1");
 	});
 
-	test("findInitialModel accepts explicit provider custom model ids", async () => {
+	test("findInitialModel prefers the scoped model and its thinking level", async () => {
+		const savedModel = mockModels[1];
+		const scopedModel = mockModels[0];
 		const registry = {
-			getAll: () => allModels,
+			find: () => savedModel,
+			hasConfiguredAuth: () => true,
+			getAvailable: async () => [savedModel],
 		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
 
 		const result = await findInitialModel({
-			cliProvider: "openrouter",
-			cliModel: "openrouter/openai/ghost-model",
+			scopedModels: [{ model: scopedModel, thinkingLevel: "high" }],
+			isContinuing: false,
+			defaultProvider: "openai",
+			defaultModelId: "gpt-4o",
+			defaultThinkingLevel: "low",
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(scopedModel);
+		expect(result.thinkingLevel).toBe("high");
+	});
+
+	test("findInitialModel uses the default thinking level for a scoped model without one", async () => {
+		const registry = {
+			getAvailable: async () => [],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [{ model: mockModels[0] }],
+			isContinuing: false,
+			defaultThinkingLevel: "low",
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(mockModels[0]);
+		expect(result.thinkingLevel).toBe("low");
+	});
+
+	test("findInitialModel skips scope when continuing and uses the authenticated saved default", async () => {
+		const savedModel = mockModels[1];
+		const registry = {
+			find: () => savedModel,
+			hasConfiguredAuth: () => true,
+			getAvailable: async () => [mockModels[0]],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [{ model: mockModels[0], thinkingLevel: "high" }],
+			isContinuing: true,
+			defaultProvider: "openai",
+			defaultModelId: "gpt-4o",
+			defaultThinkingLevel: "low",
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(savedModel);
+		expect(result.thinkingLevel).toBe("low");
+	});
+
+	test("findInitialModel falls back to available models when the saved default is missing", async () => {
+		const registry = {
+			find: () => undefined,
+			hasConfiguredAuth: () => false,
+			getAvailable: async () => [mockModels[0]],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			defaultProvider: "openai",
+			defaultModelId: "missing-model",
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBe(mockModels[0]);
+		expect(result.thinkingLevel).toBe("medium");
+	});
+
+	test("findInitialModel prefers a known provider default over the first available model", async () => {
+		const defaultOpenAIModel: Model<"anthropic-messages"> = {
+			...mockModels[1],
+			id: "gpt-5.5",
+			name: "GPT-5.5",
+		};
+		const registry = {
+			getAvailable: async () => [mockModels[0], defaultOpenAIModel],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
 			scopedModels: [],
 			isContinuing: false,
 			modelRegistry: registry,
 		});
 
-		expect(result.model?.provider).toBe("openrouter");
-		expect(result.model?.id).toBe("openai/ghost-model");
+		expect(result.model).toBe(defaultOpenAIModel);
+	});
+
+	test("findInitialModel returns no model when none are available", async () => {
+		const registry = {
+			getAvailable: async () => [],
+		} as unknown as Parameters<typeof findInitialModel>[0]["modelRegistry"];
+
+		const result = await findInitialModel({
+			scopedModels: [],
+			isContinuing: false,
+			modelRegistry: registry,
+		});
+
+		expect(result.model).toBeUndefined();
+		expect(result.thinkingLevel).toBe("medium");
+		expect(result.fallbackMessage).toBeUndefined();
 	});
 
 	test("findInitialModel selects ai-gateway default when available", async () => {
