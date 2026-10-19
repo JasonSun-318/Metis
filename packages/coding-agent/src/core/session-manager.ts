@@ -94,6 +94,11 @@ import {
 	type SessionControlEntry,
 	type SessionControlPayload,
 } from "./session-control.ts";
+import {
+	MAX_SESSION_DISPLAY_METADATA_BYTES,
+	parseSessionDisplayMetadata,
+	serializeSessionDisplayMetadata,
+} from "./session-display-metadata-codec.ts";
 import { assertValidSessionId, createSessionId } from "./session-id.ts";
 import {
 	CorruptSessionError,
@@ -166,7 +171,6 @@ export function getSessionToolOutputDir(sessionFile: string): string {
 }
 
 const SESSION_DISPLAY_METADATA_SUFFIX = ".metadata.json";
-const MAX_SESSION_DISPLAY_METADATA_BYTES = 16 * 1024;
 const SESSION_UNREAD_STATE_SUFFIX = ".unread.json";
 const MAX_SESSION_UNREAD_STATE_BYTES = 1024;
 
@@ -211,18 +215,7 @@ export function readSessionDisplayMetadata(sessionFile: string): SessionDisplayM
 			maxBytes: MAX_SESSION_DISPLAY_METADATA_BYTES,
 		});
 		if (text === undefined) return undefined;
-		const value = JSON.parse(text) as Record<string, unknown>;
-		if (value.version !== 1 || typeof value.sessionId !== "string") return undefined;
-		assertValidSessionId(value.sessionId);
-		if (value.name !== null && typeof value.name !== "string") return undefined;
-		const name = typeof value.name === "string" ? value.name.trim() : "";
-		if (Buffer.byteLength(name, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES / 2) return undefined;
-		return {
-			sessionId: value.sessionId,
-			...(name ? { name } : {}),
-			...(value.useMemory === false ? { useMemory: false } : {}),
-			...(value.contributeMemory === false ? { contributeMemory: false } : {}),
-		};
+		return parseSessionDisplayMetadata(text);
 	} catch {
 		return undefined;
 	}
@@ -263,18 +256,7 @@ function removeSessionDisplayMetadata(sessionFile: string): void {
 }
 
 function writeSessionDisplayMetadata(sessionFile: string, metadata: SessionDisplayMetadata): void {
-	assertValidSessionId(metadata.sessionId);
-	const name = metadata.name?.replace(/[\r\n]+/g, " ").trim();
-	const contents = `${JSON.stringify({
-		version: 1,
-		sessionId: metadata.sessionId,
-		name: name || null,
-		...(metadata.useMemory === false ? { useMemory: false } : {}),
-		...(metadata.contributeMemory === false ? { contributeMemory: false } : {}),
-	})}\n`;
-	if (Buffer.byteLength(contents, "utf8") > MAX_SESSION_DISPLAY_METADATA_BYTES) {
-		throw new Error("Session display metadata exceeds its size limit");
-	}
+	const contents = serializeSessionDisplayMetadata(metadata);
 	replaceFileAtomicallySync(getSessionDisplayMetadataPath(sessionFile), contents, { mode: 0o600 });
 }
 
