@@ -6,6 +6,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { isDeepStrictEqual } from "util";
 import { getAgentDir, getMetisEnv, getProjectConfigDir } from "../config.ts";
+import { acquireLockSyncWithRetry } from "../utils/lock-retry.ts";
 import { normalizePath, resolvePath } from "../utils/paths.ts";
 import { replaceFileAtomicallySync } from "./durable-file.ts";
 import { DEFAULT_HTTP_IDLE_TIMEOUT_MS, parseHttpIdleTimeoutMs } from "./http-dispatcher.ts";
@@ -284,31 +285,11 @@ export class FileSettingsStorage implements SettingsStorage {
 		this.projectSettingsPath = join(getProjectConfigDir(resolvedCwd), "settings.json");
 	}
 
-	private acquireLockSyncWithRetry(path: string): () => void {
-		const maxAttempts = 10;
-		const delayMs = 20;
-		let lastError: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				return lockfile.lockSync(path, { realpath: false });
-			} catch (error) {
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? String((error as { code?: unknown }).code)
-						: undefined;
-				if (code !== "ELOCKED" || attempt === maxAttempts) {
-					throw error;
-				}
-				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
-			}
-		}
-
-		throw (lastError as Error) ?? new Error("Failed to acquire settings lock");
+	private acquireSettingsLockSync(path: string): () => void {
+		return acquireLockSyncWithRetry(() => lockfile.lockSync(path, { realpath: false }), {
+			maxAttempts: 10,
+			delayMs: 20,
+		});
 	}
 
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void {
@@ -320,7 +301,7 @@ export class FileSettingsStorage implements SettingsStorage {
 			// Only create directory and lock if file exists or we need to write
 			const fileExists = existsSync(path);
 			if (fileExists) {
-				release = this.acquireLockSyncWithRetry(path);
+				release = this.acquireSettingsLockSync(path);
 			}
 			const current = fileExists ? readFileSync(path, "utf-8") : undefined;
 			const next = fn(current);
@@ -330,7 +311,7 @@ export class FileSettingsStorage implements SettingsStorage {
 					mkdirSync(dir, { recursive: true });
 				}
 				if (!release) {
-					release = this.acquireLockSyncWithRetry(path);
+					release = this.acquireSettingsLockSync(path);
 				}
 				replaceSettingsFileUnderLock(path, next);
 			}
@@ -346,7 +327,7 @@ export class FileSettingsStorage implements SettingsStorage {
 		const dir = dirname(path);
 		if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-		const release = this.acquireLockSyncWithRetry(path);
+		const release = this.acquireSettingsLockSync(path);
 		try {
 			const current = existsSync(path) ? readFileSync(path, "utf-8") : undefined;
 			const next = fn(current);

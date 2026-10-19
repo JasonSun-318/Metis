@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import lockfile from "proper-lockfile";
 import { getProjectConfigDir } from "../config.ts";
+import { acquireLockSyncWithRetry } from "../utils/lock-retry.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import { ensureDirectoryDurablySync, readSingleLinkTextFileSync, replaceFileAtomicallySync } from "./durable-file.ts";
 
@@ -136,33 +137,10 @@ function writeTrustFile(path: string, data: TrustFile): void {
 function acquireTrustLockSync(path: string): () => void {
 	const trustDir = dirname(path);
 	ensureDirectoryDurablySync(trustDir);
-	const maxAttempts = 10;
-	const delayMs = 20;
-	let lastError: unknown;
-
-	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		try {
-			return lockfile.lockSync(trustDir, { realpath: false, lockfilePath: `${path}.lock` });
-		} catch (error) {
-			const code =
-				typeof error === "object" && error !== null && "code" in error
-					? String((error as { code?: unknown }).code)
-					: undefined;
-			if (code !== "ELOCKED" || attempt === maxAttempts) {
-				throw error;
-			}
-			lastError = error;
-			const start = Date.now();
-			while (Date.now() - start < delayMs) {
-				// Sleep synchronously to avoid changing trust store callers to async.
-			}
-		}
-	}
-
-	if (lastError instanceof Error) {
-		throw lastError;
-	}
-	throw new Error("Failed to acquire trust store lock");
+	return acquireLockSyncWithRetry(
+		() => lockfile.lockSync(trustDir, { realpath: false, lockfilePath: `${path}.lock` }),
+		{ maxAttempts: 10, delayMs: 20 },
+	);
 }
 
 function withTrustFileLock<T>(path: string, fn: () => T): T {

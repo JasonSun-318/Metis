@@ -21,6 +21,7 @@ import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
 import { isDeepStrictEqual } from "util";
 import { getAgentDir } from "../config.ts";
+import { acquireLockSyncWithRetry } from "../utils/lock-retry.ts";
 import { canonicalizePathForCreation, normalizePath } from "../utils/paths.ts";
 import {
 	cleanupPublishedAliasesSync,
@@ -182,31 +183,11 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 		}
 	}
 
-	private acquireLockSyncWithRetry(path: string): () => void {
-		const maxAttempts = 10;
-		const delayMs = 20;
-		let lastError: unknown;
-
-		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-			try {
-				return lockfile.lockSync(path, { realpath: false });
-			} catch (error) {
-				const code =
-					typeof error === "object" && error !== null && "code" in error
-						? String((error as { code?: unknown }).code)
-						: undefined;
-				if (code !== "ELOCKED" || attempt === maxAttempts) {
-					throw error;
-				}
-				lastError = error;
-				const start = Date.now();
-				while (Date.now() - start < delayMs) {
-					// Sleep synchronously to avoid changing callers to async.
-				}
-			}
-		}
-
-		throw (lastError as Error) ?? new Error("Failed to acquire auth storage lock");
+	private acquireAuthLockSync(path: string): () => void {
+		return acquireLockSyncWithRetry(() => lockfile.lockSync(path, { realpath: false }), {
+			maxAttempts: 10,
+			delayMs: 20,
+		});
 	}
 
 	withLock<T>(fn: (current: string | undefined) => LockResult<T>): T {
@@ -215,7 +196,7 @@ export class FileAuthStorageBackend implements AuthStorageBackend {
 
 		let release: (() => void) | undefined;
 		try {
-			release = this.acquireLockSyncWithRetry(this.authPath);
+			release = this.acquireAuthLockSync(this.authPath);
 			const current = readSingleLinkTextFileSync(this.authPath);
 			const { result, next } = fn(current);
 			if (next !== undefined) this.replaceUnderLock(next);

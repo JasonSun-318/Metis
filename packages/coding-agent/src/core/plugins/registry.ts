@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import lockfile from "proper-lockfile";
+import { acquireLockSyncWithRetry } from "../../utils/lock-retry.ts";
 import { replaceFileAtomicallySync } from "../durable-file.ts";
 import type {
 	PluginHookComponent,
@@ -72,31 +73,12 @@ function ensureLockFile(lockPath: string): void {
 	}
 }
 
-function acquireLockSyncWithRetry(lockPath: string): () => void {
+function acquirePluginRegistryLockSync(lockPath: string): () => void {
 	ensureLockFile(lockPath);
-	const maxAttempts = 20;
-	const delayMs = 25;
-	let lastError: unknown;
-
-	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-		try {
-			return lockfile.lockSync(lockPath, { realpath: false });
-		} catch (error) {
-			const code =
-				typeof error === "object" && error !== null && "code" in error
-					? String((error as { code?: unknown }).code)
-					: undefined;
-			if (code !== "ELOCKED" || attempt === maxAttempts) {
-				throw error;
-			}
-			lastError = error;
-			const start = Date.now();
-			while (Date.now() - start < delayMs) {
-				// busy wait sync
-			}
-		}
-	}
-	throw (lastError as Error) ?? new Error("Failed to acquire plugin registry lock");
+	return acquireLockSyncWithRetry(() => lockfile.lockSync(lockPath, { realpath: false }), {
+		maxAttempts: 20,
+		delayMs: 25,
+	});
 }
 
 export function readPluginRegistry(agentDir: string): PluginRegistry {
@@ -139,7 +121,7 @@ export function withPluginRegistryLock<T>(
 	fn: (current: PluginRegistry) => { next?: PluginRegistry; result: T },
 ): T {
 	const lockPath = getPluginLockPath(agentDir);
-	const release = acquireLockSyncWithRetry(lockPath);
+	const release = acquirePluginRegistryLockSync(lockPath);
 	try {
 		const current = readPluginRegistry(agentDir);
 		const { next, result } = fn(current);
