@@ -1,5 +1,5 @@
 import { Box, type Component, Container, getCapabilities, Image, Spacer, Text, type TUI } from "@metis/tui";
-import type { ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
+import type { AgentToolResult, ToolDefinition, ToolRenderContext } from "../../../core/extensions/types.ts";
 import { lookupToolDefinition } from "../../../core/tools/index.ts";
 import { getTextOutput as getRenderedTextOutput } from "../../../core/tools/render-utils.ts";
 import { sanitizeTerminalText, sanitizeTerminalValue } from "../../../utils/ansi.ts";
@@ -17,12 +17,12 @@ export class ToolExecutionComponent extends Container {
 	private selfRenderContainer: Container;
 	private callRendererComponent?: Component;
 	private resultRendererComponent?: Component;
-	private rendererState: any = {};
+	private rendererState: Record<string, unknown> = {};
 	private imageComponents: Image[] = [];
 	private imageSpacers: Spacer[] = [];
 	private toolName: string;
 	private toolCallId: string;
-	private args: any;
+	private args: unknown;
 	private expanded = false;
 	private showImages: boolean;
 	private imageWidthCells: number;
@@ -36,7 +36,7 @@ export class ToolExecutionComponent extends Container {
 	private result?: {
 		content: Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
 		isError: boolean;
-		details?: any;
+		details?: unknown;
 	};
 	private convertedImages: Map<number, { data: string; mimeType: string }> = new Map();
 	private hideComponent = false;
@@ -113,7 +113,7 @@ export class ToolExecutionComponent extends Container {
 		return this.toolDefinition.renderShell ?? this.builtInToolDefinition.renderShell ?? "default";
 	}
 
-	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext {
+	private getRenderContext(lastComponent: Component | undefined): ToolRenderContext<Record<string, unknown>, unknown> {
 		return {
 			args: this.args,
 			toolCallId: this.toolCallId,
@@ -295,7 +295,10 @@ export class ToolExecutionComponent extends Container {
 				} else {
 					try {
 						const component = resultRenderer(
-							sanitizeTerminalValue({ content: this.result.content as any, details: this.result.details }),
+							sanitizeTerminalValue({
+								content: this.result.content as AgentToolResult<unknown>["content"],
+								details: this.result.details,
+							}),
 							{ expanded: this.expanded, isPartial: this.isPartial },
 							theme,
 							this.getRenderContext(this.resultRendererComponent),
