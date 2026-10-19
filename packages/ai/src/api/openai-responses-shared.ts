@@ -138,6 +138,35 @@ type OpenAIFunctionTool = Extract<OpenAITool, { type: "function" }>;
 // Message conversion
 // =============================================================================
 
+/**
+ * Parse a reasoning item persisted in `thinkingSignature`. Corrupt or
+ * non-reasoning items must fail before they reach the provider: replaying a
+ * malformed item produces an opaque upstream 400, and silently dropping a
+ * valid one loses encrypted reasoning for stateless follow-ups.
+ */
+function parseReasoningSignatureItem(signature: string, model: Model<Api>): ResponseReasoningItem {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(signature);
+	} catch {
+		throw new Error(
+			`Invalid persisted reasoning signature for ${model.provider}/${model.id}: expected JSON-encoded reasoning item. The saved thinking block cannot be replayed.`,
+		);
+	}
+	if (
+		parsed === null ||
+		typeof parsed !== "object" ||
+		Array.isArray(parsed) ||
+		(parsed as { type?: unknown }).type !== "reasoning" ||
+		typeof (parsed as { id?: unknown }).id !== "string"
+	) {
+		throw new Error(
+			`Invalid persisted reasoning signature for ${model.provider}/${model.id}: expected a reasoning item with type and id. The saved thinking block cannot be replayed.`,
+		);
+	}
+	return parsed as ResponseReasoningItem;
+}
+
 export function convertResponsesMessages<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
@@ -253,7 +282,7 @@ export function convertResponsesMessages<TApi extends Api>(
 			for (const block of msg.content) {
 				if (block.type === "thinking") {
 					if (block.thinkingSignature) {
-						const reasoningItem = JSON.parse(block.thinkingSignature) as ResponseReasoningItem;
+						const reasoningItem = parseReasoningSignatureItem(block.thinkingSignature, model);
 						output.push(reasoningItem);
 					}
 				} else if (block.type === "text") {
@@ -824,7 +853,7 @@ export async function processResponsesStream<TApi extends Api>(
 			const block = reasoningBlocksById.get(item.id);
 			if (!block?.thinkingSignature) continue;
 
-			const storedItem = JSON.parse(block.thinkingSignature) as ResponseReasoningItem;
+			const storedItem = parseReasoningSignatureItem(block.thinkingSignature, model);
 			if (storedItem.encrypted_content) continue;
 			block.thinkingSignature = JSON.stringify({
 				...storedItem,
@@ -867,6 +896,17 @@ export async function processResponsesStream<TApi extends Api>(
 		}
 		// Map status to stop reason
 		output.stopReason = mapStopReason(response?.status);
+		if (output.stopReason === "error") {
+			// Terminal responses can carry a failed/cancelled status with the
+			// provider's error details. Keep that code/message instead of letting
+			// callers replace it with a generic unknown-error string.
+			const error = response?.error;
+			if (error) {
+				output.errorMessage = `${error.code || "unknown"}: ${error.message || "no message"}`;
+			} else if (!output.errorMessage) {
+				output.errorMessage = `Provider response finished with status ${response?.status ?? "unknown"}`;
+			}
+		}
 		if (output.content.some((b) => b.type === "toolCall") && output.stopReason === "stop") {
 			output.stopReason = "toolUse";
 		}

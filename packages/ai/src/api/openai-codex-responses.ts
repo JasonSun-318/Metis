@@ -490,6 +490,10 @@ export const stream: StreamFunction<"openai-codex-responses", OpenAICodexRespons
 				throw new Error("Request was aborted");
 			}
 
+			if (output.stopReason === "error") {
+				throw new CodexProtocolError(output.errorMessage || "Codex response finished with an error status");
+			}
+
 			stream.push({ type: "done", reason: output.stopReason as "stop" | "length" | "toolUse", message: output });
 			stream.end();
 		} catch (error) {
@@ -512,12 +516,9 @@ export const streamSimple: StreamFunction<"openai-codex-responses", SimpleStream
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey;
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, context, options, apiKey);
+	// stream() owns the missing-credential error path so direct streamSimple
+	// callers receive a terminal error stream instead of a synchronous throw.
+	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
 
@@ -1489,6 +1490,11 @@ async function processWebSocketStream(
 		);
 		if (options?.signal?.aborted) {
 			keepConnection = false;
+		} else if (output.stopReason === "error") {
+			// A terminal failed/cancelled response is not a cached turn. Throw
+			// here so the catch below clears the continuation and releases the
+			// faulty socket before the caller sees the error.
+			throw new CodexProtocolError(output.errorMessage || "Codex response finished with an error status");
 		} else if (useCachedContext && entry && output.responseId) {
 			const responseItems = convertResponsesMessages(model, { messages: [output] }, CODEX_TOOL_CALL_PROVIDERS, {
 				includeSystemPrompt: false,

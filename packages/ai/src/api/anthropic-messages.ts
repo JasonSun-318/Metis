@@ -832,8 +832,8 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	assertRequestAuth(model.provider, options?.apiKey, options?.headers);
-
+	// stream() owns the missing-credential error path so direct streamSimple
+	// callers receive a terminal error stream instead of a synchronous throw.
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const toolChoice = mapSimpleToolChoice(options?.toolChoice, "any");
 	if (!options?.reasoning) {

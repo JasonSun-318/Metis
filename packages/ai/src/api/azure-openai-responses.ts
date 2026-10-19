@@ -123,7 +123,7 @@ export const stream: StreamFunction<"azure-openai-responses", AzureOpenAIRespons
 			}
 
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
+				throw new Error(output.errorMessage || "Azure OpenAI Responses finished with an error status");
 			}
 
 			stream.push({ type: "done", reason: output.stopReason, message: output });
@@ -149,12 +149,9 @@ export const streamSimple: StreamFunction<"azure-openai-responses", SimpleStream
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey;
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, context, options, apiKey);
+	// stream() owns the missing-credential error path so direct streamSimple
+	// callers receive a terminal error stream instead of a synchronous throw.
+	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;
 

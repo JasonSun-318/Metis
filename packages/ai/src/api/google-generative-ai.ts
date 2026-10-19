@@ -83,7 +83,7 @@ export const stream: StreamFunction<"google-generative-ai", GoogleOptions> = (
 			}
 
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
+				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
 
 			stream.push({ type: "done", reason: output.stopReason, message: output });
@@ -110,12 +110,9 @@ export const streamSimple: StreamFunction<"google-generative-ai", SimpleStreamOp
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey;
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, context, options, apiKey);
+	// stream() owns the missing-credential error path so direct streamSimple
+	// callers receive a terminal error stream instead of a synchronous throw.
+	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const toolChoice = mapSimpleToolChoice(options?.toolChoice, "any");
 	if (!options?.reasoning) {
 		return stream(model, context, { ...base, thinking: { enabled: false }, toolChoice } satisfies GoogleOptions);

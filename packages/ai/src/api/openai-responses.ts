@@ -190,7 +190,7 @@ export const stream: StreamFunction<"openai-responses", OpenAIResponsesOptions> 
 			}
 
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
+				throw new Error(output.errorMessage || "OpenAI Responses finished with an error status");
 			}
 
 			stream.push({ type: "done", reason: output.stopReason, message: output });
@@ -216,8 +216,9 @@ export const streamSimple: StreamFunction<"openai-responses", SimpleStreamOption
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	getClientApiKey(model.provider, options?.apiKey, options?.headers);
-
+	// Missing credentials are reported by stream()'s existing error path so
+	// direct streamSimple callers get a terminal error stream instead of a
+	// synchronous throw.
 	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoningEffort = clampedReasoning === "off" ? undefined : clampedReasoning;

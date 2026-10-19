@@ -505,6 +505,11 @@ export async function processGenerateContentStream<TApi extends GoogleApiType>(
 
 		if (candidate?.finishReason) {
 			output.stopReason = mapStopReason(candidate.finishReason);
+			if (output.stopReason === "error") {
+				// Preserve the provider-specific reason (for example SAFETY or
+				// PROHIBITED_CONTENT) for the terminal error stream.
+				output.errorMessage = `Provider finish_reason: ${candidate.finishReason}`;
+			}
 			if (output.stopReason === "stop" && output.content.some((b) => b.type === "toolCall")) {
 				output.stopReason = "toolUse";
 			}

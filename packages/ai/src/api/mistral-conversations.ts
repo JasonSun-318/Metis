@@ -85,7 +85,7 @@ export const stream: StreamFunction<"mistral-conversations", MistralOptions> = (
 			}
 
 			if (output.stopReason === "aborted" || output.stopReason === "error") {
-				throw new Error("An unknown error occurred");
+				throw new Error(output.errorMessage || "An unknown error occurred");
 			}
 
 			stream.push({ type: "done", reason: output.stopReason, message: output });
@@ -113,12 +113,9 @@ export const streamSimple: StreamFunction<"mistral-conversations", SimpleStreamO
 	context: Context,
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream => {
-	const apiKey = options?.apiKey;
-	if (!apiKey) {
-		throw new Error(`No API key for provider: ${model.provider}`);
-	}
-
-	const base = buildBaseOptions(model, context, options, apiKey);
+	// stream() owns the missing-credential error path so direct streamSimple
+	// callers receive a terminal error stream instead of a synchronous throw.
+	const base = buildBaseOptions(model, context, options, options?.apiKey);
 	const clampedReasoning = options?.reasoning ? clampThinkingLevel(model, options.reasoning) : undefined;
 	const reasoning = clampedReasoning === "off" ? undefined : clampedReasoning;
 	const shouldUseReasoning = model.reasoning && reasoning !== undefined;
@@ -340,6 +337,9 @@ async function consumeChatStream(
 
 		if (choice.finishReason) {
 			output.stopReason = mapChatStopReason(choice.finishReason);
+			if (output.stopReason === "error") {
+				output.errorMessage = `Provider finish_reason: ${choice.finishReason}`;
+			}
 		}
 
 		const delta = choice.delta;
