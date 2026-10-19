@@ -17,13 +17,11 @@ import { createJiti } from "jiti/static";
 // Static imports of packages that extensions may use.
 // These MUST be static so Bun bundles them into the compiled binary.
 // The virtualModules option then makes them available to extensions.
+// @metis/coding-agent is the exception; see createVirtualModules below.
 import * as _bundledTypebox from "typebox";
 import * as _bundledTypeboxCompile from "typebox/compile";
 import * as _bundledTypeboxValue from "typebox/value";
 import { getAgentDir, getProjectConfigDir, isBunBinary } from "../../config.ts";
-// NOTE: This import works because loader.ts exports are NOT re-exported from index.ts,
-// avoiding a circular dependency. Extensions can import from @metis/coding-agent.
-import * as _bundledMetisCodingAgent from "../../index.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { createEventBus, type EventBus } from "../event-bus.ts";
 import type { ExecOptions } from "../exec.ts";
@@ -44,24 +42,35 @@ import type {
 	ToolDefinition,
 } from "./types.ts";
 
-/** Modules available to extensions via virtualModules (for compiled Bun binary) */
-const VIRTUAL_MODULES: Record<string, unknown> = {
-	typebox: _bundledTypebox,
-	"typebox/compile": _bundledTypeboxCompile,
-	"typebox/value": _bundledTypeboxValue,
-	"@sinclair/typebox": _bundledTypebox,
-	"@sinclair/typebox/compile": _bundledTypeboxCompile,
-	"@sinclair/typebox/value": _bundledTypeboxValue,
-	"@metis/agent-core": _bundledMetisAgentCore,
-	"@metis/tui": _bundledMetisTui,
-	// Extensions resolve the metis-ai root to the compat entrypoint (a strict
-	// superset of the core entrypoint): existing extensions using the old
-	// global API keep working at runtime until compat is removed.
-	"@metis/ai": _bundledMetisAiCompat,
-	"@metis/ai/compat": _bundledMetisAiCompat,
-	"@metis/ai/oauth": _bundledMetisAiOauth,
-	"@metis/coding-agent": _bundledMetisCodingAgent,
-};
+/**
+ * Modules available to extensions via virtualModules (for compiled Bun binary).
+ *
+ * @metis/coding-agent is resolved lazily: the package entrypoint re-exports this
+ * loader, so a static import here would complete a synchronous initialization
+ * cycle. The loader still depends on the entrypoint conceptually, but the edge
+ * is asynchronous at runtime; the literal dynamic import below remains a static
+ * edge for the Bun bundler. Extensions receive the exact entrypoint namespace on
+ * the first extension load.
+ */
+async function createVirtualModules(): Promise<Record<string, unknown>> {
+	return {
+		typebox: _bundledTypebox,
+		"typebox/compile": _bundledTypeboxCompile,
+		"typebox/value": _bundledTypeboxValue,
+		"@sinclair/typebox": _bundledTypebox,
+		"@sinclair/typebox/compile": _bundledTypeboxCompile,
+		"@sinclair/typebox/value": _bundledTypeboxValue,
+		"@metis/agent-core": _bundledMetisAgentCore,
+		"@metis/tui": _bundledMetisTui,
+		// Extensions resolve the metis-ai root to the compat entrypoint (a strict
+		// superset of the core entrypoint): existing extensions using the old
+		// global API keep working at runtime until compat is removed.
+		"@metis/ai": _bundledMetisAiCompat,
+		"@metis/ai/compat": _bundledMetisAiCompat,
+		"@metis/ai/oauth": _bundledMetisAiOauth,
+		"@metis/coding-agent": await import("../../index.ts"),
+	};
+}
 
 const require = createRequire(import.meta.url);
 
@@ -392,12 +401,13 @@ async function loadExtensionModule(extensionPath: string, cacheToken?: Extension
 		}
 	}
 
+	const virtualModules = isBunBinary ? await createVirtualModules() : undefined;
 	const jiti = createJiti(import.meta.url, {
 		moduleCache: false,
 		// In Bun binary: use virtualModules for bundled packages (no filesystem resolution)
 		// Also disable tryNative so jiti handles ALL imports (not just the entry point)
 		// In Node.js/dev: use aliases to resolve to node_modules paths
-		...(isBunBinary ? { virtualModules: VIRTUAL_MODULES, tryNative: false } : { alias: getAliases() }),
+		...(virtualModules ? { virtualModules, tryNative: false } : { alias: getAliases() }),
 	});
 
 	const module = await jiti.import(extensionPath, { default: true });
