@@ -8,11 +8,21 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 			return;
 		}
 
-		const timeout = setTimeout(resolve, ms);
+		function cleanup(): void {
+			signal?.removeEventListener("abort", onAbort);
+		}
 
-		signal?.addEventListener("abort", () => {
+		function onAbort(): void {
 			clearTimeout(timeout);
+			cleanup();
 			reject(new Error("Aborted"));
-		});
+		}
+
+		const timeout = setTimeout(() => {
+			cleanup();
+			resolve();
+		}, ms);
+
+		signal?.addEventListener("abort", onAbort);
 	});
 }
