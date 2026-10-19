@@ -1,6 +1,7 @@
 import { PassThrough } from "node:stream";
 import { PROTOCOL_VERSION } from "@metis/app-protocol";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import desktopPackage from "../package.json";
 import { AppServerSupervisor, ServerRestartedError, type UtilityChild } from "../src/main/app-server-supervisor.ts";
 
 const EPOCHS = [
@@ -100,6 +101,22 @@ describe("AppServerSupervisor", () => {
 		children[0].replyReady(EPOCHS[0]);
 
 		await expect(started).resolves.toMatchObject({ state: "ready", serverEpoch: EPOCHS[0] });
+	});
+
+	it("reports the desktop package version in the initialize payload", async () => {
+		const { children, supervisor } = harness();
+		void supervisor.start();
+		children[0].emit("spawn");
+
+		expect(children[0].sent[0]).toMatchObject({
+			jsonrpc: "2.0",
+			method: "initialize",
+			params: {
+				protocolVersion: PROTOCOL_VERSION,
+				client: { name: "metis-desktop-main", version: desktopPackage.version },
+				capabilities: [],
+			},
+		});
 	});
 
 	it("times out a stalled handshake and schedules a restart", async () => {

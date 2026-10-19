@@ -16,6 +16,7 @@ import {
 	validateServerRequest,
 	validateUncorrelatedErrorResponse,
 } from "@metis/app-protocol";
+import desktopPackage from "../../package.json";
 import type { SupervisorState, SupervisorView } from "../shared/desktop-api.ts";
 
 export type { SupervisorState, SupervisorView } from "../shared/desktop-api.ts";
@@ -272,7 +273,7 @@ export class AppServerSupervisor {
 			method: "initialize",
 			params: {
 				protocolVersion: PROTOCOL_VERSION,
-				client: { name: "metis-desktop-main", version: "0.80.6" },
+				client: { name: "metis-desktop-main", version: desktopPackage.version },
 				capabilities: [],
 			},
 		};

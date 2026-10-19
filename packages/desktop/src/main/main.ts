@@ -168,6 +168,19 @@ async function launch(): Promise<void> {
 	});
 	const deliveredNotifications = new Set<Notification>();
 	let suppressNextFocusAcknowledgement = false;
+
+	function reportWindowReopenFailure(context: string, error: unknown): void {
+		suppressNextFocusAcknowledgement = false;
+		try {
+			const detail = error instanceof Error ? error.message : String(error);
+			void diagnostics
+				.append("supervisor", `Failed to reopen main window ${context}: ${detail}\n`)
+				.catch(() => undefined);
+		} catch {
+			// A diagnostic failure must never replace the original reopen failure.
+		}
+	}
+
 	const completionTracker = createBackgroundCompletionTracker({
 		isActive: () => isAppActive(),
 		setBadgeCount: (count) => {
@@ -193,13 +206,17 @@ async function launch(): Promise<void> {
 				broker.requestRendererOpenSession(sessionId, mode);
 				void (async () => {
 					if (!mainWindow || mainWindow.isDestroyed()) await openMainWindow();
-					if (!mainWindow || mainWindow.isDestroyed()) return;
+					if (!mainWindow || mainWindow.isDestroyed()) {
+						reportWindowReopenFailure(
+							"from notification",
+							new Error("window was closed or destroyed during reopen"),
+						);
+						return;
+					}
 					if (mainWindow.isMinimized()) mainWindow.restore();
 					mainWindow.show();
 					mainWindow.focus();
-				})().catch(() => {
-					suppressNextFocusAcknowledgement = false;
-				});
+				})().catch((error) => reportWindowReopenFailure("from notification", error));
 			});
 			notification.on("close", release);
 			notification.on("failed", release);
@@ -302,7 +319,13 @@ async function launch(): Promise<void> {
 
 	app.on("activate", () => {
 		if (mainWindow === null) {
-			void openMainWindow().catch(() => undefined);
+			void openMainWindow()
+				.then(() => {
+					if (!mainWindow || mainWindow.isDestroyed()) {
+						reportWindowReopenFailure("on activate", new Error("window was closed or destroyed during reopen"));
+					}
+				})
+				.catch((error) => reportWindowReopenFailure("on activate", error));
 		}
 	});
 	app.on("window-all-closed", () => {

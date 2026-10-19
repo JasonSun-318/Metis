@@ -323,6 +323,59 @@ function withThemeColorFallbacks(colors: ThemeJson["colors"]): ThemeJson["colors
 	return { ...colors, thinkingMax: colors.thinkingMax ?? colors.thinkingXhigh };
 }
 
+// A deliberately small, terminal-default-friendly palette used only when a
+// bundled dark/light resource cannot be read, parsed or resolved.
+const EMERGENCY_THEME_COLOR_OVERRIDES: Readonly<Record<string, ColorValue>> = {
+	accent: 6,
+	border: 8,
+	borderAccent: 6,
+	borderMuted: 8,
+	success: 2,
+	error: 1,
+	warning: 3,
+	muted: 8,
+	dim: 8,
+	thinkingText: 8,
+	customMessageLabel: 6,
+	toolOutput: 8,
+	mdHeading: 6,
+	mdLink: 4,
+	mdLinkUrl: 8,
+	mdCode: 6,
+	mdCodeBlock: 2,
+	mdCodeBlockBorder: 8,
+	mdQuote: 8,
+	mdQuoteBorder: 8,
+	mdHr: 8,
+	mdListBullet: 6,
+	toolDiffAdded: 2,
+	toolDiffRemoved: 1,
+	toolDiffContext: 8,
+	syntaxComment: 8,
+	syntaxKeyword: 4,
+	syntaxFunction: 6,
+	syntaxVariable: 6,
+	syntaxString: 2,
+	syntaxNumber: 3,
+	syntaxType: 5,
+	thinkingOff: 8,
+	thinkingMinimal: 8,
+	thinkingLow: 4,
+	thinkingMedium: 6,
+	thinkingHigh: 5,
+	thinkingXhigh: 5,
+	thinkingMax: 5,
+	bashMode: 2,
+};
+
+function createEmergencyTheme(name: "dark" | "light"): ThemeJson {
+	const colors: Record<string, ColorValue> = {};
+	for (const key of Object.keys(ThemeJsonSchema.properties.colors.properties)) {
+		colors[key] = EMERGENCY_THEME_COLOR_OVERRIDES[key] ?? "";
+	}
+	return { name, colors: colors as ThemeJson["colors"] };
+}
+
 // ============================================================================
 // Theme Class
 // ============================================================================
@@ -437,14 +490,40 @@ export class Theme {
 
 let BUILTIN_THEMES: Record<string, ThemeJson> | undefined;
 
+function reportBuiltinThemeFailure(name: string, themePath: string, error: unknown): void {
+	try {
+		const detail = error instanceof Error ? error.message : String(error);
+		console.warn(
+			`Built-in ${name} theme could not be loaded from ${themePath}; using the emergency palette.\n${detail}`,
+		);
+	} catch {
+		// Diagnostics must never make theme loading fatal.
+	}
+}
+
+function loadBuiltinTheme(name: "dark" | "light"): ThemeJson {
+	const themePath = path.join(getThemesDir(), `${name}.json`);
+	try {
+		const content = fs.readFileSync(themePath, "utf-8");
+		const themeJson = parseThemeJsonContent(themePath, content);
+		// Validate variable references and color values before caching the
+		// resource, using the same path that a normal theme load would use.
+		createTheme(themeJson, "truecolor");
+		return themeJson;
+	} catch (error) {
+		reportBuiltinThemeFailure(name, themePath, error);
+		return createEmergencyTheme(name);
+	}
+}
+
 function getBuiltinThemes(): Record<string, ThemeJson> {
 	if (!BUILTIN_THEMES) {
-		const themesDir = getThemesDir();
-		const darkPath = path.join(themesDir, "dark.json");
-		const lightPath = path.join(themesDir, "light.json");
+		// Load each variant independently so a broken resource cannot discard
+		// the healthy one, and cache the result (including emergency themes) so
+		// failures are reported at most once per process.
 		BUILTIN_THEMES = {
-			dark: JSON.parse(fs.readFileSync(darkPath, "utf-8")) as ThemeJson,
-			light: JSON.parse(fs.readFileSync(lightPath, "utf-8")) as ThemeJson,
+			dark: loadBuiltinTheme("dark"),
+			light: loadBuiltinTheme("light"),
 		};
 	}
 	return BUILTIN_THEMES;
