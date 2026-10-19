@@ -538,17 +538,6 @@ describe("InteractiveMode.showLoadedResources", () => {
 				(InteractiveMode as any).prototype.getShortPath.call(fakeThis, p, sourceInfo),
 			getCompactPathLabel: (p: string, sourceInfo?: SourceInfo) =>
 				(InteractiveMode as any).prototype.getCompactPathLabel.call(fakeThis, p, sourceInfo),
-			getCompactPackageSourceLabel: (sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactPackageSourceLabel.call(fakeThis, sourceInfo),
-			getCompactExtensionLabel: (p: string, sourceInfo?: SourceInfo) =>
-				(InteractiveMode as any).prototype.getCompactExtensionLabel.call(fakeThis, p, sourceInfo),
-			getCompactDisplayPathSegments: (p: string) =>
-				(InteractiveMode as any).prototype.getCompactDisplayPathSegments.call(fakeThis, p),
-			getCompactNonPackageExtensionLabel: (
-				p: string,
-				index: number,
-				allPaths: Array<{ path: string; segments: string[] }>,
-			) => (InteractiveMode as any).prototype.getCompactNonPackageExtensionLabel.call(fakeThis, p, index, allPaths),
 			getCompactExtensionLabels: (extensions: ExtensionFixture[]) =>
 				(InteractiveMode as any).prototype.getCompactExtensionLabels.call(fakeThis, extensions),
 			formatDiagnostics: () => "diagnostics",
