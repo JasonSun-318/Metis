@@ -39,6 +39,44 @@ function getWaitDurations(calls: number[], delayMs: number): number[] {
 	return durations;
 }
 
+function withPlatform<T>(platform: NodeJS.Platform, fn: () => T): T {
+	const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+	if (descriptor === undefined) throw new Error("process.platform is not configurable");
+	Object.defineProperty(process, "platform", { ...descriptor, value: platform });
+	try {
+		return fn();
+	} finally {
+		Object.defineProperty(process, "platform", descriptor);
+	}
+}
+
+function withoutAtomicsWait<T>(fn: () => T): T {
+	const descriptor = Object.getOwnPropertyDescriptor(Atomics, "wait");
+	if (descriptor === undefined) throw new Error("Atomics.wait is not configurable");
+	Object.defineProperty(Atomics, "wait", { ...descriptor, value: undefined });
+	try {
+		return fn();
+	} finally {
+		Object.defineProperty(Atomics, "wait", descriptor);
+	}
+}
+
+function withoutSharedArrayBuffer<T>(fn: () => T): T {
+	const descriptor = Object.getOwnPropertyDescriptor(globalThis, "SharedArrayBuffer");
+	if (descriptor === undefined) throw new Error("SharedArrayBuffer is not configurable");
+	Object.defineProperty(globalThis, "SharedArrayBuffer", {
+		...descriptor,
+		value: function BrokenSharedArrayBuffer() {
+			throw new Error("SharedArrayBuffer is unavailable");
+		},
+	});
+	try {
+		return fn();
+	} finally {
+		Object.defineProperty(globalThis, "SharedArrayBuffer", descriptor);
+	}
+}
+
 afterEach(() => {
 	vi.restoreAllMocks();
 });
@@ -142,5 +180,145 @@ describe("acquireLockSyncWithRetry", () => {
 		expect(result).toBe(release);
 		expect(acquire).toHaveBeenCalledTimes(2);
 		expect(getWaitDurations(calls, 20)).toEqual([20]);
+	});
+
+	it.each([
+		[20, 10],
+		[25, 15],
+	])(
+		"uses a private finite wait for only part of the %ims budget without changing retry counts",
+		(delayMs, expectedSleepMs) => {
+			const waitSpy = vi.spyOn(Atomics, "wait");
+			const release = () => {};
+			const acquire = vi
+				.fn<() => () => void>()
+				.mockImplementationOnce(() => {
+					throw elockedError();
+				})
+				.mockImplementationOnce(() => {
+					throw elockedError();
+				})
+				.mockReturnValue(release);
+
+			const { result, calls } = withPlatform("darwin", () =>
+				withClock(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs })),
+			);
+
+			expect(result).toBe(release);
+			expect(acquire).toHaveBeenCalledTimes(3);
+			expect(waitSpy).toHaveBeenCalledTimes(2);
+			expect(waitSpy).toHaveBeenNthCalledWith(1, expect.any(Int32Array), 0, 0, expectedSleepMs);
+			expect(getWaitDurations(calls, delayMs)).toEqual([delayMs, delayMs]);
+			expect(calls).toHaveLength(2 * (delayMs + 1));
+		},
+	);
+
+	it("keeps the busy wait when the delay does not exceed the wake margin", () => {
+		const waitSpy = vi.spyOn(Atomics, "wait");
+		const release = () => {};
+		const acquire = vi
+			.fn<() => () => void>()
+			.mockImplementationOnce(() => {
+				throw elockedError();
+			})
+			.mockReturnValue(release);
+
+		const { result, calls } = withPlatform("darwin", () =>
+			withClock(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs: 10 })),
+		);
+
+		expect(result).toBe(release);
+		expect(acquire).toHaveBeenCalledTimes(2);
+		expect(waitSpy).not.toHaveBeenCalled();
+		expect(getWaitDurations(calls, 10)).toEqual([10]);
+		expect(calls).toHaveLength(11);
+	});
+
+	it("falls back when the finite wait primitive throws and still rethrows the final lock error", () => {
+		const waitError = new Error("Atomics.wait is unavailable");
+		const waitSpy = vi.spyOn(Atomics, "wait").mockImplementation(() => {
+			throw waitError;
+		});
+		const errors = Array.from({ length: 10 }, () => elockedError());
+		let attempt = 0;
+		const acquire = vi.fn<() => () => void>(() => {
+			throw errors[attempt++];
+		});
+
+		const { result: thrown, calls } = withPlatform("darwin", () =>
+			withClock(() => captureThrown(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs: 20 }))),
+		);
+
+		expect(thrown).toBe(errors[9]);
+		expect(thrown).not.toBe(waitError);
+		expect(acquire).toHaveBeenCalledTimes(10);
+		expect(waitSpy).toHaveBeenCalledTimes(9);
+		expect(getWaitDurations(calls, 20)).toEqual(Array.from({ length: 9 }, () => 20));
+		expect(calls).toHaveLength(9 * 21);
+	});
+
+	it("falls back when the finite wait primitive is absent", () => {
+		const release = () => {};
+		const acquire = vi
+			.fn<() => () => void>()
+			.mockImplementationOnce(() => {
+				throw elockedError();
+			})
+			.mockReturnValue(release);
+
+		const { result, calls } = withoutAtomicsWait(() =>
+			withPlatform("darwin", () =>
+				withClock(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs: 20 })),
+			),
+		);
+
+		expect(result).toBe(release);
+		expect(acquire).toHaveBeenCalledTimes(2);
+		expect(getWaitDurations(calls, 20)).toEqual([20]);
+		expect(calls).toHaveLength(21);
+	});
+
+	it("falls back when the shared wait cell cannot be allocated", () => {
+		const release = () => {};
+		const acquire = vi
+			.fn<() => () => void>()
+			.mockImplementationOnce(() => {
+				throw elockedError();
+			})
+			.mockReturnValue(release);
+
+		const { result, calls } = withoutSharedArrayBuffer(() =>
+			withPlatform("darwin", () =>
+				withClock(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs: 20 })),
+			),
+		);
+
+		expect(result).toBe(release);
+		expect(acquire).toHaveBeenCalledTimes(2);
+		expect(getWaitDurations(calls, 20)).toEqual([20]);
+		expect(calls).toHaveLength(21);
+	});
+
+	it.each(["linux", "win32"] as const)("keeps the original busy wait on %s", (platform) => {
+		const waitSpy = vi.spyOn(Atomics, "wait").mockImplementation(() => {
+			throw new Error("finite wait must not run outside darwin");
+		});
+		const release = () => {};
+		const acquire = vi
+			.fn<() => () => void>()
+			.mockImplementationOnce(() => {
+				throw elockedError();
+			})
+			.mockReturnValue(release);
+
+		const { result, calls } = withPlatform(platform, () =>
+			withClock(() => acquireLockSyncWithRetry(acquire, { maxAttempts: 10, delayMs: 20 })),
+		);
+
+		expect(result).toBe(release);
+		expect(acquire).toHaveBeenCalledTimes(2);
+		expect(waitSpy).not.toHaveBeenCalled();
+		expect(getWaitDurations(calls, 20)).toEqual([20]);
+		expect(calls).toHaveLength(21);
 	});
 });
