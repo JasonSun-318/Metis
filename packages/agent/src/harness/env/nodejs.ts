@@ -30,6 +30,8 @@ import {
 
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
+const MAX_CAPTURED_OUTPUT_BYTES = 64 * 1024 * 1024;
+const CLOSE_GRACE_MS = 250;
 
 function resolveTimeoutMs(timeout: number | undefined): Result<number | undefined, ExecutionError> {
 	if (timeout === undefined) return ok(undefined);
@@ -122,6 +124,9 @@ async function runCommand(
 ): Promise<{ stdout: string; status: number | null }> {
 	return await new Promise((resolve) => {
 		let stdout = "";
+		let capturedBytes = 0;
+		let settled = false;
+		let timeout: ReturnType<typeof setTimeout> | undefined;
 		let child: ReturnType<typeof spawn>;
 		try {
 			child = spawn(command, args, {
@@ -132,21 +137,37 @@ async function runCommand(
 			resolve({ stdout: "", status: null });
 			return;
 		}
-		const timeout = setTimeout(() => {
+		const finish = (status: number | null) => {
+			if (settled) return;
+			settled = true;
+			if (timeout !== undefined) clearTimeout(timeout);
+			child.stdout?.off("data", onData);
+			child.off("close", finish);
+			child.stdout?.destroy();
+			child.unref();
+			resolve({ stdout: status === null ? "" : stdout, status });
+			stdout = "";
+		};
+		const fail = () => {
+			if (settled) return;
 			if (child.pid) killProcessTree(child.pid);
-		}, timeoutMs);
-		child.stdout?.setEncoding("utf8");
-		child.stdout?.on("data", (chunk: string) => {
+			finish(null);
+		};
+		const onData = (chunk: string) => {
+			if (settled) return;
+			capturedBytes += Buffer.byteLength(chunk, "utf8");
+			if (capturedBytes > MAX_CAPTURED_OUTPUT_BYTES) {
+				fail();
+				return;
+			}
 			stdout += chunk;
-		});
-		child.on("error", () => {
-			clearTimeout(timeout);
-			resolve({ stdout: "", status: null });
-		});
-		child.on("close", (status) => {
-			clearTimeout(timeout);
-			resolve({ stdout, status });
-		});
+		};
+		timeout = setTimeout(fail, timeoutMs);
+		child.stdout?.setEncoding("utf8");
+		child.stdout?.on("data", onData);
+		child.stdout?.on("error", fail);
+		child.on("error", fail);
+		child.on("close", finish);
 	});
 }
 
@@ -221,11 +242,15 @@ function getShellEnv(baseEnv?: NodeJS.ProcessEnv, extraEnv?: Record<string, stri
 function killProcessTree(pid: number): void {
 	if (process.platform === "win32") {
 		try {
-			spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
+			const taskkill = spawn("taskkill", ["/F", "/T", "/PID", String(pid)], {
 				stdio: "ignore",
 				detached: true,
 				windowsHide: true,
 			});
+			taskkill.on("error", () => {
+				// taskkill may be unavailable or fail asynchronously; the caller handles the close grace.
+			});
+			taskkill.unref();
 		} catch {
 			// Ignore errors.
 		}
@@ -282,27 +307,131 @@ export class NodeExecutionEnv implements ExecutionEnv {
 		const shellConfig = await getShellConfig(this.shellPath);
 		if (!shellConfig.ok) return shellConfig;
 
+		const abortSignal = options?.abortSignal;
+
 		return await new Promise((resolvePromise) => {
 			let stdout = "";
 			let stderr = "";
+			let capturedBytes = 0;
 			let settled = false;
 			let timedOut = false;
 			let callbackError: ExecutionError | undefined;
+			let overflowError: ExecutionError | undefined;
 			let child: ReturnType<typeof spawn> | undefined;
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
+			let closeGraceId: ReturnType<typeof setTimeout> | undefined;
+			let terminationStarted = false;
 
-			const onAbort = () => {
-				if (child?.pid) {
-					killProcessTree(child.pid);
-				}
+			const failureResult = ():
+				| Result<{ stdout: string; stderr: string; exitCode: number }, ExecutionError>
+				| undefined => {
+				if (callbackError) return err(callbackError);
+				if (overflowError) return err(overflowError);
+				if (timedOut) return err(new ExecutionError("timeout", `timeout:${options?.timeout}`));
+				if (abortSignal?.aborted) return err(new ExecutionError("aborted", "aborted"));
+				return undefined;
 			};
 
 			const settle = (result: Result<{ stdout: string; stderr: string; exitCode: number }, ExecutionError>) => {
-				if (timeoutId) clearTimeout(timeoutId);
-				if (options?.abortSignal) options.abortSignal.removeEventListener("abort", onAbort);
 				if (settled) return;
 				settled = true;
+				if (timeoutId !== undefined) {
+					clearTimeout(timeoutId);
+					timeoutId = undefined;
+				}
+				if (closeGraceId !== undefined) {
+					clearTimeout(closeGraceId);
+					closeGraceId = undefined;
+				}
+				abortSignal?.removeEventListener("abort", onAbort);
+				child?.off("close", onClose);
+				child?.stdout?.off("data", onStdoutData);
+				child?.stderr?.off("data", onStderrData);
+				try {
+					child?.stdin?.destroy();
+					child?.stdout?.destroy();
+					child?.stderr?.destroy();
+					child?.unref();
+				} catch {
+					// Stream teardown is best-effort.
+				}
 				resolvePromise(result);
+				stdout = "";
+				stderr = "";
+			};
+
+			const terminate = () => {
+				if (settled) return;
+				if (!terminationStarted) {
+					terminationStarted = true;
+					if (child?.pid !== undefined) {
+						killProcessTree(child.pid);
+					}
+				}
+				if (closeGraceId !== undefined) return;
+				// A killed process can fail to emit "close"; settle within a bounded grace instead of hanging.
+				closeGraceId = setTimeout(() => {
+					closeGraceId = undefined;
+					if (settled) return;
+					const failure = failureResult();
+					settle(failure ?? err(new ExecutionError("unknown", "process did not close after termination")));
+				}, CLOSE_GRACE_MS);
+			};
+
+			const onAbort = () => {
+				terminate();
+			};
+
+			const reportCallbackError = (error: unknown) => {
+				if (settled || callbackError) return;
+				const cause = toError(error);
+				callbackError = new ExecutionError("callback_error", cause.message, cause);
+				terminate();
+			};
+
+			const captureChunk = (stream: "stdout" | "stderr", chunk: string) => {
+				if (settled || callbackError || overflowError || timedOut || abortSignal?.aborted) return;
+				const chunkBytes = Buffer.byteLength(chunk, "utf8");
+				if (capturedBytes + chunkBytes > MAX_CAPTURED_OUTPUT_BYTES) {
+					overflowError = new ExecutionError(
+						"unknown",
+						`Execution output exceeded the ${MAX_CAPTURED_OUTPUT_BYTES}-byte (64 MiB) capture limit; process terminated`,
+					);
+					terminate();
+					return;
+				}
+				capturedBytes += chunkBytes;
+				if (stream === "stdout") {
+					stdout += chunk;
+					try {
+						options?.onStdout?.(chunk);
+					} catch (error) {
+						reportCallbackError(error);
+					}
+				} else {
+					stderr += chunk;
+					try {
+						options?.onStderr?.(chunk);
+					} catch (error) {
+						reportCallbackError(error);
+					}
+				}
+			};
+
+			const onStdoutData = (chunk: string) => {
+				captureChunk("stdout", chunk);
+			};
+			const onStderrData = (chunk: string) => {
+				captureChunk("stderr", chunk);
+			};
+
+			const onClose = (code: number | null) => {
+				const failure = failureResult();
+				if (failure) {
+					settle(failure);
+					return;
+				}
+				settle(ok({ stdout, stderr, exitCode: code ?? 0 }));
 			};
 
 			try {
@@ -332,62 +461,39 @@ export class NodeExecutionEnv implements ExecutionEnv {
 				timeoutMs !== undefined
 					? setTimeout(() => {
 							timedOut = true;
-							if (child?.pid) {
-								killProcessTree(child.pid);
-							}
+							terminate();
 						}, timeoutMs)
 					: undefined;
 
-			if (options?.abortSignal) {
-				if (options.abortSignal.aborted) {
+			if (abortSignal) {
+				if (abortSignal.aborted) {
 					onAbort();
 				} else {
-					options.abortSignal.addEventListener("abort", onAbort, { once: true });
+					abortSignal.addEventListener("abort", onAbort, { once: true });
 				}
 			}
 
 			child.stdout?.setEncoding("utf8");
 			child.stderr?.setEncoding("utf8");
-			child.stdout?.on("data", (chunk: string) => {
-				stdout += chunk;
-				try {
-					options?.onStdout?.(chunk);
-				} catch (error) {
-					const cause = toError(error);
-					callbackError = new ExecutionError("callback_error", cause.message, cause);
-					onAbort();
-				}
-			});
-			child.stderr?.on("data", (chunk: string) => {
-				stderr += chunk;
-				try {
-					options?.onStderr?.(chunk);
-				} catch (error) {
-					const cause = toError(error);
-					callbackError = new ExecutionError("callback_error", cause.message, cause);
-					onAbort();
-				}
-			});
+			child.stdout?.on("data", onStdoutData);
+			child.stderr?.on("data", onStderrData);
+
+			// Keep late stream errors observable without turning them into uncaught exceptions.
+			const onStreamError = (error: Error) => {
+				if (settled) return;
+				const failure = failureResult();
+				terminate();
+				settle(failure ?? err(new ExecutionError("spawn_error", error.message, error)));
+			};
+			child.stdout?.on("error", onStreamError);
+			child.stderr?.on("error", onStreamError);
 
 			child.on("error", (error) => {
+				if (settled) return;
 				settle(err(new ExecutionError("spawn_error", error.message, error)));
 			});
 
-			child.on("close", (code) => {
-				if (callbackError) {
-					settle(err(callbackError));
-					return;
-				}
-				if (timedOut) {
-					settle(err(new ExecutionError("timeout", `timeout:${options?.timeout}`)));
-					return;
-				}
-				if (options?.abortSignal?.aborted) {
-					settle(err(new ExecutionError("aborted", "aborted")));
-					return;
-				}
-				settle(ok({ stdout, stderr, exitCode: code ?? 0 }));
-			});
+			child.on("close", onClose);
 		});
 	}
 

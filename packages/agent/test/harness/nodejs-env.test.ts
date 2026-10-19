@@ -256,6 +256,16 @@ describe("NodeExecutionEnv", () => {
 		expect(stderr).toBe("err");
 	});
 
+	it("captures real process output below the cap with stderr and exit code intact", async () => {
+		const root = createTempDir();
+		const env = new NodeExecutionEnv({ cwd: root });
+		const result = getOrThrow(await env.exec("printf '%1048576s' x; printf err >&2"));
+		expect(result.stdout).toHaveLength(1024 * 1024);
+		expect(result.stdout.endsWith("x")).toBe(true);
+		expect(result.stderr).toBe("err");
+		expect(result.exitCode).toBe(0);
+	});
+
 	it("returns non-zero command exit codes as successful execution results", async () => {
 		const root = createTempDir();
 		const env = new NodeExecutionEnv({ cwd: root });
