@@ -1796,10 +1796,7 @@ export class InteractiveMode {
 				},
 			},
 			shutdownHandler: () => {
-				this.shutdownRequested = true;
-				if (this.session.isIdle) {
-					void this.shutdown();
-				}
+				this.requestShutdown();
 			},
 			onError: (error) => {
 				this.showExtensionError(error.extensionPath, error.error, error.stack);
@@ -1904,7 +1901,7 @@ export class InteractiveMode {
 			},
 			hasPendingMessages: () => this.session.pendingMessageCount > 0,
 			shutdown: () => {
-				this.shutdownRequested = true;
+				this.requestShutdown();
 			},
 			getContextUsage: () => this.session.getContextUsage(),
 			compact: (options) => {
@@ -2777,7 +2774,14 @@ export class InteractiveMode {
 				this.editor.insertTextAtCursor?.(text);
 				this.ui.requestRender();
 			}
-		} catch {}
+		} catch (error) {
+			try {
+				const message = error instanceof Error ? error.message : String(error);
+				this.showError(sanitizeTerminalText(message));
+			} catch {
+				// A paste diagnostic must never escape the fire-and-forget handler.
+			}
+		}
 	}
 
 	private takeClipboardInput(text: string): InteractiveUserInput {
@@ -4021,6 +4025,17 @@ export class InteractiveMode {
 	}
 
 	/**
+	 * Record an extension shutdown request. Idle sessions can exit immediately;
+	 * active ones stay deferred until the agent_settled event.
+	 */
+	private requestShutdown(): void {
+		this.shutdownRequested = true;
+		if (this.session.isIdle) {
+			void this.shutdown();
+		}
+	}
+
+	/**
 	 * Check if shutdown was requested and perform shutdown if so.
 	 */
 	private async checkShutdownRequested(): Promise<void> {
@@ -4091,13 +4106,29 @@ export class InteractiveMode {
 		const ignoreSigint = () => {};
 		process.on("SIGINT", ignoreSigint);
 
-		// Set up handler to restore TUI when resumed
-		process.once("SIGCONT", () => {
+		let resumed = false;
+		let fallback: ReturnType<typeof setImmediate> | undefined;
+
+		const cleanup = () => {
 			clearInterval(suspendKeepAlive);
+			if (fallback !== undefined) {
+				clearImmediate(fallback);
+				fallback = undefined;
+			}
 			process.removeListener("SIGINT", ignoreSigint);
+			process.removeListener("SIGCONT", resume);
+		};
+
+		const resume = () => {
+			if (resumed) return;
+			resumed = true;
+			cleanup();
 			this.ui.start();
 			this.ui.requestRender(true);
-		});
+		};
+
+		// Set up handler to restore TUI when resumed
+		process.once("SIGCONT", resume);
 
 		try {
 			// Stop the TUI (restore terminal to normal mode)
@@ -4106,9 +4137,20 @@ export class InteractiveMode {
 			// Send SIGTSTP to process group (pid=0 means all processes in group)
 			process.kill(0, "SIGTSTP");
 		} catch (error) {
-			clearInterval(suspendKeepAlive);
-			process.removeListener("SIGINT", ignoreSigint);
+			// The TUI was already stopped; restart it before surfacing the failure.
+			try {
+				resume();
+			} catch {
+				// Preserve the original suspension error after best-effort restoration.
+			}
 			throw error;
+		}
+
+		// An ignored SIGTSTP never delivers SIGCONT. Restore on the next turn so
+		// the TUI cannot stay stopped forever; a genuinely suspended process
+		// cannot run this fallback until SIGCONT resumes it, where resume() wins.
+		if (!resumed) {
+			fallback = setImmediate(resume);
 		}
 	}
 

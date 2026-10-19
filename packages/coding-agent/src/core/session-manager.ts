@@ -3789,6 +3789,7 @@ export class SessionManager {
 
 	/** Append a session info entry (e.g., display name). Returns entry id. */
 	appendSessionInfo(name: string): string {
+		this._assertOpen();
 		const sanitizedName = name.replace(/[\r\n]+/g, " ").trim();
 		const entry: SessionInfoEntry = {
 			type: "session_info",

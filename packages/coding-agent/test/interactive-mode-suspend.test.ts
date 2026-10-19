@@ -105,14 +105,63 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		expect(sigcontHandler).toBeDefined();
 
 		sigcontHandler?.();
+		sigcontHandler?.();
 
-		expect(clearIntervalSpy).toHaveBeenCalledWith(keepAliveHandle);
+		expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
 		expect(removeListenerSpy).toHaveBeenCalledWith("SIGINT", sigintHandler);
+		expect(removeListenerSpy).toHaveBeenCalledWith("SIGCONT", sigcontHandler);
 		expect(ui.start).toHaveBeenCalledTimes(1);
 		expect(ui.requestRender).toHaveBeenCalledWith(true);
 	});
 
-	test("cleans up the temporary handlers if suspension fails", () => {
+	test("restores the TUI on the next turn when SIGTSTP is ignored", async () => {
+		const ui: FakeUi = {
+			start: vi.fn(),
+			stop: vi.fn(),
+			requestRender: vi.fn(),
+		};
+		const context: HandleCtrlZThis = { ui };
+		const keepAliveHandle = setTimeout(() => undefined, 0);
+		clearTimeout(keepAliveHandle);
+
+		let sigintHandler: ProcessSignalHandler | undefined;
+		let sigcontHandler: ProcessSignalHandler | undefined;
+
+		vi.spyOn(globalThis, "setInterval").mockReturnValue(keepAliveHandle);
+		const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => undefined);
+		vi.spyOn(process, "on").mockImplementation(((event: string, listener: () => void) => {
+			if (event === "SIGINT") sigintHandler = listener;
+			return process;
+		}) as typeof process.on);
+		vi.spyOn(process, "once").mockImplementation(((event: string, listener: () => void) => {
+			if (event === "SIGCONT") sigcontHandler = listener;
+			return process;
+		}) as typeof process.once);
+		const removeListenerSpy = vi
+			.spyOn(process, "removeListener")
+			.mockImplementation(((_event: string, _listener: () => void) => process) as typeof process.removeListener);
+		const processKillSpy = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+		callHandleCtrlZ(context);
+
+		expect(processKillSpy).toHaveBeenCalledWith(0, "SIGTSTP");
+		expect(ui.stop).toHaveBeenCalledTimes(1);
+		expect(ui.start).not.toHaveBeenCalled();
+
+		// The process was not actually stopped, so the fallback runs on the next turn.
+		await new Promise<void>((resolve) => setImmediate(resolve));
+
+		expect(ui.start).toHaveBeenCalledTimes(1);
+		expect(ui.requestRender).toHaveBeenCalledWith(true);
+		expect(clearIntervalSpy).toHaveBeenCalledWith(keepAliveHandle);
+		expect(removeListenerSpy).toHaveBeenCalledWith("SIGINT", sigintHandler);
+		expect(removeListenerSpy).toHaveBeenCalledWith("SIGCONT", sigcontHandler);
+
+		sigcontHandler?.();
+		expect(ui.start).toHaveBeenCalledTimes(1);
+	});
+
+	test("restores the TUI and cleans up temporary handlers if suspension fails", () => {
 		const ui: FakeUi = {
 			start: vi.fn(),
 			stop: vi.fn(),
@@ -122,6 +171,7 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		const keepAliveHandle = setTimeout(() => undefined, 0);
 		clearTimeout(keepAliveHandle);
 		const suspendError = new Error("suspend failed");
+		let sigcontHandler: ProcessSignalHandler | undefined;
 
 		const setIntervalSpy = vi.spyOn(globalThis, "setInterval").mockReturnValue(keepAliveHandle);
 		const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval").mockImplementation(() => undefined);
@@ -131,9 +181,10 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		const removeListenerSpy = vi
 			.spyOn(process, "removeListener")
 			.mockImplementation(((_event: string, _listener: () => void) => process) as typeof process.removeListener);
-		vi.spyOn(process, "once").mockImplementation(
-			((_event: string, _listener: () => void) => process) as typeof process.once,
-		);
+		vi.spyOn(process, "once").mockImplementation(((event: string, listener: () => void) => {
+			if (event === "SIGCONT") sigcontHandler = listener;
+			return process;
+		}) as typeof process.once);
 		vi.spyOn(process, "kill").mockImplementation(() => {
 			throw suspendError;
 		});
@@ -143,7 +194,8 @@ describe("InteractiveMode.handleCtrlZ", () => {
 		expect(setIntervalSpy).toHaveBeenCalledTimes(1);
 		expect(clearIntervalSpy).toHaveBeenCalledWith(keepAliveHandle);
 		expect(removeListenerSpy).toHaveBeenCalledWith("SIGINT", expect.any(Function));
-		expect(ui.start).not.toHaveBeenCalled();
-		expect(ui.requestRender).not.toHaveBeenCalled();
+		expect(removeListenerSpy).toHaveBeenCalledWith("SIGCONT", sigcontHandler);
+		expect(ui.start).toHaveBeenCalledTimes(1);
+		expect(ui.requestRender).toHaveBeenCalledWith(true);
 	});
 });

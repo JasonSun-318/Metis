@@ -24,6 +24,7 @@ import { ENV_AGENT_DIR } from "../src/config.ts";
 import { syncDirectorySync } from "../src/core/durable-file.ts";
 import { getSessionImageDir, SessionManager } from "../src/core/session-manager.ts";
 import { migrateSessionsFromAgentRoot } from "../src/migrations.ts";
+import { sanitizeTerminalText } from "../src/utils/ansi.ts";
 import { encodePathForStorage } from "../src/utils/paths.ts";
 
 describe("legacy agent-root session migration", () => {
@@ -115,6 +116,115 @@ describe("legacy agent-root session migration", () => {
 			expect(existsSync(`${targetPath}.lease`)).toBe(false);
 			const snapshot = SessionManager.openReadOnly(targetPath);
 			expect(snapshot.getEntries().filter((entry) => entry.type === "message")).toHaveLength(2);
+		});
+	});
+
+	it("stays quiet when migration is deferred by an expected writer lock", () => {
+		const { agentDir, cwd, sourcePath, targetPath } = fixture();
+		withAgentDir(agentDir, () => {
+			const writer = createLegacySession(sourcePath, agentDir, cwd);
+			writer.appendMessage({ role: "user", content: "held by a live writer", timestamp: Date.now() });
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			let warningCalls: unknown[][] = [];
+
+			try {
+				migrateSessionsFromAgentRoot();
+				warningCalls = [...warn.mock.calls];
+			} finally {
+				warn.mockRestore();
+				writer.close();
+			}
+
+			expect(warningCalls).toEqual([]);
+			expect(existsSync(sourcePath)).toBe(true);
+			expect(existsSync(targetPath)).toBe(false);
+		});
+	});
+
+	it("warns about an unexpected per-file migration failure without touching the source", () => {
+		const { agentDir, cwd, sourcePath, targetPath } = fixture();
+		withAgentDir(agentDir, () => {
+			const source = createLegacySession(sourcePath, agentDir, cwd);
+			source.appendMessage({ role: "user", content: "must survive", timestamp: Date.now() });
+			source.close();
+			const failure = Object.assign(new Error("simulated \x1b[31mread\x07 failure"), { code: "EIO" });
+			const importSpy = vi.spyOn(SessionManager, "importFrom").mockImplementation(() => {
+				throw failure;
+			});
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+			let importCalls = 0;
+			let warningCalls: unknown[][] = [];
+
+			try {
+				migrateSessionsFromAgentRoot();
+				importCalls = importSpy.mock.calls.length;
+				warningCalls = [...warn.mock.calls];
+			} finally {
+				importSpy.mockRestore();
+				warn.mockRestore();
+			}
+
+			expect(importCalls).toBeGreaterThan(0);
+			expect(warningCalls).toHaveLength(1);
+			const message = String(warningCalls[0]?.[0]);
+			expect(message).toContain("Could not migrate session");
+			expect(message).toContain(sourcePath);
+			expect(message).toContain("EIO");
+			expect(message).toContain("simulated read failure");
+			expect(message).not.toContain("\x1b");
+			expect(message).not.toContain("\x07");
+			expect(existsSync(sourcePath)).toBe(true);
+			expect(existsSync(targetPath)).toBe(false);
+		});
+	});
+
+	it("does not let a failing diagnostic abort migration or skip later files", () => {
+		const { agentDir, cwd, sourcePath, targetPath } = fixture();
+		const secondCwd = join(cwd, "second");
+		const secondSourcePath = join(agentDir, "second-session.jsonl");
+		const secondTargetPath = join(agentDir, "sessions", encodePathForStorage(secondCwd), "second-session.jsonl");
+		withAgentDir(agentDir, () => {
+			mkdirSync(secondCwd, { recursive: true });
+			const first = createLegacySession(sourcePath, agentDir, cwd);
+			first.appendMessage({ role: "user", content: "first must survive", timestamp: Date.now() });
+			first.close();
+			const second = createLegacySession(secondSourcePath, agentDir, secondCwd);
+			second.appendMessage({ role: "user", content: "second must migrate", timestamp: Date.now() });
+			second.close();
+
+			const originalImport = SessionManager.importFrom;
+			const importSpy = vi.spyOn(SessionManager, "importFrom").mockImplementation(((
+				...args: Parameters<typeof SessionManager.importFrom>
+			) => {
+				if (args[0] === sourcePath) throw new Error("simulated migration failure");
+				return originalImport(...args);
+			}) as typeof SessionManager.importFrom);
+			let warningAttempts = 0;
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {
+				warningAttempts++;
+				throw new Error("simulated broken stderr");
+			});
+			let migrationError: unknown;
+			let warningCalls: unknown[][] = [];
+
+			try {
+				migrateSessionsFromAgentRoot();
+				warningCalls = [...warn.mock.calls];
+			} catch (error) {
+				migrationError = error;
+			} finally {
+				importSpy.mockRestore();
+				warn.mockRestore();
+			}
+
+			expect(migrationError).toBeUndefined();
+			expect(warningAttempts).toBe(1);
+			expect(warningCalls).toHaveLength(1);
+			expect(String(warningCalls[0]?.[0])).toContain(sanitizeTerminalText("simulated migration failure"));
+			expect(existsSync(sourcePath)).toBe(true);
+			expect(existsSync(targetPath)).toBe(false);
+			expect(existsSync(secondSourcePath)).toBe(false);
+			expect(existsSync(secondTargetPath)).toBe(true);
 		});
 	});
 

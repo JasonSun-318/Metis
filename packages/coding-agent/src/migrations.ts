@@ -17,7 +17,9 @@ import {
 	syncDirectorySync,
 } from "./core/durable-file.ts";
 import { migrateKeybindingsConfig } from "./core/keybindings.ts";
+import { SessionLeaseError } from "./core/session-lease.ts";
 import { SessionManager } from "./core/session-manager.ts";
+import { sanitizeTerminalText } from "./utils/ansi.ts";
 import { encodePathForStorage } from "./utils/paths.ts";
 
 const MIGRATION_GUIDE_URL =
@@ -234,6 +236,29 @@ export function migrateAuthToAuthJson(): string[] {
 	return providers;
 }
 
+/**
+ * A live writer lease is an expected reason to defer migration: the next
+ * startup will see the file again after the writer closes.
+ */
+function isExpectedMigrationContention(error: unknown): boolean {
+	return error instanceof SessionLeaseError && error.code === "SESSION_IN_USE";
+}
+
+function reportUnexpectedMigrationFailure(file: string, error: unknown): void {
+	try {
+		const code = (error as NodeJS.ErrnoException | undefined)?.code;
+		const message = error instanceof Error ? error.message : String(error);
+		const detail = code && message ? `${code}: ${message}` : message || code || "unknown error";
+		console.warn(
+			chalk.yellow(
+				`Warning: Could not migrate session ${sanitizeTerminalText(file)}: ${sanitizeTerminalText(detail)}`,
+			),
+		);
+	} catch {
+		// Diagnostics must never abort the migration loop or mask its cleanup.
+	}
+}
+
 /** Relocate flat *.jsonl session files into per-cwd session directories. */
 export function migrateSessionsFromAgentRoot(): void {
 	const agentDir = getAgentDir();
@@ -315,8 +340,12 @@ export function migrateSessionsFromAgentRoot(): void {
 			if (retiredReconciled) {
 				publishRetiredSessionCheckpoint(agentDir, basename(retiredPath), safePath, newPath);
 			}
-		} catch {
-			// Skip files that can't be migrated
+		} catch (error) {
+			// A live writer is expected; report only genuinely unexpected failures
+			// while leaving the source, target, and backup recovery paths untouched.
+			if (!isExpectedMigrationContention(error)) {
+				reportUnexpectedMigrationFailure(file, error);
+			}
 		} finally {
 			closeSessionManagerAfterMigration(target);
 			closeSessionManagerAfterMigration(source);
@@ -520,7 +549,7 @@ function migrateExtensionSystem(cwd: string): string[] {
 }
 
 /**
- * Print deprecation warnings and wait for keypress.
+ * Print deprecation warnings, waiting for a keypress only on a usable TTY.
  */
 export async function showDeprecationWarnings(warnings: string[]): Promise<void> {
 	if (warnings.length === 0) return;
@@ -531,16 +560,53 @@ export async function showDeprecationWarnings(warnings: string[]): Promise<void>
 	console.log(chalk.yellow(`\nMove your extensions to the extensions/ directory.`));
 	console.log(chalk.yellow(`Migration guide: ${MIGRATION_GUIDE_URL}`));
 	console.log(chalk.yellow(`Documentation: ${EXTENSIONS_DOC_URL}`));
+
+	const stdin = process.stdin;
+	if (!stdin.isTTY || stdin.destroyed || stdin.readableEnded || stdin.readable === false) {
+		// Non-interactive or already-closed stdin has no keypress to wait for.
+		return;
+	}
+
 	console.log(chalk.dim(`\nPress any key to continue...`));
 
+	const wasRaw = stdin.isRaw === true;
+	const wasFlowing = stdin.readableFlowing === true;
+	let resumedInput = false;
+
 	await new Promise<void>((resolve) => {
-		process.stdin.setRawMode?.(true);
-		process.stdin.resume();
-		process.stdin.once("data", () => {
-			process.stdin.setRawMode?.(false);
-			process.stdin.pause();
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			stdin.off("data", finish);
+			stdin.off("end", finish);
+			stdin.off("close", finish);
+			stdin.off("error", finish);
+			try {
+				stdin.setRawMode?.(wasRaw);
+			} catch {
+				// The stream is already unusable; still restore pause ownership below.
+			}
+			try {
+				if (!wasFlowing) stdin.pause();
+				else if (!resumedInput) stdin.resume();
+			} catch {
+				// Best-effort state restoration for a closing stream.
+			}
 			resolve();
-		});
+		};
+
+		try {
+			stdin.setRawMode?.(true);
+			stdin.once("data", finish);
+			stdin.once("end", finish);
+			stdin.once("close", finish);
+			stdin.on("error", finish);
+			stdin.resume();
+			resumedInput = true;
+		} catch {
+			finish();
+		}
 	});
 	console.log();
 }
