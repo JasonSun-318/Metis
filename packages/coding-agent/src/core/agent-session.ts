@@ -60,6 +60,12 @@ import { sleep } from "../utils/sleep.ts";
 import type { AgentMode } from "./agent-mode.ts";
 import { AgentSessionContextUsage } from "./agent-session-context-usage.ts";
 import {
+	createMessageEndExtensionEvent,
+	createTurnEndExtensionEvent,
+	createTurnStartExtensionEvent,
+	mapAgentEventToExtensionEvent,
+} from "./agent-session-extension-events.ts";
+import {
 	buildSessionStats,
 	extractUserMessageText,
 	listUserMessagesForForking,
@@ -98,22 +104,14 @@ import {
 	ExtensionRunner,
 	type ExtensionUIContext,
 	type InputSource,
-	type MessageEndEvent,
-	type MessageStartEvent,
-	type MessageUpdateEvent,
 	type ReplacedSessionContext,
 	type SessionBeforeCompactResult,
 	type SessionBeforeTreeResult,
 	type SessionStartEvent,
 	type ShutdownHandler,
 	type ToolDefinition,
-	type ToolExecutionEndEvent,
-	type ToolExecutionStartEvent,
-	type ToolExecutionUpdateEvent,
 	type ToolInfo,
 	type TreePreparation,
-	type TurnEndEvent,
-	type TurnStartEvent,
 	wrapRegisteredTools,
 } from "./extensions/index.ts";
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
@@ -2713,43 +2711,23 @@ export class AgentSession {
 	private async _emitExtensionEvent(event: AgentEvent): Promise<void> {
 		if (event.type === "agent_start") {
 			this._turnIndex = 0;
-			await this._extensionRunner.emit({ type: "agent_start" });
-		} else if (event.type === "agent_end") {
-			await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
-		} else if (event.type === "turn_start") {
-			const extensionEvent: TurnStartEvent = {
-				type: "turn_start",
-				turnIndex: this._turnIndex,
-				timestamp: Date.now(),
-			};
+		}
+
+		if (event.type === "turn_start") {
+			const extensionEvent = createTurnStartExtensionEvent(this._turnIndex, Date.now());
 			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "turn_end") {
-			const extensionEvent: TurnEndEvent = {
-				type: "turn_end",
-				turnIndex: this._turnIndex,
-				message: event.message,
-				toolResults: event.toolResults,
-			};
+			return;
+		}
+
+		if (event.type === "turn_end") {
+			const extensionEvent = createTurnEndExtensionEvent(this._turnIndex, event);
 			await this._extensionRunner.emit(extensionEvent);
 			this._turnIndex++;
-		} else if (event.type === "message_start") {
-			const extensionEvent: MessageStartEvent = {
-				type: "message_start",
-				message: event.message,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "message_update") {
-			const extensionEvent: MessageUpdateEvent = {
-				type: "message_update",
-				message: event.message,
-				assistantMessageEvent: event.assistantMessageEvent,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "message_end") {
-			const extensionEvent: MessageEndEvent = {
-				type: "message_end",
-				message: event.message,
-			};
+			return;
+		}
+
+		if (event.type === "message_end") {
+			const extensionEvent = createMessageEndExtensionEvent(event);
 			const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
 			if (replacement) {
 				// Untyped extension handlers can return messages with null/missing content;
@@ -2764,33 +2742,13 @@ export class AgentSession {
 						: replacement;
 				this._replaceMessageInPlace(event.message, normalized);
 			}
-		} else if (event.type === "tool_execution_start") {
-			const extensionEvent: ToolExecutionStartEvent = {
-				type: "tool_execution_start",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				args: event.args,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "tool_execution_update") {
-			const extensionEvent: ToolExecutionUpdateEvent = {
-				type: "tool_execution_update",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				args: event.args,
-				partialResult: event.partialResult,
-			};
-			await this._extensionRunner.emit(extensionEvent);
-		} else if (event.type === "tool_execution_end") {
-			const extensionEvent: ToolExecutionEndEvent = {
-				type: "tool_execution_end",
-				toolCallId: event.toolCallId,
-				toolName: event.toolName,
-				result: event.result,
-				isError: event.isError,
-			};
-			await this._extensionRunner.emit(extensionEvent);
+			return;
 		}
+
+		const extensionEvent = mapAgentEventToExtensionEvent(event);
+		if (!extensionEvent) return;
+
+		await this._extensionRunner.emit(extensionEvent);
 	}
 
 	/**

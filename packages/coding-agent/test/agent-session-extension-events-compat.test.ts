@@ -235,6 +235,56 @@ describe("AgentSession._emitExtensionEvent mapping", () => {
 		expect(message.content).toEqual([{ type: "text", text: "replacement" }]);
 	});
 
+	it("mutates the currently referenced AgentEvent.message after awaiting emitMessageEnd", async () => {
+		const { mode, messageEnds } = createEmitHarness();
+		const initial = fauxAssistantMessage("initial");
+		const current = fauxAssistantMessage("current");
+		const replacement = fauxAssistantMessage("replacement");
+		const event: Extract<AgentEvent, { type: "message_end" }> = {
+			type: "message_end",
+			message: initial,
+		};
+		let release: () => void = () => {
+			throw new Error("gate was not initialized");
+		};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		mode._extensionRunner.emitMessageEnd = async (messageEvent) => {
+			messageEnds.push(messageEvent);
+			await gate;
+			return replacement;
+		};
+		const pending = emitExtensionEvent(mode, event);
+		let settled = false;
+		void pending.then(
+			() => {
+				settled = true;
+			},
+			() => {
+				settled = true;
+			},
+		);
+		await Promise.resolve();
+
+		try {
+			expect(messageEnds).toHaveLength(1);
+			expect(messageEnds[0]).toStrictEqual({ type: "message_end", message: initial });
+			expect(messageEnds[0].message).toBe(initial);
+			expect(settled).toBe(false);
+
+			event.message = current;
+		} finally {
+			release();
+			await pending;
+		}
+
+		expect(event.message).toBe(current);
+		expect(current.content).toEqual([{ type: "text", text: "replacement" }]);
+		expect(initial.content).toEqual([{ type: "text", text: "initial" }]);
+		expect(messageEnds[0].message).toBe(initial);
+	});
+
 	it("normalizes null or missing content on message_end replacements in the original object", async () => {
 		const replacements = [
 			(message: AgentMessage): AgentMessage => ({ ...message, content: null }) as unknown as AgentMessage,
