@@ -29,7 +29,7 @@ import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
 import { getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
 import { type GitSource, parseGitUrl } from "../utils/git.ts";
-import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
+import { isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
 import {
 	collectAncestorAgentsSkillDirs,
@@ -49,6 +49,13 @@ import {
 	isOverridePattern,
 	splitPatterns,
 } from "./package-manager/resource-patterns.ts";
+import {
+	addResource,
+	createAccumulator,
+	getTargetMap,
+	type ResourceAccumulator,
+	toResolvedPaths,
+} from "./package-manager/resource-results.ts";
 import type { PackageSource, SettingsManager } from "./settings-manager.ts";
 
 const NETWORK_TIMEOUT_MS = 10000;
@@ -169,31 +176,6 @@ interface NpmUpdateTarget extends ConfiguredUpdateSource {
 
 interface GitUpdateTarget extends ConfiguredUpdateSource {
 	parsed: GitSource;
-}
-
-interface ResourceAccumulator {
-	extensions: Map<string, { metadata: PathMetadata; enabled: boolean }>;
-	skills: Map<string, { metadata: PathMetadata; enabled: boolean }>;
-	prompts: Map<string, { metadata: PathMetadata; enabled: boolean }>;
-	themes: Map<string, { metadata: PathMetadata; enabled: boolean }>;
-}
-
-/**
- * Compute a numeric precedence rank for a resource based on its metadata.
- * Lower rank = higher precedence. Used to sort resolved resources so that
- * name-collision resolution ("first wins") produces the correct outcome.
- *
- * Precedence (highest to lowest):
- *   0  project + settings entry (source: "local", scope: "project")
- *   1  project + auto-discovered (source: "auto", scope: "project")
- *   2  user + settings entry (source: "local", scope: "user")
- *   3  user + auto-discovered (source: "auto", scope: "user")
- *   4  package resource (origin: "package")
- */
-function resourcePrecedenceRank(m: PathMetadata): number {
-	if (m.origin === "package") return 4;
-	const scopeBase = m.scope === "project" ? 0 : 2;
-	return scopeBase + (m.source === "local" ? 0 : 1);
 }
 
 interface PackageFilter {
@@ -325,7 +307,7 @@ export class DefaultPackageManager implements PackageManager {
 	}
 
 	async resolve(onMissing?: (source: string) => Promise<MissingSourceAction>): Promise<ResolvedPaths> {
-		const accumulator = this.createAccumulator();
+		const accumulator = createAccumulator();
 		const globalSettings = this.settingsManager.getGlobalSettings();
 		const projectSettings = this.settingsManager.getProjectSettings();
 
@@ -346,7 +328,7 @@ export class DefaultPackageManager implements PackageManager {
 		const projectBaseDir = getProjectConfigDir(this.cwd);
 
 		for (const resourceType of RESOURCE_TYPES) {
-			const target = this.getTargetMap(accumulator, resourceType);
+			const target = getTargetMap(accumulator, resourceType);
 			const globalEntries = (globalSettings[resourceType] ?? []) as string[];
 			const projectEntries = (projectSettings[resourceType] ?? []) as string[];
 			this.resolveLocalEntries(
@@ -375,18 +357,18 @@ export class DefaultPackageManager implements PackageManager {
 
 		this.addAutoDiscoveredResources(accumulator, globalSettings, projectSettings, globalBaseDir, projectBaseDir);
 
-		return this.toResolvedPaths(accumulator);
+		return toResolvedPaths(accumulator);
 	}
 
 	async resolveExtensionSources(
 		sources: string[],
 		options?: { local?: boolean; temporary?: boolean },
 	): Promise<ResolvedPaths> {
-		const accumulator = this.createAccumulator();
+		const accumulator = createAccumulator();
 		const scope: SourceScope = options?.temporary ? "temporary" : options?.local ? "project" : "user";
 		const packageSources = sources.map((source) => ({ pkg: source as PackageSource, scope }));
 		await this.resolvePackageSources(packageSources, accumulator);
-		return this.toResolvedPaths(accumulator);
+		return toResolvedPaths(accumulator);
 	}
 
 	listConfiguredPackages(): ConfiguredPackage[] {
@@ -755,14 +737,14 @@ export class DefaultPackageManager implements PackageManager {
 			const stats = statSync(resolved);
 			if (stats.isFile()) {
 				metadata.baseDir = dirname(resolved);
-				this.addResource(accumulator.extensions, resolved, metadata, true);
+				addResource(accumulator.extensions, resolved, metadata, true);
 				return;
 			}
 			if (stats.isDirectory()) {
 				metadata.baseDir = resolved;
 				const resources = this.collectPackageResources(resolved, accumulator, filter, metadata);
 				if (!resources) {
-					this.addResource(accumulator.extensions, resolved, metadata, true);
+					addResource(accumulator.extensions, resolved, metadata, true);
 				}
 			}
 		} catch {
@@ -1535,7 +1517,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (filter) {
 			for (const resourceType of RESOURCE_TYPES) {
 				const patterns = filter[resourceType];
-				const target = this.getTargetMap(accumulator, resourceType);
+				const target = getTargetMap(accumulator, resourceType);
 				if (filter.autoload === false) {
 					this.applyPackageDeltaFilter(packageRoot, patterns ?? [], resourceType, target, metadata);
 				} else if (patterns !== undefined) {
@@ -1555,7 +1537,7 @@ export class DefaultPackageManager implements PackageManager {
 					entries,
 					packageRoot,
 					resourceType,
-					this.getTargetMap(accumulator, resourceType),
+					getTargetMap(accumulator, resourceType),
 					metadata,
 				);
 			}
@@ -1569,7 +1551,7 @@ export class DefaultPackageManager implements PackageManager {
 				// Collect all files from the directory (all enabled by default)
 				const files = collectResourceFiles(dir, resourceType);
 				for (const f of files) {
-					this.addResource(this.getTargetMap(accumulator, resourceType), f, metadata, true);
+					addResource(getTargetMap(accumulator, resourceType), f, metadata, true);
 				}
 				hasAnyDir = true;
 			}
@@ -1594,7 +1576,7 @@ export class DefaultPackageManager implements PackageManager {
 			// Collect all files from the directory (all enabled by default)
 			const files = collectResourceFiles(dir, resourceType);
 			for (const f of files) {
-				this.addResource(target, f, metadata, true);
+				addResource(target, f, metadata, true);
 			}
 		}
 	}
@@ -1611,7 +1593,7 @@ export class DefaultPackageManager implements PackageManager {
 		if (userPatterns.length === 0) {
 			// Empty array explicitly disables all resources of this type
 			for (const f of allFiles) {
-				this.addResource(target, f, metadata, false);
+				addResource(target, f, metadata, false);
 			}
 			return;
 		}
@@ -1621,7 +1603,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		for (const f of allFiles) {
 			const enabled = enabledByUser.has(f);
-			this.addResource(target, f, metadata, enabled);
+			addResource(target, f, metadata, enabled);
 		}
 	}
 
@@ -1639,7 +1621,7 @@ export class DefaultPackageManager implements PackageManager {
 		const { allFiles } = this.collectManifestFiles(packageRoot, resourceType);
 		const enabledByUser = applyAutoloadDisabledPatterns(allFiles, userPatterns, packageRoot);
 		for (const [filePath, enabled] of enabledByUser) {
-			this.addResource(target, filePath, metadata, enabled);
+			addResource(target, filePath, metadata, enabled);
 		}
 	}
 
@@ -1700,7 +1682,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		for (const f of allFiles) {
 			if (enabledPaths.has(f)) {
-				this.addResource(target, f, metadata, true);
+				addResource(target, f, metadata, true);
 			}
 		}
 	}
@@ -1741,7 +1723,7 @@ export class DefaultPackageManager implements PackageManager {
 
 		// Add all files with their enabled state
 		for (const f of allFiles) {
-			this.addResource(target, f, metadata, enabledPaths.has(f));
+			addResource(target, f, metadata, enabledPaths.has(f));
 		}
 	}
 
@@ -1803,10 +1785,10 @@ export class DefaultPackageManager implements PackageManager {
 			overrides: string[],
 			baseDir: string,
 		) => {
-			const target = this.getTargetMap(accumulator, resourceType);
+			const target = getTargetMap(accumulator, resourceType);
 			for (const path of paths) {
 				const enabled = isEnabledByOverrides(path, overrides, baseDir);
-				this.addResource(target, path, metadata, enabled);
+				addResource(target, path, metadata, enabled);
 			}
 		};
 
@@ -1928,73 +1910,6 @@ export class DefaultPackageManager implements PackageManager {
 			}
 		}
 		return files;
-	}
-
-	private getTargetMap(
-		accumulator: ResourceAccumulator,
-		resourceType: ResourceType,
-	): Map<string, { metadata: PathMetadata; enabled: boolean }> {
-		switch (resourceType) {
-			case "extensions":
-				return accumulator.extensions;
-			case "skills":
-				return accumulator.skills;
-			case "prompts":
-				return accumulator.prompts;
-			case "themes":
-				return accumulator.themes;
-			default:
-				throw new Error(`Unknown resource type: ${resourceType}`);
-		}
-	}
-
-	private addResource(
-		map: Map<string, { metadata: PathMetadata; enabled: boolean }>,
-		path: string,
-		metadata: PathMetadata,
-		enabled: boolean,
-	): void {
-		if (!path) return;
-		if (!map.has(path)) {
-			map.set(path, { metadata, enabled });
-		}
-	}
-
-	private createAccumulator(): ResourceAccumulator {
-		return {
-			extensions: new Map(),
-			skills: new Map(),
-			prompts: new Map(),
-			themes: new Map(),
-		};
-	}
-
-	private toResolvedPaths(accumulator: ResourceAccumulator): ResolvedPaths {
-		const mapToResolved = (
-			entries: Map<string, { metadata: PathMetadata; enabled: boolean }>,
-		): ResolvedResource[] => {
-			const resolved = Array.from(entries.entries()).map(([path, { metadata, enabled }]) => ({
-				path,
-				enabled,
-				metadata,
-			}));
-			resolved.sort((a, b) => resourcePrecedenceRank(a.metadata) - resourcePrecedenceRank(b.metadata));
-
-			const seen = new Set<string>();
-			return resolved.filter((entry) => {
-				const canonicalPath = canonicalizePath(entry.path);
-				if (seen.has(canonicalPath)) return false;
-				seen.add(canonicalPath);
-				return true;
-			});
-		};
-
-		return {
-			extensions: mapToResolved(accumulator.extensions),
-			skills: mapToResolved(accumulator.skills),
-			prompts: mapToResolved(accumulator.prompts),
-			themes: mapToResolved(accumulator.themes),
-		};
 	}
 
 	private spawnCommand(command: string, args: string[], options?: { cwd?: string }): ChildProcess {
