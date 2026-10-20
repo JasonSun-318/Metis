@@ -322,6 +322,36 @@ function removeOperation(operationDir: string): void {
 	syncDirectorySync(dirname(operationDir));
 }
 
+function removeFailedPreparation(operationDir: string, payload: string, cause: unknown): never {
+	try {
+		const manifest = join(operationDir, "manifest.json");
+		for (const name of readdirSync(operationDir)) {
+			if (name !== "payload" && name !== "manifest.json") {
+				throw new Error(`Unexpected Schedule Trash preparation entry: ${join(operationDir, name)}`);
+			}
+		}
+		if (pathExists(payload)) {
+			const metadata = lstatSync(payload);
+			if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
+				throw new Error(`Unsafe Schedule Trash preparation payload: ${payload}`);
+			}
+			rmdirSync(payload);
+		}
+		if (pathExists(manifest)) {
+			const metadata = lstatSync(manifest);
+			if (!metadata.isFile() || metadata.nlink !== 1) {
+				throw new Error(`Unsafe Schedule Trash preparation manifest: ${manifest}`);
+			}
+			unlinkSync(manifest);
+		}
+		rmdirSync(operationDir);
+		syncDirectorySync(dirname(operationDir));
+	} catch (cleanupError) {
+		throw new AggregateError([cause, cleanupError], `Schedule Trash preparation cleanup failed: ${operationDir}`);
+	}
+	throw cause;
+}
+
 function restore(
 	agentDir: string,
 	operationDir: string,
@@ -381,9 +411,7 @@ export async function trashScheduledTaskData(
 		const operationId = (hooks.operationId ?? randomUUID)();
 		if (!UUID.test(operationId)) throw new Error("Schedule Trash operation id must be a UUID");
 		const operationDir = join(operationRoot, operationId);
-		mkdirSync(operationDir, { mode: 0o700 });
 		const payload = join(operationDir, "payload");
-		mkdirSync(payload, { mode: 0o700 });
 		const targets = collected.targets.map((original, index) => ({
 			original,
 			staged: join(payload, `${String(index).padStart(6, "0")}-${basename(original)}`),
@@ -398,7 +426,14 @@ export async function trashScheduledTaskData(
 			retainedSessionCount: collected.retainedSessionCount,
 			targets,
 		};
-		writeManifest(operationDir, manifest);
+		mkdirSync(operationDir, { mode: 0o700 });
+		try {
+			// Only this call's empty operation entries are owned here; no target has moved yet.
+			mkdirSync(payload, { mode: 0o700 });
+			writeManifest(operationDir, manifest);
+		} catch (error) {
+			removeFailedPreparation(operationDir, payload, error);
+		}
 		try {
 			for (const target of targets) durableRename(target.original, target.staged, hooks.rename);
 			manifest = { ...manifest, phase: "staged" };
