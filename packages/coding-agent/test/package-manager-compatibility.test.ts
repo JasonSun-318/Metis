@@ -823,4 +823,163 @@ describe("package manager compatibility regressions", () => {
 			]);
 		});
 	});
+
+	describe("C7 package collection fallbacks and manifest refresh", () => {
+		const directoryFallbackCases: Array<{
+			name: string;
+			directory: string;
+			setup: (packageDir: string) => void;
+			expectsDirectoryFallback: boolean;
+		}> = [
+			{
+				name: "without a manifest",
+				directory: "no-manifest",
+				setup: () => {},
+				expectsDirectoryFallback: true,
+			},
+			{
+				name: "with a package.json lacking metis",
+				directory: "no-metis",
+				setup: (packageDir) => {
+					writeFixture(join(packageDir, "package.json"), JSON.stringify({ name: "no-metis" }));
+				},
+				expectsDirectoryFallback: true,
+			},
+			{
+				name: "with invalid JSON",
+				directory: "invalid-json",
+				setup: (packageDir) => {
+					writeFixture(join(packageDir, "package.json"), "{ invalid json");
+				},
+				expectsDirectoryFallback: true,
+			},
+			{
+				name: "with an empty metis object",
+				directory: "empty-metis",
+				setup: (packageDir) => {
+					writeFixture(join(packageDir, "package.json"), JSON.stringify({ metis: {} }));
+				},
+				expectsDirectoryFallback: false,
+			},
+			{
+				name: "with an empty conventional directory",
+				directory: "empty-convention-directory",
+				setup: (packageDir) => {
+					mkdirSync(join(packageDir, "extensions"), { recursive: true });
+				},
+				expectsDirectoryFallback: false,
+			},
+		];
+
+		it.each(directoryFallbackCases)(
+			"C7 ties directory fallback to the collection boolean $name",
+			async ({ directory, setup, expectsDirectoryFallback }) => {
+				const packageDir = join(tempDir, "directory-fallback", directory);
+				mkdirSync(packageDir, { recursive: true });
+				setup(packageDir);
+
+				const result = await manager.resolveExtensionSources([packageDir]);
+				const packageMetadata = {
+					source: packageDir,
+					scope: "user" as const,
+					origin: "package" as const,
+					baseDir: packageDir,
+				};
+
+				expect(result.extensions).toEqual(
+					expectsDirectoryFallback ? [{ path: packageDir, enabled: true, metadata: packageMetadata }] : [],
+				);
+				expect(result.skills).toEqual([]);
+				expect(result.prompts).toEqual([]);
+				expect(result.themes).toEqual([]);
+			},
+		);
+
+		const partialManifestCases: Array<{
+			name: string;
+			directory: string;
+			manifest: Record<string, unknown>;
+			emptyFilterExtensions: (packageDir: string) => string[];
+		}> = [
+			{
+				name: "a missing extension field",
+				directory: "missing-field",
+				manifest: { prompts: ["prompts/p.md"] },
+				emptyFilterExtensions: (packageDir) => [join(packageDir, "extensions", "auto.ts")],
+			},
+			{
+				name: "an empty extension array",
+				directory: "empty-array",
+				manifest: { extensions: [], prompts: ["prompts/p.md"] },
+				emptyFilterExtensions: () => [],
+			},
+		];
+
+		it.each(partialManifestCases)(
+			"C7 keeps $name distinct under no filter and an empty package filter",
+			async ({ directory, manifest, emptyFilterExtensions }) => {
+				const packageDir = join(tempDir, "partial-manifest", directory);
+				const conventionExtension = join(packageDir, "extensions", "auto.ts");
+				const prompt = join(packageDir, "prompts", "p.md");
+				const packageMetadata = {
+					source: packageDir,
+					scope: "user" as const,
+					origin: "package" as const,
+					baseDir: packageDir,
+				};
+				writeFixture(conventionExtension);
+				writeFixture(prompt, "# Prompt\n");
+				writeFixture(join(packageDir, "package.json"), JSON.stringify({ metis: manifest }));
+
+				settingsManager.setPackages([packageDir]);
+				const unfiltered = await manager.resolve();
+				expect(unfiltered.extensions).toEqual([]);
+				expect(unfiltered.prompts).toEqual([{ path: prompt, enabled: true, metadata: packageMetadata }]);
+
+				settingsManager.setPackages([{ source: packageDir }]);
+				const emptyFilter = await manager.resolve();
+				expect(emptyFilter.extensions).toEqual(
+					emptyFilterExtensions(packageDir).map((path) => ({
+						path,
+						enabled: true,
+						metadata: packageMetadata,
+					})),
+				);
+				expect(emptyFilter.prompts).toEqual([{ path: prompt, enabled: true, metadata: packageMetadata }]);
+			},
+		);
+
+		it("C7 reflects package.json changes on the same manager without mutating prior results", async () => {
+			const packageDir = join(tempDir, "manifest-refresh");
+			const firstExtension = join(packageDir, "a.ts");
+			const secondExtension = join(packageDir, "b.ts");
+			const manifestPath = join(packageDir, "package.json");
+			const packageMetadata = {
+				source: packageDir,
+				scope: "user" as const,
+				origin: "package" as const,
+				baseDir: packageDir,
+			};
+			writeFixture(firstExtension);
+			writeFixture(secondExtension);
+			writeFixture(manifestPath, JSON.stringify({ metis: { extensions: ["a.ts"] } }));
+
+			const first = await manager.resolveExtensionSources([packageDir]);
+			const firstSnapshot = structuredClone(first);
+			const firstMetadata = first.extensions[0]!.metadata;
+			expect(first.extensions).toEqual([{ path: firstExtension, enabled: true, metadata: packageMetadata }]);
+
+			writeFixture(manifestPath, JSON.stringify({ metis: { extensions: ["b.ts"] } }));
+			const second = await manager.resolveExtensionSources([packageDir]);
+
+			expect(second).not.toBe(first);
+			expect(second.extensions).not.toBe(first.extensions);
+			expect(second.extensions).toEqual([{ path: secondExtension, enabled: true, metadata: packageMetadata }]);
+			expect(second.extensions[0]!.metadata).toEqual(first.extensions[0]!.metadata);
+			expect(second.extensions[0]!.metadata.baseDir).toBe(packageDir);
+			expect(first).toEqual(firstSnapshot);
+			expect(first.extensions[0]!.metadata).toBe(firstMetadata);
+			expect(first.extensions.map(({ path }) => path)).toEqual([firstExtension]);
+		});
+	});
 });
