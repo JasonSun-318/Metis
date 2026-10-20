@@ -393,17 +393,27 @@ describe("package manager compatibility regressions", () => {
 			const projectExplicitA = join(projectBase, "explicit", "a.ts");
 			const projectExplicitB = join(projectBase, "explicit", "b.ts");
 			const projectAutoExtension = join(projectBase, "extensions", "auto.ts");
+			const projectOtherAutoExtension = join(projectBase, "extensions", "other-auto.ts");
 			const userExplicitExtension = join(agentDir, "explicit", "user.ts");
+			const userAliasTargetExtension = join(agentDir, "explicit", "alias-target.ts");
 			const userAliasExtension = join(agentDir, "explicit", "alias.ts");
 			const userAutoExtension = join(agentDir, "extensions", "auto.ts");
 			const packageExtension = join(packageDir, "extensions", "package.ts");
+			const packageAliasTargetExtension = join(packageDir, "extensions", "alias-target.ts");
 			writeFixture(projectExplicitA);
 			writeFixture(projectExplicitB);
 			writeFixture(projectAutoExtension);
+			writeFixture(projectOtherAutoExtension);
 			writeFixture(userExplicitExtension);
+			writeFixture(userAliasTargetExtension);
 			writeFixture(userAutoExtension);
 			writeFixture(packageExtension);
-			symlinkSync(projectExplicitA, userAliasExtension);
+			writeFixture(packageAliasTargetExtension);
+			symlinkSync(packageAliasTargetExtension, userAliasExtension);
+			const projectAliasExtension = join(projectBase, "explicit", "alias-wins.ts");
+			const projectAliasDuplicateExtension = join(projectBase, "explicit", "alias-loses.ts");
+			symlinkSync(userAliasTargetExtension, projectAliasExtension);
+			symlinkSync(userAliasTargetExtension, projectAliasDuplicateExtension);
 
 			const projectExplicitSkill = join(projectBase, "explicit", "skill.md");
 			const projectAutoSkill = join(projectBase, "skills", "project-skill", "SKILL.md");
@@ -438,7 +448,16 @@ describe("package manager compatibility regressions", () => {
 			writeFixture(userAutoTheme, "{}");
 			writeFixture(packageTheme, "{}");
 
-			settingsManager.setProjectExtensionPaths(["explicit/a.ts", "explicit/b.ts", "!extensions/auto.ts"]);
+			settingsManager.setProjectExtensionPaths([
+				"explicit/a.ts",
+				"explicit/b.ts",
+				"extensions/auto.ts",
+				"!extensions/auto.ts",
+				"../package/extensions/package.ts",
+				"!../package/extensions/package.ts",
+				"explicit/alias-wins.ts",
+				"explicit/alias-loses.ts",
+			]);
 			settingsManager.setExtensionPaths(["explicit/user.ts", "explicit/alias.ts", "!extensions/auto.ts"]);
 			settingsManager.setProjectSkillPaths(["explicit/skill.md", "!skills/project-skill"]);
 			settingsManager.setSkillPaths(["explicit/skill.md", "!skills/user-skill"]);
@@ -469,8 +488,11 @@ describe("package manager compatibility regressions", () => {
 			expect(result.extensions).toEqual([
 				{ path: projectExplicitA, enabled: true, metadata: projectLocal },
 				{ path: projectExplicitB, enabled: true, metadata: projectLocal },
-				{ path: projectAutoExtension, enabled: false, metadata: projectAuto },
+				{ path: projectAutoExtension, enabled: false, metadata: projectLocal },
+				{ path: projectAliasExtension, enabled: true, metadata: projectLocal },
+				{ path: projectOtherAutoExtension, enabled: true, metadata: projectAuto },
 				{ path: userExplicitExtension, enabled: true, metadata: userLocal },
+				{ path: userAliasExtension, enabled: true, metadata: userLocal },
 				{ path: userAutoExtension, enabled: false, metadata: userAuto },
 				{ path: packageExtension, enabled: true, metadata: packageMetadata },
 			]);
@@ -496,6 +518,46 @@ describe("package manager compatibility regressions", () => {
 				{ path: packageTheme, enabled: true, metadata: packageMetadata },
 			]);
 
+			const packageExtensionResource = findResource(result.extensions, packageExtension)!;
+			const packageSkillResource = findResource(result.skills, packageSkill)!;
+			const packagePromptResource = findResource(result.prompts, packagePrompt)!;
+			const packageThemeResource = findResource(result.themes, packageTheme)!;
+			expect(packageExtensionResource.metadata).toBe(packageSkillResource.metadata);
+			expect(packageExtensionResource.metadata).toBe(packagePromptResource.metadata);
+			expect(packageExtensionResource.metadata).toBe(packageThemeResource.metadata);
+
+			// Packages are collected before explicit/auto sources, so a later duplicate of
+			// the same raw path may not replace its metadata or enabled state.
+			expect(findResource(result.extensions, packageExtension)).toMatchObject({
+				enabled: true,
+				metadata: packageMetadata,
+			});
+			expect(findResource(result.extensions, projectAutoExtension)).toMatchObject({
+				enabled: false,
+				metadata: projectLocal,
+			});
+
+			// Canonical collisions are removed after rank sorting. A later-collected alias
+			// beats an earlier package path, and equal-rank aliases keep collection order;
+			// the winner keeps its raw path and metadata instead of the resolved realpath.
+			expect(findResource(result.extensions, projectAliasExtension)).toMatchObject({
+				enabled: true,
+				metadata: projectLocal,
+			});
+			expect(findResource(result.extensions, projectAliasDuplicateExtension)).toBeUndefined();
+			expect(findResource(result.extensions, userAliasExtension)).toMatchObject({
+				enabled: true,
+				metadata: userLocal,
+			});
+			expect(findResource(result.extensions, userAliasTargetExtension)).toBeUndefined();
+			expect(findResource(result.extensions, packageAliasTargetExtension)).toBeUndefined();
+
+			const firstResult = structuredClone(result);
+			const firstExtensions = result.extensions;
+			const firstSkills = result.skills;
+			const firstPrompts = result.prompts;
+			const firstThemes = result.themes;
+
 			const lateAutoExtension = join(projectBase, "extensions", "late.ts");
 			const lateExplicitExtension = join(projectBase, "explicit", "late.ts");
 			writeFixture(lateAutoExtension);
@@ -504,6 +566,14 @@ describe("package manager compatibility regressions", () => {
 
 			const second = await manager.resolve();
 
+			expect(second).not.toBe(result);
+			expect(second.extensions).not.toBe(firstExtensions);
+			expect(second.skills).not.toBe(firstSkills);
+			expect(second.prompts).not.toBe(firstPrompts);
+			expect(second.themes).not.toBe(firstThemes);
+			expect(result).toEqual(firstResult);
+			expect(findResource(result.extensions, lateAutoExtension)).toBeUndefined();
+			expect(findResource(second.extensions, userExplicitExtension)?.metadata).toEqual(userLocal);
 			expect(findResource(second.extensions, projectAutoExtension)?.enabled).toBe(true);
 			expect(findResource(second.extensions, lateAutoExtension)?.metadata).toEqual(projectAuto);
 			expect(findResource(second.extensions, lateExplicitExtension)?.metadata).toEqual(projectLocal);
