@@ -26,7 +26,6 @@ import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import type { Readable } from "node:stream";
 import { globSync } from "glob";
 import ignore from "ignore";
-import { minimatch } from "minimatch";
 import { maxSatisfying, rcompare, satisfies, valid, validRange } from "semver";
 import { getMetisEnv, getProjectConfigDir } from "../config.ts";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.ts";
@@ -34,6 +33,15 @@ import { type GitSource, parseGitUrl } from "../utils/git.ts";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.ts";
 import { addIgnoreRules } from "./ignore-rules.ts";
 import { isStdoutTakenOver } from "./output-guard.ts";
+import {
+	applyAutoloadDisabledPatterns,
+	applyPatterns,
+	hasGlobPattern,
+	isEnabledByOverrides,
+	isOverridePattern,
+	splitPatterns,
+	toPosixPath,
+} from "./package-manager/resource-patterns.ts";
 import type { PackageSource, SettingsManager } from "./settings-manager.ts";
 
 const NETWORK_TIMEOUT_MS = 10000;
@@ -209,10 +217,6 @@ const FILE_PATTERNS: Record<ResourceType, RegExp> = {
 
 type IgnoreMatcher = ReturnType<typeof ignore>;
 
-function toPosixPath(p: string): string {
-	return p.split(sep).join("/");
-}
-
 function getHomeDir(): string {
 	return process.env.HOME || homedir();
 }
@@ -222,31 +226,6 @@ export function getExtensionTempFolder(agentDir: string): string {
 	mkdirSync(tempFolder, { recursive: true, mode: 0o700 });
 	chmodSync(tempFolder, 0o700);
 	return tempFolder;
-}
-
-function isPattern(s: string): boolean {
-	return s.startsWith("!") || s.startsWith("+") || s.startsWith("-") || s.includes("*") || s.includes("?");
-}
-
-function isOverridePattern(s: string): boolean {
-	return s.startsWith("!") || s.startsWith("+") || s.startsWith("-");
-}
-
-function hasGlobPattern(s: string): boolean {
-	return s.includes("*") || s.includes("?");
-}
-
-function splitPatterns(entries: string[]): { plain: string[]; patterns: string[] } {
-	const plain: string[] = [];
-	const patterns: string[] = [];
-	for (const entry of entries) {
-		if (isPattern(entry)) {
-			patterns.push(entry);
-		} else {
-			plain.push(entry);
-		}
-	}
-	return { plain, patterns };
 }
 
 function collectFiles(
@@ -566,157 +545,6 @@ function collectResourceFiles(dir: string, resourceType: ResourceType): string[]
 		return collectAutoExtensionEntries(dir);
 	}
 	return collectFiles(dir, FILE_PATTERNS[resourceType]);
-}
-
-function matchesAnyPattern(filePath: string, patterns: string[], baseDir: string): boolean {
-	const rel = toPosixPath(relative(baseDir, filePath));
-	const name = basename(filePath);
-	const filePathPosix = toPosixPath(filePath);
-	const isSkillFile = name === "SKILL.md";
-	const parentDir = isSkillFile ? dirname(filePath) : undefined;
-	const parentRel = isSkillFile ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
-	const parentName = isSkillFile ? basename(parentDir!) : undefined;
-	const parentDirPosix = isSkillFile ? toPosixPath(parentDir!) : undefined;
-
-	return patterns.some((pattern) => {
-		const normalizedPattern = toPosixPath(pattern);
-		if (
-			minimatch(rel, normalizedPattern) ||
-			minimatch(name, normalizedPattern) ||
-			minimatch(filePathPosix, normalizedPattern)
-		) {
-			return true;
-		}
-		if (!isSkillFile) return false;
-		return (
-			minimatch(parentRel!, normalizedPattern) ||
-			minimatch(parentName!, normalizedPattern) ||
-			minimatch(parentDirPosix!, normalizedPattern)
-		);
-	});
-}
-
-function normalizeExactPattern(pattern: string): string {
-	const normalized = pattern.startsWith("./") || pattern.startsWith(".\\") ? pattern.slice(2) : pattern;
-	return toPosixPath(normalized);
-}
-
-function matchesAnyExactPattern(filePath: string, patterns: string[], baseDir: string): boolean {
-	if (patterns.length === 0) return false;
-	const rel = toPosixPath(relative(baseDir, filePath));
-	const name = basename(filePath);
-	const filePathPosix = toPosixPath(filePath);
-	const isSkillFile = name === "SKILL.md";
-	const parentDir = isSkillFile ? dirname(filePath) : undefined;
-	const parentRel = isSkillFile ? toPosixPath(relative(baseDir, parentDir!)) : undefined;
-	const parentDirPosix = isSkillFile ? toPosixPath(parentDir!) : undefined;
-
-	return patterns.some((pattern) => {
-		const normalized = normalizeExactPattern(pattern);
-		if (normalized === rel || normalized === filePathPosix) {
-			return true;
-		}
-		if (!isSkillFile) return false;
-		return normalized === parentRel || normalized === parentDirPosix;
-	});
-}
-
-function getOverridePatterns(entries: string[]): string[] {
-	return entries.filter((pattern) => pattern.startsWith("!") || pattern.startsWith("+") || pattern.startsWith("-"));
-}
-
-function isEnabledByOverrides(filePath: string, patterns: string[], baseDir: string): boolean {
-	const overrides = getOverridePatterns(patterns);
-	const excludes = overrides.filter((pattern) => pattern.startsWith("!")).map((pattern) => pattern.slice(1));
-	const forceIncludes = overrides.filter((pattern) => pattern.startsWith("+")).map((pattern) => pattern.slice(1));
-	const forceExcludes = overrides.filter((pattern) => pattern.startsWith("-")).map((pattern) => pattern.slice(1));
-
-	let enabled = true;
-	if (excludes.length > 0 && matchesAnyPattern(filePath, excludes, baseDir)) {
-		enabled = false;
-	}
-	if (forceIncludes.length > 0 && matchesAnyExactPattern(filePath, forceIncludes, baseDir)) {
-		enabled = true;
-	}
-	if (forceExcludes.length > 0 && matchesAnyExactPattern(filePath, forceExcludes, baseDir)) {
-		enabled = false;
-	}
-	return enabled;
-}
-
-/**
- * Apply patterns to paths and return a Set of enabled paths.
- * Pattern types:
- * - Plain patterns: include matching paths
- * - `!pattern`: exclude matching paths
- * - `+path`: force-include exact path (overrides exclusions)
- * - `-path`: force-exclude exact path (overrides force-includes)
- */
-function applyPatterns(allPaths: string[], patterns: string[], baseDir: string): Set<string> {
-	const includes: string[] = [];
-	const excludes: string[] = [];
-	const forceIncludes: string[] = [];
-	const forceExcludes: string[] = [];
-
-	for (const p of patterns) {
-		if (p.startsWith("+")) {
-			forceIncludes.push(p.slice(1));
-		} else if (p.startsWith("-")) {
-			forceExcludes.push(p.slice(1));
-		} else if (p.startsWith("!")) {
-			excludes.push(p.slice(1));
-		} else {
-			includes.push(p);
-		}
-	}
-
-	// Step 1: Apply includes (or all if no includes)
-	let result: string[];
-	if (includes.length === 0) {
-		result = [...allPaths];
-	} else {
-		result = allPaths.filter((filePath) => matchesAnyPattern(filePath, includes, baseDir));
-	}
-
-	// Step 2: Apply excludes
-	if (excludes.length > 0) {
-		result = result.filter((filePath) => !matchesAnyPattern(filePath, excludes, baseDir));
-	}
-
-	// Step 3: Force-include (add back from allPaths, overriding exclusions)
-	if (forceIncludes.length > 0) {
-		for (const filePath of allPaths) {
-			if (!result.includes(filePath) && matchesAnyExactPattern(filePath, forceIncludes, baseDir)) {
-				result.push(filePath);
-			}
-		}
-	}
-
-	// Step 4: Force-exclude (remove even if included or force-included)
-	if (forceExcludes.length > 0) {
-		result = result.filter((filePath) => !matchesAnyExactPattern(filePath, forceExcludes, baseDir));
-	}
-
-	return new Set(result);
-}
-
-function applyAutoloadDisabledPatterns(allPaths: string[], patterns: string[], baseDir: string): Map<string, boolean> {
-	const result = new Map<string, boolean>();
-	for (const pattern of patterns) {
-		const target = pattern.slice(
-			pattern.startsWith("+") || pattern.startsWith("-") || pattern.startsWith("!") ? 1 : 0,
-		);
-		const enabled = !pattern.startsWith("-") && !pattern.startsWith("!");
-		const exact = pattern.startsWith("+") || pattern.startsWith("-");
-		for (const filePath of allPaths) {
-			if (
-				exact ? matchesAnyExactPattern(filePath, [target], baseDir) : matchesAnyPattern(filePath, [target], baseDir)
-			) {
-				result.set(filePath, enabled);
-			}
-		}
-	}
-	return result;
 }
 
 export class DefaultPackageManager implements PackageManager {
