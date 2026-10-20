@@ -2,15 +2,19 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { Folder, FolderOpen, type Icon } from "@phosphor-icons/react";
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../src/renderer/components/BrowserPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import type {
 	DesktopBrowserEvent,
 	DesktopBrowserState,
+	DesktopDownloadControlType,
 	DesktopDownloadItem,
+	DesktopDownloadState,
 	MetisDesktopApi,
 } from "../src/shared/desktop-api.ts";
 import { DEFAULT_BROWSER_PROFILE_ID } from "../src/shared/desktop-api.ts";
@@ -36,13 +40,37 @@ function button(container: ParentNode, label: string): HTMLButtonElement | undef
 	);
 }
 
+function downloadRow(container: ParentNode, filename: string): HTMLElement {
+	const match = [...container.querySelectorAll<HTMLElement>(".browser-download-row")].find(
+		(candidate) => candidate.querySelector(".browser-download-name")?.textContent === filename,
+	);
+	if (!match) throw new Error(`Missing download row: ${filename}`);
+	return match;
+}
+
+function actionLabels(row: ParentNode): string[] {
+	return [...row.querySelectorAll<HTMLButtonElement>(".browser-download-actions button")].map(
+		(candidate) => candidate.getAttribute("aria-label") ?? "",
+	);
+}
+
+function iconPaths(svg: SVGSVGElement): string[] {
+	return [...svg.querySelectorAll("path")].map((path) => path.getAttribute("d") ?? "");
+}
+
+function renderedIconPaths(IconComponent: Icon): string[] {
+	const template = document.createElement("template");
+	template.innerHTML = renderToStaticMarkup(<IconComponent aria-hidden="true" size={12} />);
+	return [...template.content.querySelectorAll("path")].map((path) => path.getAttribute("d") ?? "");
+}
+
 async function flush() {
 	await act(async () => {
 		await Promise.resolve();
 	});
 }
 
-function renderPanel(api: MetisDesktopApi) {
+function renderPanel(api: MetisDesktopApi, onError: (cause: unknown) => void = vi.fn()) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -54,7 +82,7 @@ function renderPanel(api: MetisDesktopApi) {
 					sessionId="11111111-1111-4111-8111-111111111111"
 					browserId="browser-1"
 					controlState="idle"
-					onError={vi.fn()}
+					onError={onError}
 					onProfileImported={vi.fn()}
 					onState={vi.fn()}
 					profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }}
@@ -191,5 +219,155 @@ describe("BrowserPanel downloads", () => {
 		await flush();
 
 		expect(container.textContent).toContain("No downloads yet");
+	});
+
+	it("renders every state with fixed action order, menuitems and 12px icons", async () => {
+		const cases: readonly {
+			readonly actions: readonly string[];
+			readonly label: string;
+			readonly state: DesktopDownloadState;
+		}[] = [
+			{
+				actions: ["Pause download", "Cancel download", "Remove from list"],
+				label: "Downloading",
+				state: "progressing",
+			},
+			{ actions: ["Resume download", "Cancel download", "Remove from list"], label: "Paused", state: "paused" },
+			{ actions: ["Open file", "Show in folder", "Remove from list"], label: "Completed", state: "completed" },
+			{ actions: ["Retry download", "Remove from list"], label: "Cancelled", state: "cancelled" },
+			{ actions: ["Retry download", "Remove from list"], label: "Download failed", state: "interrupted" },
+		];
+		const actionTypes: Readonly<Record<string, DesktopDownloadControlType>> = {
+			"Pause download": "pause",
+			"Resume download": "resume",
+			"Cancel download": "cancel",
+			"Open file": "open",
+			"Show in folder": "reveal",
+			"Retry download": "retry",
+			"Remove from list": "remove",
+		};
+		const controlBrowserDownload = vi.fn().mockResolvedValue(undefined);
+		const { api } = browserPanelApi({
+			controlBrowserDownload,
+			downloads: cases.map((item) =>
+				download({ downloadId: `d-${item.state}`, filename: `${item.state}.zip`, state: item.state }),
+			),
+		});
+		const { container } = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Downloads")!.click());
+		await flush();
+
+		for (const expected of cases) {
+			const element = downloadRow(container, `${expected.state}.zip`);
+			expect(element.tagName).toBe("DIV");
+			expect(element.getAttribute("data-download-state")).toBe(expected.state);
+			const name = element.querySelector(".browser-download-name");
+			expect(name?.textContent).toBe(`${expected.state}.zip`);
+			expect(name?.getAttribute("title")).toBe(`${expected.state}.zip`);
+			expect(element.querySelector(".browser-download-meta")?.textContent).toContain(expected.label);
+			expect(actionLabels(element)).toEqual(expected.actions);
+
+			const main = element.querySelector(".browser-download-main");
+			expect(main?.parentElement).toBe(element);
+			expect(main?.querySelector(".browser-download-info > .browser-download-name")).toBe(name);
+			for (const action of element.querySelectorAll<HTMLButtonElement>(".browser-download-actions button")) {
+				expect(action.getAttribute("role")).toBe("menuitem");
+				expect(action.getAttribute("type")).toBe("button");
+				const svg = action.querySelector("svg");
+				expect(svg?.getAttribute("width")).toBe("12");
+				expect(svg?.getAttribute("height")).toBe("12");
+			}
+
+			const progress = element.querySelector<HTMLElement>(".browser-download-progress");
+			if (expected.state === "progressing" || expected.state === "paused") {
+				expect(progress).not.toBeNull();
+				expect(progress?.parentElement).toBe(element);
+				expect(progress?.querySelector("i")?.style.width).toBe("25%");
+			} else {
+				expect(progress).toBeNull();
+			}
+		}
+
+		const reveal = downloadRow(container, "completed.zip").querySelector<HTMLButtonElement>(
+			'button[aria-label="Show in folder"]',
+		);
+		expect(iconPaths(reveal!.querySelector("svg")!)).toEqual(renderedIconPaths(Folder));
+		expect(iconPaths(reveal!.querySelector("svg")!)).not.toEqual(renderedIconPaths(FolderOpen));
+
+		let expectedCalls = 0;
+		for (const expected of cases) {
+			const element = downloadRow(container, `${expected.state}.zip`);
+			for (const label of expected.actions) {
+				const action = [...element.querySelectorAll<HTMLButtonElement>(".browser-download-actions button")].find(
+					(candidate) => candidate.getAttribute("aria-label") === label,
+				);
+				expect(action).toBeDefined();
+				await act(async () => action!.click());
+				expectedCalls += 1;
+				expect(controlBrowserDownload).toHaveBeenNthCalledWith(expectedCalls, {
+					type: actionTypes[label],
+					downloadId: `d-${expected.state}`,
+				});
+			}
+		}
+	});
+
+	it("formats known, unknown and clamped totals", async () => {
+		const { api } = browserPanelApi({
+			downloads: [
+				download({ downloadId: "d-known", filename: "known.zip", receivedBytes: 250, totalBytes: 1_000 }),
+				download({ downloadId: "d-unknown", filename: "unknown.zip", receivedBytes: 750, totalBytes: 0 }),
+				download({ downloadId: "d-over", filename: "over.zip", receivedBytes: 2_500, totalBytes: 1_000 }),
+			],
+		});
+		const { container } = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Downloads")!.click());
+		await flush();
+
+		const meta = (filename: string) =>
+			downloadRow(container, filename).querySelector(".browser-download-meta")?.textContent;
+		const progressWidth = (filename: string) =>
+			downloadRow(container, filename).querySelector<HTMLElement>(".browser-download-progress i")?.style.width;
+
+		expect(meta("known.zip")).toBe("250 B / 1000 B · Downloading · 25%");
+		expect(meta("unknown.zip")).toBe("750 B · Downloading");
+		expect(meta("over.zip")).toBe("2.4 KB / 1000 B · Downloading · 100%");
+		expect(progressWidth("unknown.zip")).toBe("0%");
+		expect(progressWidth("over.zip")).toBe("100%");
+	});
+
+	it("translates download states and actions for the active locale", async () => {
+		await setLocale("zh-CN");
+		const { api } = browserPanelApi({ downloads: [download({ downloadId: "d-zh", filename: "zh.zip" })] });
+		const { container } = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "下载")!.click());
+		await flush();
+
+		const element = downloadRow(container, "zh.zip");
+		expect(element.querySelector(".browser-download-meta")?.textContent).toContain("下载中");
+		expect(actionLabels(element)).toEqual(["暂停下载", "取消下载", "从列表中移除"]);
+	});
+
+	it("reports control failures without closing the menu", async () => {
+		const onError = vi.fn();
+		const controlBrowserDownload = vi.fn().mockRejectedValueOnce(new Error("control failed"));
+		const { api } = browserPanelApi({
+			controlBrowserDownload,
+			downloads: [download({ downloadId: "d-active" })],
+		});
+		const { container } = renderPanel(api, onError);
+		await flush();
+		await act(async () => button(container, "Downloads")!.click());
+		await flush();
+		await act(async () => button(container, "Pause download")!.click());
+		await flush();
+
+		expect(controlBrowserDownload).toHaveBeenCalledWith({ type: "pause", downloadId: "d-active" });
+		expect(onError).toHaveBeenCalledOnce();
+		expect(container.textContent).toContain("Browser action failed");
+		expect(downloadRow(container, "report.pdf")).toBeDefined();
 	});
 });

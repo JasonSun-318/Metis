@@ -1,14 +1,18 @@
 // @vitest-environment jsdom
 
+import { Folder, FolderOpen, type Icon } from "@phosphor-icons/react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserSettingsPanel } from "../src/renderer/components/BrowserSettingsPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
 	type DesktopBrowserEvent,
+	type DesktopDownloadControlType,
 	type DesktopDownloadItem,
+	type DesktopDownloadState,
 	type DesktopHistoryEntry,
 	type MetisDesktopApi,
 } from "../src/shared/desktop-api.ts";
@@ -90,6 +94,30 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 	);
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
+}
+
+function downloadRow(container: ParentNode, filename: string): HTMLElement {
+	const match = [...container.querySelectorAll<HTMLElement>(".browser-settings-download")].find(
+		(candidate) => candidate.querySelector("strong")?.textContent === filename,
+	);
+	if (!match) throw new Error(`Missing download row: ${filename}`);
+	return match;
+}
+
+function actionLabels(row: ParentNode): string[] {
+	return [...row.querySelectorAll<HTMLButtonElement>(".browser-settings-download-actions button")].map(
+		(candidate) => candidate.getAttribute("aria-label") ?? "",
+	);
+}
+
+function iconPaths(svg: SVGSVGElement): string[] {
+	return [...svg.querySelectorAll("path")].map((path) => path.getAttribute("d") ?? "");
+}
+
+function renderedIconPaths(IconComponent: Icon): string[] {
+	const template = document.createElement("template");
+	template.innerHTML = renderToStaticMarkup(<IconComponent aria-hidden="true" size={14} />);
+	return [...template.content.querySelectorAll("path")].map((path) => path.getAttribute("d") ?? "");
 }
 
 function setValue(input: HTMLInputElement, value: string) {
@@ -299,5 +327,189 @@ describe("BrowserSettingsPanel", () => {
 		expect(container.textContent).toContain("Browser settings could not be loaded");
 		await act(async () => button(container, "Manage downloads").click());
 		expect(container.textContent).toContain("No downloads in this run");
+	});
+
+	it("renders every state without menuitem, with 14px icons and FolderOpen reveal", async () => {
+		const cases: readonly {
+			readonly actions: readonly string[];
+			readonly label: string;
+			readonly state: DesktopDownloadState;
+		}[] = [
+			{
+				actions: ["Pause download", "Cancel download", "Remove from list"],
+				label: "Downloading",
+				state: "progressing",
+			},
+			{ actions: ["Resume download", "Cancel download", "Remove from list"], label: "Paused", state: "paused" },
+			{ actions: ["Open file", "Show in folder", "Remove from list"], label: "Completed", state: "completed" },
+			{ actions: ["Retry download", "Remove from list"], label: "Cancelled", state: "cancelled" },
+			{ actions: ["Retry download", "Remove from list"], label: "Download failed", state: "interrupted" },
+		];
+		const actionTypes: Readonly<Record<string, DesktopDownloadControlType>> = {
+			"Pause download": "pause",
+			"Resume download": "resume",
+			"Cancel download": "cancel",
+			"Open file": "open",
+			"Show in folder": "reveal",
+			"Retry download": "retry",
+			"Remove from list": "remove",
+		};
+		const { api } = fixture({
+			downloads: cases.map((item) =>
+				download({
+					downloadId: `d-${item.state}`,
+					filename: `${item.state}.zip`,
+					receivedBytes: 250,
+					state: item.state,
+				}),
+			),
+		});
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Manage downloads").click());
+		await flush();
+
+		for (const expected of cases) {
+			const element = downloadRow(container, `${expected.state}.zip`);
+			expect(element.tagName).toBe("LI");
+			expect(element.getAttribute("data-download-state")).toBe(expected.state);
+			const name = element.querySelector(".browser-settings-download-copy strong");
+			expect(name?.textContent).toBe(`${expected.state}.zip`);
+			expect(name?.getAttribute("title")).toBe(`${expected.state}.zip`);
+			const copy = element.querySelector(".browser-settings-download-copy");
+			expect(copy?.parentElement).toBe(element);
+			expect(copy?.querySelector("span")?.textContent).toContain(expected.label);
+			expect(actionLabels(element)).toEqual(expected.actions);
+
+			for (const action of element.querySelectorAll<HTMLButtonElement>(
+				".browser-settings-download-actions button",
+			)) {
+				expect(action.getAttribute("role")).toBeNull();
+				expect(action.getAttribute("type")).toBe("button");
+				const svg = action.querySelector("svg");
+				expect(svg?.getAttribute("width")).toBe("14");
+				expect(svg?.getAttribute("height")).toBe("14");
+			}
+
+			const progress = element.querySelector<HTMLElement>(".browser-settings-download-progress");
+			if (expected.state === "progressing" || expected.state === "paused") {
+				expect(progress).not.toBeNull();
+				expect(progress?.parentElement).toBe(element);
+				expect(progress?.querySelector("i")?.style.width).toBe("25%");
+			} else {
+				expect(progress).toBeNull();
+			}
+		}
+
+		const reveal = downloadRow(container, "completed.zip").querySelector<HTMLButtonElement>(
+			'button[aria-label="Show in folder"]',
+		);
+		expect(iconPaths(reveal!.querySelector("svg")!)).toEqual(renderedIconPaths(FolderOpen));
+		expect(iconPaths(reveal!.querySelector("svg")!)).not.toEqual(renderedIconPaths(Folder));
+
+		for (const expected of cases) {
+			const element = downloadRow(container, `${expected.state}.zip`);
+			for (const label of expected.actions) {
+				const action = [
+					...element.querySelectorAll<HTMLButtonElement>(".browser-settings-download-actions button"),
+				].find((candidate) => candidate.getAttribute("aria-label") === label);
+				expect(action).toBeDefined();
+				await act(async () => action!.click());
+				await flush();
+				expect(api.controlBrowserDownload).toHaveBeenLastCalledWith({
+					type: actionTypes[label],
+					downloadId: `d-${expected.state}`,
+				});
+			}
+		}
+	});
+
+	it("formats known, unknown and clamped totals", async () => {
+		const { api } = fixture({
+			downloads: [
+				download({ downloadId: "known", filename: "known.zip", receivedBytes: 250, state: "progressing" }),
+				download({
+					downloadId: "unknown",
+					filename: "unknown.zip",
+					receivedBytes: 750,
+					state: "progressing",
+					totalBytes: 0,
+				}),
+				download({
+					downloadId: "over",
+					filename: "over.zip",
+					receivedBytes: 2_500,
+					state: "progressing",
+				}),
+			],
+		});
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Manage downloads").click());
+		await flush();
+
+		const meta = (filename: string) =>
+			downloadRow(container, filename).querySelector(".browser-settings-download-copy span")?.textContent;
+		const progressWidth = (filename: string) =>
+			downloadRow(container, filename).querySelector<HTMLElement>(".browser-settings-download-progress i")?.style
+				.width;
+
+		expect(meta("known.zip")).toBe("250 B / 1000 B · Downloading · 25%");
+		expect(meta("unknown.zip")).toBe("750 B · Downloading");
+		expect(meta("over.zip")).toBe("2.4 KB / 1000 B · Downloading · 100%");
+		expect(progressWidth("unknown.zip")).toBe("0%");
+		expect(progressWidth("over.zip")).toBe("100%");
+	});
+
+	it("translates download states and actions for the active locale", async () => {
+		await setLocale("zh-CN");
+		const { api } = fixture({
+			downloads: [download({ downloadId: "zh", filename: "zh.zip", state: "progressing", receivedBytes: 250 })],
+		});
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "管理下载").click());
+		await flush();
+
+		const element = downloadRow(container, "zh.zip");
+		expect(element.querySelector(".browser-settings-download-copy span")?.textContent).toContain("下载中");
+		expect(actionLabels(element)).toEqual(["暂停下载", "取消下载", "从列表中移除"]);
+	});
+
+	it("refreshes after a successful control and reports failures without refreshing", async () => {
+		const { api } = fixture({
+			downloads: [
+				download({ downloadId: "active", filename: "active.zip", state: "progressing", receivedBytes: 250 }),
+			],
+		});
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Manage downloads").click());
+		await flush();
+
+		const listCalls = vi.mocked(api.listBrowserDownloads).mock.calls.length;
+		let resolveControl = () => {};
+		vi.mocked(api.controlBrowserDownload).mockImplementationOnce(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveControl = resolve;
+				}),
+		);
+		await act(async () => button(container, "Pause download").click());
+		expect(api.controlBrowserDownload).toHaveBeenCalledWith({ type: "pause", downloadId: "active" });
+		expect(api.listBrowserDownloads).toHaveBeenCalledTimes(listCalls);
+		await act(async () => {
+			resolveControl();
+			await Promise.resolve();
+		});
+		await flush();
+		expect(api.listBrowserDownloads).toHaveBeenCalledTimes(listCalls + 1);
+
+		vi.mocked(api.controlBrowserDownload).mockRejectedValueOnce(new Error("control failed"));
+		const callsBeforeFailure = vi.mocked(api.listBrowserDownloads).mock.calls.length;
+		await act(async () => button(container, "Pause download").click());
+		await flush();
+		expect(container.textContent).toContain("Browser action failed");
+		expect(api.listBrowserDownloads).toHaveBeenCalledTimes(callsBeforeFailure);
 	});
 });

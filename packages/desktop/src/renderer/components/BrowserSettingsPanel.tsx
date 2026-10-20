@@ -1,16 +1,10 @@
 import {
-	ArrowCounterClockwise,
 	ArrowLeft,
-	ArrowSquareOut,
 	CaretDown,
 	ClockCounterClockwise,
 	DownloadSimple,
 	FolderOpen,
 	MagnifyingGlass,
-	Pause,
-	Play,
-	Trash,
-	X,
 } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -23,8 +17,10 @@ import {
 	type DesktopHistoryEntry,
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
-import { browserProfileLabel, formatBrowserBytes } from "../browser-display.ts";
+import { browserProfileLabel } from "../browser-display.ts";
+import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
+import { browserDownloadPresentation } from "./browser-download-presentation.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 type BrowserSettingsView = "overview" | "history" | "downloads";
@@ -87,91 +83,28 @@ function DownloadRow({
 	readonly onAction: (type: DesktopDownloadControlType, downloadId: string) => void;
 }) {
 	const { t } = useTranslation();
-	const percent =
-		download.totalBytes > 0 ? Math.min(100, Math.floor((download.receivedBytes / download.totalBytes) * 100)) : null;
-	const size =
-		download.totalBytes > 0
-			? `${formatBrowserBytes(download.receivedBytes)} / ${formatBrowserBytes(download.totalBytes)}`
-			: formatBrowserBytes(download.receivedBytes);
-	const state =
-		download.state === "progressing"
-			? t("Downloading")
-			: download.state === "paused"
-				? t("Paused")
-				: download.state === "completed"
-					? t("Completed")
-					: download.state === "cancelled"
-						? t("Cancelled")
-						: t("Download failed");
+	const { actions, percent, showProgress, showProgressPercent, size, stateLabel } = browserDownloadPresentation(
+		download,
+		t,
+	);
 	return (
 		<li className="browser-settings-download" data-download-state={download.state}>
 			<div className="browser-settings-download-copy">
 				<strong title={download.filename}>{download.filename}</strong>
 				<span>
-					{size} · {state}
-					{percent !== null && download.state === "progressing" ? ` · ${percent}%` : ""}
+					{size} · {stateLabel}
+					{showProgressPercent ? ` · ${percent}%` : ""}
 				</span>
 			</div>
-			<div className="browser-settings-download-actions">
-				{download.state === "progressing" && (
-					<button
-						aria-label={t("Pause download")}
-						onClick={() => onAction("pause", download.downloadId)}
-						type="button"
-					>
-						<Pause aria-hidden="true" size={14} />
-					</button>
-				)}
-				{download.state === "paused" && (
-					<button
-						aria-label={t("Resume download")}
-						onClick={() => onAction("resume", download.downloadId)}
-						type="button"
-					>
-						<Play aria-hidden="true" size={14} />
-					</button>
-				)}
-				{(download.state === "progressing" || download.state === "paused") && (
-					<button
-						aria-label={t("Cancel download")}
-						onClick={() => onAction("cancel", download.downloadId)}
-						type="button"
-					>
-						<X aria-hidden="true" size={14} />
-					</button>
-				)}
-				{download.state === "completed" && (
-					<button aria-label={t("Open file")} onClick={() => onAction("open", download.downloadId)} type="button">
-						<ArrowSquareOut aria-hidden="true" size={14} />
-					</button>
-				)}
-				{download.state === "completed" && (
-					<button
-						aria-label={t("Show in folder")}
-						onClick={() => onAction("reveal", download.downloadId)}
-						type="button"
-					>
-						<FolderOpen aria-hidden="true" size={14} />
-					</button>
-				)}
-				{(download.state === "interrupted" || download.state === "cancelled") && (
-					<button
-						aria-label={t("Retry download")}
-						onClick={() => onAction("retry", download.downloadId)}
-						type="button"
-					>
-						<ArrowCounterClockwise aria-hidden="true" size={14} />
-					</button>
-				)}
-				<button
-					aria-label={t("Remove from list")}
-					onClick={() => onAction("remove", download.downloadId)}
-					type="button"
-				>
-					<Trash aria-hidden="true" size={14} />
-				</button>
-			</div>
-			{(download.state === "progressing" || download.state === "paused") && (
+			<BrowserDownloadActions
+				actions={actions}
+				className="browser-settings-download-actions"
+				downloadId={download.downloadId}
+				iconSize={14}
+				onAction={onAction}
+				revealIcon={FolderOpen}
+			/>
+			{showProgress && (
 				<div aria-hidden="true" className="browser-settings-download-progress">
 					<i style={{ width: `${percent ?? 0}%` }} />
 				</div>
