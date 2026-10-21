@@ -3,6 +3,7 @@ import type { ThinkingLevel } from "@metis/agent-core";
 import type { Model } from "@metis/ai";
 import { getAgentDir } from "../config.ts";
 import { resolvePath } from "../utils/paths.ts";
+import { createAgentSession } from "./agent-session-factory.ts";
 import { AuthStorage } from "./auth-storage.ts";
 import type { SessionStartEvent, ToolDefinition } from "./extensions/index.ts";
 import { createDeclarativeHooksBridge } from "./hooks/hook-bridge.ts";
@@ -15,7 +16,7 @@ import {
 	type ResourceLoader,
 	type ResourceLoaderReloadOptions,
 } from "./resource-loader.ts";
-import { type CreateAgentSessionOptions, type CreateAgentSessionResult, createAgentSession } from "./sdk.ts";
+import type { CreateAgentSessionOptions, CreateAgentSessionResult } from "./sdk.ts";
 import type { SessionManager } from "./session-manager.ts";
 import { SettingsManager } from "./settings-manager.ts";
 import type { UnattendedExecutionProfile } from "./unattended-execution.ts";
