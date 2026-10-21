@@ -47,6 +47,14 @@ describe("desktop App Server RPC forwarding", () => {
 		});
 	});
 
+	it("declares model discovery forwarding", () => {
+		expect(DESKTOP_RPC_FORWARDING.discoverModels).toEqual({
+			channel: "metis:discover-models",
+			method: "model/discover",
+			input: "required",
+		});
+	});
+
 	it("declares plugin RPC forwarding", () => {
 		expect(DESKTOP_RPC_FORWARDING.listPluginMarkets).toEqual({
 			channel: "metis:list-plugin-markets",

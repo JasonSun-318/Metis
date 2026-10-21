@@ -767,6 +767,11 @@ export interface Model<TApi extends Api> {
 	 * Missing keys use provider defaults. null marks a level as unsupported.
 	 */
 	thinkingLevelMap?: ThinkingLevelMap;
+	/**
+	 * True for user-authored manual maps. Adapters must use only explicit map
+	 * values, never infer a provider value from the level, model id, or base URL.
+	 */
+	explicitThinkingLevels?: boolean;
 	input: ("text" | "image")[];
 	cost: ModelCost;
 	contextWindow: number;

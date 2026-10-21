@@ -7,7 +7,7 @@
 			"id": "client-1",
 			"method": "initialize",
 			"params": {
-				"protocolVersion": 24,
+				"protocolVersion": 25,
 				"client": {
 					"name": "Metis Desktop",
 					"version": "0.80.6"

@@ -96,6 +96,7 @@ export const DESKTOP_RPC_FORWARDING = {
 		method: "model/settings/update",
 		input: "required",
 	},
+	discoverModels: { channel: "metis:discover-models", method: "model/discover", input: "required" },
 	getPersonalization: { channel: "metis:get-personalization", method: "personalization/get", input: "none" },
 	updatePersonalization: {
 		channel: "metis:update-personalization",

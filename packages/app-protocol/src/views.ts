@@ -759,13 +759,26 @@ export const CustomModelReasoningModeSchema = Type.Union([
 	Type.Literal("auto"),
 	Type.Literal("off"),
 	Type.Literal("generic"),
+	Type.Literal("manual"),
 ]);
 export const CustomModelReasoningSourceSchema = Type.Union([
 	Type.Literal("catalog"),
 	Type.Literal("generic"),
 	Type.Literal("off"),
+	Type.Literal("manual"),
 	Type.Literal("unrecognized"),
 ]);
+const ThinkingLevelValueSchema = Type.Union([Type.String({ minLength: 1, maxLength: 1_024 }), Type.Null()]);
+/** Explicit per-level provider values; absent/null levels are unsupported. */
+export const CustomModelThinkingLevelMapSchema = StrictObject({
+	off: Type.Optional(ThinkingLevelValueSchema),
+	minimal: Type.Optional(ThinkingLevelValueSchema),
+	low: Type.Optional(ThinkingLevelValueSchema),
+	medium: Type.Optional(ThinkingLevelValueSchema),
+	high: Type.Optional(ThinkingLevelValueSchema),
+	xhigh: Type.Optional(ThinkingLevelValueSchema),
+	max: Type.Optional(ThinkingLevelValueSchema),
+});
 export const ModelRefSchema = StrictObject({ provider: NameSchema, modelId: NameSchema });
 export const ModelOptionViewSchema = StrictObject({
 	provider: NameSchema,
@@ -782,6 +795,7 @@ export const ModelSettingsModelViewSchema = StrictObject({
 	thinkingLevels: Type.Array(ActualThinkingLevelSchema, { maxItems: 7, uniqueItems: true }),
 	reasoningMode: Type.Union([CustomModelReasoningModeSchema, Type.Null()]),
 	reasoningSource: Type.Union([CustomModelReasoningSourceSchema, Type.Null()]),
+	thinkingLevelMap: Type.Optional(CustomModelThinkingLevelMapSchema),
 	imageInput: Type.Boolean(),
 	custom: Type.Boolean(),
 });
@@ -1706,6 +1720,7 @@ export type PermissionSettingsView = Static<typeof PermissionSettingsViewSchema>
 export type PermissionExecutionTargetView = Static<typeof PermissionExecutionTargetSchema>;
 export type ProjectPermissionRuleView = Static<typeof ProjectPermissionRuleViewSchema>;
 export type ModelOptionView = Static<typeof ModelOptionViewSchema>;
+export type CustomModelThinkingLevelMap = Static<typeof CustomModelThinkingLevelMapSchema>;
 export type ModelSettingsModelView = Static<typeof ModelSettingsModelViewSchema>;
 export type ModelSettingsProviderView = Static<typeof ModelSettingsProviderViewSchema>;
 export type ModelSettingsView = Static<typeof ModelSettingsViewSchema>;

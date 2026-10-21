@@ -5,9 +5,12 @@ import {
 	type AuthStorage,
 	FileAuthStorageBackend,
 	getSupportedThinkingLevels,
+	hasConfiguredManualThinkingLevel,
 	type ModelRegistry,
+	normalizeManualThinkingLevelMap,
 	type SettingsManager,
 } from "@metis/coding-agent/host";
+import { discoverModels } from "./model-discovery.ts";
 
 interface ModelsConfigDocument {
 	providers: Record<string, Record<string, unknown>>;
@@ -22,6 +25,7 @@ interface ModelSettingsServiceOptions {
 }
 
 const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+type TestReasoningLevel = Exclude<ReturnType<typeof getSupportedThinkingLevels>[number], "off">;
 
 function clampThinkingSelection(
 	model: Parameters<typeof getSupportedThinkingLevels>[0],
@@ -71,7 +75,7 @@ function configuredModelIds(config: ModelsConfigDocument): Map<string, Set<strin
 	return result;
 }
 
-type SavedReasoningMode = "auto" | "off" | "generic";
+type SavedReasoningMode = "auto" | "off" | "generic" | "manual";
 
 function configuredModelReasoningModes(config: ModelsConfigDocument): Map<string, Map<string, SavedReasoningMode>> {
 	const result = new Map<string, Map<string, SavedReasoningMode>>();
@@ -81,7 +85,7 @@ function configuredModelReasoningModes(config: ModelsConfigDocument): Map<string
 		for (const model of models) {
 			if (!isRecord(model) || typeof model.id !== "string") continue;
 			const mode = model.reasoningMode;
-			if (mode === "auto" || mode === "off" || mode === "generic") modes.set(model.id, mode);
+			if (mode === "auto" || mode === "off" || mode === "generic" || mode === "manual") modes.set(model.id, mode);
 		}
 		result.set(provider, modes);
 	}
@@ -101,6 +105,25 @@ function publicError(error: unknown, secrets: readonly (string | undefined)[]): 
 		if (secret) message = message.split(secret).join("[redacted]");
 	}
 	return message.replace(/Bearer\s+\S+/giu, "Bearer [redacted]").slice(0, 500) || "Connection failed";
+}
+
+function publicThinkingLevelMap(
+	map: Parameters<typeof normalizeManualThinkingLevelMap>[0],
+): Partial<Record<(typeof THINKING_LEVELS)[number], string | null>> | undefined {
+	if (!map) return undefined;
+	const result: Partial<Record<(typeof THINKING_LEVELS)[number], string | null>> = {};
+	let hasValue = false;
+	for (const level of THINKING_LEVELS) {
+		const value = map[level];
+		if (typeof value === "string" && value.trim().length > 0) {
+			result[level] = value;
+			hasValue = true;
+		} else if (value === null) {
+			result[level] = null;
+			hasValue = true;
+		}
+	}
+	return hasValue ? result : undefined;
 }
 
 /** Owns the small settings-specific mutation surface for models.json, auth.json, and global defaults. */
@@ -175,6 +198,7 @@ export class ModelSettingsService {
 				models: models
 					.map((model) => {
 						const isCustom = configuredIds.has(model.id);
+						const thinkingLevelMap = isCustom ? publicThinkingLevelMap(model.thinkingLevelMap) : undefined;
 						return {
 							provider,
 							modelId: model.id,
@@ -187,6 +211,7 @@ export class ModelSettingsService {
 							reasoningSource: isCustom
 								? (this.modelRegistry.getCustomModelReasoningSource(provider, model.id) ?? null)
 								: null,
+							...(thinkingLevelMap ? { thinkingLevelMap } : {}),
 							imageInput: model.input.includes("image"),
 							custom: isCustom,
 						};
@@ -225,6 +250,12 @@ export class ModelSettingsService {
 				const model = this.modelRegistry.find(mutation.model.provider, mutation.model.modelId);
 				if (!model || !this.modelRegistry.hasConfiguredAuth(model))
 					throw new Error("The default model is unavailable");
+				if (
+					this.modelRegistry.getCustomModelReasoningSource(model.provider, model.id) === "manual" &&
+					!getSupportedThinkingLevels(model).includes(mutation.thinkingSelection)
+				) {
+					throw new Error(`Thinking level "${mutation.thinkingSelection}" is not configured for this model`);
+				}
 				this.settingsManager.setDefaultModelSettings(
 					{ provider: model.provider, modelId: model.id },
 					clampThinkingSelection(model, mutation.thinkingSelection),
@@ -309,7 +340,22 @@ export class ModelSettingsService {
 								("reasoning" in previousModel || "thinkingLevelMap" in previousModel);
 							next.id = model.modelId;
 							next.name = model.name;
-							if (preserveExplicitReasoning) {
+							if (model.reasoningMode === "manual") {
+								const source =
+									model.thinkingLevelMap ??
+									(isRecord(previousModel) && isRecord(previousModel.thinkingLevelMap)
+										? previousModel.thinkingLevelMap
+										: undefined);
+								const normalized = normalizeManualThinkingLevelMap(
+									source as Parameters<typeof normalizeManualThinkingLevelMap>[0],
+								);
+								if (!hasConfiguredManualThinkingLevel(normalized)) {
+									throw new Error(`Model "${model.modelId}" needs at least one manual thinking level value`);
+								}
+								next.reasoningMode = "manual";
+								next.thinkingLevelMap = normalized;
+								delete next.reasoning;
+							} else if (preserveExplicitReasoning) {
 								delete next.reasoningMode;
 							} else {
 								next.reasoningMode = model.reasoningMode;
@@ -366,17 +412,39 @@ export class ModelSettingsService {
 		}
 	}
 
+	async discover(params: ClientParams<"model/discover">): Promise<ClientResult<"model/discover">> {
+		let apiKey = params.apiKey;
+		if (apiKey === undefined && params.provider) {
+			const credential = this.authStorage.get(params.provider);
+			if (credential?.type === "api_key") {
+				apiKey = credential.key;
+			} else if (!credential) {
+				// models.json provider keys are read through the registry; OAuth tokens are
+				// deliberately not refreshed by a read-only discovery call.
+				apiKey = await this.modelRegistry.getApiKeyForProvider(params.provider);
+			}
+		}
+		return discoverModels(params, { apiKey });
+	}
+
 	async testConnection(params: ClientParams<"model/testConnection">): Promise<ClientResult<"model/testConnection">> {
 		this.modelRegistry.refresh();
 		const model = this.modelRegistry.find(params.provider, params.modelId);
 		if (!model) return { ok: false, message: "Model not found", latencyMs: 0 };
+		let reasoning: TestReasoningLevel | undefined;
+		if (model.explicitThinkingLevels) {
+			const supportedLevels = getSupportedThinkingLevels(model);
+			const savedLevel = this.settingsManager.getDefaultThinkingLevel();
+			const level = savedLevel && supportedLevels.includes(savedLevel) ? savedLevel : supportedLevels[0];
+			reasoning = level && level !== "off" ? level : undefined;
+		}
 		const startedAt = Date.now();
 		let apiKey: string | undefined;
 		try {
 			const auth = await this.modelRegistry.getApiKeyAndHeaders(model);
 			if (!auth.ok) throw new Error(auth.error);
 			apiKey = auth.apiKey;
-			await this.modelRegistry
+			const message = await this.modelRegistry
 				.streamSimple(
 					model,
 					{ messages: [{ role: "user", content: "Reply with OK.", timestamp: Date.now() }] },
@@ -386,11 +454,18 @@ export class ModelSettingsService {
 						headers: auth.headers,
 						maxTokens: 8,
 						maxRetries: 0,
+						...(reasoning ? { reasoning } : {}),
 						timeoutMs: 15_000,
 						signal: AbortSignal.timeout(15_000),
 					},
 				)
 				.result();
+			if (message.stopReason === "error" || message.stopReason === "aborted" || message.errorMessage) {
+				const failure =
+					message.errorMessage?.trim() ||
+					(message.stopReason === "aborted" ? "Request aborted" : "Connection failed");
+				return { ok: false, message: publicError(failure, [apiKey]), latencyMs: Date.now() - startedAt };
+			}
 			return { ok: true, message: "Connection succeeded", latencyMs: Date.now() - startedAt };
 		} catch (error) {
 			return {

@@ -9,6 +9,15 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
+import { ModelCatalog } from "./ModelCatalog.tsx";
+import { type DiscoveredModel, ModelDiscovery } from "./ModelDiscovery.tsx";
+import {
+	ModelReasoningEditor,
+	type ReasoningRow,
+	reasoningError,
+	reasoningMutation,
+	reasoningRows,
+} from "./ModelReasoningEditor.tsx";
 
 interface ProviderDraft {
 	readonly provider: string;
@@ -35,9 +44,10 @@ interface CustomModelDraft {
 	readonly contextWindow: number;
 	readonly maxOutputTokens: number;
 	/** 推理能力来源：自动匹配内置目录、关闭，或按通用 low/medium/high 处理。 */
-	readonly reasoningMode: "auto" | "off" | "generic";
+	readonly reasoningMode: "auto" | "off" | "generic" | "manual";
+	readonly reasoningRows: readonly ReasoningRow[];
 	/** 服务端解析结果；未保存的新模型为 null。 */
-	readonly reasoningSource: "catalog" | "generic" | "off" | "unrecognized" | null;
+	readonly reasoningSource: "catalog" | "generic" | "off" | "unrecognized" | "manual" | null;
 	/** 当前模型可用的思考等级；未保存的草稿按所选模式预览。 */
 	readonly thinkingLevels: readonly ThinkingSelectionView[];
 	/** 模型是否支持图片输入；保存时映射为 input: ["text", "image"]。 */
@@ -85,6 +95,7 @@ function customProviderDraft(
 				contextWindow: model.contextWindow,
 				maxOutputTokens: model.maxOutputTokens,
 				reasoningMode: model.reasoningMode ?? "auto",
+				reasoningRows: reasoningRows(model.thinkingLevelMap),
 				reasoningSource: model.reasoningSource,
 				thinkingLevels: model.thinkingLevels,
 				imageInput: model.imageInput,
@@ -102,25 +113,25 @@ function customProviderDraft(
 	};
 }
 
-function newCustomModelDraft(): CustomModelDraft {
+function newCustomModelDraft(discovered?: DiscoveredModel): CustomModelDraft {
 	return {
 		key: crypto.randomUUID(),
-		modelId: "",
-		name: "",
-		contextWindow: DEFAULT_CONTEXT_WINDOW,
-		maxOutputTokens: DEFAULT_MAX_OUTPUT_TOKENS,
-		reasoningMode: "auto",
+		modelId: discovered?.modelId ?? "",
+		name: discovered?.name ?? "",
+		contextWindow: discovered?.contextWindow ?? DEFAULT_CONTEXT_WINDOW,
+		maxOutputTokens: discovered?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+		reasoningMode: "off",
+		reasoningRows: [],
 		reasoningSource: null,
 		thinkingLevels: ["off"],
-		imageInput: false,
+		imageInput: discovered?.imageInput ?? false,
 	};
 }
 
-const GENERIC_REASONING_LEVELS: readonly ThinkingSelectionView[] = ["off", "low", "medium", "high"];
-
-/** Draft-time preview of the levels a reasoning mode offers; the server is authoritative after save. */
-function previewThinkingLevels(mode: CustomModelDraft["reasoningMode"]): readonly ThinkingSelectionView[] {
-	return mode === "generic" ? GENERIC_REASONING_LEVELS : ["off"];
+function draftThinkingLevels(model: CustomModelDraft | undefined): readonly ThinkingSelectionView[] {
+	if (!model || model.reasoningMode === "off") return ["off"];
+	if (model.reasoningMode !== "manual") return model.thinkingLevels;
+	return model.reasoningRows.filter((row) => row.value.trim()).map((row) => row.level);
 }
 
 function clampTokenCount(value: number, fallback: number): number {
@@ -143,12 +154,6 @@ function providerDraft(
 
 const THINKING_LEVELS: readonly ThinkingSelectionView[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
-const CUSTOM_REASONING_OPTIONS = [
-	{ value: "auto", labelKey: "Automatic detection (recommended)" },
-	{ value: "off", labelKey: "No reasoning" },
-	{ value: "generic", labelKey: "Generic reasoning: Low, medium, high" },
-] as const;
-
 function thinkingLevelLabel(level: ThinkingSelectionView): string {
 	return level === "off" ? "Off" : level === "xhigh" ? "XHigh" : `${level.charAt(0).toUpperCase()}${level.slice(1)}`;
 }
@@ -157,19 +162,24 @@ export function ModelSettingsPanel({
 	api,
 	serverReady,
 }: {
-	readonly api: Pick<MetisDesktopApi, "getModelSettings" | "updateModelSettings" | "testModelConnection">;
+	readonly api: Pick<
+		MetisDesktopApi,
+		"getModelSettings" | "updateModelSettings" | "testModelConnection" | "discoverModels"
+	>;
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
 	const fieldId = useId();
-	const [catalogOpen, setCatalogOpen] = useState(false);
+	const [catalogOpen, setCatalogOpen] = useState(true);
 	const [providerQuery, setProviderQuery] = useState("");
 	const [settings, setSettings] = useState<ModelSettingsView | null>(null);
 	const [draft, setDraft] = useState<ProviderDraft | null>(null);
 	const [customDraft, setCustomDraft] = useState<CustomProviderDraft | null>(null);
 	const [visionDraft, setVisionDraft] = useState<VisionDraft | null>(null);
 	const [defaultThinking, setDefaultThinking] = useState<ThinkingSelectionView>("medium");
-	const [busy, setBusy] = useState(false);
+	const [operation, setOperation] = useState<"save" | "test" | "defaults" | "remove" | null>(null);
+	const busy = operation !== null;
+	const [confirmRemoval, setConfirmRemoval] = useState<"credentials" | "provider" | "vision" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const providerDialogRef = useRef<HTMLDialogElement>(null);
@@ -209,7 +219,7 @@ export function ModelSettingsPanel({
 	const providerDefaultThinking: ThinkingSelectionView = defaultModelLevels.includes(defaultThinking)
 		? defaultThinking
 		: (defaultModelLevels.at(-1) ?? "off");
-	const customModelLevels = selectedCustomModel?.thinkingLevels ?? ["off"];
+	const customModelLevels = draftThinkingLevels(selectedCustomModel);
 	const customDefaultThinking: ThinkingSelectionView = customModelLevels.includes(defaultThinking)
 		? defaultThinking
 		: (customModelLevels.at(-1) ?? "off");
@@ -226,6 +236,7 @@ export function ModelSettingsPanel({
 		setCustomDraft(null);
 		setError(null);
 		setNotice(null);
+		setConfirmRemoval(null);
 	}, []);
 
 	const closeCustomEditor = useCallback(() => {
@@ -233,6 +244,7 @@ export function ModelSettingsPanel({
 		setDraft(null);
 		setError(null);
 		setNotice(null);
+		setConfirmRemoval(null);
 	}, []);
 
 	const openCustomEditor = useCallback(
@@ -240,6 +252,7 @@ export function ModelSettingsPanel({
 			setError(null);
 			setNotice(null);
 			setDraft(null);
+			setConfirmRemoval(null);
 			setCustomDraft(customProviderDraft(provider, settings?.defaultModel ?? null));
 		},
 		[settings?.defaultModel],
@@ -297,6 +310,7 @@ export function ModelSettingsPanel({
 		setVisionDraft(null);
 		setError(null);
 		setNotice(null);
+		setConfirmRemoval(null);
 	}, []);
 
 	const visionOpen = visionDraft !== null;
@@ -326,8 +340,9 @@ export function ModelSettingsPanel({
 	const runUpdate = async (
 		mutation: Parameters<MetisDesktopApi["updateModelSettings"]>[0]["mutation"],
 		success: string,
+		action: "save" | "defaults" | "remove" = "save",
 	) => {
-		setBusy(true);
+		setOperation(action);
 		setError(null);
 		setNotice(null);
 		try {
@@ -339,7 +354,7 @@ export function ModelSettingsPanel({
 			setError(cause instanceof Error ? cause.message : t("Model settings could not be saved."));
 			return null;
 		} finally {
-			setBusy(false);
+			setOperation(null);
 		}
 	};
 
@@ -352,6 +367,7 @@ export function ModelSettingsPanel({
 				thinkingSelection: providerDefaultThinking,
 			},
 			t("Defaults saved"),
+			"defaults",
 		);
 	};
 
@@ -408,6 +424,7 @@ export function ModelSettingsPanel({
 		const next = await runUpdate(
 			{ type: "set_vision", settings: null, credential: { action: "remove" } },
 			t("Vision model removed"),
+			"remove",
 		);
 		if (!next) return;
 		setVisionDraft(null);
@@ -431,6 +448,7 @@ export function ModelSettingsPanel({
 					credentialAction === "remove" ? { action: "remove" } : { action: "set", value: draft.apiKey.trim() },
 			},
 			credentialAction === "remove" ? t("Credentials cleared") : t("Provider saved"),
+			credentialAction === "remove" ? "remove" : "save",
 		);
 		if (!next) return;
 		const saved = next.providers.find((item) => item.provider === draft.provider);
@@ -439,11 +457,11 @@ export function ModelSettingsPanel({
 
 	const testConnection = async () => {
 		const testModelId = draft?.testModelId;
-		if (!selectedProvider || !testModelId) return;
+		if (!selectedProvider || !testModelId || draft?.apiKey.trim()) return;
 		const model =
 			selectedProvider.models.find((candidate) => candidate.modelId === testModelId) ?? selectedProvider.models[0];
 		if (!model) return;
-		setBusy(true);
+		setOperation("test");
 		setError(null);
 		setNotice(null);
 		try {
@@ -453,19 +471,18 @@ export function ModelSettingsPanel({
 				provider: selectedProvider.provider,
 				modelId: model.modelId,
 			});
-			setNotice(
-				`${t(result.ok ? "Connection succeeded" : "Connection failed")} · ${result.latencyMs} ms${result.ok ? "" : ` · ${result.message}`}`,
-			);
+			if (result.ok) setNotice(`${t("Connection succeeded")} · ${result.latencyMs} ms`);
+			else setError(`${t("Connection failed")} · ${result.latencyMs} ms · ${result.message}`);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Connection test failed."));
 		} finally {
-			setBusy(false);
+			setOperation(null);
 		}
 	};
 
 	const testCustomConnection = async () => {
-		if (!customDraft || !customDraft.testModelId) return;
-		setBusy(true);
+		if (!customDraft || !customDraft.testModelId || customDirty) return;
+		setOperation("test");
 		setError(null);
 		setNotice(null);
 		try {
@@ -475,13 +492,12 @@ export function ModelSettingsPanel({
 				provider: customDraft.provider,
 				modelId: customDraft.testModelId,
 			});
-			setNotice(
-				`${t(result.ok ? "Connection succeeded" : "Connection failed")} · ${result.latencyMs} ms${result.ok ? "" : ` · ${result.message}`}`,
-			);
+			if (result.ok) setNotice(`${t("Connection succeeded")} · ${result.latencyMs} ms`);
+			else setError(`${t("Connection failed")} · ${result.latencyMs} ms · ${result.message}`);
 		} catch (cause) {
 			setError(cause instanceof Error ? cause.message : t("Connection test failed."));
 		} finally {
-			setBusy(false);
+			setOperation(null);
 		}
 	};
 
@@ -518,6 +534,13 @@ export function ModelSettingsPanel({
 			setError(t("Enter an API key to save."));
 			return;
 		}
+		for (const model of customDraft.models) {
+			const message = reasoningError(model);
+			if (message) {
+				setError(t(message));
+				return;
+			}
+		}
 		const models = customDraft.models
 			.map((model) => ({ ...model, modelId: model.modelId.trim(), name: model.name.trim() || model.modelId.trim() }))
 			.filter((model) => model.modelId !== "");
@@ -548,7 +571,7 @@ export function ModelSettingsPanel({
 					name: model.name,
 					contextWindow: clampTokenCount(model.contextWindow, DEFAULT_CONTEXT_WINDOW),
 					maxOutputTokens: clampTokenCount(model.maxOutputTokens, DEFAULT_MAX_OUTPUT_TOKENS),
-					reasoningMode: model.reasoningMode,
+					...reasoningMutation(model),
 					imageInput: model.imageInput,
 				})),
 				credential,
@@ -562,7 +585,7 @@ export function ModelSettingsPanel({
 	const removeCustomProvider = async () => {
 		if (!customDraft) return;
 		const provider = customDraft.provider;
-		const next = await runUpdate({ type: "remove_provider", provider }, t("Provider removed"));
+		const next = await runUpdate({ type: "remove_provider", provider }, t("Provider removed"), "remove");
 		if (!next) return;
 		setCustomDraft(null);
 	};
@@ -576,6 +599,7 @@ export function ModelSettingsPanel({
 				thinkingSelection: customDefaultThinking,
 			},
 			t("Defaults saved"),
+			"defaults",
 		);
 	};
 
@@ -600,6 +624,7 @@ export function ModelSettingsPanel({
 	};
 
 	const openProvider = (provider: ModelSettingsProviderView) => {
+		setConfirmRemoval(null);
 		setError(null);
 		setNotice(null);
 		if (provider.builtin) {
@@ -627,14 +652,78 @@ export function ModelSettingsPanel({
 					{provider.auth.configured ? t("Configured") : t("Set up")}
 				</span>
 			</span>
-			<small>{t("{{count}} models", { count: provider.models.length })}</small>
+			<small>
+				{t("{{count}} models", { count: provider.models.length })} ·{" "}
+				{provider.builtin ? t("Built-in") : t("Custom")}
+				{settings?.defaultModel?.provider === provider.provider ? ` · ${t("Current default")}` : ""}
+			</small>
 		</button>
 	);
-	const availableProviders = providers.filter(
-		(provider) =>
-			!provider.auth.configured &&
-			`${provider.name} ${provider.provider}`.toLocaleLowerCase().includes(providerQuery.trim().toLocaleLowerCase()),
+	const matchesProvider = (provider: ModelSettingsProviderView) =>
+		`${provider.name} ${provider.provider}`.toLocaleLowerCase().includes(providerQuery.trim().toLocaleLowerCase());
+	const currentDefaultProvider = settings?.providers.find((item) => item.provider === settings.defaultModel?.provider);
+	const currentDefaultModel = currentDefaultProvider?.models.find(
+		(item) => item.modelId === settings?.defaultModel?.modelId,
 	);
+	const defaultEditorProvider = currentDefaultProvider ?? providers.find((item) => item.auth.configured);
+	const savedCustom = settings?.providers.find((item) => item.provider === customDraft?.provider);
+	const customDirty = Boolean(
+		customDraft &&
+			(!savedCustom ||
+				customDraft.apiKey.trim() ||
+				customDraft.name !== savedCustom.name ||
+				customDraft.baseUrl !== savedCustom.baseUrl ||
+				customDraft.api !== savedCustom.api ||
+				JSON.stringify(
+					customDraft.models.map((model) => ({
+						modelId: model.modelId,
+						name: model.name,
+						contextWindow: model.contextWindow,
+						maxOutputTokens: model.maxOutputTokens,
+						imageInput: model.imageInput,
+						...reasoningMutation(model),
+					})),
+				) !==
+					JSON.stringify(
+						savedCustom.models.map((model) => ({
+							modelId: model.modelId,
+							name: model.name,
+							contextWindow: model.contextWindow,
+							maxOutputTokens: model.maxOutputTokens,
+							imageInput: model.imageInput,
+							reasoningMode: model.reasoningMode ?? "auto",
+							...(model.reasoningMode === "manual"
+								? {
+										thinkingLevelMap: Object.fromEntries(
+											THINKING_LEVELS.flatMap((level) =>
+												typeof model.thinkingLevelMap?.[level] === "string"
+													? [[level, model.thinkingLevelMap[level]]]
+													: [],
+											),
+										),
+									}
+								: {}),
+						})),
+					)),
+	);
+	const addDiscovered = (found: readonly DiscoveredModel[]) =>
+		setCustomDraft((current) => {
+			if (!current) return current;
+			const ids = new Set(current.models.map((model) => model.modelId.trim()));
+			const added = found.filter((model) => !ids.has(model.modelId));
+			const models = current.models.filter(
+				(model) =>
+					model.modelId ||
+					model.name ||
+					model.imageInput ||
+					model.reasoningMode !== "off" ||
+					model.reasoningRows.length > 0 ||
+					model.contextWindow !== DEFAULT_CONTEXT_WINDOW ||
+					model.maxOutputTokens !== DEFAULT_MAX_OUTPUT_TOKENS,
+			);
+			return { ...current, models: [...models, ...added.map(newCustomModelDraft)] };
+		});
+	const availableProviders = providers.filter((provider) => !provider.auth.configured && matchesProvider(provider));
 
 	if (!settings && !error)
 		return <output aria-label={t("Loading model settings")} className="status-block settings-loading" />;
@@ -646,9 +735,34 @@ export function ModelSettingsPanel({
 	const defaultThinkingOptions = thinkingOptions.filter(({ value }) => defaultModelLevels.includes(value));
 	return (
 		<section className="settings-page model-settings-page">
+			<section className="model-default-summary" aria-label={t("New task defaults")}>
+				<div>
+					<h3>{t("New task defaults")}</h3>
+					<strong>{currentDefaultModel?.name ?? settings?.defaultModel?.modelId ?? t("No default model")}</strong>
+					<p>
+						{settings?.defaultModel ? (
+							<>
+								{currentDefaultProvider?.name ?? settings.defaultModel.provider} · {t("Default reasoning")}:{" "}
+								{t(thinkingLevelLabel(settings.defaultThinkingSelection))}
+							</>
+						) : (
+							t("Configure a provider, then choose a default model.")
+						)}
+					</p>
+					<p>{t("Applies to new tasks. Existing conversations keep their current model.")}</p>
+				</div>
+				<button
+					type="button"
+					className="settings-secondary-button"
+					disabled={!defaultEditorProvider || busy}
+					onClick={() => defaultEditorProvider && openProvider(defaultEditorProvider)}
+				>
+					{currentDefaultProvider ? t("Change default model") : t("Choose default model")}
+				</button>
+			</section>
 			<div className="settings-section">
 				<header className="settings-section-heading">
-					<h3>{t("Configured providers")}</h3>
+					<h3>{t("Providers")}</h3>
 				</header>
 				<p className="model-provider-intro">
 					{t("Manage your connected providers and add more when you need them.")}
@@ -658,12 +772,22 @@ export function ModelSettingsPanel({
 						{settings.loadError}
 					</p>
 				) : null}
+				<input
+					type="search"
+					aria-label={t("Search providers")}
+					placeholder={t("Search providers…")}
+					value={providerQuery}
+					onChange={(event) => setProviderQuery(event.target.value)}
+				/>
+				<h4 className="model-group-label">{t("Configured providers")}</h4>
 				<div className="model-provider-grid">
-					{providers.filter((provider) => provider.auth.configured).map(renderProvider)}
+					{providers
+						.filter((provider) => provider.auth.configured && matchesProvider(provider))
+						.map(renderProvider)}
 				</div>
 				{!providers.some((provider) => provider.auth.configured) && (
 					<p className="model-provider-intro">
-						{t("No providers configured. Browse the catalog to connect one.")}
+						{t("No providers configured. Choose a built-in provider below or add your own.")}
 					</p>
 				)}
 				<div className="model-provider-catalog-actions">
@@ -673,7 +797,7 @@ export function ModelSettingsPanel({
 						onClick={() => setCatalogOpen(!catalogOpen)}
 						type="button"
 					>
-						{t("Browse providers")}
+						{catalogOpen ? t("Hide provider catalog") : t("Show provider catalog")}
 					</button>
 
 					<button
@@ -683,18 +807,12 @@ export function ModelSettingsPanel({
 						type="button"
 					>
 						<Plus aria-hidden="true" size={15} />
-						{t("Add provider")}
+						{t("Add custom provider")}
 					</button>
 				</div>
 				{catalogOpen && (
 					<div className="model-provider-catalog">
-						<input
-							aria-label={t("Search providers")}
-							onChange={(event) => setProviderQuery(event.target.value)}
-							placeholder={t("Search providers…")}
-							type="search"
-							value={providerQuery}
-						/>
+						<h4 className="model-group-label">{t("Available providers")}</h4>
 						<div className="model-provider-grid">{availableProviders.map(renderProvider)}</div>
 						{availableProviders.length === 0 && <p>{t("No providers match your search.")}</p>}
 					</div>
@@ -828,7 +946,7 @@ export function ModelSettingsPanel({
 									<button
 										className="settings-danger-button"
 										disabled={busy}
-										onClick={() => void saveProvider("remove")}
+										onClick={() => setConfirmRemoval("credentials")}
 										type="button"
 									>
 										{t("Clear credentials")}
@@ -837,11 +955,12 @@ export function ModelSettingsPanel({
 								{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
 									<button
 										className="settings-secondary-button"
-										disabled={busy}
+										disabled={busy || Boolean(draft.apiKey.trim())}
 										onClick={() => void testConnection()}
+										title={t("Tests the saved key and selected model. Model calls may incur usage charges.")}
 										type="button"
 									>
-										{t("Test connection")}
+										{operation === "test" ? t("Testing…") : t("Test connection")}
 									</button>
 								) : null}
 								<button
@@ -849,9 +968,34 @@ export function ModelSettingsPanel({
 									disabled={busy || !serverReady || !draft.apiKey.trim()}
 									type="submit"
 								>
-									{busy ? t("Saving…") : t("Save API key")}
+									{operation === "save" ? t("Saving…") : t("Save API key")}
 								</button>
 							</div>
+							{confirmRemoval === "credentials" ? (
+								<div className="model-removal-confirm" role="alert">
+									<p>{t("Clear the saved key for this provider?")}</p>
+									<button
+										className="settings-secondary-button"
+										type="button"
+										disabled={busy}
+										onClick={() => setConfirmRemoval(null)}
+									>
+										{t("Cancel")}
+									</button>
+									<button
+										className="settings-danger-button"
+										type="button"
+										disabled={busy}
+										onClick={() => {
+											setConfirmRemoval(null);
+											void saveProvider("remove");
+										}}
+									>
+										{t("Confirm clear credentials")}
+									</button>
+								</div>
+							) : null}
+							{draft.apiKey.trim() ? <p>{t("Save the new key before testing the connection.")}</p> : null}
 							{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
 								<div className="model-use-section">
 									<div>
@@ -890,10 +1034,13 @@ export function ModelSettingsPanel({
 											onClick={saveDefaults}
 											type="button"
 										>
-											{t("Use this model")}
+											{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
 										</button>
 									</div>
 								</div>
+							) : null}
+							{selectedProvider ? (
+								<ModelCatalog key={selectedProvider.provider} models={selectedProvider.models} />
 							) : null}
 						</form>
 						{error ? (
@@ -997,6 +1144,19 @@ export function ModelSettingsPanel({
 								</label>
 							</div>
 
+							<ModelDiscovery
+								api={api}
+								connection={{
+									...(customDraft.provider ? { provider: customDraft.provider } : {}),
+									baseUrl: customDraft.baseUrl,
+									api: customDraft.api,
+									...(customDraft.apiKey.trim() ? { apiKey: customDraft.apiKey.trim() } : {}),
+								}}
+								configured={Boolean(savedCustom?.auth.configured)}
+								existingIds={customDraft.models.map((model) => model.modelId.trim())}
+								disabled={busy}
+								onAdd={addDiscovered}
+							/>
 							<div className="model-custom-models">
 								<div className="model-custom-models-heading">
 									<span>{t("Models")}</span>
@@ -1054,91 +1214,62 @@ export function ModelSettingsPanel({
 												/>
 											</label>
 										</div>
-										<div className="model-custom-model-fields model-custom-model-limits">
-											<label>
-												<span>{t("Context window")}</span>
-												<input
-													disabled={busy}
-													min={1}
-													onChange={(event) =>
-														updateCustomModel(index, {
-															...model,
-															contextWindow: Number(event.target.value),
-														})
-													}
-													type="number"
-													value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""}
-												/>
-											</label>
-											<label>
-												<span>{t("Max output tokens")}</span>
-												<input
-													disabled={busy}
-													min={1}
-													onChange={(event) =>
-														updateCustomModel(index, {
-															...model,
-															maxOutputTokens: Number(event.target.value),
-														})
-													}
-													type="number"
-													value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""}
-												/>
-											</label>
-										</div>
-										<div className="model-custom-model-options">
-											<label className="model-custom-model-capability">
-												<input
-													aria-label={t("Image input")}
-													checked={model.imageInput}
-													disabled={busy}
-													onChange={(event) =>
-														updateCustomModel(index, { ...model, imageInput: event.target.checked })
-													}
-													type="checkbox"
-												/>
-												<span>{t("Image input")}</span>
-											</label>
-											<label
-												htmlFor={`${fieldId}-select-3-${index}`}
-												className="model-custom-model-reasoning"
-											>
-												<span>{t("Reasoning support")}</span>
-												<MenuSelect
-													id={`${fieldId}-select-3-${index}`}
-													ariaLabel={t("Reasoning support")}
-													disabled={busy}
-													onChange={(reasoningMode) =>
-														updateCustomModel(index, {
-															...model,
-															reasoningMode,
-															reasoningSource: null,
-															thinkingLevels: previewThinkingLevels(reasoningMode),
-														})
-													}
-													options={CUSTOM_REASONING_OPTIONS.map((option) => ({
-														value: option.value,
-														label: t(option.labelKey),
-													}))}
-													value={model.reasoningMode}
-												/>
-											</label>
-										</div>
-										{model.reasoningMode === "auto" && model.reasoningSource === "unrecognized" ? (
-											<p className="model-custom-model-hint">
-												{t(
-													"This model was not found for the selected API format. Reasoning stays off unless you choose Generic reasoning: Low, medium, high.",
-												)}
-											</p>
-										) : model.reasoningSource === "catalog" ? (
-											<p className="model-custom-model-hint">
-												{t("Supported reasoning levels: {{levels}}", {
-													levels: model.thinkingLevels
-														.map((level) => t(thinkingLevelLabel(level)))
-														.join(", "),
-												})}
-											</p>
-										) : null}
+										<details className="model-advanced-settings">
+											<summary>{t("Advanced model settings")}</summary>
+											<div className="model-custom-model-fields model-custom-model-limits">
+												<label>
+													<span>{t("Context window")}</span>
+													<input
+														disabled={busy}
+														min={1}
+														onChange={(event) =>
+															updateCustomModel(index, {
+																...model,
+																contextWindow: Number(event.target.value),
+															})
+														}
+														type="number"
+														value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""}
+													/>
+												</label>
+												<label>
+													<span>{t("Max output tokens")}</span>
+													<input
+														disabled={busy}
+														min={1}
+														onChange={(event) =>
+															updateCustomModel(index, {
+																...model,
+																maxOutputTokens: Number(event.target.value),
+															})
+														}
+														type="number"
+														value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""}
+													/>
+												</label>
+											</div>
+											<div className="model-custom-model-options">
+												<label className="model-custom-model-capability">
+													<input
+														aria-label={t("Image input")}
+														checked={model.imageInput}
+														disabled={busy}
+														onChange={(event) =>
+															updateCustomModel(index, { ...model, imageInput: event.target.checked })
+														}
+														type="checkbox"
+													/>
+													<span>{t("Image input")}</span>
+												</label>
+											</div>
+										</details>
+										<ModelReasoningEditor
+											id={`${fieldId}-reasoning-${model.key}`}
+											model={model}
+											api={customDraft.api}
+											disabled={busy}
+											onChange={(patch) => updateCustomModel(index, { ...model, ...patch })}
+										/>
 									</div>
 								))}
 							</div>
@@ -1148,7 +1279,7 @@ export function ModelSettingsPanel({
 									<button
 										className="settings-danger-button"
 										disabled={busy}
-										onClick={() => void removeCustomProvider()}
+										onClick={() => setConfirmRemoval("provider")}
 										type="button"
 									>
 										{t("Remove provider")}
@@ -1157,17 +1288,49 @@ export function ModelSettingsPanel({
 								{customDraft.provider && customDraft.testModelId ? (
 									<button
 										className="settings-secondary-button"
-										disabled={busy}
+										disabled={busy || customDirty}
 										onClick={() => void testCustomConnection()}
+										title={t("Tests the saved configuration. Model calls may incur usage charges.")}
 										type="button"
 									>
-										{t("Test connection")}
+										{operation === "test" ? t("Testing…") : t("Test connection")}
 									</button>
 								) : null}
 								<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
-									{busy ? t("Saving…") : t("Save provider")}
+									{operation === "save" ? t("Saving…") : t("Save provider")}
 								</button>
 							</div>
+							{confirmRemoval === "provider" ? (
+								<div className="model-removal-confirm" role="alert">
+									<p>{t("Remove this custom provider and its model configuration?")}</p>
+									<button
+										className="settings-secondary-button"
+										type="button"
+										disabled={busy}
+										onClick={() => setConfirmRemoval(null)}
+									>
+										{t("Cancel")}
+									</button>
+									<button
+										className="settings-danger-button"
+										type="button"
+										disabled={busy}
+										onClick={() => {
+											setConfirmRemoval(null);
+											void removeCustomProvider();
+										}}
+									>
+										{t("Confirm remove provider")}
+									</button>
+								</div>
+							) : null}
+							{customDraft.provider ? (
+								<p>
+									{customDirty
+										? t("Save your changes before testing or changing defaults.")
+										: t("Connection tests use the saved configuration and may incur usage charges.")}
+								</p>
+							) : null}
 							{customDraft.provider && customDraft.models.length > 0 ? (
 								<div className="model-use-section">
 									<div>
@@ -1201,11 +1364,11 @@ export function ModelSettingsPanel({
 										</label>
 										<button
 											className="settings-primary-button"
-											disabled={busy || !customDraft.testModelId}
+											disabled={busy || customDirty || !customDraft.testModelId}
 											onClick={saveCustomDefaults}
 											type="button"
 										>
-											{t("Use this model")}
+											{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
 										</button>
 									</div>
 								</div>
@@ -1258,7 +1421,11 @@ export function ModelSettingsPanel({
 							<header className="model-provider-editor-header">
 								<div>
 									<h2>{t("Vision model")}</h2>
-									<p>{t("Pick the chat API format and endpoint describe_image talks to.")}</p>
+									<p>
+										{t(
+											"Configure an optional service for understanding images, independently of your chat model.",
+										)}
+									</p>
 								</div>
 								<button
 									aria-label={t("Close")}
@@ -1341,7 +1508,7 @@ export function ModelSettingsPanel({
 									<button
 										className="settings-danger-button"
 										disabled={busy}
-										onClick={() => void clearVision()}
+										onClick={() => setConfirmRemoval("vision")}
 										type="button"
 									>
 										{t("Remove")}
@@ -1356,9 +1523,33 @@ export function ModelSettingsPanel({
 									{t("Cancel")}
 								</button>
 								<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
-									{busy ? t("Saving…") : t("Save")}
+									{operation === "save" ? t("Saving…") : t("Save")}
 								</button>
 							</div>
+							{confirmRemoval === "vision" ? (
+								<div className="model-removal-confirm" role="alert">
+									<p>{t("Remove the optional vision configuration?")}</p>
+									<button
+										className="settings-secondary-button"
+										type="button"
+										disabled={busy}
+										onClick={() => setConfirmRemoval(null)}
+									>
+										{t("Cancel")}
+									</button>
+									<button
+										className="settings-danger-button"
+										type="button"
+										disabled={busy}
+										onClick={() => {
+											setConfirmRemoval(null);
+											void clearVision();
+										}}
+									>
+										{t("Confirm remove vision")}
+									</button>
+								</div>
+							) : null}
 							{error ? (
 								<p className="settings-action-message error" role="alert">
 									<XCircle aria-hidden="true" size={15} />

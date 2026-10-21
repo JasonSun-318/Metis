@@ -423,6 +423,227 @@ describe("SettingsDialog", () => {
 	});
 });
 
+describe("Model settings workflows", () => {
+	const roots: ReturnType<typeof createRoot>[] = [];
+	afterEach(async () => {
+		for (const root of roots.splice(0)) await act(async () => root.unmount());
+	});
+	async function mount(settings = modelSettings, overrides: Partial<MetisDesktopApi> = {}) {
+		const api = {
+			getModelSettings: vi.fn().mockResolvedValue(settings),
+			updateModelSettings: vi.fn().mockResolvedValue(settings),
+			testModelConnection: vi.fn().mockResolvedValue({ ok: true, message: "OK", latencyMs: 7 }),
+			discoverModels: vi.fn().mockResolvedValue({ models: [] }),
+			...overrides,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
+		await flush();
+		return { container, api, root };
+	}
+	async function newProvider(container: HTMLElement) {
+		await act(async () => button(container, "Add custom provider").click());
+		await act(async () => {
+			setValue(container.querySelector('input[placeholder="my-provider"]')!, "custom-example");
+			setValue(
+				container.querySelector('input[placeholder="https://api.example.com/v1"]')!,
+				"https://models.example.invalid/v1",
+			);
+			setValue(container.querySelector('input[type="password"]')!, "test-only-key");
+		});
+	}
+	it("shows the built-in catalog before credentials without making a network or save call", async () => {
+		const settings = {
+			...modelSettings,
+			providers: modelSettings.providers.map((provider) => ({ ...provider, auth: { configured: false } })),
+		};
+		const { container, api } = await mount(settings);
+		expect(container.querySelector(".model-default-summary")?.textContent).toContain("GPT-5");
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		const dialog = container.querySelector(".model-provider-dialog")!;
+		expect(dialog.querySelector(".model-catalog-section")?.textContent).toContain("gpt-5");
+		expect(dialog.textContent).toContain("400000");
+		expect(dialog.textContent).toContain("Text and image input");
+		expect(dialog.querySelectorAll('input[type="password"]')).toHaveLength(1);
+		expect(dialog.textContent).not.toContain("Base URL");
+		expect(api.discoverModels).not.toHaveBeenCalled();
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+	});
+	it("blocks tests of an unsaved key and renders a failed test as an error", async () => {
+		const testModelConnection = vi.fn().mockResolvedValue({ ok: false, message: "Permission denied", latencyMs: 9 });
+		const { container } = await mount(modelSettings, { testModelConnection });
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		await act(async () => setValue(container.querySelector('input[type="password"]')!, "new-test-key"));
+		expect(button(container, "Test connection").disabled).toBe(true);
+		expect(container.textContent).toContain("Save the new key before testing");
+		expect(testModelConnection).not.toHaveBeenCalled();
+		await act(async () => setValue(container.querySelector('input[type="password"]')!, ""));
+		await act(async () => button(container, "Test connection").click());
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain(
+			"Connection failed · 9 ms · Permission denied",
+		);
+		expect(container.querySelector(".settings-action-message:not(.error)")).toBeNull();
+	});
+	it("discovers before saving, adds only selected models and preserves manual edits", async () => {
+		const discoverModels = vi.fn().mockResolvedValue({
+			models: [
+				{ modelId: "remote-a", name: "Remote A", contextWindow: 64000 },
+				{ modelId: "remote-a", name: "Remote A", contextWindow: 64000 },
+				{ modelId: "remote-b", name: "Remote B" },
+			],
+		});
+		const { container, api } = await mount(modelSettings, { discoverModels });
+		await newProvider(container);
+		await act(async () => setValue(container.querySelector('input[placeholder="gpt-5"]')!, "manual-model"));
+		await act(async () => button(container, "Fetch model list").click());
+		expect(discoverModels).toHaveBeenCalledWith({
+			baseUrl: "https://models.example.invalid/v1",
+			api: "openai-responses",
+			apiKey: "test-only-key",
+		});
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+		expect(container.querySelectorAll(".model-discovery-option")).toHaveLength(2);
+		expect(container.querySelector(".model-discovery")?.textContent).toContain("Not tested");
+		await act(async () =>
+			container.querySelector<HTMLInputElement>('input[aria-label="Select model remote-a"]')!.click(),
+		);
+		await act(async () => button(container, "Add selected models (1)").click());
+		const ids = [...container.querySelectorAll<HTMLInputElement>('input[placeholder="gpt-5"]')].map(
+			(input) => input.value,
+		);
+		expect(ids).toEqual(["manual-model", "remote-a"]);
+		await act(async () => button(container, "Show fetched models").click());
+		expect(container.querySelector<HTMLInputElement>('input[aria-label="Select model remote-a"]')!.disabled).toBe(
+			true,
+		);
+		expect(container.textContent).not.toContain("test-only-key");
+		await act(async () => button(container, "Save provider").click());
+		expect(api.updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({
+					models: [
+						expect.objectContaining({ modelId: "manual-model" }),
+						expect.objectContaining({ modelId: "remote-a", contextWindow: 64000, reasoningMode: "off" }),
+					],
+				}),
+			}),
+		);
+	});
+	it("discards a pending discovery result when connection settings change", async () => {
+		let complete!: (result: Awaited<ReturnType<MetisDesktopApi["discoverModels"]>>) => void;
+		const pending = new Promise<Awaited<ReturnType<MetisDesktopApi["discoverModels"]>>>((resolve) => {
+			complete = resolve;
+		});
+		const { container } = await mount(modelSettings, { discoverModels: vi.fn().mockReturnValue(pending) });
+		await newProvider(container);
+		await act(async () => button(container, "Fetch model list").click());
+		await act(async () =>
+			setValue(
+				container.querySelector('input[placeholder="https://api.example.com/v1"]')!,
+				"https://other.example.invalid/v1",
+			),
+		);
+		await act(async () => complete({ models: [{ modelId: "stale-model", name: "Stale model" }] }));
+		expect(container.textContent).not.toContain("stale-model");
+		expect(button(container, "Fetch model list").disabled).toBe(false);
+	});
+	it("keeps manual model addition available after discovery fails", async () => {
+		const { container, api } = await mount(modelSettings, {
+			discoverModels: vi.fn().mockRejectedValue(new Error("Listing is unsupported")),
+		});
+		await newProvider(container);
+		await act(async () => button(container, "Fetch model list").click());
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Listing is unsupported");
+		await act(async () => setValue(container.querySelector('input[placeholder="gpt-5"]')!, "manually-specified"));
+		await act(async () => button(container, "Save provider").click());
+		expect(api.updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({ models: [expect.objectContaining({ modelId: "manually-specified" })] }),
+			}),
+		);
+	});
+	it("requires explicit API values and saves the exact per-model mapping", async () => {
+		const { container, api } = await mount();
+		await newProvider(container);
+		await act(async () => setValue(container.querySelector('input[placeholder="gpt-5"]')!, "custom-model"));
+		await act(async () => container.querySelector<HTMLInputElement>('input[role="switch"]')!.click());
+		await act(async () => button(container, "Add reasoning level").click());
+		await act(async () => button(container, "Save provider").click());
+		expect(container.textContent).toContain("Enter the API value for every reasoning level.");
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+		await act(async () =>
+			setValue(container.querySelector('input[aria-label="API value 1"]')!, "vendor-specific-effort"),
+		);
+		await act(async () => button(container, "Save provider").click());
+		expect(api.updateModelSettings).toHaveBeenCalledWith(
+			expect.objectContaining({
+				mutation: expect.objectContaining({
+					models: [
+						expect.objectContaining({
+							reasoningMode: "manual",
+							thinkingLevelMap: { low: "vendor-specific-effort" },
+						}),
+					],
+				}),
+			}),
+		);
+	});
+	it("shows authentication failures returned by discovery as an error, not an empty success", async () => {
+		const { container } = await mount(modelSettings, {
+			discoverModels: vi
+				.fn()
+				.mockResolvedValue({ models: [], warnings: ["Model discovery authentication failed (HTTP 401)"] }),
+		});
+		await newProvider(container);
+		await act(async () => button(container, "Fetch model list").click());
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("HTTP 401");
+		expect(container.textContent).not.toContain("No models were returned.");
+		expect(button(container, "Add model").disabled).toBe(false);
+	});
+	it("does not mark an unchanged explicit mapping dirty or invent unsupported default levels", async () => {
+		const provider = modelSettings.providers[0]!;
+		const thinkingLevelMap = {
+			off: null,
+			minimal: null,
+			low: null,
+			medium: null,
+			high: "vendor-high",
+			xhigh: null,
+			max: null,
+		};
+		const settings: ModelSettingsView = {
+			...modelSettings,
+			providers: [
+				{
+					...provider,
+					builtin: false,
+					baseUrl: "https://models.example.invalid/v1",
+					api: "openai-responses",
+					models: [
+						{
+							...provider.models[0]!,
+							reasoningMode: "manual",
+							reasoningSource: "manual",
+							thinkingLevels: ["high"],
+							thinkingLevelMap,
+						},
+					],
+				},
+			],
+		};
+		const { container } = await mount(settings);
+		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		expect(button(container, "Test connection").disabled).toBe(false);
+		await act(async () => button(container, "Default reasoning").click());
+		expect([...container.querySelectorAll('[role="option"]')].map((item) => item.textContent?.trim())).toEqual([
+			"High",
+		]);
+	});
+});
+
 describe("ModelSettingsPanel", () => {
 	it("keeps configured providers visible and searches the optional provider catalog", async () => {
 		const unconfigured = {
@@ -440,12 +661,14 @@ describe("ModelSettingsPanel", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
-		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
 		expect(container.textContent).toContain("Specialized models");
-		act(() => button(container, "Browse providers").click());
+		act(() => button(container, "Hide provider catalog").click());
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		act(() => button(container, "Show provider catalog").click());
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
 		act(() => setValue(container.querySelector('input[type="search"]')!, "no match"));
-		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(0);
 		expect(container.textContent).toContain("No providers match your search.");
 		act(() => setValue(container.querySelector('input[type="search"]')!, "anthropic"));
 		expect(container.querySelector(".model-provider-catalog")?.textContent).toContain("Anthropic");
@@ -477,11 +700,11 @@ describe("ModelSettingsPanel", () => {
 		expect(container.querySelector(".model-provider-dialog")?.hasAttribute("open")).toBe(true);
 		const editor = container.querySelector<HTMLElement>(".model-provider-editor")!;
 		expect(editor.textContent).toContain("••••••••••••");
-		expect(editor.textContent).not.toContain("Add provider");
+		expect(editor.textContent).not.toContain("Add custom provider");
 		expect(editor.textContent).not.toContain("Base URL");
 		expect(editor.textContent).not.toContain("Protocol");
 		expect(editor.textContent).not.toContain("Custom models");
-		await act(async () => button(editor, "Use this model").click());
+		await act(async () => button(editor, "Set as default for new tasks").click());
 		expect(updateModelSettings).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mutation: {
@@ -517,6 +740,10 @@ describe("ModelSettingsPanel", () => {
 		);
 		expect(container.textContent).toContain("Connection succeeded · 42 ms");
 		await act(async () => button(container, "Clear credentials").click());
+		expect(updateModelSettings).not.toHaveBeenLastCalledWith(
+			expect.objectContaining({ mutation: expect.objectContaining({ credential: { action: "remove" } }) }),
+		);
+		await act(async () => button(container, "Confirm clear credentials").click());
 		await flush();
 		expect(updateModelSettings).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -607,7 +834,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		expect(container.querySelector(".model-custom-provider-dialog")?.hasAttribute("open")).toBe(true);
 
@@ -634,16 +861,11 @@ describe("ModelSettingsPanel", () => {
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[2]!, "200000");
 			setValue(firstRow.querySelectorAll<HTMLInputElement>("input")[3]!, "32000");
 		});
-		// 第一行默认是 Automatic detection，这里切到 Generic reasoning
-		const reasoningSelect = firstRow.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')!;
-		expect(reasoningSelect.textContent).toContain("Automatic");
-		await act(async () => reasoningSelect.click());
-		await flush();
-		await act(async () => {
-			[...container.querySelectorAll<HTMLButtonElement>('[role="option"]')]
-				.find((item) => item.textContent?.includes("Generic reasoning: Low, medium, high"))
-				?.click();
-		});
+		await act(async () => firstRow.querySelector<HTMLInputElement>('input[role="switch"]')!.click());
+		await act(async () => button(firstRow, "Add reasoning level").click());
+		await act(async () =>
+			setValue(firstRow.querySelector<HTMLInputElement>('input[aria-label="API value 1"]')!, "high"),
+		);
 		// 添加第二行
 		await act(async () => button(container, "Add model").click());
 		await flush();
@@ -679,7 +901,8 @@ describe("ModelSettingsPanel", () => {
 							name: "My Model A",
 							contextWindow: 200000,
 							maxOutputTokens: 32000,
-							reasoningMode: "generic",
+							reasoningMode: "manual",
+							thinkingLevelMap: { low: "high" },
 							imageInput: false,
 						},
 						{
@@ -687,7 +910,7 @@ describe("ModelSettingsPanel", () => {
 							name: "My Model B",
 							contextWindow: 128000,
 							maxOutputTokens: 16384,
-							reasoningMode: "auto",
+							reasoningMode: "off",
 							imageInput: false,
 						},
 					],
@@ -708,7 +931,7 @@ describe("ModelSettingsPanel", () => {
 		try {
 			await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 			await flush();
-			await act(async () => button(container, "Add provider").click());
+			await act(async () => button(container, "Add custom provider").click());
 			await act(async () => button(container, "Add model").click());
 			const [first, second] = container.querySelectorAll<HTMLElement>(".model-custom-model-row");
 			const input = second!.querySelector<HTMLInputElement>('input[placeholder="gpt-5"]')!;
@@ -798,17 +1021,18 @@ describe("ModelSettingsPanel", () => {
 		expect(editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!.value).toBe("My Custom");
 		// 默认模型应预选为 my-model-a（而不是无脑选第一个）
 		expect(editor.querySelector(".model-use-row .menu-select-value")?.textContent).toBe("My Model A");
-		expect(editor.querySelector<HTMLButtonElement>('button[aria-label="Reasoning support"]')?.textContent).toContain(
-			"Generic reasoning: Low, medium, high",
-		);
-		expect(editor.textContent).toContain("not found for the selected API format");
+		expect(editor.textContent).toContain("Existing reasoning settings are preserved until you edit the mapping.");
+		expect(
+			[...editor.querySelectorAll<HTMLInputElement>('input[role="switch"]')].map((input) => input.checked),
+		).toEqual([true, false]);
+		expect(editor.querySelector('button[aria-label="Reasoning support"]')).toBeNull();
 		expect(editor.querySelectorAll(".model-use-row .menu-select-value")[1]?.textContent).toBe("High");
 		await act(async () => button(editor, "Default reasoning").click());
 		expect(
 			[...editor.querySelectorAll<HTMLElement>('[role="option"]')].map((option) => option.textContent?.trim()),
 		).toEqual(["Off", "Low", "Medium", "High"]);
 		await act(async () => editor.querySelector<HTMLButtonElement>('[role="option"][aria-selected="true"]')!.click());
-		await act(async () => button(editor, "Use this model").click());
+		await act(async () => button(editor, "Set as default for new tasks").click());
 		expect(updateModelSettings).toHaveBeenCalledWith(
 			expect.objectContaining({
 				mutation: {
@@ -841,6 +1065,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
 		await flush();
 		await act(async () => button(container, "Remove provider").click());
+		await act(async () => button(container, "Confirm remove provider").click());
 		await flush();
 		expect(updateModelSettings).toHaveBeenCalledWith(
 			expect.objectContaining({
@@ -863,7 +1088,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		await act(async () =>
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "vision-provider"),
@@ -964,7 +1189,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		await act(async () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "openai");
@@ -998,7 +1223,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		await act(async () => {
 			setValue(container.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!, "my-dup");
@@ -1035,7 +1260,7 @@ describe("ModelSettingsPanel", () => {
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
 
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		expect(container.querySelectorAll(".model-provider-dialog")).toHaveLength(1);
 		// 打开内置卡片时，自定义编辑器必须被关闭
@@ -1046,7 +1271,7 @@ describe("ModelSettingsPanel", () => {
 		// 关闭内置 dialog 后再开添加，同样只有一个
 		await act(async () => button(container, "Close provider settings").click());
 		await flush();
-		await act(async () => button(container, "Add provider").click());
+		await act(async () => button(container, "Add custom provider").click());
 		await flush();
 		expect(container.querySelectorAll(".model-provider-dialog")).toHaveLength(1);
 		expect(container.querySelector(".model-custom-provider-dialog")).not.toBeNull();

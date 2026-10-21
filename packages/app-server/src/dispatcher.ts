@@ -742,6 +742,8 @@ export class Dispatcher {
 				);
 			case "model/testConnection":
 				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
+			case "model/discover":
+				return await this.modelSettings.discover(request.params);
 			case "permission/auto/get":
 				return this.permissionAutoSettings.view();
 			case "permission/auto/update":

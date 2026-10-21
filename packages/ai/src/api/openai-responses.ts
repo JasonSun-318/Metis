@@ -331,7 +331,22 @@ function buildParams(
 	}
 
 	if (model.reasoning) {
-		if (options?.reasoningEffort || options?.reasoningSummary) {
+		if (model.explicitThinkingLevels) {
+			const level = options?.reasoningEffort;
+			const mapped = level ? model.thinkingLevelMap?.[level] : model.thinkingLevelMap?.off;
+			if (typeof mapped !== "string" || mapped.trim().length === 0) {
+				throw new Error(
+					level
+						? `Thinking level "${level}" is not configured for this model`
+						: 'The "off" thinking level is not configured for this model',
+				);
+			}
+			params.reasoning = {
+				effort: mapped as NonNullable<typeof params.reasoning>["effort"],
+				...(level ? { summary: options?.reasoningSummary || "auto" } : {}),
+			};
+			if (level) params.include = ["reasoning.encrypted_content"];
+		} else if (options?.reasoningEffort || options?.reasoningSummary) {
 			const effort = options?.reasoningEffort
 				? (model.thinkingLevelMap?.[options.reasoningEffort] ?? options.reasoningEffort)
 				: "medium";

@@ -635,7 +635,23 @@ function buildParams(
 	const thinkingTokenBudgetField = resolveThinkingTokenBudgetField(compat);
 	const thinkingBudget = resolveClampedThinkingBudget(model, options, params);
 
-	if (compat.thinkingFormat === "zai" && model.reasoning) {
+	if (model.explicitThinkingLevels && model.reasoning) {
+		// Manual mappings bypass provider/URL auto-detection: the configured value is
+		// the wire value for reasoning_effort, and unsupported levels fail loudly.
+		if (model.compat?.supportsReasoningEffort === false) {
+			throw new Error("This model is configured without reasoning_effort support");
+		}
+		const level = options?.reasoningEffort;
+		const mapped = level ? model.thinkingLevelMap?.[level] : model.thinkingLevelMap?.off;
+		if (typeof mapped !== "string" || mapped.trim().length === 0) {
+			throw new Error(
+				level
+					? `Thinking level "${level}" is not configured for this model`
+					: 'The "off" thinking level is not configured for this model',
+			);
+		}
+		(params as Omit<typeof params, "reasoning_effort"> & { reasoning_effort?: string }).reasoning_effort = mapped;
+	} else if (compat.thinkingFormat === "zai" && model.reasoning) {
 		const zaiParams = params as Omit<typeof params, "reasoning_effort"> & {
 			thinking?: { type: "enabled" | "disabled"; clear_thinking?: boolean };
 			reasoning_effort?: string;
@@ -738,7 +754,7 @@ function buildParams(
 	// same server can serve zai, qwen or chat-template models. Reasoning and the answer
 	// share max_tokens here, so an uncapped reasoning phase can consume the whole
 	// response and leave no answer and no tool call.
-	if (thinkingTokenBudgetField && thinkingBudget !== undefined) {
+	if (!model.explicitThinkingLevels && thinkingTokenBudgetField && thinkingBudget !== undefined) {
 		Object.assign(params, { [thinkingTokenBudgetField]: thinkingBudget });
 	}
 

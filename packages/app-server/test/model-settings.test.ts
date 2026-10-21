@@ -348,6 +348,231 @@ describe("ModelSettingsService", () => {
 		expect(savedModel).not.toHaveProperty("thinkingLevelMap");
 	});
 
+	it("saves, reads, preserves, and validates explicit manual thinking maps", async () => {
+		const modelsPath = join(agentDir, "models.json");
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, modelsPath);
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+
+		const saved = await service.update({
+			type: "save_provider",
+			provider: "manual-provider",
+			name: "Manual Provider",
+			baseUrl: "https://manual.example.test/v1",
+			api: "openai-responses",
+			models: [
+				{
+					modelId: "manual-model",
+					name: "Manual Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					thinkingLevelMap: { low: "low", high: "high", max: null },
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "manual-test-key" },
+		});
+
+		const expectedMap = {
+			off: null,
+			minimal: null,
+			low: "low",
+			medium: null,
+			high: "high",
+			xhigh: null,
+			max: null,
+		};
+		const provider = saved.providers.find((entry) => entry.provider === "manual-provider");
+		expect(provider?.models[0]).toMatchObject({
+			reasoning: true,
+			thinkingLevels: ["low", "high"],
+			reasoningMode: "manual",
+			reasoningSource: "manual",
+			thinkingLevelMap: expectedMap,
+		});
+
+		const persisted = JSON.parse(readFileSync(modelsPath, "utf8"));
+		const savedModel = persisted.providers["manual-provider"].models[0];
+		expect(savedModel).toMatchObject({ reasoningMode: "manual", thinkingLevelMap: expectedMap });
+		expect(savedModel).not.toHaveProperty("reasoning");
+
+		// Updating provider metadata without a map keeps the existing manual map.
+		const renamed = await service.update({
+			type: "save_provider",
+			provider: "manual-provider",
+			name: "Manual Provider Renamed",
+			baseUrl: "https://manual.example.test/v1",
+			api: "openai-responses",
+			models: [
+				{
+					modelId: "manual-model",
+					name: "Manual Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 16_384,
+					reasoningMode: "manual",
+					imageInput: false,
+				},
+			],
+			credential: { action: "keep" },
+		});
+		expect(
+			renamed.providers.find((entry) => entry.provider === "manual-provider")?.models[0]?.thinkingLevelMap,
+		).toEqual(expectedMap);
+
+		await service.update({
+			type: "set_defaults",
+			model: { provider: "manual-provider", modelId: "manual-model" },
+			thinkingSelection: "high",
+		});
+		expect(service.view().defaultThinkingSelection).toBe("high");
+		await expect(
+			service.update({
+				type: "set_defaults",
+				model: { provider: "manual-provider", modelId: "manual-model" },
+				thinkingSelection: "off",
+			}),
+		).rejects.toThrow(/not configured/);
+		expect(service.view().defaultThinkingSelection).toBe("high");
+
+		const beforeInvalidSave = readFileSync(modelsPath, "utf8");
+		await expect(
+			service.update({
+				type: "save_provider",
+				provider: "manual-provider",
+				name: "Manual Provider",
+				baseUrl: null,
+				api: null,
+				models: [
+					{
+						modelId: "empty-manual",
+						name: "Empty Manual",
+						contextWindow: 128_000,
+						maxOutputTokens: 16_384,
+						reasoningMode: "manual",
+						imageInput: false,
+					},
+				],
+				credential: { action: "keep" },
+			}),
+		).rejects.toThrow(/at least one manual thinking level value/);
+		expect(readFileSync(modelsPath, "utf8")).toBe(beforeInvalidSave);
+	});
+
+	it("tests a manual model with a configured level when off is unavailable", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+
+		await service.update({
+			type: "save_provider",
+			provider: "manual-test",
+			name: "Manual Test",
+			baseUrl: "https://example.test/v1",
+			api: "openai-responses",
+			models: [
+				{
+					modelId: "manual-test-model",
+					name: "Manual Test Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 8_192,
+					reasoningMode: "manual",
+					thinkingLevelMap: { high: "high", xhigh: "xhigh" },
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "manual-test-key" },
+		});
+
+		const fakeStream = { result: async () => ({}) } as unknown as ReturnType<ModelRegistry["streamSimple"]>;
+		const streamSimple = vi.spyOn(modelRegistry, "streamSimple").mockReturnValue(fakeStream);
+
+		const result = await service.testConnection({
+			requestId: "00000000-0000-4000-8000-000000000000",
+			kind: "chat",
+			provider: "manual-test",
+			modelId: "manual-test-model",
+		});
+
+		expect(result.ok).toBe(true);
+		const options = streamSimple.mock.calls[0]?.[2];
+		expect(options?.reasoning).toBe("high");
+		expect(options?.apiKey).toBe("manual-test-key");
+
+		const modelsPath = join(agentDir, "models.json");
+		const config = JSON.parse(readFileSync(modelsPath, "utf8"));
+		config.providers["manual-test"].models[0].thinkingLevelMap.off = "none";
+		writeFileSync(modelsPath, JSON.stringify(config));
+		await service.update({
+			type: "set_defaults",
+			model: { provider: "manual-test", modelId: "manual-test-model" },
+			thinkingSelection: "off",
+		});
+		const offResult = await service.testConnection({
+			requestId: "00000000-0000-4000-8000-000000000003",
+			kind: "chat",
+			provider: "manual-test",
+			modelId: "manual-test-model",
+		});
+		expect(offResult.ok).toBe(true);
+		expect(streamSimple.mock.calls[1]?.[2]?.reasoning).toBeUndefined();
+	});
+
+	it("reports stream error and aborted outcomes instead of successful connections", async () => {
+		const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
+		const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+		const settingsManager = SettingsManager.create(agentDir, agentDir);
+		const service = new ModelSettingsService({ agentDir, authStorage, modelRegistry, settingsManager });
+
+		await service.update({
+			type: "save_provider",
+			provider: "manual-test",
+			name: "Manual Test",
+			baseUrl: "https://example.test/v1",
+			api: "openai-responses",
+			models: [
+				{
+					modelId: "manual-test-model",
+					name: "Manual Test Model",
+					contextWindow: 128_000,
+					maxOutputTokens: 8_192,
+					reasoningMode: "manual",
+					thinkingLevelMap: { high: "high", xhigh: "xhigh" },
+					imageInput: false,
+				},
+			],
+			credential: { action: "set", value: "secret-stream-key" },
+		});
+
+		const streamResult = (stopReason: "error" | "aborted", errorMessage?: string) =>
+			({
+				result: async () => ({ stopReason, ...(errorMessage ? { errorMessage } : {}) }),
+			}) as unknown as ReturnType<ModelRegistry["streamSimple"]>;
+		const streamSimple = vi
+			.spyOn(modelRegistry, "streamSimple")
+			.mockReturnValueOnce(streamResult("error", "401 Unauthorized: Bearer secret-stream-key"))
+			.mockReturnValueOnce(streamResult("aborted"));
+
+		const request = {
+			requestId: "00000000-0000-4000-8000-000000000001",
+			kind: "chat" as const,
+			provider: "manual-test",
+			modelId: "manual-test-model",
+		};
+
+		const failed = await service.testConnection(request);
+		expect(failed.ok).toBe(false);
+		expect(failed.message).not.toContain("secret-stream-key");
+		expect(failed.message).toContain("[redacted]");
+
+		const aborted = await service.testConnection({ ...request, requestId: "00000000-0000-4000-8000-000000000002" });
+		expect(aborted.ok).toBe(false);
+		expect(aborted.message).toMatch(/aborted/i);
+		expect(streamSimple).toHaveBeenCalledTimes(2);
+	});
+
 	it("preserves hand-edited model capabilities when saving unrelated provider fields", async () => {
 		const modelsPath = join(agentDir, "models.json");
 		writeFileSync(

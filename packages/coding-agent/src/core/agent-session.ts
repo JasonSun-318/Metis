@@ -4895,7 +4895,8 @@ export class AgentSession {
 
 	setThinkingSelection(selection: ThinkingLevel): void {
 		this.setThinkingLevel(selection);
-		this.settingsManager.setDefaultThinkingLevel(selection);
+		// Manual models persist only configured levels; legacy models retain their preferred selection.
+		this.settingsManager.setDefaultThinkingLevel(this.model?.explicitThinkingLevels ? this.thinkingLevel : selection);
 		this._emit({
 			type: "thinking_selection_changed",
 			selection: this.thinkingLevel,

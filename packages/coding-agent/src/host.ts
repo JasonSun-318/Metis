@@ -5,6 +5,10 @@
  */
 
 export {
+	hasConfiguredManualThinkingLevel,
+	normalizeManualThinkingLevelMap,
+} from "./core/custom-model-reasoning.ts";
+export {
 	KNOWLEDGE_LINKS_CUSTOM_TYPE,
 	type KnowledgeLibraryLink,
 	readKnowledgeLinks,

@@ -804,6 +804,39 @@ describe("ModelRegistry", () => {
 			expect(model && getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
 			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "gpt-5.5")).toBeUndefined();
 		});
+
+		test("manual uses only configured levels and normalizes the rest to null", () => {
+			writeRawModelsJson({
+				"my-codex-proxy": {
+					baseUrl: "https://proxy.example.com/v1",
+					apiKey: "test-key",
+					api: "openai-completions",
+					models: [
+						{
+							id: "manual-model",
+							reasoningMode: "manual",
+							thinkingLevelMap: { low: "low", xhigh: "xhigh", max: null },
+						},
+					],
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			const model = registry.find("my-codex-proxy", "manual-model");
+			expect(model?.reasoning).toBe(true);
+			expect(model?.explicitThinkingLevels).toBe(true);
+			expect(model?.thinkingLevelMap).toEqual({
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: null,
+				high: null,
+				xhigh: "xhigh",
+				max: null,
+			});
+			expect(model && getSupportedThinkingLevels(model)).toEqual(["low", "xhigh"]);
+			expect(registry.getCustomModelReasoningSource("my-codex-proxy", "manual-model")).toBe("manual");
+		});
 	});
 
 	describe("modelOverrides (per-model customization)", () => {

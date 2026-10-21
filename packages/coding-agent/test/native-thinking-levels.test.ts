@@ -42,6 +42,37 @@ describe("native thinking levels", () => {
 				.getDurableJournalSnapshot()
 				.some((entry) => (entry.type as string) === "session_ultra_selection"),
 		).toBe(false);
+		created.session.setThinkingSelection("max");
+		expect(created.session.getThinkingSelection()).toBe("xhigh");
+		expect(created.session.settingsManager.getDefaultThinkingLevel()).toBe("max");
+		created.session.dispose();
+	});
+
+	it("offers and persists only manually configured levels", async () => {
+		const { cwd, agentDir } = setup();
+		const base = getModel("openai", "gpt-5")!;
+		const model = {
+			...base,
+			provider: "manual-provider",
+			reasoning: true,
+			explicitThinkingLevels: true,
+			thinkingLevelMap: {
+				off: null,
+				minimal: null,
+				low: null,
+				medium: null,
+				high: "high",
+				xhigh: null,
+				max: "max",
+			},
+		};
+		const created = await createAgentSession({ cwd, agentDir, model });
+		expect(created.session.getAvailableThinkingSelections()).toEqual(["high", "max"]);
+		created.session.setThinkingSelection("max");
+		expect(created.session.getThinkingSelection()).toBe("max");
+		created.session.setThinkingSelection("low");
+		expect(created.session.getThinkingSelection()).toBe("high");
+		expect(created.session.settingsManager.getDefaultThinkingLevel()).toBe("high");
 		created.session.dispose();
 	});
 

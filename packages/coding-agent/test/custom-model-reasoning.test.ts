@@ -80,4 +80,39 @@ describe("resolveCustomModelReasoning", () => {
 		expect(result.thinkingLevelMap).toEqual(thinkingLevelMap);
 		expect(result.thinkingLevelMap).not.toBe(thinkingLevelMap);
 	});
+
+	it("manual normalizes every unconfigured level to explicit null", () => {
+		const result = resolveCustomModelReasoning({
+			mode: "manual",
+			modelId: "custom",
+			api: "openai-responses",
+			catalog: [{ id: "custom", api: "openai-responses", reasoning: true }],
+			thinkingLevelMap: { low: "low", high: " high ", max: null },
+		});
+		expect(result).toEqual({
+			reasoning: true,
+			thinkingLevelMap: {
+				off: null,
+				minimal: null,
+				low: "low",
+				medium: null,
+				high: " high ",
+				xhigh: null,
+				max: null,
+			},
+			source: "manual",
+		});
+	});
+
+	it("manual rejects a map without any configured value", () => {
+		expect(() =>
+			resolveCustomModelReasoning({
+				mode: "manual",
+				modelId: "custom",
+				api: "anthropic-messages",
+				catalog: [],
+				thinkingLevelMap: { off: null, low: "   " },
+			}),
+		).toThrow(/does not configure any thinking level value/);
+	});
 });

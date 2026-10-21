@@ -8,6 +8,7 @@ import {
 	browserActionElementIds,
 	ClientRequestMethods,
 	CustomModelReasoningModeSchema,
+	CustomModelThinkingLevelMapSchema,
 	createRpcError,
 	findBrowserStateElement,
 	formatBrowserStateNode,
@@ -180,6 +181,11 @@ const scheduleRunSummary = {
 
 const scheduleCases = [
 	["model/list", {}, { models: [{ provider: "openai", modelId: "gpt-test", name: "GPT Test" }] }],
+	[
+		"model/discover",
+		{ baseUrl: "https://api.example.com/v1", api: "openai-responses" },
+		{ models: [{ modelId: "gpt-test", name: "GPT Test" }] },
+	],
 	[
 		"model/settings/get",
 		{},
@@ -876,13 +882,25 @@ describe("thinking selection schema", () => {
 		expect(validate.Check("ultra")).toBe(false);
 	});
 
-	it("accepts only the three custom model reasoning modes", () => {
+	it("accepts only the four custom model reasoning modes", () => {
 		const validate = Compile(CustomModelReasoningModeSchema);
 		expect(validate.Check("auto")).toBe(true);
 		expect(validate.Check("off")).toBe(true);
 		expect(validate.Check("generic")).toBe(true);
+		expect(validate.Check("manual")).toBe(true);
 		expect(validate.Check("reasoning")).toBe(false);
 		expect(validate.Check("ultra")).toBe(false);
+	});
+});
+
+describe("manual model thinking map schema", () => {
+	it("accepts explicit strings and nulls but rejects blank or unknown levels", () => {
+		const validate = Compile(CustomModelThinkingLevelMapSchema);
+		expect(validate.Check({ off: null, high: "high", max: "max" })).toBe(true);
+		expect(validate.Check({})).toBe(true);
+		expect(validate.Check({ high: "" })).toBe(false);
+		expect(validate.Check({ high: 1 })).toBe(false);
+		expect(validate.Check({ high: "high", ultra: "max" })).toBe(false);
 	});
 });
 
@@ -2340,16 +2358,25 @@ describe("redacted errors and generated schema", () => {
 		const generated = readFileSync(join(fixturesDir, "../../generated/app-server.schema.json"), "utf8");
 		expect(generated).toContain("x-metis-maxUtf16Units");
 		expect(generated).toContain("x-metis-maxUtf8Bytes");
-		for (const forbidden of [
-			"AgentSessionEvent",
-			"SessionEntry",
-			"apiKey",
-			"accessToken",
-			"refreshToken",
-			"Electron",
-		]) {
+		for (const forbidden of ["AgentSessionEvent", "SessionEntry", "accessToken", "refreshToken", "Electron"]) {
 			expect(generated).not.toContain(forbidden);
 		}
+		const apiKeyParents: Record<string, unknown>[] = [];
+		const visit = (value: unknown): void => {
+			if (Array.isArray(value)) {
+				for (const item of value) visit(item);
+				return;
+			}
+			if (typeof value !== "object" || value === null) return;
+			const record = value as Record<string, unknown>;
+			if ("apiKey" in record) apiKeyParents.push(record);
+			for (const child of Object.values(record)) visit(child);
+		};
+		visit(JSON.parse(generated));
+		// Discovery is the only method allowed to carry a request-only draft key, and
+		// it must stay scoped to a params object that also carries baseUrl/api.
+		expect(apiKeyParents.length).toBeGreaterThan(0);
+		expect(apiKeyParents.every((parent) => "baseUrl" in parent && "api" in parent)).toBe(true);
 	});
 });
 

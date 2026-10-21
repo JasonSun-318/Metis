@@ -193,7 +193,9 @@ const ModelDefinitionSchema = Type.Object({
 	baseUrl: Type.Optional(Type.String({ minLength: 1 })),
 	reasoning: Type.Optional(Type.Boolean()),
 	thinkingLevelMap: Type.Optional(ThinkingLevelMapSchema),
-	reasoningMode: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("off"), Type.Literal("generic")])),
+	reasoningMode: Type.Optional(
+		Type.Union([Type.Literal("auto"), Type.Literal("off"), Type.Literal("generic"), Type.Literal("manual")]),
+	),
 	input: Type.Optional(Type.Array(Type.Union([Type.Literal("text"), Type.Literal("image")]))),
 	cost: Type.Optional(ModelCostSchema),
 	contextWindow: Type.Optional(Type.Number()),
@@ -660,15 +662,18 @@ export class ModelRegistry {
 				let thinkingLevelMap =
 					modelDef.thinkingLevelMap ??
 					(modelDef.reasoning && !builtInProviders.has(providerName) ? { minimal: null } : undefined);
+				let explicitThinkingLevels = false;
 				if (modelDef.reasoningMode !== undefined) {
 					const resolved = resolveCustomModelReasoning({
 						mode: modelDef.reasoningMode,
 						modelId: modelDef.id,
 						api: api as Api,
 						catalog: reasoningCatalog,
+						thinkingLevelMap: modelDef.thinkingLevelMap,
 					});
 					reasoning = resolved.reasoning;
 					thinkingLevelMap = resolved.thinkingLevelMap;
+					explicitThinkingLevels = resolved.source === "manual";
 					this.customReasoningSources.set(`${providerName}\0${modelDef.id}`, resolved.source);
 				}
 
@@ -681,6 +686,7 @@ export class ModelRegistry {
 					baseUrl,
 					reasoning,
 					thinkingLevelMap,
+					...(explicitThinkingLevels ? { explicitThinkingLevels: true } : {}),
 					input: (modelDef.input ?? ["text"]) as ("text" | "image")[],
 					cost: modelDef.cost ?? defaultCost,
 					contextWindow: modelDef.contextWindow ?? 128000,

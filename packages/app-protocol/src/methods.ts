@@ -43,6 +43,7 @@ import {
 	ConnectionEventsParamsSchema,
 	CustomAgentTypeViewSchema,
 	CustomModelReasoningModeSchema,
+	CustomModelThinkingLevelMapSchema,
 	DeclarativeHookViewSchema,
 	DurableImageRefViewSchema,
 	HooksListViewSchema,
@@ -806,7 +807,30 @@ const EditableModelInputSchema = StrictObject({
 	contextWindow: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
 	maxOutputTokens: Type.Integer({ minimum: 1, maximum: 10_000_000 }),
 	reasoningMode: CustomModelReasoningModeSchema,
+	thinkingLevelMap: Type.Optional(CustomModelThinkingLevelMapSchema),
 	imageInput: Type.Boolean(),
+});
+const ModelDiscoveryApiSchema = Type.Union([
+	Type.Literal("openai-responses"),
+	Type.Literal("openai-completions"),
+	Type.Literal("anthropic-messages"),
+]);
+export const ModelDiscoverParamsSchema = StrictObject({
+	provider: Type.Optional(NameSchema),
+	baseUrl: Type.String({ minLength: 1, maxLength: 2_048 }),
+	api: ModelDiscoveryApiSchema,
+	apiKey: Type.Optional(Type.String({ minLength: 1, maxLength: 32_768 })),
+});
+export const DiscoveredModelSchema = StrictObject({
+	modelId: NameSchema,
+	name: NameSchema,
+	contextWindow: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
+	maxOutputTokens: Type.Optional(Type.Integer({ minimum: 1, maximum: 10_000_000 })),
+	imageInput: Type.Optional(Type.Boolean()),
+});
+export const ModelDiscoverResultSchema = StrictObject({
+	models: Type.Array(DiscoveredModelSchema, { maxItems: 512 }),
+	warnings: Type.Optional(Type.Array(PublicTextSchema, { maxItems: 20 })),
 });
 export const CredentialMutationSchema = Type.Union([
 	StrictObject({ action: Type.Literal("keep") }),
@@ -1628,6 +1652,7 @@ export const ClientRequestMethods = {
 	"plugin/update/inspect": method(PluginUpdateInspectParamsSchema, PluginUpdateInspectionViewSchema),
 	"plugin/update": method(PluginUpdateParamsSchema, PluginInstallResultSchema),
 	"connection/ack": method(ConnectionAckParamsSchema, ConnectionAckResultSchema),
+	"model/discover": method(ModelDiscoverParamsSchema, ModelDiscoverResultSchema),
 } as const;
 
 export const HostRequestMethods = {

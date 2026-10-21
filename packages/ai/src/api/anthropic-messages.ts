@@ -827,6 +827,28 @@ function mapThinkingLevelToEffort(
 	}
 }
 
+const ANTHROPIC_MANUAL_EFFORTS = new Set<AnthropicEffort>(["low", "medium", "high", "xhigh", "max"]);
+
+function usesAdaptiveThinking(model: Model<"anthropic-messages">): boolean {
+	return model.compat?.forceAdaptiveThinking === true || model.explicitThinkingLevels === true;
+}
+
+function validateManualEffort(value: unknown): AnthropicEffort {
+	if (typeof value !== "string" || !ANTHROPIC_MANUAL_EFFORTS.has(value as AnthropicEffort)) {
+		throw new Error(
+			'Anthropic manual reasoning accepts explicit adaptive effort values "low", "medium", "high", "xhigh", or "max"',
+		);
+	}
+	return value as AnthropicEffort;
+}
+
+function validateManualDisabled(model: Model<"anthropic-messages">): void {
+	const off = model.thinkingLevelMap?.off;
+	if (typeof off !== "string" || off.toLowerCase() !== "disabled") {
+		throw new Error('Anthropic manual reasoning requires the "off" level to map explicitly to "disabled"');
+	}
+}
+
 export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOptions> = (
 	model: Model<"anthropic-messages">,
 	context: Context,
@@ -842,6 +864,15 @@ export const streamSimple: StreamFunction<"anthropic-messages", SimpleStreamOpti
 
 	// For models with adaptive thinking: use an effort level.
 	// For older models: use budget-based thinking.
+	if (model.explicitThinkingLevels) {
+		const mapped = model.thinkingLevelMap?.[options.reasoning];
+		return stream(model, context, {
+			...base,
+			thinkingEnabled: true,
+			...(typeof mapped === "string" ? { effort: mapped as AnthropicEffort } : {}),
+			toolChoice,
+		} satisfies AnthropicOptions);
+	}
 	if (model.compat?.forceAdaptiveThinking === true) {
 		const effort = mapThinkingLevelToEffort(model, options.reasoning);
 		return stream(model, context, {
@@ -886,7 +917,7 @@ function createClient(
 	sessionId?: string,
 ): { client: Anthropic; isOAuthToken: boolean } {
 	// Adaptive thinking models have interleaved thinking built in, so skip the beta header.
-	const needsInterleavedBeta = interleavedThinking && model.compat?.forceAdaptiveThinking !== true;
+	const needsInterleavedBeta = interleavedThinking && !usesAdaptiveThinking(model);
 	const betaFeatures: string[] = [];
 	if (useFineGrainedToolStreamingBeta) {
 		betaFeatures.push(FINE_GRAINED_TOOL_STREAMING_BETA);
@@ -1084,7 +1115,20 @@ function buildParams(
 
 	// Configure thinking mode: adaptive, budget-based, or explicitly disabled.
 	if (model.reasoning) {
-		if (options?.thinkingEnabled) {
+		if (model.explicitThinkingLevels) {
+			if (options?.thinkingEnabled) {
+				const effort = validateManualEffort(options.effort);
+				const display: AnthropicThinkingDisplay = options.thinkingDisplay ?? "summarized";
+				params.thinking = { type: "adaptive", display };
+				params.output_config =
+					effort === "xhigh"
+						? ({ effort } as unknown as NonNullable<MessageCreateParamsStreaming["output_config"]>)
+						: { effort };
+			} else {
+				validateManualDisabled(model);
+				params.thinking = { type: "disabled" };
+			}
+		} else if (options?.thinkingEnabled) {
 			// Default to "summarized" so Opus 4.7 and Mythos Preview behave like
 			// older Claude 4 models (whose API default is also "summarized").
 			const display: AnthropicThinkingDisplay = options.thinkingDisplay ?? "summarized";
