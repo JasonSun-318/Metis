@@ -17,6 +17,7 @@ import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
+import { trapDialogTab } from "./dialog-focus.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
 import { MemorySettingsPanel } from "./MemorySettingsPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
@@ -120,6 +121,7 @@ export function SettingsDialog({
 
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.defaultPrevented) return;
 			if (dialogRef.current?.querySelector("dialog[open]")) return;
 			if (event.key === "Escape") {
 				event.preventDefault();
@@ -273,7 +275,9 @@ export function SettingsDialog({
 									theme={theme}
 								/>
 							) : null}
-							{page === "model" ? <ModelSettingsPanel api={api} serverReady={serverReady} /> : null}
+							{page === "model" ? (
+								<ModelSettingsPanel api={api} onDirtyChange={setDirty} serverReady={serverReady} />
+							) : null}
 							{page === "personalization" ? (
 								<PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} />
 							) : null}
@@ -307,6 +311,7 @@ export function SettingsDialog({
 						aria-labelledby="settings-unsaved-title"
 						aria-describedby="settings-unsaved-copy"
 						className="settings-unsaved-dialog"
+						onKeyDown={(event) => trapDialogTab(event, event.currentTarget)}
 						onCancel={(event) => {
 							event.preventDefault();
 							setPendingDestination(null);

@@ -1,12 +1,5 @@
 import { type RefObject, useCallback, useLayoutEffect, useRef } from "react";
-
-function focusable(dialog: HTMLElement): HTMLElement[] {
-	return Array.from(
-		dialog.querySelectorAll<HTMLElement>(
-			"button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href]",
-		),
-	);
-}
+import { trapDialogTab } from "./dialog-focus.ts";
 
 export function DialogFrame({
 	cancellable,
@@ -26,37 +19,38 @@ export function DialogFrame({
 	readonly titleId: string;
 }) {
 	const dialog = useRef<HTMLElement>(null);
+	const openingFocus = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null);
 	const cancel = useRef(onCancel);
 	const canCancel = useRef(cancellable);
 	cancel.current = onCancel;
 	canCancel.current = cancellable;
-	const handleKeyDown = useCallback((event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault" | "target">) => {
-		if (event.key === "Escape" && canCancel.current) {
-			if (
-				dialog.current?.querySelector('[aria-haspopup][aria-expanded="true"]') ||
-				(event.target instanceof Element && event.target.closest('[role="listbox"], [role="menu"]'))
-			)
+	const handleKeyDown = useCallback(
+		(event: Pick<KeyboardEvent, "key" | "shiftKey" | "preventDefault" | "target" | "defaultPrevented">) => {
+			if (event.defaultPrevented || dialog.current?.querySelector("dialog[open]")) return;
+			if (event.key === "Escape" && canCancel.current) {
+				if (
+					dialog.current?.querySelector('[aria-haspopup][aria-expanded="true"]') ||
+					(event.target instanceof Element && event.target.closest('[role="listbox"], [role="menu"]'))
+				)
+					return;
+				event.preventDefault();
+				cancel.current();
 				return;
-			event.preventDefault();
-			cancel.current();
-			return;
-		}
-		if (event.key !== "Tab" || !dialog.current) return;
-		const controls = focusable(dialog.current);
-		if (controls.length === 0) return;
-		const first = controls[0]!;
-		const last = controls.at(-1)!;
-		if (event.shiftKey && document.activeElement === first) {
-			event.preventDefault();
-			last.focus();
-		} else if (!event.shiftKey && document.activeElement === last) {
-			event.preventDefault();
-			first.focus();
-		}
+			}
+			if (dialog.current) trapDialogTab(event, dialog.current);
+		},
+		[],
+	);
+	useLayoutEffect(() => {
+		return () => {
+			if (openingFocus.current?.isConnected) openingFocus.current.focus();
+		};
 	}, []);
 	useLayoutEffect(() => {
-		queueMicrotask(() => initialFocus.current?.focus());
 		const node = dialog.current;
+		queueMicrotask(() => {
+			if (node?.isConnected) initialFocus.current?.focus();
+		});
 		const onKeyDown = (event: KeyboardEvent) => handleKeyDown(event);
 		node?.addEventListener("keydown", onKeyDown);
 		return () => node?.removeEventListener("keydown", onKeyDown);

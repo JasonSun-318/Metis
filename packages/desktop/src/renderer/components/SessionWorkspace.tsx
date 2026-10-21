@@ -122,6 +122,13 @@ type PlaceTab = (
 const MIN_PANE_WIDTH = 360;
 const MIN_PANE_HEIGHT = 280;
 
+/** Keep the chat column wide enough for the composer input and its action rows. */
+const TOOLS_SIDEBAR_MAIN_MIN_WIDTH = 560;
+/** Below the main-column minimum the sidebar stops shrinking rather than becoming unusable. */
+const TOOLS_SIDEBAR_MIN_WIDTH = 280;
+/** The resize handle overlays this much of the pane's right edge. */
+const TOOLS_SIDEBAR_SEPARATOR_WIDTH = 8;
+
 interface SessionWorkspaceViewProps {
 	readonly api: MetisDesktopApi;
 	readonly chat: ReactNode;
@@ -172,8 +179,14 @@ export function clampToolsSidebarWidth(
 	value: number,
 	workspaceWidth = document.querySelector<HTMLElement>(".workspace")?.clientWidth || window.innerWidth,
 ): number {
-	const maximum = Math.max(280, Math.min(Math.floor(workspaceWidth * 0.85), workspaceWidth - 280 - 7));
-	return Math.max(280, Math.min(maximum, value));
+	// Reserve a usable chat column before growing the sidebar. When the window is
+	// too narrow to satisfy both minimums, the sidebar stays at its own minimum
+	// and the chat column wraps its action rows instead of clipping them.
+	const maximum = Math.max(
+		TOOLS_SIDEBAR_MIN_WIDTH,
+		Math.floor(workspaceWidth - TOOLS_SIDEBAR_MAIN_MIN_WIDTH - TOOLS_SIDEBAR_SEPARATOR_WIDTH),
+	);
+	return Math.max(TOOLS_SIDEBAR_MIN_WIDTH, Math.min(maximum, value));
 }
 
 function workspaceSeed(chatSessionId: string | null): SessionWorkspace {

@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 
 import type { ScheduleTaskView } from "@metis/app-protocol";
-import { act } from "react";
+import { act, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ScheduledTaskDialog } from "../src/renderer/components/ScheduledTaskDialog.tsx";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
@@ -36,12 +36,67 @@ async function selectOption(container: HTMLElement, label: string, option: strin
 	await act(async () => item.click());
 }
 
+beforeEach(() => {
+	Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+});
+
 afterEach(() => {
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
 });
 
 describe("ScheduledTaskDialog", () => {
+	it("focuses the name field and restores the create button after closing", async () => {
+		function Host() {
+			const [open, setOpen] = useState(false);
+			return (
+				<>
+					<button onClick={() => setOpen(true)} type="button">
+						Create task
+					</button>
+					{open && (
+						<ScheduledTaskDialog
+							api={{} as MetisDesktopApi}
+							models={[]}
+							sessions={[]}
+							onClose={() => setOpen(false)}
+							onSaved={() => setOpen(false)}
+						/>
+					)}
+				</>
+			);
+		}
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<Host />));
+			const trigger = container.querySelector<HTMLButtonElement>("button")!;
+			trigger.focus();
+			await act(async () => trigger.click());
+			expect(document.activeElement).toBe(container.querySelector("input"));
+			const close = container.querySelector<HTMLButtonElement>('[aria-label="Close"]')!;
+			const last = container.querySelector<HTMLButtonElement>("footer button:not(:disabled)")!;
+			last.focus();
+			await act(async () =>
+				last.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true })),
+			);
+			expect(document.activeElement).toBe(close);
+			await act(async () =>
+				close.dispatchEvent(
+					new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true }),
+				),
+			);
+			expect(document.activeElement).toBe(last);
+			await act(async () =>
+				container.querySelector("dialog")!.dispatchEvent(new Event("cancel", { cancelable: true })),
+			);
+			expect(container.querySelector("dialog")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
 	it("submits required display metadata, only the instruction prompt, and a configured model", async () => {
 		const createSchedule = vi.fn().mockResolvedValue({ task: TASK });
 		const selectProjectFolder = vi.fn().mockResolvedValue("/Users/test/Desktop");

@@ -8,6 +8,7 @@ import { CheckCircle, Key, Plus, Trash, X, XCircle } from "@phosphor-icons/react
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ModelCatalog } from "./ModelCatalog.tsx";
 import { type DiscoveredModel, ModelDiscovery } from "./ModelDiscovery.tsx";
@@ -62,6 +63,13 @@ interface CustomProviderDraft {
 	readonly apiKey: string;
 	readonly testModelId: string;
 	readonly models: CustomModelDraft[];
+}
+
+interface EditorBaseline {
+	readonly provider: ProviderDraft | null;
+	readonly custom: CustomProviderDraft | null;
+	readonly vision: VisionDraft | null;
+	readonly thinking: ThinkingSelectionView;
 }
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
@@ -160,12 +168,14 @@ function thinkingLevelLabel(level: ThinkingSelectionView): string {
 
 export function ModelSettingsPanel({
 	api,
+	onDirtyChange,
 	serverReady,
 }: {
 	readonly api: Pick<
 		MetisDesktopApi,
 		"getModelSettings" | "updateModelSettings" | "testModelConnection" | "discoverModels"
 	>;
+	readonly onDirtyChange?: (dirty: boolean) => void;
 	readonly serverReady: boolean;
 }) {
 	const { t } = useTranslation();
@@ -185,6 +195,40 @@ export function ModelSettingsPanel({
 	const providerDialogRef = useRef<HTMLDialogElement>(null);
 	const customDialogRef = useRef<HTMLDialogElement>(null);
 	const visionDialogRef = useRef<HTMLDialogElement>(null);
+	const discardDialogRef = useRef<HTMLDialogElement>(null);
+	const pendingEditorAction = useRef<(() => void) | null>(null);
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
+	const [editorBaseline, setEditorBaseline] = useState<EditorBaseline>({
+		provider: null,
+		custom: null,
+		vision: null,
+		thinking: "medium",
+	});
+	const editorDirty = draft
+		? JSON.stringify(draft) !== JSON.stringify(editorBaseline.provider) || defaultThinking !== editorBaseline.thinking
+		: customDraft
+			? JSON.stringify(customDraft) !== JSON.stringify(editorBaseline.custom) ||
+				defaultThinking !== editorBaseline.thinking
+			: visionDraft
+				? JSON.stringify(visionDraft) !== JSON.stringify(editorBaseline.vision)
+				: false;
+	const editorState = useRef({ dirty: false, busy: false, confirming: false });
+	editorState.current = { dirty: editorDirty, busy, confirming: confirmDiscard };
+	useEffect(() => onDirtyChange?.(editorDirty), [editorDirty, onDirtyChange]);
+	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
+	useEffect(() => {
+		if (!confirmDiscard) return;
+		const dialog = discardDialogRef.current!;
+		const previous = document.activeElement as HTMLElement | null;
+		if (typeof dialog.showModal === "function") dialog.showModal();
+		else dialog.setAttribute("open", "");
+		dialog.querySelector<HTMLButtonElement>("button")?.focus();
+		return () => {
+			if (dialog.open && typeof dialog.close === "function") dialog.close();
+			else dialog.removeAttribute("open");
+			if (previous?.isConnected) previous.focus();
+		};
+	}, [confirmDiscard]);
 
 	const applySettings = useCallback((next: ModelSettingsView) => {
 		setSettings(next);
@@ -231,111 +275,132 @@ export function ModelSettingsPanel({
 			),
 		[settings],
 	);
-	const closeProvider = useCallback(() => {
+	const discardEditor = useCallback(() => {
 		setDraft(null);
 		setCustomDraft(null);
+		setVisionDraft(null);
+		setConfirmDiscard(false);
 		setError(null);
 		setNotice(null);
 		setConfirmRemoval(null);
 	}, []);
 
-	const closeCustomEditor = useCallback(() => {
-		setCustomDraft(null);
-		setDraft(null);
-		setError(null);
-		setNotice(null);
-		setConfirmRemoval(null);
+	const requestEditorAction = useCallback((action: () => void) => {
+		if (editorState.current.busy || editorState.current.confirming) return;
+		if (editorState.current.dirty) {
+			pendingEditorAction.current = action;
+			setConfirmDiscard(true);
+		} else action();
 	}, []);
+	const requestCloseEditor = useCallback(
+		() => requestEditorAction(discardEditor),
+		[discardEditor, requestEditorAction],
+	);
 
-	const openCustomEditor = useCallback(
+	const beginCustomEditor = useCallback(
 		(provider?: ModelSettingsProviderView) => {
 			setError(null);
 			setNotice(null);
 			setDraft(null);
+			setVisionDraft(null);
 			setConfirmRemoval(null);
-			setCustomDraft(customProviderDraft(provider, settings?.defaultModel ?? null));
+			const next = customProviderDraft(provider, settings?.defaultModel ?? null);
+			const thinking = settings?.defaultThinkingSelection ?? "off";
+			setDefaultThinking(thinking);
+			setEditorBaseline({ provider: null, custom: next, vision: null, thinking });
+			setCustomDraft(next);
 		},
-		[settings?.defaultModel],
+		[settings?.defaultModel, settings?.defaultThinkingSelection],
 	);
+	const openCustomEditor = (provider?: ModelSettingsProviderView) =>
+		requestEditorAction(() => beginCustomEditor(provider));
 
 	const customProvider = customDraft?.provider;
 	useEffect(() => {
 		if (customProvider === undefined) return;
 		const dialog = customDialogRef.current;
 		if (!dialog) return;
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		try {
 			if (typeof dialog.showModal === "function") dialog.showModal();
 			else dialog.setAttribute("open", "");
 		} catch {
 			dialog.setAttribute("open", "");
 		}
+		dialog.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (editorState.current.confirming) return;
+			trapDialogTab(event, dialog);
+			if (event.key !== "Escape" || event.defaultPrevented) return;
 			event.preventDefault();
-			closeCustomEditor();
+			requestCloseEditor();
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
 			if (dialog.open && typeof dialog.close === "function") dialog.close();
 			else dialog.removeAttribute("open");
+			if (previous?.isConnected) previous.focus();
 		};
-	}, [closeCustomEditor, customProvider]);
+	}, [requestCloseEditor, customProvider]);
 
 	const provider = draft?.provider;
 	useEffect(() => {
 		if (provider === undefined) return;
 		const dialog = providerDialogRef.current;
 		if (!dialog) return;
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		try {
 			if (typeof dialog.showModal === "function") dialog.showModal();
 			else dialog.setAttribute("open", "");
 		} catch {
 			dialog.setAttribute("open", "");
 		}
+		dialog.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (editorState.current.confirming) return;
+			trapDialogTab(event, dialog);
+			if (event.key !== "Escape" || event.defaultPrevented) return;
 			event.preventDefault();
-			closeProvider();
+			requestCloseEditor();
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
 			if (dialog.open && typeof dialog.close === "function") dialog.close();
 			else dialog.removeAttribute("open");
+			if (previous?.isConnected) previous.focus();
 		};
-	}, [closeProvider, provider]);
-
-	const closeVisionEditor = useCallback(() => {
-		setVisionDraft(null);
-		setError(null);
-		setNotice(null);
-		setConfirmRemoval(null);
-	}, []);
+	}, [requestCloseEditor, provider]);
 
 	const visionOpen = visionDraft !== null;
 	useEffect(() => {
 		if (!visionOpen) return;
 		const dialog = visionDialogRef.current;
 		if (!dialog) return;
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		try {
 			if (typeof dialog.showModal === "function") dialog.showModal();
 			else dialog.setAttribute("open", "");
 		} catch {
 			dialog.setAttribute("open", "");
 		}
+		dialog.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus();
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (editorState.current.confirming) return;
+			trapDialogTab(event, dialog);
+			if (event.key !== "Escape" || event.defaultPrevented) return;
 			event.preventDefault();
-			closeVisionEditor();
+			requestCloseEditor();
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
 			if (dialog.open && typeof dialog.close === "function") dialog.close();
 			else dialog.removeAttribute("open");
+			if (previous?.isConnected) previous.focus();
 		};
-	}, [closeVisionEditor, visionOpen]);
+	}, [requestCloseEditor, visionOpen]);
 
 	const runUpdate = async (
 		mutation: Parameters<MetisDesktopApi["updateModelSettings"]>[0]["mutation"],
@@ -358,9 +423,9 @@ export function ModelSettingsPanel({
 		}
 	};
 
-	const saveDefaults = () => {
+	const saveDefaults = async () => {
 		if (!draft?.testModelId) return;
-		void runUpdate(
+		const next = await runUpdate(
 			{
 				type: "set_defaults",
 				model: { provider: draft.provider, modelId: draft.testModelId },
@@ -369,20 +434,31 @@ export function ModelSettingsPanel({
 			t("Defaults saved"),
 			"defaults",
 		);
+		if (next) {
+			setEditorBaseline((current) => ({
+				...current,
+				provider: current.provider ? { ...current.provider, testModelId: draft.testModelId } : null,
+				thinking: next.defaultThinkingSelection,
+			}));
+		}
 	};
 
-	const openVisionEditor = () => {
-		const current = settings?.vision;
-		setError(null);
-		setNotice(null);
-		setVisionDraft({
-			name: current?.name ?? "",
-			baseUrl: current?.baseUrl ?? "",
-			api: current?.api ?? "openai-responses",
-			modelId: current?.modelId ?? "",
-			apiKey: "",
+	const openVisionEditor = () =>
+		requestEditorAction(() => {
+			discardEditor();
+			const current = settings?.vision;
+			setError(null);
+			setNotice(null);
+			const next: VisionDraft = {
+				name: current?.name ?? "",
+				baseUrl: current?.baseUrl ?? "",
+				api: current?.api ?? "openai-responses",
+				modelId: current?.modelId ?? "",
+				apiKey: "",
+			};
+			setEditorBaseline({ provider: null, custom: null, vision: next, thinking: defaultThinking });
+			setVisionDraft(next);
 		});
-	};
 
 	const saveVision = async () => {
 		if (!visionDraft) return;
@@ -452,7 +528,9 @@ export function ModelSettingsPanel({
 		);
 		if (!next) return;
 		const saved = next.providers.find((item) => item.provider === draft.provider);
-		setDraft(saved ? providerDraft(saved, next.defaultModel) : null);
+		const nextDraft = saved ? providerDraft(saved, next.defaultModel) : null;
+		setEditorBaseline({ provider: nextDraft, custom: null, vision: null, thinking: next.defaultThinkingSelection });
+		setDraft(nextDraft);
 	};
 
 	const testConnection = async () => {
@@ -590,9 +668,9 @@ export function ModelSettingsPanel({
 		setCustomDraft(null);
 	};
 
-	const saveCustomDefaults = () => {
+	const saveCustomDefaults = async () => {
 		if (!customDraft?.testModelId) return;
-		void runUpdate(
+		const next = await runUpdate(
 			{
 				type: "set_defaults",
 				model: { provider: customDraft.provider, modelId: customDraft.testModelId },
@@ -601,6 +679,13 @@ export function ModelSettingsPanel({
 			t("Defaults saved"),
 			"defaults",
 		);
+		if (next) {
+			setEditorBaseline((current) => ({
+				...current,
+				custom: current.custom ? { ...current.custom, testModelId: customDraft.testModelId } : null,
+				thinking: next.defaultThinkingSelection,
+			}));
+		}
 	};
 
 	const updateCustomModel = (index: number, model: CustomModelDraft) => {
@@ -623,17 +708,23 @@ export function ModelSettingsPanel({
 		setCustomDraft({ ...customDraft, models, testModelId });
 	};
 
-	const openProvider = (provider: ModelSettingsProviderView) => {
-		setConfirmRemoval(null);
-		setError(null);
-		setNotice(null);
-		if (provider.builtin) {
-			setCustomDraft(null);
-			setDraft(providerDraft(provider, settings?.defaultModel ?? null));
-		} else {
-			openCustomEditor(provider);
-		}
-	};
+	const openProvider = (provider: ModelSettingsProviderView) =>
+		requestEditorAction(() => {
+			discardEditor();
+			setConfirmRemoval(null);
+			setError(null);
+			setNotice(null);
+			if (provider.builtin) {
+				setCustomDraft(null);
+				const next = providerDraft(provider, settings?.defaultModel ?? null);
+				const thinking = settings?.defaultThinkingSelection ?? "off";
+				setDefaultThinking(thinking);
+				setEditorBaseline({ provider: next, custom: null, vision: null, thinking });
+				setDraft(next);
+			} else {
+				beginCustomEditor(provider);
+			}
+		});
 
 	const renderProvider = (provider: ModelSettingsProviderView) => (
 		<button
@@ -864,10 +955,10 @@ export function ModelSettingsPanel({
 					className="model-provider-dialog"
 					onCancel={(event) => {
 						event.preventDefault();
-						closeProvider();
+						requestCloseEditor();
 					}}
 					onClick={(event) => {
-						if (event.target === event.currentTarget) closeProvider();
+						if (event.target === event.currentTarget) requestCloseEditor();
 					}}
 					ref={providerDialogRef}
 				>
@@ -902,7 +993,8 @@ export function ModelSettingsPanel({
 									<button
 										aria-label={t("Close provider settings")}
 										className="model-provider-dialog-close"
-										onClick={closeProvider}
+										disabled={busy}
+										onClick={requestCloseEditor}
 										type="button"
 									>
 										<X aria-hidden="true" size={18} />
@@ -1065,10 +1157,10 @@ export function ModelSettingsPanel({
 					className="model-provider-dialog model-custom-provider-dialog"
 					onCancel={(event) => {
 						event.preventDefault();
-						closeCustomEditor();
+						requestCloseEditor();
 					}}
 					onClick={(event) => {
-						if (event.target === event.currentTarget) closeCustomEditor();
+						if (event.target === event.currentTarget) requestCloseEditor();
 					}}
 					ref={customDialogRef}
 				>
@@ -1089,303 +1181,313 @@ export function ModelSettingsPanel({
 									<button
 										aria-label={t("Close provider settings")}
 										className="model-provider-dialog-close"
-										onClick={closeCustomEditor}
+										disabled={busy}
+										onClick={requestCloseEditor}
 										type="button"
 									>
 										<X aria-hidden="true" size={18} />
 									</button>
 								</div>
 							</header>
-
-							<div className="model-custom-provider-fields">
-								<label className="model-api-key-field">
-									<span>{t("Provider name")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setCustomDraft({ ...customDraft, name: event.target.value })}
-										placeholder="my-provider"
-										type="text"
-										value={customDraft.name}
-									/>
-								</label>
-								<label className="model-api-key-field">
-									<span>{t("Base URL")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setCustomDraft({ ...customDraft, baseUrl: event.target.value })}
-										placeholder="https://api.example.com/v1"
-										type="text"
-										value={customDraft.baseUrl}
-									/>
-								</label>
-								<label htmlFor={`${fieldId}-select-2`} className="model-api-key-field">
-									<span>{t("API format")}</span>
-									<MenuSelect
-										id={`${fieldId}-select-2`}
-										ariaLabel={t("API format")}
-										disabled={busy}
-										onChange={(api) => setCustomDraft({ ...customDraft, api })}
-										options={API_FORMATS.map((format) => ({ value: format.value, label: t(format.label) }))}
-										value={customDraft.api}
-									/>
-								</label>
-								<label className="model-api-key-field">
-									<span>{t("API key")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setCustomDraft({ ...customDraft, apiKey: event.target.value })}
-										placeholder="sk-…"
-										type="password"
-										value={customDraft.apiKey}
-									/>
-								</label>
-							</div>
-
-							<ModelDiscovery
-								api={api}
-								connection={{
-									...(customDraft.provider ? { provider: customDraft.provider } : {}),
-									baseUrl: customDraft.baseUrl,
-									api: customDraft.api,
-									...(customDraft.apiKey.trim() ? { apiKey: customDraft.apiKey.trim() } : {}),
-								}}
-								configured={Boolean(savedCustom?.auth.configured)}
-								existingIds={customDraft.models.map((model) => model.modelId.trim())}
-								disabled={busy}
-								onAdd={addDiscovered}
-							/>
-							<div className="model-custom-models">
-								<div className="model-custom-models-heading">
-									<span>{t("Models")}</span>
-									<button
-										className="settings-secondary-button"
-										disabled={busy}
-										onClick={() =>
-											setCustomDraft({
-												...customDraft,
-												models: [...customDraft.models, newCustomModelDraft()],
-											})
-										}
-										type="button"
-									>
-										<Plus aria-hidden="true" size={14} />
-										{t("Add model")}
-									</button>
-								</div>
-								{customDraft.models.map((model, index) => (
-									<div className="model-custom-model-row" key={model.key}>
-										<button
-											aria-label={t("Remove model")}
-											className="model-custom-model-remove"
-											disabled={busy || customDraft.models.length === 1}
-											onClick={() => removeCustomModel(index)}
-											type="button"
-										>
-											<Trash aria-hidden="true" size={15} />
-										</button>
-										<div className="model-custom-model-fields model-custom-model-identity">
-											<label>
-												<span>{t("Model ID")}</span>
-												<input
-													autoComplete="off"
-													disabled={busy}
-													onChange={(event) =>
-														updateCustomModel(index, { ...model, modelId: event.target.value })
-													}
-													placeholder="gpt-5"
-													type="text"
-													value={model.modelId}
-												/>
-											</label>
-											<label>
-												<span>{t("Display name")}</span>
-												<input
-													autoComplete="off"
-													disabled={busy}
-													onChange={(event) =>
-														updateCustomModel(index, { ...model, name: event.target.value })
-													}
-													placeholder={model.modelId || t("Model name")}
-													type="text"
-													value={model.name}
-												/>
-											</label>
-										</div>
-										<details className="model-advanced-settings">
-											<summary>{t("Advanced model settings")}</summary>
-											<div className="model-custom-model-fields model-custom-model-limits">
-												<label>
-													<span>{t("Context window")}</span>
-													<input
-														disabled={busy}
-														min={1}
-														onChange={(event) =>
-															updateCustomModel(index, {
-																...model,
-																contextWindow: Number(event.target.value),
-															})
-														}
-														type="number"
-														value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""}
-													/>
-												</label>
-												<label>
-													<span>{t("Max output tokens")}</span>
-													<input
-														disabled={busy}
-														min={1}
-														onChange={(event) =>
-															updateCustomModel(index, {
-																...model,
-																maxOutputTokens: Number(event.target.value),
-															})
-														}
-														type="number"
-														value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""}
-													/>
-												</label>
-											</div>
-											<div className="model-custom-model-options">
-												<label className="model-custom-model-capability">
-													<input
-														aria-label={t("Image input")}
-														checked={model.imageInput}
-														disabled={busy}
-														onChange={(event) =>
-															updateCustomModel(index, { ...model, imageInput: event.target.checked })
-														}
-														type="checkbox"
-													/>
-													<span>{t("Image input")}</span>
-												</label>
-											</div>
-										</details>
-										<ModelReasoningEditor
-											id={`${fieldId}-reasoning-${model.key}`}
-											model={model}
-											api={customDraft.api}
+							<div className="model-provider-editor-body">
+								<div className="model-custom-provider-fields">
+									<label className="model-api-key-field">
+										<span>{t("Provider name")}</span>
+										<input
+											autoComplete="off"
 											disabled={busy}
-											onChange={(patch) => updateCustomModel(index, { ...model, ...patch })}
+											onChange={(event) => setCustomDraft({ ...customDraft, name: event.target.value })}
+											placeholder="my-provider"
+											type="text"
+											value={customDraft.name}
 										/>
-									</div>
-								))}
-							</div>
-
-							<div className="settings-form-actions">
-								{customDraft.provider ? (
-									<button
-										className="settings-danger-button"
-										disabled={busy}
-										onClick={() => setConfirmRemoval("provider")}
-										type="button"
-									>
-										{t("Remove provider")}
-									</button>
-								) : null}
-								{customDraft.provider && customDraft.testModelId ? (
-									<button
-										className="settings-secondary-button"
-										disabled={busy || customDirty}
-										onClick={() => void testCustomConnection()}
-										title={t("Tests the saved configuration. Model calls may incur usage charges.")}
-										type="button"
-									>
-										{operation === "test" ? t("Testing…") : t("Test connection")}
-									</button>
-								) : null}
-								<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
-									{operation === "save" ? t("Saving…") : t("Save provider")}
-								</button>
-							</div>
-							{confirmRemoval === "provider" ? (
-								<div className="model-removal-confirm" role="alert">
-									<p>{t("Remove this custom provider and its model configuration?")}</p>
-									<button
-										className="settings-secondary-button"
-										type="button"
-										disabled={busy}
-										onClick={() => setConfirmRemoval(null)}
-									>
-										{t("Cancel")}
-									</button>
-									<button
-										className="settings-danger-button"
-										type="button"
-										disabled={busy}
-										onClick={() => {
-											setConfirmRemoval(null);
-											void removeCustomProvider();
-										}}
-									>
-										{t("Confirm remove provider")}
-									</button>
+									</label>
+									<label className="model-api-key-field">
+										<span>{t("Base URL")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setCustomDraft({ ...customDraft, baseUrl: event.target.value })}
+											placeholder="https://api.example.com/v1"
+											type="text"
+											value={customDraft.baseUrl}
+										/>
+									</label>
+									<label htmlFor={`${fieldId}-select-2`} className="model-api-key-field">
+										<span>{t("API format")}</span>
+										<MenuSelect
+											id={`${fieldId}-select-2`}
+											ariaLabel={t("API format")}
+											disabled={busy}
+											onChange={(api) => setCustomDraft({ ...customDraft, api })}
+											options={API_FORMATS.map((format) => ({
+												value: format.value,
+												label: t(format.label),
+											}))}
+											value={customDraft.api}
+										/>
+									</label>
+									<label className="model-api-key-field">
+										<span>{t("API key")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setCustomDraft({ ...customDraft, apiKey: event.target.value })}
+											placeholder="sk-…"
+											type="password"
+											value={customDraft.apiKey}
+										/>
+									</label>
 								</div>
-							) : null}
-							{customDraft.provider ? (
-								<p>
-									{customDirty
-										? t("Save your changes before testing or changing defaults.")
-										: t("Connection tests use the saved configuration and may incur usage charges.")}
-								</p>
-							) : null}
-							{customDraft.provider && customDraft.models.length > 0 ? (
-								<div className="model-use-section">
-									<div>
-										<h2>{t("Default model")}</h2>
-										<p>{t("Choose the model and reasoning effort used for new tasks.")}</p>
-									</div>
-									<div className="model-use-row">
-										<label htmlFor={`${fieldId}-select-4`}>
-											<span>{t("Model")}</span>
-											<MenuSelect
-												id={`${fieldId}-select-4`}
-												ariaLabel={t("Default model")}
-												disabled={busy}
-												onChange={(testModelId) => setCustomDraft({ ...customDraft, testModelId })}
-												options={customDraft.models
-													.filter((model) => model.modelId.trim() !== "")
-													.map((model) => ({ value: model.modelId, label: model.name || model.modelId }))}
-												value={customDraft.testModelId || customDraft.models[0]?.modelId}
-											/>
-										</label>
-										<label htmlFor={`${fieldId}-select-5`}>
-											<span>{t("Default reasoning")}</span>
-											<MenuSelect
-												id={`${fieldId}-select-5`}
-												ariaLabel={t("Default reasoning")}
-												disabled={busy}
-												onChange={setDefaultThinking}
-												options={customThinkingOptions}
-												value={customDefaultThinking}
-											/>
-										</label>
+
+								<ModelDiscovery
+									api={api}
+									connection={{
+										...(customDraft.provider ? { provider: customDraft.provider } : {}),
+										baseUrl: customDraft.baseUrl,
+										api: customDraft.api,
+										...(customDraft.apiKey.trim() ? { apiKey: customDraft.apiKey.trim() } : {}),
+									}}
+									configured={Boolean(savedCustom?.auth.configured)}
+									existingIds={customDraft.models.map((model) => model.modelId.trim())}
+									disabled={busy}
+									onAdd={addDiscovered}
+								/>
+								<div className="model-custom-models">
+									<div className="model-custom-models-heading">
+										<span>{t("Models")}</span>
 										<button
-											className="settings-primary-button"
-											disabled={busy || customDirty || !customDraft.testModelId}
-											onClick={saveCustomDefaults}
+											className="settings-secondary-button"
+											disabled={busy}
+											onClick={() =>
+												setCustomDraft({
+													...customDraft,
+													models: [...customDraft.models, newCustomModelDraft()],
+												})
+											}
 											type="button"
 										>
-											{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
+											<Plus aria-hidden="true" size={14} />
+											{t("Add model")}
 										</button>
 									</div>
+									{customDraft.models.map((model, index) => (
+										<div className="model-custom-model-row" key={model.key}>
+											<button
+												aria-label={t("Remove model")}
+												className="model-custom-model-remove"
+												disabled={busy || customDraft.models.length === 1}
+												onClick={() => removeCustomModel(index)}
+												type="button"
+											>
+												<Trash aria-hidden="true" size={15} />
+											</button>
+											<div className="model-custom-model-fields model-custom-model-identity">
+												<label>
+													<span>{t("Model ID")}</span>
+													<input
+														autoComplete="off"
+														disabled={busy}
+														onChange={(event) =>
+															updateCustomModel(index, { ...model, modelId: event.target.value })
+														}
+														placeholder="gpt-5"
+														type="text"
+														value={model.modelId}
+													/>
+												</label>
+												<label>
+													<span>{t("Display name")}</span>
+													<input
+														autoComplete="off"
+														disabled={busy}
+														onChange={(event) =>
+															updateCustomModel(index, { ...model, name: event.target.value })
+														}
+														placeholder={model.modelId || t("Model name")}
+														type="text"
+														value={model.name}
+													/>
+												</label>
+											</div>
+											<details className="model-advanced-settings">
+												<summary>{t("Advanced model settings")}</summary>
+												<div className="model-custom-model-fields model-custom-model-limits">
+													<label>
+														<span>{t("Context window")}</span>
+														<input
+															disabled={busy}
+															min={1}
+															onChange={(event) =>
+																updateCustomModel(index, {
+																	...model,
+																	contextWindow: Number(event.target.value),
+																})
+															}
+															type="number"
+															value={Number.isFinite(model.contextWindow) ? model.contextWindow : ""}
+														/>
+													</label>
+													<label>
+														<span>{t("Max output tokens")}</span>
+														<input
+															disabled={busy}
+															min={1}
+															onChange={(event) =>
+																updateCustomModel(index, {
+																	...model,
+																	maxOutputTokens: Number(event.target.value),
+																})
+															}
+															type="number"
+															value={Number.isFinite(model.maxOutputTokens) ? model.maxOutputTokens : ""}
+														/>
+													</label>
+												</div>
+												<div className="model-custom-model-options">
+													<label className="model-custom-model-capability">
+														<input
+															aria-label={t("Image input")}
+															checked={model.imageInput}
+															disabled={busy}
+															onChange={(event) =>
+																updateCustomModel(index, { ...model, imageInput: event.target.checked })
+															}
+															type="checkbox"
+														/>
+														<span>{t("Image input")}</span>
+													</label>
+												</div>
+											</details>
+											<ModelReasoningEditor
+												id={`${fieldId}-reasoning-${model.key}`}
+												model={model}
+												api={customDraft.api}
+												disabled={busy}
+												onChange={(patch) => updateCustomModel(index, { ...model, ...patch })}
+											/>
+										</div>
+									))}
 								</div>
-							) : null}
+
+								{customDraft.provider ? (
+									<p>
+										{customDirty
+											? t("Save your changes before testing or changing defaults.")
+											: t("Connection tests use the saved configuration and may incur usage charges.")}
+									</p>
+								) : null}
+								{customDraft.provider && customDraft.models.length > 0 ? (
+									<div className="model-use-section">
+										<div>
+											<h2>{t("Default model")}</h2>
+											<p>{t("Choose the model and reasoning effort used for new tasks.")}</p>
+										</div>
+										<div className="model-use-row">
+											<label htmlFor={`${fieldId}-select-4`}>
+												<span>{t("Model")}</span>
+												<MenuSelect
+													id={`${fieldId}-select-4`}
+													ariaLabel={t("Default model")}
+													disabled={busy}
+													onChange={(testModelId) => setCustomDraft({ ...customDraft, testModelId })}
+													options={customDraft.models
+														.filter((model) => model.modelId.trim() !== "")
+														.map((model) => ({
+															value: model.modelId,
+															label: model.name || model.modelId,
+														}))}
+													value={customDraft.testModelId || customDraft.models[0]?.modelId}
+												/>
+											</label>
+											<label htmlFor={`${fieldId}-select-5`}>
+												<span>{t("Default reasoning")}</span>
+												<MenuSelect
+													id={`${fieldId}-select-5`}
+													ariaLabel={t("Default reasoning")}
+													disabled={busy}
+													onChange={setDefaultThinking}
+													options={customThinkingOptions}
+													value={customDefaultThinking}
+												/>
+											</label>
+											<button
+												className="settings-primary-button"
+												disabled={busy || customDirty || !customDraft.testModelId}
+												onClick={saveCustomDefaults}
+												type="button"
+											>
+												{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
+											</button>
+										</div>
+									</div>
+								) : null}
+							</div>
+							<footer className="model-provider-editor-footer">
+								{error ? (
+									<p className="settings-action-message error" role="alert">
+										<XCircle aria-hidden="true" size={15} />
+										{error}
+									</p>
+								) : null}
+								{notice ? (
+									<output className="status-paragraph settings-action-message">
+										<CheckCircle aria-hidden="true" size={15} />
+										{notice}
+									</output>
+								) : null}
+								{confirmRemoval === "provider" ? (
+									<div className="model-removal-confirm" role="alert">
+										<p>{t("Remove this custom provider and its model configuration?")}</p>
+										<button
+											className="settings-secondary-button"
+											type="button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval(null)}
+										>
+											{t("Cancel")}
+										</button>
+										<button
+											className="settings-danger-button"
+											type="button"
+											disabled={busy}
+											onClick={() => {
+												setConfirmRemoval(null);
+												void removeCustomProvider();
+											}}
+										>
+											{t("Confirm remove provider")}
+										</button>
+									</div>
+								) : null}
+								<div className="settings-form-actions">
+									{customDraft.provider ? (
+										<button
+											className="settings-danger-button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval("provider")}
+											type="button"
+										>
+											{t("Remove provider")}
+										</button>
+									) : null}
+									{customDraft.provider && customDraft.testModelId ? (
+										<button
+											className="settings-secondary-button"
+											disabled={busy || customDirty}
+											onClick={() => void testCustomConnection()}
+											title={t("Tests the saved configuration. Model calls may incur usage charges.")}
+											type="button"
+										>
+											{operation === "test" ? t("Testing…") : t("Test connection")}
+										</button>
+									) : null}
+									<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
+										{operation === "save" ? t("Saving…") : t("Save provider")}
+									</button>
+								</div>
+							</footer>
 						</form>
-						{error ? (
-							<p className="settings-action-message error" role="alert">
-								<XCircle aria-hidden="true" size={15} />
-								{error}
-							</p>
-						) : null}
-						{notice ? (
-							<output className="status-paragraph settings-action-message">
-								<CheckCircle aria-hidden="true" size={15} />
-								{notice}
-							</output>
-						) : null}
 					</div>
 				</dialog>
 			) : null}
@@ -1403,10 +1505,10 @@ export function ModelSettingsPanel({
 					className="model-provider-dialog model-service-dialog"
 					onCancel={(event) => {
 						event.preventDefault();
-						closeVisionEditor();
+						requestCloseEditor();
 					}}
 					onClick={(event) => {
-						if (event.target === event.currentTarget) closeVisionEditor();
+						if (event.target === event.currentTarget) requestCloseEditor();
 					}}
 					ref={visionDialogRef}
 				>
@@ -1430,7 +1532,8 @@ export function ModelSettingsPanel({
 								<button
 									aria-label={t("Close")}
 									className="model-provider-dialog-close"
-									onClick={closeVisionEditor}
+									disabled={busy}
+									onClick={requestCloseEditor}
 									type="button"
 								>
 									<X aria-hidden="true" size={18} />
@@ -1517,7 +1620,7 @@ export function ModelSettingsPanel({
 								<button
 									className="settings-secondary-button"
 									disabled={busy}
-									onClick={closeVisionEditor}
+									onClick={requestCloseEditor}
 									type="button"
 								>
 									{t("Cancel")}
@@ -1563,6 +1666,41 @@ export function ModelSettingsPanel({
 								</output>
 							) : null}
 						</form>
+					</div>
+				</dialog>
+			) : null}
+			{confirmDiscard ? (
+				<dialog
+					aria-labelledby={`${fieldId}-discard-title`}
+					aria-describedby={`${fieldId}-discard-copy`}
+					className="settings-unsaved-dialog"
+					onKeyDown={(event) => trapDialogTab(event, event.currentTarget)}
+					onCancel={(event) => {
+						event.preventDefault();
+						setConfirmDiscard(false);
+					}}
+					ref={discardDialogRef}
+				>
+					<h2 id={`${fieldId}-discard-title`}>{t("Unsaved changes")}</h2>
+					<p id={`${fieldId}-discard-copy`}>
+						{t("Your changes have not been saved. Keep editing to save them, or discard them to leave.")}
+					</p>
+					<div className="settings-form-actions">
+						<button className="settings-secondary-button" onClick={() => setConfirmDiscard(false)} type="button">
+							{t("Keep editing")}
+						</button>
+						<button
+							className="settings-danger-button"
+							onClick={() => {
+								const action = pendingEditorAction.current;
+								pendingEditorAction.current = null;
+								discardEditor();
+								action?.();
+							}}
+							type="button"
+						>
+							{t("Discard changes")}
+						</button>
 					</div>
 				</dialog>
 			) : null}

@@ -83,6 +83,7 @@ function mount() {
 	roots.push(root);
 	const store = new AppStore();
 	const onToolsSidebarOpenChange = vi.fn();
+	const onToolsSidebarWidthChange = vi.fn();
 	let props: WorkspaceProps = {
 		api,
 		chat: null,
@@ -111,6 +112,7 @@ function mount() {
 		titlebarTabsSlot: chatSlot,
 		titlebarToolsSlot: toolsSlot,
 		onToolsSidebarOpenChange,
+		onToolsSidebarWidthChange,
 	};
 	const render = async (next: Partial<WorkspaceProps> = {}) => {
 		props = { ...props, ...next };
@@ -120,7 +122,16 @@ function mount() {
 		await act(async () => button(container.querySelector(".tool-sidebar-menu")!, "Terminal").click());
 		return container.querySelector<HTMLElement>(".terminal-panel")!.dataset.terminalId!;
 	};
-	return { api, container, chatSlot, toolsSlot, onToolsSidebarOpenChange, render, addTerminal };
+	return {
+		api,
+		container,
+		chatSlot,
+		toolsSlot,
+		onToolsSidebarOpenChange,
+		onToolsSidebarWidthChange,
+		render,
+		addTerminal,
+	};
 }
 
 beforeEach(async () => {
@@ -136,6 +147,33 @@ afterEach(async () => {
 });
 
 describe("per-session tools sidebar", () => {
+	it("clamps keyboard resizing to leave a usable chat column", async () => {
+		const view = mount();
+		view.container.classList.add("workspace");
+		Object.defineProperty(view.container, "clientWidth", { configurable: true, value: 972 });
+		await view.render({ toolsSidebarWidth: 650 });
+		const resizer = view.container.querySelector<HTMLElement>(".tool-sidebar-resizer")!;
+		const maximum = 404;
+		expect(resizer.getAttribute("aria-valuemax")).toBe(String(maximum));
+		expect(resizer.getAttribute("aria-valuemin")).toBe(String(280));
+		await act(async () => resizer.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })));
+		expect(view.onToolsSidebarWidthChange).toHaveBeenLastCalledWith(maximum);
+
+		await view.render({ toolsSidebarWidth: 280 });
+		await act(async () => resizer.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true })));
+		expect(view.onToolsSidebarWidthChange).toHaveBeenLastCalledWith(280);
+	});
+
+	it("keeps the pane reservation and the aside on the same width", async () => {
+		const view = mount();
+		const width = 404;
+		await view.render({ toolsSidebarWidth: width });
+		expect(view.container.querySelector<HTMLElement>(".tool-sidebar")?.style.width).toBe(`${width}px`);
+		expect(view.container.querySelector<HTMLElement>(".session-workspace-panes")?.style.paddingRight).toBe(
+			`${width}px`,
+		);
+	});
+
 	it("uses the chat space left beside the sidebar when checking a split", async () => {
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
 			x: 0,

@@ -803,14 +803,16 @@ describe("Chat desktop shell", () => {
 			await flush();
 			await act(async () => button(container, "Show tools sidebar").click());
 			const sidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
-			expect(sidebar.style.width).toBe("850px");
+			const maximum = 712;
+			expect(sidebar.style.width).toBe(`${maximum}px`);
+			expect(1280 - maximum - 8).toBe(560);
 			workspaceWidth = 650;
 			await act(async () => window.dispatchEvent(new Event("resize")));
-			expect(sidebar.style.width).toBe("363px");
+			expect(sidebar.style.width).toBe(`${280}px`);
 			expect(localStorage.getItem(key)).toBe("850");
 			workspaceWidth = 1280;
 			await act(async () => window.dispatchEvent(new Event("resize")));
-			expect(sidebar.style.width).toBe("850px");
+			expect(sidebar.style.width).toBe(`${maximum}px`);
 			expect(localStorage.getItem(key)).toBe("850");
 		} finally {
 			await act(async () => root.unmount());

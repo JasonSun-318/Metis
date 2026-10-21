@@ -9,6 +9,7 @@ import { FolderSimple, X } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
@@ -86,6 +87,7 @@ export interface ScheduledTaskDialogProps {
 export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSaved }: ScheduledTaskDialogProps) {
 	const { t, i18n } = useTranslation();
 	const dialog = useRef<HTMLDialogElement>(null);
+	const nameInput = useRef<HTMLInputElement>(null);
 	const initialSchedule = useMemo(() => inputSchedule(task), [task]);
 	const projects = useMemo(() => projectSessions(sessions), [sessions]);
 	const currentModelKey = task ? modelKey(task.model) : "";
@@ -142,8 +144,14 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 	const request = useRef<{ key: string; id: string } | null>(null);
 
 	useEffect(() => {
-		dialog.current?.showModal?.();
-		return () => dialog.current?.close?.();
+		const node = dialog.current;
+		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		node?.showModal?.();
+		nameInput.current?.focus();
+		return () => {
+			if (node?.open) node.close?.();
+			if (previous?.isConnected) previous.focus();
+		};
 	}, []);
 
 	const setKind = (kind: ScheduleInputSpecView["kind"]) => {
@@ -251,6 +259,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 		<dialog
 			aria-labelledby="scheduled-task-dialog-title"
 			className="scheduled-task-dialog"
+			onKeyDown={(event) => trapDialogTab(event, event.currentTarget)}
 			onCancel={(event) => {
 				event.preventDefault();
 				if (!busy) onClose();
@@ -277,7 +286,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					<label>
 						{t("Name")}
 						<input
-							autoFocus
+							ref={nameInput}
 							maxLength={120}
 							onChange={(event) => setName(event.target.value)}
 							required

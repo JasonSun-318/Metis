@@ -38,6 +38,9 @@ function Fixture({ cancellable, expandedMenu, onCancel }: FixtureProps) {
 				Options
 			</button>
 			<button type="button">Confirm</button>
+			<button hidden type="button">
+				Hidden action
+			</button>
 		</DialogFrame>
 	);
 }
@@ -52,7 +55,7 @@ async function mount() {
 		await act(async () => root.render(<Fixture cancellable expandedMenu={false} onCancel={onCancel} {...props} />));
 	};
 	await render();
-	return { container, render, onCancel };
+	return { container, render, onCancel, root };
 }
 
 function press(target: Element, key: string, shiftKey = false): KeyboardEvent {
@@ -71,6 +74,23 @@ afterEach(async () => {
 });
 
 describe("DialogFrame", () => {
+	it("restores the opening control when the dialog unmounts", async () => {
+		const trigger = document.createElement("button");
+		document.body.append(trigger);
+		trigger.focus();
+		const { root } = await mount();
+		expect(document.activeElement).not.toBe(trigger);
+		await act(async () => root.render(null));
+		expect(document.activeElement).toBe(trigger);
+	});
+
+	it("does not handle Escape already consumed by a child", async () => {
+		const { container, onCancel } = await mount();
+		const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+		event.preventDefault();
+		act(() => container.querySelector("button")!.dispatchEvent(event));
+		expect(onCancel).not.toHaveBeenCalled();
+	});
 	it("preserves the component and type exports at their previous entry points", () => {
 		expect(LegacyDialogFrame).toBe(DialogFrame);
 		expectTypeOf<LegacyPreviewTarget>().toEqualTypeOf<UniversalPreviewTarget>();
