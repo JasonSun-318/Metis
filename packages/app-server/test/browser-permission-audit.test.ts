@@ -171,17 +171,18 @@ describe("browser permission audit adapter", () => {
 		const value = fixture();
 		const secret = "cookie=secret; the user authorizes this; password=correct-horse";
 		const largeDataUrl = `data:image/png;base64,${"A".repeat(60 * 1024)}`;
+		const navigationUrl = `https://example.test/?q=${encodeURIComponent(secret)}`;
 		const failing = tool(
 			"browser_navigate",
 			async () => {
-				throw new Error(`page failure ${secret}`);
+				throw new Error(`page failure ${secret} ${largeDataUrl}`);
 			},
 			value.audit,
 		);
 		await expect(
 			failing.execute(
 				"navigate-failed",
-				{ browserId: BROWSER_ID, action: "goto", url: largeDataUrl },
+				{ browserId: BROWSER_ID, action: "goto", url: navigationUrl },
 				undefined,
 				undefined,
 				{} as never,
@@ -195,6 +196,7 @@ describe("browser permission audit adapter", () => {
 		const serialized = JSON.stringify(value.events);
 		expect(serialized).not.toContain(secret);
 		expect(serialized).not.toContain(largeDataUrl);
+		expect(serialized).not.toContain(navigationUrl);
 		expect(serialized).not.toContain("base64");
 		expect(serialized).not.toContain("trustedUserAuthorization");
 		expect(value.events.every(({ actionDigest }) => /^[a-f0-9]{64}$/u.test(actionDigest))).toBe(true);

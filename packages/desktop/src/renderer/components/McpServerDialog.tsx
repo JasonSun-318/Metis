@@ -321,253 +321,259 @@ export function McpServerForm({
 		}
 	};
 	return (
-		<form className="mcp-server-form" onSubmit={(event) => void submit(event)}>
-			<div className="mcp-dialog-grid">
-				<label>
-					{t(variant === "custom" ? "Server name" : "Name")}
-					<input
-						disabled={Boolean(server) || pending}
-						onChange={(event) => {
-							nameEdited.current = true;
-							setName(event.target.value);
-						}}
-						value={name}
-					/>
-				</label>
-				{variant !== "url" && (
-					<label htmlFor={transportId}>
-						{t("Transport")}
-						<MenuSelect
-							ariaLabel={t("Transport")}
-							id={transportId}
-							disabled={pending}
-							onChange={setTransport}
-							options={
-								variant === "custom"
-									? [
-											{ value: "http", label: "HTTP" },
-											{ value: "stdio", label: "STDIO" },
-										]
-									: [
-											{ value: "stdio", label: t("Local command") },
-											{ value: "http", label: t("Streamable HTTP") },
-										]
-							}
-							value={transport}
+		<form className="mcp-server-form dialog-form-layout" onSubmit={(event) => void submit(event)}>
+			<div className="dialog-form-body">
+				<div className="mcp-dialog-grid">
+					<label>
+						{t(variant === "custom" ? "Server name" : "Name")}
+						<input
+							disabled={Boolean(server) || pending}
+							onChange={(event) => {
+								nameEdited.current = true;
+								setName(event.target.value);
+							}}
+							value={name}
 						/>
 					</label>
-				)}
-				<label className="mcp-dialog-wide mcp-description-field">
-					{t("Description (optional)")}
-					<textarea
-						disabled={pending}
-						onChange={(event) => setDescription(event.target.value)}
-						value={description}
-					/>
-				</label>
-				{transport === "stdio" ? (
-					<>
-						<label className="mcp-dialog-wide">
-							{t("Command")}
-							<input disabled={pending} onChange={(event) => setCommand(event.target.value)} value={command} />
-						</label>
-						<label>
-							{t("Arguments, one per line")}
-							<textarea disabled={pending} onChange={(event) => setArgs(event.target.value)} value={args} />
-						</label>
-						<label>
-							{t("Forwarded variable names, one per line")}
-							<textarea
+					{variant !== "url" && (
+						<label htmlFor={transportId}>
+							{t("Transport")}
+							<MenuSelect
+								ariaLabel={t("Transport")}
+								id={transportId}
 								disabled={pending}
-								onChange={(event) => setEnvVars(event.target.value)}
-								value={envVars}
+								onChange={setTransport}
+								options={
+									variant === "custom"
+										? [
+												{ value: "http", label: "HTTP" },
+												{ value: "stdio", label: "STDIO" },
+											]
+										: [
+												{ value: "stdio", label: t("Local command") },
+												{ value: "http", label: t("Streamable HTTP") },
+											]
+								}
+								value={transport}
 							/>
 						</label>
-						<label className="mcp-dialog-wide">
-							{t("Working directory")}
-							<input disabled={pending} onChange={(event) => setCwd(event.target.value)} value={cwd} />
-						</label>
-					</>
-				) : (
-					<>
-						<label className="mcp-dialog-wide">
-							{t("Server URL")}
-							<input
-								disabled={pending}
-								onBlur={() => {
-									if (nameEdited.current) return;
-									try {
-										setName(new URL(url).hostname);
-									} catch {
-										/* keep blank */
-									}
-								}}
-								onChange={(event) => setUrl(event.target.value)}
-								type="url"
-								value={url}
-							/>
-						</label>
-						{variant === "edit" && (
-							<>
+					)}
+					<label className="mcp-dialog-wide mcp-description-field">
+						{t("Description (optional)")}
+						<textarea
+							disabled={pending}
+							onChange={(event) => setDescription(event.target.value)}
+							value={description}
+						/>
+					</label>
+					{transport === "stdio" ? (
+						<>
+							<label className="mcp-dialog-wide">
+								{t("Command")}
+								<input
+									disabled={pending}
+									onChange={(event) => setCommand(event.target.value)}
+									value={command}
+								/>
+							</label>
+							<label>
+								{t("Arguments, one per line")}
+								<textarea disabled={pending} onChange={(event) => setArgs(event.target.value)} value={args} />
+							</label>
+							<label>
+								{t("Forwarded variable names, one per line")}
+								<textarea
+									disabled={pending}
+									onChange={(event) => setEnvVars(event.target.value)}
+									value={envVars}
+								/>
+							</label>
+							<label className="mcp-dialog-wide">
+								{t("Working directory")}
+								<input disabled={pending} onChange={(event) => setCwd(event.target.value)} value={cwd} />
+							</label>
+						</>
+					) : (
+						<>
+							<label className="mcp-dialog-wide">
+								{t("Server URL")}
+								<input
+									disabled={pending}
+									onBlur={() => {
+										if (nameEdited.current) return;
+										try {
+											setName(new URL(url).hostname);
+										} catch {
+											/* keep blank */
+										}
+									}}
+									onChange={(event) => setUrl(event.target.value)}
+									type="url"
+									value={url}
+								/>
+							</label>
+							{variant === "edit" && (
+								<>
+									<label>
+										{t("Bearer token environment variable")}
+										<input
+											disabled={pending}
+											onChange={(event) => setBearerTokenEnvVar(event.target.value)}
+											value={bearerTokenEnvVar}
+										/>
+									</label>
+									<label>
+										{t("HTTP headers")}
+										<textarea
+											disabled={pending}
+											onChange={(event) => setHeaders(event.target.value)}
+											placeholder="X-Tenant=MCP_TENANT"
+											value={headers}
+										/>
+									</label>
+								</>
+							)}
+						</>
+					)}
+					{variant === "edit" && (
+						<>
+							<label>
+								{t("Startup timeout (seconds)")}
+								<input
+									disabled={pending}
+									min="0.001"
+									onChange={(event) => setStartupTimeout(event.target.value)}
+									step="any"
+									type="number"
+									value={startupTimeout}
+								/>
+							</label>
+							<label>
+								{t("Tool timeout (seconds)")}
+								<input
+									disabled={pending}
+									min="0.001"
+									onChange={(event) => setToolTimeout(event.target.value)}
+									step="any"
+									type="number"
+									value={toolTimeout}
+								/>
+							</label>
+						</>
+					)}
+				</div>
+				{variant !== "edit" && transport === "http" && (
+					<fieldset className="mcp-quick-headers">
+						<legend>{t("Custom headers (optional)")}</legend>
+						{quickHeaders.map((row) => (
+							<div className="mcp-quick-header-row" key={row.id}>
 								<label>
-									{t("Bearer token environment variable")}
+									{t("Header name")}
 									<input
 										disabled={pending}
-										onChange={(event) => setBearerTokenEnvVar(event.target.value)}
-										value={bearerTokenEnvVar}
+										onChange={(event) =>
+											setQuickHeaders((current) =>
+												current.map((item) =>
+													item.id === row.id ? { ...item, header: event.target.value } : item,
+												),
+											)
+										}
+										value={row.header}
 									/>
 								</label>
 								<label>
-									{t("HTTP headers")}
-									<textarea
+									{t("Environment name (optional)")}
+									<input
 										disabled={pending}
-										onChange={(event) => setHeaders(event.target.value)}
-										placeholder="X-Tenant=MCP_TENANT"
-										value={headers}
+										onChange={(event) =>
+											setQuickHeaders((current) =>
+												current.map((item) =>
+													item.id === row.id ? { ...item, name: event.target.value } : item,
+												),
+											)
+										}
+										value={row.name}
 									/>
 								</label>
-							</>
-						)}
-					</>
+								<label>
+									{t("Secret value")}
+									<input
+										autoComplete="off"
+										disabled={pending}
+										onChange={(event) =>
+											setQuickHeaders((current) =>
+												current.map((item) =>
+													item.id === row.id ? { ...item, value: event.target.value } : item,
+												),
+											)
+										}
+										type="password"
+										value={row.value}
+									/>
+								</label>
+								<button
+									aria-label={t("Remove header")}
+									disabled={pending}
+									onClick={() => setQuickHeaders((current) => current.filter((item) => item.id !== row.id))}
+									type="button"
+								>
+									<Trash aria-hidden="true" size={15} />
+								</button>
+							</div>
+						))}
+						<button
+							className="mcp-add-row"
+							disabled={pending || quickHeaders.length >= 128}
+							onClick={() =>
+								setQuickHeaders((current) => [
+									...current,
+									{ id: crypto.randomUUID(), header: "", name: "", value: "" },
+								])
+							}
+							type="button"
+						>
+							<Plus aria-hidden="true" size={15} />
+							{t("Add header")}
+						</button>
+					</fieldset>
+				)}
+				{(variant !== "custom" || transport === "stdio") && (
+					<McpCredentialFields
+						disabled={pending}
+						onChange={setCredential}
+						onValidityChange={setCredentialValid}
+						suggestedEnvironmentNames={suggestedNames}
+						transport={transport}
+					/>
 				)}
 				{variant === "edit" && (
-					<>
+					<div className="mcp-dialog-checks">
 						<label>
-							{t("Startup timeout (seconds)")}
 							<input
+								checked={enabled}
 								disabled={pending}
-								min="0.001"
-								onChange={(event) => setStartupTimeout(event.target.value)}
-								step="any"
-								type="number"
-								value={startupTimeout}
+								onChange={(event) => setEnabled(event.target.checked)}
+								type="checkbox"
 							/>
+							{t("Enabled")}
 						</label>
 						<label>
-							{t("Tool timeout (seconds)")}
 							<input
+								checked={required}
 								disabled={pending}
-								min="0.001"
-								onChange={(event) => setToolTimeout(event.target.value)}
-								step="any"
-								type="number"
-								value={toolTimeout}
+								onChange={(event) => setRequired(event.target.checked)}
+								type="checkbox"
 							/>
+							{t("Required")}
 						</label>
-					</>
+					</div>
+				)}
+				{(localError || error) && (
+					<p className="mcp-dialog-error" role="alert">
+						{t(localError || error || "")}
+					</p>
 				)}
 			</div>
-			{variant !== "edit" && transport === "http" && (
-				<fieldset className="mcp-quick-headers">
-					<legend>{t("Custom headers (optional)")}</legend>
-					{quickHeaders.map((row) => (
-						<div className="mcp-quick-header-row" key={row.id}>
-							<label>
-								{t("Header name")}
-								<input
-									disabled={pending}
-									onChange={(event) =>
-										setQuickHeaders((current) =>
-											current.map((item) =>
-												item.id === row.id ? { ...item, header: event.target.value } : item,
-											),
-										)
-									}
-									value={row.header}
-								/>
-							</label>
-							<label>
-								{t("Environment name (optional)")}
-								<input
-									disabled={pending}
-									onChange={(event) =>
-										setQuickHeaders((current) =>
-											current.map((item) =>
-												item.id === row.id ? { ...item, name: event.target.value } : item,
-											),
-										)
-									}
-									value={row.name}
-								/>
-							</label>
-							<label>
-								{t("Secret value")}
-								<input
-									autoComplete="off"
-									disabled={pending}
-									onChange={(event) =>
-										setQuickHeaders((current) =>
-											current.map((item) =>
-												item.id === row.id ? { ...item, value: event.target.value } : item,
-											),
-										)
-									}
-									type="password"
-									value={row.value}
-								/>
-							</label>
-							<button
-								aria-label={t("Remove header")}
-								disabled={pending}
-								onClick={() => setQuickHeaders((current) => current.filter((item) => item.id !== row.id))}
-								type="button"
-							>
-								<Trash aria-hidden="true" size={15} />
-							</button>
-						</div>
-					))}
-					<button
-						className="mcp-add-row"
-						disabled={pending || quickHeaders.length >= 128}
-						onClick={() =>
-							setQuickHeaders((current) => [
-								...current,
-								{ id: crypto.randomUUID(), header: "", name: "", value: "" },
-							])
-						}
-						type="button"
-					>
-						<Plus aria-hidden="true" size={15} />
-						{t("Add header")}
-					</button>
-				</fieldset>
-			)}
-			{(variant !== "custom" || transport === "stdio") && (
-				<McpCredentialFields
-					disabled={pending}
-					onChange={setCredential}
-					onValidityChange={setCredentialValid}
-					suggestedEnvironmentNames={suggestedNames}
-					transport={transport}
-				/>
-			)}
-			{variant === "edit" && (
-				<div className="mcp-dialog-checks">
-					<label>
-						<input
-							checked={enabled}
-							disabled={pending}
-							onChange={(event) => setEnabled(event.target.checked)}
-							type="checkbox"
-						/>
-						{t("Enabled")}
-					</label>
-					<label>
-						<input
-							checked={required}
-							disabled={pending}
-							onChange={(event) => setRequired(event.target.checked)}
-							type="checkbox"
-						/>
-						{t("Required")}
-					</label>
-				</div>
-			)}
-			{(localError || error) && (
-				<p className="mcp-dialog-error" role="alert">
-					{t(localError || error || "")}
-				</p>
-			)}
 			<div className="mcp-dialog-actions">
 				<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">
 					{t("Cancel")}
@@ -598,7 +604,7 @@ export function McpServerDialog({
 	return (
 		<DialogFrame
 			cancellable={!pending}
-			className="mcp-dialog"
+			className="mcp-dialog dialog-form-dialog"
 			descriptionId="mcp-server-description"
 			initialFocus={close}
 			onCancel={onCancel}

@@ -68,8 +68,8 @@ export function MenuSelect<T extends string>({
 		const neededHeight = Math.min(280, options.length * 34 + 10);
 		setPosition(
 			below >= neededHeight || below >= above
-				? { top: rect.bottom + 6, left, width, maxHeight: Math.max(0, below - 6) }
-				: { bottom: viewportHeight - rect.top + 6, left, width, maxHeight: Math.max(0, above - 6) },
+				? { top: rect.bottom + 6, left, width, maxHeight: Math.max(0, Math.min(280, below - 6)) }
+				: { bottom: viewportHeight - rect.top + 6, left, width, maxHeight: Math.max(0, Math.min(280, above - 6)) },
 		);
 	}, [menuAlign, menuMinWidth, options.length]);
 	const close = useCallback((restoreFocus = false) => {
@@ -88,9 +88,9 @@ export function MenuSelect<T extends string>({
 		updatePosition();
 		queueMicrotask(() => {
 			const selectedItem = menu.current?.querySelector<HTMLButtonElement>('[aria-selected="true"]:not(:disabled)');
-			(selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({
-				preventScroll: true,
-			});
+			const initialItem = selectedItem ?? menu.current?.querySelector<HTMLButtonElement>("button:not(:disabled)");
+			initialItem?.focus({ preventScroll: true });
+			initialItem?.scrollIntoView?.({ block: "nearest" });
 		});
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;

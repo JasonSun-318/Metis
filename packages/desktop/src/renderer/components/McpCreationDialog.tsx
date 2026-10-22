@@ -8,7 +8,7 @@ import {
 	SlidersHorizontal,
 	X,
 } from "@phosphor-icons/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { type McpServerDraft, McpServerForm } from "./McpServerDialog.tsx";
@@ -183,11 +183,33 @@ export function McpCreationDialog({
 			setPending(false);
 		}
 	};
+	const body = useRef<HTMLDivElement>(null);
+	const inspectionReady = inspection !== null;
+	const close = useRef<HTMLButtonElement>(null);
+	// Steps and inspection results replace the focused control; keep keyboard input inside the dialog.
+	useEffect(() => {
+		queueMicrotask(() => {
+			const preferred =
+				step === "methods"
+					? first.current
+					: inspectionReady
+						? body.current?.querySelector<HTMLElement>(".mcp-import-candidate input:not(:disabled)")
+						: null;
+			const control =
+				preferred && !preferred.matches(":disabled")
+					? preferred
+					: body.current?.querySelector<HTMLElement>(
+							"input:not(:disabled), textarea:not(:disabled), button:not(:disabled)",
+						);
+			(control ?? close.current)?.focus();
+		});
+	}, [step, inspectionReady]);
+
 	const initialFocus = step === "json" ? jsonInput : first;
 	return (
 		<DialogFrame
 			cancellable={!pending}
-			className="mcp-dialog mcp-create-dialog"
+			className="mcp-dialog mcp-create-dialog dialog-form-dialog"
 			descriptionId="mcp-create-description"
 			initialFocus={initialFocus}
 			onCancel={onCancel}
@@ -196,6 +218,7 @@ export function McpCreationDialog({
 			<button
 				aria-label={t("Close")}
 				className="mcp-dialog-close"
+				ref={close}
 				disabled={pending}
 				onClick={onCancel}
 				type="button"
@@ -235,151 +258,132 @@ export function McpCreationDialog({
 					</p>
 				</div>
 			</div>
-			{scope === "project" && (
-				<div className="skill-create-project">
-					<span>{t("Create in")}</span>
-					<div>
-						<MenuSelect<string>
-							ariaLabel={t("Create in")}
-							className="skill-create-project-select"
-							disabled={pending || step !== "methods"}
-							onChange={setCwd}
-							options={projectOptions}
-							placeholder={t("Choose a project")}
-							value={cwd ?? ""}
-						/>
+			<div
+				className={`mcp-create-body${step === "custom" || (step === "url" && !inspection) ? " has-form" : ""}`}
+				ref={body}
+			>
+				{scope === "project" && (
+					<div className="skill-create-project">
+						<span>{t("Create in")}</span>
+						<div>
+							<MenuSelect<string>
+								ariaLabel={t("Create in")}
+								className="skill-create-project-select"
+								disabled={pending || step !== "methods"}
+								onChange={setCwd}
+								options={projectOptions}
+								placeholder={t("Choose a project")}
+								value={cwd ?? ""}
+							/>
+							<button
+								className="button-secondary skill-create-folder"
+								disabled={pending || step !== "methods"}
+								onClick={() => void chooseProject()}
+								type="button"
+							>
+								<FolderSimple aria-hidden="true" size={15} />
+								{t("Choose folder…")}
+							</button>
+						</div>
+					</div>
+				)}
+				{step === "methods" && (
+					<div className="skill-create-methods">
 						<button
-							className="button-secondary skill-create-folder"
-							disabled={pending || step !== "methods"}
-							onClick={() => void chooseProject()}
+							aria-label={t("Add by URL")}
+							disabled={!currentTarget || pending}
+							onClick={() => enter("url")}
+							ref={first}
 							type="button"
 						>
-							<FolderSimple aria-hidden="true" size={15} />
-							{t("Choose folder…")}
+							<span>
+								<LinkSimple aria-hidden="true" size={20} />
+							</span>
+							<span>
+								<strong>{t("Add by URL")}</strong>
+								<small>{t("Configure a Streamable HTTP server and optional credentials.")}</small>
+							</span>
+							<CaretRight aria-hidden="true" size={16} />
+						</button>
+						<button
+							aria-label={t("Custom MCP")}
+							disabled={!currentTarget || pending}
+							onClick={() => enter("custom")}
+							type="button"
+						>
+							<span>
+								<SlidersHorizontal aria-hidden="true" size={20} />
+							</span>
+							<span>
+								<strong>{t("Custom MCP")}</strong>
+								<small>{t("Configure a local command or advanced Streamable HTTP server.")}</small>
+							</span>
+							<CaretRight aria-hidden="true" size={16} />
+						</button>
+						<button
+							aria-label={t("Import JSON")}
+							disabled={!currentTarget || pending}
+							onClick={() => enter("json")}
+							type="button"
+						>
+							<span>
+								<BracketsCurly aria-hidden="true" size={20} />
+							</span>
+							<span>
+								<strong>{t("Import JSON")}</strong>
+								<small>{t("Inspect JSON or JSONC before importing selected servers.")}</small>
+							</span>
+							<CaretRight aria-hidden="true" size={16} />
 						</button>
 					</div>
-				</div>
-			)}
-			{step === "methods" && (
-				<div className="skill-create-methods">
-					<button
-						aria-label={t("Add by URL")}
-						disabled={!currentTarget || pending}
-						onClick={() => enter("url")}
-						ref={first}
-						type="button"
-					>
-						<span>
-							<LinkSimple aria-hidden="true" size={20} />
-						</span>
-						<span>
-							<strong>{t("Add by URL")}</strong>
-							<small>{t("Configure a Streamable HTTP server and optional credentials.")}</small>
-						</span>
-						<CaretRight aria-hidden="true" size={16} />
-					</button>
-					<button
-						aria-label={t("Custom MCP")}
-						disabled={!currentTarget || pending}
-						onClick={() => enter("custom")}
-						type="button"
-					>
-						<span>
-							<SlidersHorizontal aria-hidden="true" size={20} />
-						</span>
-						<span>
-							<strong>{t("Custom MCP")}</strong>
-							<small>{t("Configure a local command or advanced Streamable HTTP server.")}</small>
-						</span>
-						<CaretRight aria-hidden="true" size={16} />
-					</button>
-					<button
-						aria-label={t("Import JSON")}
-						disabled={!currentTarget || pending}
-						onClick={() => enter("json")}
-						type="button"
-					>
-						<span>
-							<BracketsCurly aria-hidden="true" size={20} />
-						</span>
-						<span>
-							<strong>{t("Import JSON")}</strong>
-							<small>{t("Inspect JSON or JSONC before importing selected servers.")}</small>
-						</span>
-						<CaretRight aria-hidden="true" size={16} />
-					</button>
-				</div>
-			)}
-			{step === "url" && !inspection && (
-				<McpServerForm
-					error={error}
-					onCancel={onCancel}
-					onSubmit={(draft) => void inspectUrl(draft)}
-					pending={pending}
-					variant="url"
-				/>
-			)}
-			{step === "custom" && (
-				<McpServerForm
-					error={error}
-					onCancel={onCancel}
-					onSubmit={(draft) => void save(draft)}
-					pending={pending}
-					variant="custom"
-				/>
-			)}
-			{step === "json" && (
-				<form className="mcp-json-form" onSubmit={(event) => void inspect(event)}>
-					<label>
-						{t("MCP JSON or JSONC")}
-						<textarea
-							aria-label={t("MCP JSON or JSONC")}
-							disabled={pending}
-							onChange={(event) => {
-								setText(event.target.value);
-								setInspection(null);
-							}}
-							placeholder={'{\n  "mcpServers": { ... }\n}'}
-							ref={jsonInput}
-							value={text}
-						/>
-					</label>
-				</form>
-			)}
-			{inspection && (
-				<div className="mcp-import-candidates">
-					<h3>{t("MCP servers found")}</h3>
-					{inspection.candidates.map((candidate) => (
-						<div className="mcp-import-candidate" key={candidate.id}>
-							<label>
-								<input
-									checked={selected.has(candidate.id)}
-									disabled={pending}
-									onChange={(event) =>
-										setSelected((current) => {
-											const next = new Set(current);
-											if (event.target.checked) next.add(candidate.id);
-											else next.delete(candidate.id);
-											return next;
-										})
-									}
-									type="checkbox"
-								/>
-								<span>
-									<strong>{candidate.name}</strong>
-									<small>
-										{t(candidate.transport === "stdio" ? "Local command" : "Streamable HTTP")} ·{" "}
-										{t(candidate.existingRevision ? "Existing server" : "New server")}
-									</small>
-								</span>
-							</label>
-							{candidate.existingRevision && selected.has(candidate.id) && (
-								<label className="mcp-replace-confirm">
+				)}
+				{step === "url" && !inspection && (
+					<McpServerForm
+						error={error}
+						onCancel={onCancel}
+						onSubmit={(draft) => void inspectUrl(draft)}
+						pending={pending}
+						variant="url"
+					/>
+				)}
+				{step === "custom" && (
+					<McpServerForm
+						error={error}
+						onCancel={onCancel}
+						onSubmit={(draft) => void save(draft)}
+						pending={pending}
+						variant="custom"
+					/>
+				)}
+				{step === "json" && (
+					<form className="mcp-json-form" onSubmit={(event) => void inspect(event)}>
+						<label>
+							{t("MCP JSON or JSONC")}
+							<textarea
+								aria-label={t("MCP JSON or JSONC")}
+								disabled={pending}
+								onChange={(event) => {
+									setText(event.target.value);
+									setInspection(null);
+								}}
+								placeholder={'{\n  "mcpServers": { ... }\n}'}
+								ref={jsonInput}
+								value={text}
+							/>
+						</label>
+					</form>
+				)}
+				{inspection && (
+					<div className="mcp-import-candidates">
+						<h3>{t("MCP servers found")}</h3>
+						{inspection.candidates.map((candidate) => (
+							<div className="mcp-import-candidate" key={candidate.id}>
+								<label>
 									<input
-										checked={replacements.has(candidate.id)}
+										checked={selected.has(candidate.id)}
 										disabled={pending}
 										onChange={(event) =>
-											setReplacements((current) => {
+											setSelected((current) => {
 												const next = new Set(current);
 												if (event.target.checked) next.add(candidate.id);
 												else next.delete(candidate.id);
@@ -388,18 +392,42 @@ export function McpCreationDialog({
 										}
 										type="checkbox"
 									/>
-									{t("Replace")}
+									<span>
+										<strong>{candidate.name}</strong>
+										<small>
+											{t(candidate.transport === "stdio" ? "Local command" : "Streamable HTTP")} ·{" "}
+											{t(candidate.existingRevision ? "Existing server" : "New server")}
+										</small>
+									</span>
 								</label>
-							)}
-						</div>
-					))}
-				</div>
-			)}
-			{error && step !== "custom" && !(step === "url" && !inspection) && (
-				<p className="mcp-dialog-error" role="alert">
-					{error}
-				</p>
-			)}
+								{candidate.existingRevision && selected.has(candidate.id) && (
+									<label className="mcp-replace-confirm">
+										<input
+											checked={replacements.has(candidate.id)}
+											disabled={pending}
+											onChange={(event) =>
+												setReplacements((current) => {
+													const next = new Set(current);
+													if (event.target.checked) next.add(candidate.id);
+													else next.delete(candidate.id);
+													return next;
+												})
+											}
+											type="checkbox"
+										/>
+										{t("Replace")}
+									</label>
+								)}
+							</div>
+						))}
+					</div>
+				)}
+				{error && step !== "custom" && !(step === "url" && !inspection) && (
+					<p className="mcp-dialog-error" role="alert">
+						{error}
+					</p>
+				)}
+			</div>
 			{(step === "methods" || step === "json" || (step === "url" && inspection)) && (
 				<div className="mcp-dialog-actions">
 					<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">
@@ -419,7 +447,7 @@ export function McpCreationDialog({
 										: "Importing…"
 									: step === "url"
 										? "Add selected"
-										: "Import selected",
+										: "Import selected servers",
 							)}
 						</button>
 					)}

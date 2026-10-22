@@ -60,7 +60,7 @@ export function SkillEditorDialog({
 	return (
 		<DialogFrame
 			cancellable={!pending}
-			className={`mcp-dialog skill-editor-dialog is-${mode}`}
+			className={`mcp-dialog dialog-form-dialog skill-editor-dialog is-${mode}`}
 			descriptionId="skill-editor-description"
 			initialFocus={mode === "create" ? nameInput : contentInput}
 			onCancel={onCancel}
@@ -79,62 +79,64 @@ export function SkillEditorDialog({
 			<p className="sr-only" id="skill-editor-description">
 				{t("Create or update the Skill instructions stored in SKILL.md.")}
 			</p>
-			<form onSubmit={submit}>
-				<label>
-					{t(mode === "create" ? "Skill name" : "Name")}
-					<input
-						disabled={mode === "edit" || pending}
-						onChange={(event) => setName(event.target.value)}
-						placeholder={mode === "create" ? "weekly-status-report" : undefined}
-						ref={nameInput}
-						required
-						value={name}
-					/>
-				</label>
-				{mode === "create" ? (
-					<>
-						<label>
-							{t("Description")}
-							<textarea
-								className="skill-editor-description"
-								disabled={pending}
-								onChange={(event) => setDescription(event.target.value)}
-								placeholder={t(
-									"Generate weekly status reports from recent work. Use when asked for updates or progress summaries.",
-								)}
-								required
-								value={description}
-							/>
-						</label>
-						<label>
-							{t("Instructions")}
-							<textarea
-								className="skill-editor-instructions"
-								disabled={pending}
-								onChange={(event) => setInstructions(event.target.value)}
-								placeholder={t("Summarize recent work in three sections: wins, blockers, and next steps.")}
-								ref={instructionsInput}
-								required
-								value={instructions}
-							/>
-						</label>
-					</>
-				) : (
+			<form className="dialog-form-layout" onSubmit={submit}>
+				<div className="dialog-form-body">
 					<label>
-						{t("SKILL.md")}
-						<textarea
-							disabled={pending}
-							onChange={(event) => setContent(event.target.value)}
-							ref={contentInput}
-							value={content}
+						{t(mode === "create" ? "Skill name" : "Name")}
+						<input
+							disabled={mode === "edit" || pending}
+							onChange={(event) => setName(event.target.value)}
+							placeholder={mode === "create" ? "weekly-status-report" : undefined}
+							ref={nameInput}
+							required
+							value={name}
 						/>
 					</label>
-				)}
-				{(localError || error) && (
-					<p className="mcp-dialog-error" role="alert">
-						{localError || error}
-					</p>
-				)}
+					{mode === "create" ? (
+						<>
+							<label>
+								{t("Description")}
+								<textarea
+									className="skill-editor-description"
+									disabled={pending}
+									onChange={(event) => setDescription(event.target.value)}
+									placeholder={t(
+										"Generate weekly status reports from recent work. Use when asked for updates or progress summaries.",
+									)}
+									required
+									value={description}
+								/>
+							</label>
+							<label>
+								{t("Instructions")}
+								<textarea
+									className="skill-editor-instructions"
+									disabled={pending}
+									onChange={(event) => setInstructions(event.target.value)}
+									placeholder={t("Summarize recent work in three sections: wins, blockers, and next steps.")}
+									ref={instructionsInput}
+									required
+									value={instructions}
+								/>
+							</label>
+						</>
+					) : (
+						<label>
+							{t("SKILL.md")}
+							<textarea
+								disabled={pending}
+								onChange={(event) => setContent(event.target.value)}
+								ref={contentInput}
+								value={content}
+							/>
+						</label>
+					)}
+					{(localError || error) && (
+						<p className="mcp-dialog-error" role="alert">
+							{localError || error}
+						</p>
+					)}
+				</div>
 				<div className="mcp-dialog-actions">
 					<button className="button-secondary" disabled={pending} onClick={onCancel} type="button">
 						{t("Cancel")}

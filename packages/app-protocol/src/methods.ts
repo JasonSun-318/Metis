@@ -1152,19 +1152,26 @@ const BrowserCoordinateTargetSchema = StrictObject({ x: BrowserCoordinateSchema,
 const BrowserElementTargetSchema = StrictObject({ elementId: BrowserElementIdSchema });
 const BrowserPointTargetSchema = Type.Union([BrowserElementTargetSchema, BrowserCoordinateTargetSchema]);
 
-export const BrowserTabsInputSchema = Type.Union([
-	StrictObject({ action: Type.Literal("list") }),
-	StrictObject({ action: Type.Literal("open"), profileId: Type.Optional(BrowserProfileIdSchema) }),
-	StrictObject({ action: Type.Literal("close"), browserId: BrowserIdSchema }),
-]);
+// Function-calling providers require an explicit object root, including action unions.
+export const BrowserTabsInputSchema = Type.Union(
+	[
+		StrictObject({ action: Type.Literal("list") }),
+		StrictObject({ action: Type.Literal("open"), profileId: Type.Optional(BrowserProfileIdSchema) }),
+		StrictObject({ action: Type.Literal("close"), browserId: BrowserIdSchema }),
+	],
+	{ type: "object" },
+);
 
-export const BrowserNavigateInputSchema = Type.Union([
-	StrictObject({ browserId: BrowserIdSchema, action: Type.Literal("goto"), url: BrowserNavigationTargetSchema }),
-	StrictObject({
-		browserId: BrowserIdSchema,
-		action: Type.Union([Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]),
-	}),
-]);
+export const BrowserNavigateInputSchema = Type.Union(
+	[
+		StrictObject({ browserId: BrowserIdSchema, action: Type.Literal("goto"), url: BrowserNavigationTargetSchema }),
+		StrictObject({
+			browserId: BrowserIdSchema,
+			action: Type.Union([Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]),
+		}),
+	],
+	{ type: "object" },
+);
 
 export const BrowserObserveInputSchema = StrictObject({
 	browserId: BrowserIdSchema,

@@ -156,7 +156,11 @@ export function AgentTypesSettingsPanel({
 	};
 
 	if (loading) {
-		return <output aria-label={t("Agent types")} className="status-block settings-loading" />;
+		return (
+			<output aria-label={t("Agent types")} className="status-block settings-loading">
+				{t("Loading agent types…")}
+			</output>
+		);
 	}
 	if (loadError) {
 		return (
@@ -275,20 +279,20 @@ export function AgentTypesSettingsPanel({
 					</label>
 					<div className="agent-types-actions">
 						<button
-							className="settings-primary-button"
-							disabled={!serverReady || saving}
-							onClick={() => void save()}
-							type="button"
-						>
-							{t("Save")}
-						</button>
-						<button
 							className="settings-secondary-button"
 							disabled={saving}
 							onClick={() => setDraft(null)}
 							type="button"
 						>
 							{t("Cancel")}
+						</button>
+						<button
+							className="settings-primary-button"
+							disabled={!serverReady || saving}
+							onClick={() => void save()}
+							type="button"
+						>
+							{t("Save")}
 						</button>
 					</div>
 				</section>
@@ -306,6 +310,11 @@ export function AgentTypesSettingsPanel({
 					placeholder={t("Search agent types")}
 					value={filter}
 				/>
+				{filter && (
+					<button className="settings-secondary-button" onClick={() => setFilter("")} type="button">
+						{t("Clear search")}
+					</button>
+				)}
 				<button className="settings-primary-button" disabled={!serverReady} onClick={startCreate} type="button">
 					<Plus aria-hidden="true" size={14} />
 					{t("New agent type")}
@@ -347,7 +356,21 @@ export function AgentTypesSettingsPanel({
 				</h2>
 				{custom.length === 0 ? (
 					<p className="agent-types-empty">
-						{t("No custom agent types yet. Duplicate a built-in or create a new one.")}
+						{t(
+							filter.trim()
+								? "No matching custom agent types."
+								: "No custom agent types yet. Duplicate a built-in or create a new one.",
+						)}
+						{!filter.trim() && (
+							<button
+								className="settings-secondary-button"
+								disabled={!serverReady}
+								onClick={startCreate}
+								type="button"
+							>
+								{t("New agent type")}
+							</button>
+						)}
 					</p>
 				) : (
 					<div className="agent-types-list">
@@ -375,7 +398,7 @@ export function AgentTypesSettingsPanel({
 								</button>
 								<button
 									aria-label={t("Delete {{name}}", { name: view.displayName })}
-									className="settings-secondary-button"
+									className="settings-danger-button"
 									disabled={!serverReady}
 									onClick={() => void remove(view)}
 									type="button"

@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { describe, expect, it, vi } from "vitest";
+import { PptxViewer } from "../src/renderer/components/preview/PptxViewer.tsx";
 
 const destroy = vi.fn();
 const setZoom = vi.fn().mockResolvedValue(undefined);
@@ -23,7 +24,6 @@ vi.mock("@aiden0z/pptx-renderer", () => ({
 
 describe("PptxViewer", () => {
 	it("opens the deck from bytes with windowed rendering and destroys on unmount", async () => {
-		const { PptxViewer } = await import("../src/renderer/components/preview/PptxViewer.tsx");
 		const bytes = new Uint8Array([0x50, 0x4b]);
 		const container = document.createElement("div");
 		document.body.append(container);

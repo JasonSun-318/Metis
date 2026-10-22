@@ -952,7 +952,7 @@ export function ModelSettingsPanel({
 				/* biome-ignore lint/a11y/useKeyWithClickEvents: Only a native dialog backdrop click dismisses here; Escape is handled by onCancel. */
 				<dialog
 					aria-label={t("Configure {{provider}}", { provider: draft.name })}
-					className="model-provider-dialog"
+					className="model-provider-dialog model-built-in-provider-dialog"
 					onCancel={(event) => {
 						event.preventDefault();
 						requestCloseEditor();
@@ -1002,151 +1002,157 @@ export function ModelSettingsPanel({
 								</div>
 							</header>
 
-							{selectedProvider?.auth.configured ? (
-								<div className="model-saved-credential">
-									<span>{t("Saved API key")}</span>
-									<code>••••••••••••</code>
-								</div>
-							) : null}
-							<label className="model-api-key-field">
-								<span>{t("API key")}</span>
-								<input
-									aria-describedby="model-auth-source"
-									autoComplete="off"
-									onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
-									placeholder={
-										selectedProvider?.auth.configured
-											? t("Enter a new key to replace the saved credential")
-											: "sk-…"
-									}
-									type="password"
-									value={draft.apiKey}
-								/>
-							</label>
-							<p className="model-auth-source" id="model-auth-source">
-								{selectedProvider?.auth.configured
-									? selectedProvider.auth.source === "environment"
-										? t("Configured by environment: {{source}}", {
-												source: selectedProvider.auth.label ?? t("environment"),
-											})
-										: t("Credential is stored locally by Metis.")
-									: t("This provider is unavailable until credentials are configured.")}
-							</p>
-
-							<div className="settings-form-actions">
-								{selectedProvider?.auth.source === "stored" || selectedProvider?.auth.source === "oauth" ? (
-									<button
-										className="settings-danger-button"
-										disabled={busy}
-										onClick={() => setConfirmRemoval("credentials")}
-										type="button"
-									>
-										{t("Clear credentials")}
-									</button>
-								) : null}
-								{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
-									<button
-										className="settings-secondary-button"
-										disabled={busy || Boolean(draft.apiKey.trim())}
-										onClick={() => void testConnection()}
-										title={t("Tests the saved key and selected model. Model calls may incur usage charges.")}
-										type="button"
-									>
-										{operation === "test" ? t("Testing…") : t("Test connection")}
-									</button>
-								) : null}
-								<button
-									className="settings-primary-button"
-									disabled={busy || !serverReady || !draft.apiKey.trim()}
-									type="submit"
-								>
-									{operation === "save" ? t("Saving…") : t("Save API key")}
-								</button>
-							</div>
-							{confirmRemoval === "credentials" ? (
-								<div className="model-removal-confirm" role="alert">
-									<p>{t("Clear the saved key for this provider?")}</p>
-									<button
-										className="settings-secondary-button"
-										type="button"
-										disabled={busy}
-										onClick={() => setConfirmRemoval(null)}
-									>
-										{t("Cancel")}
-									</button>
-									<button
-										className="settings-danger-button"
-										type="button"
-										disabled={busy}
-										onClick={() => {
-											setConfirmRemoval(null);
-											void saveProvider("remove");
-										}}
-									>
-										{t("Confirm clear credentials")}
-									</button>
-								</div>
-							) : null}
-							{draft.apiKey.trim() ? <p>{t("Save the new key before testing the connection.")}</p> : null}
-							{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
-								<div className="model-use-section">
-									<div>
-										<h2>{t("Default model")}</h2>
-										<p>{t("Choose the model and reasoning effort used for new tasks.")}</p>
+							<div className="model-provider-editor-body">
+								{selectedProvider?.auth.configured ? (
+									<div className="model-saved-credential">
+										<span>{t("Saved API key")}</span>
+										<code>••••••••••••</code>
 									</div>
-									<div className="model-use-row">
-										<label htmlFor={`${fieldId}-select-0`}>
-											<span>{t("Model")}</span>
-											<MenuSelect
-												id={`${fieldId}-select-0`}
-												ariaLabel={t("Default model")}
-												disabled={busy}
-												onChange={(testModelId) => setDraft({ ...draft, testModelId })}
-												options={selectedProvider.models.map((model) => ({
-													value: model.modelId,
-													label: model.name,
-												}))}
-												value={draft.testModelId}
-											/>
-										</label>
-										<label htmlFor={`${fieldId}-select-1`}>
-											<span>{t("Default reasoning")}</span>
-											<MenuSelect
-												id={`${fieldId}-select-1`}
-												ariaLabel={t("Default reasoning")}
-												disabled={busy}
-												onChange={setDefaultThinking}
-												options={defaultThinkingOptions}
-												value={providerDefaultThinking}
-											/>
-										</label>
+								) : null}
+								<label className="model-api-key-field">
+									<span>{t("API key")}</span>
+									<input
+										aria-describedby="model-auth-source"
+										autoComplete="off"
+										onChange={(event) => setDraft({ ...draft, apiKey: event.target.value })}
+										placeholder={
+											selectedProvider?.auth.configured
+												? t("Enter a new key to replace the saved credential")
+												: "sk-…"
+										}
+										type="password"
+										value={draft.apiKey}
+									/>
+								</label>
+								<p className="model-auth-source" id="model-auth-source">
+									{selectedProvider?.auth.configured
+										? selectedProvider.auth.source === "environment"
+											? t("Configured by environment: {{source}}", {
+													source: selectedProvider.auth.label ?? t("environment"),
+												})
+											: t("Credential is stored locally by Metis.")
+										: t("This provider is unavailable until credentials are configured.")}
+								</p>
+
+								{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
+									<div className="model-use-section">
+										<div>
+											<h2>{t("Default model")}</h2>
+											<p>{t("Choose the model and reasoning effort used for new tasks.")}</p>
+										</div>
+										<div className="model-use-row">
+											<label htmlFor={`${fieldId}-select-0`}>
+												<span>{t("Model")}</span>
+												<MenuSelect
+													id={`${fieldId}-select-0`}
+													ariaLabel={t("Default model")}
+													disabled={busy}
+													onChange={(testModelId) => setDraft({ ...draft, testModelId })}
+													options={selectedProvider.models.map((model) => ({
+														value: model.modelId,
+														label: model.name,
+													}))}
+													value={draft.testModelId}
+												/>
+											</label>
+											<label htmlFor={`${fieldId}-select-1`}>
+												<span>{t("Default reasoning")}</span>
+												<MenuSelect
+													id={`${fieldId}-select-1`}
+													ariaLabel={t("Default reasoning")}
+													disabled={busy}
+													onChange={setDefaultThinking}
+													options={defaultThinkingOptions}
+													value={providerDefaultThinking}
+												/>
+											</label>
+											<button
+												className="settings-primary-button"
+												disabled={busy || !draft.testModelId}
+												onClick={saveDefaults}
+												type="button"
+											>
+												{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
+											</button>
+										</div>
+									</div>
+								) : null}
+								{selectedProvider ? (
+									<ModelCatalog key={selectedProvider.provider} models={selectedProvider.models} />
+								) : null}
+							</div>
+							<footer className="model-provider-editor-footer">
+								<div className="settings-form-actions">
+									{selectedProvider?.auth.source === "stored" || selectedProvider?.auth.source === "oauth" ? (
 										<button
-											className="settings-primary-button"
-											disabled={busy || !draft.testModelId}
-											onClick={saveDefaults}
+											className="settings-danger-button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval("credentials")}
 											type="button"
 										>
-											{operation === "defaults" ? t("Saving…") : t("Set as default for new tasks")}
+											{t("Clear credentials")}
+										</button>
+									) : null}
+									{selectedProvider?.auth.configured && selectedProvider.models.length > 0 ? (
+										<button
+											className="settings-secondary-button"
+											disabled={busy || Boolean(draft.apiKey.trim())}
+											onClick={() => void testConnection()}
+											title={t(
+												"Tests the saved key and selected model. Model calls may incur usage charges.",
+											)}
+											type="button"
+										>
+											{operation === "test" ? t("Testing…") : t("Test connection")}
+										</button>
+									) : null}
+									<button
+										className="settings-primary-button"
+										disabled={busy || !serverReady || !draft.apiKey.trim()}
+										type="submit"
+									>
+										{operation === "save" ? t("Saving…") : t("Save API key")}
+									</button>
+								</div>
+								{confirmRemoval === "credentials" ? (
+									<div className="model-removal-confirm" role="alert">
+										<p>{t("Clear the saved key for this provider?")}</p>
+										<button
+											className="settings-secondary-button"
+											type="button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval(null)}
+										>
+											{t("Cancel")}
+										</button>
+										<button
+											className="settings-danger-button"
+											type="button"
+											disabled={busy}
+											onClick={() => {
+												setConfirmRemoval(null);
+												void saveProvider("remove");
+											}}
+										>
+											{t("Confirm clear credentials")}
 										</button>
 									</div>
-								</div>
-							) : null}
-							{selectedProvider ? (
-								<ModelCatalog key={selectedProvider.provider} models={selectedProvider.models} />
-							) : null}
+								) : null}
+								{draft.apiKey.trim() ? <p>{t("Save the new key before testing the connection.")}</p> : null}
+								{error ? (
+									<p className="settings-action-message error" role="alert">
+										<XCircle aria-hidden="true" size={15} />
+										{error}
+									</p>
+								) : null}
+								{notice ? (
+									<output className="status-paragraph settings-action-message">
+										<CheckCircle aria-hidden="true" size={15} />
+										{notice}
+									</output>
+								) : null}
+							</footer>
 						</form>
-						{error ? (
-							<p className="settings-action-message error" role="alert">
-								<XCircle aria-hidden="true" size={15} />
-								{error}
-							</p>
-						) : null}
-						{notice ? (
-							<output className="status-paragraph settings-action-message">
-								<CheckCircle aria-hidden="true" size={15} />
-								{notice}
-							</output>
-						) : null}
 					</div>
 				</dialog>
 			) : null}
@@ -1539,132 +1545,139 @@ export function ModelSettingsPanel({
 									<X aria-hidden="true" size={18} />
 								</button>
 							</header>
-							<div className="model-custom-provider-fields">
-								<label className="model-api-key-field">
-									<span>{t("Name")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setVisionDraft({ ...visionDraft, name: event.target.value })}
-										placeholder={t("My vision")}
-										type="text"
-										value={visionDraft.name}
-									/>
-								</label>
-								<label htmlFor={`${fieldId}-select-6`} className="model-api-key-field">
-									<span>{t("API format")}</span>
-									<MenuSelect
-										id={`${fieldId}-select-6`}
-										ariaLabel={t("API format")}
-										disabled={busy}
-										onChange={(api) => setVisionDraft({ ...visionDraft, api })}
-										options={API_FORMATS.map((format) => ({ value: format.value, label: t(format.label) }))}
-										value={visionDraft.api}
-									/>
-								</label>
-								<label className="model-api-key-field">
-									<span>{t("Base URL")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setVisionDraft({ ...visionDraft, baseUrl: event.target.value })}
-										placeholder="https://api.openai.com/v1"
-										type="text"
-										value={visionDraft.baseUrl}
-									/>
-								</label>
-								<label className="model-api-key-field">
-									<span>{t("Model ID")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setVisionDraft({ ...visionDraft, modelId: event.target.value })}
-										placeholder="gpt-4o"
-										type="text"
-										value={visionDraft.modelId}
-									/>
-								</label>
-								<label className="model-api-key-field">
-									<span>{t("API key")}</span>
-									<input
-										autoComplete="off"
-										disabled={busy}
-										onChange={(event) => setVisionDraft({ ...visionDraft, apiKey: event.target.value })}
-										placeholder={
-											settings?.vision?.authConfigured
-												? t("Enter a new key to replace the saved credential")
-												: "sk-…"
-										}
-										type="password"
-										value={visionDraft.apiKey}
-									/>
-								</label>
-							</div>
-							{settings?.vision?.authConfigured ? (
-								<div className="model-saved-credential">
-									<span>{t("Saved API key")}</span>
-									<code>••••••••••••</code>
+							<div className="model-provider-editor-body">
+								<div className="model-custom-provider-fields">
+									<label className="model-api-key-field">
+										<span>{t("Name")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setVisionDraft({ ...visionDraft, name: event.target.value })}
+											placeholder={t("My vision")}
+											type="text"
+											value={visionDraft.name}
+										/>
+									</label>
+									<label htmlFor={`${fieldId}-select-6`} className="model-api-key-field">
+										<span>{t("API format")}</span>
+										<MenuSelect
+											id={`${fieldId}-select-6`}
+											ariaLabel={t("API format")}
+											disabled={busy}
+											onChange={(api) => setVisionDraft({ ...visionDraft, api })}
+											options={API_FORMATS.map((format) => ({
+												value: format.value,
+												label: t(format.label),
+											}))}
+											value={visionDraft.api}
+										/>
+									</label>
+									<label className="model-api-key-field">
+										<span>{t("Base URL")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setVisionDraft({ ...visionDraft, baseUrl: event.target.value })}
+											placeholder="https://api.openai.com/v1"
+											type="text"
+											value={visionDraft.baseUrl}
+										/>
+									</label>
+									<label className="model-api-key-field">
+										<span>{t("Model ID")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setVisionDraft({ ...visionDraft, modelId: event.target.value })}
+											placeholder="gpt-4o"
+											type="text"
+											value={visionDraft.modelId}
+										/>
+									</label>
+									<label className="model-api-key-field">
+										<span>{t("API key")}</span>
+										<input
+											autoComplete="off"
+											disabled={busy}
+											onChange={(event) => setVisionDraft({ ...visionDraft, apiKey: event.target.value })}
+											placeholder={
+												settings?.vision?.authConfigured
+													? t("Enter a new key to replace the saved credential")
+													: "sk-…"
+											}
+											type="password"
+											value={visionDraft.apiKey}
+										/>
+									</label>
 								</div>
-							) : null}
-							<div className="settings-form-actions">
-								{settings?.vision ? (
-									<button
-										className="settings-danger-button"
-										disabled={busy}
-										onClick={() => setConfirmRemoval("vision")}
-										type="button"
-									>
-										{t("Remove")}
-									</button>
+								{settings?.vision?.authConfigured ? (
+									<div className="model-saved-credential">
+										<span>{t("Saved API key")}</span>
+										<code>••••••••••••</code>
+									</div>
 								) : null}
-								<button
-									className="settings-secondary-button"
-									disabled={busy}
-									onClick={requestCloseEditor}
-									type="button"
-								>
-									{t("Cancel")}
-								</button>
-								<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
-									{operation === "save" ? t("Saving…") : t("Save")}
-								</button>
 							</div>
-							{confirmRemoval === "vision" ? (
-								<div className="model-removal-confirm" role="alert">
-									<p>{t("Remove the optional vision configuration?")}</p>
+							<footer className="model-provider-editor-footer">
+								<div className="settings-form-actions">
+									{settings?.vision ? (
+										<button
+											className="settings-danger-button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval("vision")}
+											type="button"
+										>
+											{t("Remove")}
+										</button>
+									) : null}
 									<button
 										className="settings-secondary-button"
-										type="button"
 										disabled={busy}
-										onClick={() => setConfirmRemoval(null)}
+										onClick={requestCloseEditor}
+										type="button"
 									>
 										{t("Cancel")}
 									</button>
-									<button
-										className="settings-danger-button"
-										type="button"
-										disabled={busy}
-										onClick={() => {
-											setConfirmRemoval(null);
-											void clearVision();
-										}}
-									>
-										{t("Confirm remove vision")}
+									<button className="settings-primary-button" disabled={busy || !serverReady} type="submit">
+										{operation === "save" ? t("Saving…") : t("Save")}
 									</button>
 								</div>
-							) : null}
-							{error ? (
-								<p className="settings-action-message error" role="alert">
-									<XCircle aria-hidden="true" size={15} />
-									{error}
-								</p>
-							) : null}
-							{notice ? (
-								<output className="status-paragraph settings-action-message">
-									<CheckCircle aria-hidden="true" size={15} />
-									{notice}
-								</output>
-							) : null}
+								{confirmRemoval === "vision" ? (
+									<div className="model-removal-confirm" role="alert">
+										<p>{t("Remove the optional vision configuration?")}</p>
+										<button
+											className="settings-secondary-button"
+											type="button"
+											disabled={busy}
+											onClick={() => setConfirmRemoval(null)}
+										>
+											{t("Cancel")}
+										</button>
+										<button
+											className="settings-danger-button"
+											type="button"
+											disabled={busy}
+											onClick={() => {
+												setConfirmRemoval(null);
+												void clearVision();
+											}}
+										>
+											{t("Confirm remove vision")}
+										</button>
+									</div>
+								) : null}
+								{error ? (
+									<p className="settings-action-message error" role="alert">
+										<XCircle aria-hidden="true" size={15} />
+										{error}
+									</p>
+								) : null}
+								{notice ? (
+									<output className="status-paragraph settings-action-message">
+										<CheckCircle aria-hidden="true" size={15} />
+										{notice}
+									</output>
+								) : null}
+							</footer>
 						</form>
 					</div>
 				</dialog>

@@ -95,8 +95,12 @@ describe("Settings visual states", () => {
 		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-form").padding).toBe("12px 16px");
 		expect(rule('.auto-command-allowlist-page .auto-command-allowlist-form input[type="text"]').flex).toBe("1 1 0%");
 		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle").display).toBe("inline-flex");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").width).toBe("36px");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").height).toBe("22px");
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").width).toBe(
+			"var(--switch-width)",
+		);
+		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").height).toBe(
+			"var(--switch-height)",
+		);
 		expect(
 			rule(
 				".auto-command-allowlist-page .auto-command-allowlist-toggle input:checked + .auto-command-allowlist-toggle-track",

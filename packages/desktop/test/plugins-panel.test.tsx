@@ -372,10 +372,25 @@ describe("PluginsPanel", () => {
 		try {
 			expect(container.textContent).toContain("No MCP servers in this scope.");
 			expect(button(container, "New MCP")).not.toBeNull();
-			expect(container.querySelector(".plugins-full-list .settings-primary-button")).toBeNull();
+			expect(button(container.querySelector(".plugins-full-list")!, "Create User MCP")).not.toBeNull();
 		} finally {
 			await act(async () => root.unmount());
 		}
+	});
+
+	it("distinguishes filtered results from an empty catalog and restores the search focus", async () => {
+		const { container, root } = await renderPanel(api());
+		await act(async () => button(container, "MCP").click());
+		await flush();
+		const search = container.querySelector<HTMLInputElement>('[aria-label="Search MCP servers"]')!;
+		await act(async () => setInput(search, "no-such-server"));
+		expect(container.textContent).toContain("No matching results");
+		expect(container.textContent).not.toContain("No MCP servers in this scope.");
+		await act(async () => button(container, "Clear filters").click());
+		expect(search.value).toBe("");
+		expect(document.activeElement).toBe(search);
+		expect(button(container, "github")).not.toBeNull();
+		await act(async () => root.unmount());
 	});
 
 	it("protects system Skills and sends exact identity, revision, and bytes for user mutations", async () => {
@@ -622,6 +637,30 @@ describe("PluginsPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it.each(["Add by URL", "Custom MCP", "Import JSON"])(
+		"keeps focus and Escape working after entering %s",
+		async (method) => {
+			const { container, root } = await renderPanel(api());
+			await act(async () => button(container, "MCP").click());
+			await flush();
+			const trigger = button(container, "New MCP");
+			await act(async () => trigger.click());
+			await act(async () => button(document.body.querySelector(".plugins-new-menu")!, "User").click());
+			const dialog = container.querySelector<HTMLElement>(".mcp-create-dialog")!;
+			await act(async () => button(dialog, method).click());
+			expect(dialog.contains(document.activeElement)).toBe(true);
+			expect(document.activeElement?.matches("input, textarea")).toBe(true);
+			await act(async () =>
+				document.activeElement!.dispatchEvent(
+					new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+				),
+			);
+			expect(container.querySelector(".mcp-create-dialog")).toBeNull();
+			expect(document.activeElement).toBe(trigger);
+			await act(async () => root.unmount());
+		},
+	);
+
 	it("creates a URL MCP with a bearer token and multiple scoped secrets", async () => {
 		const desktop = api();
 		const { container, root } = await renderPanel(desktop);
@@ -645,6 +684,7 @@ describe("PluginsPanel", () => {
 		});
 		await act(async () => button(dialog, "Inspect").click());
 		await flush();
+		expect(document.activeElement).toBe(dialog.querySelector('.mcp-import-candidate input[type="checkbox"]'));
 		const inspected = desktop.inspectMcpImport.mock.calls.at(-1)?.[0]?.text as string;
 		expect(inspected).toContain('"docs"');
 		expect(inspected).not.toContain("bearer-secret");
@@ -815,11 +855,11 @@ describe("PluginsPanel", () => {
 		expect(candidates[0]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(true);
 		const existing = candidates[1]!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
 		await act(async () => existing.click());
-		await act(async () => button(dialog, "Import selected").click());
+		await act(async () => button(dialog, "Import selected servers").click());
 		expect(dialog.querySelector('[role="alert"]')?.textContent).toContain("Confirm Replace");
 		const replace = candidates[1]!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]!;
 		await act(async () => replace.click());
-		await act(async () => button(dialog, "Import selected").click());
+		await act(async () => button(dialog, "Import selected servers").click());
 		await flush();
 		expect(desktop.importMcpServers).toHaveBeenCalledWith(
 			expect.objectContaining({

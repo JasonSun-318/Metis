@@ -181,6 +181,31 @@ describe("InteractionBroker", () => {
 		expect(replacementPeer.browserRequests).toHaveLength(1);
 	});
 
+	it.each(["call_provider|fc_response", `call_${"x".repeat(512)}`])(
+		"keeps incompatible provider call IDs out of the browser RPC: %s",
+		async (providerToolCallId) => {
+			const broker = new InteractionBroker({ serverEpoch: EPOCH });
+			const peer = new FakePeer();
+			peer.browserResponseFor = (request) => browserTabsResponse(request.params.toolCallId);
+			broker.assign(SESSION_ID, peer);
+			for (const id of [providerToolCallId, providerToolCallId, `${providerToolCallId}_other`]) {
+				await expect(
+					broker.requestBrowserTool(SESSION_ID, id, browserTabsCall(), new AbortController().signal),
+				).resolves.toMatchObject({ tool: "browser_tabs", details: { tabs: [] } });
+			}
+			const ids = peer.browserRequests.map((request) => request.params.toolCallId);
+			expect(ids[0]).toMatch(/^browser:[a-f0-9]{64}$/);
+			expect(ids[0]).toEqual(ids[1]);
+			expect(ids[0]).not.toEqual(ids[2]);
+			expect(ids).not.toContain(providerToolCallId);
+
+			peer.browserResponseFor = () => browserTabsResponse("unrelated-call");
+			await expect(
+				broker.requestBrowserTool(SESSION_ID, providerToolCallId, browserTabsCall(), new AbortController().signal),
+			).rejects.toThrow();
+		},
+	);
+
 	it("confirms a high-risk browser action immediately before dispatch", async () => {
 		const ids = [
 			"00000000-0000-4000-8000-000000000401",
@@ -1047,20 +1072,24 @@ describe("InteractionBroker", () => {
 			method: "initialize",
 			params: { protocolVersion: PROTOCOL_VERSION, client: { name: "test", version: "1" }, capabilities: [] },
 		});
-		const request = {
-			jsonrpc: "2.0",
-			id: "server-browser-abort",
-			method: "browser/tool",
-			params: {
-				serverEpoch: EPOCH,
-				sessionId: SESSION_ID,
-				toolCallId: "browser-call-abort",
-				call: { tool: "browser_tabs", input: { action: "list" } },
-			},
-		} as const;
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => "server-browser-abort" });
+		broker.assign(SESSION_ID, connection);
 		const controller = new AbortController();
-		const pending = connection.request(request, controller.signal);
-		await vi.waitFor(() => expect(outbound).toContainEqual(request));
+		const pending = broker.requestBrowserTool(
+			SESSION_ID,
+			"call_provider|fc_response",
+			browserTabsCall(),
+			controller.signal,
+		);
+		await vi.waitFor(() =>
+			expect(outbound).toContainEqual(
+				expect.objectContaining({ id: "server-browser-abort", method: "browser/tool" }),
+			),
+		);
+		const request = outbound.find(
+			(envelope) => (envelope as ServerRpcRequest).method === "browser/tool",
+		) as ServerRpcRequest<"browser/tool">;
+		expect(request.params.toolCallId).toMatch(/^browser:[a-f0-9]{64}$/);
 		controller.abort(new Error("turn interrupted"));
 		await expect(pending).rejects.toThrow("OPERATION_FAILED");
 		await vi.waitFor(() =>
@@ -1070,7 +1099,7 @@ describe("InteractionBroker", () => {
 				params: {
 					serverEpoch: EPOCH,
 					sessionId: SESSION_ID,
-					toolCallId: "browser-call-abort",
+					toolCallId: request.params.toolCallId,
 					requestId: "server-browser-abort",
 				},
 			}),

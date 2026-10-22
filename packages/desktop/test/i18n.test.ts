@@ -93,6 +93,28 @@ describe("Desktop locale preference", () => {
 		expect(localeForIntl()).toBe("en-US");
 	});
 
+	it("localizes panel controls and uses consistent Hook terminology without translating technical IDs", async () => {
+		await setLocale("zh-CN", localStorage);
+		for (const key of [
+			"Resize sessions sidebar",
+			"Resize file tree",
+			"Hide workspace tree",
+			"Show workspace tree",
+			"Clear filters",
+			"No matching results",
+		]) {
+			expect(i18n.exists(key, { lng: "zh-CN" })).toBe(true);
+			expect(i18n.t(key)).not.toBe(key);
+		}
+		expect(i18n.t("Search Hooks")).toBe("搜索钩子");
+		expect(i18n.t("New Hook")).toBe("新建钩子");
+		expect(i18n.t("Import selected")).toBe("导入所选技能");
+		expect(i18n.t("Import selected servers")).toBe("导入所选服务器");
+		for (const id of ["gpt-5", "reasoning_effort", "command-v1", "MCP"]) expect(i18n.t(id)).toBe(id);
+		await setLocale("en", localStorage);
+		expect(i18n.t("Resize file tree")).toBe("Resize file tree");
+	});
+
 	it("translates every home starter and greeting", async () => {
 		await setLocale("zh-CN", localStorage);
 		const { CODE_HOME_GREETINGS, HOME_GREETINGS, getHomeStarters } = await import(

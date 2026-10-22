@@ -102,15 +102,15 @@ export function SystemNotice({ action, message, onDismiss, title, tone }: System
 	const Icon = icons[tone];
 	const onDismissRef = useRef(onDismiss);
 	onDismissRef.current = onDismiss;
-	const dismissible = onDismiss !== undefined;
+	const autoDismiss = onDismiss !== undefined && !action && (tone === "info" || tone === "success");
 	// biome-ignore lint/correctness/useExhaustiveDependencies(tone): Notice content changes restart the dismissal timer.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(title): Notice content changes restart the dismissal timer.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(message): Notice content changes restart the dismissal timer.
 	useEffect(() => {
-		if (!dismissible) return;
+		if (!autoDismiss) return;
 		const timer = setTimeout(() => onDismissRef.current?.(), 5_000);
 		return () => clearTimeout(timer);
-	}, [message, dismissible, title, tone]);
+	}, [message, autoDismiss, title, tone]);
 	return (
 		<div
 			className="system-notice"

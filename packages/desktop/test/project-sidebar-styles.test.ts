@@ -133,16 +133,13 @@ describe("Project sidebar motion", () => {
 		expect(scheduledHeading.fontWeight).toBe(taskHeading.fontWeight);
 	});
 
-	it("keeps text controls neutral when focused", () => {
-		expect(rule("button:focus-visible, summary:focus-visible").outline).toContain("var(--focus)");
-		expect(rule("input:focus-visible, textarea:focus-visible, select:focus-visible").outline).toBe(
-			"1px solid var(--border-strong)",
-		);
-		expect(rule(".file-search-field:focus-within").borderColor).toBe("var(--border-strong)");
-		expect(rule(".browser-address-field:focus-within").borderColor).toBe("var(--border-strong)");
-		expect(rule(".plugins-search:focus-within").borderColor).toBe("var(--border-strong)");
-		expect(rule(".plugins-search:focus-within").boxShadow).toBe("none");
-		expect(rule(".composer:focus-within").borderColor).toBe("var(--border-strong)");
+	it("keeps controls free of focus rings while preserving their ordinary borders", () => {
+		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("none");
+		expect(rule("input:focus-visible, textarea:focus-visible, select:focus-visible").outline).toBe("none");
+		expect(rule(".file-search-field").border).toBe("1px solid var(--control-border)");
+		expect(rule(".browser-address-field").border).toBe("1px solid transparent");
+		expect(rule(".plugins-search").border).toBe("1px solid var(--control-border)");
+		expect(rule(".composer").border).toBe("1px solid var(--border-strong)");
 	});
 
 	it("keeps the update action rectangular and aligned above the account footer", () => {
@@ -168,7 +165,7 @@ describe("Project sidebar motion", () => {
 		const hover = rule(".account-menu-item:hover, .account-menu-item:focus-visible");
 		expect(hover.background).toBe("var(--menu-hover)");
 		expect(hover.boxShadow).toBe("");
-		expect(hover.outline).toBe("0px");
+		expect(hover.outline).toBe("");
 	});
 
 	it("keeps the titlebar interactive controls outside the window drag region", () => {

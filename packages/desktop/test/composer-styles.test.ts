@@ -42,7 +42,6 @@ describe("Composer visual states", () => {
 		expect(rule(".composer").borderRadius).toBe("var(--composer-radius)");
 		expect(css).not.toContain(".queued-turn-list + .composer");
 		expect(rule(".composer:hover").transform).toBe("");
-		expect(rule(".composer:focus-within").transform).toBe("");
 		expect(rule(".session-sidebar button:disabled").opacity).toBe("1");
 		expect(
 			rule(".composer .composer-plain-button:disabled, .composer .composer-selector-trigger:disabled").opacity,
@@ -111,7 +110,7 @@ describe("Composer visual states", () => {
 		expect(rule(".new-task-home .composer").borderBottom).toBe("1px solid var(--home-border)");
 		expect(rule(".new-task-home-project-control").minHeight).toBe("38px");
 		expect(rule(".new-task-home .home-project-picker").height).toBe("38px");
-		expect(rule(".new-task-home .home-project-picker button:focus-visible").outline).toBe("2px solid var(--focus)");
+		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("none");
 	});
 
 	it("keeps a readable centered welcome and lightweight shortcuts in normal flow", () => {
@@ -207,7 +206,8 @@ describe("Composer visual states", () => {
 
 	it("distinguishes selected choices from focus and keeps unchecked controls visible", () => {
 		expect(rule(".ask-user-option:hover:not(:disabled)").background).toBe("var(--panel-hover)");
-		expect(rule(".ask-user-option:focus-visible").outline).toContain("2px");
+		expect(rule(".ask-user-option.is-selected").borderColor).toBe("var(--link)");
+		expect(rule(".ask-user-option.is-selected").background).toBe("var(--accent-soft-bg)");
 		expect(css).not.toContain("var(KEEP_WHITE)");
 		expect(rule(".ask-user-checkbox").border).toContain("1px solid");
 	});

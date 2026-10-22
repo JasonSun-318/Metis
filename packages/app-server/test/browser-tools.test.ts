@@ -17,6 +17,41 @@ const observation = {
 };
 
 describe("browser host tools", () => {
+	it("publishes object function parameters without root combinators", () => {
+		const tools = createBrowserToolDefinitions(async () => ({
+			tool: "browser_tabs",
+			details: { profiles: [], tabs: [] },
+		}));
+		const schemas = JSON.parse(JSON.stringify(tools.map(({ name, parameters }) => ({ name, parameters }))));
+		expect(schemas.map(({ parameters }: { parameters: { type?: string } }) => parameters.type)).toEqual(
+			BROWSER_TOOL_NAMES.map(() => "object"),
+		);
+		for (const { parameters } of schemas) {
+			expect(parameters.anyOf).toBeUndefined();
+			expect(parameters.allOf).toBeUndefined();
+			expect(parameters.properties).toBeDefined();
+		}
+		expect(Object.keys(schemas[0].parameters.properties).sort()).toEqual(["action", "browserId", "profileId"]);
+		expect(Object.keys(schemas[1].parameters.properties).sort()).toEqual(["action", "browserId", "url"]);
+	});
+
+	it.each([
+		["browser_tabs", { action: "close" }],
+		["browser_tabs", { action: "list", browserId: BROWSER_ID }],
+		["browser_tabs", { action: "open", browserId: BROWSER_ID }],
+		["browser_navigate", { browserId: BROWSER_ID, action: "goto" }],
+		["browser_navigate", { browserId: BROWSER_ID, action: "back", url: "https://example.test" }],
+		["browser_navigate", { browserId: BROWSER_ID, action: "goto", url: "data:text/html,secret" }],
+		["browser_navigate", { browserId: BROWSER_ID, action: "goto", url: "https://user:password@example.test" }],
+	] as const)("rejects invalid %s action arguments before host execution", async (name, input) => {
+		const executor = vi.fn().mockResolvedValue({ tool: "browser_tabs", details: { profiles: [], tabs: [] } });
+		const tool = createBrowserToolDefinitions(executor).find((tool) => tool.name === name)!;
+		await expect(tool.execute("invalid-action", input, undefined, undefined, {} as never)).rejects.toThrow(
+			`Invalid ${name} arguments`,
+		);
+		expect(executor).not.toHaveBeenCalled();
+	});
+
 	it("tells the model how to recover an expired task-owned browser tab", async () => {
 		const executor = vi.fn().mockRejectedValue(Object.assign(new Error("NOT_FOUND"), { code: "NOT_FOUND" }));
 		const tool = createBrowserToolDefinitions(executor).find(({ name }) => name === "browser_observe")!;

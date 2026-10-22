@@ -10,6 +10,20 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	"Resize sessions sidebar": "调整会话侧边栏宽度",
+	"Resize file tree": "调整文件树宽度",
+	"Hide workspace tree": "隐藏工作区文件树",
+	"Show workspace tree": "显示工作区文件树",
+
+	"No matching results": "没有匹配的结果",
+	"Try another search or clear the filters.": "尝试其他关键词，或清空筛选条件。",
+	"Clear filters": "清空筛选",
+	"Create reusable instructions for tasks you do often.": "为常用任务创建可复用的技能指令。",
+	"Connect tools and data through a local or remote MCP server.": "通过本地或远程 MCP 服务器连接工具与数据。",
+	"Run a script automatically at a chosen point in a conversation.": "在会话的指定环节自动运行脚本。",
+	"Loading agent types…": "正在加载子智能体…",
+	"No matching custom agent types.": "没有匹配的自定义子智能体。",
+
 	"New task defaults": "新任务默认设置",
 	"No default model": "尚未设置默认模型",
 	"Applies to new tasks. Existing conversations keep their current model.":
@@ -919,18 +933,17 @@ const zhCN = {
 	Plugins: "插件",
 	Customize: "自定义",
 	"Extend Metis with built-in capabilities.": "通过内置能力扩展 Metis。",
-	"Extend Metis with built-in capabilities, MCP servers, and hooks.":
-		"通过内置能力、MCP 服务与自动化 Hooks 扩展 Metis。",
-	"Search Hooks": "搜索 Hooks",
-	"New Hook": "新建 Hook",
-	"Reload Hooks": "重新加载 Hooks",
-	"Back to Hooks": "返回 Hooks",
-	"No Hooks configured yet.": "暂未配置任何 Hook。",
-	"Hook events": "Hook 事件",
+	"Extend Metis with built-in capabilities, MCP servers, and hooks.": "通过内置能力、MCP 服务与自动化钩子扩展 Metis。",
+	"Search Hooks": "搜索钩子",
+	"New Hook": "新建钩子",
+	"Reload Hooks": "重新加载钩子",
+	"Back to Hooks": "返回钩子",
+	"No Hooks configured yet.": "暂未配置任何钩子。",
+	"Hook events": "钩子事件",
 	"All events": "全部事件",
-	"Remove Hook?": "移除 Hook？",
+	"Remove Hook?": "移除钩子？",
 	"Remove {{name}}? This will stop it from running automatically.": "确定要移除 {{name}} 吗？这将停止其自动运行。",
-	"Edit Hook": "编辑 Hook",
+	"Edit Hook": "编辑钩子",
 	"Tool matcher (Regex / Tool name)": "工具匹配规则（正则 / 工具名）",
 	"Process (Binary + Arguments)": "独立进程 (可执行程序 + 参数)",
 	"Arguments (one per line)": "参数列表 (每行一个)",
@@ -952,8 +965,7 @@ const zhCN = {
 		"工具执行失败后运行。脚本可以向模型提供排错信息。",
 	"Check before the model finishes. Your script can request one more continuation.":
 		"模型准备结束时运行。脚本可以要求模型再继续处理一次。",
-	"Runs your command at this point, preserving traditional hook behavior.":
-		"在这个时机执行命令，保持旧版 Hook 的行为。",
+	"Runs your command at this point, preserving traditional hook behavior.": "在这个时机执行命令，保持旧版钩子的行为。",
 	"Session reasons (optional)": "仅匹配这些启动原因（可选）",
 	"Only these tools (optional)": "仅匹配这些工具（可选）",
 	"Leave empty for all tools. Separate tool names with commas.": "留空表示所有工具；填写时用逗号分隔工具名。",
@@ -969,12 +981,12 @@ const zhCN = {
 	"command-v1: your script receives JSON and can return context or decisions. Keep this for new hooks.":
 		"command-v1：脚本接收 JSON 信息，可返回补充内容或执行决定。新建时保持此选项即可。",
 	"legacy: keeps existing scripts working as before. Choose this only for older hooks.":
-		"legacy：保持旧脚本原有行为。仅在兼容旧版 Hook 时选择。",
+		"legacy：保持旧脚本原有行为。仅在兼容旧版钩子时选择。",
 	"Stops a script that takes too long. Default: 60 seconds.": "超时后停止脚本，默认 60 秒。",
 	"Timeout (seconds, optional)": "超时时间 (秒，可选)",
 	"Status message (optional)": "运行状态提示 (可选)",
 	"Custom fields (JSON, optional)": "自定义字段（JSON，可选）",
-	"Enable this hook": "启用此 Hook",
+	"Enable this hook": "启用此钩子",
 	"Tool matcher": "工具匹配",
 	"Direct process": "独立进程",
 	"command-v1 (Structured command)": "command-v1 (结构化命令)",
@@ -1040,6 +1052,7 @@ const zhCN = {
 	"Skills found": "发现的技能",
 	"{{count}} files": "{{count}} 个文件",
 	"Import selected": "导入所选技能",
+	"Import selected servers": "导入所选服务器",
 	"Importing…": "正在导入…",
 	"New MCP": "新建 MCP",
 	"Create Project MCP": "创建项目级 MCP",

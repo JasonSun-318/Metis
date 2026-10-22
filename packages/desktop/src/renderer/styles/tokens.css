@@ -31,6 +31,49 @@
 	--code-meta-size: calc(var(--content-font-size) - 1px);
 	--code-mono-size: calc(var(--content-font-size) - 2px);
 
+	/* spacing scale: shared rhythm for layout, forms, cards, and dialogs. */
+	--space-4: 4px;
+	--space-8: 8px;
+	--space-12: 12px;
+	--space-16: 16px;
+	--space-24: 24px;
+	--space-32: 32px;
+
+	/* semantic spacing: prefer these for reusable surface rhythm. */
+	--content-width: 960px;
+	--form-label-gap: var(--space-8);
+	--form-field-gap: var(--space-12);
+	--group-gap: var(--space-8);
+	--card-padding: var(--space-16);
+	--card-gap: var(--space-12);
+	--dialog-width-small: 560px;
+	--dialog-width-medium: 700px;
+	--dialog-width-large: 760px;
+	--dialog-padding: var(--space-24);
+	--dialog-gap: var(--space-16);
+
+	/* collection pages: shared content width, top rhythm, and title size. */
+	--collection-width: 920px;
+	--collection-page-padding: var(--space-32);
+	--page-title-size: 24px;
+
+	/* shape: controls, cards, and dialogs use distinct radii. */
+	--radius-control: 8px;
+	--radius-card: 12px;
+	--radius-dialog: 16px;
+
+	/* control tiers: forms, compact toolbars, and icon-only actions. */
+	--control-height: 36px;
+	--control-font-size: 13px;
+	--control-height-compact: 32px;
+	--control-icon-size: 28px;
+	--control-disabled-opacity: .48;
+	--switch-width: 36px;
+	--switch-height: 22px;
+	--switch-thumb-size: 16px;
+	--switch-thumb-travel: 14px;
+	--choice-size: 16px;
+
 	/* Shared control feedback; geometry and theme colors stay component-owned. */
 	--motion-duration-fast: 120ms;
 	--motion-duration-control: 160ms;
@@ -51,14 +94,17 @@
 	--menu-bg: #202020;
 	--menu-hover: #343434;
 	--text: #ededed;
-	--text-muted: #787878;
-	--muted: #8c8c8c;
+	--text-muted: #969696;
+	--muted: #a2a2a2;
 	--accent: #909090;
 	--accent-hover: #a2a2a2;
 	--accent-ink: #141414;
 	--accent-soft: #b0b0b0;
 	--accent-soft-bg: rgb(255 255 255 / 8%);
 	--focus: #888888;
+	--focus-ring: var(--focus);
+	--placeholder: var(--text-09);
+	--control-border: #737373;
 	--link: #58a6ff;
 	--link-ring: rgb(88 166 255 / 55%);
 	--danger: #f85149;
@@ -100,7 +146,7 @@
 	--success-weekday-bg: #233527;
 	--success-weekday-border: #3fb950;
 	--success-weekday-ink: #f0efe9;
-	--usage-code: #2e9f7d;
+	--usage-code: #43b58f;
 	--warning: #d29922;
 	--warning-soft: #e3b341;
 	--warning-icon: #d29922;
@@ -204,12 +250,12 @@
 	--text-03: #646464;
 	--text-04: #707070;
 	--text-05: #787878;
-	--text-06: #808080;
-	--text-07: #888888;
-	--text-08: #909090;
-	--text-09: #969696;
-	--text-10: #9e9e9e;
-	--text-11: #a6a6a6;
+	--text-06: #969696;
+	--text-07: #9a9a9a;
+	--text-08: #9e9e9e;
+	--text-09: #a2a2a2;
+	--text-10: #a6a6a6;
+	--text-11: #aaaaaa;
 	--text-12: #aeaeae;
 	--text-13: #b6b6b6;
 	--text-14: #bcbcbc;
@@ -260,6 +306,7 @@
 	--accent-soft: #6e6e6e;
 	--accent-soft-bg: rgb(95 95 95 / 12%);
 	--focus: #5f5f5f;
+	--control-border: #807c76;
 	--link: #2a66c4;
 	--link-ring: rgb(42 102 196 / 55%);
 	--danger: #c03e2d;
@@ -267,7 +314,7 @@
 	--danger-bg: #b23a2e;
 	--danger-bg-hover: #a63d31;
 	--danger-bg-hover-2: #c0483c;
-	--danger-soft-text: #c0554b;
+	--danger-soft-text: #9b3024;
 	--danger-soft-border: rgb(180 60 50 / 30%);
 	--danger-soft-bg: rgb(190 80 65 / 14%);
 	--danger-strong-text: #a24a40;
@@ -278,32 +325,32 @@
 	--danger-icon: #d96a62;
 	--danger-count: #d63a5e;
 	--danger-mcp: #c0554b;
-	--danger-action: #c0554b;
+	--danger-action: #9b3024;
 	--danger-mcp-hover: #b5453e;
 	--danger-hover-bg: rgb(190 80 65 / 16%);
 	--danger-toast-border: #d3b0a8;
 	--danger-form: #c0554b;
-	--danger-inline-ink: #b5453e;
+	--danger-inline-ink: #9b3024;
 	--success: #3f8f57;
 	--success-strong: #2e9e52;
 	--success-dot: #3f8f57;
 	--success-soft-bg: rgb(63 143 87 / 15%);
-	--success-soft-text: #4a9463;
+	--success-soft-text: #286d3e;
 	--success-chip-bg: rgb(63 143 87 / 14%);
 	--success-chip-border: rgb(63 143 87 / 40%);
-	--success-chip-text: #3f8f57;
+	--success-chip-text: #286d3e;
 	--success-switch-bg: #3f8f57;
 	--success-switch-border: #3f8f57;
 	--success-msg-border: rgb(63 143 87 / 30%);
 	--success-msg-bg: rgb(63 143 87 / 14%);
-	--success-msg-text: #3f8f57;
+	--success-msg-text: #286d3e;
 	--success-input: #2e9e52;
 	--success-weekday-bg: #e3eee2;
 	--success-weekday-border: #9dbb9c;
-	--success-weekday-ink: #3f8f57;
-	--usage-code: #2a8268;
+	--success-weekday-ink: #286d3e;
+	--usage-code: #23725b;
 	--warning: #a06a2c;
-	--warning-soft: #a06a2c;
+	--warning-soft: #8f5d20;
 	--warning-icon: #a06a2c;
 	--attention: #a8792f;
 	--warning-banner-border: #c9a24b;
@@ -321,10 +368,10 @@
 	--chip-skill-border: rgb(42 102 196 / 40%);
 	--chip-skill-bg: rgb(42 102 196 / 12%);
 	--chip-skill-bg-hover: rgb(42 102 196 / 20%);
-	--chip-skill-text: #4a7ab5;
+	--chip-skill-text: #3568a8;
 	--code-link: #4a6a8a;
 	--code-output: #6b6b6b;
-	--highest-effort-text: #8a63c9;
+	--highest-effort-text: #7d4fc0;
 	--highest-effort-tick: #8a63c9;
 	--highest-effort-thumb: #cfb8ea;
 	--highest-effort-track: linear-gradient(90deg, #eae6dc 0%, #e5deea 52%, #ddd3ec 100%);
@@ -405,21 +452,21 @@
 	--text-03: #949494;
 	--text-04: #929292;
 	--text-05: #8f8f8f;
-	--text-06: #898989;
-	--text-07: #868686;
-	--text-08: #808080;
-	--text-09: #7e7e7e;
-	--text-10: #7a7a7a;
-	--text-11: #747474;
-	--text-12: #737373;
-	--text-13: #696969;
-	--text-14: #696969;
-	--text-15: #626262;
-	--text-16: #5d5d5d;
-	--text-17: #5b5b5b;
-	--text-18: #555555;
-	--text-19: #525252;
-	--text-20: #4f4f4f;
+	--text-06: #69655f;
+	--text-07: #68645e;
+	--text-08: #67635d;
+	--text-09: #66625c;
+	--text-10: #65615b;
+	--text-11: #64605a;
+	--text-12: #635f59;
+	--text-13: #625e58;
+	--text-14: #615d57;
+	--text-15: #605c56;
+	--text-16: #5f5b55;
+	--text-17: #5b5751;
+	--text-18: #57534d;
+	--text-19: #535049;
+	--text-20: #4f4c46;
 	--text-21: #474747;
 	--text-22: #424242;
 	--text-23: #414141;

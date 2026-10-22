@@ -16,7 +16,6 @@
 .message-annotations { display: flex; align-self: flex-end; margin-top: 6px; }
 .message-annotations-trigger { display: inline-flex; min-height: 27px; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 9px; background: var(--surface-03); color: var(--text-18); padding: 4px 8px; font-size: 11px; line-height: 16px; }
 .message-annotations-trigger:hover, .message-annotations-trigger[aria-expanded="true"] { background: var(--surface-06); color: var(--text); }
-.message-annotations-trigger:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .message-annotations-popover { position: fixed; inset: auto; display: flex; width: min(360px, calc(100vw - 16px)); max-height: min(340px, calc(100vh - 16px)); flex-direction: column; overflow: hidden; margin: 0; padding: 0; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--menu-bg); color: var(--text); box-shadow: var(--overlay-shadow); font-size: 12px; -webkit-app-region: no-drag; }
 .message-annotations-popover > header { display: flex; min-height: 39px; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--border); padding: 6px 10px 6px 13px; }
 .message-annotations-popover > header strong { font-size: 12px; font-weight: 500; }
@@ -35,7 +34,6 @@
 .transcript.has-navigation .transcript-scroll { padding-left: max(48px, calc((100% - var(--conversation-width)) / 2)); }
 .conversation-navigation { position: absolute; z-index: 4; left: 4px; top: 50%; transform: translateY(-50%); width: 42px; max-height: calc(100% - 128px); }
 .conversation-navigation-track { position: absolute; inset: 0; border-radius: 6px; cursor: pointer; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain; }
-.conversation-navigation-track:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .conversation-navigation-ticks { position: relative; margin-left: 12px; pointer-events: none; }
 .conversation-navigation-ticks > span { position: absolute; left: 0; height: 2px; background: color-mix(in srgb, var(--muted) 55%, transparent); border-radius: 0; transition: width 130ms ease, opacity 130ms ease; }
 .conversation-navigation-ticks > .is-current { background: var(--text); }

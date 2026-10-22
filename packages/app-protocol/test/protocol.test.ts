@@ -1008,6 +1008,24 @@ describe("golden protocol fixtures", () => {
 		}
 	});
 
+	it("keeps browser action unions strict when function schemas declare object roots", () => {
+		const invalidCalls = [
+			{ tool: "browser_tabs", input: {} },
+			{ tool: "browser_tabs", input: { action: "close" } },
+			{ tool: "browser_tabs", input: { action: "list", browserId: BROWSER_ID } },
+			{ tool: "browser_tabs", input: { action: "open", browserId: BROWSER_ID } },
+			{ tool: "browser_navigate", input: { browserId: BROWSER_ID, action: "goto" } },
+			{ tool: "browser_navigate", input: { action: "back" } },
+			{
+				tool: "browser_navigate",
+				input: { browserId: BROWSER_ID, action: "back", url: "https://example.test" },
+			},
+		];
+		for (const call of invalidCalls) {
+			expect(() => validateServerRequest(makeBrowserTool(call))).toThrow();
+		}
+	});
+
 	it("shares browser state element formatting and action target enumeration", () => {
 		const line = formatBrowserStateNode({
 			depth: 1,

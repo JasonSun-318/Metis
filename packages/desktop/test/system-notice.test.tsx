@@ -50,13 +50,41 @@ describe("SystemNotice", () => {
 		const root = createRoot(container);
 		const onDismiss = vi.fn();
 
-		await act(async () => root.render(<SystemNotice onDismiss={onDismiss} title="Request failed" tone="error" />));
+		await act(async () => root.render(<SystemNotice onDismiss={onDismiss} title="Saved" tone="success" />));
 		await act(async () => vi.advanceTimersByTime(4_999));
 		expect(onDismiss).not.toHaveBeenCalled();
 		await act(async () => vi.advanceTimersByTime(1));
 		expect(onDismiss).toHaveBeenCalledOnce();
 		await act(async () => root.unmount());
 	});
+
+	it.each(["error", "warning", "action"] as const)(
+		"keeps %s notices available until explicitly dismissed",
+		async (kind) => {
+			vi.useFakeTimers();
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const onDismiss = vi.fn();
+			await act(async () =>
+				root.render(
+					<SystemNotice
+						title="Needs attention"
+						tone={kind === "action" ? "info" : kind}
+						action={kind === "action" ? { label: "Retry", onClick: vi.fn() } : undefined}
+						onDismiss={onDismiss}
+					/>,
+				),
+			);
+			await act(async () => vi.advanceTimersByTime(30_000));
+			expect(onDismiss).not.toHaveBeenCalled();
+			expect(container.querySelector(".system-notice")).not.toBeNull();
+			await act(async () => container.querySelector<HTMLButtonElement>(".system-notice-dismiss")!.click());
+			expect(onDismiss).toHaveBeenCalledOnce();
+			await act(async () => root.unmount());
+		},
+	);
 
 	it("turns a provider 404 into model-configuration guidance", () => {
 		expect(systemErrorNotice('OpenAI API error (404): 404 "Not Found"')).toEqual({

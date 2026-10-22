@@ -388,7 +388,7 @@ export function ScheduledTasksPanel({
 					<div className="scheduled-tasks-content">
 						{loading && tasks.length === 0 ? (
 							<output className="status-block scheduled-task-loading">{t("Loading scheduled tasks…")}</output>
-						) : tasks.length === 0 ? (
+						) : listError && tasks.length === 0 ? null : tasks.length === 0 ? (
 							<div className="scheduled-tasks-empty">
 								<TracedSvgIcon className="scheduled-tasks-empty-icon" src={scheduleEmptyIcon} />
 								<h2>{t(query ? "No matching scheduled tasks" : "Create your first scheduled task")}</h2>
@@ -399,7 +399,11 @@ export function ScheduledTasksPanel({
 											: "Set a task to run once or on a recurring schedule.",
 									)}
 								</p>
-								{!query && (
+								{query ? (
+									<button className="settings-secondary-button" onClick={() => setQuery("")} type="button">
+										{t("Clear search")}
+									</button>
+								) : (
 									<button
 										className="settings-primary-button"
 										disabled={!serverReady || modelsLoading || models.length === 0}

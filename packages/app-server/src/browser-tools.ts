@@ -9,6 +9,8 @@ import {
 	type BrowserToolCall,
 } from "@metis/app-protocol";
 import type { ToolDefinition } from "@metis/coding-agent/host";
+import { type TSchema, Type } from "typebox";
+import { Compile } from "typebox/compile";
 import {
 	type BrowserPermissionAudit,
 	BrowserPermissionDecisionUnavailableError,
@@ -23,6 +25,28 @@ export const BROWSER_TOOL_NAMES = [
 	"browser_handoff",
 ] as const;
 export type BrowserToolName = (typeof BROWSER_TOOL_NAMES)[number];
+
+// Some gateways reject function parameters with root anyOf/allOf. Keep the
+// provider-facing fields ordinary objects and enforce the full action unions
+// before invoking the host, in addition to the unchanged RPC validation.
+const BrowserTabsToolParams = Type.Object(
+	{
+		action: Type.Union([Type.Literal("list"), Type.Literal("open"), Type.Literal("close")]),
+		profileId: Type.Optional(BrowserTabsParams.anyOf[1].properties.profileId),
+		browserId: Type.Optional(BrowserTabsParams.anyOf[2].properties.browserId),
+	},
+	{ additionalProperties: false },
+);
+const BrowserNavigateToolParams = Type.Object(
+	{
+		browserId: BrowserNavigateParams.anyOf[0].properties.browserId,
+		action: Type.Union([Type.Literal("goto"), Type.Literal("back"), Type.Literal("forward"), Type.Literal("reload")]),
+		url: Type.Optional(BrowserNavigateParams.anyOf[0].properties.url),
+	},
+	{ additionalProperties: false },
+);
+const browserTabsValidator = Compile(BrowserTabsParams);
+const browserNavigateValidator = Compile(BrowserNavigateParams);
 
 type BrowserHostRequestBase = {
 	readonly toolCallId: string;
@@ -95,14 +119,7 @@ function resultContent(result: BrowserHostResult) {
 	return observationContent(result.details.observation);
 }
 
-function definition<
-	TParams extends
-		| typeof BrowserTabsParams
-		| typeof BrowserNavigateParams
-		| typeof BrowserObserveParams
-		| typeof BrowserActParams
-		| typeof BrowserHandoffParams,
->(
+function definition<TParams extends TSchema>(
 	tool: BrowserToolName,
 	label: string,
 	description: string,
@@ -129,6 +146,16 @@ function definition<
 		}),
 		executionMode: "sequential",
 		async execute(toolCallId, input, signal) {
+			if (tool === "browser_tabs" && !browserTabsValidator.Check(input)) {
+				throw new TypeError(
+					"Invalid browser_tabs arguments: list accepts only action; open optionally accepts profileId; close requires browserId.",
+				);
+			}
+			if (tool === "browser_navigate" && !browserNavigateValidator.Check(input)) {
+				throw new TypeError(
+					"Invalid browser_navigate arguments: browserId is required; goto requires url; back, forward and reload do not accept url.",
+				);
+			}
 			const request = { toolCallId, tool, input, signal: signal ?? NEVER_ABORTED } as BrowserHostRequest;
 			try {
 				const result = await execute(request);
@@ -196,8 +223,8 @@ export function createBrowserToolDefinitions(
 		definition(
 			"browser_tabs",
 			"Browser tabs",
-			"List task-owned browser tabs and profiles, open a tab, or close a tab.",
-			BrowserTabsParams,
+			"List task-owned browser tabs and profiles (action=list), open a tab (action=open, optional profileId), or close a tab (action=close, required browserId).",
+			BrowserTabsToolParams,
 			execute,
 			audit,
 			BROWSER_GUIDELINES,
@@ -205,8 +232,8 @@ export function createBrowserToolDefinitions(
 		definition(
 			"browser_navigate",
 			"Navigate browser",
-			"Navigate a task-owned browser tab to an HTTP(S) URL or search, go back or forward, or reload.",
-			BrowserNavigateParams,
+			"Navigate a task-owned browser tab to an HTTP(S) URL or search (action=goto, required url), or go back, forward or reload (no url). All actions require browserId.",
+			BrowserNavigateToolParams,
 			execute,
 			audit,
 		),

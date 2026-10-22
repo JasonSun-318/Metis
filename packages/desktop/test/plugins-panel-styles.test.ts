@@ -19,24 +19,22 @@ function rule(selector: string): CSSStyleDeclaration {
 
 describe("Plugin Center visual contract", () => {
 	it("matches the scheduled-task content width and density", () => {
-		expect(css).toContain(
-			"input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 1px solid var(--border-strong); outline-offset: 1px; }",
-		);
+		expect(css).toContain("input:focus-visible, textarea:focus-visible, select:focus-visible { outline: none; }");
 		expect(rule(".plugins-catalog-page").overflowY).toBe("auto");
 		expect(rule(".plugins-full-list").overflowY).toBe("auto");
 		expect(rule(".plugins-full-list:has(.plugins-catalog-message)").borderColor).toBe("transparent");
 		expect(rule(".plugins-detail-page").overflowY).toBe("auto");
 		expect(css).toContain(
-			".plugins-page-header, .plugins-section-switch-row, .plugins-list-controls, .plugins-full-list { width: min(832px, 100%);",
+			".plugins-page-header, .plugins-section-switch-row, .plugins-list-controls, .plugins-full-list { width: min(var(--collection-width), 100%);",
 		);
 		expect(rule(".plugins-detail-grid").gridTemplateColumns).toBe("minmax(0, 1fr) 320px");
-		expect(rule(".plugins-page-header h1, .plugins-detail-header h1").fontSize).toBe("27px");
-		expect(rule(".plugins-new-trigger, .plugins-new-btn").height).toBe("32px");
+		expect(rule(".plugins-page-header h1").fontSize).toBe(rule(".scheduled-tasks-header h1").fontSize);
+		expect(rule(".plugins-new-trigger, .plugins-new-btn").height).toBe("var(--control-height-compact)");
 		expect(rule(".plugins-new-trigger, .plugins-new-btn").minWidth).toBe("112px");
-		expect(rule(".plugins-reload").height).toBe("32px");
+		expect(rule(".plugins-reload").height).toBe("var(--control-height-compact)");
 		expect(rule(".plugins-reload").display).toBe("inline-flex");
-		expect(rule(".plugins-section-switch").height).toBe("40px");
-		expect(rule(".plugins-search").height).toBe("42px");
+		expect(rule(".plugins-section-switch").height).toBe("var(--control-height)");
+		expect(rule(".plugins-search").height).toBe("var(--control-height)");
 		expect(rule(".plugins-list-row").minHeight).toBe("64px");
 		expect(rule(".plugins-row-icon").width).toBe("36px");
 		expect(rule(".plugins-detail-actions button").minHeight).toBe("34px");
@@ -44,15 +42,17 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
 		expect(rule(".scheduled-tasks-empty").minHeight).toBe("260px");
 		expect(rule(".scheduled-tasks-empty-icon").width).toBe("96px");
-		expect(css).toContain(".mcp-dialog { position: relative; width: min(760px, calc(100vw - 48px));");
+		expect(css).toContain(
+			".mcp-dialog { position: relative; width: min(var(--dialog-width-large), calc(100vw - 48px));",
+		);
 		expect(rule(".mcp-dialog").borderRadius).toBe("16px");
 		expect(rule(".mcp-dialog").background).toBe("var(--surface-04)");
 		expect(rule(".mcp-dialog h2").fontSize).toBe("19px");
 		expect(rule(".mcp-dialog label").fontSize).toBe("12px");
 		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select, .mcp-dialog textarea').fontSize).toBe(
-			"13px",
+			"var(--control-font-size)",
 		);
-		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select').height).toBe("40px");
+		expect(rule('.mcp-dialog input:not([type="checkbox"]), .mcp-dialog select').height).toBe("var(--control-height)");
 		expect(rule(".skill-create-methods > button").minHeight).toBe("72px");
 		expect(rule(".skill-create-methods strong").fontSize).toBe("14px");
 		expect(rule(".skill-create-methods small").fontSize).toBe("12px");
@@ -68,8 +68,8 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".mcp-dialog .plugins-partial-checkbox").display).toBe("flex");
 		expect(rule(".mcp-dialog .plugins-partial-checkbox").alignItems).toBe("center");
 		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').flex).toMatch(/(none|0 0 auto)/);
-		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').width).toBe("14px");
-		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').height).toBe("14px");
+		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').width).toBe("var(--choice-size)");
+		expect(rule('.mcp-dialog .plugins-partial-checkbox input[type="checkbox"]').height).toBe("var(--choice-size)");
 		expect(rule(".plugins-partial-checkbox span").minWidth).toBe("0px");
 	});
 });

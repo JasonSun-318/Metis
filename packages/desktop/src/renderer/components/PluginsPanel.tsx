@@ -37,6 +37,7 @@ import {
 import {
 	type CSSProperties,
 	type KeyboardEvent,
+	type ReactNode,
 	type RefObject,
 	useCallback,
 	useEffect,
@@ -583,21 +584,84 @@ function SearchBox({
 	label,
 	query,
 	setQuery,
+	inputRef,
 }: {
+	readonly inputRef: RefObject<HTMLInputElement | null>;
 	readonly label: string;
 	readonly query: string;
 	readonly setQuery: (value: string) => void;
 }) {
+	const { t } = useTranslation();
 	return (
 		<label className="plugins-search">
 			<MagnifyingGlass aria-hidden="true" size={18} />
 			<input
 				aria-label={label}
+				ref={inputRef}
 				onChange={(event) => setQuery(event.target.value)}
 				placeholder={`${label}…`}
 				value={query}
 			/>
+			{query && (
+				<button
+					type="button"
+					className="search-clear-button"
+					aria-label={t("Clear search")}
+					onClick={() => {
+						setQuery("");
+						inputRef.current?.focus();
+					}}
+				>
+					<X aria-hidden="true" size={15} />
+				</button>
+			)}
 		</label>
+	);
+}
+
+function CatalogList({
+	children,
+	hasItems,
+	label,
+	onKeyDown,
+}: {
+	readonly children: ReactNode;
+	readonly hasItems: boolean;
+	readonly label: string;
+	readonly onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+}) {
+	return hasItems ? (
+		<div className="plugins-full-list" aria-label={label} role="listbox" onKeyDown={onKeyDown}>
+			{children}
+		</div>
+	) : (
+		<section className="plugins-full-list" aria-label={label}>
+			{children}
+		</section>
+	);
+}
+
+function CatalogEmptyState({
+	message,
+	description,
+	actionLabel,
+	onAction,
+	disabled = false,
+}: {
+	readonly message: string;
+	readonly description: string;
+	readonly actionLabel: string;
+	readonly onAction: () => void;
+	readonly disabled?: boolean;
+}) {
+	return (
+		<div className="plugins-catalog-message">
+			<p>{message}</p>
+			<p>{description}</p>
+			<button className="settings-secondary-button" disabled={disabled} onClick={onAction} type="button">
+				{actionLabel}
+			</button>
+		</div>
 	);
 }
 
@@ -909,6 +973,7 @@ export function PluginsPanel({
 	const hooksListGeneration = useRef(0);
 	const skipSkillDetailLoad = useRef<string | null>(null);
 	const detailHeading = useRef<HTMLHeadingElement>(null);
+	const catalogSearch = useRef<HTMLInputElement>(null);
 	const restoreFocus = useRef<HTMLButtonElement | null>(null);
 	const activeSession = state.activeSessionId ? state.sessionsById.get(state.activeSessionId) : undefined;
 	const activeCwd = activeSession?.cwd ?? null;
@@ -1136,6 +1201,26 @@ export function PluginsPanel({
 				(!query || `${hook.name} ${hook.command} ${hook.statusMessage ?? ""}`.toLocaleLowerCase().includes(query)),
 		);
 	}, [hookFilter, hookQuery, hooksState]);
+
+	const catalogFiltered =
+		section === "skills"
+			? Boolean(skillQuery.trim() || skillFilter !== "all")
+			: section === "mcp"
+				? Boolean(mcpQuery.trim() || mcpFilter !== "all")
+				: Boolean(hookQuery.trim() || hookFilter !== "all");
+	const resetCatalogFilters = () => {
+		if (section === "skills") {
+			setSkillQuery("");
+			setSkillFilter("all");
+		} else if (section === "mcp") {
+			setMcpQuery("");
+			setMcpFilter("all");
+		} else {
+			setHookQuery("");
+			setHookFilter("all");
+		}
+		catalogSearch.current?.focus();
+	};
 
 	const switchSection = (next: PluginSection) => {
 		setSection(next);
@@ -1614,6 +1699,7 @@ export function PluginsPanel({
 				<>
 					<div className="plugins-list-controls">
 						<SearchBox
+							inputRef={catalogSearch}
 							label={t(
 								section === "skills"
 									? "Search Skills"
@@ -1669,7 +1755,13 @@ export function PluginsPanel({
 							/>
 						)}
 					</div>
-					<div className="plugins-full-list" onKeyDown={keyNavigation} role="listbox">
+					<CatalogList
+						label={t(section === "skills" ? "Skills" : section === "mcp" ? "MCP" : "Hooks")}
+						hasItems={
+							(section === "skills" ? visibleSkills : section === "mcp" ? visibleMcp : visibleHooks).length > 0
+						}
+						onKeyDown={keyNavigation}
+					>
 						{section === "skills" ? (
 							skillsState.status === "loading" ? (
 								<output className="status-paragraph plugins-catalog-message">{t("Loading skills")}</output>
@@ -1681,7 +1773,23 @@ export function PluginsPanel({
 									</button>
 								</div>
 							) : visibleSkills.length === 0 ? (
-								<p className="plugins-catalog-message">{t("No Skills are available in this category.")}</p>
+								<CatalogEmptyState
+									message={t(
+										catalogFiltered ? "No matching results" : "No Skills are available in this category.",
+									)}
+									description={t(
+										catalogFiltered
+											? "Try another search or clear the filters."
+											: "Create reusable instructions for tasks you do often.",
+									)}
+									actionLabel={t(catalogFiltered ? "Clear filters" : "Create User Skill")}
+									disabled={!catalogFiltered && !serverReady}
+									onAction={
+										catalogFiltered
+											? resetCatalogFilters
+											: () => openDialog({ kind: "skill-create", source: "user", initialCwd: null })
+									}
+								/>
 							) : (
 								visibleSkills.map((skill) => (
 									<button
@@ -1736,7 +1844,27 @@ export function PluginsPanel({
 									</button>
 								</div>
 							) : visibleMcp.length === 0 ? (
-								<p className="plugins-catalog-message">{t("No MCP servers in this scope.")}</p>
+								<CatalogEmptyState
+									message={t(catalogFiltered ? "No matching results" : "No MCP servers in this scope.")}
+									description={t(
+										catalogFiltered
+											? "Try another search or clear the filters."
+											: "Connect tools and data through a local or remote MCP server.",
+									)}
+									actionLabel={t(catalogFiltered ? "Clear filters" : "Create User MCP")}
+									disabled={!catalogFiltered && !serverReady}
+									onAction={
+										catalogFiltered
+											? resetCatalogFilters
+											: () =>
+													openDialog({
+														kind: "mcp-create",
+														scope: "user",
+														initialCwd: null,
+														initialSession: activeSession,
+													})
+									}
+								/>
 							) : (
 								visibleMcp.map((server) => (
 									<button
@@ -1786,7 +1914,21 @@ export function PluginsPanel({
 								</button>
 							</div>
 						) : visibleHooks.length === 0 ? (
-							<p className="plugins-catalog-message">{t("No Hooks configured yet.")}</p>
+							<CatalogEmptyState
+								message={t(catalogFiltered ? "No matching results" : "No Hooks configured yet.")}
+								description={t(
+									catalogFiltered
+										? "Try another search or clear the filters."
+										: "Run a script automatically at a chosen point in a conversation.",
+								)}
+								actionLabel={t(catalogFiltered ? "Clear filters" : "New Hook")}
+								disabled={!catalogFiltered && !serverReady}
+								onAction={
+									catalogFiltered
+										? resetCatalogFilters
+										: () => openDialog({ kind: "hook-editor", mode: "create" })
+								}
+							/>
 						) : (
 							visibleHooks.map((hook) => (
 								<button
@@ -1820,7 +1962,7 @@ export function PluginsPanel({
 								</button>
 							))
 						)}
-					</div>
+					</CatalogList>
 				</>
 			)}
 		</section>

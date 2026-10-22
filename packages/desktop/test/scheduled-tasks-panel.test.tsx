@@ -207,6 +207,38 @@ describe("ScheduledTasksPanel", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("does not present a failed task load as an empty catalog and can retry", async () => {
+		const { api, store } = harness([]);
+		vi.mocked(api.listSchedules).mockRejectedValueOnce(new Error("task list offline"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<ScheduledTasksPanel
+					api={api}
+					store={store}
+					serverReady
+					sessions={[]}
+					selectedTaskId={null}
+					onCreateWithMetis={async () => {}}
+					onOpenSession={() => {}}
+					onSelectTask={() => {}}
+				/>,
+			),
+		);
+		await wait(220);
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("task list offline");
+		expect(container.textContent).not.toContain("Create your first scheduled task");
+		await act(async () =>
+			[...container.querySelectorAll("button")].find((button) => button.textContent === "Retry")!.click(),
+		);
+		await wait(220);
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.textContent).toContain("Create your first scheduled task");
+		await act(async () => root.unmount());
+	});
+
 	it("keeps a model-loading error visible when the task list succeeds", async () => {
 		const { api, store } = harness([]);
 		vi.mocked(api.listModels).mockRejectedValue(new Error("model catalog failed"));

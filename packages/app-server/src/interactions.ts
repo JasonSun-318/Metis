@@ -1,9 +1,10 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
 	type BrowserActInput,
 	type BrowserToolCall,
 	type BrowserToolResult,
 	browserActionElementIds,
+	compileSchema,
 	type DomainEvent,
 	findBrowserStateElement,
 	type InteractionResponseInput,
@@ -12,6 +13,7 @@ import {
 	MAX_NAME_UTF16_UNITS,
 	MAX_PERMISSION_OPERATION_ROWS,
 	MAX_PUBLIC_TEXT_UTF8_BYTES,
+	OpaqueIdSchema,
 	type ServerRequestMethod,
 	type ServerResult,
 	type ServerRpcRequest,
@@ -33,6 +35,7 @@ import { BrowserPermissionDecisionUnavailableError, BrowserPermissionDeniedError
 const DEFAULT_TIMEOUT_MS = 120_000;
 const ASK_USER_TIMEOUT_MS = 15 * 60_000;
 const MAX_TIMEOUT_MS = 2_147_483_647;
+const opaqueIdValidator = compileSchema(OpaqueIdSchema);
 const GENERIC_TARGET_KEY =
 	/^(action|address|branch|command|directory|file|folder|host|id|name|owner|path|port|project|query|repo|repository|resource|target|url|uri)$/iu;
 
@@ -328,11 +331,15 @@ export class InteractionBroker {
 		call: BrowserToolCall,
 		signal: AbortSignal,
 	): Promise<BrowserToolResult> {
+		// Provider call IDs can be compound or oversized; only the local RPC needs an opaque ID.
+		const wireToolCallId = opaqueIdValidator.Check(toolCallId)
+			? toolCallId
+			: `browser:${createHash("sha256").update(toolCallId).digest("hex")}`;
 		const request = validateServerRequest({
 			jsonrpc: "2.0",
 			id: this.createId(),
 			method: "browser/tool",
-			params: { serverEpoch: this.serverEpoch, sessionId, toolCallId, call },
+			params: { serverEpoch: this.serverEpoch, sessionId, toolCallId: wireToolCallId, call },
 		}) as ServerRpcRequest<"browser/tool">;
 		const result = (await peer.request(request, signal)) as ServerResult<"browser/tool">;
 		validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
