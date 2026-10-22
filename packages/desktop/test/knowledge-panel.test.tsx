@@ -127,6 +127,51 @@ describe("Knowledge sidebar and conversation links", () => {
 		await click(button(container, "Back to knowledge library"));
 		expect(container.querySelector('[aria-label="Knowledge graph"]')).not.toBeNull();
 	});
+	it("retries a failed note read for the same path", async () => {
+		const api = fixture();
+		api.readKnowledgeNote.mockRejectedValueOnce(new Error("File is temporarily unavailable"));
+		let resolveRetry!: (result: { path: string; content: string }) => void;
+		api.readKnowledgeNote.mockImplementationOnce(
+			() =>
+				new Promise<{ path: string; content: string }>((resolve) => {
+					resolveRetry = resolve;
+				}),
+		);
+		const container = await mount(api);
+		await click(container.querySelector('[role="button"][aria-label="Home"]')!);
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("File is temporarily unavailable");
+		await click(button(container, "Retry"));
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.querySelector("output")?.textContent).toContain("Loading");
+		expect(api.readKnowledgeNote).toHaveBeenLastCalledWith({ libraryId: a.id, path: "Home.md" });
+		await act(async () => {
+			resolveRetry({ path: "Home.md", content: "# Home restored" });
+		});
+		expect(container.textContent).toContain("Home restored");
+		expect(api.readKnowledgeNote).toHaveBeenCalledTimes(2);
+	});
+	it("does not let a stale note read replace another selected note", async () => {
+		const api = fixture();
+		let resolveHome!: (result: { path: string; content: string }) => void;
+		api.readKnowledgeNote.mockImplementation(({ path }: { path: string }) =>
+			path === "Home.md"
+				? new Promise<{ path: string; content: string }>((resolve) => {
+						resolveHome = resolve;
+					})
+				: Promise.resolve({ path, content: "# Deep note\nNested content" }),
+		);
+		const container = await mount(api);
+		await click(container.querySelector('[role="button"][aria-label="Home"]')!);
+		await click(button(container, "Back to knowledge library"));
+		await click(container.querySelector('[role="button"][aria-label="Deep note"]')!);
+		expect(container.textContent).toContain("Nested content");
+		expect(api.readKnowledgeNote).toHaveBeenLastCalledWith({ libraryId: a.id, path: "topic/deep/Note.md" });
+		await act(async () => {
+			resolveHome({ path: "Home.md", content: "Stale Home content" });
+		});
+		expect(container.textContent).toContain("Nested content");
+		expect(container.textContent).not.toContain("Stale Home content");
+	});
 	it("keeps the current note visible while polling reads its updated content", async () => {
 		const api = fixture();
 		const container = await mount(api);

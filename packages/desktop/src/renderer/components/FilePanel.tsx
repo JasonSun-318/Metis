@@ -198,6 +198,7 @@ export function FilePanel({
 	const [file, setFile] = useState<DesktopWorkspaceFile | null>(null);
 	const [previewLoading, setPreviewLoading] = useState(false);
 	const [previewError, setPreviewError] = useState<string | null>(null);
+	const [previewRetry, setPreviewRetry] = useState(0);
 	const [previewMode, setPreviewMode] = useState(false);
 	const [actionMenuOpen, setActionMenuOpen] = useState(false);
 	const [selectedEntry, setSelectedEntry] = useState<DesktopWorkspaceEntry | null>(null);
@@ -364,6 +365,7 @@ export function FilePanel({
 		return () => window.clearTimeout(timer);
 	}, [api, onError, query, sessionId, visible]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(previewRetry): Retry explicitly re-reads the preview.
 	useEffect(() => {
 		const generation = ++readGeneration.current;
 		setActionMenuOpen(false);
@@ -407,7 +409,7 @@ export function FilePanel({
 				if (!isWorkspaceNotAFileError(cause)) onError(cause);
 			},
 		);
-	}, [activePath, api, draftMatchesActivePath, onError, sessionId, t, visible]);
+	}, [activePath, api, draftMatchesActivePath, onError, previewRetry, sessionId, t, visible]);
 
 	useEffect(() => {
 		if (!actionMenuOpen) return;
@@ -787,6 +789,13 @@ export function FilePanel({
 							<File aria-hidden="true" size={27} />
 							<strong>{t("File could not be opened")}</strong>
 							<span>{previewError}</span>
+							<button
+								className="settings-secondary-button"
+								onClick={() => setPreviewRetry((value) => value + 1)}
+								type="button"
+							>
+								{t("Retry")}
+							</button>
 						</div>
 					) : hostedPreview && activePath ? (
 						<UniversalFilePreviewer

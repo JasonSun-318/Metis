@@ -11,6 +11,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { localeForIntl } from "../i18n.ts";
 
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
 
@@ -51,7 +52,8 @@ export function PersonalizationPanel({
 	readonly serverReady: boolean;
 	readonly onDirtyChange?: (dirty: boolean) => void;
 }) {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
+	const locale = localeForIntl(i18n.resolvedLanguage);
 	const [instructions, setInstructions] = useState("");
 	const [savedInstructions, setSavedInstructions] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -109,6 +111,7 @@ export function PersonalizationPanel({
 	};
 
 	const applyPreset = (presetText: string) => {
+		if (!serverReady || loading || saving) return;
 		setInstructions((prev) => {
 			const trimmed = prev.trim();
 			if (!trimmed) return presetText;
@@ -155,6 +158,7 @@ export function PersonalizationPanel({
 							return (
 								<button
 									className="personalization-preset-chip"
+									disabled={!serverReady || loading || saving}
 									key={preset.label}
 									onClick={() => applyPreset(t(preset.text))}
 									type="button"
@@ -174,6 +178,7 @@ export function PersonalizationPanel({
 							aria-label={t("Global instructions")}
 							disabled={!serverReady || saving}
 							onChange={(event) => {
+								if (!serverReady || loading || saving) return;
 								setInstructions(event.target.value);
 								setError(null);
 								setSaved(false);
@@ -187,8 +192,8 @@ export function PersonalizationPanel({
 						<div className="personalization-meta">
 							<span className="personalization-bytes">
 								{t("{{used}} / {{max}} bytes", {
-									used: instructionBytes.toLocaleString(),
-									max: MAX_INSTRUCTION_BYTES.toLocaleString(),
+									used: instructionBytes.toLocaleString(locale),
+									max: MAX_INSTRUCTION_BYTES.toLocaleString(locale),
 								})}
 							</span>
 							{oversized ? (

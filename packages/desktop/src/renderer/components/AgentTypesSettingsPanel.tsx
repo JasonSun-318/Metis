@@ -1,8 +1,9 @@
 import type { CustomAgentTypeView } from "@metis/app-protocol";
-import { CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "@phosphor-icons/react";
+import { ArrowLeft, CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { localeForIntl } from "../i18n.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 const AGENT_TYPE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
@@ -49,7 +50,8 @@ export function AgentTypesSettingsPanel({
 	readonly api: Pick<MetisDesktopApi, "listAgentTypes" | "upsertAgentType" | "removeAgentType">;
 	readonly serverReady: boolean;
 }) {
-	const { t } = useTranslation();
+	const { t, i18n } = useTranslation();
+	const locale = localeForIntl(i18n.resolvedLanguage);
 	const [types, setTypes] = useState<readonly CustomAgentTypeView[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(false);
@@ -89,6 +91,10 @@ export function AgentTypesSettingsPanel({
 	const custom = useMemo(() => types.filter((type) => !type.builtIn && matchesFilter(type, filter)), [filter, types]);
 	const promptBytes = useMemo(() => (draft ? new TextEncoder().encode(draft.systemPrompt).byteLength : 0), [draft]);
 
+	const closeEditor = () => {
+		setDraft(null);
+		setFormError(null);
+	};
 	const startCreate = () => {
 		setDraft({ ...EMPTY_DRAFT });
 		setIdLocked(false);
@@ -144,6 +150,7 @@ export function AgentTypesSettingsPanel({
 	};
 
 	const remove = async (view: CustomAgentTypeView) => {
+		setFormError(null);
 		if (!window.confirm(t("Delete agent type {{id}}? Existing agents keep their type name.", { id: view.id })))
 			return;
 		try {
@@ -179,6 +186,13 @@ export function AgentTypesSettingsPanel({
 		return (
 			<div className="settings-page agent-types-page">
 				<section aria-label={t("Agent types")} className="settings-section agent-types-editor">
+					<header className="settings-section-heading">
+						<h3>{idLocked ? t("Edit agent type") : t("New agent type")}</h3>
+						<button className="settings-secondary-button" disabled={saving} onClick={closeEditor} type="button">
+							<ArrowLeft aria-hidden="true" size={13} />
+							{t("Back to agent types")}
+						</button>
+					</header>
 					{formError && (
 						<p className="agent-types-form-error settings-inline-error" role="alert">
 							{formError}
@@ -274,16 +288,14 @@ export function AgentTypesSettingsPanel({
 							value={draft.systemPrompt}
 						/>
 						<span className="agent-types-hint">
-							{promptBytes.toLocaleString()} / {MAX_SYSTEM_PROMPT_BYTES.toLocaleString()} UTF-8 bytes
+							{t("{{used}} / {{max}} UTF-8 bytes", {
+								used: promptBytes.toLocaleString(locale),
+								max: MAX_SYSTEM_PROMPT_BYTES.toLocaleString(locale),
+							})}
 						</span>
 					</label>
 					<div className="agent-types-actions">
-						<button
-							className="settings-secondary-button"
-							disabled={saving}
-							onClick={() => setDraft(null)}
-							type="button"
-						>
+						<button className="settings-secondary-button" disabled={saving} onClick={closeEditor} type="button">
 							{t("Cancel")}
 						</button>
 						<button
@@ -320,6 +332,11 @@ export function AgentTypesSettingsPanel({
 					{t("New agent type")}
 				</button>
 			</div>
+			{formError && (
+				<p className="agent-types-form-error settings-inline-error" role="alert">
+					{formError}
+				</p>
+			)}
 			<section aria-label={t("Built-in agent types")} className="settings-section">
 				<h2 className="agent-types-heading">{t("Built-in agent types")}</h2>
 				<div className="agent-types-list">

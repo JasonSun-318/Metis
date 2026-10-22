@@ -55,6 +55,18 @@ export function MemoryDialog({
 			aria-modal="true"
 			className={`memory-dialog ${className}`}
 			ref={dialogRef}
+			onKeyDown={(event) => {
+				if (
+					event.key !== "Escape" ||
+					event.defaultPrevented ||
+					event.currentTarget.querySelector('[aria-haspopup][aria-expanded="true"]')
+				)
+					return;
+				event.preventDefault();
+				event.stopPropagation();
+				if (confirmDiscard) setConfirmDiscard(false);
+				else close();
+			}}
 			onCancel={(event) => {
 				event.preventDefault();
 				event.stopPropagation();

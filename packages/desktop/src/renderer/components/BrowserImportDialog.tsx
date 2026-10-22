@@ -27,7 +27,8 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 	const [history, setHistory] = useState(true);
 	const [loading, setLoading] = useState(true);
 	const [pending, setPending] = useState(false);
-	const [error, setError] = useState<string | null>(null);
+	const [sourceError, setSourceError] = useState<string | null>(null);
+	const [importError, setImportError] = useState<string | null>(null);
 	const selectedSource = sources.find((source) => source.sourceId === sourceId);
 	const selectedProfile = selectedSource?.profiles.find((profile) => profile.sourceProfileId === sourceProfileId);
 	const canImport = Boolean(
@@ -36,7 +37,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 
 	const refresh = useCallback(async () => {
 		setLoading(true);
-		setError(null);
+		setSourceError(null);
 		try {
 			const found = await api.listBrowserImportSources();
 			setSources(found);
@@ -44,7 +45,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 			setSourceId(source?.sourceId ?? "");
 			setSourceProfileId(source?.profiles[0]?.sourceProfileId ?? "");
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : t("Browser data could not be imported"));
+			setSourceError(cause instanceof Error ? cause.message : t("Browser data could not be imported"));
 		} finally {
 			setLoading(false);
 		}
@@ -57,7 +58,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 	const submit = async () => {
 		if (!canImport || !sourceId) return;
 		setPending(true);
-		setError(null);
+		setImportError(null);
 		try {
 			onImported(
 				await api.importBrowserData({
@@ -67,7 +68,7 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 				}),
 			);
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : t("Browser data could not be imported"));
+			setImportError(cause instanceof Error ? cause.message : t("Browser data could not be imported"));
 			setPending(false);
 		}
 	};
@@ -118,8 +119,16 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 					placeholder={t("Choose a profile")}
 					value={sourceProfileId}
 				/>
-				{!loading && sources.length === 0 && !error && (
+				{!loading && sources.length === 0 && !sourceError && (
 					<p className="browser-import-empty">{t("No supported browser profiles found")}</p>
+				)}
+				{sourceError && (
+					<div className="browser-import-warning" role="alert">
+						<span>{sourceError}</span>
+						<button className="button-secondary" disabled={loading} onClick={() => void refresh()} type="button">
+							{t("Retry")}
+						</button>
+					</div>
 				)}
 				{selectedSource?.running && (
 					<div className="browser-import-warning" role="alert">
@@ -162,9 +171,9 @@ export function BrowserImportDialog({ api, onCancel, onImported }: BrowserImport
 						/>
 					</label>
 				</fieldset>
-				{error && (
+				{importError && (
 					<p className="mcp-dialog-error" role="alert">
-						{error}
+						{importError}
 					</p>
 				)}
 			</div>

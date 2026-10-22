@@ -27,10 +27,12 @@ type BrowserSettingsView = "overview" | "history" | "downloads";
 
 function HistoryClearDialog({
 	busy,
+	error,
 	onCancel,
 	onConfirm,
 }: {
 	readonly busy: boolean;
+	readonly error: string | null;
 	readonly onCancel: () => void;
 	readonly onConfirm: () => void;
 }) {
@@ -56,6 +58,11 @@ function HistoryClearDialog({
 			<div>
 				<h2 id="browser-settings-clear-title">{t("Clear browsing history?")}</h2>
 				<p>{t("This permanently removes history from the selected Metis browser profile.")}</p>
+				{error && (
+					<p className="settings-inline-error" role="alert">
+						{error}
+					</p>
+				)}
 				<footer>
 					<button className="settings-secondary-button" disabled={busy} onClick={onCancel} type="button">
 						{t("Cancel")}
@@ -72,6 +79,18 @@ function HistoryClearDialog({
 				</footer>
 			</div>
 		</dialog>
+	);
+}
+
+function ReadError({ message, onRetry }: { readonly message: string; readonly onRetry: () => void }) {
+	const { t } = useTranslation();
+	return (
+		<div className="settings-inline-error" role="alert">
+			<span>{message}</span>
+			<button className="settings-secondary-button" onClick={onRetry} type="button">
+				{t("Retry")}
+			</button>
+		</div>
 	);
 }
 
@@ -127,18 +146,26 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 	const [expandedHistoryDates, setExpandedHistoryDates] = useState<ReadonlySet<string>>(new Set());
 	const [loading, setLoading] = useState(true);
 	const [historyLoading, setHistoryLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [loadError, setLoadError] = useState<string | null>(null);
+	const [historyError, setHistoryError] = useState<string | null>(null);
+	const [actionError, setActionError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [importOpen, setImportOpen] = useState(false);
 	const [confirmClear, setConfirmClear] = useState(false);
 	const [clearing, setClearing] = useState(false);
+	const [clearError, setClearError] = useState<string | null>(null);
+	const [reloadRequest, setReloadRequest] = useState(0);
+	const [historyReloadRequest, setHistoryReloadRequest] = useState(0);
 
 	useEffect(() => {
 		selectedProfileIdRef.current = selectedProfileId;
 	}, [selectedProfileId]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(reloadRequest): Retry explicitly reloads browser settings.
 	useEffect(() => {
 		let active = true;
+		setLoading(true);
+		setLoadError(null);
 		void Promise.allSettled([
 			api.listBrowserProfiles(),
 			api.listBrowserDownloads(),
@@ -154,7 +181,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			if (downloadResult.status === "fulfilled") setDownloads(downloadResult.value);
 			if (directoryResult.status === "fulfilled") setDownloadDirectory(directoryResult.value);
 			if ([profileResult, downloadResult, directoryResult].some(({ status }) => status === "rejected")) {
-				setError(t("Browser settings could not be loaded"));
+				setLoadError(t("Browser settings could not be loaded"));
 			}
 			setLoading(false);
 		});
@@ -168,11 +195,13 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			active = false;
 			unsubscribe();
 		};
-	}, [api, t]);
+	}, [api, reloadRequest, t]);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(historyReloadRequest): Retry reloads history for the selected profile.
 	useEffect(() => {
 		let active = true;
 		setHistoryLoading(true);
+		setHistoryError(null);
 		void api.listBrowserHistory({ profileId: selectedProfileId }).then(
 			(entries) => {
 				if (active) {
@@ -182,7 +211,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			},
 			() => {
 				if (active) {
-					setError(t("Browser settings could not be loaded"));
+					setHistoryError(t("Browser settings could not be loaded"));
 					setHistoryLoading(false);
 				}
 			},
@@ -190,7 +219,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 		return () => {
 			active = false;
 		};
-	}, [api, selectedProfileId, t]);
+	}, [api, selectedProfileId, historyReloadRequest, t]);
 
 	const filteredHistory = useMemo(() => {
 		const query = search.trim().toLocaleLowerCase();
@@ -229,29 +258,29 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 			result.history ? t("{{count}} history entries retained", { count: result.history.retained }) : null,
 		].filter(Boolean);
 		setNotice(parts.join(" · "));
-		void refreshProfiles(result).catch(() => setError(t("Browser settings could not be loaded")));
+		void refreshProfiles(result).catch(() => setLoadError(t("Browser settings could not be loaded")));
 	};
 
 	const runDownloadAction = async (type: DesktopDownloadControlType, downloadId: string) => {
-		setError(null);
+		setActionError(null);
 		try {
 			await api.controlBrowserDownload({ type, downloadId });
 			setDownloads(await api.listBrowserDownloads());
 		} catch {
-			setError(t("Browser action failed"));
+			setActionError(t("Browser action failed"));
 		}
 	};
 
 	const clearHistory = async () => {
 		setClearing(true);
-		setError(null);
+		setClearError(null);
 		try {
 			await api.clearBrowserHistory({ profileId: selectedProfileId });
 			setHistory([]);
 			setConfirmClear(false);
 			setNotice(t("Browsing history cleared"));
 		} catch {
-			setError(t("Browser action failed"));
+			setClearError(t("Browser action failed"));
 		} finally {
 			setClearing(false);
 		}
@@ -302,20 +331,28 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 					<button
 						aria-label={t("Clear browsing history")}
 						className="settings-danger-button"
-						disabled={history.length === 0 || historyLoading}
-						onClick={() => setConfirmClear(true)}
+						disabled={history.length === 0 || historyLoading || historyError !== null}
+						onClick={() => {
+							setClearError(null);
+							setConfirmClear(true);
+						}}
 						type="button"
 					>
 						{t("Clear history")}
 					</button>
 				</div>
-				{error && (
+				{loadError && <ReadError message={loadError} onRetry={() => setReloadRequest((request) => request + 1)} />}
+				{actionError && (
 					<p className="settings-inline-error" role="alert">
-						{error}
+						{actionError}
 					</p>
 				)}
 				{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
-				{historyLoading ? (
+				{historyError ? (
+					<div className="browser-settings-state">
+						<ReadError message={historyError} onRetry={() => setHistoryReloadRequest((request) => request + 1)} />
+					</div>
+				) : historyLoading ? (
 					<output className="status-block browser-settings-state">{t("Loading browsing history…")}</output>
 				) : groupedHistory.length === 0 ? (
 					<div className="browser-settings-state">
@@ -375,6 +412,7 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 				{confirmClear && (
 					<HistoryClearDialog
 						busy={clearing}
+						error={clearError}
 						onCancel={() => setConfirmClear(false)}
 						onConfirm={() => void clearHistory()}
 					/>
@@ -401,9 +439,10 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 						<p>{t("Manage files downloaded by the built-in browser during this app run.")}</p>
 					</div>
 				</div>
-				{error && (
+				{loadError && <ReadError message={loadError} onRetry={() => setReloadRequest((request) => request + 1)} />}
+				{actionError && (
 					<p className="settings-inline-error" role="alert">
-						{error}
+						{actionError}
 					</p>
 				)}
 				{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
@@ -429,9 +468,10 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 
 	return (
 		<div className="settings-page browser-settings-page">
-			{error && (
+			{loadError && <ReadError message={loadError} onRetry={() => setReloadRequest((request) => request + 1)} />}
+			{actionError && (
 				<p className="settings-inline-error" role="alert">
-					{error}
+					{actionError}
 				</p>
 			)}
 			{notice && <output className="status-paragraph settings-action-message">{notice}</output>}
@@ -521,7 +561,9 @@ export function BrowserSettingsPanel({ api }: { readonly api: MetisDesktopApi })
 								className="settings-secondary-button"
 								disabled={!downloadDirectory}
 								onClick={() =>
-									void api.openBrowserDownloadDirectory().catch(() => setError(t("Browser action failed")))
+									void api
+										.openBrowserDownloadDirectory()
+										.catch(() => setActionError(t("Browser action failed")))
 								}
 								type="button"
 							>

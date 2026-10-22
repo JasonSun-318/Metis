@@ -1039,6 +1039,17 @@ describe("Chat desktop shell", () => {
 			visibleSessionId: "chat-existing",
 		});
 
+		const composer = (container.querySelector("textarea") ?? container.querySelector("#composer-input"))!;
+		await act(async () => changeTextarea(composer, "Draft survives settings"));
+		await addTool(container, "Browser");
+		await flush();
+		expect(container.querySelector('.session-button[aria-current="page"]')?.textContent).toContain(
+			"Chat project task",
+		);
+		expect(
+			activeWorkspace(container).querySelector(".tool-sidebar-panel:not([hidden]) .browser-panel"),
+		).not.toBeNull();
+
 		await act(async () => button(container, "Metis User").click());
 		expect(document.activeElement?.textContent).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
@@ -1057,6 +1068,16 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".app-shell")?.hasAttribute("inert")).toBe(true);
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
 		expect(container.querySelector('[role="dialog"][aria-label="Settings"]')).toBeNull();
+		expect(container.querySelector(".app-shell")?.hasAttribute("inert")).toBe(false);
+		await act(async () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+		expect(document.activeElement).toBe(container.querySelector(".account-menu-trigger"));
+		expect(container.querySelector('.session-button[aria-current="page"]')?.textContent).toContain(
+			"Chat project task",
+		);
+		expect(composerText(composer)).toBe("Draft survives settings");
+		expect(
+			activeWorkspace(container).querySelector(".tool-sidebar-panel:not([hidden]) .browser-panel"),
+		).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 

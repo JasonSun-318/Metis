@@ -7,6 +7,8 @@ import { localeForIntl } from "../i18n.ts";
 
 type UsageDisplay = "chart" | "table";
 
+const RANGE_DAYS = [7, 30, 90] as const;
+
 function dayTotal(day: UsageDailyView): number {
 	return day.chatTokens + day.codeTokens;
 }
@@ -20,7 +22,11 @@ export function UsagePanel({
 }) {
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
-	const [rangeDays, setRangeDays] = useState<UsageRangeDays>(30);
+	const [request, setRequest] = useState<{ rangeDays: UsageRangeDays; retryNonce: number }>({
+		rangeDays: 30,
+		retryNonce: 0,
+	});
+	const rangeDays = request.rangeDays;
 	const [display, setDisplay] = useState<UsageDisplay>("chart");
 	const [usage, setUsage] = useState<UsageSummaryView | null>(null);
 	const [hovered, setHovered] = useState<number | null>(null);
@@ -34,11 +40,37 @@ export function UsagePanel({
 	const full = useMemo(() => new Intl.NumberFormat(locale), [locale]);
 	const date = useMemo(() => new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }), [locale]);
 
+	const selectRange = (days: UsageRangeDays) => {
+		if (days === rangeDays) return;
+		setRequest((current) => ({ rangeDays: days, retryNonce: current.retryNonce }));
+		setUsage(null);
+		setHovered(null);
+		setError(null);
+		activeSelectedRef.current = null;
+		activeLeftRef.current = 50;
+	};
+	const rangeToolbar = (
+		<div className="usage-toolbar">
+			<p>{t("Local token usage across Chat and Code on this device.")}</p>
+			<fieldset aria-label={t("Usage range")} className="control-group settings-segmented">
+				{RANGE_DAYS.map((days) => (
+					<button aria-pressed={rangeDays === days} key={days} onClick={() => selectRange(days)} type="button">
+						{t("{{count}}d", { count: days })}
+					</button>
+				))}
+			</fieldset>
+		</div>
+	);
+
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
 		setError(null);
-		void api.getUsage({ rangeDays }).then(
+		setUsage(null);
+		setHovered(null);
+		activeSelectedRef.current = null;
+		activeLeftRef.current = 50;
+		void api.getUsage({ rangeDays: request.rangeDays }).then(
 			(result) => {
 				if (current) {
 					setUsage(result);
@@ -52,14 +84,30 @@ export function UsagePanel({
 		return () => {
 			current = false;
 		};
-	}, [api, rangeDays, serverReady, t]);
+	}, [api, request, serverReady, t]);
 
-	if (!usage && !error) return <output aria-label={t("Loading usage")} className="status-block settings-loading" />;
+	if (!usage && !error)
+		return (
+			<>
+				{rangeToolbar}
+				<output aria-label={t("Loading usage")} className="status-block settings-loading" />
+			</>
+		);
 	if (!usage)
 		return (
-			<p className="settings-inline-error" role="alert">
-				{error}
-			</p>
+			<>
+				{rangeToolbar}
+				<div className="settings-inline-error" role="alert">
+					<p>{error}</p>
+					<button
+						className="settings-secondary-button"
+						onClick={() => setRequest((current) => ({ ...current, retryNonce: current.retryNonce + 1 }))}
+						type="button"
+					>
+						{t("Retry")}
+					</button>
+				</div>
+			</>
 		);
 	const peak = Math.max(1, ...usage.daily.map(dayTotal));
 	const selected = hovered === null ? null : (usage.daily[hovered] ?? null);
@@ -76,16 +124,7 @@ export function UsagePanel({
 
 	return (
 		<section className="settings-page usage-page">
-			<div className="usage-toolbar">
-				<p>{t("Local token usage across Chat and Code on this device.")}</p>
-				<fieldset aria-label={t("Usage range")} className="control-group settings-segmented">
-					{([7, 30, 90] as const).map((days) => (
-						<button aria-pressed={rangeDays === days} key={days} onClick={() => setRangeDays(days)} type="button">
-							{days}d
-						</button>
-					))}
-				</fieldset>
-			</div>
+			{rangeToolbar}
 
 			<div className="usage-summary-cards">
 				<article className="usage-metric-card">

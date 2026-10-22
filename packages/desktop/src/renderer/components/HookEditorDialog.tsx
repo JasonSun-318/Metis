@@ -136,7 +136,7 @@ export function HookEditorDialog({
 					return;
 				}
 			} catch {
-				setLocalError(t("Custom fields must be a JSON object."));
+				setLocalError(t("Custom fields (JSON) must be valid JSON. Check the syntax."));
 				return;
 			}
 		}

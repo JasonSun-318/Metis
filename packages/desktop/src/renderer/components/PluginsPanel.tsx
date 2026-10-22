@@ -959,6 +959,8 @@ export function PluginsPanel({
 	const [hookCursor, setHookCursor] = useState<string | null>(null);
 	const [dialog, setDialog] = useState<DialogState | null>(null);
 	const [dialogError, setDialogError] = useState<string | null>(null);
+	const [hookActionError, setHookActionError] = useState<string | null>(null);
+	const [hookTogglePending, setHookTogglePending] = useState(false);
 	const [pendingAction, setPendingAction] = useState<string | null>(null);
 	const [selectedPluginId, setSelectedPluginId] = useState<string | null>(null);
 	const navigateToPlugin = useCallback((pluginId: string) => {
@@ -971,6 +973,7 @@ export function PluginsPanel({
 	const mcpListGeneration = useRef(0);
 	const mcpDetailGeneration = useRef(0);
 	const hooksListGeneration = useRef(0);
+	const hookToggleRef = useRef(false);
 	const skipSkillDetailLoad = useRef<string | null>(null);
 	const detailHeading = useRef<HTMLHeadingElement>(null);
 	const catalogSearch = useRef<HTMLInputElement>(null);
@@ -1161,6 +1164,15 @@ export function PluginsPanel({
 		page.kind === "hook" && hooksState.status === "success"
 			? hooksState.value.find((hook) => hook.id === page.hookId)
 			: undefined;
+	const hookPageId = page.kind === "hook" ? page.hookId : null;
+	const hookPageRef = useRef<string | null>(null);
+	hookPageRef.current = section === "hooks" ? hookPageId : null;
+	const hookControlsDisabled = hookTogglePending || pendingAction === "hook" || pendingAction === "hook-remove";
+
+	// biome-ignore lint/correctness/useExhaustiveDependencies: Clear stale action feedback when the selected hook or section changes.
+	useEffect(() => {
+		setHookActionError(null);
+	}, [hookPageId, section]);
 
 	useEffect(() => {
 		if (
@@ -1537,11 +1549,18 @@ export function PluginsPanel({
 	};
 
 	const toggleHookEnabled = async (hook: DeclarativeHookView) => {
+		if (hookToggleRef.current) return;
+		hookToggleRef.current = true;
+		setHookTogglePending(true);
+		setHookActionError(null);
 		try {
 			const result = await api.upsertHook({ hook: { ...hook, enabled: !hook.enabled } });
 			setHooksState({ status: "success", value: result.hooks });
 		} catch (cause) {
-			setDialogError(message(cause));
+			if (hookPageRef.current === hook.id) setHookActionError(message(cause));
+		} finally {
+			hookToggleRef.current = false;
+			setHookTogglePending(false);
 		}
 	};
 
@@ -2150,7 +2169,11 @@ export function PluginsPanel({
 		);
 	if (page.kind === "hook")
 		content = (
-			<section aria-busy={!selectedHook} className="plugins-detail-page" data-plugin-detail="hook">
+			<section
+				aria-busy={!selectedHook || hookControlsDisabled}
+				className="plugins-detail-page"
+				data-plugin-detail="hook"
+			>
 				<PluginBackButton label={t("Back to Hooks")} onBack={() => setPage({ kind: "catalog" })} />
 				{selectedHook ? (
 					<>
@@ -2173,15 +2196,24 @@ export function PluginsPanel({
 									</button>
 								) : (
 									<>
-										<button onClick={() => void toggleHookEnabled(selectedHook)} type="button">
+										<button
+											disabled={hookControlsDisabled}
+											onClick={() => void toggleHookEnabled(selectedHook)}
+											type="button"
+										>
 											{selectedHook.enabled ? (
 												<XCircle aria-hidden="true" size={17} />
 											) : (
 												<CheckCircle aria-hidden="true" size={17} />
 											)}
-											{selectedHook.enabled ? t("Disable") : t("Enable")}
+											{hookTogglePending
+												? t("Updating…")
+												: selectedHook.enabled
+													? t("Disable")
+													: t("Enable")}
 										</button>
 										<button
+											disabled={hookControlsDisabled}
 											onClick={(event) =>
 												openDialog(
 													{ kind: "hook-editor", mode: "edit", initial: selectedHook },
@@ -2195,6 +2227,7 @@ export function PluginsPanel({
 										</button>
 										<button
 											className="plugins-danger-action"
+											disabled={hookControlsDisabled}
 											onClick={(event) =>
 												openDialog({ kind: "hook-remove", hook: selectedHook }, event.currentTarget)
 											}
@@ -2207,6 +2240,11 @@ export function PluginsPanel({
 								)}
 							</div>
 						</header>
+						{hookActionError && (
+							<p className="plugins-detail-error" role="alert">
+								{hookActionError}
+							</p>
+						)}
 						<div className="plugins-detail-grid">
 							<article className="plugins-detail-document">
 								<h3>{t("Command")}</h3>

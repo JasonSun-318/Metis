@@ -178,10 +178,13 @@ describe("SettingsDialog", () => {
 		await flush();
 		expect(document.activeElement).toBe(button(container, "Personalization"));
 		act(() => setValue(container.querySelector("textarea")!, "Keep this draft"));
+		const pageScroll = container.querySelector<HTMLElement>(".settings-page-scroll")!;
+		pageScroll.scrollTop = 120;
 		act(() => button(container, "Memory").click());
 		expect(container.textContent).toContain("Unsaved changes");
 		act(() => button(container, "Keep editing").click());
 		expect(container.querySelector("textarea")?.value).toBe("Keep this draft");
+		expect(pageScroll.scrollTop).toBe(120);
 		await act(async () => button(container, "Save instructions").click());
 		act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 		expect(onClose).not.toHaveBeenCalled();
@@ -193,6 +196,7 @@ describe("SettingsDialog", () => {
 		await flush();
 		expect(container.querySelector(".memory-page")).not.toBeNull();
 		expect(container.querySelector(".personalization-page")).toBeNull();
+		expect(pageScroll.scrollTop).toBe(0);
 		await act(async () => root.unmount());
 	});
 

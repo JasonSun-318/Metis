@@ -87,6 +87,7 @@ export function KnowledgePanel({
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [content, setContent] = useState<string>();
 	const [readError, setReadError] = useState<string>();
+	const [readRetry, setReadRetry] = useState(0);
 	const [error, setError] = useState<string>();
 	const [loading, setLoading] = useState(false);
 	const [adding, setAdding] = useState(false);
@@ -158,6 +159,7 @@ export function KnowledgePanel({
 		};
 	}, [api, libraryId, libraryPath, visible, refresh]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(scanRevision): A successful scan refreshes the open note even when the graph is unchanged.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(readRetry): Retry explicitly re-reads the open note even when its path is unchanged.
 	useEffect(() => {
 		const request = ++requestRevision.current;
 		const key = `${libraryId}:${selectedPath}`;
@@ -182,7 +184,7 @@ export function KnowledgePanel({
 		return () => {
 			++requestRevision.current;
 		};
-	}, [api, libraryId, selectedPath, visible, scanRevision]);
+	}, [api, libraryId, selectedPath, visible, scanRevision, readRetry]);
 	const filtered = useMemo(() => {
 		const needle = query.trim().toLocaleLowerCase();
 		const notes = graph.notes.filter(
@@ -315,9 +317,18 @@ export function KnowledgePanel({
 					<div className="knowledge-reader-scroll">
 						<div className="knowledge-note-path">{selectedPath}</div>
 						{readError && (
-							<p className="knowledge-error" role="alert">
-								{readError}
-							</p>
+							<div className="knowledge-error" role="alert">
+								<span>{readError}</span>
+								<button
+									type="button"
+									onClick={() => {
+										setReadError(undefined);
+										setReadRetry((value) => value + 1);
+									}}
+								>
+									{t("Retry")}
+								</button>
+							</div>
 						)}
 						{content !== undefined && note ? (
 							/* biome-ignore lint/a11y/useKeyWithClickEvents: Native links generate keyboard clicks; the wrapper only resolves internal knowledge links. */

@@ -20,10 +20,12 @@ import { ConversationQuoteChips, useConversationQuotes } from "./ConversationQuo
 import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
 import { type ComposerSlashCommand, composerSlashCommands, SlashCommandMenu } from "./SlashCommandMenu.tsx";
+import { SystemNotice } from "./SystemNotice.tsx";
 import { TaskList } from "./TaskList.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const noSlashCommands = new Set<ComposerSlashCommand>();
+const MAX_COMPOSER_ATTACHMENTS = 16;
 
 const SCROLL_SVG =
 	'<svg aria-hidden="true" viewBox="0 0 256 256" width="14" height="14" fill="currentColor"><path d="M216,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V48A8,8,0,0,0,216,40ZM56,56H200V88H56ZM200,200H56a8,8,0,0,1-8-8V96H200v96A8,8,0,0,1,200,200Z"></path></svg>';
@@ -365,11 +367,39 @@ export function Composer({
 	const conversationQuotes = useConversationQuotes();
 	const [hasInput, setHasInput] = useState(false);
 	const [attachments, setAttachments] = useState<readonly DesktopAttachmentSelection[]>([]);
+	const [attachmentOverflow, setAttachmentOverflow] = useState(false);
 	const [submitting, setSubmitting] = useState(false);
 	const [slashQuery, setSlashQuery] = useState<string>();
 	const [dismissedSlashText, setDismissedSlashText] = useState<string>();
 	const editorRef = useRef<HTMLDivElement>(null);
+	const attachmentsRef = useRef<readonly DesktopAttachmentSelection[]>([]);
 	const selectionOffset = useRef(0);
+
+	const mergeAttachments = useCallback((incoming: readonly DesktopAttachmentSelection[]) => {
+		if (incoming.length === 0) return;
+		const current = attachmentsRef.current;
+		const byPath = new Map(current.map((attachment) => [attachment.path, attachment]));
+		let added = 0;
+		let omitted = 0;
+		for (const attachment of incoming) {
+			if (byPath.has(attachment.path)) {
+				byPath.set(attachment.path, attachment);
+				continue;
+			}
+			if (byPath.size >= MAX_COMPOSER_ATTACHMENTS) {
+				omitted += 1;
+				continue;
+			}
+			byPath.set(attachment.path, attachment);
+			added += 1;
+		}
+		const next = [...byPath.values()];
+		attachmentsRef.current = next;
+		setAttachments(next);
+		if (omitted > 0) setAttachmentOverflow(true);
+		else if (added > 0) setAttachmentOverflow(false);
+		if (next.length > 0) setHasInput(true);
+	}, []);
 
 	const syncEditorState = useCallback(() => {
 		const el = editorRef.current;
@@ -457,16 +487,9 @@ export function Composer({
 				}
 			}
 
-			if (incoming.length > 0) {
-				setAttachments((current) => {
-					const byPath = new Map(current.map((att) => [att.path, att]));
-					for (const att of incoming) byPath.set(att.path, att);
-					return [...byPath.values()].slice(0, 16);
-				});
-				setHasInput(true);
-			}
+			if (incoming.length > 0) mergeAttachments(incoming);
 		},
-		[onResolveDroppedFiles],
+		[mergeAttachments, onResolveDroppedFiles],
 	);
 
 	const handlePaste = useCallback(
@@ -570,24 +593,18 @@ export function Composer({
 	const addFiles = async () => {
 		if (!onPickFiles) return;
 		const selected = await onPickFiles();
-		setAttachments((current) => {
-			const byPath = new Map(current.map((attachment) => [attachment.path, attachment]));
-			for (const attachment of selected) byPath.set(attachment.path, attachment);
-			return [...byPath.values()].slice(0, 16);
-		});
-		setHasInput(true);
+		mergeAttachments(selected);
 	};
 
 	const removeAttachment = (path: string) => {
-		setAttachments((current) => {
-			const next = current.filter((attachment) => attachment.path !== path);
-			const editor = editorRef.current;
-			const parsed = parseComposerContent(editor);
-			setHasInput(
-				parsed.cleanText.length > 0 || next.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken,
-			);
-			return next;
-		});
+		const next = attachmentsRef.current.filter((attachment) => attachment.path !== path);
+		attachmentsRef.current = next;
+		setAttachments(next);
+		const parsed = parseComposerContent(editorRef.current);
+		setHasInput(
+			parsed.cleanText.length > 0 || next.length > 0 || parsed.tokenSkills.length > 0 || parsed.hasGoalToken,
+		);
+		setAttachmentOverflow(false);
 	};
 
 	const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -679,7 +696,9 @@ export function Composer({
 			fileSelections?.remove(selected.map((item) => item.id));
 			conversationQuotes?.remove(quotes.map((item) => item.id));
 			if (quotes.length) conversationQuotes?.accepted(quotes[0]!.sessionId);
+			attachmentsRef.current = [];
 			setAttachments([]);
+			setAttachmentOverflow(false);
 			syncEditorState();
 		} finally {
 			setSubmitting(false);
@@ -729,6 +748,14 @@ export function Composer({
 					<div className="composer-box">
 						<FileSelectionChips sessionId={selectionSessionId} />
 						<ConversationQuoteChips sessionId={selectionSessionId} />
+						{attachmentOverflow && (
+							<SystemNotice
+								message="Only 16 attachments can be added. Remove one before adding more."
+								onDismiss={() => setAttachmentOverflow(false)}
+								title="Some files were not added"
+								tone="warning"
+							/>
+						)}
 						{attachments.length > 0 && (
 							<section aria-label={t("Message additions")} className="composer-attachments">
 								{attachments.map((attachment) =>

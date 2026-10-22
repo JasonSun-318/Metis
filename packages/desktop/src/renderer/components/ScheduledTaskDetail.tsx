@@ -62,6 +62,7 @@ export function ScheduledTaskDetail({
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [historyError, setHistoryError] = useState<{ message: string; beforeRunId?: string } | null>(null);
 	const [confirmDelete, setConfirmDelete] = useState(false);
 	const generation = useRef(0);
 	const markRequests = useRef(new Map<string, string>());
@@ -71,6 +72,7 @@ export function ScheduledTaskDetail({
 	const loadRuns = useCallback(
 		async (beforeRunId?: string) => {
 			const current = ++generation.current;
+			setHistoryError(null);
 			if (!beforeRunId) setLoading(true);
 			try {
 				const page = await api.listScheduleRuns({
@@ -81,10 +83,12 @@ export function ScheduledTaskDetail({
 				if (current !== generation.current) return;
 				setRuns((existing) => (beforeRunId ? [...existing, ...page.runs] : page.runs));
 				setNextBeforeRunId(page.nextBeforeRunId);
-				setError(null);
 			} catch (cause) {
 				if (current === generation.current)
-					setError(cause instanceof Error ? cause.message : "Run history could not be loaded.");
+					setHistoryError({
+						message: cause instanceof Error ? cause.message : "Run history could not be loaded.",
+						...(beforeRunId ? { beforeRunId } : {}),
+					});
 			} finally {
 				if (current === generation.current) setLoading(false);
 			}
@@ -240,7 +244,9 @@ export function ScheduledTaskDetail({
 						{loading ? (
 							<output className="status-block scheduled-task-loading">{t("Loading run history…")}</output>
 						) : runs.length === 0 ? (
-							<p className="scheduled-task-muted">{t("No runs yet.")}</p>
+							historyError ? null : (
+								<p className="scheduled-task-muted">{t("No runs yet.")}</p>
+							)
 						) : (
 							<ul className="scheduled-task-history">
 								{runs.map((run) => (
@@ -263,6 +269,14 @@ export function ScheduledTaskDetail({
 									</li>
 								))}
 							</ul>
+						)}
+						{historyError && (
+							<div className="scheduled-tasks-error scheduled-task-history-error" role="alert">
+								<span>{t(historyError.message)}</span>
+								<button onClick={() => void loadRuns(historyError.beforeRunId)} type="button">
+									{t("Retry")}
+								</button>
+							</div>
 						)}
 						{nextBeforeRunId && (
 							<button

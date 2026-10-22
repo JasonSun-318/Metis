@@ -71,6 +71,10 @@ afterEach(() => {
 	document.body.replaceChildren();
 });
 
+function makeRules(count: number) {
+	return Array.from({ length: count }, (_, index) => ({ command: `cmd-${index}`, allowNetwork: false }));
+}
+
 describe("AutoCommandAllowlistPanel", () => {
 	it("loads global rules and suggestions", async () => {
 		const client = clientStub({
@@ -222,6 +226,68 @@ describe("AutoCommandAllowlistPanel", () => {
 		await flush();
 		expect(client.updatePermissionAutoSettings).toHaveBeenCalledTimes(2);
 		expect(container.querySelector('[role="alert"]')).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it("rejects a typed command at the 64-rule limit without writing or clearing the draft", async () => {
+		const client = clientStub({
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({ rules: makeRules(64), suggestions: [] }),
+		});
+		const { container, root } = await renderPanel(client);
+		setInput(container, "echo ok");
+		clickCheckbox(container, "Allow network access");
+		await act(async () => clickButton(container, "Add command"));
+		await flush();
+		expect(client.updatePermissionAutoSettings).not.toHaveBeenCalled();
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("at most 64 commands");
+		expect(container.querySelector<HTMLInputElement>('input[type="text"]')?.value).toBe("echo ok");
+		expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked).toBe(true);
+		await act(async () => root.unmount());
+	});
+
+	it("rejects a suggestion at the 64-rule limit without writing", async () => {
+		const client = clientStub({
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({ rules: makeRules(64), suggestions: ["curl"] }),
+		});
+		const { container, root } = await renderPanel(client);
+		await act(async () => clickButton(container, "Add curl"));
+		await flush();
+		expect(client.updatePermissionAutoSettings).not.toHaveBeenCalled();
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("at most 64 commands");
+		await act(async () => root.unmount());
+	});
+
+	it("adds the 64th typed command when the allowlist has 63 rules", async () => {
+		const client = clientStub({
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({ rules: makeRules(63), suggestions: [] }),
+		});
+		const { container, root } = await renderPanel(client);
+		setInput(container, "echo ok");
+		await act(async () => clickButton(container, "Add command"));
+		await flush();
+		const update = vi.mocked(client.updatePermissionAutoSettings);
+		expect(update).toHaveBeenCalledTimes(1);
+		const rules = update.mock.calls[0]?.[0].rules;
+		expect(rules).toHaveLength(64);
+		expect(rules?.at(-1)).toEqual({ command: "echo ok", allowNetwork: false });
+		await act(async () => root.unmount());
+	});
+
+	it("retries an initial load failure without mutating rules", async () => {
+		const getPermissionAutoSettings = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("offline"))
+			.mockResolvedValue({ rules: [{ command: "ls", allowNetwork: false }], suggestions: [] });
+		const client = clientStub({ getPermissionAutoSettings });
+		const { container, root } = await renderPanel(client);
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("offline");
+		expect(container.querySelector('input[type="text"]')).toBeNull();
+		await act(async () => clickButton(container, "Retry"));
+		await flush();
+		expect(getPermissionAutoSettings).toHaveBeenCalledTimes(2);
+		expect(container.textContent).toContain("ls");
+		expect(container.querySelector('input[type="text"]')).not.toBeNull();
+		expect(client.updatePermissionAutoSettings).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 

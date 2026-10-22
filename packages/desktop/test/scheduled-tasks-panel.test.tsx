@@ -98,13 +98,31 @@ describe("ScheduledTasksPanel", () => {
 		const newTask = [...container.querySelectorAll("button")].find(
 			(button) => button.textContent?.trim() === "New task",
 		)!;
+		// Native modal dialogs reject focus moves to the inert page behind them.
+		const focus = HTMLElement.prototype.focus;
+		vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(function (this: HTMLElement, options) {
+			const modal = document.querySelector("dialog[open]");
+			if (!modal || modal.contains(this)) focus.call(this, options);
+		});
+		vi.spyOn(HTMLDialogElement.prototype, "showModal").mockImplementation(function (this: HTMLDialogElement) {
+			this.open = true;
+		});
+		vi.spyOn(HTMLDialogElement.prototype, "close").mockImplementation(function (this: HTMLDialogElement) {
+			this.open = false;
+		});
 		await act(async () => newTask.click());
 		const manual = [...document.querySelectorAll<HTMLButtonElement>('[role="option"]')].find(
 			(button) => button.textContent?.trim() === "Set up manually",
 		)!;
-		await act(async () => manual.click());
+		await act(async () => {
+			manual.focus();
+			manual.click();
+		});
 		expect(container.querySelector("dialog")?.textContent).toContain("Create scheduled task");
 		expect(container.querySelector('[aria-label="Repeat"]')).not.toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>('dialog [aria-label="Close"]')!.click());
+		expect(container.querySelector("dialog")).toBeNull();
+		expect(document.activeElement).toBe(newTask);
 		await act(async () => root.unmount());
 	});
 

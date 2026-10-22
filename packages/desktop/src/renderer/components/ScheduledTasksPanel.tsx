@@ -1,6 +1,6 @@
 import type { ModelOptionView, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
 import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "@phosphor-icons/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import scheduleEmptyIcon from "../assets/scheduled-tasks-empty.svg";
@@ -33,14 +33,18 @@ function NewTaskMenu({
 	readonly onManual: () => void;
 }) {
 	const { t } = useTranslation();
+	const triggerId = useId();
 	return (
 		<MenuSelect<NewTaskAction>
 			ariaLabel={t("Create scheduled task")}
+			id={triggerId}
 			className={`scheduled-task-new-menu ${className ?? ""}`.trim()}
 			disabled={disabled}
 			menuAlign="end"
 			menuMinWidth={204}
 			onChange={(action) => {
+				// Capture a stable return target before the native dialog makes this page inert.
+				document.getElementById(triggerId)?.focus();
 				if (action === "assisted") onAssisted();
 				else if (action === "manual") onManual();
 			}}

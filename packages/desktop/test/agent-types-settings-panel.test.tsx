@@ -144,4 +144,100 @@ describe("AgentTypesSettingsPanel", () => {
 		expect(confirmSpy).toHaveBeenCalled();
 		expect(desktopApi.removeAgentType).toHaveBeenCalledWith(expect.objectContaining({ id: "auditor" }));
 	});
+
+	it("shows a New agent type heading with Back and bottom Cancel then Save", async () => {
+		const desktopApi = agentTypesApi();
+		const { container } = renderPanel(desktopApi);
+		await flush();
+
+		await act(async () => button(container, "New agent type")!.click());
+
+		expect(container.querySelector(".settings-section-heading h3")?.textContent).toBe("New agent type");
+		expect(button(container, "Back to agent types")).toBeDefined();
+		const actions = [...container.querySelectorAll<HTMLButtonElement>(".agent-types-actions button")];
+		expect(actions.map((action) => action.textContent?.trim())).toEqual(["Cancel", "Save"]);
+
+		await act(async () => button(container, "Back to agent types")!.click());
+		expect(container.textContent).toContain("Built-in agent types");
+		expect(container.querySelector(".settings-section-heading h3")).toBeNull();
+	});
+
+	it("duplicates into a new editor with a readable context and editable slug", async () => {
+		const desktopApi = agentTypesApi();
+		const { container } = renderPanel(desktopApi);
+		await flush();
+
+		await act(async () => button(container, "Duplicate explorer")!.click());
+
+		expect(container.querySelector(".settings-section-heading h3")?.textContent).toBe("New agent type");
+		const inputs = [...container.querySelectorAll<HTMLInputElement>(".agent-types-field > input")];
+		expect(inputs[0]?.value).toBe("explorer");
+		expect(inputs[1]?.value).toBe("");
+		expect(inputs[1]?.disabled).toBe(false);
+	});
+
+	it("edits an existing type under an Edit agent type heading and goes back", async () => {
+		const desktopApi = agentTypesApi();
+		const { container } = renderPanel(desktopApi);
+		await flush();
+
+		await act(async () => button(container, "Edit Auditor")!.click());
+
+		expect(container.querySelector(".settings-section-heading h3")?.textContent).toBe("Edit agent type");
+		const inputs = [...container.querySelectorAll<HTMLInputElement>(".agent-types-field > input")];
+		expect(inputs[0]?.value).toBe("Auditor");
+		expect(inputs[1]?.value).toBe("auditor");
+		expect(inputs[1]?.disabled).toBe(true);
+		expect(button(container, "Back to agent types")).toBeDefined();
+
+		await act(async () => button(container, "Back to agent types")!.click());
+		expect(container.textContent).toContain("Auditor");
+		expect(container.textContent).toContain("Built-in agent types");
+	});
+
+	it("shows a failed deletion in the list and keeps the item", async () => {
+		vi.spyOn(window, "confirm").mockReturnValue(true);
+		const desktopApi = agentTypesApi({
+			removeAgentType: vi.fn().mockRejectedValue(new Error("delete failed")),
+		});
+		const { container } = renderPanel(desktopApi);
+		await flush();
+
+		await act(async () => button(container, "Delete Auditor")!.click());
+		await flush();
+
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Couldn’t delete the agent type.");
+		expect(button(container, "Edit Auditor")).toBeDefined();
+		expect(container.textContent).toContain("Auditor");
+
+		await act(async () => button(container, "Edit Auditor")!.click());
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		await act(async () => button(container, "Back to agent types")!.click());
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+	});
+
+	it("keeps the failed save draft inside the editor", async () => {
+		const desktopApi = agentTypesApi({
+			upsertAgentType: vi.fn().mockRejectedValue(new Error("save failed")),
+		});
+		const { container } = renderPanel(desktopApi);
+		await flush();
+
+		await act(async () => button(container, "New agent type")!.click());
+		const inputs = [...container.querySelectorAll<HTMLInputElement>(".agent-types-field > input")];
+		await act(async () => {
+			typeInput(inputs[0]!, "Code Reviewer");
+			typeInput(inputs[1]!, "code-reviewer");
+		});
+		await act(async () => button(container, "Save")!.click());
+		await flush();
+
+		expect(container.querySelector(".agent-types-form-error")?.textContent).toContain(
+			"Couldn’t save the agent type.",
+		);
+		expect(inputs[0]?.value).toBe("Code Reviewer");
+		expect(inputs[1]?.value).toBe("code-reviewer");
+		expect(container.querySelector(".settings-section-heading h3")?.textContent).toBe("New agent type");
+		expect(button(container, "Back to agent types")).toBeDefined();
+	});
 });

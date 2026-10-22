@@ -6,7 +6,7 @@ import type {
 	SessionSummary,
 } from "@metis/app-protocol";
 import { FolderSimple, X } from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { trapDialogTab } from "./dialog-focus.ts";
@@ -88,7 +88,17 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 	const { t, i18n } = useTranslation();
 	const dialog = useRef<HTMLDialogElement>(null);
 	const nameInput = useRef<HTMLInputElement>(null);
+	const keepEditingButton = useRef<HTMLButtonElement>(null);
 	const initialSchedule = useMemo(() => inputSchedule(task), [task]);
+	const initial = useRef({
+		name: task?.name ?? "",
+		description: task?.description ?? "",
+		instruction: task?.instruction ?? "",
+		model: task ? modelKey(task.model) : "",
+		target: task?.target.workspace === "task" ? "task" : task ? "unchanged" : "task",
+		additionalWorkspaceCwd: task?.target.workspace === "task" ? (task.target.additionalWorkspaceCwd ?? "") : "",
+		schedule: JSON.stringify(initialSchedule),
+	}).current;
 	const projects = useMemo(() => projectSessions(sessions), [sessions]);
 	const currentModelKey = task ? modelKey(task.model) : "";
 	const currentModelAvailable = models.some((model) => modelKey(model) === currentModelKey);
@@ -130,18 +140,45 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 		],
 		[currentModelAvailable, currentModelKey, i18n.resolvedLanguage, models, task, t],
 	);
-	const [name, setName] = useState(task?.name ?? "");
-	const [description, setDescription] = useState(task?.description ?? "");
-	const [instruction, setInstruction] = useState(task?.instruction ?? "");
-	const [selectedModel, setSelectedModel] = useState(currentModelKey);
-	const [target, setTarget] = useState(task?.target.workspace === "task" ? "task" : task ? "unchanged" : "task");
-	const [additionalWorkspaceCwd, setAdditionalWorkspaceCwd] = useState(
-		task?.target.workspace === "task" ? (task.target.additionalWorkspaceCwd ?? "") : "",
-	);
+	const [name, setName] = useState(initial.name);
+	const [description, setDescription] = useState(initial.description);
+	const [instruction, setInstruction] = useState(initial.instruction);
+	const [selectedModel, setSelectedModel] = useState(initial.model);
+	const [target, setTarget] = useState(initial.target);
+	const [additionalWorkspaceCwd, setAdditionalWorkspaceCwd] = useState(initial.additionalWorkspaceCwd);
 	const [schedule, setSchedule] = useState<ScheduleInputSpecView>(initialSchedule);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
+	const [confirmDiscard, setConfirmDiscard] = useState(false);
 	const request = useRef<{ key: string; id: string } | null>(null);
+	const dirty =
+		name !== initial.name ||
+		description !== initial.description ||
+		instruction !== initial.instruction ||
+		selectedModel !== initial.model ||
+		target !== initial.target ||
+		additionalWorkspaceCwd !== initial.additionalWorkspaceCwd ||
+		JSON.stringify(schedule) !== initial.schedule;
+	const focusEditor = () => nameInput.current?.focus();
+	const close = () => {
+		if (busy) return;
+		if (confirmDiscard) {
+			setConfirmDiscard(false);
+			focusEditor();
+			return;
+		}
+		if (dirty) setConfirmDiscard(true);
+		else onClose();
+	};
+	const keepEditing = () => {
+		setConfirmDiscard(false);
+		focusEditor();
+	};
+	const discard = () => {
+		if (busy) return;
+		setConfirmDiscard(false);
+		onClose();
+	};
 
 	useEffect(() => {
 		const node = dialog.current;
@@ -154,7 +191,12 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 		};
 	}, []);
 
+	useLayoutEffect(() => {
+		if (confirmDiscard) keepEditingButton.current?.focus();
+	}, [confirmDiscard]);
+
 	const setKind = (kind: ScheduleInputSpecView["kind"]) => {
+		if (busy) return;
 		if (kind === "once") setSchedule({ kind, date: localDate(new Date(Date.now() + 86_400_000)), time: "09:00" });
 		else if (kind === "daily") setSchedule({ kind, time: "09:00" });
 		else if (kind === "weekly") setSchedule({ kind, weekdays: [1], time: "09:00" });
@@ -163,6 +205,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 	};
 
 	const chooseAdditionalFolder = async () => {
+		if (busy) return;
 		try {
 			const selected = await api.selectProjectFolder();
 			if (selected) setAdditionalWorkspaceCwd(selected);
@@ -172,6 +215,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 	};
 
 	const save = async () => {
+		if (busy || confirmDiscard) return;
 		const model = models.some((candidate) => modelKey(candidate) === selectedModel)
 			? parseModelKey(selectedModel)
 			: undefined;
@@ -259,13 +303,24 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 		<dialog
 			aria-labelledby="scheduled-task-dialog-title"
 			className="scheduled-task-dialog"
-			onKeyDown={(event) => trapDialogTab(event, event.currentTarget)}
+			onKeyDown={(event) => {
+				trapDialogTab(event, event.currentTarget);
+				if (
+					event.key !== "Escape" ||
+					event.defaultPrevented ||
+					event.currentTarget.querySelector('[aria-haspopup][aria-expanded="true"]')
+				)
+					return;
+				event.preventDefault();
+				event.stopPropagation();
+				close();
+			}}
 			onCancel={(event) => {
 				event.preventDefault();
-				if (!busy) onClose();
+				close();
 			}}
 			onMouseDown={(event) => {
-				if (event.target === event.currentTarget && !busy) onClose();
+				if (event.target === event.currentTarget) close();
 			}}
 			ref={dialog}
 		>
@@ -278,7 +333,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 			>
 				<header>
 					<h2 id="scheduled-task-dialog-title">{t(task ? "Edit scheduled task" : "Create scheduled task")}</h2>
-					<button aria-label={t("Close")} disabled={busy} onClick={onClose} type="button">
+					<button aria-label={t("Close")} disabled={busy} onClick={close} type="button">
 						<X aria-hidden="true" size={17} />
 					</button>
 				</header>
@@ -287,6 +342,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 						{t("Name")}
 						<input
 							ref={nameInput}
+							disabled={busy}
 							maxLength={120}
 							onChange={(event) => setName(event.target.value)}
 							required
@@ -296,6 +352,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					<label>
 						{t("Description")}
 						<input
+							disabled={busy}
 							maxLength={512}
 							onChange={(event) => setDescription(event.target.value)}
 							placeholder={t("Optional display description")}
@@ -305,6 +362,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					<label>
 						{t("Instructions")}
 						<textarea
+							disabled={busy}
 							onChange={(event) => setInstruction(event.target.value)}
 							required
 							rows={5}
@@ -314,12 +372,19 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 					<div className="scheduled-task-dialog-row">
 						<div className="scheduled-task-field">
 							<span>{t("Work in")}</span>
-							<MenuSelect ariaLabel={t("Work in")} onChange={setTarget} options={targetOptions} value={target} />
+							<MenuSelect
+								ariaLabel={t("Work in")}
+								disabled={busy}
+								onChange={setTarget}
+								options={targetOptions}
+								value={target}
+							/>
 						</div>
 						<div className="scheduled-task-field">
 							<span>{t("Model")}</span>
 							<MenuSelect
 								ariaLabel={t("Model")}
+								disabled={busy}
 								onChange={setSelectedModel}
 								options={modelOptions}
 								placeholder={t("Choose a configured model")}
@@ -363,6 +428,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 						<legend>{t("Repeat")}</legend>
 						<MenuSelect
 							ariaLabel={t("Repeat")}
+							disabled={busy}
 							onChange={setKind}
 							options={[
 								{ value: "once", label: t("Once") },
@@ -378,6 +444,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 								<label>
 									{t("Date")}
 									<input
+										disabled={busy}
 										min={localDate()}
 										onChange={(event) => setSchedule({ ...schedule, date: event.target.value })}
 										required
@@ -400,6 +467,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 							<label>
 								{t("Time")}
 								<input
+									disabled={busy}
 									onChange={(event) => setSchedule({ ...schedule, time: event.target.value })}
 									required
 									type="time"
@@ -416,6 +484,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 										return (
 											<button
 												aria-pressed={selected}
+												disabled={busy}
 												key={label}
 												onClick={() =>
 													setSchedule({
@@ -448,6 +517,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 								<label>
 									{t("Day")}
 									<input
+										disabled={busy}
 										max={31}
 										min={1}
 										onChange={(event) => setSchedule({ ...schedule, day: Number(event.target.value) })}
@@ -473,6 +543,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 									<label>
 										{t("Every")}
 										<input
+											disabled={busy}
 											max={10000}
 											min={1}
 											onChange={(event) => setSchedule({ ...schedule, every: Number(event.target.value) })}
@@ -485,6 +556,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 										<span>{t("Unit")}</span>
 										<MenuSelect
 											ariaLabel={t("Unit")}
+											disabled={busy}
 											onChange={(unit) => setSchedule({ ...schedule, unit })}
 											options={[
 												{ value: "minute", label: t("Minutes") },
@@ -498,6 +570,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 									<label>
 										{t("Start date")}
 										<input
+											disabled={busy}
 											onChange={(event) => setSchedule({ ...schedule, startDate: event.target.value })}
 											required
 											type="date"
@@ -507,6 +580,7 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 									<label>
 										{t("Start time")}
 										<input
+											disabled={busy}
 											onChange={(event) => setSchedule({ ...schedule, startTime: event.target.value })}
 											required
 											type="time"
@@ -523,14 +597,28 @@ export function ScheduledTaskDialog({ api, models, sessions, task, onClose, onSa
 						</p>
 					)}
 				</div>
-				<footer>
-					<button className="button-secondary" disabled={busy} onClick={onClose} type="button">
-						{t("Cancel")}
-					</button>
-					<button disabled={busy || models.length === 0} type="submit">
-						{t(busy ? "Saving…" : "Save")}
-					</button>
-				</footer>
+				{confirmDiscard ? (
+					<footer className="scheduled-task-discard">
+						<p role="alert">
+							{t("Your changes have not been saved. Keep editing to save them, or discard them to leave.")}
+						</p>
+						<button className="button-secondary" onClick={keepEditing} ref={keepEditingButton} type="button">
+							{t("Keep editing")}
+						</button>
+						<button className="scheduled-task-danger" disabled={busy} onClick={discard} type="button">
+							{t("Discard changes")}
+						</button>
+					</footer>
+				) : (
+					<footer>
+						<button className="button-secondary" disabled={busy} onClick={close} type="button">
+							{t("Cancel")}
+						</button>
+						<button disabled={busy || models.length === 0} type="submit">
+							{t(busy ? "Saving…" : "Save")}
+						</button>
+					</footer>
+				)}
 			</form>
 		</dialog>
 	);

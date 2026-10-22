@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, type ComponentProps } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Composer } from "../src/renderer/components/Composer.tsx";
+import { setLocale } from "../src/renderer/i18n.ts";
 
 afterEach(() => document.body.replaceChildren());
 
@@ -20,6 +21,59 @@ function type(editor: HTMLElement, value: string) {
 		selection?.addRange(range);
 	}
 	editor.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+async function mountComposer(overrides: Partial<ComponentProps<typeof Composer>> = {}) {
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	const onSubmit = overrides.onSubmit ?? vi.fn(async () => undefined);
+	await act(async () =>
+		root.render(
+			<Composer
+				disabled={false}
+				onInterrupt={async () => undefined}
+				running={false}
+				{...overrides}
+				onSubmit={onSubmit}
+			/>,
+		),
+	);
+	return {
+		container,
+		root,
+		form: container.querySelector<HTMLFormElement>("form")!,
+		editor: container.querySelector<HTMLElement>("#composer-input")!,
+		onSubmit,
+	};
+}
+
+async function pickFiles(container: HTMLElement) {
+	await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add to message"]')!.click());
+	await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Add files or photos"]')!.click());
+	await act(async () => Promise.resolve());
+}
+
+function pickerAttachments(count: number) {
+	return Array.from({ length: count }, (_, index) => ({
+		path: `/tmp/file-${index + 1}.pdf`,
+		name: `file-${index + 1}.pdf`,
+	}));
+}
+
+function droppedFiles(count: number) {
+	return Array.from(
+		{ length: count },
+		(_, index) => new File(["x"], `file-${index + 1}.pdf`, { type: "application/pdf" }),
+	);
+}
+
+function droppedAttachment(file: File) {
+	return { path: `/tmp/${file.name}`, name: file.name };
+}
+
+function overflowWarning(container: HTMLElement) {
+	return container.querySelector<HTMLElement>('.system-notice[data-tone="warning"]');
 }
 
 describe("Composer slash commands", () => {
@@ -384,6 +438,103 @@ describe("Composer slash commands", () => {
 		expect(container.querySelector('.composer-image-preview img[alt="photo.png"]')).toBeNull();
 		expect(container.querySelector(".composer-file-card")?.textContent).toContain("report.pdf");
 		await act(async () => root.unmount());
+	});
+});
+
+describe("Composer attachment merging", () => {
+	it("keeps 16 picker attachments and shows a dismissible warning for unique overflow", async () => {
+		const { container, root } = await mountComposer({ onPickFiles: async () => pickerAttachments(17) });
+		await pickFiles(container);
+
+		const names = [...container.querySelectorAll(".composer-file-card strong")].map((name) => name.textContent);
+		expect(names).toEqual(pickerAttachments(16).map((attachment) => attachment.name));
+
+		const warning = overflowWarning(container);
+		expect(warning).not.toBeNull();
+		expect(warning?.getAttribute("role")).toBe("alert");
+		expect(warning?.textContent).toContain("Some files were not added");
+		expect(warning?.textContent).toContain("Only 16 attachments can be added.");
+
+		await act(async () => warning!.querySelector<HTMLButtonElement>('[aria-label="Dismiss notification"]')!.click());
+		expect(overflowWarning(container)).toBeNull();
+		expect(container.querySelectorAll(".composer-file-card")).toHaveLength(16);
+		await act(async () => root.unmount());
+	});
+
+	it("does not warn when a later selection only repeats accepted paths", async () => {
+		const selected = pickerAttachments(16);
+		const onPickFiles = vi.fn(async () => selected);
+		const { container, root } = await mountComposer({ onPickFiles });
+		await pickFiles(container);
+		await pickFiles(container);
+
+		expect(onPickFiles).toHaveBeenCalledTimes(2);
+		expect(overflowWarning(container)).toBeNull();
+		expect([...container.querySelectorAll(".composer-file-card strong")].map((name) => name.textContent)).toEqual(
+			selected.map((attachment) => attachment.name),
+		);
+		await act(async () => root.unmount());
+	});
+
+	it("shows the same overflow warning for pasted files", async () => {
+		const { container, root, editor } = await mountComposer({
+			onResolveDroppedFiles: (files) => files.map(droppedAttachment),
+		});
+		const paste = new Event("paste", { bubbles: true, cancelable: true });
+		Object.defineProperty(paste, "clipboardData", {
+			value: { files: droppedFiles(17), getData: () => "" },
+		});
+		await act(async () => editor.dispatchEvent(paste));
+
+		expect(paste.defaultPrevented).toBe(true);
+		expect(container.querySelectorAll(".composer-file-card")).toHaveLength(16);
+		expect(overflowWarning(container)?.textContent).toContain("Some files were not added");
+		await act(async () => root.unmount());
+	});
+
+	it("shows the same overflow warning for dropped files", async () => {
+		const { container, root, form } = await mountComposer({
+			onResolveDroppedFiles: (files) => files.map(droppedAttachment),
+		});
+		const drop = new Event("drop", { bubbles: true, cancelable: true });
+		Object.defineProperty(drop, "dataTransfer", { value: { files: droppedFiles(17) } });
+		await act(async () => form.dispatchEvent(drop));
+
+		expect(drop.defaultPrevented).toBe(true);
+		expect(container.querySelectorAll(".composer-file-card")).toHaveLength(16);
+		expect(overflowWarning(container)?.textContent).toContain("Some files were not added");
+		await act(async () => root.unmount());
+	});
+
+	it("keeps the draft text and accepted attachments when submit fails", async () => {
+		const onSubmit = vi.fn(async () => {
+			throw new Error("offline");
+		});
+		const { container, root, editor, form } = await mountComposer({
+			onPickFiles: async () => pickerAttachments(2),
+			onSubmit,
+		});
+		await pickFiles(container);
+		await act(async () => type(editor, "Keep this draft"));
+		await act(async () => form.requestSubmit());
+
+		expect(onSubmit).toHaveBeenCalledOnce();
+		expect(editor.textContent).toBe("Keep this draft");
+		expect(container.querySelectorAll(".composer-file-card")).toHaveLength(2);
+		await act(async () => root.unmount());
+	});
+
+	it("localizes the code composer placeholder in Chinese", async () => {
+		await setLocale("zh-CN");
+		try {
+			const { container, root } = await mountComposer();
+			expect(container.querySelector("#composer-input")?.getAttribute("data-placeholder")).toBe(
+				"描述任务或提出问题",
+			);
+			await act(async () => root.unmount());
+		} finally {
+			await setLocale("en");
+		}
 	});
 });
 

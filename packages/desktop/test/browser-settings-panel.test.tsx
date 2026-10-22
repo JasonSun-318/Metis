@@ -512,4 +512,72 @@ describe("BrowserSettingsPanel", () => {
 		expect(container.textContent).toContain("Browser action failed");
 		expect(api.listBrowserDownloads).toHaveBeenCalledTimes(callsBeforeFailure);
 	});
+
+	it("shows a clear failure inside the confirmation dialog and recovers on retry", async () => {
+		const { api } = fixture();
+		vi.mocked(api.clearBrowserHistory).mockRejectedValueOnce(new Error("clear failed"));
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Manage browsing history").click());
+		await flush();
+		await act(async () => button(container, "Clear browsing history").click());
+		const dialog = document.querySelector("dialog")!;
+		await act(async () => button(dialog, "Confirm clear browsing history").click());
+		await flush();
+
+		expect(dialog.textContent).toContain("Browser action failed");
+		expect(dialog.textContent).toContain("Clear history");
+		expect(button(dialog, "Cancel").disabled).toBe(false);
+		expect(container.textContent).toContain("Metis docs");
+		expect(api.clearBrowserHistory).toHaveBeenCalledTimes(1);
+		expect(container.textContent).not.toContain("Browsing history cleared");
+
+		await act(async () => button(dialog, "Confirm clear browsing history").click());
+		await flush();
+
+		expect(api.clearBrowserHistory).toHaveBeenCalledTimes(2);
+		expect(document.querySelector("dialog")).toBeNull();
+		expect(container.textContent).toContain("Browsing history cleared");
+		expect(container.textContent).toContain("No history yet");
+	});
+
+	it("retries a failed initial read without discarding fulfilled partial data", async () => {
+		const { api } = fixture();
+		vi.mocked(api.listBrowserProfiles).mockRejectedValueOnce(new Error("profiles unavailable"));
+		const container = renderPanel(api);
+		await flush();
+
+		expect(container.textContent).toContain("Browser settings could not be loaded");
+		expect(container.textContent).toContain("1 downloads");
+		expect(api.listBrowserProfiles).toHaveBeenCalledOnce();
+
+		await act(async () => button(container, "Retry").click());
+		await flush();
+
+		expect(container.textContent).not.toContain("Browser settings could not be loaded");
+		expect(container.textContent).toContain("2 profiles");
+		expect(container.textContent).toContain("1 downloads");
+		expect(api.listBrowserProfiles).toHaveBeenCalledTimes(2);
+		expect(api.clearBrowserHistory).not.toHaveBeenCalled();
+	});
+
+	it("retries a failed history read without showing a confirmed empty history", async () => {
+		const { api } = fixture();
+		vi.mocked(api.listBrowserHistory).mockRejectedValueOnce(new Error("history unavailable"));
+		const container = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "Manage browsing history").click());
+		await flush();
+
+		expect(container.textContent).toContain("Browser settings could not be loaded");
+		expect(container.textContent).not.toContain("No history yet");
+		expect(api.listBrowserHistory).toHaveBeenCalledOnce();
+
+		await act(async () => button(container, "Retry").click());
+		await flush();
+
+		expect(container.textContent).not.toContain("Browser settings could not be loaded");
+		expect(container.textContent).toContain("Metis docs");
+		expect(api.listBrowserHistory).toHaveBeenCalledTimes(2);
+	});
 });

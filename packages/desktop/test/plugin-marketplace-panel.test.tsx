@@ -447,6 +447,58 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
 	});
 
+	it("shows the market load error instead of a false empty list and recovers the saved source via Reload", async () => {
+		const api = createMockApi({
+			listPluginMarkets: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("market source unavailable"))
+				.mockResolvedValueOnce({
+					markets: [officialMarket],
+					selectedSourceId: "official-market",
+					registryRevision: 1,
+				}),
+		});
+		const { container } = await renderPanel(api, "plugins", false);
+
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("market source unavailable");
+		expect(container.textContent).not.toContain("No markets added.");
+		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(0);
+
+		await act(async () => button(container, "Reload").click());
+		await flush();
+
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
+		expect(container.textContent).toContain("anthropics/claude-plugins-official");
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-source-open")!.click());
+		await flush();
+		expect(api.getPluginCatalog).toHaveBeenCalledWith({ sourceId: "official-market" });
+		expect(container.textContent).toContain("Dev Tools");
+	});
+
+	it("keeps fulfilled market cards when a later refresh fails", async () => {
+		const api = createMockApi({
+			listPluginMarkets: vi
+				.fn()
+				.mockResolvedValueOnce({
+					markets: [officialMarket],
+					selectedSourceId: "official-market",
+					registryRevision: 1,
+				})
+				.mockRejectedValueOnce(new Error("refresh unavailable")),
+		});
+		const { container } = await renderPanel(api, "plugins", false);
+		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
+
+		await act(async () => button(container, "Reload").click());
+		await flush();
+
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("refresh unavailable");
+		expect(container.querySelectorAll(".plugins-source-open")).toHaveLength(1);
+		expect(container.textContent).toContain("anthropics/claude-plugins-official");
+		expect(container.textContent).not.toContain("No markets added.");
+	});
+
 	it("uses repository paths for old and new market names in either locale", async () => {
 		const api = createMockApi({
 			listPluginMarkets: vi.fn().mockResolvedValue({

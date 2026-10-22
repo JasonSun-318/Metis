@@ -743,6 +743,63 @@ describe("MemorySettingsPanel", () => {
 		}
 	});
 
+	it("retries an initial settings failure and reloads the same session", async () => {
+		const getMemorySettings = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("settings unavailable"))
+			.mockResolvedValue(memorySettings);
+		const api = makeApi({ getMemorySettings });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady sessionId={UUID} />));
+			await flush();
+			expect(getMemorySettings).toHaveBeenCalledWith({ sessionId: UUID });
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain("settings unavailable");
+			expect(container.querySelectorAll('input[role="switch"]')).toHaveLength(0);
+			expect([...container.querySelectorAll("button")].some((item) => item.textContent === "Save")).toBe(false);
+			await act(async () => button(container, "Retry").click());
+			await flush();
+			expect(getMemorySettings).toHaveBeenCalledTimes(2);
+			expect(getMemorySettings).toHaveBeenLastCalledWith({ sessionId: UUID });
+			expect(api.listMemoryHistory).toHaveBeenCalledTimes(2);
+			expect(container.querySelector('[role="alert"]')).toBeNull();
+			expect(toggle(container, "Enable long-term memory").checked).toBe(true);
+			expect(toggle(container, "Remember project progress").checked).toBe(true);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("retries an initial history failure instead of rendering unloaded preferences", async () => {
+		const listMemoryHistory = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("history unavailable"))
+			.mockResolvedValue({ entries: [historyEntry] });
+		const api = makeApi({ listMemoryHistory });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<MemorySettingsPanel api={api} serverReady sessionId={UUID} />));
+			await flush();
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain("history unavailable");
+			expect(container.querySelectorAll('input[role="switch"]')).toHaveLength(0);
+			await act(async () => button(container, "Retry").click());
+			await flush();
+			expect(api.getMemorySettings).toHaveBeenCalledTimes(2);
+			expect(api.getMemorySettings).toHaveBeenLastCalledWith({ sessionId: UUID });
+			expect(listMemoryHistory).toHaveBeenCalledTimes(2);
+			expect(container.querySelector('[role="alert"]')).toBeNull();
+			expect(toggle(container, "Enable long-term memory").checked).toBe(true);
+			await openPanel(container, "Recent changes");
+			expect(container.textContent).toContain("prefers-concise-replies");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("labels the history diff as before-to-current", async () => {
 		const api = makeApi();
 		const container = document.createElement("div");

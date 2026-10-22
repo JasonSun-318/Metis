@@ -22,6 +22,22 @@ function setInputValue(input: HTMLInputElement, value: string) {
 	input.dispatchEvent(new Event("change", { bubbles: true }));
 }
 
+function button(root: ParentNode, label: string) {
+	return [...root.querySelectorAll<HTMLButtonElement>("button")].find(
+		(candidate) => candidate.textContent?.trim() === label,
+	);
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (reason?: unknown) => void;
+	const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+		resolve = resolvePromise;
+		reject = rejectPromise;
+	});
+	return { promise, reject, resolve };
+}
+
 describe("HookEditorDialog and PluginsPanel", () => {
 	let container: HTMLDivElement;
 
@@ -286,5 +302,95 @@ describe("HookEditorDialog and PluginsPanel", () => {
 		expect(submitted!.timeout).toBe("120");
 		expect(submitted!.statusMessage).toBe("Analyzing output...");
 		expect(JSON.parse(submitted!.metadataJson)).toEqual({ env: "staging", priority: 1 });
+	});
+
+	it("coalesces repeated hook toggles, disables detail actions, and keeps the prior state on failure", async () => {
+		const hook: DeclarativeHookView = {
+			id: "hook-toggle-race",
+			name: "toggle-race-hook",
+			enabled: true,
+			event: "PreToolUse",
+			protocol: "command-v1",
+			runMode: "shell",
+			command: "echo check",
+		};
+		const first = deferred<{ hooks: DeclarativeHookView[] }>();
+		const second = deferred<{ hooks: DeclarativeHookView[] }>();
+		const upsertHook = vi.fn().mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+		const apiStub = {
+			listHooks: vi.fn().mockResolvedValue({ hooks: [hook], loadErrors: [] }),
+			listSkills: vi.fn().mockResolvedValue({ skills: [] }),
+			listMcpServers: vi.fn().mockResolvedValue({ servers: [] }),
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({ rules: [], suggestions: [] }),
+			upsertHook,
+		} as unknown as MetisDesktopApi;
+
+		const root = createRoot(container);
+		await act(async () => {
+			root.render(
+				<PluginsPanel
+					api={apiStub}
+					initialSection="hooks"
+					onSkillsChanged={() => {}}
+					preferences={new Map()}
+					serverReady={true}
+					state={{ activeSessionId: null, sessionsById: new Map() } as any}
+				/>,
+			);
+		});
+		await flush();
+
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-list-row")!.click());
+		await flush();
+
+		const toggleButton = button(container, "Disable");
+		expect(toggleButton).not.toBeUndefined();
+		await act(async () => {
+			toggleButton!.click();
+			toggleButton!.click();
+		});
+
+		expect(upsertHook).toHaveBeenCalledTimes(1);
+		expect(upsertHook).toHaveBeenCalledWith({
+			hook: expect.objectContaining({ id: "hook-toggle-race", enabled: false }),
+		});
+		expect(toggleButton!.disabled).toBe(true);
+		expect(button(container, "Edit")!.disabled).toBe(true);
+		expect(button(container, "Delete")!.disabled).toBe(true);
+		expect(container.querySelector('[data-plugin-detail="hook"]')?.getAttribute("aria-busy")).toBe("true");
+		expect(container.textContent).toContain("Updating…");
+		expect(container.textContent).toContain("Enabled");
+
+		await act(async () => {
+			first.reject(new Error("Could not update the hook."));
+		});
+		await flush();
+
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Could not update the hook.");
+		expect(button(container, "Disable")!.disabled).toBe(false);
+		expect(button(container, "Edit")!.disabled).toBe(false);
+		expect(button(container, "Delete")!.disabled).toBe(false);
+		expect(container.querySelector('[data-plugin-detail="hook"]')?.textContent).toContain("Enabled");
+
+		await act(async () => button(container, "Back to Hooks")!.click());
+		await flush();
+		expect(container.querySelector(".plugins-detail-error")).toBeNull();
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-list-row")!.click());
+		await flush();
+		expect(container.querySelector(".plugins-detail-error")).toBeNull();
+
+		const retryButton = button(container, "Disable")!;
+		await act(async () => retryButton.click());
+		expect(upsertHook).toHaveBeenCalledTimes(2);
+		expect(retryButton.disabled).toBe(true);
+
+		await act(async () => {
+			second.resolve({ hooks: [{ ...hook, enabled: false }] });
+		});
+		await flush();
+
+		expect(button(container, "Enable")?.disabled).toBe(false);
+		expect(container.querySelector('[data-plugin-detail="hook"]')?.textContent).toContain("Disabled");
+		expect(container.querySelector(".plugins-detail-error")).toBeNull();
 	});
 });

@@ -55,11 +55,24 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 	const terminalRef = useRef<Terminal | null>(null);
 	const fitRef = useRef<(() => void) | null>(null);
 	const creationRef = useRef<Promise<unknown> | null>(null);
+	const creationFailedRef = useRef(false);
+	const startCreationRef = useRef<(() => void) | null>(null);
 	const translateRef = useRef(t);
 	const themeRef = useRef(theme);
 	translateRef.current = t;
 	themeRef.current = theme;
 	const [status, setStatus] = useState<string | null>(null);
+	const [creationFailed, setCreationFailed] = useState(false);
+
+	const retryCreation = () => {
+		const start = startCreationRef.current;
+		if (!start || !creationFailedRef.current) return;
+		creationFailedRef.current = false;
+		creationRef.current = null;
+		setCreationFailed(false);
+		setStatus(null);
+		start();
+	};
 
 	useEffect(() => {
 		const host = hostRef.current;
@@ -119,21 +132,29 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			});
 		});
 
-		creationRef.current ??= api.createTerminal({ terminalId, cwd, cols: terminal.cols, rows: terminal.rows });
-		void creationRef.current.then(
-			() => {
-				if (!active) return;
-				ready = true;
-				terminal.options.disableStdin = false;
-				setStatus(null);
-				fitTerminal();
-				terminal.focus();
-			},
-			(cause) => {
-				if (active)
+		const startCreation = () => {
+			creationRef.current ??= api.createTerminal({ terminalId, cwd, cols: terminal.cols, rows: terminal.rows });
+			void creationRef.current.then(
+				() => {
+					if (!active) return;
+					creationFailedRef.current = false;
+					setCreationFailed(false);
+					ready = true;
+					terminal.options.disableStdin = false;
+					setStatus(null);
+					fitTerminal();
+					terminal.focus();
+				},
+				(cause) => {
+					if (!active) return;
+					creationFailedRef.current = true;
+					setCreationFailed(true);
 					setStatus(cause instanceof Error ? cause.message : translateRef.current("Terminal could not start"));
-			},
-		);
+				},
+			);
+		};
+		startCreationRef.current = startCreation;
+		startCreation();
 
 		return () => {
 			active = false;
@@ -144,6 +165,7 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 			terminal.dispose();
 			if (terminalRef.current === terminal) terminalRef.current = null;
 			if (fitRef.current === fitTerminal) fitRef.current = null;
+			if (startCreationRef.current === startCreation) startCreationRef.current = null;
 		};
 	}, [api, cwd, terminalId]);
 
@@ -192,7 +214,16 @@ export function TerminalPanel({ api, cwd, terminalId, theme, visible }: Terminal
 				</button>
 			</div>
 			<div className="terminal-host" ref={hostRef} />
-			{status && <output className="status-block terminal-status">{status}</output>}
+			{status && (
+				<output className="status-block terminal-status">
+					{status}
+					{creationFailed && (
+						<button className="settings-secondary-button" onClick={retryCreation} type="button">
+							{t("Retry")}
+						</button>
+					)}
+				</output>
+			)}
 		</section>
 	);
 }

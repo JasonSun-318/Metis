@@ -99,3 +99,33 @@ it("does not dismiss while a save is pending", async () => {
 		await act(async () => root.unmount());
 	}
 });
+
+it("handles consecutive Escape keys before the native dialog close request", async () => {
+	const onClose = vi.fn();
+	const container = document.createElement("div");
+	document.body.append(container);
+	const root = createRoot(container);
+	try {
+		await act(async () =>
+			root.render(
+				<MemoryDialog title="Edit note" dirty onClose={onClose}>
+					<textarea defaultValue="unsaved text" />
+				</MemoryDialog>,
+			),
+		);
+		const textarea = container.querySelector("textarea")!;
+		const first = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+		await act(async () => textarea.dispatchEvent(first));
+		expect(first.defaultPrevented).toBe(true);
+		expect(container.querySelector('[role="alert"]')).not.toBeNull();
+		const second = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+		await act(async () => textarea.dispatchEvent(second));
+		expect(second.defaultPrevented).toBe(true);
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.querySelector("dialog")!.open).toBe(true);
+		expect(textarea.value).toBe("unsaved text");
+		expect(onClose).not.toHaveBeenCalled();
+	} finally {
+		await act(async () => root.unmount());
+	}
+});

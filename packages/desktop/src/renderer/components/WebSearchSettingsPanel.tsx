@@ -33,7 +33,9 @@ export function WebSearchSettingsPanel({
 	const [revealBusy, setRevealBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
+	const [request, setRequest] = useState(0);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(request): Retry explicitly reloads web search settings.
 	useEffect(() => {
 		if (!serverReady) {
 			setRevealedCredential(null);
@@ -57,7 +59,7 @@ export function WebSearchSettingsPanel({
 		return () => {
 			current = false;
 		};
-	}, [api, serverReady, t]);
+	}, [api, request, serverReady, t]);
 
 	useEffect(() => {
 		if (notice === null) return;
@@ -75,8 +77,34 @@ export function WebSearchSettingsPanel({
 		onDirtyChange?.(dirty);
 	}, [dirty, onDirtyChange]);
 	useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
-	if (!settings && !error)
-		return <output aria-label={t("Search settings")} className="status-block settings-loading" />;
+	if (!settings) {
+		if (!error) {
+			return <output aria-label={t("Search settings")} className="status-block settings-loading" />;
+		}
+		return (
+			<section className="settings-section personalization-section web-search-section">
+				<header className="settings-section-heading">
+					<h3>{t("Search engine")}</h3>
+				</header>
+				<div className="settings-card web-search-card">
+					<div className="web-search-load-error settings-inline-error" role="alert">
+						<p>{error}</p>
+						<button
+							className="settings-secondary-button"
+							disabled={!serverReady}
+							onClick={() => {
+								setError(null);
+								setRequest((value) => value + 1);
+							}}
+							type="button"
+						>
+							{t("Retry")}
+						</button>
+					</div>
+				</div>
+			</section>
+		);
+	}
 
 	const save = async (credentialAction: "set" | "keep" | "remove") => {
 		if (!settings) return;

@@ -51,6 +51,27 @@ async function flush() {
 	});
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (cause: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+const OLDER_RUN: ScheduleRunView = { ...RUN, id: "30000000-0000-4000-8000-000000000002", resultPreview: "Older" };
+const LAST_RUN = {
+	id: "30000000-0000-4000-8000-000000000003",
+	taskId: TASK.id,
+	status: "succeeded" as const,
+	scheduledFor: "2026-07-31T02:00:00Z",
+	createdAt: "2026-07-31T02:00:00Z",
+	completedAt: "2026-07-31T02:01:00Z",
+	unread: false,
+};
+
 afterEach(() => {
 	document.body.replaceChildren();
 	vi.restoreAllMocks();
@@ -139,6 +160,132 @@ describe("ScheduledTaskDetail", () => {
 		await act(async () => remove.click());
 		expect(deleteSchedule).toHaveBeenCalledWith(expect.objectContaining({ taskId: TASK.id, deleteSessions: true }));
 		expect(onDeleted).toHaveBeenCalledWith(TASK.id);
+		await act(async () => root.unmount());
+	});
+
+	it("shows a retryable history error instead of a false empty history when the first page fails", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const listScheduleRuns = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("Run history unavailable."))
+			.mockResolvedValueOnce({ runs: [RUN], nextBeforeRunId: null });
+		const api = { listScheduleRuns } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<ScheduledTaskDetail
+					api={api}
+					onBack={() => undefined}
+					onChanged={() => undefined}
+					onDeleted={() => undefined}
+					onEdit={() => undefined}
+					onOpenSession={() => undefined}
+					task={TASK}
+				/>,
+			),
+		);
+		await flush();
+		const alert = container.querySelector<HTMLElement>('[role="alert"]')!;
+		expect(alert.textContent).toContain("Run history unavailable.");
+		expect(container.textContent).not.toContain("No runs yet.");
+		const retry = [...alert.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
+		await act(async () => retry.click());
+		await flush();
+		expect(container.textContent).toContain("Ready");
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(listScheduleRuns).toHaveBeenCalledTimes(2);
+		expect(listScheduleRuns.mock.calls[1]?.[0]).toEqual(expect.objectContaining({ taskId: TASK.id, limit: 40 }));
+		expect(listScheduleRuns.mock.calls[1]?.[0].beforeRunId).toBeUndefined();
+		await act(async () => root.unmount());
+	});
+
+	it("keeps loaded runs and the older-page cursor when Load older fails, then retries that page", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const listScheduleRuns = vi
+			.fn()
+			.mockResolvedValueOnce({ runs: [RUN], nextBeforeRunId: "cursor-1" })
+			.mockRejectedValueOnce(new Error("Older page unavailable."))
+			.mockResolvedValueOnce({ runs: [OLDER_RUN], nextBeforeRunId: null });
+		const api = { listScheduleRuns, getScheduleRun: vi.fn() } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<ScheduledTaskDetail
+					api={api}
+					onBack={() => undefined}
+					onChanged={() => undefined}
+					onDeleted={() => undefined}
+					onEdit={() => undefined}
+					onOpenSession={() => undefined}
+					task={TASK}
+				/>,
+			),
+		);
+		await flush();
+		const loadOlder = [...container.querySelectorAll("button")].find(
+			(button) => button.textContent === "Load older runs",
+		)!;
+		await act(async () => loadOlder.click());
+		await flush();
+		const alert = container.querySelector<HTMLElement>('[role="alert"]')!;
+		expect(alert.textContent).toContain("Older page unavailable.");
+		expect(container.textContent).toContain("Ready");
+		expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Load older runs")).toBe(
+			true,
+		);
+		const retry = [...alert.querySelectorAll("button")].find((button) => button.textContent === "Retry")!;
+		await act(async () => retry.click());
+		await flush();
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(container.textContent).toContain("Ready");
+		expect(container.textContent).toContain("Older");
+		expect(listScheduleRuns).toHaveBeenCalledTimes(3);
+		expect(listScheduleRuns.mock.calls[2]?.[0]).toEqual(expect.objectContaining({ beforeRunId: "cursor-1" }));
+		await act(async () => root.unmount());
+	});
+
+	it("ignores a stale older-page failure after a newer history load", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const olderPage = deferred<{ runs: readonly ScheduleRunView[]; nextBeforeRunId: string | null }>();
+		const listScheduleRuns = vi
+			.fn()
+			.mockResolvedValueOnce({ runs: [RUN], nextBeforeRunId: "cursor-1" })
+			.mockReturnValueOnce(olderPage.promise)
+			.mockResolvedValueOnce({ runs: [RUN], nextBeforeRunId: null });
+		const api = { listScheduleRuns } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const render = (task: ScheduleTaskView) =>
+			root.render(
+				<ScheduledTaskDetail
+					api={api}
+					onBack={() => undefined}
+					onChanged={() => undefined}
+					onDeleted={() => undefined}
+					onEdit={() => undefined}
+					onOpenSession={() => undefined}
+					task={task}
+				/>,
+			);
+		await act(async () => render(TASK));
+		await flush();
+		await act(async () =>
+			[...container.querySelectorAll("button")].find((button) => button.textContent === "Load older runs")!.click(),
+		);
+		await act(async () => render({ ...TASK, lastRun: LAST_RUN }));
+		await flush();
+		await act(async () => {
+			olderPage.reject(new Error("Stale older page failed."));
+			await olderPage.promise.catch(() => undefined);
+		});
+		await flush();
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		expect(listScheduleRuns).toHaveBeenCalledTimes(3);
 		await act(async () => root.unmount());
 	});
 });

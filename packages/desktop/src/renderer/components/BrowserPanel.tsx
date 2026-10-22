@@ -986,7 +986,7 @@ export function BrowserPanel({
 							>
 								<MagnifyingGlass aria-hidden="true" size={14} />
 								<span>{t("Find in page")}</span>
-								<kbd>⌘F</kbd>
+								<kbd>{api.platform === "darwin" ? "⌘F" : "Ctrl+F"}</kbd>
 							</button>
 							<button
 								disabled={state.url === ""}
@@ -996,7 +996,7 @@ export function BrowserPanel({
 							>
 								<Printer aria-hidden="true" size={14} />
 								<span>{t("Print")}</span>
-								<kbd>⌘P</kbd>
+								<kbd>{api.platform === "darwin" ? "⌘P" : "Ctrl+P"}</kbd>
 							</button>
 							<hr className="browser-menu-separator" />
 							<fieldset aria-label={t("Zoom")} className="control-group browser-zoom-row">

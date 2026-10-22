@@ -624,7 +624,7 @@ export function PluginMarketplacePanel({
 				<section className="plugins-full-list plugins-market-sources" aria-label={t("Markets")}>
 					{marketsLoading ? (
 						<output className="status-paragraph plugins-catalog-message">{t("Loading markets…")}</output>
-					) : visibleMarkets.length === 0 ? (
+					) : marketError && markets.length === 0 ? null : visibleMarkets.length === 0 ? (
 						<p className="plugins-catalog-message">
 							{t(
 								marketQuery

@@ -192,6 +192,7 @@ export function ModelSettingsPanel({
 	const [confirmRemoval, setConfirmRemoval] = useState<"credentials" | "provider" | "vision" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
+	const [loadRequest, setLoadRequest] = useState(0);
 	const providerDialogRef = useRef<HTMLDialogElement>(null);
 	const customDialogRef = useRef<HTMLDialogElement>(null);
 	const visionDialogRef = useRef<HTMLDialogElement>(null);
@@ -235,6 +236,7 @@ export function ModelSettingsPanel({
 		setDefaultThinking(next.defaultThinkingSelection);
 	}, []);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(loadRequest): Retry explicitly reloads model settings.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
@@ -250,7 +252,7 @@ export function ModelSettingsPanel({
 		return () => {
 			current = false;
 		};
-	}, [api, applySettings, serverReady, t]);
+	}, [api, applySettings, loadRequest, serverReady, t]);
 
 	const selectedProvider = draft
 		? settings?.providers.find((provider) => provider.provider === draft.provider)
@@ -816,8 +818,29 @@ export function ModelSettingsPanel({
 		});
 	const availableProviders = providers.filter((provider) => !provider.auth.configured && matchesProvider(provider));
 
-	if (!settings && !error)
-		return <output aria-label={t("Loading model settings")} className="status-block settings-loading" />;
+	if (!settings) {
+		if (!error) return <output aria-label={t("Loading model settings")} className="status-block settings-loading" />;
+		return (
+			<section className="settings-page model-settings-page">
+				<div className="settings-section">
+					<div className="settings-inline-error" role="alert">
+						<p>{error}</p>
+						<button
+							className="settings-secondary-button"
+							disabled={!serverReady}
+							onClick={() => {
+								setError(null);
+								setLoadRequest((value) => value + 1);
+							}}
+							type="button"
+						>
+							{t("Retry")}
+						</button>
+					</div>
+				</div>
+			</section>
+		);
+	}
 	const thinkingOptions = THINKING_LEVELS.map((level) => ({
 		value: level,
 		label: t(thinkingLevelLabel(level)),

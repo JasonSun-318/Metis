@@ -136,4 +136,71 @@ describe("BrowserImportDialog", () => {
 		)!;
 		expect(importButton.disabled).toBe(true);
 	});
+
+	it("retries a failed source discovery and restores the importable selection", async () => {
+		const api = apiFixture();
+		vi.mocked(api.listBrowserImportSources).mockRejectedValueOnce(new Error("sources unavailable"));
+		const { container } = renderDialog(api);
+		await flush();
+
+		expect(container.textContent).toContain("sources unavailable");
+		expect(api.listBrowserImportSources).toHaveBeenCalledOnce();
+
+		const retry = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Retry",
+		);
+		expect(retry).toBeDefined();
+		await act(async () => retry!.click());
+		await flush();
+
+		expect(container.textContent).not.toContain("sources unavailable");
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
+		expect(importButton.disabled).toBe(false);
+		await act(async () => importButton.click());
+		expect(api.importBrowserData).toHaveBeenCalledWith({
+			sourceId: "chrome",
+			sourceProfileId: "Default",
+			dataTypes: { cookies: true, history: true },
+		});
+	});
+
+	it("keeps the chosen source, profile and data types after an import failure", async () => {
+		const api = apiFixture();
+		vi.mocked(api.importBrowserData).mockRejectedValueOnce(new Error("import failed"));
+		const { container, onImported } = renderDialog(api);
+		await flush();
+		await select(container, "Source profile", "Work");
+		const cookies = container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[0]!;
+		act(() => cookies.click());
+
+		const importButton = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
+		await act(async () => importButton.click());
+		await flush();
+
+		expect(container.textContent).toContain("import failed");
+		expect(container.querySelector<HTMLButtonElement>('button[aria-label="Source profile"]')?.textContent).toContain(
+			"Work",
+		);
+		expect(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[0]!.checked).toBe(false);
+		expect(container.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')[1]!.checked).toBe(true);
+		expect(onImported).not.toHaveBeenCalled();
+		expect(api.listBrowserImportSources).toHaveBeenCalledOnce();
+
+		const retryImport = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
+			(button) => button.textContent === "Import",
+		)!;
+		expect(retryImport.disabled).toBe(false);
+		await act(async () => retryImport.click());
+		expect(api.importBrowserData).toHaveBeenCalledTimes(2);
+		expect(api.importBrowserData).toHaveBeenLastCalledWith({
+			sourceId: "chrome",
+			sourceProfileId: "Profile 2",
+			dataTypes: { cookies: false, history: true },
+		});
+		expect(api.listBrowserImportSources).toHaveBeenCalledOnce();
+	});
 });

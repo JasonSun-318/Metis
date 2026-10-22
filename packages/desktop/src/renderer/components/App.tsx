@@ -1430,7 +1430,10 @@ export function App({ api, store }: AppProps) {
 			setNavigationBack((entries) => entries.slice(0, -1));
 			setNavigationForward([]);
 		}
-		requestAnimationFrame(() => settingsReturnFocusRef.current?.focus());
+		requestAnimationFrame(() => {
+			const target = settingsReturnFocusRef.current;
+			(target?.isConnected ? target : document.querySelector<HTMLElement>(".account-menu-trigger"))?.focus();
+		});
 	}, [api.platform]);
 	const deleteScheduledTask = useCallback(
 		async (input: Parameters<MetisDesktopApi["deleteSchedule"]>[0]) => {

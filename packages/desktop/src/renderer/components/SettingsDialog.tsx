@@ -241,7 +241,6 @@ export function SettingsDialog({
 									key={id}
 									onClick={() => {
 										navigate(id);
-										if (pageScrollRef.current) pageScrollRef.current.scrollTop = 0;
 									}}
 									ref={id === "profile" ? firstNavRef : undefined}
 									type="button"

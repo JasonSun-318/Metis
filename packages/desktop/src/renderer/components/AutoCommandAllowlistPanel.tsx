@@ -20,12 +20,14 @@ export function AutoCommandAllowlistPanel({
 }) {
 	const { t } = useTranslation();
 	const [view, setView] = useState<ClientResult<"permission/auto/get"> | null>(null);
+	const [loadRequest, setLoadRequest] = useState(0);
 	const [command, setCommand] = useState("");
 	const [allowNetwork, setAllowNetwork] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(loadRequest): Retry explicitly reloads Auto command rules.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
@@ -41,7 +43,7 @@ export function AutoCommandAllowlistPanel({
 		return () => {
 			current = false;
 		};
-	}, [api, serverReady, t]);
+	}, [api, loadRequest, serverReady, t]);
 
 	useEffect(() => {
 		if (notice === null) return;
@@ -70,6 +72,10 @@ export function AutoCommandAllowlistPanel({
 		if (!nextCommand) return;
 		if (view.rules.some((rule) => rule.command === nextCommand)) {
 			setError(t("This command is already on the allowlist."));
+			return;
+		}
+		if (view.rules.length >= MAX_AUTO_COMMAND_RULES) {
+			setError(t("The allowlist can hold at most {{max}} commands.", { max: MAX_AUTO_COMMAND_RULES }));
 			return;
 		}
 		if (await save([...view.rules, { command: nextCommand, allowNetwork: network }])) {
@@ -112,6 +118,19 @@ export function AutoCommandAllowlistPanel({
 				<p className="settings-inline-error" role="alert">
 					{error}
 				</p>
+			) : null}
+			{!view && error ? (
+				<button
+					className="settings-secondary-button"
+					disabled={!serverReady}
+					onClick={() => {
+						setError(null);
+						setLoadRequest((request) => request + 1);
+					}}
+					type="button"
+				>
+					{t("Retry")}
+				</button>
 			) : null}
 			{view ? (
 				<div className="settings-card auto-command-allowlist-card">

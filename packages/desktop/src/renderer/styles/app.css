@@ -1315,6 +1315,9 @@ textarea { resize: none; }
 .scheduled-task-dialog footer, .scheduled-task-delete-dialog footer { display: flex; justify-content: flex-end; gap: var(--space-8); margin-top: 5px; }
 .scheduled-task-dialog footer button, .scheduled-task-delete-dialog footer button { min-width: 96px; min-height: var(--control-height); border-radius: var(--radius-control); --button-hover-bg: var(--button-primary-bg-hover); background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 14px; font-size: 13px; font-weight: 550; }
 .scheduled-task-dialog footer .button-secondary, .scheduled-task-delete-dialog footer .button-secondary { --button-hover-bg: var(--panel-hover); border: 1px solid var(--border-strong); background: transparent; color: var(--text-25); }
+.scheduled-task-dialog footer.scheduled-task-discard { align-items: center; }
+.scheduled-task-dialog footer.scheduled-task-discard p { min-width: 0; flex: 1; margin: 0; color: var(--text-13); font-size: 13px; line-height: 1.5; }
+.scheduled-task-dialog footer .scheduled-task-danger { --button-hover-bg: var(--danger-bg-hover-2); background: var(--danger-bg-hover); color: var(--danger-ink); }
 .scheduled-task-workspace-dialog > div { display: grid; gap: var(--dialog-gap); padding: var(--dialog-padding); }
 .scheduled-task-workspace-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-24); }
 .scheduled-task-workspace-dialog h2 { margin: 0; color: var(--text); font-size: 19px; font-weight: 590; letter-spacing: -.015em; }

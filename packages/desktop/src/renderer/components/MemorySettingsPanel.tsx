@@ -197,7 +197,9 @@ export function MemorySettingsPanel({
 	const [modelSettings, setModelSettings] = useState<ModelSettingsView | null>(null);
 	const [modelChoicesError, setModelChoicesError] = useState(false);
 	const [failedRunId, setFailedRunId] = useState<string | null>(null);
+	const [loadRequest, setLoadRequest] = useState(0);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(loadRequest): Retry explicitly reloads memory settings.
 	useEffect(() => {
 		if (!serverReady) return;
 		let current = true;
@@ -221,7 +223,7 @@ export function MemorySettingsPanel({
 		return () => {
 			current = false;
 		};
-	}, [api, serverReady, sessionId, t]);
+	}, [api, loadRequest, serverReady, sessionId, t]);
 
 	// Model choices load independently: a failure must not take down the rest of the panel.
 	useEffect(() => {
@@ -611,8 +613,35 @@ export function MemorySettingsPanel({
 		}
 	};
 
-	if (!settings && !error) {
-		return <output aria-label={t("Memory settings")} className="status-block settings-loading" />;
+	if (!settings) {
+		if (!error) {
+			return <output aria-label={t("Memory settings")} className="status-block settings-loading" />;
+		}
+		return (
+			<div className="settings-page memory-page">
+				<section className="settings-section memory-settings-section">
+					<header className="settings-section-heading">
+						<h3>{t("Memory preferences")}</h3>
+					</header>
+					<div className="settings-card memory-settings-card">
+						<div className="memory-load-error settings-inline-error" role="alert">
+							<p>{error}</p>
+							<button
+								className="settings-secondary-button"
+								disabled={!serverReady}
+								onClick={() => {
+									setError(null);
+									setLoadRequest((value) => value + 1);
+								}}
+								type="button"
+							>
+								{t("Retry")}
+							</button>
+						</div>
+					</div>
+				</section>
+			</div>
+		);
 	}
 
 	const dreamLastRun = settings?.dream.lastRun;
