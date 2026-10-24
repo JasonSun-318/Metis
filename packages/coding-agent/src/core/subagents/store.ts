@@ -2,7 +2,8 @@ import { existsSync, lstatSync, readdirSync, readFileSync, renameSync, rmSync } 
 import { join } from "node:path";
 import type { AgentMessage } from "@metis/agent-core";
 import { createFileAtomicallySync, ensureDirectoryDurablySync, syncDirectorySync } from "../durable-file.ts";
-import type { AgentArchivedEntry, AgentStateReason, AgentTaskEntry } from "../session-control.ts";
+import { type PermissionPreset, type PermissionSettings, settingsForPreset } from "../permissions/settings.ts";
+import type { AgentArchivedEntry, AgentInputEntry, AgentStateReason, AgentTaskEntry } from "../session-control.ts";
 import { assertValidSessionId, createSessionId } from "../session-id.ts";
 import {
 	type FileEntry,
@@ -14,6 +15,7 @@ import {
 } from "../session-manager.ts";
 import type {
 	AgentConfig,
+	AgentRunControl,
 	AgentStatus,
 	AgentTaskStatus,
 	AgentTaskSummary,
@@ -27,15 +29,25 @@ export interface AgentDiskRecord {
 	readonly name: string;
 	readonly path: string;
 	readonly config: AgentConfig;
+	readonly permissionCeiling?: PermissionSettings;
+	readonly runControl?: AgentRunControl;
 	readonly archived: boolean;
 	readonly tasks: readonly AgentTaskSummary[];
+	readonly inputs: readonly AgentInputEntry[];
 	readonly header: NonNullable<SessionHeader["agent"]>;
 }
 
 export interface AgentStoreApi {
 	listTree(): { readonly agents: readonly AgentDiskRecord[]; readonly diagnostics: readonly string[] };
-	create(config: AgentConfig, forkedMessages: readonly AgentMessage[], firstTaskId?: string): AgentDiskRecord;
+	create(
+		config: AgentConfig,
+		forkedMessages: readonly AgentMessage[],
+		firstTaskId?: string,
+		initialInput?: Omit<AgentInputEntry, "id" | "parentId" | "timestamp">,
+		permissionCeiling?: PermissionPreset,
+	): AgentDiskRecord;
 	load(agentId: string): AgentDiskRecord;
+	reload(record: AgentDiskRecord): AgentDiskRecord;
 	appendTask(
 		agentId: string,
 		input: {
@@ -58,10 +70,11 @@ export interface AgentStoreApi {
 			readonly error?: string;
 			readonly usage?: AgentUsage;
 		},
+		record?: AgentDiskRecord,
 	): AgentDiskRecord;
 	listTasks(agentId: string): readonly AgentTaskSummary[];
 	listTombstones(): readonly AgentTombstone[];
-	readJournal(agentId: string): readonly FileEntry[];
+	readJournal(agentId: string, record?: AgentDiskRecord): readonly FileEntry[];
 	setArchived(agentId: string, archived: boolean): AgentDiskRecord;
 	beginDeleteGroup(rootAgentId: string, tombstones: readonly AgentTombstone[]): void;
 	finishDeleteGroup(rootAgentId: string): Promise<{
@@ -114,12 +127,29 @@ function reduceTasks(entries: readonly FileEntry[], agentId: string): AgentTaskS
 		tasks.set(entry.taskId, {
 			taskId: entry.taskId,
 			status: entry.status,
+			...(entry.instructionRevision === undefined ? {} : { instructionRevision: entry.instructionRevision }),
+			...(entry.consumedInstructionRevision === undefined
+				? {}
+				: { consumedInstructionRevision: entry.consumedInstructionRevision }),
 			taskSummary: entry.taskSummary,
 			createdAt: prior?.createdAt ?? entry.timestamp,
 			updatedAt: entry.timestamp,
 			...(entry.finalMessage ? { finalMessage: entry.finalMessage } : {}),
 			...(entry.error ? { error: entry.error } : {}),
 			...(entry.usage ? { usage: entry.usage } : {}),
+		});
+	}
+	for (const entry of entries) {
+		if (entry.type !== "agent_input" || entry.agentId !== agentId) continue;
+		const task = tasks.get(entry.taskId);
+		if (!task) continue;
+		tasks.set(entry.taskId, {
+			...task,
+			instructionRevision: Math.max(task.instructionRevision ?? 0, entry.instructionRevision),
+			consumedInstructionRevision: Math.max(
+				task.consumedInstructionRevision ?? 0,
+				entry.state === "delivered" ? entry.instructionRevision : 0,
+			),
 		});
 	}
 	return [...tasks.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
@@ -133,8 +163,18 @@ function reduceArchived(entries: readonly FileEntry[], agentId: string): boolean
 	return archived;
 }
 
-function headerToConfig(header: NonNullable<SessionHeader["agent"]>): AgentConfig {
+function reduceInputs(entries: readonly FileEntry[], agentId: string): AgentInputEntry[] {
+	const latest = new Map<string, AgentInputEntry>();
+	for (const entry of entries) {
+		if (entry.type === "agent_input" && entry.agentId === agentId) latest.set(entry.messageId, entry);
+	}
+	return [...latest.values()];
+}
+
+function headerToConfig(header: NonNullable<SessionHeader["agent"]>, mode: AgentConfig["mode"]): AgentConfig {
 	return {
+		mode,
+		...(header.roleSnapshot ? { roleSnapshot: header.roleSnapshot } : {}),
 		agentId: header.agentId,
 		name: header.name,
 		agentType: header.agentType,
@@ -179,14 +219,38 @@ function reduceRecord(path: string, rootSessionId: string): AgentDiskRecord {
 	if (header.id !== header.agent.agentId) throw new Error("Child session id must match agent id");
 	validateAgentRelation(header.agent, rootSessionId);
 	const entries = manager.getDurableJournalSnapshot();
-	const config = headerToConfig(header.agent);
+	const savedRole = [...entries]
+		.reverse()
+		.find((entry) => entry.type === "agent_role_snapshot" && entry.agentId === header.id);
+	const savedCeiling = [...entries]
+		.reverse()
+		.find((entry) => entry.type === "agent_permission_ceiling" && entry.agentId === header.id);
+	const config = headerToConfig(
+		{
+			...header.agent,
+			...(savedRole?.type === "agent_role_snapshot" ? { roleSnapshot: savedRole.roleSnapshot } : {}),
+		},
+		header.mode ?? "code",
+	);
 	return {
 		agentId: header.id,
 		name: header.agent.name,
 		path,
 		config,
+		...(savedCeiling?.type === "agent_permission_ceiling"
+			? { permissionCeiling: settingsForPreset(savedCeiling.permissionPreset) }
+			: {}),
+		...(() => {
+			const control = [...entries]
+				.reverse()
+				.find((entry) => entry.type === "agent_run_control" && entry.agentId === header.id);
+			return control?.type === "agent_run_control"
+				? { runControl: { state: control.state, scope: control.scope, requestId: control.requestId } }
+				: {};
+		})(),
 		archived: reduceArchived(entries, header.id),
 		tasks: reduceTasks(entries, header.id),
+		inputs: reduceInputs(entries, header.id),
 		header: header.agent,
 	};
 }
@@ -244,6 +308,7 @@ function agentHeaderFromConfig(config: AgentConfig): NonNullable<SessionHeader["
 		rootSessionId: config.rootSessionId,
 		agentPath: config.agentPath,
 		agentType: config.agentType,
+		...(config.roleSnapshot ? { roleSnapshot: config.roleSnapshot } : {}),
 		tools: config.tools,
 		writePolicy: config.writePolicy,
 		permissionPreset: config.permissionPreset,
@@ -264,8 +329,8 @@ export class AgentStore implements AgentStoreApi {
 	private readonly rootSessionId: string;
 	private readonly agentDir: string;
 
-	constructor(rootSessionManager: SessionManager, agentDir: string) {
-		if (!rootSessionManager.isPersisted() || !rootSessionManager.getSessionFile()) {
+	constructor(rootSessionManager: Pick<SessionManager, "getSessionFile" | "getSessionId">, agentDir: string) {
+		if (!rootSessionManager.getSessionFile()) {
 			throw new Error("Agents require a persisted root session");
 		}
 		this.rootSessionId = rootSessionManager.getSessionId();
@@ -302,7 +367,13 @@ export class AgentStore implements AgentStoreApi {
 		return { agents, diagnostics };
 	}
 
-	create(config: AgentConfig, forkedMessages: readonly AgentMessage[], firstTaskId?: string): AgentDiskRecord {
+	create(
+		config: AgentConfig,
+		forkedMessages: readonly AgentMessage[],
+		firstTaskId?: string,
+		initialInput?: Omit<AgentInputEntry, "id" | "parentId" | "timestamp">,
+		permissionCeiling?: PermissionPreset,
+	): AgentDiskRecord {
 		validateAgentRelation(agentHeaderFromConfig(config), this.rootSessionId);
 		const tree = this.listTree();
 		if (tree.agents.some((agent) => agent.agentId === config.agentId)) {
@@ -318,12 +389,17 @@ export class AgentStore implements AgentStoreApi {
 		ensureDirectoryDurablySync(this.directory);
 		const manager = SessionManager.create(config.cwd, this.directory, {
 			id: config.agentId,
-			mode: "code",
+			mode: config.mode ?? "code",
 			permissionPreset: config.permissionPreset,
 			agent: agentHeaderFromConfig(config),
 		});
 		const path = manager.getSessionFile();
 		try {
+			manager.appendAgentControl({
+				type: "agent_permission_ceiling",
+				agentId: config.agentId,
+				permissionPreset: permissionCeiling ?? config.permissionPreset,
+			});
 			manager.appendAgentControl({
 				type: "agent_task",
 				agentId: config.agentId,
@@ -332,6 +408,7 @@ export class AgentStore implements AgentStoreApi {
 				taskSummary: summarizeAgentTask(config.initialTask),
 				status: "queued",
 			});
+			if (initialInput) manager.appendAgentControl(initialInput);
 			for (const message of selectForkMessages(forkedMessages, config.forkTurns)) {
 				if (message.role === "branchSummary" || message.role === "compactionSummary") continue;
 				if (message.role === "custom") {
@@ -359,6 +436,13 @@ export class AgentStore implements AgentStoreApi {
 		const match = this.listTree().agents.find((agent) => agent.agentId === agentId);
 		if (!match) throw new Error(`Unknown agent: ${agentId}`);
 		return match;
+	}
+
+	reload(record: AgentDiskRecord): AgentDiskRecord {
+		if (record.config.rootSessionId !== this.rootSessionId) {
+			throw new Error("Agent record belongs to a different root session");
+		}
+		return reduceRecord(record.path, this.rootSessionId);
 	}
 
 	appendTask(
@@ -413,9 +497,10 @@ export class AgentStore implements AgentStoreApi {
 			readonly error?: string;
 			readonly usage?: AgentUsage;
 		},
+		current?: AgentDiskRecord,
 	): AgentDiskRecord {
-		const record = this.load(agentId);
-		const journal = this.readJournal(agentId);
+		const record = current?.agentId === agentId ? current : this.load(agentId);
+		const journal = this.readJournal(agentId, record);
 		const prior = [...journal]
 			.reverse()
 			.find((entry): entry is AgentTaskEntry => entry.type === "agent_task" && entry.taskId === input.taskId);
@@ -437,7 +522,7 @@ export class AgentStore implements AgentStoreApi {
 		} finally {
 			manager.close();
 		}
-		return this.load(agentId);
+		return reduceRecord(record.path, this.rootSessionId);
 	}
 
 	listTasks(agentId: string): readonly AgentTaskSummary[] {
@@ -460,9 +545,9 @@ export class AgentStore implements AgentStoreApi {
 		return tombstones;
 	}
 
-	readJournal(agentId: string): readonly FileEntry[] {
-		const record = this.load(agentId);
-		return SessionManager.openReadOnly(record.path).getDurableJournalSnapshot();
+	readJournal(agentId: string, record?: AgentDiskRecord): readonly FileEntry[] {
+		const path = record?.agentId === agentId ? record.path : this.load(agentId).path;
+		return SessionManager.openReadOnly(path).getDurableJournalSnapshot();
 	}
 
 	setArchived(agentId: string, archived: boolean): AgentDiskRecord {

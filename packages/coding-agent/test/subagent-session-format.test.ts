@@ -270,3 +270,90 @@ describe("v13 agent control records", () => {
 		expect(JSON.parse(readFileSync(goodPath, "utf8").trim()).version).toBeGreaterThanOrEqual(12);
 	});
 });
+
+describe("v15 agent conversations", () => {
+	it("strictly parses origin, rich input, receipts and pause controls", () => {
+		const base = { id: "input-entry", parentId: null, timestamp: new Date(0).toISOString() };
+		const input = {
+			...base,
+			type: "agent_input",
+			agentId: "child",
+			taskId: "task",
+			messageId: "message",
+			requestId: "request",
+			requestHash: "a".repeat(64),
+			delivery: "steer",
+			state: "accepted",
+			instructionRevision: 1,
+			origin: { kind: "user" },
+			input: {
+				text: "Correction",
+				images: [{ type: "image_ref", hash: "b".repeat(64), mimeType: "image/png", size: 1 }],
+			},
+		};
+		expect(parseSessionControlEntry(input)).toEqual(input);
+		expect(() => parseSessionControlEntry({ ...input, origin: { kind: "user", sessionId: "forged" } })).toThrow(
+			"unknown field",
+		);
+		expect(() => parseSessionControlEntry({ ...input, input: { text: "Correction", path: "/private" } })).toThrow();
+		expect(() => parseSessionControlEntry({ ...input, instructionRevision: 0 })).toThrow();
+		expect(
+			parseSessionControlEntry({
+				...base,
+				type: "agent_run_control",
+				agentId: "child",
+				requestId: "stop",
+				action: "stop",
+				state: "user_paused",
+				scope: "subtree",
+				origin: { kind: "user" },
+			}),
+		).toMatchObject({ state: "user_paused" });
+	});
+
+	it("keeps v14 reads byte-identical and rejects v15 records in old headers", () => {
+		const root = tempRoot();
+		const path = join(root, "legacy.jsonl");
+		const header = {
+			type: "session",
+			id: "root",
+			version: 14,
+			timestamp: new Date(0).toISOString(),
+			cwd: root,
+			mode: "chat",
+			permissionPreset: "ask",
+		};
+		const bytes = JSON.stringify(header) + "\n";
+		writeFileSync(path, bytes);
+		expect(SessionManager.openReadOnly(path).getHeader()?.mode).toBe("chat");
+		expect(readFileSync(path, "utf8")).toBe(bytes);
+		const control = {
+			type: "agent_run_control",
+			id: "control",
+			parentId: null,
+			timestamp: header.timestamp,
+			agentId: "root",
+			requestId: "stop",
+			action: "stop",
+			state: "user_paused",
+			scope: "subtree",
+			origin: { kind: "user" },
+		};
+		writeFileSync(path, bytes + JSON.stringify(control) + "\n");
+		expect(() => SessionManager.openReadOnly(path)).toThrow("v15");
+		writeFileSync(
+			path,
+			bytes +
+				JSON.stringify({
+					type: "agent_permission_ceiling",
+					id: "ceiling",
+					parentId: null,
+					timestamp: header.timestamp,
+					agentId: "child",
+					permissionPreset: "ask",
+				}) +
+				"\n",
+		);
+		expect(() => SessionManager.openReadOnly(path)).toThrow("v15");
+	});
+});

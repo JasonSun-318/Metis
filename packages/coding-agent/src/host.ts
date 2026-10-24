@@ -14,8 +14,13 @@ export {
 	readKnowledgeLinks,
 } from "./core/knowledge-context.ts";
 export { parseKnowledgeNote, resolveKnowledgeLink } from "./core/knowledge-markdown.ts";
+export type { DurablePromptInput } from "./core/runtime-recovery.ts";
 // Schedule data trash seam for hosts that need to inject a non-OS trash implementation.
 export { trashScheduledTaskData } from "./core/schedules/delete.ts";
+export { resolveDeliveredFilePath } from "./core/session-attachments.ts";
+export { agentSummaryFromRecord } from "./core/subagents/manager.ts";
+export { AgentStore } from "./core/subagents/store.ts";
+export { BUILT_IN_TOOL_NAMES } from "./core/tools/index.ts";
 export type {
 	AgentSessionEvent,
 	AgentSessionRuntime,

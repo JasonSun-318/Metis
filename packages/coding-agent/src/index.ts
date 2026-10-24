@@ -749,17 +749,30 @@ export {
 	removeCustomAgentType,
 	upsertCustomAgentType,
 } from "./core/subagents/agent-type-registry.ts";
+export { agentSummaryFromRecord, SubagentManager } from "./core/subagents/manager.ts";
+export { decideAgentDelivery } from "./core/subagents/message-admission.ts";
 export {
 	buildAgentCoordinationPrompt,
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./core/subagents/prompts.ts";
+export { type AgentDiskRecord, AgentStore } from "./core/subagents/store.ts";
 export { agentTaskWindow } from "./core/subagents/trace.ts";
 export {
 	AGENT_TOOL_NAMES,
 	type AgentConfig,
+	type AgentControlInput,
+	type AgentControlReceipt,
+	type AgentDeliveryMode,
+	type AgentDeliveryState,
 	AgentError,
+	type AgentMailboxEvent,
 	type AgentMailboxTerminalEvent,
+	type AgentMessageActor,
+	type AgentMessageOrigin,
+	type AgentMessageReceipt,
+	type AgentRunControl,
+	type AgentSubmitMessageInput,
 	type AgentSummary,
 	type AgentToolName,
 	type AgentVisibleActivity,

@@ -34,14 +34,40 @@ describe("built-in agent profiles", () => {
 	it.each<[AgentType, string[], "inherit" | "deny", boolean]>([
 		[
 			"default",
-			["read", "grep", "find", "ls", "bash", "edit", "write", "web_fetch", "web_search", "custom_mcp_write"],
+			[
+				"read",
+				"grep",
+				"find",
+				"ls",
+				"bash",
+				"edit",
+				"write",
+				"web_fetch",
+				"web_search",
+				"ask_user",
+				"deliver_file",
+				"custom_mcp_write",
+			],
 			"inherit",
 			true,
 		],
 		["explorer", ["read", "grep", "find", "ls", "web_fetch", "web_search"], "deny", false],
 		[
 			"worker",
-			["read", "grep", "find", "ls", "bash", "edit", "write", "web_fetch", "web_search", "custom_mcp_write"],
+			[
+				"read",
+				"grep",
+				"find",
+				"ls",
+				"bash",
+				"edit",
+				"write",
+				"web_fetch",
+				"web_search",
+				"ask_user",
+				"deliver_file",
+				"custom_mcp_write",
+			],
 			"inherit",
 			true,
 		],
@@ -62,5 +88,26 @@ describe("built-in agent profiles", () => {
 	it("reports coordination tools only when the child may delegate", () => {
 		expect(effectiveAgentToolNames({ tools: ["read"], mayDelegate: true })).toEqual(["read", ...AGENT_TOOL_NAMES]);
 		expect(effectiveAgentToolNames({ tools: ["read"], mayDelegate: false })).toEqual(["read"]);
+	});
+
+	it("inherits reconstructable host tools only from the parent's delegatable capabilities", () => {
+		const available = resolveAgentProfile({
+			definition: AGENT_TYPE_PROFILES.worker,
+			parentTools: ["read", "ask_user", "deliver_file", "browser_act"],
+			depth: 1,
+		});
+		expect(available.tools).toEqual(["read", "ask_user", "deliver_file", "browser_act"]);
+		const unavailable = resolveAgentProfile({
+			definition: AGENT_TYPE_PROFILES.worker,
+			parentTools: ["read"],
+			depth: 1,
+		});
+		expect(unavailable.tools).toEqual(["read"]);
+		const capped = resolveAgentProfile({
+			definition: AGENT_TYPE_PROFILES.explorer,
+			parentTools: available.tools,
+			depth: 1,
+		});
+		expect(capped.tools).toEqual(["read"]);
 	});
 });

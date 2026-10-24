@@ -38,6 +38,7 @@ export class SessionAgentCoordinator {
 	private readonly attemptedContinuationIds = new Set<string>();
 	private continuationTask?: Promise<void>;
 	private generation = 0;
+	private attaching = false;
 
 	constructor(options: SessionAgentCoordinatorOptions) {
 		this.agentDir = options.agentDir;
@@ -67,7 +68,12 @@ export class SessionAgentCoordinator {
 		this.attemptedContinuationIds.clear();
 		this.continuationTask = undefined;
 		session.setCollaborationModeGuard(undefined);
-		this.bind(session, this.generation);
+		this.attaching = true;
+		try {
+			this.bind(session, this.generation);
+		} finally {
+			this.attaching = false;
+		}
 	}
 
 	async rebind(session: AgentSession): Promise<void> {
@@ -115,13 +121,7 @@ export class SessionAgentCoordinator {
 
 	private async recoverDeletes(session: AgentSession): Promise<void> {
 		const header = session.sessionManager.getHeader();
-		if (
-			this.inheritedManager ||
-			!session.sessionManager.isPersisted() ||
-			header?.agent ||
-			header?.scheduled ||
-			session.mode !== "code"
-		) {
+		if (this.inheritedManager || !session.sessionManager.isPersisted() || header?.agent || header?.scheduled) {
 			return;
 		}
 		await new AgentStore(session.sessionManager, this.agentDir).recoverDeleteMarkers();
@@ -135,29 +135,18 @@ export class SessionAgentCoordinator {
 			if (!this.inheritedManager) return;
 			this.managerValue = this.inheritedManager;
 			this.detachActor = this.inheritedManager.attachActor(session);
-			this.unsubscribeManager = this.inheritedManager.subscribe((event) => {
-				if (!this.isCurrent(session, generation)) return;
-				if (
-					event.type === "notification_ready" &&
-					event.event.parentSessionId === session.sessionManager.getSessionId()
-				) {
-					this.requestContinuation(session, generation, event.event.eventId);
-				}
-			});
+			// The manager owns child continuations so idle children can be rehydrated
+			// through the scheduler without racing this runtime's disposal.
 			if (header.agent.mayDelegate) this.installTools(session);
 			this.syncCapabilities(session, header.agent);
-			this.resumePendingContinuations(session, generation);
 			return;
 		}
-
-		if (session.mode !== "code") return;
 
 		if (this.inheritedManager) {
 			this.managerValue = this.inheritedManager;
 			this.detachActor = this.inheritedManager.attachActor(session);
 			this.installTools(session);
 			this.syncCapabilities(session);
-			this.resumePendingContinuations(session, generation);
 			return;
 		}
 
@@ -180,6 +169,7 @@ export class SessionAgentCoordinator {
 			this.syncCapabilities(session);
 			if (
 				event.type === "notification_ready" &&
+				event.wake !== false &&
 				event.event.parentSessionId === session.sessionManager.getSessionId()
 			) {
 				this.requestContinuation(session, generation, event.event.eventId);
@@ -189,7 +179,6 @@ export class SessionAgentCoordinator {
 		});
 		this.detachActor = manager.attachActor(session);
 		this.syncCapabilities(session);
-		this.resumePendingContinuations(session, generation);
 	}
 
 	private installTools(session: AgentSession): void {
@@ -210,19 +199,26 @@ export class SessionAgentCoordinator {
 	}
 
 	private requestContinuation(session: AgentSession, generation: number, eventId: string): void {
-		if (!this.isCurrent(session, generation)) return;
+		if (!this.isCurrent(session, generation) || this.attaching) return;
 		this.pendingContinuationIds.add(eventId);
 		this.scheduleContinuation(session, generation);
 	}
 
-	private resumePendingContinuations(session: AgentSession, generation: number): void {
-		for (const eventId of session.getPendingAgentMailboxEventIds()) {
-			this.requestContinuation(session, generation, eventId);
-		}
+	/** Called only after an explicit human resume; attaching history never calls this. */
+	resumePendingContinuations(): void {
+		const session = this.session;
+		if (!session || this.managerValue?.isRunAllowed?.(session.sessionManager.getSessionId()) === false) return;
+		for (const eventId of session.getPendingAgentMailboxEventIds())
+			this.requestContinuation(session, this.generation, eventId);
 	}
 
 	private scheduleContinuation(session: AgentSession, generation: number): void {
-		if (this.continuationTask || !this.isCurrent(session, generation)) return;
+		if (
+			this.continuationTask ||
+			!this.isCurrent(session, generation) ||
+			this.managerValue?.isRunAllowed?.(session.sessionManager.getSessionId()) === false
+		)
+			return;
 		let task!: Promise<void>;
 		task = this.drainContinuation(session, generation)
 			.catch((error) => {
@@ -249,6 +245,7 @@ export class SessionAgentCoordinator {
 		await session.waitForIdle();
 		if (!this.isCurrent(session, generation)) return;
 
+		if (this.managerValue?.isRunAllowed?.(session.sessionManager.getSessionId()) === false) return;
 		const pending = new Set(session.getPendingAgentMailboxEventIds());
 		for (const eventId of [...this.pendingContinuationIds]) {
 			if (!pending.has(eventId)) this.pendingContinuationIds.delete(eventId);
@@ -280,20 +277,18 @@ export class SessionAgentCoordinator {
 		const reserved = new Set<string>(AGENT_TOOL_NAMES);
 		const base = session.getConfiguredActiveToolNames().filter((name) => !reserved.has(name));
 
-		if (agentHeader) {
-			const agentTools = agentHeader.mayDelegate ? INSTALLED_AGENT_TOOLS : [];
-			session.setActiveToolsByName([...base, ...agentTools]);
-			session.setHostSystemPrompt(() => undefined);
-			return;
-		}
-
-		if (session.mode !== "code") {
-			session.setActiveToolsByName(base);
-			session.setHostSystemPrompt(() => undefined);
-			return;
-		}
-
-		session.setActiveToolsByName([...base, ...INSTALLED_AGENT_TOOLS]);
-		session.setHostSystemPrompt(() => buildAgentCoordinationPrompt(loadAgentTypeDefinitions()));
+		const mayDelegate = !agentHeader || agentHeader.mayDelegate;
+		session.setActiveToolsByName([...base, ...(mayDelegate ? INSTALLED_AGENT_TOOLS : [])]);
+		session.setAgentCoordinationPrompt(
+			mayDelegate
+				? () =>
+						buildAgentCoordinationPrompt(loadAgentTypeDefinitions(this.agentDir), {
+							parentTools: session.getDelegatableToolNames(agentHeader?.writePolicy ?? "inherit"),
+							depth: (agentHeader?.agentPath.length ?? 0) + 1,
+							writePolicy: agentHeader?.writePolicy ?? "inherit",
+							mode: session.mode,
+						})
+				: undefined,
+		);
 	}
 }

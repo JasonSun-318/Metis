@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAgentDir } from "../../config.ts";
@@ -22,6 +23,108 @@ export interface CustomAgentType {
 	readonly systemPrompt: string;
 	readonly writePolicy: "inherit" | "deny";
 	readonly mayDelegate: boolean;
+}
+
+/** Durable role instructions, never an authorization or runtime-tool snapshot. */
+export interface AgentRoleSnapshot {
+	readonly version: 1;
+	readonly agentType: string;
+	readonly displayName: string;
+	readonly purpose: string;
+	readonly systemPrompt: string;
+	readonly revision: string;
+	readonly source: "created" | "legacy-current" | "legacy-missing";
+}
+
+export function parseAgentRoleSnapshot(value: unknown): AgentRoleSnapshot {
+	const fields = ["version", "agentType", "displayName", "purpose", "systemPrompt", "revision", "source"];
+	if (!isRecord(value) || Object.keys(value).some((key) => !fields.includes(key))) {
+		throw new Error("Invalid agent role snapshot fields");
+	}
+	const { version, agentType, displayName, purpose, systemPrompt, revision, source } = value;
+	if (version !== 1) throw new Error("Invalid agent role snapshot version");
+	if (typeof agentType !== "string" || !AGENT_TYPE_ID_PATTERN.test(agentType)) {
+		throw new Error("Invalid agent role snapshot agentType");
+	}
+	if (
+		typeof displayName !== "string" ||
+		displayName.length < 1 ||
+		displayName.length > MAX_DISPLAY_NAME_CHARS ||
+		NAME_CONTROL_CHARS.test(displayName)
+	) {
+		throw new Error("Invalid agent role snapshot displayName");
+	}
+	if (typeof purpose !== "string" || purpose.length > MAX_DESCRIPTION_CHARS) {
+		throw new Error("Invalid agent role snapshot purpose");
+	}
+	if (typeof systemPrompt !== "string" || Buffer.byteLength(systemPrompt, "utf8") > MAX_SYSTEM_PROMPT_UTF8_BYTES) {
+		throw new Error("Invalid agent role snapshot systemPrompt");
+	}
+	if (typeof revision !== "string" || !/^[a-f0-9]{64}$/u.test(revision)) {
+		throw new Error("Invalid agent role snapshot revision");
+	}
+	if (source !== "created" && source !== "legacy-current" && source !== "legacy-missing") {
+		throw new Error("Invalid agent role snapshot source");
+	}
+	return Object.freeze({ version, agentType, displayName, purpose, systemPrompt, revision, source });
+}
+
+function agentRoleRevision(agentType: string, definition: AgentTypeProfile): string {
+	return createHash("sha256")
+		.update(
+			JSON.stringify({
+				agentType,
+				displayName: definition.displayName ?? agentType,
+				purpose: definition.purpose,
+				systemPrompt: definition.systemPrompt ?? "",
+				allowedTools: definition.allowedTools ? [...new Set(definition.allowedTools)].sort() : null,
+				writePolicy: definition.writePolicy,
+				mayDelegate: definition.mayDelegate,
+			}),
+		)
+		.digest("hex");
+}
+
+export function captureAgentRoleSnapshot(
+	agentType: string,
+	definition: AgentTypeProfile,
+	source: "created" | "legacy-current" = "created",
+): AgentRoleSnapshot {
+	return Object.freeze({
+		version: 1,
+		agentType,
+		displayName: definition.displayName ?? agentType,
+		purpose: definition.purpose,
+		systemPrompt: definition.systemPrompt ?? "",
+		revision: agentRoleRevision(agentType, definition),
+		source,
+	});
+}
+
+export function resolveAgentRoleSnapshot(
+	agentType: string,
+	options: {
+		readonly roleSnapshot?: AgentRoleSnapshot;
+		readonly agentDir?: string;
+		readonly definitions?: Readonly<Record<string, AgentTypeProfile>>;
+	} = {},
+): AgentRoleSnapshot {
+	if (options.roleSnapshot) {
+		if (options.roleSnapshot.agentType !== agentType) {
+			throw new Error(`Role snapshot ${options.roleSnapshot.agentType} does not match agent type ${agentType}`);
+		}
+		return options.roleSnapshot;
+	}
+	const definitions = options.definitions ?? loadAgentTypeDefinitions(options.agentDir);
+	const definition = Object.hasOwn(definitions, agentType) ? definitions[agentType] : undefined;
+	if (definition) return captureAgentRoleSnapshot(agentType, definition, "legacy-current");
+	const fallback = captureAgentRoleSnapshot(agentType, {
+		purpose:
+			"The historical role instructions could not be recovered. Continue only the explicit assignment under the existing runtime limits.",
+		writePolicy: "deny",
+		mayDelegate: false,
+	});
+	return Object.freeze({ ...fallback, source: "legacy-missing" });
 }
 
 interface RegistryFile {
@@ -143,6 +246,7 @@ export function loadAgentTypeDefinitions(agentDir: string = getAgentDir()): Read
 	const definitions: Record<string, AgentTypeProfile> = { ...AGENT_TYPE_PROFILES };
 	for (const custom of readCustomAgentTypes(agentDir)) {
 		definitions[custom.id] = {
+			displayName: custom.displayName,
 			purpose: custom.description,
 			...(custom.allowedTools.length > 0 ? { allowedTools: custom.allowedTools } : {}),
 			...(custom.systemPrompt ? { systemPrompt: custom.systemPrompt } : {}),
@@ -150,5 +254,10 @@ export function loadAgentTypeDefinitions(agentDir: string = getAgentDir()): Read
 			mayDelegate: custom.mayDelegate,
 		};
 	}
-	return definitions;
+	return Object.fromEntries(
+		Object.entries(definitions).map(([id, definition]) => [
+			id,
+			{ ...definition, revision: agentRoleRevision(id, definition) },
+		]),
+	);
 }

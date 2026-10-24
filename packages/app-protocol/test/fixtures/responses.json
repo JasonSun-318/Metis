@@ -1480,5 +1480,36 @@
 				]
 			}
 		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/send",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "agent-send",
+			"result": {
+				"agentId": "22222222-2222-4222-8222-222222222222",
+				"taskId": "task-1",
+				"messageId": "message-1",
+				"requestId": "77777777-7777-4777-8777-777777777777",
+				"delivery": "steer",
+				"state": "accepted",
+				"instructionRevision": 1
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/control",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "agent-control",
+			"result": {
+				"agentId": "22222222-2222-4222-8222-222222222222",
+				"requestId": "77777777-7777-4777-8777-777777777777",
+				"state": "user_paused",
+				"scope": "subtree"
+			}
+		}
 	}
 ]

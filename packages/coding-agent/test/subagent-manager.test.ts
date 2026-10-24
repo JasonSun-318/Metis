@@ -314,7 +314,462 @@ async function finishTask(harness: Harness, agentId: string, taskId: string, tex
 	);
 }
 
+async function reopenHarness(harness: Harness): Promise<Harness> {
+	await harness.manager.unload("parent_unloaded");
+	const path = harness.parentManager.getSessionFile()!;
+	harness.parentManager.close();
+	const parentManager = SessionManager.open(path);
+	const parent = new FakeChildSession(parentManager, harness.parent.getActiveToolNames()) as unknown as AgentSession;
+	const runtimes: FakeChildRuntime[] = [];
+	const factoryInputs: ChildRuntimeFactoryInput[] = [];
+	const manager = new SubagentManager({
+		parentSessionManager: parentManager,
+		agentDir: join(harness.root, "agent"),
+		getWorkspaceRoots: () => parentManager.getWorkspaceRoots(),
+		scheduler: new SubagentScheduler(4, 4),
+		createChildRuntime: async (input) => {
+			factoryInputs.push(input);
+			const runtime = new FakeChildRuntime(
+				input.sessionManager,
+				[...input.config.tools, ...(input.config.mayDelegate ? AGENT_TOOL_NAMES : [])],
+				input.permissionSettingsCeiling,
+			);
+			runtimes.push(runtime);
+			return runtime as unknown as AgentSessionRuntime;
+		},
+	});
+	manager.attachActor(parent);
+	cleanups.unshift(() => parentManager.close());
+	return { ...harness, parentManager, parent, manager, runtimes, factoryInputs };
+}
+
 describe("SubagentManager", () => {
+	it.each(["New assignment", "Repeat assignment"])(
+		"creates fresh follow-ups after cold restarts: %s",
+		async (text) => {
+			let harness = setup();
+			const child = await harness.manager.spawn(ROOT_ID, {
+				name: "Persistent worker",
+				task: "Initial",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+			await finishTask(harness, child.agentId, child.taskId);
+			harness = await reopenHarness(harness);
+			const first = await harness.manager.followUpTask(ROOT_ID, {
+				agentId: child.agentId,
+				task: "Repeat assignment",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+			await finishTask(harness, child.agentId, first.taskId);
+			harness = await reopenHarness(harness);
+			try {
+				const next = await harness.manager.followUpTask(ROOT_ID, { agentId: child.agentId, task: text });
+				expect(next.taskId).not.toBe(first.taskId);
+				await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+				expect(harness.runtimes[0]!.prompts).toEqual([text]);
+				expect(harness.manager.listTasks(child.agentId)).toHaveLength(3);
+				await finishTask(harness, child.agentId, next.taskId);
+			} finally {
+				await harness.manager.unload("parent_unloaded");
+			}
+		},
+	);
+
+	it.each(["sendMessage", "followUpTask"] as const)(
+		"deduplicates %s replay across restart and rejects changed input",
+		async (method) => {
+			let harness = setup();
+			const child = await harness.manager.spawn(ROOT_ID, {
+				name: "Replay worker",
+				task: "Initial",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+			const input = {
+				agentId: child.agentId,
+				message: "Replay instructions",
+				task: "Replay instructions",
+				requestId: "stable-tool-operation",
+			};
+			const first = await harness.manager[method](ROOT_ID, input);
+			await finishTask(harness, child.agentId, child.taskId);
+			if (method === "followUpTask") {
+				await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+				await finishTask(harness, child.agentId, first.taskId);
+			}
+			harness = await reopenHarness(harness);
+			try {
+				const replayed = await harness.manager[method](ROOT_ID, input);
+				expect(replayed.taskId).toBe(first.taskId);
+				expect(harness.runtimes).toHaveLength(0);
+				expect(harness.manager.listTasks(child.agentId)).toHaveLength(method === "followUpTask" ? 2 : 1);
+				await expect(
+					harness.manager[method](ROOT_ID, { ...input, task: "Changed", message: "Changed" }),
+				).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" });
+			} finally {
+				await harness.manager.unload("parent_unloaded");
+			}
+		},
+	);
+
+	it("admits human steering idempotently and notifies its parent exactly once", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Image layout",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const submission = {
+			agentId: child.agentId,
+			requestId: "human-steer-1",
+			input: { text: "Check dimensions first" },
+		};
+		const first = await harness.manager.submitMessage({ kind: "user" }, submission);
+		const second = await harness.manager.submitMessage({ kind: "user" }, submission);
+		expect(second).toEqual(first);
+		expect(first).toMatchObject({
+			taskId: child.taskId,
+			delivery: "steer",
+			state: "accepted",
+			instructionRevision: 2,
+		});
+		expect(harness.runtimes[0].prompts.filter((text) => text === "Check dimensions first")).toHaveLength(1);
+		const events = harness.parentManager
+			.getDurableJournalSnapshot()
+			.filter((entry) => entry.type === "agent_mailbox_event" && entry.event.type === "intervention");
+		expect(events).toHaveLength(1);
+		await expect(
+			harness.manager.submitMessage({ kind: "user" }, { ...submission, input: { text: "Different" } }),
+		).rejects.toMatchObject({ code: "REQUEST_ID_CONFLICT" });
+		await finishTask(harness, child.agentId, child.taskId);
+	});
+
+	it("retains a report before a human stop acknowledgment and inspects it without resuming work", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Inventory worker",
+			task: "Inspect the project",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const runtime = harness.runtimes[0]!;
+		await vi.waitFor(() => expect(harness.manager.listTasks(child.agentId)[0]?.status).toBe("running"));
+		const report = "Inventory report: dependencies and build artifacts account for most disk usage.";
+		runtime.session.sessionManager.appendMessage({
+			...assistantMsg(report),
+			content: [
+				{ type: "thinking", thinking: "Private reasoning must not appear in activity." },
+				{ type: "text", text: report },
+			],
+		});
+		await harness.manager.submitMessage(
+			{ kind: "user" },
+			{ agentId: child.agentId, requestId: "stop-via-message", input: { text: "不用看了" } },
+		);
+		const acknowledgment = "明白，就到这里，不再继续查看或执行命令。";
+		await finishTask(harness, child.agentId, child.taskId, acknowledgment);
+		const terminal = harness.parentManager
+			.getDurableJournalSnapshot()
+			.find((entry) => entry.type === "agent_mailbox_event" && entry.event.type === "terminal");
+		expect(terminal).toMatchObject({ event: { finalMessage: acknowledgment, status: "done" } });
+
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: child.agentId, action: "stop", scope: "self", requestId: "persist-human-pause" },
+		);
+		const journalBefore = await harness.manager.readJournal(ROOT_ID, child.agentId);
+		const latest = await harness.manager.inspect(ROOT_ID, { agentId: child.agentId, taskId: child.taskId, limit: 1 });
+		if (latest.kind !== "trace") throw new Error("Expected task activity");
+		expect(latest.events).toMatchObject([{ kind: "final", text: acknowledgment }]);
+		expect(latest.nextBeforeEventId).toBeDefined();
+		const earlier = await harness.manager.inspect(ROOT_ID, {
+			agentId: child.agentId,
+			taskId: child.taskId,
+			beforeEventId: latest.nextBeforeEventId,
+			limit: 1,
+		});
+		if (earlier.kind !== "trace") throw new Error("Expected earlier task activity");
+		expect(earlier.events).toMatchObject([{ kind: "llm", text: report }]);
+		expect(JSON.stringify(earlier)).not.toContain("Private reasoning");
+		expect(await harness.manager.readJournal(ROOT_ID, child.agentId)).toEqual(journalBefore);
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("user_paused");
+		expect(harness.manager.isRunAllowed(child.agentId)).toBe(false);
+		expect(harness.runtimes).toHaveLength(1);
+		expect(runtime.prompts).toEqual(["Inspect the project", "不用看了"]);
+		expect(harness.manager.listTasks(child.agentId)).toHaveLength(1);
+	});
+
+	it("persists a user stop, denies agent restart, and accepts a human task in the same child", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Research task",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: child.agentId, action: "stop", scope: "subtree", requestId: "stop-1" },
+		);
+		expect(harness.manager.isRunAllowed(child.agentId)).toBe(false);
+		await expect(
+			harness.manager.followUpTask(ROOT_ID, { agentId: child.agentId, task: "Restart" }),
+		).rejects.toMatchObject({ code: "USER_PAUSED" });
+		const receipt = await harness.manager.submitMessage(
+			{ kind: "user" },
+			{ agentId: child.agentId, requestId: "resume-input", input: { text: "Continue with dimensions" } },
+		);
+		expect(receipt.agentId).toBe(child.agentId);
+		expect(receipt.taskId).not.toBe(child.taskId);
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, child.agentId, receipt.taskId);
+	});
+
+	it("does not let a human child message bypass a paused root", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Research task",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: ROOT_ID, action: "stop", scope: "subtree", requestId: "root-stop" },
+		);
+		await expect(
+			harness.manager.submitMessage(
+				{ kind: "user" },
+				{ agentId: child.agentId, requestId: "child-send", input: { text: "Resume" } },
+			),
+		).rejects.toMatchObject({ code: "USER_PAUSED" });
+		expect(harness.runtimes).toHaveLength(1);
+	});
+
+	it("resumes only the target conversation and never bypasses a paused root", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "Research task",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: child.agentId, action: "stop", scope: "subtree", requestId: "stop-child" },
+		);
+		await expect(
+			harness.manager.control(
+				{ kind: "user" },
+				{ agentId: child.agentId, action: "resume", scope: "subtree", requestId: "resume-subtree" },
+			),
+		).rejects.toMatchObject({ code: "INVALID_INPUT" });
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: child.agentId, action: "resume", scope: "self", requestId: "resume-self" },
+		);
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("enabled");
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: ROOT_ID, action: "stop", scope: "subtree", requestId: "root-stop" },
+		);
+		await expect(
+			harness.manager.control(
+				{ kind: "user" },
+				{ agentId: child.agentId, action: "resume", scope: "self", requestId: "resume-under-root" },
+			),
+		).rejects.toMatchObject({ code: "USER_PAUSED" });
+	});
+
+	it("keeps a paused agent paused when send validation fails", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "paused validation",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.control(
+			{ kind: "user" },
+			{ agentId: child.agentId, action: "stop", scope: "self", requestId: "pause-before-failed-send" },
+		);
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("user_paused");
+		await harness.manager.setArchived(ROOT_ID, child.agentId, true);
+		await expect(
+			harness.manager.submitMessage(
+				{ kind: "user" },
+				{ agentId: child.agentId, requestId: "failed-archived-send", input: { text: "Continue" } },
+			),
+		).rejects.toMatchObject({ code: "INVALID_STATE" });
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("user_paused");
+	});
+
+	it("retries control subtree cleanup for the same request id", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "retry stop",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const runtime = harness.runtimes[0]!;
+		let attempts = 0;
+		runtime.interrupt = async () => {
+			attempts += 1;
+			if (attempts === 1) throw new Error("interrupt failed");
+			runtime.session.settle("interrupted", "aborted");
+			return {} as never;
+		};
+		const stop = {
+			agentId: ROOT_ID,
+			action: "stop" as const,
+			scope: "subtree" as const,
+			requestId: "retry-subtree-stop",
+		};
+		await expect(harness.manager.control({ kind: "user" }, stop)).rejects.toThrow("interrupt failed");
+		await expect(harness.manager.control({ kind: "user" }, stop)).resolves.toMatchObject({
+			agentId: ROOT_ID,
+			state: "user_paused",
+		});
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("user_paused");
+		await vi.waitFor(() =>
+			expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)?.status).toBe(
+				"stopped",
+			),
+		);
+	});
+
+	it("does not replay an old stop over a newer human resume", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, { name: "stop retry", task: "Inspect", agentType: "worker" });
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const stop = { agentId: child.agentId, action: "stop" as const, scope: "self" as const, requestId: "old-stop" };
+		await harness.manager.control({ kind: "user" }, stop);
+		await harness.manager.control({ kind: "user" }, { ...stop, action: "resume", requestId: "new-resume" });
+		const message = await harness.manager.submitMessage(
+			{ kind: "user" },
+			{ agentId: child.agentId, requestId: "new-work", input: { text: "Continue" } },
+		);
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await harness.manager.control({ kind: "user" }, stop);
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("enabled");
+		expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === message.taskId)?.status).toBe(
+			"running",
+		);
+	});
+
+	it.each(["retry", "reattach"] as const)(
+		"recovers a failed terminal-child control notification through %s",
+		async (recovery) => {
+			const harness = setup();
+			const child = await harness.manager.spawn(ROOT_ID, {
+				name: "control notification recovery",
+				task: "Finish before the human stop",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+			await finishTask(harness, child.agentId, child.taskId);
+			const runtimeCount = harness.runtimes.length;
+			const stop = {
+				agentId: child.agentId,
+				action: "stop" as const,
+				scope: "self" as const,
+				requestId: "recover-control-notification",
+			};
+			const eventId = `agent:${child.agentId}:${stop.requestId}:control:${ROOT_ID}`;
+			const originalAppend = harness.parentManager.appendAgentControl.bind(harness.parentManager);
+			const append = vi.spyOn(harness.parentManager, "appendAgentControl").mockImplementationOnce((payload) => {
+				if (payload.type === "agent_mailbox_event" && payload.event.eventId === eventId)
+					throw new Error("transient root mailbox write failure");
+				return originalAppend(payload);
+			});
+			let restored: SubagentManager | undefined;
+			try {
+				await harness.manager.control({ kind: "user" }, stop);
+				const copies = () =>
+					harness.parentManager
+						.getDurableJournalSnapshot()
+						.filter((entry) => entry.type === "agent_mailbox_event" && entry.event.eventId === eventId);
+				expect(copies()).toHaveLength(0);
+				append.mockRestore();
+				if (recovery === "retry") {
+					await harness.manager.control({ kind: "user" }, stop);
+				} else {
+					await harness.manager.unload("parent_unloaded");
+					restored = new SubagentManager({
+						parentSessionManager: harness.parentManager,
+						agentDir: join(harness.root, "agent"),
+						getWorkspaceRoots: () => harness.parentManager.getWorkspaceRoots(),
+						createChildRuntime: async () => {
+							throw new Error("History recovery must not start a model");
+						},
+					});
+					const notifications: AgentManagerEvent[] = [];
+					restored.subscribe((event) => notifications.push(event));
+					restored.attachActor(harness.parent);
+					expect(
+						notifications.filter(
+							(event) => event.type === "notification_ready" && event.event.eventId === eventId,
+						),
+					).toEqual([expect.objectContaining({ type: "notification_ready", wake: false })]);
+				}
+				expect(copies()).toHaveLength(1);
+				expect(harness.runtimes).toHaveLength(runtimeCount);
+				expect((restored ?? harness.manager).listTasks(child.agentId)).toHaveLength(1);
+			} finally {
+				append.mockRestore();
+				await restored?.unload("parent_unloaded");
+				await harness.manager.unload("parent_unloaded");
+			}
+		},
+	);
+
+	it("repairs an accepted input whose task append failed on retry", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "repair input",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		await harness.manager.control(
+			{ kind: "user" },
+			{
+				agentId: child.agentId,
+				action: "stop",
+				scope: "self",
+				requestId: "pause-before-write-failure",
+			},
+		);
+		const internals = harness.manager as unknown as {
+			appendControl: (agentId: string, payload: { type: string; taskId?: string }, record?: unknown) => void;
+		};
+		const original = internals.appendControl.bind(harness.manager);
+		let failed = false;
+		internals.appendControl = (agentId, payload, record) => {
+			if (!failed && payload.type === "agent_task") {
+				failed = true;
+				throw new Error("task append failed");
+			}
+			return original(agentId, payload, record);
+		};
+		const request = {
+			agentId: child.agentId,
+			requestId: "repair-task-append",
+			delivery: "queue" as const,
+			input: { text: "Continue after repair" },
+		};
+		await expect(harness.manager.submitMessage({ kind: "user" }, request)).rejects.toThrow("task append failed");
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("user_paused");
+		internals.appendControl = original;
+		const receipt = await harness.manager.submitMessage({ kind: "user" }, request);
+		expect(harness.manager.listTasks(child.agentId).some((task) => task.taskId === receipt.taskId)).toBe(true);
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		expect(harness.manager.getRunControl(child.agentId)?.state).toBe("enabled");
+	});
+
 	it("accepts provider-qualified model ids that contain slashes", async () => {
 		const base = getModel("anthropic", "claude-sonnet-4-5")!;
 		const childModel = { ...base, provider: "fixture", id: "family/model" } as unknown as Model<any>;
@@ -609,7 +1064,7 @@ describe("SubagentManager", () => {
 		harness.runtimes[0]!.session.settle();
 	});
 
-	it("records a cancelled message when steering admission fails", async () => {
+	it("records a failed receipt when steering admission fails", async () => {
 		const harness = setup();
 		const created = await harness.manager.spawn(ROOT_ID, {
 			name: "reject steering",
@@ -622,10 +1077,15 @@ describe("SubagentManager", () => {
 			harness.manager.sendMessage(ROOT_ID, { agentId: created.agentId, message: "too late" }),
 		).rejects.toThrow("runtime is disposing");
 		const messages = harness.runtimes[0]!.session.sessionManager.getDurableJournalSnapshot().filter(
-			(entry) => entry.type === "agent_message",
+			(entry) => entry.type === "agent_input" && entry.delivery === "steer",
 		);
-		expect(messages.map((entry) => entry.state)).toEqual(["accepted", "cancelled"]);
-		expect(new Set(messages.map((entry) => entry.messageId)).size).toBe(1);
+		expect(messages.map((entry) => (entry.type === "agent_input" ? entry.state : undefined))).toEqual([
+			"accepted",
+			"failed",
+		]);
+		expect(new Set(messages.map((entry) => (entry.type === "agent_input" ? entry.messageId : undefined))).size).toBe(
+			1,
+		);
 		harness.runtimes[0]!.session.settle();
 	});
 
@@ -692,6 +1152,47 @@ describe("SubagentManager", () => {
 		harness.runtimes[0]!.session.settle("foreground complete");
 		await vi.waitFor(() => expect(harness.manager.listSummaries(ROOT_ID)[0]?.status).toBe("done"));
 	});
+
+	it.each(["user control", "model interrupt"] as const)(
+		"stops a starting child through %s without prompting",
+		async (path) => {
+			const gate = deferred();
+			const harness = setup({ factoryGate: gate.promise });
+			const child = await harness.manager.spawn(ROOT_ID, {
+				name: "starting stop",
+				task: "Start later",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.factoryInputs).toHaveLength(1));
+			const stopping =
+				path === "user control"
+					? harness.manager.control(
+							{ kind: "user" },
+							{ agentId: child.agentId, action: "stop", scope: "self", requestId: "stop-while-starting" },
+						)
+					: harness.manager.interrupt(ROOT_ID, child.agentId);
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			gate.resolve();
+			try {
+				await stopping;
+				expect
+					.soft(harness.manager.getRunControl(child.agentId)?.state)
+					.toBe(path === "user control" ? "user_paused" : "interrupted");
+				expect
+					.soft(
+						new AgentStore(harness.parentManager, join(harness.root, "agent")).load(child.agentId).runControl
+							?.state,
+					)
+					.toBe(path === "user control" ? "user_paused" : "interrupted");
+				expect.soft(harness.runtimes.flatMap((runtime) => runtime.prompts)).toEqual([]);
+				expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)?.status).toBe(
+					"stopped",
+				);
+			} finally {
+				await harness.manager.unload("parent_unloaded");
+			}
+		},
+	);
 
 	it("applies a parent downgrade before a starting child's first prompt", async () => {
 		const gate = deferred();
@@ -796,6 +1297,100 @@ describe("SubagentManager", () => {
 		}
 	});
 
+	it("keeps a cold grandchild under the intermediate parent ceiling", async () => {
+		const harness = setup({ parentPermissionPreset: "full" });
+		const parent = await harness.manager.spawn(ROOT_ID, {
+			name: "ceiling parent",
+			task: "Coordinate",
+			agentType: "worker",
+			permissionPreset: "ask",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const parentSession = harness.runtimes[0]!.session;
+		await finishTask(harness, parent.agentId, parent.taskId);
+		const detach = harness.manager.attachActor(parentSession as unknown as AgentSession);
+		const child = await harness.manager.spawn(parent.agentId, {
+			name: "ceiling child",
+			task: "Inspect",
+			agentType: "worker",
+			permissionPreset: "full",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, child.agentId, child.taskId);
+		detach();
+		await harness.manager.unload("parent_unloaded");
+
+		const recoveredInputs: ChildRuntimeFactoryInput[] = [];
+		const recovered = new SubagentManager({
+			parentSessionManager: harness.parentManager,
+			agentDir: join(harness.root, "agent"),
+			getWorkspaceRoots: () => harness.parentManager.getWorkspaceRoots(),
+			createChildRuntime: async (input) => {
+				recoveredInputs.push(input);
+				return new FakeChildRuntime(
+					input.sessionManager,
+					[...input.config.tools, ...(input.config.mayDelegate ? AGENT_TOOL_NAMES : [])],
+					input.permissionSettingsCeiling,
+				) as unknown as AgentSessionRuntime;
+			},
+		});
+		recovered.attachActor(harness.parent);
+		try {
+			await recovered.followUpTask(ROOT_ID, { agentId: child.agentId, task: "Continue" });
+			await vi.waitFor(() => expect(recoveredInputs).toHaveLength(1));
+			expect(recoveredInputs[0]!.config.permissionPreset).toBe("full");
+			expect(recoveredInputs[0]!.permissionSettingsCeiling?.()).toEqual(PERMISSION_PRESETS.ask);
+		} finally {
+			await recovered.unload("parent_unloaded");
+		}
+	});
+
+	it("persists a historical parent narrowing across a cold restart", async () => {
+		const harness = setup({ parentPermissionPreset: "full" });
+		const parent = await harness.manager.spawn(ROOT_ID, {
+			name: "historical parent",
+			task: "Coordinate",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const parentSession = harness.runtimes[0]!.session;
+		const detach = harness.manager.attachActor(parentSession as unknown as AgentSession);
+		const child = await harness.manager.spawn(parent.agentId, {
+			name: "historical child",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		await finishTask(harness, child.agentId, child.taskId);
+		parentSession.sessionManager.setPermissionPreset("ask");
+		parentSession.sessionManager.setPermissionPreset("full");
+		detach();
+		await harness.manager.unload("parent_unloaded");
+
+		const recoveredInputs: ChildRuntimeFactoryInput[] = [];
+		const recovered = new SubagentManager({
+			parentSessionManager: harness.parentManager,
+			agentDir: join(harness.root, "agent"),
+			getWorkspaceRoots: () => harness.parentManager.getWorkspaceRoots(),
+			createChildRuntime: async (input) => {
+				recoveredInputs.push(input);
+				return new FakeChildRuntime(
+					input.sessionManager,
+					[...input.config.tools, ...(input.config.mayDelegate ? AGENT_TOOL_NAMES : [])],
+					input.permissionSettingsCeiling,
+				) as unknown as AgentSessionRuntime;
+			},
+		});
+		recovered.attachActor(harness.parent);
+		try {
+			await recovered.followUpTask(ROOT_ID, { agentId: child.agentId, task: "Continue" });
+			await vi.waitFor(() => expect(recoveredInputs).toHaveLength(1));
+			expect(recoveredInputs[0]!.permissionSettingsCeiling?.()).toEqual(PERMISSION_PRESETS.ask);
+		} finally {
+			await recovered.unload("parent_unloaded");
+		}
+	});
+
 	it("maps provider errors to failed tasks", async () => {
 		const harness = setup();
 		const created = await harness.manager.spawn(ROOT_ID, {
@@ -837,6 +1432,32 @@ describe("SubagentManager", () => {
 		});
 		expect(harness.runtimes[0]?.disposed).toBe(true);
 		expect(created.agentId).toBeTruthy();
+	});
+
+	it("persists a failed terminal state after disposal closes the hot session", async () => {
+		const harness = setup();
+		const child = await harness.manager.spawn(ROOT_ID, {
+			name: "dispose failure",
+			task: "Inspect",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const runtime = harness.runtimes[0]!;
+		runtime.dispose = async () => {
+			runtime.session.sessionManager.close();
+			throw new Error("dispose exploded");
+		};
+		runtime.session.settle("finished");
+		await vi.waitFor(
+			() =>
+				expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)?.status).toBe(
+					"failed",
+				),
+			{ timeout: 5_000 },
+		);
+		expect(harness.manager.listTasks(child.agentId).find((task) => task.taskId === child.taskId)?.error).toContain(
+			"dispose exploded",
+		);
 	});
 
 	it("does not finish interrupt until disposal and terminal persistence complete", async () => {
@@ -1238,6 +1859,76 @@ describe("SubagentManager", () => {
 		expect(harness.factoryInputs.at(-1)!.config.agentPath).toHaveLength(2);
 	});
 
+	it("does not resume a cold mailbox beneath an archived ancestor", async () => {
+		const harness = setup();
+		try {
+			const parent = await harness.manager.spawn(ROOT_ID, {
+				name: "archived mailbox parent",
+				task: "Coordinate",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+			harness.manager.attachActor(harness.runtimes[0]!.session as unknown as AgentSession);
+			const child = await harness.manager.spawn(parent.agentId, {
+				name: "archived mailbox child",
+				task: "Finish",
+				agentType: "worker",
+			});
+			await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+			await harness.manager.control(
+				{ kind: "user" },
+				{
+					agentId: parent.agentId,
+					action: "stop",
+					scope: "self",
+					requestId: "pause-mailbox-parent",
+				},
+			);
+			await finishTask(harness, child.agentId, child.taskId);
+			await vi.waitFor(() => expect(harness.runtimes[1]!.disposed).toBe(true));
+			const store = new AgentStore(harness.parentManager, join(harness.root, "agent"));
+			const writer = SessionManager.open(store.load(child.agentId).path);
+			try {
+				writer.appendAgentControl({
+					type: "agent_mailbox_event",
+					event: {
+						type: "terminal",
+						eventId: "late-cold-mailbox-result",
+						parentSessionId: child.agentId,
+						agentId: "finished-grandchild",
+						taskId: "finished-grandchild-task",
+						name: "finished grandchild",
+						status: "done",
+						finalMessage: "Late result",
+						completedAt: new Date().toISOString(),
+					},
+				});
+			} finally {
+				writer.close();
+			}
+			await harness.manager.setArchived(ROOT_ID, parent.agentId, true);
+			const runtimeCount = harness.runtimes.length;
+			const taskCount = harness.manager.listTasks(child.agentId).length;
+			await harness.manager
+				.control(
+					{ kind: "user" },
+					{
+						agentId: child.agentId,
+						action: "resume",
+						scope: "self",
+						requestId: "resume-under-archive",
+					},
+				)
+				.catch((error) => expect(error).toMatchObject({ code: "INVALID_STATE" }));
+			await new Promise((resolve) => setTimeout(resolve, 0));
+			expect.soft(harness.runtimes).toHaveLength(runtimeCount);
+			expect(harness.manager.listTasks(child.agentId)).toHaveLength(taskCount);
+			expect(store.load(parent.agentId).archived).toBe(true);
+		} finally {
+			await harness.manager.unload("parent_unloaded");
+		}
+	});
+
 	it("treats an archived ancestor as an archive overlay for its terminal subtree", async () => {
 		const harness = setup();
 		const parent = await harness.manager.spawn(ROOT_ID, {
@@ -1258,6 +1949,10 @@ describe("SubagentManager", () => {
 		harness.runtimes[0]!.session.settle("parent done");
 		await vi.waitFor(() => expect(harness.manager.listTasks(parent.agentId)[0]?.status).toBe("done"));
 
+		// This fixture does not consume the mailbox during the first task. Finish
+		// the automatically scheduled continuation before archiving its tree.
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(3));
+		await finishTask(harness, parent.agentId, harness.manager.listTasks(parent.agentId).at(-1)!.taskId);
 		await harness.manager.setArchived(ROOT_ID, parent.agentId, true);
 		expect(harness.manager.listSummaries(ROOT_ID)).toEqual([]);
 		expect(
@@ -1387,6 +2082,35 @@ describe("SubagentManager", () => {
 			harness.manager.spawn(ROOT_ID, { name: "queue overflow", task: "Overflow", agentType: "worker" }),
 		).rejects.toMatchObject({ code: "QUEUE_FULL" });
 		expect(harness.manager.listSummaries(ROOT_ID, true).some((agent) => agent.name === "queue overflow")).toBe(false);
+	});
+
+	it("reports active work without scanning the agent tree", async () => {
+		const harness = setup({ scheduler: new SubagentScheduler(1, 1) });
+		const blocker = await harness.manager.spawn(ROOT_ID, {
+			name: "active blocker",
+			task: "Block",
+			agentType: "worker",
+		});
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(1));
+		const queued = await harness.manager.spawn(ROOT_ID, {
+			name: "active queue",
+			task: "Wait",
+			agentType: "worker",
+		});
+		expect(queued.status).toBe("queued");
+		const listTree = vi.spyOn(AgentStore.prototype, "listTree");
+		const expectActive = (expected: boolean) => {
+			const scans = listTree.mock.calls.length;
+			expect(harness.manager.hasActiveWork()).toBe(expected);
+			expect(listTree.mock.calls.length).toBe(scans);
+		};
+		expectActive(true);
+		expectActive(true);
+		await finishTask(harness, blocker.agentId, blocker.taskId, "blocker done");
+		await vi.waitFor(() => expect(harness.runtimes).toHaveLength(2));
+		expectActive(true);
+		await finishTask(harness, queued.agentId, queued.taskId, "queued done");
+		await vi.waitFor(() => expectActive(false));
 	});
 
 	it("rejects invalid ingress before creating a child journal", async () => {

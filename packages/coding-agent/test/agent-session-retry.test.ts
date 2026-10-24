@@ -71,7 +71,7 @@ describe("AgentSession retry", () => {
 
 	function createSession(options?: { failCount?: number; maxRetries?: number; delayAssistantMessageEndMs?: number }) {
 		const failCount = options?.failCount ?? 1;
-		const maxRetries = options?.maxRetries ?? 3;
+		const maxRetries = options?.maxRetries;
 		const delayAssistantMessageEndMs = options?.delayAssistantMessageEndMs ?? 0;
 		let callCount = 0;
 
@@ -106,7 +106,9 @@ describe("AgentSession retry", () => {
 		const authStorage = AuthStorage.create(join(tempDir, "auth.json"));
 		const modelRegistry = ModelRegistry.create(authStorage, tempDir);
 		authStorage.setRuntimeApiKey("anthropic", "test-key");
-		settingsManager.applyOverrides({ retry: { enabled: true, maxRetries, baseDelayMs: 1 } });
+		settingsManager.applyOverrides({
+			retry: { enabled: true, ...(maxRetries === undefined ? {} : { maxRetries }), baseDelayMs: 1 },
+		});
 
 		session = new AgentSession({
 			agent,
@@ -144,6 +146,41 @@ describe("AgentSession retry", () => {
 		expect(created.getCallCount()).toBe(2);
 		expect(events).toEqual(["start:1", "end:success=true"]);
 		expect(created.session.isRetrying).toBe(false);
+	});
+
+	it("defaults to five visible retries and marks intermediate failures before publishing them", async () => {
+		const created = createSession({ failCount: 99 });
+		const failures: AssistantMessage[] = [];
+		const attempts: number[] = [];
+		created.session.subscribe((event) => {
+			if (event.type === "message_end" && event.message.role === "assistant")
+				failures.push(structuredClone(event.message));
+			if (event.type === "auto_retry_start") {
+				attempts.push(event.attempt);
+				expect(event.maxAttempts).toBe(5);
+				expect(created.session.retryState?.attempt).toBe(event.attempt);
+			}
+			if (event.type === "auto_retry_end") expect(created.session.retryState).toBeUndefined();
+		});
+		await created.session.prompt("Test");
+		expect(created.getCallCount()).toBe(6);
+		expect(attempts).toEqual([1, 2, 3, 4, 5]);
+		for (const failure of failures.slice(0, 5))
+			expect(failure.diagnostics).toEqual(
+				expect.arrayContaining([expect.objectContaining({ type: "auto_retry_scheduled" })]),
+			);
+		expect(failures.at(-1)?.diagnostics).toBeUndefined();
+	});
+
+	it("stops during backoff without sending another provider request", async () => {
+		const created = createSession({ failCount: 99 });
+		created.session.settingsManager.applyOverrides({ retry: { enabled: true, baseDelayMs: 10_000 } });
+		created.session.subscribe((event) => {
+			if (event.type === "auto_retry_start") queueMicrotask(() => void created.session.abort());
+		});
+		await created.session.prompt("Test");
+		expect(created.getCallCount()).toBe(1);
+		expect(created.session.retryState).toBeUndefined();
 	});
 
 	it("exhausts max retries and emits failure", async () => {

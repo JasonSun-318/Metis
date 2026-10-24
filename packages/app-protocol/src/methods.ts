@@ -430,6 +430,7 @@ export const SessionReadItemsResultSchema = StrictObject({
 
 export const SessionReadImageParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
 	image: DurableImageRefViewSchema,
 });
 export const SessionReadImageResultSchema = StrictObject({
@@ -444,6 +445,7 @@ export const SessionReadImageResultSchema = StrictObject({
 
 export const SessionOpenDeliveredFileParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
 	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
 	action: Type.Union([Type.Literal("default"), Type.Literal("reveal")]),
 });
@@ -451,6 +453,7 @@ export const SessionOpenDeliveredFileResultSchema = StrictObject({});
 
 export const SessionReadDeliveredFileParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
 	fileId: Type.String({ minLength: 16, maxLength: 16, pattern: "^[a-f0-9]{16}$" }),
 });
 export const SessionReadDeliveredFileResultSchema = StrictObject({
@@ -661,6 +664,7 @@ export const AgentListParamsSchema = StrictObject({
 export const AgentListResultSchema = StrictObject({
 	agents: Type.Array(AgentSummaryViewSchema, { maxItems: 100 }),
 	nextAfterAgentId: Type.Union([SessionIdSchema, Type.Null()]),
+	unreadableAgentCount: Type.Optional(Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER })),
 });
 export const AgentResultSchema = StrictObject({ agent: AgentSummaryViewSchema });
 export const AgentDeleteResultSchema = StrictObject({
@@ -671,6 +675,7 @@ export const AgentDeleteResultSchema = StrictObject({
 export const AgentTypeListParamsSchema = StrictObject({});
 export const AgentTypeListResultSchema = StrictObject({
 	types: Type.Array(CustomAgentTypeViewSchema, { maxItems: 20 }),
+	availableTools: Type.Optional(Type.Array(NameSchema, { maxItems: 256, uniqueItems: true })),
 });
 export const AgentTypeUpsertParamsSchema = StrictObject({
 	requestId: UuidSchema,
@@ -747,6 +752,48 @@ export const TurnInputSchema = StrictObject({
 	attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
 	fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
 	conversationQuotes: Type.Optional(Type.Array(ConversationQuoteInputSchema, { maxItems: 8 })),
+});
+
+export const AgentSendParamsSchema = StrictObject({
+	...AgentMutationFields,
+	delivery: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("steer"), Type.Literal("queue")])),
+	input: StrictObject({
+		text: PromptTextSchema,
+		images: Type.Optional(Type.Array(DurableImageRefViewSchema, { maxItems: 32 })),
+		attachments: Type.Optional(Type.Array(FileAttachmentInputSchema, { maxItems: 16 })),
+		fileSelections: Type.Optional(Type.Array(FileSelectionInputSchema, { maxItems: 8 })),
+		conversationQuotes: Type.Optional(Type.Array(ConversationQuoteInputSchema, { maxItems: 8 })),
+	}),
+});
+export const AgentSendResultSchema = StrictObject({
+	agentId: SessionIdSchema,
+	taskId: SessionIdSchema,
+	messageId: OpaqueIdSchema,
+	requestId: UuidSchema,
+	delivery: Type.Union([Type.Literal("steer"), Type.Literal("start"), Type.Literal("queue")]),
+	state: Type.Union([
+		Type.Literal("accepted"),
+		Type.Literal("queued"),
+		Type.Literal("delivered"),
+		Type.Literal("cancelled"),
+		Type.Literal("failed"),
+	]),
+	instructionRevision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+});
+export const AgentControlParamsSchema = Type.Refine(
+	StrictObject({
+		...AgentMutationFields,
+		action: Type.Union([Type.Literal("stop"), Type.Literal("resume")]),
+		scope: Type.Optional(Type.Union([Type.Literal("self"), Type.Literal("subtree")])),
+	}),
+	(value) => value.action !== "resume" || value.scope !== "subtree",
+	"Resume applies to the selected agent only",
+);
+export const AgentControlResultSchema = StrictObject({
+	agentId: SessionIdSchema,
+	requestId: UuidSchema,
+	state: Type.Union([Type.Literal("enabled"), Type.Literal("user_paused"), Type.Literal("interrupted")]),
+	scope: Type.Union([Type.Literal("self"), Type.Literal("subtree")]),
 });
 
 export const TurnSteerParamsSchema = StrictObject({
@@ -1158,6 +1205,7 @@ export const BrowserTabsInputSchema = Type.Union(
 		StrictObject({ action: Type.Literal("list") }),
 		StrictObject({ action: Type.Literal("open"), profileId: Type.Optional(BrowserProfileIdSchema) }),
 		StrictObject({ action: Type.Literal("close"), browserId: BrowserIdSchema }),
+		StrictObject({ action: Type.Literal("release"), browserId: BrowserIdSchema }),
 	],
 	{ type: "object" },
 );
@@ -1173,10 +1221,17 @@ export const BrowserNavigateInputSchema = Type.Union(
 	{ type: "object" },
 );
 
+const BrowserStateCursorSchema = StrictObject({
+	documentId: UuidSchema,
+	revision: Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+	offset: Type.Integer({ minimum: 1, maximum: MAX_BROWSER_STATE_UTF8_BYTES }),
+});
+
 export const BrowserObserveInputSchema = StrictObject({
 	browserId: BrowserIdSchema,
 	mode: Type.Optional(Type.Union([Type.Literal("state"), Type.Literal("screenshot"), Type.Literal("both")])),
 	sinceRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	cursor: Type.Optional(BrowserStateCursorSchema),
 });
 
 export const BrowserRiskSchema = Type.Union([
@@ -1212,6 +1267,11 @@ export const BrowserActionSchema = Type.Union([
 		type: Type.Literal("select"),
 		elementId: BrowserElementIdSchema,
 		value: Utf8String(4096),
+	}),
+	StrictObject({
+		type: Type.Literal("select"),
+		elementId: BrowserElementIdSchema,
+		optionIndex: Type.Integer({ minimum: 0, maximum: 999 }),
 	}),
 	StrictObject({
 		type: Type.Literal("dialog"),
@@ -1252,6 +1312,14 @@ export const BrowserObservationSchema = StrictObject({
 	title: Utf8String(4096),
 	loading: Type.Boolean(),
 	state: Utf8String(MAX_BROWSER_STATE_UTF8_BYTES),
+	statePage: Type.Optional(
+		StrictObject({
+			offset: Type.Integer({ minimum: 0, maximum: MAX_BROWSER_STATE_UTF8_BYTES }),
+			totalChars: Type.Integer({ minimum: 0, maximum: MAX_BROWSER_STATE_UTF8_BYTES }),
+			nextCursor: Type.Optional(BrowserStateCursorSchema),
+		}),
+	),
+	cursorReset: Type.Optional(Type.Literal(true)),
 	screenshot: Type.Optional(
 		StrictObject({
 			mediaType: Type.Literal("image/jpeg"),
@@ -1278,6 +1346,7 @@ export const BrowserTabsDetailsSchema = StrictObject({
 			url: BrowserUrlSchema,
 			loading: Type.Boolean(),
 			controlState: BrowserControlStateSchema,
+			ownerAgentId: Type.Optional(SessionIdSchema),
 		}),
 		{ maxItems: MAX_BROWSER_TABS_PER_SESSION },
 	),
@@ -1286,12 +1355,30 @@ export const BrowserTabsDetailsSchema = StrictObject({
 export const BrowserOperationDetailsSchema = Type.Union([
 	StrictObject({ status: Type.Literal("completed"), observation: BrowserObservationSchema }),
 	StrictObject({
+		status: Type.Literal("failed"),
+		reason: Type.Union([
+			Type.Literal("select_unavailable"),
+			Type.Literal("unsupported_select"),
+			Type.Literal("option_not_found"),
+			Type.Literal("option_ambiguous"),
+			Type.Literal("option_changed"),
+			Type.Literal("option_unavailable"),
+			Type.Literal("select_changed"),
+			Type.Literal("selection_changed"),
+			Type.Literal("selection_unconfirmed"),
+		]),
+		execution: Type.Union([Type.Literal("not_started"), Type.Literal("dispatched"), Type.Literal("unknown")]),
+		recovery: Type.Union([Type.Literal("observe"), Type.Literal("use_supported_action")]),
+		message: Utf8String(1024, { minLength: 1 }),
+	}),
+	StrictObject({
 		status: Type.Literal("stale"),
 		reason: Type.Union([
 			Type.Literal("origin_changed"),
 			Type.Literal("document_changed"),
 			Type.Literal("revision_changed"),
 			Type.Literal("element_missing"),
+			Type.Literal("element_not_interactable"),
 		]),
 		observation: BrowserObservationSchema,
 	}),
@@ -1334,6 +1421,10 @@ export const BrowserToolResultSchema = Type.Union([
 export const BrowserToolRequestParamsSchema = StrictObject({
 	serverEpoch: UuidSchema,
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
+	actorSessionId: Type.Optional(SessionIdSchema),
+	agentId: Type.Optional(SessionIdSchema),
+	taskId: Type.Optional(SessionIdSchema),
 	toolCallId: OpaqueIdSchema,
 	call: BrowserToolCallSchema,
 });
@@ -1346,6 +1437,10 @@ export const BrowserToolRequestResultSchema = StrictObject({
 export const BrowserToolCancelledParamsSchema = StrictObject({
 	serverEpoch: UuidSchema,
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
+	actorSessionId: Type.Optional(SessionIdSchema),
+	agentId: Type.Optional(SessionIdSchema),
+	taskId: Type.Optional(SessionIdSchema),
 	toolCallId: OpaqueIdSchema,
 	requestId: OpaqueIdSchema,
 });
@@ -1618,6 +1713,8 @@ export const ClientRequestMethods = {
 	"hooks/delete": method(HooksDeleteParamsSchema, HooksListViewSchema),
 	"agent/list": method(AgentListParamsSchema, AgentListResultSchema),
 	"agent/readItems": method(AgentReadItemsParamsSchema, SessionReadItemsResultSchema),
+	"agent/send": method(AgentSendParamsSchema, AgentSendResultSchema),
+	"agent/control": method(AgentControlParamsSchema, AgentControlResultSchema),
 	"agent/interrupt": method(AgentInterruptParamsSchema, AgentResultSchema),
 	"agent/archive": method(AgentArchiveParamsSchema, AgentResultSchema),
 	"agent/delete": method(AgentDeleteParamsSchema, AgentDeleteResultSchema),

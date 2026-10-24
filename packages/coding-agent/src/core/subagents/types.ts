@@ -1,6 +1,9 @@
 import type { ThinkingLevel } from "@metis/agent-core";
-import type { AgentSessionEvent } from "../agent-session.ts";
+import type { AgentMode } from "../agent-mode.ts";
+import type { AgentSession, AgentSessionEvent } from "../agent-session.ts";
 import type { PermissionPreset } from "../permissions/settings.ts";
+import type { DurablePromptInput } from "../runtime-recovery.ts";
+import type { AgentRoleSnapshot } from "./agent-type-registry.ts";
 
 export type AgentVisibleActivity = Extract<
 	AgentSessionEvent,
@@ -52,6 +55,8 @@ export interface AgentRelation {
 }
 
 export interface AgentConfig extends AgentRelation {
+	readonly mode?: AgentMode;
+	readonly roleSnapshot?: AgentRoleSnapshot;
 	readonly agentId: string;
 	readonly name: string;
 	readonly agentType: string;
@@ -68,6 +73,8 @@ export interface AgentConfig extends AgentRelation {
 }
 
 export interface AgentTaskSummary {
+	readonly instructionRevision?: number;
+	readonly consumedInstructionRevision?: number;
 	readonly taskId: string;
 	readonly status: AgentTaskStatus;
 	readonly taskSummary: string;
@@ -79,6 +86,11 @@ export interface AgentTaskSummary {
 }
 
 export interface AgentSummary extends AgentRelation {
+	readonly retry?: AgentSession["retryState"];
+	readonly model?: AgentModelRef;
+	readonly mode?: AgentMode;
+	readonly roleSnapshot?: AgentRoleSnapshot;
+	readonly runControl?: AgentRunControl;
 	readonly agentId: string;
 	readonly name: string;
 	readonly agentType: string;
@@ -133,7 +145,9 @@ export type AgentErrorCode =
 	| "QUEUE_FULL"
 	| "DEPTH_LIMIT"
 	| "MODEL_UNAVAILABLE"
-	| "TOOL_SNAPSHOT_UNAVAILABLE";
+	| "TOOL_SNAPSHOT_UNAVAILABLE"
+	| "USER_PAUSED"
+	| "REQUEST_ID_CONFLICT";
 
 export class AgentError extends Error {
 	readonly code: AgentErrorCode;
@@ -155,6 +169,8 @@ export interface AgentUsageTotals {
 }
 
 export interface InspectAgentsInput {
+	readonly messageId?: string;
+	readonly textOffset?: number;
 	readonly agentId?: string;
 	readonly taskId?: string;
 	readonly beforeEventId?: string;
@@ -162,6 +178,18 @@ export interface InspectAgentsInput {
 }
 
 export type InspectAgentsResult =
+	| {
+			readonly kind: "message";
+			readonly agentId: string;
+			readonly taskId: string;
+			readonly messageId: string;
+			readonly origin: AgentMessageOrigin;
+			readonly text: string;
+			readonly imageCount: number;
+			readonly state: AgentDeliveryState;
+			readonly instructionRevision: number;
+			readonly nextTextOffset?: number;
+	  }
 	| { readonly kind: "list"; readonly agents: readonly AgentSummary[]; readonly usage: AgentUsageTotals }
 	| {
 			readonly kind: "trace";
@@ -210,6 +238,8 @@ export interface AgentTombstone {
 }
 
 export interface AgentMailboxTerminalEvent {
+	readonly instructionRevision?: number;
+	readonly consumedInstructionRevision?: number;
 	readonly eventId: string;
 	readonly taskId: string;
 	readonly agentId: string;
@@ -237,5 +267,70 @@ export type AgentManagerEvent =
 			readonly taskId: string;
 			readonly toolName: string;
 	  }
-	| { readonly type: "notification_ready"; readonly event: AgentMailboxTerminalEvent }
-	| { readonly type: "notification_failed"; readonly event: AgentMailboxTerminalEvent; readonly error: string };
+	| { readonly type: "notification_ready"; readonly event: AgentMailboxEvent; readonly wake?: boolean }
+	| { readonly type: "notification_failed"; readonly event: AgentMailboxEvent; readonly error: string };
+
+export type AgentMessageOrigin =
+	| { readonly kind: "user" }
+	| { readonly kind: "agent"; readonly sessionId: string; readonly sourceItemId?: string }
+	| { readonly kind: "system"; readonly eventId: string };
+export type AgentMessageActor = Exclude<AgentMessageOrigin, { kind: "system" }>;
+export type AgentDeliveryMode = "auto" | "steer" | "queue";
+export type AgentDeliveryState = "accepted" | "queued" | "delivered" | "cancelled" | "failed";
+export interface AgentRunControl {
+	readonly state: "enabled" | "user_paused" | "interrupted";
+	readonly scope: "self" | "subtree";
+	readonly requestId: string;
+}
+export interface AgentSubmitMessageInput {
+	readonly agentId: string;
+	readonly requestId: string;
+	readonly delivery?: AgentDeliveryMode;
+	readonly input: DurablePromptInput;
+}
+export interface AgentMessageReceipt {
+	readonly agentId: string;
+	readonly taskId: string;
+	readonly messageId: string;
+	readonly requestId: string;
+	readonly delivery: "steer" | "start" | "queue";
+	readonly state: AgentDeliveryState;
+	readonly instructionRevision: number;
+}
+export interface AgentControlInput {
+	readonly agentId: string;
+	readonly action: "stop" | "resume";
+	readonly scope: "self" | "subtree";
+	readonly requestId: string;
+}
+export interface AgentControlReceipt extends AgentRunControl {
+	readonly agentId: string;
+}
+export interface AgentMailboxInterventionEvent {
+	readonly type: "intervention";
+	readonly eventId: string;
+	readonly taskId: string;
+	readonly agentId: string;
+	readonly parentSessionId: string;
+	readonly name: string;
+	readonly completedAt: string;
+	readonly messageId: string;
+	readonly instructionRevision: number;
+	readonly delivery: "steer" | "start" | "queue";
+	readonly state: AgentDeliveryState;
+	readonly text: string;
+	readonly imageCount?: number;
+}
+export interface AgentMailboxRunControlEvent {
+	readonly type: "run_control";
+	readonly eventId: string;
+	readonly taskId: string;
+	readonly agentId: string;
+	readonly parentSessionId: string;
+	readonly name: string;
+	readonly completedAt: string;
+	readonly action: "stop" | "resume";
+	readonly state: AgentRunControl["state"];
+	readonly scope: AgentRunControl["scope"];
+}
+export type AgentMailboxEvent = AgentMailboxTerminalEvent | AgentMailboxInterventionEvent | AgentMailboxRunControlEvent;

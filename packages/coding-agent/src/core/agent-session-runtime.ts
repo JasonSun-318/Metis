@@ -538,6 +538,12 @@ export class AgentSessionRuntime {
 		}
 	}
 
+	/** Resume durable agent notifications only following an explicit user action. */
+	resumeAgentContinuations(): void {
+		this.assertPubliclyAccessible();
+		this.agentCoordinator.resumePendingContinuations();
+	}
+
 	async submitPrompt(input: SubmitPromptInput): Promise<SubmitPromptResult> {
 		this.assertPubliclyAccessible();
 		if (!this.submissionGateOpen) throw new Error(RUNTIME_DISPOSING_ERROR);

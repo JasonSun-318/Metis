@@ -54,4 +54,33 @@ describe("SubagentScheduler", () => {
 		expect(scheduler.isQueued("b")).toBe(false);
 		gate.resolve();
 	});
+	it("releases waiting parent slots so grandchildren can run, then reacquires once", async () => {
+		const scheduler = new SubagentScheduler(4, 4);
+		const done = [deferred(), deferred(), deferred(), deferred()];
+		const children = [deferred(), deferred(), deferred(), deferred()];
+		const started: number[] = [];
+		for (let i = 0; i < 4; i++)
+			scheduler.enqueue({ key: `parent-${i}`, parentSessionId: "root", start: () => done[i].promise });
+		for (let i = 0; i < 4; i++)
+			scheduler.enqueue({
+				key: `child-${i}`,
+				parentSessionId: "root",
+				start: async () => {
+					started.push(i);
+					await children[i].promise;
+				},
+			});
+		expect(scheduler.queuedCount).toBe(4);
+		for (let i = 0; i < 4; i++) scheduler.suspend(`parent-${i}`);
+		await tick();
+		expect(started).toEqual([0, 1, 2, 3]);
+		expect(scheduler.runningCount).toBe(4);
+		const resumed = Promise.all(done.map((_, i) => scheduler.resume(`parent-${i}`)));
+		for (const gate of children) gate.resolve();
+		await resumed;
+		expect(scheduler.runningCount).toBe(4);
+		for (const gate of done) gate.resolve();
+		await tick();
+		expect(scheduler.runningCount).toBe(0);
+	});
 });

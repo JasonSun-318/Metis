@@ -5,6 +5,7 @@ import { Compile } from "typebox/compile";
 import { describe, expect, it } from "vitest";
 import {
 	assertEnvelopeByteLimit,
+	BrowserOperationDetailsSchema,
 	browserActionElementIds,
 	ClientRequestMethods,
 	CustomModelReasoningModeSchema,
@@ -905,6 +906,11 @@ describe("manual model thinking map schema", () => {
 });
 
 describe("golden protocol fixtures", () => {
+	it("allows partial agent catalogs to report unreadable entries without losing valid pagination", () => {
+		const validator = Compile(ClientRequestMethods["agent/list"].result);
+		expect(validator.Check({ agents: [], nextAfterAgentId: null, unreadableAgentCount: 2 })).toBe(true);
+		expect(validator.Check({ agents: [], nextAfterAgentId: null, unreadableAgentCount: -1 })).toBe(false);
+	});
 	it("covers and validates every client and host request method", () => {
 		const clientMethods = requests.filter((entry) => entry.direction === "client").map((entry) => entry.method);
 		const hostMethods = requests.filter((entry) => entry.direction === "host").map((entry) => entry.method);
@@ -965,6 +971,26 @@ describe("golden protocol fixtures", () => {
 		}
 	});
 
+	it("validates bounded structured browser failures without requiring a success observation", () => {
+		const validator = Compile(BrowserOperationDetailsSchema);
+		const receipt = {
+			status: "failed",
+			reason: "selection_changed",
+			execution: "dispatched",
+			recovery: "observe",
+			message: "Call browser_observe before retrying.",
+		};
+		expect(validator.Check(receipt)).toBe(true);
+		for (const invalid of [
+			{ ...receipt, reason: "raw exception" },
+			{ ...receipt, execution: "completed" },
+			{ ...receipt, recovery: "blind_retry" },
+			{ ...receipt, message: "x".repeat(1025) },
+			{ ...receipt, privateValue: "secret" },
+		])
+			expect(validator.Check(invalid)).toBe(false);
+	});
+
 	it("validates every browser call and action variant", () => {
 		const calls = [
 			{ tool: "browser_tabs", input: { action: "list" } },
@@ -977,6 +1003,10 @@ describe("golden protocol fixtures", () => {
 				input: { browserId: BROWSER_ID, action },
 			})),
 			{ tool: "browser_observe", input: { browserId: BROWSER_ID, mode: "both", sinceRevision: 1 } },
+			{
+				tool: "browser_observe",
+				input: { browserId: BROWSER_ID, cursor: { documentId: DOCUMENT_ID, revision: 1, offset: 100 } },
+			},
 			...[
 				{ type: "click", target: { elementId: "e1" }, button: "left" },
 				{ type: "hover", target: { x: 10, y: 20 } },
@@ -985,6 +1015,7 @@ describe("golden protocol fixtures", () => {
 				{ type: "scroll", direction: "down", pages: 2, elementId: "e1" },
 				{ type: "drag", from: { elementId: "e1" }, to: { x: 10, y: 20 } },
 				{ type: "select", elementId: "e1", value: "one" },
+				{ type: "select", elementId: "e1", optionIndex: 0 },
 				{ type: "dialog", decision: "dismiss" },
 			].map((action) => ({
 				tool: "browser_act",
@@ -1005,6 +1036,33 @@ describe("golden protocol fixtures", () => {
 		for (const [index, call] of calls.entries()) {
 			const request = makeBrowserTool(call, `browser-call-${index}`);
 			expect(validateServerRequest(request)).toEqual(request);
+		}
+	});
+
+	it("rejects invalid or ambiguous native option selectors", () => {
+		for (const selector of [
+			{},
+			{ optionIndex: -1 },
+			{ optionIndex: 0.5 },
+			{ optionIndex: 1000 },
+			{ value: "one", optionIndex: 0 },
+		]) {
+			const request = makeBrowserTool(
+				{
+					tool: "browser_act",
+					input: {
+						browserId: BROWSER_ID,
+						documentId: DOCUMENT_ID,
+						snapshotRevision: 1,
+						origin: "https://example.test",
+						intent: "Select an observed option",
+						risk: "ordinary",
+						action: { type: "select", elementId: "e1", ...selector },
+					},
+				},
+				"invalid-selector",
+			);
+			expect(() => validateServerRequest(request)).toThrow();
 		}
 	});
 
@@ -1047,6 +1105,38 @@ describe("golden protocol fixtures", () => {
 		expect(browserActionElementIds({ type: "press", key: "Enter" })).toEqual([]);
 	});
 
+	it("validates observation continuation metadata and rejects invalid cursor offsets", () => {
+		const cursor = { documentId: DOCUMENT_ID, revision: 1, offset: 100 };
+		const request = makeBrowserTool({ tool: "browser_observe", input: { browserId: BROWSER_ID, cursor } });
+		expect(validateServerRequest(request)).toEqual(request);
+		for (const offset of [-1, 0, 0.5, MAX_BROWSER_STATE_UTF8_BYTES + 1]) {
+			expect(() =>
+				validateServerRequest(
+					makeBrowserTool({
+						tool: "browser_observe",
+						input: { browserId: BROWSER_ID, cursor: { ...cursor, offset } },
+					}),
+				),
+			).toThrow();
+		}
+		const response = {
+			jsonrpc: "2.0",
+			id: request.id,
+			result: {
+				toolCallId: (request.params as { toolCallId: string }).toolCallId,
+				result: {
+					tool: "browser_observe",
+					observation: {
+						...browserObservation,
+						statePage: { offset: 0, totalChars: 1000, nextCursor: cursor },
+						cursorReset: true,
+					},
+				},
+			},
+		};
+		expect(validateResponseFor("server", request, response)).toEqual(response);
+	});
+
 	it("correlates bounded browser results with their pending call", () => {
 		const request = makeBrowserTool({ tool: "browser_observe", input: { browserId: BROWSER_ID } });
 		const response = {
@@ -1075,35 +1165,38 @@ describe("golden protocol fixtures", () => {
 		).toThrow("does not match");
 	});
 
-	it("accepts a fail-closed stale browser action with a fresh observation", () => {
-		const request = makeBrowserTool({
-			tool: "browser_act",
-			input: {
-				browserId: BROWSER_ID,
-				documentId: DOCUMENT_ID,
-				snapshotRevision: 1,
-				origin: "https://example.test",
-				intent: "Click the fixture",
-				risk: "ordinary",
-				action: { type: "click", target: { elementId: "e1" } },
-			},
-		});
-		const response = {
-			jsonrpc: "2.0",
-			id: request.id,
-			result: {
-				toolCallId: (request.params as { toolCallId: string }).toolCallId,
-				result: {
-					tool: "browser_act",
-					details: { status: "stale", reason: "revision_changed", observation: browserObservation },
+	it.each(["revision_changed", "element_not_interactable"])(
+		"accepts a fail-closed browser action (%s) with a fresh observation",
+		(reason) => {
+			const request = makeBrowserTool({
+				tool: "browser_act",
+				input: {
+					browserId: BROWSER_ID,
+					documentId: DOCUMENT_ID,
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Click the fixture",
+					risk: "ordinary",
+					action: { type: "click", target: { elementId: "e1" } },
 				},
-			},
-		};
-		expect(validateResponseFor("server", request, response)).toEqual(response);
-		const closed = structuredClone(response);
-		closed.result.result.details = { status: "cancelled", reason: "tab_closed" } as never;
-		expect(() => validateResponseFor("server", request, closed)).toThrow();
-	});
+			});
+			const response = {
+				jsonrpc: "2.0",
+				id: request.id,
+				result: {
+					toolCallId: (request.params as { toolCallId: string }).toolCallId,
+					result: {
+						tool: "browser_act",
+						details: { status: "stale", reason, observation: browserObservation },
+					},
+				},
+			};
+			expect(validateResponseFor("server", request, response)).toEqual(response);
+			const closed = structuredClone(response);
+			closed.result.result.details = { status: "cancelled", reason: "tab_closed" } as never;
+			expect(() => validateResponseFor("server", request, closed)).toThrow();
+		},
+	);
 
 	it("rejects unsafe or oversized browser payloads", () => {
 		const valid = makeBrowserTool({

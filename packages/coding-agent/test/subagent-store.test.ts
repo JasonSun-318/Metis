@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CURRENT_SESSION_VERSION, getSessionAgentDir, SessionManager } from "../src/core/session-manager.ts";
 import { AgentStore } from "../src/core/subagents/store.ts";
 import type { AgentConfig } from "../src/core/subagents/types.ts";
@@ -71,6 +71,61 @@ describe("AgentStore", () => {
 		store.appendTask("agent-1", { taskId: "task-2", text: "verify again", status: "queued" });
 		expect(created.header).toMatchObject({ agentId: "agent-1", rootSessionId: ROOT_ID });
 		expect(store.listTasks("agent-1").map((task) => task.taskId)).toEqual(["task-1", "task-2"]);
+	});
+
+	it("creates the first task and its accepted input together", () => {
+		const { root, store } = setup();
+		const { config: agentConfig, taskId } = config(root);
+		const created = store.create(agentConfig, [], taskId, {
+			type: "agent_input",
+			agentId: agentConfig.agentId,
+			taskId,
+			messageId: "message-1",
+			requestId: "initial-task-1",
+			requestHash: "a".repeat(64),
+			delivery: "start",
+			state: "queued",
+			instructionRevision: 1,
+			input: { text: agentConfig.initialTask },
+			origin: { kind: "agent", sessionId: ROOT_ID },
+		});
+		expect(created.tasks.map((task) => task.taskId)).toEqual([taskId]);
+		expect(created.inputs).toEqual([
+			expect.objectContaining({ taskId, requestId: "initial-task-1", delivery: "start", state: "queued" }),
+		]);
+	});
+
+	it("rolls back a new child when initial input persistence fails", () => {
+		const { root, store } = setup();
+		const { config: agentConfig, taskId } = config(root);
+		const original = SessionManager.prototype.appendAgentControl;
+		const write = vi.spyOn(SessionManager.prototype, "appendAgentControl").mockImplementation(function (
+			this: SessionManager,
+			payload,
+		) {
+			if (payload.type === "agent_input") throw new Error("initial input write failed");
+			return original.call(this, payload);
+		});
+		try {
+			expect(() =>
+				store.create(agentConfig, [], taskId, {
+					type: "agent_input",
+					agentId: agentConfig.agentId,
+					taskId,
+					messageId: "initial-message",
+					requestId: "initial",
+					requestHash: "a".repeat(64),
+					delivery: "start",
+					state: "queued",
+					instructionRevision: 1,
+					input: { text: agentConfig.initialTask },
+					origin: { kind: "agent", sessionId: ROOT_ID },
+				}),
+			).toThrow("initial input write failed");
+			expect(store.listTree()).toEqual({ agents: [], diagnostics: [] });
+		} finally {
+			write.mockRestore();
+		}
 	});
 
 	it("preserves task creation time across state transitions", () => {

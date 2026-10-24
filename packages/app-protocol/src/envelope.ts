@@ -308,6 +308,40 @@ function hasUniqueIds(values: readonly string[]): boolean {
 
 function validateClientResultCorrelation(request: ClientRpcRequest, result: unknown): void {
 	switch (request.method) {
+		case "agent/send":
+		case "agent/control": {
+			const receipt = result as ClientResult<"agent/send"> | ClientResult<"agent/control">;
+			if (receipt.agentId !== request.params.agentId || receipt.requestId !== request.params.requestId) {
+				failResponseCorrelation("Agent receipt does not match its request");
+			}
+			if (request.method === "agent/control") {
+				const scope = request.params.scope ?? (request.params.action === "resume" ? "self" : "subtree");
+				if ((receipt as ClientResult<"agent/control">).scope !== scope) {
+					failResponseCorrelation("Agent control receipt does not match its requested scope");
+				}
+			}
+			return;
+		}
+		case "agent/list": {
+			const agents = (result as ClientResult<"agent/list">).agents;
+			if (
+				!hasUniqueIds(agents.map((agent) => agent.agentId)) ||
+				agents.some((agent) => agent.rootSessionId !== request.params.sessionId)
+			) {
+				failResponseCorrelation("Agent catalog does not match its requested root");
+			}
+			return;
+		}
+		case "agent/readItems": {
+			const items = (result as ClientResult<"agent/readItems">).items;
+			if (
+				!hasUniqueIds(items.map((item) => item.itemId)) ||
+				items.some((item) => item.sessionId !== request.params.agentId)
+			) {
+				failResponseCorrelation("Agent history does not match its requested child");
+			}
+			return;
+		}
 		case "initialize":
 			if ((result as ClientResult<"initialize">).protocolVersion !== request.params.protocolVersion) {
 				failResponseCorrelation("Initialize response does not match the requested protocol version");

@@ -57,10 +57,12 @@ function setup() {
 	const stageAgentMailboxDelivery = vi.fn((eventIds: readonly string[]) => eventIds);
 	const session = {
 		sessionManager: { getSessionId: () => ACTOR_ID },
+		activeDurableTurnId: "turn-1",
 		stageAgentMailboxDelivery,
 	} as unknown as AgentSession;
 	return {
 		manager,
+		session,
 		stageAgentMailboxDelivery,
 		tools: createSubagentTools({ getManager: () => manager, getSession: () => session }),
 	};
@@ -119,11 +121,41 @@ describe("agent control tools", () => {
 		});
 		expect(manager.followUpTask).toHaveBeenCalledWith(
 			ACTOR_ID,
-			{ agentId: "child-1", task: "check edge case" },
+			{ agentId: "child-1", task: "check edge case", requestId: expect.any(String) },
 			undefined,
 		);
 		expect(manager.waitAgents).not.toHaveBeenCalled();
 	});
+
+	it.each(["send_message", "followup_task"])(
+		"keeps %s replay identity stable and separates new turns and calls",
+		async (name) => {
+			const { manager, tools, session } = setup();
+			const method = name === "send_message" ? "sendMessage" : "followUpTask";
+			const params =
+				name === "send_message"
+					? { agentId: "child-1", message: "Same text" }
+					: { agentId: "child-1", task: "Same text" };
+			const tool = tools.find((candidate) => candidate.name === name)!;
+			const controller = new AbortController();
+			await execute(tool, params, controller.signal);
+			await execute(tool, params, controller.signal);
+			const identity = vi.mocked(manager[method]).mock.calls[0]![1].requestId;
+			expect(identity).toMatch(/^agent-tool-[a-f0-9]{64}$/);
+			expect(vi.mocked(manager[method]).mock.calls[1]![1].requestId).toBe(identity);
+			expect(vi.mocked(manager[method]).mock.calls[0]![2]).toBe(controller.signal);
+			const recreated = createSubagentTools({ getManager: () => manager, getSession: () => session });
+			await execute(recreated.find((candidate) => candidate.name === name)!, params);
+			expect(vi.mocked(manager[method]).mock.calls[2]![1].requestId).toBe(identity);
+			Object.defineProperty(session, "activeDurableTurnId", { value: "turn-2" });
+			await execute(tool, params);
+			expect(vi.mocked(manager[method]).mock.calls[3]![1].requestId).not.toBe(identity);
+			await tool.execute("another-call", params, undefined, undefined, {} as never);
+			expect(vi.mocked(manager[method]).mock.calls[4]![1].requestId).not.toBe(
+				vi.mocked(manager[method]).mock.calls[3]![1].requestId,
+			);
+		},
+	);
 
 	it("keeps inspect task-scoped and stages only mailbox ids returned by wait", async () => {
 		const { manager, stageAgentMailboxDelivery, tools } = setup();
@@ -149,10 +181,15 @@ describe("agent control tools", () => {
 			timeoutMs: 50,
 		});
 		await execute(tools.find((tool) => tool.name === "interrupt_agent")!, { agentId: "child-1" });
-		expect(manager.sendMessage).toHaveBeenCalledWith(ACTOR_ID, {
-			agentId: "child-1",
-			message: "stay focused",
-		});
+		expect(manager.sendMessage).toHaveBeenCalledWith(
+			ACTOR_ID,
+			{
+				agentId: "child-1",
+				message: "stay focused",
+				requestId: expect.any(String),
+			},
+			undefined,
+		);
 		expect(manager.waitAgents).toHaveBeenCalledWith(ACTOR_ID, { agentIds: ["child-1"], timeoutMs: 50 }, undefined);
 		expect(stageAgentMailboxDelivery).toHaveBeenCalledWith(["agent:child-1:task-1:terminal"]);
 		expect(manager.interrupt).toHaveBeenCalledWith(ACTOR_ID, "child-1");

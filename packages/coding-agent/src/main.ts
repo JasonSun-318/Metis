@@ -938,7 +938,7 @@ export async function main(args: string[], options?: MainOptions) {
 					customTools: childConfig ? [] : sessionOptions.customTools,
 					...(childConfig
 						? {
-								additionalSystemPrompt: buildChildSystemPrompt(childConfig),
+								additionalSystemPrompt: buildChildSystemPrompt(childConfig, { agentDir }),
 								workspaceWritePolicy: childConfig.writePolicy,
 							}
 						: scheduleEligible

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Text } from "@metis/tui";
 import { Type } from "typebox";
 import { keyHint } from "../../presentation/keybinding-hints.ts";
@@ -11,6 +12,14 @@ import { terminalEventIdentity } from "./wait.ts";
 
 function actorId(session: AgentSession): string {
 	return session.sessionManager.getSessionId();
+}
+
+/** Replay identity belongs to a tool operation, never to its text or the manager lifetime. */
+function toolRequestId(session: AgentSession, name: string, callId: string): string {
+	const digest = createHash("sha256")
+		.update(JSON.stringify([actorId(session), session.activeDurableTurnId ?? null, name, callId]))
+		.digest("hex");
+	return `agent-tool-${digest}`;
 }
 
 const Spawn = Type.Object(
@@ -54,6 +63,12 @@ const Spawn = Type.Object(
 
 const Inspect = Type.Object(
 	{
+		messageId: Type.Optional(
+			Type.String({ description: "Read a specific input from an intervention notification, with trusted origin." }),
+		),
+		textOffset: Type.Optional(
+			Type.Integer({ minimum: 0, description: "Continue message text using nextTextOffset from the prior read." }),
+		),
 		agentId: Type.Optional(Type.String({ minLength: 1, description: "Owned child ID; omit to list all children." })),
 		taskId: Type.Optional(Type.String({ minLength: 1, description: "Task history entry to inspect." })),
 		beforeEventId: Type.Optional(
@@ -143,6 +158,7 @@ function agentSummary(value: unknown): string | undefined {
 }
 
 function inspectText(inspected: InspectAgentsResult): string {
+	if (inspected.kind === "message") return JSON.stringify(inspected);
 	if (inspected.kind === "list") {
 		if (inspected.agents.length === 0) return "No agent sessions.";
 		return inspected.agents
@@ -192,6 +208,7 @@ function inspectText(inspected: InspectAgentsResult): string {
 }
 
 function inspectDetails(inspected: InspectAgentsResult): unknown {
+	if (inspected.kind === "message") return inspected;
 	if (inspected.kind === "trace") {
 		const task = inspected.agent.tasks.find((candidate) => candidate.taskId === inspected.taskId);
 		return {
@@ -339,7 +356,7 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			name: "spawn_agent",
 			label: "Spawn agent",
 			description:
-				"Create one child agent for independent, bounded work. Use a unique name, a self-contained task, and the narrowest fitting agent type.",
+				"Asynchronously create a durable child conversation for independent, bounded work. Use a unique name, a self-contained task, and the narrowest fitting agent type. No parent history is copied by default. The receipt reports actual mode, model, tools, permissions and role revision.",
 			parameters: Spawn,
 			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
@@ -363,13 +380,15 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			name: "inspect_agents",
 			label: "Inspect agents",
 			description:
-				"List owned child agents or inspect one child's recent durable activity. Use it to verify handoffs or inspect state; do not poll running agents.",
+				"List owned child agents or inspect one child's recent durable activity. Use messageId from an intervention notification to read its input and trusted origin. Use it to verify handoffs or inspect state; do not poll running agents.",
 			parameters: Inspect,
 			permission: permissionDescriptor(() => permissionClaim()),
 			renderResult: renderSubagentResult,
 			async execute(_id, params) {
 				const inspected = await manager().inspect(actorId(host.getSession()), {
 					agentId: params.agentId,
+					messageId: params.messageId,
+					textOffset: params.textOffset,
 					taskId: params.taskId,
 					beforeEventId: params.beforeEventId,
 					limit: params.limit,
@@ -384,13 +403,18 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			parameters: SendMessage,
 			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
-			async execute(_id, params, signal) {
-				signal?.throwIfAborted();
+			async execute(callId, params, signal) {
+				const session = host.getSession();
 				return result(
-					await manager().sendMessage(actorId(host.getSession()), {
-						agentId: params.agentId,
-						message: params.message,
-					}),
+					await manager().sendMessage(
+						actorId(session),
+						{
+							agentId: params.agentId,
+							message: params.message,
+							requestId: toolRequestId(session, "send_message", callId),
+						},
+						signal,
+					),
 					false,
 				);
 			},
@@ -402,9 +426,17 @@ export function createSubagentTools(host: SubagentToolHost): ToolDefinition[] {
 			parameters: FollowUp,
 			permission: permissionDescriptor(() => permissionClaim({ effects: ["external-side-effect"] })),
 			renderResult: renderSubagentResult,
-			async execute(_id, params, signal) {
-				const actor = actorId(host.getSession());
-				const receipt = await manager().followUpTask(actor, { agentId: params.agentId, task: params.task }, signal);
+			async execute(callId, params, signal) {
+				const session = host.getSession();
+				const receipt = await manager().followUpTask(
+					actorId(session),
+					{
+						agentId: params.agentId,
+						task: params.task,
+						requestId: toolRequestId(session, "followup_task", callId),
+					},
+					signal,
+				);
 				return result(receipt);
 			},
 		}),

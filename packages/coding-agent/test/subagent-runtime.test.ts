@@ -581,7 +581,7 @@ describe("shared agent coordinator", () => {
 		expect(unloadSpy).not.toHaveBeenCalled();
 	});
 
-	it("automatically drains a cold child mailbox through consecutive batches", async () => {
+	it("does not call the provider on cold child attach and drains only on explicit continuation", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-agent-runtime-cold-mailbox-"));
 		roots.push(root);
 		const cwd = join(root, "project");
@@ -656,7 +656,12 @@ describe("shared agent coordinator", () => {
 			coordinator,
 		);
 		runtimes.push(childRuntime);
-		await vi.waitFor(() => expect(harness.session.getPendingAgentMailboxEventIds()).toEqual([]));
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(harness.getPendingResponseCount()).toBe(2);
+		expect(harness.session.getPendingAgentMailboxEventIds()).toHaveLength(9);
+		await harness.session.continueAgentMailbox();
+		await harness.session.continueAgentMailbox();
+		expect(harness.session.getPendingAgentMailboxEventIds()).toEqual([]);
 		const deliveries = harness.sessionManager
 			.getDurableJournalSnapshot()
 			.filter((entry) => entry.type === "agent_mailbox_delivery");

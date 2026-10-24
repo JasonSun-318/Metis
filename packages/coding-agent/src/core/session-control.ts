@@ -2,7 +2,16 @@ import { isAbsolute, normalize } from "node:path";
 import { dataFields } from "./data-fields.ts";
 import { isPermissionPreset, type PermissionPreset } from "./permissions/settings.ts";
 import { type CollaborationMode, MAX_PLAN_MARKDOWN_UTF8_BYTES, MAX_PLAN_TITLE_UTF16_UNITS } from "./plan-state.ts";
-import type { AgentMailboxTerminalEvent, AgentTaskStatus, AgentUsage } from "./subagents/types.ts";
+import { type DurablePromptInput, parseDurablePromptSubmission } from "./runtime-recovery.ts";
+import { type AgentRoleSnapshot, parseAgentRoleSnapshot } from "./subagents/agent-type-registry.ts";
+import type {
+	AgentMailboxEvent,
+	AgentMessageOrigin,
+	AgentMessageReceipt,
+	AgentRunControl,
+	AgentTaskStatus,
+	AgentUsage,
+} from "./subagents/types.ts";
 
 interface SessionControlEntryBase {
 	readonly id: string;
@@ -42,6 +51,8 @@ export type SessionDirectoryControlEntry = SessionDirectoryAddedEntry | SessionD
 export type AgentStateReason = "completed" | "error" | "interrupted" | "timeout" | "parent_unloaded" | "recovered";
 
 export interface AgentTaskEntry extends SessionControlEntryBase {
+	readonly instructionRevision?: number;
+	readonly consumedInstructionRevision?: number;
 	readonly type: "agent_task";
 	readonly agentId: string;
 	readonly taskId: string;
@@ -69,9 +80,15 @@ export interface AgentArchivedEntry extends SessionControlEntryBase {
 	readonly archived: boolean;
 }
 
+export interface AgentPermissionCeilingEntry extends SessionControlEntryBase {
+	readonly type: "agent_permission_ceiling";
+	readonly agentId: string;
+	readonly permissionPreset: PermissionPreset;
+}
+
 export interface AgentMailboxEventEntry extends SessionControlEntryBase {
 	readonly type: "agent_mailbox_event";
-	readonly event: AgentMailboxTerminalEvent;
+	readonly event: AgentMailboxEvent;
 }
 
 export interface AgentMailboxDeliveryEntry extends SessionControlEntryBase {
@@ -81,10 +98,32 @@ export interface AgentMailboxDeliveryEntry extends SessionControlEntryBase {
 	readonly state: "started" | "completed";
 }
 
+export interface AgentInputEntry extends SessionControlEntryBase, AgentMessageReceipt {
+	readonly type: "agent_input";
+	readonly input: DurablePromptInput;
+	readonly origin: AgentMessageOrigin;
+	readonly requestHash: string;
+	readonly error?: string;
+}
+export interface AgentRunControlEntry extends SessionControlEntryBase, AgentRunControl {
+	readonly type: "agent_run_control";
+	readonly agentId: string;
+	readonly action: "stop" | "resume";
+	readonly origin: AgentMessageOrigin;
+}
+export interface AgentRoleSnapshotEntry extends SessionControlEntryBase {
+	readonly type: "agent_role_snapshot";
+	readonly agentId: string;
+	readonly roleSnapshot: AgentRoleSnapshot;
+}
 export type AgentControlEntry =
+	| AgentInputEntry
+	| AgentRunControlEntry
+	| AgentRoleSnapshotEntry
 	| AgentTaskEntry
 	| AgentMessageEntry
 	| AgentArchivedEntry
+	| AgentPermissionCeilingEntry
 	| AgentMailboxEventEntry
 	| AgentMailboxDeliveryEntry;
 
@@ -230,26 +269,60 @@ function parseUsage(value: unknown): AgentUsage {
 	};
 }
 
-function parseAgentMailboxEvent(value: unknown): AgentMailboxTerminalEvent {
+function parseAgentMailboxEvent(value: unknown): AgentMailboxEvent {
 	const label = "Session control entry.event";
 	const fields = dataFields(value, label);
+	const common = ["eventId", "taskId", "agentId", "parentSessionId", "name", "type", "completedAt"];
+	const kind = fields.get("type");
+	if (kind === "intervention" || kind === "run_control") {
+		assertOnlyFields(
+			fields,
+			[
+				...common,
+				...(kind === "intervention"
+					? ["messageId", "instructionRevision", "delivery", "state", "text", "imageCount"]
+					: ["action", "state", "scope"]),
+			],
+			label,
+		);
+		const base = {
+			eventId: requiredString(fields, "eventId", { maxLength: 512, noControls: true }),
+			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			parentSessionId: requiredString(fields, "parentSessionId", { maxLength: 256, noControls: true }),
+			name: requiredString(fields, "name", { maxLength: 128, noControls: true }),
+			completedAt: requiredString(fields, "completedAt", { maxLength: 64, noControls: true }),
+		};
+		if (!Number.isFinite(Date.parse(base.completedAt))) invalid("Invalid agent event timestamp");
+		if (kind === "run_control") {
+			const action = fields.get("action");
+			const state = fields.get("state");
+			const scope = fields.get("scope");
+			if (action !== "stop" && action !== "resume") invalid("Invalid run control action");
+			if (state !== "enabled" && state !== "user_paused" && state !== "interrupted")
+				invalid("Invalid run control state");
+			if (scope !== "self" && scope !== "subtree") invalid("Invalid run control scope");
+			return { ...base, type: kind, action, state, scope };
+		}
+		const delivery = parseDelivery(fields.get("delivery"));
+		const state = parseDeliveryState(fields.get("state"));
+		return {
+			...base,
+			type: kind,
+			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
+			instructionRevision: positiveSafeInteger(fields, "instructionRevision"),
+			delivery,
+			state,
+			text: requiredString(fields, "text", { maxBytes: 4096 }),
+			...(fields.has("imageCount") ? { imageCount: nonNegativeSafeInteger(fields, "imageCount") } : {}),
+		};
+	}
 	assertOnlyFields(
 		fields,
-		[
-			"eventId",
-			"taskId",
-			"agentId",
-			"parentSessionId",
-			"name",
-			"type",
-			"status",
-			"finalMessage",
-			"error",
-			"completedAt",
-		],
+		[...common, "status", "finalMessage", "error", "instructionRevision", "consumedInstructionRevision"],
 		label,
 	);
-	if (fields.get("type") !== "terminal") invalid(`${label}.type must be terminal`);
+	if (kind !== "terminal") invalid(`${label}.type must be terminal, intervention or run_control`);
 	const status = fields.get("status");
 	if (status !== "done" && status !== "failed" && status !== "stopped") {
 		invalid(`${label}.status is invalid`);
@@ -264,6 +337,7 @@ function parseAgentMailboxEvent(value: unknown): AgentMailboxTerminalEvent {
 		name: requiredString(fields, "name", { label, maxLength: 128, noControls: true }),
 		type: "terminal",
 		status,
+		...parseInstructionRevisions(fields),
 		...(fields.has("finalMessage")
 			? { finalMessage: optionalString(fields, "finalMessage", { label, maxBytes: 4 * 1024 }) }
 			: {}),
@@ -274,9 +348,13 @@ function parseAgentMailboxEvent(value: unknown): AgentMailboxTerminalEvent {
 
 export function isAgentControlEntryType(type: unknown): type is AgentControlEntry["type"] {
 	return (
+		type === "agent_input" ||
+		type === "agent_run_control" ||
+		type === "agent_role_snapshot" ||
 		type === "agent_task" ||
 		type === "agent_message" ||
 		type === "agent_archived" ||
+		type === "agent_permission_ceiling" ||
 		type === "agent_mailbox_event" ||
 		type === "agent_mailbox_delivery"
 	);
@@ -300,6 +378,70 @@ export function isSessionControlEntryType(type: unknown): type is SessionControl
 		isPlanControlEntryType(type) ||
 		isAgentControlEntryType(type)
 	);
+}
+
+function nonNegativeSafeInteger(fields: ReadonlyMap<string, unknown>, key: string): number {
+	const value = fields.get(key);
+	if (!Number.isSafeInteger(value) || (value as number) < 0) invalid(`Session control entry.${key} is invalid`);
+	return value as number;
+}
+function parseInstructionRevisions(fields: ReadonlyMap<string, unknown>): {
+	instructionRevision?: number;
+	consumedInstructionRevision?: number;
+} {
+	const instructionRevision = fields.has("instructionRevision")
+		? nonNegativeSafeInteger(fields, "instructionRevision")
+		: undefined;
+	const consumedInstructionRevision = fields.has("consumedInstructionRevision")
+		? nonNegativeSafeInteger(fields, "consumedInstructionRevision")
+		: undefined;
+	if (
+		consumedInstructionRevision !== undefined &&
+		(instructionRevision === undefined || consumedInstructionRevision > instructionRevision)
+	)
+		invalid("Consumed instruction revision exceeds accepted revision");
+	return {
+		...(instructionRevision === undefined ? {} : { instructionRevision }),
+		...(consumedInstructionRevision === undefined ? {} : { consumedInstructionRevision }),
+	};
+}
+function parseDelivery(value: unknown): AgentMessageReceipt["delivery"] {
+	if (value !== "steer" && value !== "start" && value !== "queue") invalid("Invalid agent delivery");
+	return value;
+}
+function parseDeliveryState(value: unknown): AgentMessageReceipt["state"] {
+	if (
+		value !== "accepted" &&
+		value !== "queued" &&
+		value !== "delivered" &&
+		value !== "cancelled" &&
+		value !== "failed"
+	)
+		invalid("Invalid agent delivery state");
+	return value;
+}
+function parseOrigin(value: unknown): AgentMessageOrigin {
+	const fields = dataFields(value, "Agent message origin");
+	const kind = fields.get("kind");
+	if (kind === "user") {
+		assertOnlyFields(fields, ["kind"]);
+		return { kind };
+	}
+	if (kind === "agent") {
+		assertOnlyFields(fields, ["kind", "sessionId", "sourceItemId"]);
+		return {
+			kind,
+			sessionId: requiredString(fields, "sessionId", { maxLength: 256, noControls: true }),
+			...(fields.has("sourceItemId")
+				? { sourceItemId: requiredString(fields, "sourceItemId", { maxLength: 256, noControls: true }) }
+				: {}),
+		};
+	}
+	if (kind === "system") {
+		assertOnlyFields(fields, ["kind", "eventId"]);
+		return { kind, eventId: requiredString(fields, "eventId", { maxLength: 512, noControls: true }) };
+	}
+	invalid("Invalid agent message origin");
 }
 
 export function parseSessionControlEntry(value: unknown): SessionControlEntry {
@@ -343,6 +485,72 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 		}
 		return { type, ...parseBase(fields), path };
 	}
+	if (type === "agent_input") {
+		assertOnlyFields(fields, [
+			...baseFields,
+			"agentId",
+			"taskId",
+			"messageId",
+			"requestId",
+			"delivery",
+			"state",
+			"instructionRevision",
+			"input",
+			"origin",
+			"requestHash",
+			"error",
+		]);
+		const requestId = requiredString(fields, "requestId", { maxLength: 256, noControls: true });
+		const requestHash = requiredString(fields, "requestHash", { maxLength: 64 });
+		if (!/^[a-f0-9]{64}$/.test(requestHash)) invalid("Invalid agent request hash");
+		const rawInput = dataFields(fields.get("input"), "Agent input");
+		const input = parseDurablePromptSubmission({ requestId, ...Object.fromEntries(rawInput) }).input;
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			taskId: requiredString(fields, "taskId", { maxLength: 256, noControls: true }),
+			messageId: requiredString(fields, "messageId", { maxLength: 256, noControls: true }),
+			requestId,
+			delivery: parseDelivery(fields.get("delivery")),
+			state: parseDeliveryState(fields.get("state")),
+			instructionRevision: positiveSafeInteger(fields, "instructionRevision"),
+			input,
+			origin: parseOrigin(fields.get("origin")),
+			requestHash,
+			...(fields.has("error") ? { error: requiredString(fields, "error", { maxBytes: 4096 }) } : {}),
+		};
+	}
+	if (type === "agent_run_control") {
+		assertOnlyFields(fields, [...baseFields, "agentId", "action", "state", "scope", "requestId", "origin"]);
+		const action = fields.get("action");
+		const state = fields.get("state");
+		const scope = fields.get("scope");
+		if (action !== "stop" && action !== "resume") invalid("Invalid run control action");
+		if (state !== "enabled" && state !== "user_paused" && state !== "interrupted")
+			invalid("Invalid run control state");
+		if (scope !== "self" && scope !== "subtree") invalid("Invalid run control scope");
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			action,
+			state,
+			scope,
+			requestId: requiredString(fields, "requestId", { maxLength: 256, noControls: true }),
+			origin: parseOrigin(fields.get("origin")),
+		};
+	}
+	if (type === "agent_role_snapshot") {
+		assertOnlyFields(fields, [...baseFields, "agentId", "roleSnapshot"]);
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			roleSnapshot: parseAgentRoleSnapshot(fields.get("roleSnapshot")),
+		};
+	}
+
 	if (type === "agent_task") {
 		assertOnlyFields(fields, [
 			...baseFields,
@@ -355,6 +563,8 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			"finalMessage",
 			"error",
 			"usage",
+			"instructionRevision",
+			"consumedInstructionRevision",
 		]);
 		const status = fields.get("status");
 		const reason = fields.get("reason");
@@ -387,6 +597,7 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			text: requiredString(fields, "text", { maxBytes: 64 * 1024 }),
 			taskSummary: requiredString(fields, "taskSummary", { maxLength: 240 }),
 			status: status as AgentTaskStatus,
+			...parseInstructionRevisions(fields),
 			...(reason === undefined ? {} : { reason: reason as AgentStateReason }),
 			...(fields.has("finalMessage")
 				? { finalMessage: optionalString(fields, "finalMessage", { maxBytes: 4 * 1024 }) }
@@ -418,6 +629,17 @@ export function parseSessionControlEntry(value: unknown): SessionControlEntry {
 			...parseBase(fields),
 			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
 			archived,
+		};
+	}
+	if (type === "agent_permission_ceiling") {
+		assertOnlyFields(fields, [...baseFields, "agentId", "permissionPreset"]);
+		const permissionPreset = fields.get("permissionPreset");
+		if (!isPermissionPreset(permissionPreset)) invalid("Session control entry.permissionPreset is invalid");
+		return {
+			type,
+			...parseBase(fields),
+			agentId: requiredString(fields, "agentId", { maxLength: 256, noControls: true }),
+			permissionPreset,
 		};
 	}
 	if (type === "agent_mailbox_event") {

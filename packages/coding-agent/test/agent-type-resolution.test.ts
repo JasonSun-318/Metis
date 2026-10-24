@@ -98,9 +98,10 @@ describe("definition-aware profiles", () => {
 		expect(prompt).toContain("<agent_role_instructions>\nAlways cite file paths.\n</agent_role_instructions>");
 	});
 
-	it("falls back to the default purpose when a historical type is missing", () => {
+	it("marks the compatibility fallback when historical role instructions are missing", () => {
 		const prompt = buildChildSystemPrompt(config("deleted-role"));
-		expect(prompt).toContain("General analysis and execution");
+		expect(prompt).toContain("historical role instructions could not be recovered");
+		expect(prompt).toContain('"source":"legacy-missing"');
 		expect(prompt).not.toContain("<agent_role_instructions>");
 	});
 

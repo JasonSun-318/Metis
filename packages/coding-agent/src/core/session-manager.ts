@@ -110,7 +110,7 @@ import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
 import { isValidAgentTypeId } from "./subagents/agent-type-registry.ts";
 
-export const CURRENT_SESSION_VERSION = 14;
+export const CURRENT_SESSION_VERSION = 15;
 
 interface ImageReference {
 	type: "image_ref";
@@ -809,6 +809,8 @@ function prepareDurableRecords(records: readonly FileEntry[], storagePath: strin
 	return records.map((record) => prepareDurableRecord(record, storagePath));
 }
 
+import { type AgentRoleSnapshot, parseAgentRoleSnapshot } from "./subagents/agent-type-registry.ts";
+
 export interface SessionHeader {
 	type: "session";
 	version?: number; // v1 sessions don't have this
@@ -826,6 +828,7 @@ export interface SessionHeader {
 		rootSessionId: string;
 		agentPath: readonly string[];
 		agentType: string;
+		roleSnapshot?: AgentRoleSnapshot;
 		tools: readonly string[];
 		writePolicy: "inherit" | "deny";
 		permissionPreset: PermissionPreset;
@@ -902,6 +905,8 @@ export interface SessionMessageEntry extends SessionEntryBase {
 	message: AgentMessage;
 	toolOutput?: PersistedToolOutput;
 	turnId?: string;
+	/** Stable receipt identity for an agent conversation input; not model supplied. */
+	agentMessageId?: string;
 	/** Prompt-cache boundary recorded for the provider request that produced this message. */
 	cacheCheckpoint?: PromptCacheCheckpoint;
 	/** Digest-only request evidence; never part of LLM context. */
@@ -1100,6 +1105,7 @@ export type ReadonlySessionManager = Pick<
 	| "getTree"
 	| "getSessionName"
 	| "getContextRewrites"
+	| "resolveDurableImageRefs"
 >;
 
 function deepFreeze<T>(value: T): T {
@@ -1144,6 +1150,7 @@ function readonlySessionSnapshot(manager: SessionManager): ReadonlySessionManage
 		getTree: () => manager.getTree(),
 		getSessionName: () => manager.getSessionName(),
 		getContextRewrites: () => manager.getContextRewrites(),
+		resolveDurableImageRefs: (refs: readonly DurableImageRef[]) => manager.resolveDurableImageRefs(refs),
 	});
 }
 
@@ -1396,6 +1403,11 @@ function validateSourceSessionHeaderVersion(record: Record<string, unknown>, fil
 }
 
 function validateSessionRecordVersion(type: string, version: number, filePath: string, lineNumber: number): void {
+	if (
+		["agent_input", "agent_run_control", "agent_role_snapshot", "agent_permission_ceiling"].includes(type) &&
+		version < 15
+	)
+		corruptSession(filePath, lineNumber, "Agent conversation records require a v15 session header");
 	if (type.startsWith("runtime_") && version < 5) {
 		corruptSession(filePath, lineNumber, "Runtime control entries require a v5 session header");
 	}
@@ -1424,12 +1436,38 @@ function validateSessionRecordVersion(type: string, version: number, filePath: s
 	}
 }
 
+function validateAgentConversationVersion(
+	record: Record<string, unknown>,
+	version: number,
+	filePath: string,
+	lineNumber: number,
+): void {
+	if (version >= 15) return;
+	const event =
+		record.type === "agent_mailbox_event" && typeof record.event === "object" && record.event !== null
+			? (record.event as Record<string, unknown>)
+			: undefined;
+	if (
+		record.agentMessageId !== undefined ||
+		record.instructionRevision !== undefined ||
+		record.consumedInstructionRevision !== undefined ||
+		(event &&
+			(event.type !== "terminal" ||
+				event.instructionRevision !== undefined ||
+				event.consumedInstructionRevision !== undefined))
+	)
+		corruptSession(filePath, lineNumber, "Agent conversation fields require a v15 session header");
+}
+
 function validateSourceSessionVersionBoundaries(entries: readonly FileEntry[], filePath: string): number {
 	const header = entries.find((entry) => entry.type === "session") as unknown as Record<string, unknown> | undefined;
 	const version = validateSourceSessionHeaderVersion(header ?? {}, filePath);
 	for (let index = 0; index < entries.length; index += 1) {
 		const entry = entries[index];
-		if (entry.type !== "session") validateSessionRecordVersion(entry.type, version, filePath, index + 1);
+		if (entry.type !== "session") {
+			validateSessionRecordVersion(entry.type, version, filePath, index + 1);
+			validateAgentConversationVersion(entry as unknown as Record<string, unknown>, version, filePath, index + 1);
+		}
 	}
 	return version;
 }
@@ -1456,6 +1494,7 @@ function migrateToCurrentVersion(entries: FileEntry[], filePath: string): boolea
 	if (version < 12) migrateV11ToV12(entries);
 	if (version < 13) migrateV12ToV13(entries);
 	if (version < 14) migrateV13ToV14(entries, filePath);
+	if (version < 15) for (const entry of entries) if (entry.type === "session") entry.version = 15;
 
 	return true;
 }
@@ -1822,6 +1861,7 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 			"rootSessionId",
 			"agentPath",
 			"agentType",
+			"roleSnapshot",
 			"tools",
 			"writePolicy",
 			"permissionPreset",
@@ -1860,6 +1900,16 @@ function validateSessionHeader(record: Record<string, unknown>, filePath: string
 		}
 		if (typeof agent.agentType !== "string" || !isValidAgentTypeId(agent.agentType)) {
 			corruptSession(filePath, 1, "Session header has an invalid agent type");
+		}
+		if (agent.roleSnapshot !== undefined) {
+			if ((header.version ?? 1) < 15)
+				corruptSession(filePath, 1, "Agent role snapshots require a v15 session header");
+			try {
+				const snapshot = parseAgentRoleSnapshot(agent.roleSnapshot);
+				if (snapshot.agentType !== agent.agentType) throw new Error("Role snapshot type mismatch");
+			} catch (error) {
+				throw new CorruptSessionError(filePath, 1, "Invalid agent role snapshot", { cause: error });
+			}
 		}
 		if (agent.writePolicy !== "inherit" && agent.writePolicy !== "deny") {
 			corruptSession(filePath, 1, "Session header has an invalid agent write policy");
@@ -1943,6 +1993,7 @@ function validateRawSessionRecords(records: readonly unknown[], filePath: string
 	for (let index = 1; index < records.length; index++) {
 		const type = (records[index] as { type: string }).type;
 		validateSessionRecordVersion(type, version, filePath, index + 1);
+		validateAgentConversationVersion(records[index] as Record<string, unknown>, version, filePath, index + 1);
 		if (type.startsWith("runtime_")) {
 			if (!isRuntimeControlEntryType(type)) {
 				corruptSession(filePath, index + 1, `Unknown runtime control entry type: ${type}`);
@@ -2032,6 +2083,15 @@ function validateSessionGraphEntry(
 	if (entry.type === "message" && entry.turnId !== undefined && (typeof entry.turnId !== "string" || !entry.turnId)) {
 		corruptSession(filePath, lineNumber, `Session message ${entry.id} has an invalid turnId`);
 	}
+	if (
+		entry.type === "message" &&
+		entry.agentMessageId !== undefined &&
+		(entry.message.role !== "user" ||
+			typeof entry.agentMessageId !== "string" ||
+			!entry.agentMessageId ||
+			entry.agentMessageId.length > 256)
+	)
+		corruptSession(filePath, lineNumber, "Invalid agent message identity");
 	seenRecordIds.add(entry.id);
 	seenTreeIds.add(entry.id);
 }
@@ -2368,6 +2428,7 @@ function addCatalogRecord(state: SessionCatalogState, record: unknown, index: nu
 	const header = state.header;
 	if (!header) corruptSession(filePath, 1, "Session journal is empty");
 	validateSessionRecordVersion(raw.type as string, header.version ?? 1, filePath, index + 1);
+	validateAgentConversationVersion(raw, header.version ?? 1, filePath, index + 1);
 	if ((header.version ?? 1) < CURRENT_SESSION_VERSION) {
 		migrateLegacyPermissionJournalRecord(raw, filePath, index + 1);
 	}
@@ -3322,7 +3383,7 @@ export class SessionManager {
 
 	private _readDurableImageRefs(refs: readonly DurableImageRef[]): Array<{ ref: DurableImageRef; bytes: Buffer }> {
 		this._assertOpen();
-		if (!this.persist || !this.storagePath) {
+		if (!this.storagePath) {
 			throw new Error("Durable image references require a persisted session");
 		}
 		if (!Array.isArray(refs)) throw new TypeError("Durable image references must be an array");
@@ -3368,6 +3429,16 @@ export class SessionManager {
 	/** Validate durable prompt refs and owned blobs without retaining provider payloads. */
 	validateDurableImageRefs(refs: readonly DurableImageRef[]): void {
 		this._readDurableImageRefs(refs);
+	}
+
+	/** Copy validated owned images into this session's asset store without accepting paths. */
+	importDurableImageRefs(source: SessionManager, refs: readonly DurableImageRef[]): void {
+		this._assertOpen();
+		if (!this.persist || !this.storagePath) throw new Error("Image import requires a persisted session");
+		const images = source.resolveDurableImageRefs(refs);
+		const directory = getSessionAssetDirFromStoragePath(this.storagePath, "images");
+		for (const image of images) externalizeImage(image, directory);
+		this.validateDurableImageRefs(refs);
 	}
 
 	/** Resolve durable prompt image refs without exposing storage paths or fail-to-text fallback. */
@@ -3421,10 +3492,13 @@ export class SessionManager {
 		turnId?: string,
 		cacheCheckpoint?: PromptCacheCheckpoint,
 		cacheRequest?: PromptCacheRequestSnapshot,
+		agentMessageId?: string,
 	): string {
 		if (turnId !== undefined && (typeof turnId !== "string" || turnId.length === 0)) {
 			throw new TypeError("turnId must be a non-empty string");
 		}
+		if (agentMessageId !== undefined && (message.role !== "user" || !agentMessageId || agentMessageId.length > 256))
+			throw new TypeError("Invalid agent message identity");
 		const entry: SessionMessageEntry = {
 			type: "message",
 			id: generateId(this.recordIds),
@@ -3435,6 +3509,7 @@ export class SessionManager {
 			...(turnId === undefined ? {} : { turnId }),
 			...(cacheCheckpoint === undefined ? {} : { cacheCheckpoint }),
 			...(cacheRequest === undefined ? {} : { cacheRequest }),
+			...(agentMessageId === undefined ? {} : { agentMessageId }),
 		};
 		this._appendEntry(entry);
 		return entry.id;
@@ -4248,7 +4323,7 @@ export class SessionManager {
 			pathWithoutLabels.push({
 				...entry,
 				parentId: pathParentId,
-				...(entry.type === "message" ? { turnId: undefined } : {}),
+				...(entry.type === "message" ? { turnId: undefined, agentMessageId: undefined } : {}),
 			});
 			pathParentId = entry.id;
 		}

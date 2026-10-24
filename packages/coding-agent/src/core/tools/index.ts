@@ -135,6 +135,7 @@ const toolNames = [
 	"update_goal",
 	"describe_image",
 ] as const;
+export { toolNames as BUILT_IN_TOOL_NAMES };
 export type ToolName = (typeof toolNames)[number];
 const GOAL_TOOL_NAMES = ["get_goal", "create_goal", "update_goal"] as const;
 

@@ -26,6 +26,8 @@ export const RPC_ERROR_CODES = {
 	GITHUB_RATE_LIMITED: -32016,
 	GITHUB_DOWNLOAD_FAILED: -32017,
 	GITHUB_ACCESS_DENIED: -32018,
+	PAGE_IN_USE: -32019,
+	USER_PAUSED: -32020,
 } as const;
 
 export type RpcErrorName = keyof typeof RPC_ERROR_CODES;
@@ -54,6 +56,8 @@ const ERROR_MESSAGES: Record<RpcErrorName, string> = {
 	INVALID_CURSOR: "Cursor is invalid or no longer available",
 	GITHUB_RATE_LIMITED: "GitHub request limit reached. Please wait and try again, or use a different network or proxy.",
 	GITHUB_DOWNLOAD_FAILED: "Could not download from GitHub. Check your network or proxy and try again later.",
+	PAGE_IN_USE: "Browser page is controlled by another actor",
+	USER_PAUSED: "Agent execution is paused by the user",
 	GITHUB_ACCESS_DENIED:
 		"GitHub repository is unavailable or access was denied. Check the address and repository visibility.",
 };
@@ -82,6 +86,8 @@ const RETRYABLE: Record<RpcErrorName, boolean> = {
 	GITHUB_RATE_LIMITED: true,
 	GITHUB_DOWNLOAD_FAILED: true,
 	GITHUB_ACCESS_DENIED: false,
+	PAGE_IN_USE: true,
+	USER_PAUSED: false,
 };
 
 const STANDARD_ERROR_NAMES = new Set<RpcErrorName>([
@@ -100,6 +106,12 @@ function ApplicationErrorDataSchema<Name extends RpcErrorName>(name: Name) {
 		sessionId: Type.Optional(SessionIdSchema),
 		operationId: Type.Optional(OpaqueIdSchema),
 		interactionId: Type.Optional(UuidSchema),
+		...(name === "PAGE_IN_USE"
+			? {
+					ownerAgentId: Type.Optional(SessionIdSchema),
+					recovery: Type.Union([Type.Literal("wait_for_user"), Type.Literal("request_owner_release")]),
+				}
+			: {}),
 	});
 }
 
@@ -142,6 +154,8 @@ export const RpcErrorObjectSchema = Type.Union([
 	ApplicationErrorSchema("GITHUB_RATE_LIMITED"),
 	ApplicationErrorSchema("GITHUB_DOWNLOAD_FAILED"),
 	ApplicationErrorSchema("GITHUB_ACCESS_DENIED"),
+	ApplicationErrorSchema("PAGE_IN_USE"),
+	ApplicationErrorSchema("USER_PAUSED"),
 ]);
 
 export interface RpcErrorContext {
@@ -149,6 +163,8 @@ export interface RpcErrorContext {
 	sessionId?: string;
 	operationId?: string;
 	interactionId?: string;
+	ownerAgentId?: string;
+	recovery?: "wait_for_user" | "request_owner_release";
 }
 
 function safeContextValue(schema: typeof UuidSchema | typeof SessionIdSchema | typeof OpaqueIdSchema, value: unknown) {
@@ -163,6 +179,7 @@ export function createRpcError(name: RpcErrorName, context: RpcErrorContext = {}
 	const sessionId = safeContextValue(SessionIdSchema, context.sessionId);
 	const operationId = safeContextValue(OpaqueIdSchema, context.operationId);
 	const interactionId = safeContextValue(UuidSchema, context.interactionId);
+	const ownerAgentId = safeContextValue(SessionIdSchema, context.ownerAgentId);
 	return {
 		code: RPC_ERROR_CODES[name],
 		message: ERROR_MESSAGES[name],
@@ -173,6 +190,12 @@ export function createRpcError(name: RpcErrorName, context: RpcErrorContext = {}
 			...(sessionId === undefined ? {} : { sessionId }),
 			...(operationId === undefined ? {} : { operationId }),
 			...(interactionId === undefined ? {} : { interactionId }),
+			...(name === "PAGE_IN_USE"
+				? {
+						...(ownerAgentId === undefined ? {} : { ownerAgentId }),
+						recovery: context.recovery === "wait_for_user" ? "wait_for_user" : "request_owner_release",
+					}
+				: {}),
 		},
 	} as Static<typeof RpcErrorObjectSchema>;
 }

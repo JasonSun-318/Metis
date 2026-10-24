@@ -1147,7 +1147,7 @@ export class SettingsManager {
 	getRetrySettings(): { enabled: boolean; maxRetries: number; baseDelayMs: number } {
 		return {
 			enabled: this.getRetryEnabled(),
-			maxRetries: this.settings.retry?.maxRetries ?? 3,
+			maxRetries: this.settings.retry?.maxRetries ?? 5,
 			baseDelayMs: this.settings.retry?.baseDelayMs ?? 2000,
 		};
 	}
@@ -1168,7 +1168,9 @@ export class SettingsManager {
 	getProviderRetrySettings(): { timeoutMs?: number; maxRetries?: number; maxRetryDelayMs: number } {
 		return {
 			timeoutMs: this.settings.retry?.provider?.timeoutMs,
-			maxRetries: this.settings.retry?.provider?.maxRetries,
+			// Session retries provide one visible, abortable budget. Avoid stacking
+			// hidden SDK retries on each attempt unless explicitly configured.
+			maxRetries: this.settings.retry?.provider?.maxRetries ?? (this.getRetryEnabled() ? 0 : undefined),
 			maxRetryDelayMs: this.settings.retry?.provider?.maxRetryDelayMs ?? 60000,
 		};
 	}

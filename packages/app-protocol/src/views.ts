@@ -603,6 +603,30 @@ export const ConversationQuoteViewSchema = StrictObject({
 export const ItemViewSchema = StrictObject({
 	itemId: OpaqueIdSchema,
 	sessionId: SessionIdSchema,
+	origin: Type.Optional(
+		Type.Union([
+			StrictObject({ kind: Type.Literal("user") }),
+			StrictObject({
+				kind: Type.Literal("agent"),
+				sessionId: SessionIdSchema,
+				sourceItemId: Type.Optional(OpaqueIdSchema),
+			}),
+			StrictObject({ kind: Type.Literal("system"), eventId: OpaqueIdSchema }),
+		]),
+	),
+	agentMessageId: Type.Optional(OpaqueIdSchema),
+	agentTargetId: Type.Optional(SessionIdSchema),
+	agentTaskId: Type.Optional(SessionIdSchema),
+	deliveryState: Type.Optional(
+		Type.Union([
+			Type.Literal("accepted"),
+			Type.Literal("queued"),
+			Type.Literal("delivered"),
+			Type.Literal("cancelled"),
+			Type.Literal("failed"),
+		]),
+	),
+	instructionRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
 	turnId: Type.Optional(OpaqueIdSchema),
 	role: Type.Union([Type.Literal("user"), Type.Literal("assistant"), Type.Literal("tool"), Type.Literal("system")]),
 	state: Type.Union([Type.Literal("streaming"), Type.Literal("completed"), Type.Literal("interrupted")]),
@@ -634,6 +658,10 @@ export const InteractionChoiceSchema = StrictObject({
 const InteractionBase = {
 	interactionId: UuidSchema,
 	sessionId: SessionIdSchema,
+	rootSessionId: Type.Optional(SessionIdSchema),
+	actorSessionId: Type.Optional(SessionIdSchema),
+	agentId: Type.Optional(SessionIdSchema),
+	taskId: Type.Optional(SessionIdSchema),
 	title: NameSchema,
 	message: PublicTextSchema,
 	createdAt: TimestampSchema,
@@ -1081,6 +1109,8 @@ export const AgentUsageViewSchema = StrictObject({
 });
 export const AgentTaskSummaryViewSchema = StrictObject({
 	taskId: SessionIdSchema,
+	instructionRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
+	consumedInstructionRevision: Type.Optional(Type.Integer({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })),
 	status: AgentStatusViewSchema,
 	taskSummary: PublicTextSchema,
 	finalMessage: Type.Optional(PublicTextSchema),
@@ -1089,8 +1119,28 @@ export const AgentTaskSummaryViewSchema = StrictObject({
 	createdAt: TimestampSchema,
 	updatedAt: TimestampSchema,
 });
+export const RetryStatusViewSchema = Type.Refine(
+	StrictObject({
+		attempt: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+		maxAttempts: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+		delayMs: Type.Integer({ minimum: 0, maximum: 30_000 }),
+	}),
+	(value) => value.attempt <= value.maxAttempts,
+	"Retry attempt exceeds its budget",
+);
+
 export const AgentSummaryViewSchema = StrictObject({
+	retry: Type.Optional(RetryStatusViewSchema),
 	agentId: SessionIdSchema,
+	mode: Type.Optional(AgentModeSchema),
+	model: Type.Optional(ModelRefSchema),
+	tools: Type.Optional(Type.Array(NameSchema, { maxItems: 256 })),
+	writePolicy: Type.Optional(Type.Union([Type.Literal("inherit"), Type.Literal("deny")])),
+	mayDelegate: Type.Optional(Type.Boolean()),
+	roleRevision: Type.Optional(Type.String({ maxLength: 128 })),
+	runControl: Type.Optional(
+		Type.Union([Type.Literal("enabled"), Type.Literal("user_paused"), Type.Literal("interrupted")]),
+	),
 	name: NameSchema,
 	agentType: AgentTypeViewSchema,
 	depth: Type.Integer({ minimum: 1, maximum: 2 }),
@@ -1208,7 +1258,14 @@ export const ProcessChangedEventSchema = StrictObject({
 	process: SessionProcessViewSchema,
 });
 
+export const RetryChangedEventSchema = StrictObject({
+	type: Type.Literal("session/retryChanged"),
+	sessionId: SessionIdSchema,
+	retry: Type.Union([RetryStatusViewSchema, Type.Null()]),
+});
+
 export const SessionSnapshotSchema = StrictObject({
+	retry: Type.Optional(RetryStatusViewSchema),
 	process: Type.Optional(SessionProcessViewSchema),
 	session: SessionSummarySchema,
 	collaborationMode: CollaborationModeSchema,
@@ -1617,6 +1674,7 @@ export const MemoryDreamCompletedEventSchema = StrictObject({
 });
 
 export const DomainEventSchema = Type.Union([
+	RetryChangedEventSchema,
 	ProcessChangedEventSchema,
 	SessionUpdatedEventSchema,
 	SessionInvalidatedEventSchema,
@@ -1761,6 +1819,7 @@ export type ScheduleRunView = Static<typeof ScheduleRunViewSchema>;
 export type ScheduleSnapshotView = Static<typeof ScheduleSnapshotViewSchema>;
 export type ScheduleTaskSnapshotView = Static<typeof ScheduleTaskSnapshotViewSchema>;
 export type DomainEvent = Static<typeof DomainEventSchema>;
+export type RetryStatusView = Static<typeof RetryStatusViewSchema>;
 export type ConnectionEventsParams = Static<typeof ConnectionEventsParamsSchema>;
 export type CustomAgentTypeView = Static<typeof CustomAgentTypeViewSchema>;
 

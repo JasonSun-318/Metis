@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fauxAssistantMessage } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type NewSessionOptions, SessionManager } from "../src/core/session-manager.ts";
 import type { SubagentManager } from "../src/core/subagents/manager.ts";
@@ -119,6 +120,34 @@ function coordinatorOptions(
 }
 
 describe("SessionAgentCoordinator", () => {
+	it("preserves child and host instructions while composing coordination", async () => {
+		const { harness } = await persistedHarness({
+			id: "child",
+			mode: "chat",
+			agent: (cwd) =>
+				agentHeader(cwd, { agentId: "child", parentSessionId: "root", rootSessionId: "root", mayDelegate: true }),
+		});
+		harness.session.setHostSystemPrompt("<agent_contract>Preserve the assigned role.</agent_contract>");
+		const adapter = managerAdapter();
+		const coordinator = new SessionAgentCoordinator(
+			coordinatorOptions(harness.tempDir, { inheritedManager: adapter.manager }),
+		);
+		await coordinator.initialize(harness.session);
+		expect(harness.session.agent.state.systemPrompt).toContain("Preserve the assigned role.");
+		expect(harness.session.agent.state.systemPrompt).toContain("<agent_coordination>");
+		let requestPrompt = "";
+		harness.setResponses([
+			(context) => {
+				requestPrompt = context.systemPrompt ?? "";
+				return fauxAssistantMessage("Verified");
+			},
+		]);
+		await harness.session.prompt("Check the assigned task");
+		expect(requestPrompt).toContain("Preserve the assigned role.");
+		expect(requestPrompt).toContain("<agent_coordination>");
+		await coordinator.dispose();
+	});
+
 	it("owns a persisted Code root and disposes it once", async () => {
 		const { harness, sessionManager } = await persistedHarness({ id: "root", mode: "code" });
 		const adapter = managerAdapter();
@@ -206,20 +235,10 @@ describe("SessionAgentCoordinator", () => {
 	});
 
 	it("ignores a continuation that becomes stale during disposal", async () => {
-		const { harness } = await persistedHarness({
-			id: "child",
-			mode: "code",
-			agent: (cwd) =>
-				agentHeader(cwd, {
-					agentId: "child",
-					parentSessionId: "root",
-					rootSessionId: "root",
-					mayDelegate: true,
-				}),
-		});
+		const { harness } = await persistedHarness({ id: "root", mode: "code" });
 		const adapter = managerAdapter();
 		const coordinator = new SessionAgentCoordinator(
-			coordinatorOptions(harness.tempDir, { inheritedManager: adapter.manager }),
+			coordinatorOptions(harness.tempDir, { createManager: () => adapter.manager }),
 		);
 		let releaseIdle!: () => void;
 		const waitForIdle = vi
@@ -234,13 +253,28 @@ describe("SessionAgentCoordinator", () => {
 		const continueMailbox = vi.spyOn(harness.session, "continueAgentMailbox");
 		coordinator.attach(harness.session);
 
-		adapter.emit({ type: "notification_ready", event: terminalEvent({ parentSessionId: "child" }) });
+		adapter.emit({ type: "notification_ready", event: terminalEvent({ parentSessionId: "root" }) });
 		await vi.waitFor(() => expect(waitForIdle).toHaveBeenCalled());
 		await coordinator.dispose();
 		releaseIdle();
 		await new Promise<void>((resolve) => setImmediate(resolve));
 
 		expect(continueMailbox).not.toHaveBeenCalled();
+	});
+
+	it("does not wake a model for notifications recovered from history", async () => {
+		const { harness } = await persistedHarness({ id: "root", mode: "code" });
+		const adapter = managerAdapter();
+		const coordinator = new SessionAgentCoordinator(
+			coordinatorOptions(harness.tempDir, { createManager: () => adapter.manager }),
+		);
+		const continueMailbox = vi.spyOn(harness.session, "continueAgentMailbox");
+		await coordinator.initialize(harness.session);
+		adapter.emit({ type: "notification_ready", event: terminalEvent({ parentSessionId: "root" }), wake: false });
+		await new Promise<void>((resolve) => setImmediate(resolve));
+		expect(continueMailbox).not.toHaveBeenCalled();
+		expect(harness.faux.state.callCount).toBe(0);
+		await coordinator.dispose();
 	});
 
 	it("reports manager notification failures through the diagnostic callback", async () => {
