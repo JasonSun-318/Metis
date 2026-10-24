@@ -93,6 +93,23 @@ describe("Code change tracking", () => {
 		expect(tracker.take("command")?.turn).toEqual({ additions: 1, deletions: 1, partial: false });
 	});
 
+	it("does not report incomplete workspace scans as changes when a command edits nothing", async () => {
+		const { cwd, path, tracker } = await fixture(true);
+		// An existing oversized file makes the bounded scan partial even when
+		// the command only reads another file, as browser-control commands can.
+		await writeFile(join(cwd, "existing-large.txt"), "x".repeat(2 * 1024 * 1024));
+		await writeFile(path, "already dirty\n");
+		const scope = { cwd, paths: [], scanWorkspace: true };
+		await tracker.run("turn", "read-only", scope, () => readFile(path));
+		expect(tracker.take("read-only")).toBeUndefined();
+		await tracker.run("turn", "actual-edit", scope, () => writeFile(path, "command edit\n"));
+		const changed = tracker.take("actual-edit")!;
+		expect(changed.files).toHaveLength(1);
+		expect(changed.files[0]).toMatchObject({ path: "app.ts", additions: 1, deletions: 1 });
+		expect(changed.partial).toBe(true);
+		expect(changed.turn).toEqual({ additions: 1, deletions: 1, partial: true });
+	});
+
 	it("captures tools that declare a writable directory rather than an individual file", async () => {
 		const { cwd, path, tracker } = await fixture();
 		await tracker.run("turn", "directory-tool", { cwd, paths: [cwd] }, () => writeFile(path, "changed\n"));

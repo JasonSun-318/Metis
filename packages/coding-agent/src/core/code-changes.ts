@@ -311,6 +311,7 @@ export class CodeChangeTracker {
 	private async record(toolCallId: string, cwd: string, before: Snapshot, after: Snapshot): Promise<void> {
 		const files: CodeFileChange[] = [];
 		let partial = before.partial || after.partial;
+		let observedChanges = false;
 		let budget = MAX_STEP_PATCH_BYTES;
 		for (const [path, current] of after.files) {
 			const previous =
@@ -318,6 +319,7 @@ export class CodeChangeTracker {
 				(before.partial ? UNAVAILABLE : before.repository ? await readGitFile(before.repository, path) : MISSING);
 			if (previous.directory || current.directory) continue;
 			if (previous.signature === current.signature) continue;
+			observedChanges = true;
 			const name = relative(cwd, path).split("\\").join("/");
 			const change = fileChange(name, previous, current, budget);
 			if (files.length < MAX_STEP_FILES && Buffer.byteLength(name, "utf8") <= 4096) {
@@ -341,7 +343,10 @@ export class CodeChangeTracker {
 				);
 		}
 		this.partial ||= partial;
-		if (files.length === 0 && !partial) return;
+		// Scan limits describe coverage, not evidence that the command changed
+		// files. Keep that uncertainty for later real changes in the turn, but
+		// do not turn a partial no-op scan into a synthetic file-change event.
+		if (!observedChanges) return;
 		// History pages contain many results. Bound the whole serialized preview,
 		// including escaped text and filenames, without changing the actual counts.
 		while (Buffer.byteLength(JSON.stringify(files), "utf8") > MAX_STEP_METADATA_BYTES) {
