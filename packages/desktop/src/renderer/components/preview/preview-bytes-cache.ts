@@ -4,11 +4,16 @@ export type PreviewCacheKey = string;
 
 export function previewCacheKey(
 	target:
-		| { readonly source: "delivered"; readonly sessionId: string; readonly fileId: string }
+		| {
+				readonly source: "delivered";
+				readonly sessionId: string;
+				readonly rootSessionId?: string;
+				readonly fileId: string;
+		  }
 		| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string },
 ): PreviewCacheKey {
 	return target.source === "delivered"
-		? `delivered:${target.sessionId}:${target.fileId}`
+		? `delivered:${target.rootSessionId ? `${target.rootSessionId}:` : ""}${target.sessionId}:${target.fileId}`
 		: `workspace:${target.sessionId}:${target.relativePath}`;
 }
 

@@ -8,6 +8,7 @@ import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
+import { MessageOrigin } from "./MessageOrigin.tsx";
 import { CodeChangeCounts, codeStepCounts, ToolCodeChanges } from "./ToolCodeChanges.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnCopyButton } from "./TranscriptTurn.tsx";
@@ -50,7 +51,7 @@ function VisibleBlock({
 				</p>
 			);
 		case "notice":
-			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
+			return <p className={`notice notice-${block.level}`}>{t(block.text)}</p>;
 		case "thinking":
 		case "tool_call":
 		case "tool_result":
@@ -120,6 +121,7 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const presentation = toolTranscriptPresentation(call, result, t);
+	const changes = result?.codeChanges?.files.length ? result.codeChanges : undefined;
 	const running = call.state === "running" || call.state === "pending";
 	const Icon = isCommandTool(call.name) ? TerminalWindow : Wrench;
 	return (
@@ -136,14 +138,14 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 			>
 				<Icon aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
-				{result?.codeChanges && (
+				{changes && (
 					<>
-						{result.codeChanges.files.length === 1 && (
-							<span className="code-change-path" title={result.codeChanges.files[0]!.path}>
-								{result.codeChanges.files[0]!.path}
+						{changes.files.length === 1 && (
+							<span className="code-change-path" title={changes.files[0]!.path}>
+								{changes.files[0]!.path}
 							</span>
 						)}
-						<CodeChangeCounts counts={codeStepCounts(result.codeChanges)} />
+						<CodeChangeCounts counts={codeStepCounts(changes)} />
 					</>
 				)}
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
@@ -152,7 +154,7 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<CodeToolDetails
 					call={call}
-					changes={open ? result?.codeChanges : undefined}
+					changes={open ? changes : undefined}
 					lines={presentation.detailLines}
 					rawInput={presentation.rawInput}
 					rawOutput={presentation.rawOutput}
@@ -167,6 +169,7 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const presentation = toolTranscriptPresentation(undefined, result, t);
+	const changes = result.codeChanges?.files.length ? result.codeChanges : undefined;
 	return (
 		<details className="code-command code-command-tool" open={open}>
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
@@ -178,12 +181,12 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 			>
 				<Wrench aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
-				{result.codeChanges && <CodeChangeCounts counts={codeStepCounts(result.codeChanges)} />}
+				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
 				<CodeToolDetails
-					changes={open ? result.codeChanges : undefined}
+					changes={open ? changes : undefined}
 					lines={presentation.detailLines}
 					rawOutput={presentation.rawOutput}
 					rawOutputIsError={presentation.rawOutputIsError}
@@ -267,6 +270,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	items,
 	waitingForAnswer = false,
 	running = false,
+	retry,
 	startedAt,
 	onFork,
 	onCopy,
@@ -281,14 +285,27 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	const sessionId = items[0]?.sessionId;
 	const lastToolSegment = segments.reduce((last, segment, index) => (segment.type === "tools" ? index : last), -1);
 	let turnChanges: CodeChangesView | undefined;
+	let hasObservedChanges = false;
 	for (const result of results.values()) {
+		if (result.codeChanges?.files.length) hasObservedChanges = true;
 		if (result.codeChanges && (!turnChanges || result.codeChanges.sequence > turnChanges.sequence))
 			turnChanges = result.codeChanges;
 	}
+	// Old journals may contain empty diffs emitted solely because scanning was
+	// incomplete. A coverage warning alone must not imply any file was edited.
+	const showTurnChanges = hasObservedChanges || Boolean(turnChanges?.turn.additions || turnChanges?.turn.deletions);
 
 	return (
 		<>
 			{segments.map((segment, segmentIndex) => {
+				if (segment.type === "system")
+					return (
+						<div className="code-turn-status" data-quote-item={segment.item.itemId} key={segment.item.itemId}>
+							{segment.item.content.map((block, blockIndex) => (
+								<VisibleBlock block={block} key={`${block.type}-${blockIndex}`} />
+							))}
+						</div>
+					);
 				if (segment.type === "user") {
 					const copyText = messageText(segment.item);
 					return (
@@ -297,6 +314,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 							key={segment.item.itemId}
 							data-user-message={segment.item.itemId}
 						>
+							<MessageOrigin item={segment.item} />
 							<MessageAttachments attachments={segment.item.attachments} />
 							<MessageFileSelections selections={segment.item.fileSelections} />
 							{segment.item.content.length > 0 && (
@@ -323,7 +341,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 								calls={segment.calls}
 								orphanResults={segment.orphanResults}
 								results={results}
-								turnChanges={segmentIndex === lastToolSegment ? turnChanges : undefined}
+								turnChanges={segmentIndex === lastToolSegment && showTurnChanges ? turnChanges : undefined}
 							/>
 							{segment.calls
 								.filter((call) => call.name === "ask_user")
@@ -384,7 +402,13 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 				</div>
 			)}
 			{running && (
-				<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+				<TurnRuntimeStatus
+					items={items}
+					running
+					retry={retry}
+					startedAt={startedAt}
+					waitingForAnswer={waitingForAnswer}
+				/>
 			)}
 		</>
 	);

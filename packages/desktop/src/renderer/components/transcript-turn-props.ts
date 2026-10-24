@@ -1,8 +1,9 @@
-import type { ItemView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { ItemView, RetryStatusView, SessionDeliveredFileView } from "@metis/app-protocol";
 
 export interface TranscriptTurnProps {
 	readonly items: readonly ItemView[];
 	readonly running?: boolean;
+	readonly retry?: RetryStatusView;
 	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
 	readonly onFork?: (entryId: string) => void;
@@ -15,6 +16,7 @@ export interface TranscriptTurnProps {
 export function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnProps): boolean {
 	return (
 		left.running === right.running &&
+		left.retry === right.retry &&
 		left.waitingForAnswer === right.waitingForAnswer &&
 		left.startedAt === right.startedAt &&
 		left.onFork === right.onFork &&

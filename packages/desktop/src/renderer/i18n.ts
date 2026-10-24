@@ -10,6 +10,59 @@ export const APP_LOCALES: readonly { readonly value: AppLocale; readonly label: 
 ];
 
 const zhCN = {
+	"Agent details": "子代理详情",
+	"Agent type": "角色",
+	"Stop agent": "停止子代理",
+	"Stop this agent immediately": "立即停止此子代理",
+	"Message timing": "消息发送时机",
+	"During current task": "任务中发送",
+	"After current task": "任务后发送",
+	"The agent reads your message after its current step. Use Stop to interrupt immediately.":
+		"当前步骤结束后读取消息。如需立即中止，请使用停止按钮。",
+	"Start a follow-up after this task finishes.": "本次任务结束后，再开始处理这条消息。",
+	"Waiting to be read": "等待处理",
+	Ready: "就绪",
+	"The model provider could not complete the request. Try again or choose another configured model.":
+		"模型服务未能完成本次请求。请重试，或切换到其他已配置的模型。",
+	"Open agent conversation": "打开子代理会话",
+	"Resume agent": "恢复子代理",
+	"Open parent conversation": "打开父会话",
+	"Parent conversation": "父会话",
+	"Agent conversation": "子代理会话",
+	"Agent conversations": "子代理会话",
+	"Couldn’t load this agent conversation.": "无法加载此子代理会话。",
+	"Couldn’t send the message.": "无法发送消息。",
+	"This agent is stopped. Sending a message resumes this conversation within its parent’s permissions.":
+		"此子代理已停止。发送消息会在父会话权限允许的范围内恢复此会话。",
+	"Sent to the agent’s model": "已送入子代理的模型请求",
+	"Queued for the agent": "已加入子代理队列",
+	"Message cancelled": "消息已取消",
+	"Message delivery failed": "消息投递失败",
+	"Message saved; waiting for delivery": "消息已保存，等待投递",
+	"Add instructions for this agent…": "为此子代理补充指令…",
+	"Message this agent…": "向此子代理发送消息…",
+	"Inherited model": "继承的模型",
+	"Send after current task": "当前任务完成后发送",
+	"Agent capabilities": "子代理能力",
+	"Capabilities are recorded when the agent starts.": "子代理启动时会记录实际能力。",
+	"Independent context · No automatic memory or skills loading": "独立上下文 · 不自动加载记忆或技能",
+	"Filesystem writes denied": "禁止写入文件",
+	"Inherits parent write permissions": "继承父会话的写入权限",
+	"Parent agent": "父代理",
+	"Agent coordination": "代理协作",
+	"Sent to model": "已送入模型请求",
+	"Collapse agent tasks": "折叠子代理任务",
+	"Expand agent tasks": "展开子代理任务",
+	"{{count}} agents": "{{count}} 个子代理",
+	"Retry loading agents": "重新加载子代理",
+	"Some agent conversations could not be read. Retry loading to check again.":
+		"部分子代理会话无法读取。重新加载后再检查。",
+	"Unreadable agents: {{count}}": "无法读取的子代理：{{count}}",
+	"Inherits all parent delegatable tools": "继承父会话全部可委派工具",
+	"Uses selected tools within parent permissions": "在父会话权限内使用选定工具",
+	"Role instructions supplement Metis rules. Existing conversations keep their role snapshot.":
+		"角色指令补充 Metis 基础规则。已有会话保留创建时的角色快照。",
+
 	"Resize sessions sidebar": "调整会话侧边栏宽度",
 	"Resize file tree": "调整文件树宽度",
 	"Hide workspace tree": "隐藏工作区文件树",
@@ -237,9 +290,10 @@ const zhCN = {
 		"阅读和搜索信息，返回具体发现，不修改文件。",
 	"General analysis and execution; use when no narrower type fits.":
 		"处理通用分析和执行任务，适合没有专门角色的工作。",
-	"Font used for Code replies, greetings, and questions. Code and tools remain monospaced.":
-		"用于 Code 回复、欢迎语和问答内容的字体，代码和工具输出保持等宽字体。",
-	"Font used for Chat replies, greetings, and questions.": "用于 Chat 回复、欢迎语和问答内容的字体。",
+	"Font for Code replies and questions. Your messages use the system font; code and tools remain monospaced.":
+		"用于 Code 回复与问答内容。你的消息使用系统字体，代码和工具输出保持等宽字体。",
+	"Font for Chat replies and questions. Your messages and interface controls use the system font.":
+		"用于 Chat 回复与问答内容。你的消息和界面控件使用系统字体。",
 	"Review your profile and token usage.": "查看个人资料、活跃情况和用量。",
 	"Optional services for images. Your chat model works independently.":
 		"用于图片理解的可选服务，聊天模型可以独立使用。",
@@ -394,9 +448,9 @@ const zhCN = {
 	"Content font size": "内容字号",
 	"Adjust Chat and Code reading text without changing interface controls or layout.":
 		"调整 Chat 与 Code 阅读内容的字号，不改变界面控件或布局。",
-	"Chat font": "Chat 字体",
+	"Chat reply font": "Chat 回复字体",
 	"Font used for assistant prose in Chat mode.": "用于 Chat 模式助手正文的字体。",
-	"Code font": "Code 字体",
+	"Code reply font": "Code 回复字体",
 	"Font used for assistant prose in Code mode. Code and tools remain monospaced.":
 		"用于 Code 模式助手正文的字体；代码和工具内容仍使用等宽字体。",
 	Motion: "动效",
@@ -404,8 +458,8 @@ const zhCN = {
 	Reduced: "减少动效",
 	"System serif": "系统衬线",
 	"System sans serif": "系统无衬线",
-	"Anthropic Serif falls back to the system serif for unsupported characters.":
-		"Anthropic Serif 不支持的字符会回退到系统衬线字体。",
+	"Anthropic Serif uses a locally installed font, with system serif fallback if unavailable or missing characters.":
+		"Anthropic Serif 使用本机已安装的字体；未安装或缺少字符时使用系统衬线字体。",
 	Profile: "个人资料",
 	"Profile & Usage": "个人资料与用量",
 	"Review your profile and activity at a glance.": "查看你的个人资料和活动概览。",
@@ -1575,6 +1629,7 @@ const zhCN = {
 	"Load older activity": "加载更早的活动",
 	"{{count}} tokens": "{{count}} 个 Token",
 	"Thinking…": "思考中…",
+	"Retrying ({{attempt}}/{{maxAttempts}})": "重试中（{{attempt}}/{{maxAttempts}}）",
 	"{{time}} elapsed": "已运行 {{time}}",
 	"Available tools": "可用工具",
 	"Coming soon": "即将推出",
@@ -1734,6 +1789,8 @@ const zhCN = {
 	"Browser could not load this page": "浏览器无法加载此页面",
 	Downloads: "下载",
 	"No downloads yet": "暂无下载",
+	"Loading downloads…": "正在加载下载…",
+	"Downloads could not be loaded": "无法加载下载",
 	Downloading: "下载中",
 	"Download failed": "下载失败",
 	"Pause download": "暂停下载",
@@ -1743,6 +1800,7 @@ const zhCN = {
 	"Remove from list": "从列表中移除",
 	History: "历史记录",
 	"No history yet": "暂无历史记录",
+	"History could not be loaded": "无法加载历史记录",
 	"Clear history": "清除历史记录",
 	"Browser profile": "浏览器资料",
 	"Browser profile: {{name}}": "浏览器资料：{{name}}",
@@ -2149,6 +2207,7 @@ const zhCN = {
 	Skip: "跳过",
 	"{{count}} selected": "已选择 {{count}} 项",
 	"Next question": "下一个问题",
+	"Answer question {{number}} before submitting.": "请先回答第 {{number}} 个问题，再提交。",
 	"Submit answers": "提交回答",
 	Command: "命令",
 	"Working directory": "工作目录",
@@ -2254,6 +2313,21 @@ const zhCN = {
 	"Runtime Status": "运行状态",
 	"Runtime Errors": "运行错误",
 	"Affected session/component": "受影响的会话/组件",
+	"Running pre-flight checks...": "正在运行预检…",
+	"Loading hooks…": "正在加载钩子…",
+	Plugin: "插件",
+	"Custom fields": "自定义字段",
+	"Loading hook…": "正在加载钩子详情…",
+	"Profile view": "个人资料视图",
+	"Pick a session from the sidebar.": "从侧边栏选择一个会话。",
+	sessions: "个会话",
+	"Failed to deliver file": "文件交付失败",
+	"Memory search failed": "记忆搜索失败",
+	"Delivering file": "正在交付文件",
+	"Delivered file to user": "文件已交付给用户",
+	"Searching memory": "正在搜索记忆",
+	"Recalled {{count}} memory notes": "已回忆 {{count}} 条记忆笔记",
+	"Searched memory": "已搜索记忆",
 } satisfies Record<string, string>;
 
 function isAppLocale(value: unknown): value is AppLocale {

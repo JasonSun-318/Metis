@@ -18,6 +18,7 @@ import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
 import { MessageAttachments } from "./MessageAttachments.tsx";
 import { MessageFileSelections } from "./MessageFileSelections.tsx";
+import { MessageOrigin } from "./MessageOrigin.tsx";
 import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
@@ -45,7 +46,7 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 				</p>
 			);
 		case "notice":
-			return <p className={`notice notice-${block.level}`}>{block.text}</p>;
+			return <p className={`notice notice-${block.level}`}>{t(block.text)}</p>;
 		case "thinking":
 		case "tool_call":
 		case "tool_result":
@@ -151,6 +152,7 @@ function ExecutionChain({
 	running,
 	startedAt,
 	waitingForAnswer,
+	retry,
 }: {
 	readonly activity: readonly ItemContentBlockView[];
 	readonly items: readonly ItemView[];
@@ -158,6 +160,7 @@ function ExecutionChain({
 	readonly running: boolean;
 	readonly startedAt?: string;
 	readonly waitingForAnswer: boolean;
+	readonly retry?: TranscriptTurnProps["retry"];
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(running);
@@ -286,7 +289,13 @@ function ExecutionChain({
 						)}
 					</div>
 					{running ? (
-						<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+						<TurnRuntimeStatus
+							items={items}
+							running
+							retry={retry}
+							startedAt={startedAt}
+							waitingForAnswer={waitingForAnswer}
+						/>
 					) : (
 						(!canExpand || showAll) && (
 							<div className="execution-chain-done">
@@ -345,6 +354,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	waitingForAnswer = false,
 	items,
 	running: runtimeRunning = false,
+	retry,
 	startedAt,
 	onFork,
 	onCopy,
@@ -371,6 +381,21 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	return (
 		<>
 			{segments.map((segment, index) => {
+				if (segment.type === "notice")
+					return (
+						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript notice segments are append-only, like the neighboring streamed content segments. */
+						<div className="turn-intermediate" data-quote-item={segment.itemId} key={`notice-${index}`}>
+							<StaticBlock block={segment.block} />
+						</div>
+					);
+				if (segment.type === "system")
+					return (
+						<div className="turn-intermediate" data-quote-item={segment.item.itemId} key={segment.item.itemId}>
+							{segment.item.content.map((block, blockIndex) => (
+								<StaticBlock block={block} key={`${block.type}-${blockIndex}`} />
+							))}
+						</div>
+					);
 				if (segment.type === "user") {
 					const copyText = messageText(segment.item);
 					return (
@@ -379,6 +404,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							key={segment.item.itemId}
 							data-user-message={segment.item.itemId}
 						>
+							<MessageOrigin item={segment.item} />
 							<MessageAttachments attachments={segment.item.attachments} />
 							<MessageFileSelections selections={segment.item.fileSelections} />
 							{segment.item.content.length > 0 && (
@@ -441,6 +467,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							results={results}
 							running={index === activeActivityIndex}
 							startedAt={startedAt}
+							retry={retry}
 							waitingForAnswer={waitingForAnswer}
 						/>
 						{segment.calls
@@ -481,7 +508,13 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 				</div>
 			)}
 			{runtimeRunning && activeActivityIndex < 0 && (
-				<TurnRuntimeStatus items={items} running startedAt={startedAt} waitingForAnswer={waitingForAnswer} />
+				<TurnRuntimeStatus
+					items={items}
+					running
+					retry={retry}
+					startedAt={startedAt}
+					waitingForAnswer={waitingForAnswer}
+				/>
 			)}
 		</>
 	);

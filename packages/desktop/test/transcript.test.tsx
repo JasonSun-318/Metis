@@ -117,6 +117,44 @@ describe("TranscriptTurn", () => {
 	it.each([
 		["chat", TranscriptTurn],
 		["code", CodeTranscriptTurn],
+	] as const)(
+		"keeps a %s provider failure notice visible after recovery without presenting failure as an answer",
+		async (_mode, Turn) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const onCopy = vi.fn();
+			const onFork = vi.fn();
+			const failure: ItemView = {
+				...item("provider-failure", "assistant", [
+					{ type: "notice", level: "error", text: "The model provider could not complete the request." },
+				]),
+				state: "interrupted",
+			};
+			const failed = [turnItems[0]!, failure];
+			try {
+				await act(async () => root.render(<Turn items={failed} onCopy={onCopy} onFork={onFork} />));
+				expect(container.querySelectorAll(".notice-error")).toHaveLength(1);
+				expect(container.querySelector(".notice-error")?.textContent).toBe(
+					"The model provider could not complete the request.",
+				);
+				expect(container.querySelector("[data-transcript-answer]")).toBeNull();
+				expect(container.querySelector(".turn-fork-button")).toBeNull();
+				const recovered = [...failed, turnItems.at(-1)!];
+				await act(async () => root.render(<Turn items={recovered} onCopy={onCopy} onFork={onFork} />));
+				expect(container.querySelectorAll(".notice-error")).toHaveLength(1);
+				expect(container.querySelectorAll("[data-transcript-answer]")).toHaveLength(1);
+				expect(container.querySelector("[data-transcript-answer]")?.textContent).toContain("桌面上有 file.txt。");
+				expect(container.querySelector("[data-transcript-answer]")?.textContent).not.toContain("model provider");
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each([
+		["chat", TranscriptTurn],
+		["code", CodeTranscriptTurn],
 	] as const)("updates %s memoized rows when callbacks or items change", async (_appearance, Turn) => {
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -860,6 +898,204 @@ describe("CodeTranscriptTurn", () => {
 });
 
 describe("Transcript", () => {
+	it.each(["chat", "code"] as const)(
+		"keeps a legacy %s continuation tool chain together between explicit human turns",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const before = [
+				{ ...item("before-user", "user", [{ type: "text", text: "First request" }]), turnId: "before" },
+				{ ...item("before-answer", "assistant", [{ type: "text", text: "Initial answer" }]), turnId: "before" },
+			];
+			const continuation = turnItems.slice(1).map((entry) => ({ ...entry, turnId: undefined }));
+			const after = [
+				{ ...item("after-user", "user", [{ type: "text", text: "Next request" }]), turnId: "after" },
+				{ ...item("after-answer", "assistant", [{ type: "text", text: "Next answer" }]), turnId: "after" },
+			];
+			const render = (entries: readonly ItemView[]) =>
+				root.render(
+					<Transcript
+						appearance={appearance}
+						activeTurnId="after"
+						hasOlder={false}
+						itemIds={entries.map((entry) => entry.itemId)}
+						itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				);
+			try {
+				await act(async () => render([...before, ...continuation, ...after]));
+				const rows = [...container.querySelectorAll("[data-transcript-turn]")];
+				expect(rows).toHaveLength(3);
+				expect(rows[0]?.querySelector('[data-user-message="before-user"]')).not.toBeNull();
+				expect(rows[1]?.querySelector("[data-user-message]")).toBeNull();
+				expect(rows[2]?.querySelector('[data-user-message="after-user"]')).not.toBeNull();
+				expect(rows[2]?.querySelector(".turn-runtime-status")).not.toBeNull();
+				expect(rows[1]?.querySelector(".turn-runtime-status")).toBeNull();
+				const execution = container.querySelector<HTMLDetailsElement>(
+					appearance === "code" ? ".code-execution" : ".execution-chain",
+				)!;
+				expect(
+					container.querySelectorAll(appearance === "code" ? ".code-execution" : ".execution-chain"),
+				).toHaveLength(1);
+				expect(execution.open).toBe(false);
+				if (appearance === "code") {
+					expect(execution.querySelector(":scope > summary")?.textContent).toContain("Ran a command, used a tool");
+					expect(execution.querySelectorAll(".code-command-orphan-label")).toHaveLength(0);
+				}
+				await act(async () => execution.querySelector("summary")!.click());
+				expect(execution.open).toBe(true);
+				const mailbox: ItemView = {
+					...item("mid-chain-mailbox", "system", [{ type: "text", text: "Internal event" }]),
+					turnId: undefined,
+					origin: { kind: "system", eventId: "mid-chain-event" },
+					agentTargetId: SESSION_ID,
+				};
+				await act(async () => render([...before, continuation[0]!, mailbox, ...continuation.slice(1), ...after]));
+				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(3);
+				expect(
+					container.querySelector<HTMLDetailsElement>(
+						appearance === "code" ? ".code-execution" : ".execution-chain",
+					)!.open,
+				).toBe(true);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["chat", "code"] as const)(
+		"keeps separate human boundaries in %s history without turn IDs",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const entries = [
+				item("legacy-user-one", "user", [{ type: "text", text: "First request" }]),
+				item("legacy-answer-one", "assistant", [{ type: "text", text: "First answer" }]),
+				item("legacy-user-two", "user", [{ type: "text", text: "Second request" }]),
+				item("legacy-answer-two", "assistant", [{ type: "text", text: "Second answer" }]),
+			].map((entry) => ({ ...entry, turnId: undefined }));
+			try {
+				await act(async () =>
+					root.render(
+						<Transcript
+							appearance={appearance}
+							hasOlder={false}
+							showNavigation
+							itemIds={entries.map((entry) => entry.itemId)}
+							itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+							loadingOlder={false}
+							onLoadOlder={async () => undefined}
+						/>,
+					),
+				);
+				const rows = [...container.querySelectorAll("[data-transcript-turn]")];
+				expect(rows).toHaveLength(2);
+				expect(rows[0]?.querySelector('[data-user-message="legacy-user-one"]')).not.toBeNull();
+				expect(rows[0]?.textContent).toContain("First answer");
+				expect(rows[1]?.querySelector('[data-user-message="legacy-user-two"]')).not.toBeNull();
+				expect(rows[1]?.textContent).toContain("Second answer");
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["chat", "code"] as const)(
+		"does not join %s legacy chains across system or session boundaries",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const entries: ItemView[] = [
+				item("legacy-before-notice", "assistant", [{ type: "text", text: "Before warning" }]),
+				item("legacy-warning", "system", [{ type: "notice", level: "warning", text: "A system warning" }]),
+				item("legacy-after-notice", "assistant", [{ type: "text", text: "After warning" }]),
+				item("legacy-compaction", "system", [{ type: "compaction" }]),
+				item("legacy-after-compaction", "assistant", [{ type: "text", text: "After compaction" }]),
+				{
+					...item("legacy-other-session", "assistant", [{ type: "text", text: "Another conversation" }]),
+					sessionId: "22222222-2222-4222-8222-222222222222",
+				},
+			].map((entry) => ({ ...entry, turnId: undefined }));
+			try {
+				await act(async () =>
+					root.render(
+						<Transcript
+							appearance={appearance}
+							hasOlder={false}
+							itemIds={entries.map((entry) => entry.itemId)}
+							itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+							loadingOlder={false}
+							onLoadOlder={async () => undefined}
+						/>,
+					),
+				);
+				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(6);
+				expect(container.querySelectorAll(".transcript-compaction-row")).toHaveLength(1);
+				expect(container.querySelector(".notice-warning")?.textContent).toBe("A system warning");
+				expect(container.textContent).toContain("Another conversation");
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["chat", "code"] as const)(
+		"does not allocate %s virtual rows or new-message notices for internal mailbox events",
+		async (appearance) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const internal = Array.from(
+				{ length: 12 },
+				(_, index): ItemView => ({
+					...item(`coordination-${index}`, "system", [{ type: "text", text: `Internal child result ${index}` }]),
+					turnId: undefined,
+					origin: { kind: "system", eventId: `event-${index}` },
+					agentTargetId: "22222222-2222-4222-8222-222222222222",
+				}),
+			);
+			const render = (entries: readonly ItemView[]) =>
+				root.render(
+					<Transcript
+						appearance={appearance}
+						hasOlder={false}
+						itemIds={entries.map((entry) => entry.itemId)}
+						itemsById={new Map(entries.map((entry) => [entry.itemId, entry]))}
+						latestLabel="Jump to latest"
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				);
+			try {
+				await act(async () => render(internal));
+				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(0);
+				expect(container.querySelector<HTMLElement>(".transcript-space")?.style.height).toBe("0px");
+				await act(async () => render([...internal, ...turnItems]));
+				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
+				expect(container.querySelector("[data-transcript-turn]")?.getAttribute("data-index")).toBe("0");
+				expect(container.textContent).toContain("桌面上有 file.txt。");
+				expect(container.textContent).not.toContain("Internal child result");
+				const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
+				Object.defineProperties(scroll, {
+					clientHeight: { configurable: true, value: 600 },
+					scrollHeight: { configurable: true, value: 1_000 },
+				});
+				scroll.scrollTop = 100;
+				await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+				await act(async () => render([...internal, ...turnItems, { ...internal[0]!, itemId: "new-event" }]));
+				expect(container.querySelector(".transcript-latest")).toBeNull();
+				expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(1);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
 	it.each(["chat", "code"] as const)("renders a persistent compacted divider in %s mode", async (appearance) => {
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1093,78 +1329,108 @@ describe("Transcript", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("shows a turn's net total once and each step's independent saved diff", async () => {
-		const content = (id: string, sequence: number, turnCount: number): ItemView[] => [
-			item(`${id}-call`, "assistant", [
-				{
-					type: "tool_call",
-					toolCallId: id,
-					name: "edit",
-					state: "completed",
-					inputPreview: '{"path":"src/app.ts"}',
-				},
-			]),
-			item(`${id}-result`, "tool", [
-				{
-					type: "tool_result",
-					toolCallId: id,
-					name: "edit",
-					isError: false,
-					output: "Successfully edited",
-					codeChanges: {
-						version: 1,
-						sequence,
-						partial: false,
-						turn: { additions: turnCount, deletions: turnCount, partial: false },
-						files: [
-							{
-								path: "src/app.ts",
-								kind: "modified",
-								additions: 1,
-								deletions: 1,
-								diff: `--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-${id}-before\n+${id}-after\n`,
-							},
-						],
+	it.each(["edit", "bash"])(
+		"shows a turn's net total once and each step's independent saved diff (%s)",
+		async (toolName) => {
+			const content = (id: string, sequence: number, turnCount: number): ItemView[] => [
+				item(`${id}-call`, "assistant", [
+					{
+						type: "tool_call",
+						toolCallId: id,
+						name: toolName,
+						state: "completed",
+						inputPreview: '{"path":"src/app.ts"}',
 					},
-				},
-			]),
-		];
-		const items = [
-			item("code-diff-user", "user", [{ type: "text", text: "Edit then revert" }]),
-			...content("first-edit", 1, 1),
-			item("code-diff-status", "assistant", [{ type: "text", text: "Checking before reverting" }]),
-			...content("revert-edit", 2, 0),
-			item("code-diff-final", "assistant", [{ type: "text", text: "Reverted" }]),
-		];
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		await act(async () => root.render(<CodeTranscriptTurn items={items} />));
-		const executions = container.querySelectorAll<HTMLDetailsElement>(".code-execution");
-		expect(executions).toHaveLength(2);
-		expect(container.querySelectorAll(".code-turn-change-counts")).toHaveLength(1);
-		expect(executions[0]?.querySelector(":scope > summary .code-change-counts")).toBeNull();
-		expect(executions[1]?.querySelector(":scope > summary .code-change-additions")?.textContent).toBe("+0");
-		expect(executions[1]?.querySelector(":scope > summary .code-change-deletions")?.textContent).toBe("−0");
-		expect(container.querySelector(".code-tool-changes")).toBeNull();
-		await act(async () => executions[0]!.querySelector<HTMLElement>(":scope > summary")!.click());
-		const step = executions[0]!.querySelector<HTMLDetailsElement>(".code-command")!;
-		expect(step.querySelector("summary .code-change-additions")?.textContent).toBe("+1");
-		expect(step.querySelector("summary .code-change-deletions")?.textContent).toBe("−1");
-		expect(step.querySelector("summary")?.textContent).toContain("src/app.ts");
-		await act(async () => step.querySelector<HTMLElement>("summary")!.click());
-		expect(step.querySelector(".code-tool-changes")?.textContent).toContain("first-edit-before");
-		expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("revert-edit-before");
-		expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("@@");
-		const rawDetails = step.querySelector<HTMLDetailsElement>(".code-tool-raw-details")!;
-		expect(rawDetails.open).toBe(false);
-		expect(rawDetails.querySelector(".code-command-input")?.textContent).toContain('"path": "src/app.ts"');
-		expect(step.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
-		await act(async () => rawDetails.querySelector<HTMLElement>("summary")!.click());
-		expect(rawDetails.open).toBe(true);
-		expect(rawDetails.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
-		await act(async () => root.unmount());
-	});
+				]),
+				item(`${id}-result`, "tool", [
+					{
+						type: "tool_result",
+						toolCallId: id,
+						name: toolName,
+						isError: false,
+						output: "Successfully edited",
+						codeChanges: {
+							version: 1,
+							sequence,
+							partial: false,
+							turn: { additions: turnCount, deletions: turnCount, partial: false },
+							files: [
+								{
+									path: "src/app.ts",
+									kind: "modified",
+									additions: 1,
+									deletions: 1,
+									diff: `--- a/src/app.ts\n+++ b/src/app.ts\n@@ -1 +1 @@\n-${id}-before\n+${id}-after\n`,
+								},
+							],
+						},
+					},
+				]),
+			];
+			const items = [
+				item("code-diff-user", "user", [{ type: "text", text: "Edit then revert" }]),
+				...content("first-edit", 1, 1),
+				item("code-diff-status", "assistant", [{ type: "text", text: "Checking before reverting" }]),
+				...content("revert-edit", 2, 0),
+				item("code-diff-final", "assistant", [{ type: "text", text: "Reverted" }]),
+			];
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			await act(async () => root.render(<CodeTranscriptTurn items={items} />));
+			const executions = container.querySelectorAll<HTMLDetailsElement>(".code-execution");
+			expect(executions).toHaveLength(2);
+			expect(container.querySelectorAll(".code-turn-change-counts")).toHaveLength(1);
+			expect(executions[0]?.querySelector(":scope > summary .code-change-counts")).toBeNull();
+			expect(executions[1]?.querySelector(":scope > summary .code-change-additions")?.textContent).toBe("+0");
+			expect(executions[1]?.querySelector(":scope > summary .code-change-deletions")?.textContent).toBe("−0");
+			expect(container.querySelector(".code-tool-changes")).toBeNull();
+			await act(async () => executions[0]!.querySelector<HTMLElement>(":scope > summary")!.click());
+			const step = executions[0]!.querySelector<HTMLDetailsElement>(".code-command")!;
+			expect(step.querySelector("summary .code-change-additions")?.textContent).toBe("+1");
+			expect(step.querySelector("summary .code-change-deletions")?.textContent).toBe("−1");
+			expect(step.querySelector("summary")?.textContent).toContain("src/app.ts");
+			await act(async () => step.querySelector<HTMLElement>("summary")!.click());
+			expect(step.querySelector(".code-tool-changes")?.textContent).toContain("first-edit-before");
+			expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("revert-edit-before");
+			expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("@@");
+			const rawDetails = step.querySelector<HTMLDetailsElement>(".code-tool-raw-details")!;
+			expect(rawDetails.open).toBe(false);
+			expect(rawDetails.querySelector(".code-command-input")?.textContent).toContain('"path": "src/app.ts"');
+			expect(step.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
+			await act(async () => rawDetails.querySelector<HTMLElement>("summary")!.click());
+			expect(rawDetails.open).toBe(true);
+			expect(rawDetails.querySelector(".code-command-output")?.textContent).toBe("Successfully edited");
+			await act(async () => root.unmount());
+		},
+	);
+
+	it.each(["chat", "code"] as const)(
+		"keeps retry-only %s turns visible without empty transcript rows",
+		async (appearance) => {
+			const failed: ItemView = { ...item("retry-failed", "assistant", []), state: "interrupted", turnId: TURN_ID };
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			await act(async () =>
+				root.render(
+					<Transcript
+						appearance={appearance}
+						activeTurnId={TURN_ID}
+						retry={{ attempt: 1, maxAttempts: 5, delayMs: 2000 }}
+						hasOlder={false}
+						itemIds={[failed.itemId]}
+						itemsById={new Map([[failed.itemId, failed]])}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				),
+			);
+			expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(0);
+			expect(container.querySelector(".turn-runtime-status")?.getAttribute("aria-label")).toBe("Retrying (1/5)");
+			await act(async () => root.unmount());
+		},
+	);
 
 	it("keeps legacy Code steps and Chat transcripts free of invented change counters", async () => {
 		const container = document.createElement("div");
@@ -1174,6 +1440,46 @@ describe("Transcript", () => {
 		expect(container.querySelector(".code-change-counts")).toBeNull();
 		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
 		expect(container.querySelector(".code-change-counts")).toBeNull();
+		await act(async () => root.unmount());
+	});
+
+	it.each([false, true])("omits scan-only change metadata from saved command cards (orphan: %s)", async (orphan) => {
+		const call = item("browser-close-call", "assistant", [
+			{
+				type: "tool_call",
+				toolCallId: "browser-close",
+				name: "bash",
+				state: "completed",
+				inputPreview: JSON.stringify({ command: "ego-browser nodejs" }),
+			},
+		]);
+		const result = item("browser-close-result", "tool", [
+			{
+				type: "tool_result",
+				toolCallId: "browser-close",
+				name: "bash",
+				isError: false,
+				output: "space 10 finished, all pages closed",
+				codeChanges: {
+					version: 1,
+					sequence: 1,
+					files: [],
+					partial: true,
+					turn: { additions: 0, deletions: 0, partial: true },
+				},
+			},
+		]);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<CodeTranscriptTurn items={orphan ? [result] : [call, result]} />));
+		expect(container.querySelector(".code-change-counts")).toBeNull();
+		await act(async () => container.querySelector<HTMLElement>(".code-execution > summary")!.click());
+		await act(async () => container.querySelector<HTMLElement>(".code-command > summary")!.click());
+		expect(container.querySelector(".code-tool-changes")).toBeNull();
+		expect(container.querySelector(".code-tool-raw-details")).toBeNull();
+		expect(container.querySelector(".code-change-counts")).toBeNull();
+		expect(container.querySelector(".code-command-output")?.textContent).toBe("space 10 finished, all pages closed");
 		await act(async () => root.unmount());
 	});
 

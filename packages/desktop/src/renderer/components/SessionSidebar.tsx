@@ -19,11 +19,13 @@ import {
 	sessionsForMode,
 } from "../store/session-grouping.ts";
 import { AccountMenu } from "./AccountMenu.tsx";
+import { AgentSidebarBranch, type AgentSidebarNavigation } from "./AgentSidebarBranch.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 import { ProjectActions } from "./ProjectActions.tsx";
 import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
+import { SessionStatusIndicator } from "./SessionStatusIndicator.tsx";
 
 export type { ProjectSessionGroup } from "../session-groups.ts";
 
@@ -57,6 +59,7 @@ export type SessionSidebarState = Pick<
 
 interface SessionSidebarProps {
 	readonly state: SessionSidebarState;
+	readonly agentNavigation?: AgentSidebarNavigation;
 	readonly isClosing?: boolean;
 	readonly destination: SidebarDestination;
 	readonly onSettings: () => void;
@@ -158,7 +161,9 @@ function SessionButton({
 	selected,
 	session,
 	onOpen,
+	agentNavigation,
 }: {
+	readonly agentNavigation?: AgentSidebarNavigation;
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
 	readonly onCopy: (title: string) => Promise<void>;
@@ -176,7 +181,7 @@ function SessionButton({
 	const indicator = sessionIndicator(session, selected);
 	const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
 	const indicatorDescription = indicatorLabel ? t(indicatorLabel) : undefined;
-	return (
+	const row = (agentToggle: ReactNode = null) => (
 		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
 			<button
 				aria-busy={running || undefined}
@@ -190,7 +195,7 @@ function SessionButton({
 				type="button"
 			>
 				<span className="session-button-title">
-					<i aria-hidden="true" className={indicator} />
+					<SessionStatusIndicator indicator={indicator} />
 					{title}
 				</span>
 			</button>
@@ -206,7 +211,15 @@ function SessionButton({
 				pinned={pinned}
 				session={session}
 			/>
+			{agentToggle}
 		</div>
+	);
+	return agentNavigation ? (
+		<AgentSidebarBranch sessionId={session.sessionId} navigation={agentNavigation}>
+			{row}
+		</AgentSidebarBranch>
+	) : (
+		row()
 	);
 }
 
@@ -237,6 +250,7 @@ function ProjectGroup({
 	onDeactivateActions,
 	isDeleteDisabled,
 	selectedSessionId,
+	agentNavigation,
 	workspace,
 }: {
 	readonly actionsActive: boolean;
@@ -245,6 +259,7 @@ function ProjectGroup({
 	readonly onDeactivateActions: () => void;
 	readonly isDeleteDisabled: (session: SessionSummary) => boolean;
 	readonly selectedSessionId: string | null;
+	readonly agentNavigation?: AgentSidebarNavigation;
 	readonly workspace: SessionSidebarWorkspace;
 }) {
 	const { t } = useTranslation();
@@ -279,6 +294,7 @@ function ProjectGroup({
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
 						<SessionButton
+							agentNavigation={agentNavigation}
 							busy={busy}
 							deleteDisabled={isDeleteDisabled(session)}
 							key={session.sessionId}
@@ -300,6 +316,7 @@ function ProjectGroup({
 
 export const SessionSidebar = memo(function SessionSidebar({
 	state,
+	agentNavigation: providedAgentNavigation,
 	isClosing,
 	destination,
 	onSettings,
@@ -319,6 +336,17 @@ export const SessionSidebar = memo(function SessionSidebar({
 	workspace,
 }: SessionSidebarProps) {
 	const { t, i18n } = useTranslation();
+	const agentNavigation = providedAgentNavigation
+		? {
+				...providedAgentNavigation,
+				attentionAgentIds: new Set(
+					state.interactionOrder.flatMap((id) => {
+						const interaction = state.interactionsById.get(id);
+						return interaction?.agentId ? [interaction.agentId] : [];
+					}),
+				),
+			}
+		: undefined;
 	const {
 		busy,
 		mode,
@@ -377,7 +405,8 @@ export const SessionSidebar = memo(function SessionSidebar({
 		state.interactionOrder.some(
 			(interactionId) => state.interactionsById.get(interactionId)?.sessionId === session.sessionId,
 		);
-	const selectedSessionId = !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
+	const selectedSessionId =
+		!agentNavigation?.active && !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
 	const updateLabel =
 		updateState.status === "available"
 			? t("Update to new version")
@@ -388,6 +417,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					: null;
 	const renderSession = (session: SessionSummary) => (
 		<SessionButton
+			agentNavigation={agentNavigation}
 			busy={busy}
 			deleteDisabled={isDeleteDisabled(session)}
 			key={session.sessionId}
@@ -492,6 +522,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 				{grouping === "project" &&
 					tree.projects.map((group) => (
 						<ProjectGroup
+							agentNavigation={agentNavigation}
 							actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
 							group={group}
 							key={JSON.stringify([group.mode, group.cwd])}

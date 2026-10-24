@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 
+import { useConversationScope } from "./ConversationScope.tsx";
+
 function desktopApi(): MetisDesktopApi {
 	return (globalThis as unknown as { metis: MetisDesktopApi }).metis;
 }
@@ -15,6 +17,7 @@ export function ToolResultImages({
 	readonly images: readonly DurableImageRefView[];
 }) {
 	const { t } = useTranslation();
+	const { rootSessionId } = useConversationScope();
 	const [urls, setUrls] = useState<ReadonlyMap<string, string>>(new Map());
 	const [failed, setFailed] = useState<ReadonlySet<string>>(new Set());
 
@@ -25,7 +28,7 @@ export function ToolResultImages({
 			if (seen.has(image.hash)) continue;
 			seen.add(image.hash);
 			desktopApi()
-				.readSessionImage({ sessionId, image })
+				.readSessionImage({ sessionId, image, ...(rootSessionId ? { rootSessionId } : {}) })
 				.then((result) => {
 					if (!current) return;
 					setUrls((prev) => new Map(prev).set(image.hash, `data:${result.mediaType};base64,${result.data}`));
@@ -37,7 +40,7 @@ export function ToolResultImages({
 		return () => {
 			current = false;
 		};
-	}, [sessionId, images]);
+	}, [sessionId, images, rootSessionId]);
 
 	if (images.length === 0) return null;
 	return (

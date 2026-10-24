@@ -1,6 +1,7 @@
 export interface UniversalPreviewTarget {
 	readonly source: "delivered" | "workspace";
 	readonly sessionId: string;
+	readonly rootSessionId?: string;
 	readonly fileId?: string;
 	readonly relativePath?: string;
 	readonly name: string;

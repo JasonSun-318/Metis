@@ -30,6 +30,24 @@ afterEach(() => {
 });
 
 describe("TurnRuntimeStatus", () => {
+	it("reuses the thinking line for retry progress and clears it on recovery", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={[]} running retry={{ attempt: 1, maxAttempts: 5, delayMs: 2000 }} />),
+		);
+		expect(container.querySelector("output")?.getAttribute("aria-label")).toBe("Retrying (1/5)");
+		expect(container.querySelectorAll(".turn-runtime-spinner")).toHaveLength(1);
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={[]} running retry={{ attempt: 5, maxAttempts: 5, delayMs: 30_000 }} />),
+		);
+		expect(container.textContent).toContain("Retrying (5/5)");
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running />));
+		expect(container.textContent).toContain("Thinking");
+		expect(container.textContent).not.toContain("Retrying");
+		await act(async () => root.unmount());
+	});
 	it("estimates current-turn output and eases toward corrected targets", () => {
 		expect(estimateOutputTokens("hello world")).toBe(3);
 		expect(estimateOutputTokens("请分析代码")).toBe(5);

@@ -22,6 +22,7 @@ import {
 	type DesktopWorkspaceMutationResult,
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
+import type { AgentConversationTarget } from "../conversation-target.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import {
@@ -63,6 +64,7 @@ import {
 	type WorkspaceTab,
 	workspaceTabs,
 } from "../workspace-tabs.ts";
+import { AgentConversation } from "./AgentConversation.tsx";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
@@ -133,6 +135,8 @@ interface SessionWorkspaceViewProps {
 	readonly api: MetisDesktopApi;
 	readonly chat: ReactNode;
 	readonly chatCwd: string | null;
+	readonly agentFocusRequest?: { readonly nonce: number; readonly target: AgentConversationTarget } | null;
+	readonly onAgentConversationFocus?: (target: AgentConversationTarget | null) => void;
 	readonly chatFocusRequest: { readonly nonce: number; readonly sessionId: string | null } | null;
 	readonly chatIsDraft: boolean;
 	readonly chatSessionId: string | null;
@@ -211,7 +215,10 @@ function syncChatTabs(
 ): SessionWorkspace {
 	const pane = activePane(workspace);
 	const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
-	const shouldFocus = activeTab === undefined || activeTab.kind === "chat" || pendingSessionId === chatSessionId;
+	const shouldFocus =
+		activeTab === undefined ||
+		(activeTab.kind === "chat" && !activeTab.agentId) ||
+		pendingSessionId === chatSessionId;
 	if (chatIsDraft) {
 		const draftTab = findChatTab(workspace, null);
 		if (chatSessionId === null) {
@@ -247,6 +254,8 @@ export function SessionWorkspaceView({
 	chat,
 	chatCwd,
 	chatFocusRequest,
+	agentFocusRequest,
+	onAgentConversationFocus,
 	chatIsDraft,
 	chatSessionId,
 	cleanupSessionIds,
@@ -435,7 +444,9 @@ export function SessionWorkspaceView({
 		const live = new Set(
 			workspace.panes.flatMap((pane) => {
 				const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
-				return (tab?.kind === "chat" || tab?.kind === "agent") && tab.sessionId !== null ? [tab.sessionId] : [];
+				return ((tab?.kind === "chat" && !tab.agentId) || tab?.kind === "agent") && tab.sessionId !== null
+					? [tab.sessionId]
+					: [];
 			}),
 		);
 		// An open Agents tool tab keeps its session live even off the chat pane.
@@ -451,7 +462,7 @@ export function SessionWorkspaceView({
 				...new Set(
 					workspace.panes.flatMap((pane) => {
 						const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
-						return tab?.kind === "chat" && tab.sessionId !== null ? [tab.sessionId] : [];
+						return tab?.kind === "chat" && tab.sessionId !== null ? [tab.agentId ?? tab.sessionId] : [];
 					}),
 				),
 			]
@@ -467,6 +478,8 @@ export function SessionWorkspaceView({
 	workspaceRef.current = workspace;
 	const chatSessionIdRef = useRef(chatSessionId);
 	chatSessionIdRef.current = chatSessionId;
+	const onAgentConversationFocusRef = useRef(onAgentConversationFocus);
+	onAgentConversationFocusRef.current = onAgentConversationFocus;
 	const onChatSessionRef = useRef(onChatSession);
 	onChatSessionRef.current = onChatSession;
 
@@ -544,8 +557,14 @@ export function SessionWorkspaceView({
 			workspaceRef.current = next;
 			setWorkspace(next);
 			const focused = focusedChatTab(next);
+			onAgentConversationFocusRef.current?.(
+				focused?.agentId && focused.sessionId
+					? { sessionId: focused.sessionId, agentId: focused.agentId, name: focused.agentName ?? focused.agentId }
+					: null,
+			);
 			if (
 				focused &&
+				!focused.agentId &&
 				focused.sessionId !== chatSessionIdRef.current &&
 				pendingChatFocus.current !== focused.sessionId
 			) {
@@ -555,6 +574,29 @@ export function SessionWorkspaceView({
 		},
 		[groupOf],
 	);
+
+	const openAgentConversation = useCallback(
+		(target: AgentConversationTarget) => {
+			pendingChatFocus.current = undefined;
+			mutateWorkspace((current) => {
+				const existing = findChatTab(current, target.sessionId, target.agentId);
+				return existing
+					? activateTab(current, existing.id)
+					: placeTab(current, {
+							...chatTab(target.sessionId),
+							agentId: target.agentId,
+							agentName: target.name,
+						});
+			});
+		},
+		[mutateWorkspace, placeTab],
+	);
+	const handledAgentFocus = useRef(0);
+	useEffect(() => {
+		if (!agentFocusRequest || handledAgentFocus.current === agentFocusRequest.nonce) return;
+		handledAgentFocus.current = agentFocusRequest.nonce;
+		openAgentConversation(agentFocusRequest.target);
+	}, [agentFocusRequest, openAgentConversation]);
 
 	// Collapsing a group animates its tab body shut like a drawer before the
 	// model commits; expanding commits first and the fresh body animates open.
@@ -684,6 +726,7 @@ export function SessionWorkspaceView({
 	useEffect(() => {
 		if (!chatFocusRequest || chatFocusRequest.nonce === handledFocusNonce.current) return;
 		handledFocusNonce.current = chatFocusRequest.nonce;
+		onAgentConversationFocusRef.current?.(null);
 		pendingChatFocus.current = chatFocusRequest.sessionId;
 		updateWorkspace((current) => {
 			const existing = findChatTab(current, chatFocusRequest.sessionId);
@@ -709,7 +752,9 @@ export function SessionWorkspaceView({
 		for (const { interactionId } of fresh) revealedInteractions.current.add(interactionId);
 		updateWorkspace((current) =>
 			fresh.reduce((next, { sessionId }) => {
-				const chat = findChatTab(next, sessionId);
+				const chat =
+					findChatTab(next, sessionId) ??
+					workspaceTabs(next).find((tab) => tab.kind === "chat" && tab.agentId === sessionId);
 				return chat ? revealTab(next, chat.id) : next;
 			}, current),
 		);
@@ -929,7 +974,8 @@ export function SessionWorkspaceView({
 			const existing = workspaceTabs(workspace).find(
 				(tab): tab is Extract<WorkspaceTab, { kind: "preview" }> =>
 					tab.kind === "preview" &&
-					tab.sessionId === previewRequest.sessionId &&
+					tab.sessionId === (previewRequest.rootSessionId ?? previewRequest.sessionId) &&
+					tab.file.sessionId === previewRequest.sessionId &&
 					tab.file.source === previewRequest.source &&
 					(previewRequest.fileId
 						? tab.file.fileId === previewRequest.fileId
@@ -939,7 +985,7 @@ export function SessionWorkspaceView({
 			const tab: WorkspaceTab = {
 				kind: "preview",
 				id: crypto.randomUUID(),
-				sessionId: previewRequest.sessionId,
+				sessionId: previewRequest.rootSessionId ?? previewRequest.sessionId,
 				title: previewRequest.name,
 				file: previewRequest,
 			};
@@ -1132,7 +1178,7 @@ export function SessionWorkspaceView({
 
 	const addAgent = (target: { sessionId: string | null; cwd: string | null }) => {
 		const { sessionId: ownerSessionId } = target;
-		if (!ownerSessionId || mode !== "code") return;
+		if (!ownerSessionId) return;
 		updateWorkspace((workspace) => {
 			const existing = workspaceTabs(workspace).find(
 				(tab) => tab.kind === "agent" && tab.sessionId === ownerSessionId,
@@ -1625,12 +1671,10 @@ export function SessionWorkspaceView({
 						<span>{t("Files")}</span>
 					</button>
 				)}
-				{targetMode === "code" && (
-					<button disabled={!target.sessionId} onClick={() => addAgent(target)} type="button">
-						<Robot aria-hidden="true" size={18} />
-						<span>{t("Agents")}</span>
-					</button>
-				)}
+				<button disabled={!target.sessionId} onClick={() => addAgent(target)} type="button">
+					<Robot aria-hidden="true" size={18} />
+					<span>{t("Agents")}</span>
+				</button>
 				<button disabled={!target.sessionId} onClick={() => addKnowledge(target.sessionId)} type="button">
 					<Books aria-hidden="true" size={18} />
 					<span>{t("Knowledge")}</span>
@@ -1731,9 +1775,11 @@ export function SessionWorkspaceView({
 	) => {
 		const displayTitle =
 			tab.kind === "chat"
-				? tab.sessionId === null
-					? t("New task")
-					: sessionTitleFor(tab.sessionId)
+				? tab.agentId
+					? (tab.agentName ?? tab.agentId)
+					: tab.sessionId === null
+						? t("New task")
+						: sessionTitleFor(tab.sessionId)
 				: tab.kind === "browser" && tab.url === ""
 					? t("New tab")
 					: tab.kind === "file" && tab.relativePath === null
@@ -1948,6 +1994,7 @@ export function SessionWorkspaceView({
 			const tab = pane.tabs.find(
 				(candidate) =>
 					candidate.kind === "chat" &&
+					!candidate.agentId &&
 					(candidate.sessionId === chatSessionId || (chatIsDraft && candidate.sessionId === null)),
 			);
 			if (tab) {
@@ -1974,6 +2021,22 @@ export function SessionWorkspaceView({
 				// The host pane keeps showing the draft/loading node while it is
 				// provided; once App hands down null, the pane's own live view takes
 				// over — including the projected session the host tab belongs to.
+				if (tab.kind === "chat" && tab.agentId && tab.sessionId)
+					return (
+						<AgentConversation
+							target={{ sessionId: tab.sessionId, agentId: tab.agentId, name: tab.agentName ?? tab.agentId }}
+							context={chatView}
+							visible={panelVisible(tab.id)}
+							onOpenParent={(target) => {
+								if (typeof target === "string") {
+									onAgentConversationFocusRef.current?.(null);
+									onChatSessionRef.current(target);
+									const existing = findChatTab(workspaceRef.current, target);
+									if (existing) mutateWorkspace((current) => activateTab(current, existing.id));
+								} else openAgentConversation(target);
+							}}
+						/>
+					);
 				if (isHost && (chat !== null || tab.sessionId === null)) return chat;
 				if (tab.sessionId === null) return null;
 				const tabVisible = panelVisible(tab.id);
@@ -2096,6 +2159,13 @@ export function SessionWorkspaceView({
 											? wrap(
 													tab.id,
 													<AgentTreePanel
+														onOpenConversation={(agent) =>
+															openAgentConversation({
+																sessionId: tab.sessionId,
+																agentId: agent.agentId,
+																name: agent.name,
+															})
+														}
 														api={api}
 														onError={onError}
 														sessionId={tab.sessionId}

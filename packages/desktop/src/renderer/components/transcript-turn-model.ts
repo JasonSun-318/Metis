@@ -47,6 +47,7 @@ const PREVIEW_LINES = 10;
 const PREVIEW_CHARS = 2_000;
 
 export type CodeTranscriptSegment =
+	| { readonly type: "system"; readonly item: ItemView }
 	| {
 			readonly type: "user";
 			readonly item: ItemView;
@@ -76,6 +77,12 @@ export interface CodeTurnPresentation {
 }
 
 export type ChatTranscriptSegment =
+	| { readonly type: "system"; readonly item: ItemView }
+	| {
+			readonly type: "notice";
+			readonly block: Extract<ItemContentBlockView, { type: "notice" }>;
+			readonly itemId: string;
+	  }
 	| {
 			readonly type: "user";
 			readonly item: ItemView;
@@ -105,6 +112,11 @@ export interface TurnPresentation {
 
 function textBlocks(item: ItemView): TextBlock[] {
 	return item.content.filter((block): block is TextBlock => block.type === "text");
+}
+
+/** Mailbox events stay in history/model context, but are not conversation messages. */
+export function isInternalAgentCoordinationItem(item: ItemView): boolean {
+	return item.role === "system" && item.origin?.kind === "system" && Boolean(item.agentTargetId);
 }
 
 /** Visible markdown/plain text of a message, concatenated in block order. */
@@ -145,7 +157,7 @@ function finalResponseIndex(items: readonly ItemView[]): number {
 	}
 	for (let index = items.length - 1; index > lastToolIndex; index -= 1) {
 		const item = items[index]!;
-		if (item.role !== "assistant" || toolCalls(item).length > 0) continue;
+		if (item.role !== "assistant" || item.state === "interrupted" || toolCalls(item).length > 0) continue;
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		if (textBlocks(item).some((block) => !thinking.some((candidate) => isThinkingEcho(block.text, candidate.text))))
 			return index;
@@ -663,7 +675,8 @@ export function actionSummary(calls: readonly ToolCallBlock[], t: Translator = i
 	return t("Thought process");
 }
 
-export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentation {
+export function buildTurnPresentation(sourceItems: readonly ItemView[]): TurnPresentation {
+	const items = sourceItems.filter((item) => !isInternalAgentCoordinationItem(item));
 	const finalIndex = finalResponseIndex(items);
 	const users = items.filter((item) => item.role === "user");
 	const calls = items.filter((item) => item.role !== "user").flatMap(toolCalls);
@@ -698,6 +711,11 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 
 	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 		const item = items[itemIndex]!;
+		if (item.role === "system" && item.origin?.kind === "system") {
+			flushPhase();
+			segments.push({ type: "system", item });
+			continue;
+		}
 		if (item.role === "user") {
 			flushPhase();
 			segments.push({ type: "user", item });
@@ -705,6 +723,13 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 		}
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
 		for (const block of item.content) {
+			if (block.type === "notice") {
+				if (itemIndex !== finalIndex) {
+					flushPhase();
+					segments.push({ type: "notice", block, itemId: item.itemId });
+				}
+				continue;
+			}
 			if (block.type === "text") {
 				if (itemIndex === finalIndex || thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))
 					continue;
@@ -744,7 +769,8 @@ export function buildTurnPresentation(items: readonly ItemView[]): TurnPresentat
 	};
 }
 
-export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnPresentation {
+export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): CodeTurnPresentation {
+	const items = sourceItems.filter((item) => !isInternalAgentCoordinationItem(item));
 	const finalIndex = finalResponseIndex(items);
 	const results = new Map<string, ToolResultBlock>();
 	for (const item of items) {
@@ -787,6 +813,12 @@ export function buildCodeTurnPresentation(items: readonly ItemView[]): CodeTurnP
 
 	for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
 		const item = items[itemIndex]!;
+		if (item.role === "system" && item.origin?.kind === "system") {
+			flushContent();
+			flushTools();
+			segments.push({ type: "system", item });
+			continue;
+		}
 		if (item.role === "user") {
 			flushContent();
 			flushTools();

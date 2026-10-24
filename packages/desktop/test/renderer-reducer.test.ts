@@ -81,6 +81,21 @@ function batch(serverEpoch: string, fromCursor: number, toCursor: number, text =
 }
 
 describe("renderer projection reducer", () => {
+	it("restores retry progress, clears it on end and keeps other sessions separate", () => {
+		const store = new AppStore();
+		const retry = { attempt: 2, maxAttempts: 5, delayMs: 4000 };
+		store.applySnapshot({ ...snapshot(), retry });
+		expect(store.getSnapshot().sessions.get("session-1")?.retry).toEqual(retry);
+		store.applyBatch({
+			serverEpoch: EPOCH_A,
+			fromCursor: 1,
+			toCursor: 1,
+			events: [{ type: "session/retryChanged", sessionId: "session-1", retry: null }],
+		});
+		expect(store.getSnapshot().sessions.get("session-1")?.retry).toBeUndefined();
+		store.applySnapshot({ ...snapshot(EPOCH_A, 1), session: session("session-2") });
+		expect(store.getSnapshot().sessions.get("session-2")?.retry).toBeUndefined();
+	});
 	it("restores current process, applies live output and clears it on session switch", () => {
 		const store = new AppStore();
 		const process = {

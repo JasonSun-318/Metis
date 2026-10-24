@@ -502,7 +502,12 @@ interface DesktopWorkspaceFileBase {
 export const PREVIEW_MAX_BYTES = 50 * 1024 * 1024;
 
 export type DesktopPreviewFileInput =
-	| { readonly source: "delivered"; readonly sessionId: string; readonly fileId: string }
+	| {
+			readonly source: "delivered";
+			readonly sessionId: string;
+			readonly rootSessionId?: string;
+			readonly fileId: string;
+	  }
 	| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string };
 
 export type DesktopPreviewFile =
@@ -709,15 +714,24 @@ export function validateReadPreviewFileInput(value: unknown): DesktopPreviewFile
 	}
 	const record = value as Record<string, unknown>;
 	if (record.source === "delivered") {
-		const input = exactRecord(value, ["source", "sessionId", "fileId"], "preview file input");
+		const input = exactRecord(
+			value,
+			Object.hasOwn(record, "rootSessionId")
+				? ["source", "sessionId", "rootSessionId", "fileId"]
+				: ["source", "sessionId", "fileId"],
+			"preview file input",
+		);
 		if (typeof input.fileId !== "string" || !DELIVERED_FILE_ID.test(input.fileId)) {
 			throw new TypeError("Invalid preview file id");
 		}
 		assertSchema(sessionIdValidator, input.sessionId, "invalid_params", "preview session id");
+		if (input.rootSessionId !== undefined)
+			assertSchema(sessionIdValidator, input.rootSessionId, "invalid_params", "preview root session id");
 		return {
 			source: "delivered",
 			sessionId: input.sessionId as string,
 			fileId: input.fileId.toLowerCase(),
+			...(input.rootSessionId !== undefined ? { rootSessionId: input.rootSessionId as string } : {}),
 		};
 	}
 	if (record.source === "workspace") {

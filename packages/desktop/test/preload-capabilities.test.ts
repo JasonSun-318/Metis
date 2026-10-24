@@ -10,7 +10,7 @@ const electron = vi.hoisted(() => ({
 			throw new Error("No test profile");
 		},
 	},
-	nativeTheme: { themeSource: "system", shouldUseDarkColors: true },
+	nativeTheme: { themeSource: "system", shouldUseDarkColors: true, on: vi.fn() },
 }));
 vi.mock("electron", () => electron);
 

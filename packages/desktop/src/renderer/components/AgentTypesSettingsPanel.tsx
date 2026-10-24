@@ -9,8 +9,6 @@ import { MenuSelect } from "./MenuSelect.tsx";
 const AGENT_TYPE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
 const MAX_SYSTEM_PROMPT_BYTES = 8 * 1024;
 
-const TOOL_PALETTE = ["read", "grep", "find", "ls", "bash", "edit", "write", "web_fetch", "web_search"] as const;
-
 interface AgentTypeDraft {
 	readonly id: string;
 	readonly displayName: string;
@@ -53,6 +51,7 @@ export function AgentTypesSettingsPanel({
 	const { t, i18n } = useTranslation();
 	const locale = localeForIntl(i18n.resolvedLanguage);
 	const [types, setTypes] = useState<readonly CustomAgentTypeView[]>([]);
+	const [availableTools, setAvailableTools] = useState<readonly string[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState(false);
 	const [request, setRequest] = useState(0);
@@ -74,6 +73,7 @@ export function AgentTypesSettingsPanel({
 			(result) => {
 				if (!current) return;
 				setTypes(result.types);
+				setAvailableTools(result.availableTools ?? []);
 				setLoading(false);
 			},
 			() => {
@@ -89,6 +89,17 @@ export function AgentTypesSettingsPanel({
 
 	const builtIn = useMemo(() => types.filter((type) => type.builtIn && matchesFilter(type, filter)), [filter, types]);
 	const custom = useMemo(() => types.filter((type) => !type.builtIn && matchesFilter(type, filter)), [filter, types]);
+	const toolPalette = useMemo(
+		() =>
+			[
+				...new Set([
+					...availableTools,
+					...types.flatMap((type) => type.allowedTools),
+					...(draft?.allowedTools ?? []),
+				]),
+			].sort(),
+		[availableTools, types, draft],
+	);
 	const promptBytes = useMemo(() => (draft ? new TextEncoder().encode(draft.systemPrompt).byteLength : 0), [draft]);
 
 	const closeEditor = () => {
@@ -228,11 +239,18 @@ export function AgentTypesSettingsPanel({
 					</label>
 					<div className="agent-types-field">
 						<span>{t("Allowed tools")}</span>
+						<strong className="agent-types-hint">
+							{t(
+								draft.allowedTools.length === 0
+									? "Inherits all parent delegatable tools"
+									: "Uses selected tools within parent permissions",
+							)}
+						</strong>
 						<p className="agent-types-hint">
 							{t("Effective tools are the intersection of this cap and the parent's delegatable tools.")}
 						</p>
 						<div className="agent-types-tools">
-							{TOOL_PALETTE.map((tool) => (
+							{toolPalette.map((tool) => (
 								<label className="agent-types-tool" key={tool}>
 									<input
 										checked={draft.allowedTools.includes(tool)}
@@ -281,6 +299,9 @@ export function AgentTypesSettingsPanel({
 					</div>
 					<label className="agent-types-field">
 						<span>{t("System prompt")}</span>
+						<p className="agent-types-hint">
+							{t("Role instructions supplement Metis rules. Existing conversations keep their role snapshot.")}
+						</p>
 						<textarea
 							disabled={!serverReady || saving}
 							onChange={(event) => setDraft({ ...draft, systemPrompt: event.target.value })}

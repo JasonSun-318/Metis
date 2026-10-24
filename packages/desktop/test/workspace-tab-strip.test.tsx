@@ -9,6 +9,11 @@ import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
+vi.mock("../src/renderer/components/AgentConversation.tsx", () => ({
+	AgentConversation: ({ target }: { target: { agentId: string } }) => (
+		<input data-agent-draft={target.agentId} defaultValue="" />
+	),
+}));
 vi.mock("../src/renderer/components/SessionChatView.tsx", () => ({ SessionChatView: () => null }));
 vi.mock("../src/renderer/components/preview/UniversalFilePreviewer.tsx", () => ({
 	UniversalFilePreviewer: () => null,
@@ -82,7 +87,7 @@ function mount() {
 			(tab) => `${tab.textContent}${tab.getAttribute("aria-selected") === "true" ? "*" : ""}`,
 		);
 	const groups = () => [...container.querySelectorAll(".tool-tab-group-label")].map((label) => label.textContent);
-	return { container, onChatSession, render, tabs, groups, sessionsById };
+	return { container, onChatSession, render, tabs, groups, sessionsById, api };
 }
 
 beforeEach(() => {
@@ -98,6 +103,39 @@ afterEach(async () => {
 });
 
 describe("workspace tab strip", () => {
+	it("opens child tabs without opening the root and keeps their drafts separate", async () => {
+		const view = mount();
+		await view.render({});
+		const child = { sessionId: ALPHA_1, agentId: "child-one", name: "Image task" };
+		const sibling = { sessionId: ALPHA_1, agentId: "child-two", name: "Cart task" };
+		const onAgentConversationFocus = vi.fn();
+		await view.render({ agentFocusRequest: { nonce: 1, target: child }, onAgentConversationFocus });
+		expect(view.tabs()).toEqual(["Alpha one", "Image task*"]);
+		expect(view.onChatSession).not.toHaveBeenCalled();
+		expect(onAgentConversationFocus).toHaveBeenLastCalledWith(child);
+		const firstDraft = view.container.querySelector<HTMLInputElement>('[data-agent-draft="child-one"]')!;
+		firstDraft.value = "Preserved child draft";
+		await view.render({ agentFocusRequest: { nonce: 2, target: sibling }, onAgentConversationFocus });
+		expect(view.tabs()).toEqual(["Alpha one", "Image task", "Cart task*"]);
+		expect(view.container.querySelector<HTMLInputElement>('[data-agent-draft="child-two"]')!.value).toBe("");
+		await view.render({ agentFocusRequest: { nonce: 3, target: child }, onAgentConversationFocus });
+		expect(view.container.querySelector<HTMLInputElement>('[data-agent-draft="child-one"]')).toBe(firstDraft);
+		expect(firstDraft.value).toBe("Preserved child draft");
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [] }),
+		);
+	});
+	it("keeps a child focused when an unrelated root projection changes", async () => {
+		const view = mount();
+		await view.render({});
+		await view.render({
+			agentFocusRequest: { nonce: 1, target: { sessionId: ALPHA_1, agentId: "child", name: "Child task" } },
+		});
+		await view.render({ chatSessionId: BETA });
+		expect(view.tabs()).toContain("Child task*");
+		expect(view.tabs()).not.toContain("Beta*");
+	});
+
 	it("uses each session's mode for active and inactive conversation icons", async () => {
 		const view = mount();
 		const sessions = new Map(view.sessionsById);

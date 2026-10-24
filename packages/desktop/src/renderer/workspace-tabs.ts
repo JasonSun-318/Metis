@@ -6,6 +6,8 @@ export interface ChatTab {
 	readonly kind: "chat";
 	readonly id: string;
 	readonly sessionId: string | null;
+	readonly agentId?: string;
+	readonly agentName?: string;
 }
 
 export interface TerminalTab {
@@ -136,8 +138,14 @@ export function defaultWorkspace(): SessionWorkspace {
 	};
 }
 
-export function findChatTab(workspace: SessionWorkspace, sessionId: string | null): ChatTab | undefined {
-	return workspaceTabs(workspace).find((tab): tab is ChatTab => tab.kind === "chat" && tab.sessionId === sessionId);
+export function findChatTab(
+	workspace: SessionWorkspace,
+	sessionId: string | null,
+	agentId?: string,
+): ChatTab | undefined {
+	return workspaceTabs(workspace).find(
+		(tab): tab is ChatTab => tab.kind === "chat" && tab.sessionId === sessionId && tab.agentId === agentId,
+	);
 }
 
 export function focusedChatTab(workspace: SessionWorkspace): ChatTab | undefined {

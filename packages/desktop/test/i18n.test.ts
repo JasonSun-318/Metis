@@ -115,6 +115,36 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Resize file tree")).toBe("Resize file tree");
 	});
 
+	it("translates parent-confirmed literal t() keys and interpolates memory counts", async () => {
+		await setLocale("zh-CN", localStorage);
+		const translations = {
+			"Running pre-flight checks...": "正在运行预检…",
+			"Loading hooks…": "正在加载钩子…",
+			Plugin: "插件",
+			"Custom fields": "自定义字段",
+			"Loading hook…": "正在加载钩子详情…",
+			"Profile view": "个人资料视图",
+			"Pick a session from the sidebar.": "从侧边栏选择一个会话。",
+			sessions: "个会话",
+			"Failed to deliver file": "文件交付失败",
+			"Memory search failed": "记忆搜索失败",
+			"Delivering file": "正在交付文件",
+			"Delivered file to user": "文件已交付给用户",
+			"Searching memory": "正在搜索记忆",
+			"Searched memory": "已搜索记忆",
+		} as const;
+		for (const [key, value] of Object.entries(translations)) {
+			expect(i18n.exists(key, { lng: "zh-CN" })).toBe(true);
+			expect(i18n.t(key)).toBe(value);
+		}
+		expect(i18n.exists("Recalled {{count}} memory notes", { lng: "zh-CN" })).toBe(true);
+		expect(i18n.t("Recalled {{count}} memory notes", { count: 3 })).toBe("已回忆 3 条记忆笔记");
+		await setLocale("en", localStorage);
+		for (const key of [...Object.keys(translations), "Recalled {{count}} memory notes"]) {
+			expect(i18n.t(key)).toBe(key);
+		}
+	});
+
 	it("translates every home starter and greeting", async () => {
 		await setLocale("zh-CN", localStorage);
 		const { CODE_HOME_GREETINGS, HOME_GREETINGS, getHomeStarters } = await import(

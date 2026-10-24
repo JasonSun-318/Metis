@@ -5,6 +5,7 @@ import {
 	buildCodeTurnPresentation,
 	buildTurnPresentation,
 	commandText,
+	isInternalAgentCoordinationItem,
 	messageText,
 	type ToolCallBlock,
 	type ToolResultBlock,
@@ -61,6 +62,61 @@ function result(name: string, output: string, isError = false): ToolResultBlock 
 }
 
 describe("transcript turn presentation", () => {
+	it("keeps a failed assistant notice visible without calling its partial output a final answer", () => {
+		const failure: ItemView = {
+			...item("provider-failure", "assistant", [
+				{ type: "text", text: "Partial unfinished output" },
+				{ type: "notice", level: "error", text: "The model provider could not complete the request." },
+			]),
+			state: "interrupted",
+		};
+		const failed = [turnItems[0]!, failure];
+		const chat = buildTurnPresentation(failed);
+		expect(chat.final).toBeUndefined();
+		expect(chat.segments.map((segment) => segment.type)).toEqual(["user", "intermediate", "notice"]);
+		expect(chat.segments.at(-1)).toMatchObject({ type: "notice", block: { level: "error" } });
+		const code = buildCodeTurnPresentation(failed);
+		expect(code.final).toBeUndefined();
+		expect(code.segments.at(-1)).toMatchObject({ type: "content", answer: false });
+		expect(JSON.stringify(code.segments)).toContain("The model provider could not complete the request.");
+
+		const recovered = [...failed, turnItems.at(-1)!];
+		const recoveredChat = buildTurnPresentation(recovered);
+		expect(recoveredChat.final?.itemId).toBe("assistant-final");
+		expect(recoveredChat.segments.map((segment) => segment.type)).toEqual([
+			"user",
+			"intermediate",
+			"notice",
+			"answer",
+		]);
+		expect(buildCodeTurnPresentation(recovered).final?.itemId).toBe("assistant-final");
+	});
+
+	it("excludes only identified mailbox events without changing their durable content or the final answer", () => {
+		const mailbox: ItemView = {
+			...item("mailbox-terminal", "system", [{ type: "text", text: "Worker: done\nInternal result" }]),
+			origin: { kind: "system", eventId: "terminal-event" },
+			agentTargetId: "22222222-2222-4222-8222-222222222222",
+		};
+		const intervention: ItemView = {
+			...mailbox,
+			itemId: "mailbox-intervention",
+			agentMessageId: "human-message",
+			content: [{ type: "text", text: "You sent a message to Worker: stop" }],
+		};
+		const items = [...turnItems.slice(0, -1), intervention, turnItems.at(-1)!, mailbox];
+		expect(buildTurnPresentation(items)).toEqual(buildTurnPresentation(turnItems));
+		expect(buildCodeTurnPresentation(items)).toEqual(buildCodeTurnPresentation(turnItems));
+		expect(items).toHaveLength(turnItems.length + 2);
+		expect(mailbox.content).toEqual([{ type: "text", text: "Worker: done\nInternal result" }]);
+		expect(isInternalAgentCoordinationItem(mailbox)).toBe(true);
+		expect(isInternalAgentCoordinationItem(intervention)).toBe(true);
+		expect(isInternalAgentCoordinationItem({ ...mailbox, agentTargetId: undefined })).toBe(false);
+		expect(isInternalAgentCoordinationItem({ ...mailbox, origin: undefined })).toBe(false);
+		expect(isInternalAgentCoordinationItem({ ...mailbox, role: "user" })).toBe(false);
+		expect(isInternalAgentCoordinationItem({ ...mailbox, role: "assistant" })).toBe(false);
+	});
+
 	it("separates public answer text from thinking and pairs tool results", () => {
 		const view = buildTurnPresentation(turnItems);
 		expect(view.users.map((entry) => entry.itemId)).toEqual(["user-1"]);

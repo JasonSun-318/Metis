@@ -65,7 +65,7 @@ export interface SessionChatViewContext {
 	readonly onOpenKnowledge: (sessionId: string) => void;
 	readonly onOpenPlan: (sessionId: string, plan: PlanView) => void;
 	readonly onPickFiles: () => Promise<readonly DesktopAttachmentSelection[]>;
-	readonly onPreviewDeliveredFile: (sessionId: string, file: SessionDeliveredFileView) => void;
+	readonly onPreviewDeliveredFile: (sessionId: string, file: SessionDeliveredFileView, rootSessionId?: string) => void;
 	readonly onResolveDroppedFiles: (files: readonly File[]) => readonly DesktopAttachmentSelection[];
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
 	readonly onSetupSandbox?: () => Promise<void>;
@@ -689,6 +689,7 @@ export const SessionChatView = memo(function SessionChatView({
 					quoteSessionId={visible && serverReady ? writableSessionId : undefined}
 					showNavigation
 					activeTurnId={projection.activeTurnId}
+					retry={projection.retry}
 					waitingForAnswer={waitingForAnswer}
 					activeTurnStartedAt={
 						projection.activeTurnId ? projection.turnsById.get(projection.activeTurnId)?.startedAt : undefined

@@ -78,6 +78,22 @@ afterEach(async () => {
 });
 
 describe("AgentTypesSettingsPanel", () => {
+	it("uses the server capability catalog and states empty tool-list inheritance", async () => {
+		const api = agentTypesApi({
+			listAgentTypes: vi.fn().mockResolvedValue({
+				types: [typeView({ id: "default", allowedTools: [] })],
+				availableTools: ["read", "browser_act", "ask_user"],
+			}),
+		});
+		const { container } = renderPanel(api);
+		await flush();
+		await act(async () => button(container, "New agent type")!.click());
+		expect(container.textContent).toContain("Inherits all parent delegatable tools");
+		expect(container.textContent).toContain("browser_act");
+		expect(container.textContent).toContain("ask_user");
+		expect(container.querySelectorAll(".agent-types-tool input")).toHaveLength(3);
+	});
+
 	it("lists built-in types read-only and custom types with edit and delete", async () => {
 		const desktopApi = agentTypesApi();
 		const { container } = renderPanel(desktopApi);

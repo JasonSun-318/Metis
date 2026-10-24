@@ -16,6 +16,7 @@ import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, u
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
+import type { AgentConversationTarget } from "../conversation-target.ts";
 import {
 	applyGeneralPreferencesToDocument,
 	loadGeneralPreferences,
@@ -34,7 +35,7 @@ import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import type { ComposerSubmission } from "./Composer.tsx";
-import { ConversationQuoteProvider } from "./ConversationQuoteContext.tsx";
+import { ConversationScopeProvider } from "./ConversationScope.tsx";
 import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
@@ -171,9 +172,20 @@ export function App({ api, store }: AppProps) {
 		readonly sessionId: string;
 		readonly plan: PlanView;
 	} | null>(null);
+	const [activeAgentConversation, setActiveAgentConversation] = useState<AgentConversationTarget | null>(null);
+	const [agentFocusRequest, setAgentFocusRequest] = useState<{
+		nonce: number;
+		target: AgentConversationTarget;
+	} | null>(null);
 	const chatFocusNonce = useRef(0);
+	const focusAgentConversation = useCallback((target: AgentConversationTarget | null) => {
+		// A newer child/tab selection supersedes an unfinished mode switch.
+		if (target) chatFocusNonce.current += 1;
+		setActiveAgentConversation(target);
+	}, []);
 	const [chatFocusRequest, setChatFocusRequest] = useState<{ nonce: number; sessionId: string | null } | null>(null);
 	const requestChatFocus = useCallback((sessionId: string | null) => {
+		setActiveAgentConversation(null);
 		chatFocusNonce.current += 1;
 		setChatFocusRequest({ nonce: chatFocusNonce.current, sessionId });
 	}, []);
@@ -247,14 +259,18 @@ export function App({ api, store }: AppProps) {
 		};
 	}, [api]);
 	const modelSettingsGeneration = useRef(0);
-	const handlePreviewDeliveredFile = useCallback((sessionId: string, file: SessionDeliveredFileView) => {
-		setPreviewRequest({
-			source: "delivered",
-			sessionId,
-			fileId: file.fileId,
-			name: file.name,
-		});
-	}, []);
+	const handlePreviewDeliveredFile = useCallback(
+		(sessionId: string, file: SessionDeliveredFileView, rootSessionId?: string) => {
+			setPreviewRequest({
+				source: "delivered",
+				sessionId,
+				...(rootSessionId ? { rootSessionId } : {}),
+				fileId: file.fileId,
+				name: file.name,
+			});
+		},
+		[],
+	);
 	const updateSessionSidebarWidth = useCallback((width: number, persist = true) => {
 		const clamped = clampSessionSidebarWidth(width);
 		setSessionSidebarWidth(clamped);
@@ -680,6 +696,18 @@ export function App({ api, store }: AppProps) {
 			workspaceWorkflow,
 		],
 	);
+	const openAgentConversation = useCallback(
+		(target: AgentConversationTarget) => {
+			cancelHomeTransition();
+			setDestination("tasks");
+			setSettingsOpen(false);
+			closeCodeProjectSetup();
+			focusAgentConversation(target);
+			setAgentFocusRequest((current) => ({ nonce: (current?.nonce ?? 0) + 1, target }));
+		},
+		[cancelHomeTransition, closeCodeProjectSetup, focusAgentConversation],
+	);
+
 	const forkFromReply = useCallback(
 		async (sessionId: string, entryId: string) => {
 			try {
@@ -814,12 +842,14 @@ export function App({ api, store }: AppProps) {
 	const changeMode = useCallback(
 		(nextMode: AgentMode) => {
 			if (nextMode === mode) return;
+			const focusNonce = ++chatFocusNonce.current;
 			rememberCurrentNavigation();
 			cancelHomeTransition();
 			setDestination("tasks");
 			closeCodeProjectSetup();
 			setError(null);
 			void workspaceWorkflow.selectMode(nextMode).then(() => {
+				if (chatFocusNonce.current !== focusNonce) return;
 				const landedDraft = workspaceWorkflow.getSnapshot().draft;
 				requestChatFocus(landedDraft ? landedDraft.sessionId : store.getSnapshot().activeSessionId);
 			});
@@ -1119,7 +1149,7 @@ export function App({ api, store }: AppProps) {
 		.flatMap((interactionId) => {
 			const interaction = state.interactionsById.get(interactionId);
 			return interaction && (interaction.kind === "ask_user" || interaction.kind === "session_permission_approval")
-				? [`${interaction.interactionId}\n${interaction.sessionId}`]
+				? [`${interaction.interactionId}\n${interaction.actorSessionId ?? interaction.sessionId}`]
 				: [];
 		})
 		.join("\n\n");
@@ -1139,9 +1169,9 @@ export function App({ api, store }: AppProps) {
 		.find(
 			(interaction) =>
 				interaction !== undefined &&
-				interaction.kind !== "ask_user" &&
-				interaction.kind !== "session_permission_approval" &&
-				!chatPaneSessions.has(interaction.sessionId),
+				((interaction.kind !== "ask_user" && interaction.kind !== "session_permission_approval") ||
+					(interaction.actorSessionId !== undefined && interaction.actorSessionId !== interaction.sessionId)) &&
+				!chatPaneSessions.has(interaction.actorSessionId ?? interaction.sessionId),
 		);
 	const visibleNotifications = state.notifications.filter(
 		(notification) =>
@@ -1687,7 +1717,10 @@ export function App({ api, store }: AppProps) {
 
 	return (
 		<FileSelectionProvider enabled={Boolean(serverReady && !visibleInteraction)} onSubmit={submitFileSelection}>
-			<ConversationQuoteProvider enabled={Boolean(serverReady && !visibleInteraction)}>
+			<ConversationScopeProvider
+				value={{ openAgent: openAgentConversation }}
+				enabled={Boolean(serverReady && !visibleInteraction)}
+			>
 				{api.platform === "win32" && (
 					<nav aria-label={t("Window navigation")} className="windows-titlebar-navigation">
 						<button
@@ -1728,6 +1761,7 @@ export function App({ api, store }: AppProps) {
 				>
 					{sessionsSidebarOpen && (
 						<SessionSidebar
+							agentNavigation={{ api, active: activeAgentConversation, onOpen: openAgentConversation }}
 							destination={destination}
 							isClosing={sidebarClosing}
 							onDeleteSchedule={deleteScheduledTask}
@@ -1875,6 +1909,8 @@ export function App({ api, store }: AppProps) {
 						) : null}
 						{bootstrapped ? (
 							<SessionWorkspaceView
+								agentFocusRequest={agentFocusRequest}
+								onAgentConversationFocus={focusAgentConversation}
 								api={api}
 								chat={newTaskOpen || !visibleActiveSession ? homePage : null}
 								chatView={chatView}
@@ -1915,7 +1951,7 @@ export function App({ api, store }: AppProps) {
 								visible={
 									!settingsOpen &&
 									destination === "tasks" &&
-									(newTaskOpen || visibleActiveSession !== undefined)
+									(newTaskOpen || visibleActiveSession !== undefined || activeAgentConversation !== null)
 								}
 							/>
 						) : null}
@@ -1946,7 +1982,7 @@ export function App({ api, store }: AppProps) {
 						theme={theme}
 					/>
 				) : null}
-			</ConversationQuoteProvider>
+			</ConversationScopeProvider>
 		</FileSelectionProvider>
 	);
 }

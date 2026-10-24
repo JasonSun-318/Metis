@@ -31,10 +31,15 @@ interface LoadedPreview {
 }
 
 function previewInput(
-	file: Pick<UniversalPreviewTarget, "source" | "sessionId" | "fileId" | "relativePath">,
+	file: Pick<UniversalPreviewTarget, "source" | "sessionId" | "rootSessionId" | "fileId" | "relativePath">,
 ): DesktopPreviewFileInput | null {
 	if (file.source === "delivered" && file.fileId) {
-		return { source: "delivered", sessionId: file.sessionId, fileId: file.fileId };
+		return {
+			source: "delivered",
+			sessionId: file.sessionId,
+			...(file.rootSessionId ? { rootSessionId: file.rootSessionId } : {}),
+			fileId: file.fileId,
+		};
 	}
 	if (file.source === "workspace" && file.relativePath) {
 		return { source: "workspace", sessionId: file.sessionId, relativePath: file.relativePath };
@@ -111,7 +116,12 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const handleOpenDefault = () => {
 		if (file.source === "delivered" && file.fileId) {
 			void api
-				.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "default" })
+				.openDeliveredFile({
+					sessionId: file.sessionId,
+					...(file.rootSessionId ? { rootSessionId: file.rootSessionId } : {}),
+					fileId: file.fileId,
+					action: "default",
+				})
 				.catch(onError);
 		} else if (file.source === "workspace" && file.relativePath) {
 			void api
@@ -123,7 +133,12 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const handleReveal = () => {
 		if (file.source === "delivered" && file.fileId) {
 			void api
-				.openDeliveredFile({ sessionId: file.sessionId, fileId: file.fileId, action: "reveal" })
+				.openDeliveredFile({
+					sessionId: file.sessionId,
+					...(file.rootSessionId ? { rootSessionId: file.rootSessionId } : {}),
+					fileId: file.fileId,
+					action: "reveal",
+				})
 				.catch(onError);
 		} else if (file.source === "workspace" && file.relativePath) {
 			void api

@@ -1,4 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { RPC_ERROR_CODES, type SessionSummary } from "@metis/app-protocol";
@@ -698,6 +699,69 @@ describe("desktop trust boundaries", () => {
 		expect(sources).not.toContain("readDeliveredFile");
 		expect(sources).not.toContain("readWorkspaceFile");
 		expect(sources).toContain("readPreviewFile");
+	});
+
+	it("routes child delivery previews through root ownership validation and never falls back to guessed local files", async () => {
+		const directory = mkdtempSync(join(tmpdir(), "metis-child-preview-"));
+		const previous = process.env.METIS_AGENT_DIR;
+		process.env.METIS_AGENT_DIR = directory;
+		const fileId = "aaaaaaaaaaaaaaaa";
+		const delivered = join(directory, "attachments", "preview-child", "delivered");
+		mkdirSync(delivered, { recursive: true });
+		writeFileSync(join(delivered, `${fileId}-unguarded.txt`), "Must not read without root validation");
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const broker = new ClientBroker({ ipcMain: ipcMain as never, supervisor });
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		try {
+			supervisor.request.mockImplementationOnce(async (request) => ({
+				jsonrpc: "2.0",
+				id: request.id,
+				result: {
+					fileId,
+					name: "result.txt",
+					byteLength: 8,
+					data: Buffer.from("Verified").toString("base64"),
+					mediaType: "text/plain",
+					absolutePath: "/verified/result.txt",
+				},
+			}));
+			const read = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.readPreviewFile)!;
+			const input = { source: "delivered", sessionId: "preview-child", rootSessionId: "preview-root", fileId };
+			await expect(read(event, input)).resolves.toEqual({
+				ok: true,
+				name: "result.txt",
+				byteLength: 8,
+				mediaType: "text/plain",
+				bytes: new Uint8Array(Buffer.from("Verified")),
+			});
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({
+					method: "session/readDeliveredFile",
+					params: { sessionId: "preview-child", rootSessionId: "preview-root", fileId },
+				}),
+			);
+			supervisor.request.mockImplementationOnce(async (request) => ({
+				jsonrpc: "2.0",
+				id: request.id,
+				error: {
+					code: RPC_ERROR_CODES.NOT_FOUND,
+					message: "Resource not found",
+					data: { name: "NOT_FOUND", retryable: false },
+				},
+			}));
+			await expect(read(event, { ...input, rootSessionId: "wrong-root" })).resolves.toEqual({
+				ok: false,
+				reason: "not-found",
+			});
+		} finally {
+			broker.dispose();
+			if (previous === undefined) delete process.env.METIS_AGENT_DIR;
+			else process.env.METIS_AGENT_DIR = previous;
+			rmSync(directory, { recursive: true, force: true });
+		}
 	});
 
 	it("keeps PTY creation behind validated IPC and closes terminals with their renderer owner", async () => {

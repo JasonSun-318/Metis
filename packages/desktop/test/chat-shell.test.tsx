@@ -22,6 +22,7 @@ import { setLocale } from "../src/renderer/i18n.ts";
 import { getHomePeriod, HOME_GREETINGS } from "../src/renderer/new-task-home-content.ts";
 import { DEFAULT_PROFILE_IDENTITY, saveProfileIdentity } from "../src/renderer/profile-identity.ts";
 import { firstInteractionForSession } from "../src/renderer/session-view-utils.ts";
+import { SessionWorkspaceWorkflow } from "../src/renderer/session-workspace-workflow.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
 	loadProjectPreferences,
@@ -311,7 +312,7 @@ function createHarness(
 	const failOpenSessionIds = new Set(options.failOpenSessionIds ?? []);
 	const createdByRequestId = new Map<string, SessionSummary>();
 	const order: string[] = [];
-	let subscriber: Parameters<MetisDesktopApi["subscribe"]>[0] | undefined;
+	const subscribers = new Set<Parameters<MetisDesktopApi["subscribe"]>[0]>();
 	const terminalSubscribers = new Set<Parameters<MetisDesktopApi["subscribeTerminal"]>[0]>();
 	const browserSubscribers = new Set<Parameters<MetisDesktopApi["subscribeBrowser"]>[0]>();
 	const updateSubscribers = new Set<Parameters<MetisDesktopApi["subscribeUpdate"]>[0]>();
@@ -658,6 +659,7 @@ function createHarness(
 			},
 		})),
 		clearSessionGoal: vi.fn(async ({ sessionId }) => ({ sessionId, cleared: true })),
+		listAgents: vi.fn().mockResolvedValue({ agents: [], nextAfterAgentId: null }),
 		readAgentItems: vi.fn().mockResolvedValue({ items: [], nextBeforeItemId: null }),
 		interruptAgent: vi.fn().mockResolvedValue({}),
 		setThinkingSelection: vi.fn().mockResolvedValue({}),
@@ -671,9 +673,9 @@ function createHarness(
 		getThemePreference: vi.fn().mockResolvedValue("dark"),
 		setThemePreference: vi.fn().mockResolvedValue(undefined),
 		subscribe: vi.fn((listener) => {
-			subscriber = listener;
+			subscribers.add(listener);
 			return () => {
-				if (subscriber === listener) subscriber = undefined;
+				subscribers.delete(listener);
 			};
 		}),
 	} as unknown as MetisDesktopApi;
@@ -684,7 +686,9 @@ function createHarness(
 		) => {
 			for (const listener of browserSubscribers) listener(event);
 		},
-		emitEvent: (event: Parameters<NonNullable<typeof subscriber>>[0]) => subscriber?.(event),
+		emitEvent: (event: Parameters<Parameters<MetisDesktopApi["subscribe"]>[0]>[0]) => {
+			for (const subscriber of subscribers) subscriber(event);
+		},
 		emitUpdate: (state: DesktopUpdateState) => {
 			updateState = state;
 			for (const listener of updateSubscribers) listener(state);
@@ -5027,7 +5031,7 @@ describe("Chat desktop shell", () => {
 		expect(chatToolMenu.textContent).not.toContain("Browser");
 		expect(chatToolMenu.textContent).not.toContain("Review");
 		expect(chatToolMenu.textContent).not.toContain("Files");
-		expect(chatToolMenu.textContent).not.toContain("Agents");
+		expect(chatToolMenu.textContent).toContain("Agents");
 		await act(async () => root.unmount());
 	});
 
@@ -5769,6 +5773,63 @@ describe("Chat desktop shell", () => {
 		);
 		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].fileSelections).toHaveLength(1);
 		await act(async () => root.unmount());
+	});
+
+	it("keeps a child conversation focused when an earlier mode change resolves late", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
+		localStorage.setItem("metis.activeSessionId.code", "code-existing");
+		const worker: AgentSummaryView = {
+			agentId: "mode-race-worker",
+			name: "Mode race worker",
+			agentType: "worker",
+			depth: 1,
+			status: "done",
+			archived: false,
+			parentSessionId: "code-existing",
+			rootSessionId: "code-existing",
+			agentPath: ["mode-race-worker"],
+			tasks: [],
+			createdAt: "2026-07-20T00:00:00.000Z",
+			updatedAt: "2026-07-20T00:00:00.000Z",
+		};
+		const { api } = createHarness();
+		vi.mocked(api.listAgents).mockImplementation(async ({ sessionId }) => ({
+			agents: sessionId === "code-existing" ? [worker] : [],
+			nextAfterAgentId: null,
+		}));
+		const selectMode = SessionWorkspaceWorkflow.prototype.selectMode;
+		let release!: () => void;
+		const completion = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		vi.spyOn(SessionWorkspaceWorkflow.prototype, "selectMode").mockImplementation(async function (
+			this: SessionWorkspaceWorkflow,
+			mode,
+		) {
+			await selectMode.call(this, mode);
+			if (mode === "code") await completion;
+		});
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "Code").click());
+			await flush();
+			await act(async () => button(container, "Mode race worker").click());
+			await flush();
+			const visibleChild = () =>
+				container.querySelector('.workspace-panel:not([hidden]) [data-agent-id="mode-race-worker"]');
+			expect(visibleChild()).not.toBeNull();
+			await act(async () => release());
+			await flush();
+			expect(visibleChild()).not.toBeNull();
+		} finally {
+			release();
+			await act(async () => root.unmount());
+		}
 	});
 
 	it("renders a live agent tree for a session that is not the focused chat", async () => {

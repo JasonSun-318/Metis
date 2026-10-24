@@ -1,4 +1,5 @@
 @import "./composer-panels.css";
+@import "./agent-conversations.css";
 
 * { box-sizing: border-box; }
 
@@ -651,7 +652,7 @@ textarea { resize: none; }
 .review-change-counts > span:last-child { color: var(--diff-del); }
 .review-patch { min-width: 0; overflow: auto; background: #202020; font-size: 11.5px; }
 .review-patch diffs-container { display: block; color-scheme: dark; --diffs-dark-bg: #202020; --diffs-font-size: 11.5px; --diffs-line-height: 18px; }
-.review-context-error { margin: 0; border-top: 1px solid var(--border); color: var(--danger-mcp); padding: 7px 10px; font-size: 11px; }
+.review-context-error { display: block; margin: 0; border-top: 1px solid var(--border); background: var(--app-bg); color: var(--danger); padding: 7px 10px; font-size: 11px; }
 .review-refresh.is-error { color: var(--danger-mcp); }
 .review-diff-state, .review-empty { color: var(--text-11); margin: 0; padding: 18px 12px; text-align: center; font-size: 11.5px; line-height: 1.5; }
 .review-empty { position: absolute; display: grid; place-items: center; inset: 0; }
@@ -706,6 +707,8 @@ textarea { resize: none; }
 .browser-downloads-menu { position: absolute; z-index: 5; top: calc(100% + 4px); right: 0; width: min(324px, calc(100cqw - 14px)); max-height: 380px; overflow-y: auto; display: grid; gap: 1px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
 .browser-downloads-header { display: flex; align-items: center; justify-content: space-between; color: var(--text-20); font-size: 11px; font-weight: 560; padding: 6px 9px 4px; }
 .browser-downloads-empty { margin: 0; color: var(--text-07); font-size: 12px; padding: 14px 9px 16px; text-align: center; }
+.browser-downloads-error { display: grid; gap: 6px; margin: 0; color: var(--danger); font-size: 12px; padding: 12px 9px 14px; text-align: center; }
+.browser-downloads-error .browser-history-clear { justify-self: center; }
 .browser-download-row { position: relative; display: grid; gap: 2px; border-radius: 7px; padding: 6px 9px 8px; }
 .browser-download-row:hover { background: var(--menu-hover); }
 .browser-download-main { display: flex; align-items: center; gap: 8px; }
@@ -1428,10 +1431,10 @@ textarea { resize: none; }
 }
 .transcript-space { position: relative; width: 100%; }
 .message { position: absolute; top: 0; left: 0; width: 100%; color: var(--text-27); padding: 8px 0 24px; font-weight: 400; }
-.message-user { right: 0; left: auto; width: fit-content; max-width: min(62%, 480px); border-radius: 10px; background: var(--surface-06); box-shadow: var(--shadow); color: var(--text-27); padding: 7px 12px; line-height: 1.45; }
+.message-user { right: 0; left: auto; width: fit-content; max-width: min(62%, 480px); border-radius: 10px; background: var(--surface-06); box-shadow: var(--shadow); color: var(--text-27); padding: 7px 12px; line-height: 1.55; }
 .message header { margin-bottom: 8px; color: var(--muted); font-size: 11px; font-weight: 700; text-transform: uppercase; }
 .message p { margin: 7px 0; font-size: var(--chat-body-size); font-weight: 400; letter-spacing: -.003em; line-height: 1.55; white-space: pre-wrap; }
-.message-user p { margin: 0; font-size: var(--chat-control-size); letter-spacing: -.003em; line-height: 1.45; }
+.message-user p { margin: 0; font-size: var(--chat-control-size); letter-spacing: -.003em; line-height: 1.55; }
 .message pre { overflow-x: auto; border-radius: 7px; background: var(--surface-00); padding: 9px 11px; font-size: var(--code-mono-size); line-height: 1.5; white-space: pre-wrap; }
 .transcript-attachment { display: flex; align-items: center; gap: 7px; color: var(--muted); cursor: pointer; font-size: 13px; }
 .tool-block-error, .notice-error, .error-copy { color: var(--danger); }
@@ -1553,7 +1556,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .transcript-code .transcript-scroll { padding: 18px max(24px, calc((100% - var(--conversation-width)) / 2)) 28px; }
 .transcript-code .code-transcript-turn { position: absolute; top: 0; right: 0; left: 0; width: 100%; color: var(--text-25); padding: 0 0 30px; font-size: var(--code-body-size); font-weight: 400; letter-spacing: -.003em; line-height: 1.55; }
 .transcript-code .code-turn-user { display: flex; flex-direction: column; align-items: flex-end; margin-bottom: 18px; }
-.transcript-code .code-turn-user > .code-turn-user-bubble { max-width: min(62%, 480px); border-radius: 10px; background: var(--surface-06); box-shadow: var(--shadow); color: var(--text-27); padding: 7px 12px; line-height: 1.45; }
+.transcript-code .code-turn-user > .code-turn-user-bubble { max-width: min(62%, 480px); border-radius: 10px; background: var(--surface-06); box-shadow: var(--shadow); color: var(--text-27); padding: 7px 12px; line-height: 1.55; }
 .transcript-code .code-turn-user p, .transcript-code .code-turn-status p, .transcript-code .code-turn-answer p { margin: 0 0 9px; white-space: pre-wrap; }
 .transcript-code .code-turn-user p:last-child, .transcript-code .code-turn-status p:last-child, .transcript-code .code-turn-answer p:last-child { margin-bottom: 0; }
 .transcript-code .code-turn-status { margin-bottom: 12px; color: var(--text-24); }
@@ -1749,14 +1752,15 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .ask-user-option-copy { display: grid; min-width: 0; gap: 2px; font-family: var(--question-font, inherit); }
 .ask-user-option-copy strong { white-space: normal; color: var(--text); font-size: max(12px, calc(var(--content-font-size) - 3px)); font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
 .ask-user-option-copy small { white-space: normal; color: var(--text-19); font-size: max(11px, calc(var(--content-font-size) - 4px)); line-height: 1.4; overflow-wrap: anywhere; }
-.ask-user-custom { padding: 0 10px 8px; }
-.ask-user-custom textarea { display: block; width: 100%; min-height: 58px; max-height: 120px; field-sizing: content; border: 1px solid var(--control-border); border-radius: 8px; padding: 8px 10px; background: var(--surface-03); font-family: var(--question-font, inherit); font-size: max(12px, calc(var(--content-font-size) - 2px)); line-height: 1.5; }
+.ask-user-custom { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: start; gap: 8px; margin: 0 10px 8px; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius-control); }
+.ask-user-custom.is-selected { border-color: var(--link); background: var(--accent-soft-bg); }
+.ask-user-custom textarea { display: block; width: 100%; min-height: 32px; max-height: 120px; field-sizing: content; border: 1px solid var(--control-border); border-radius: var(--radius-control); padding: 6px 8px; background: var(--surface-03); font-family: var(--question-font, inherit); font-size: max(12px, calc(var(--content-font-size) - 2px)); line-height: 1.5; }
 .ask-user-custom textarea::placeholder { color: var(--placeholder); }
 .ask-user-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; min-height: 44px; padding: 7px 10px; border-top: 1px solid var(--border); }
 .ask-user-actions > div { display: flex; align-items: center; gap: 4px; }
 .ask-user-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 0 8px; border-radius: 6px; font-size: 12px; white-space: nowrap; }
-.ask-user-skip, .ask-user-custom-trigger { color: var(--text-19); }
-.ask-user-skip:hover:not(:disabled), .ask-user-custom-trigger:hover:not(:disabled) { background: var(--panel-hover); }
+.ask-user-skip { color: var(--text-19); }
+.ask-user-skip:hover:not(:disabled) { background: var(--panel-hover); }
 .ask-user-step { background: var(--button-primary-bg); color: var(--button-primary-ink); }
 .ask-user-step:hover:not(:disabled) { background: var(--button-primary-bg-hover); }
 .ask-user-error { margin: 0 10px 8px; padding: 8px; border-radius: 6px; background: var(--danger-soft-bg); color: var(--danger-soft-text); font-size: 12px; }
@@ -2300,7 +2304,7 @@ details:has(> .transcript-drawer)::details-content { display: block; content-vis
 .interaction-options button { display: grid; gap: 3px; border: 1px solid var(--border); background: var(--panel); color: var(--text); padding: 10px 12px; text-align: left; }
 .interaction-options span { color: var(--muted); font-size: 12px; font-weight: 400; }
 .interaction-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
-.interaction-actions button, .interaction-dialog form button { border-radius: 7px; --button-hover-bg: var(--button-primary-bg-hover); background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 14px;  min-height: var(--control-height); font-size: 13px;}
+.interaction-actions button, .interaction-dialog form button { border-radius: var(--radius-control); --button-hover-bg: var(--button-primary-bg-hover); background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 14px;  min-height: var(--control-height); font-size: 13px;}
 .unsaved-file-dialog { width: min(420px, 100%); }
 .unsaved-file-dialog .button-secondary { --button-hover-bg: var(--panel-hover); border: 1px solid var(--border-strong); background: transparent; color: var(--text); }
 .interaction-dialog form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; margin-top: 18px; }

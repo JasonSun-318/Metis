@@ -193,6 +193,8 @@ export const DESKTOP_RPC_FORWARDING = {
 	clearSessionGoal: { channel: "metis:clear-session-goal", method: "session/goal/clear", input: "required" },
 	listAgents: { channel: "metis:list-agents", method: "agent/list", input: "required" },
 	readAgentItems: { channel: "metis:read-agent-items", method: "agent/readItems", input: "required" },
+	sendAgentMessage: { channel: "metis:send-agent-message", method: "agent/send", input: "required" },
+	controlAgent: { channel: "metis:control-agent", method: "agent/control", input: "required" },
 	interruptAgent: { channel: "metis:interrupt-agent", method: "agent/interrupt", input: "required" },
 	archiveAgent: { channel: "metis:archive-agent", method: "agent/archive", input: "required" },
 	deleteAgent: { channel: "metis:delete-agent", method: "agent/delete", input: "required" },

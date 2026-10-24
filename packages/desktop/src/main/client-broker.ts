@@ -612,6 +612,24 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.readPreviewFile, 1, async (_event, [input]) => {
 			const params = validateReadPreviewFileInput(input);
 			if (params.source === "workspace") return this.workspaceFiles.readPreviewBytes(params);
+			if (params.rootSessionId) {
+				try {
+					const file = await this.clientCall("session/readDeliveredFile", {
+						sessionId: params.sessionId,
+						rootSessionId: params.rootSessionId,
+						fileId: params.fileId,
+					});
+					return {
+						ok: true,
+						name: file.name,
+						byteLength: file.byteLength,
+						mediaType: file.mediaType ?? "application/octet-stream",
+						bytes: new Uint8Array(Buffer.from(file.data, "base64")),
+					};
+				} catch {
+					return { ok: false, reason: "not-found" };
+				}
+			}
 			for (const directory of deliveredPreviewDirectories(params.sessionId)) {
 				const result = await readDeliveredPreviewBytes(directory, params.fileId);
 				if (result.ok || result.reason === "too-large") return result;

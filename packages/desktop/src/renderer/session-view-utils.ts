@@ -1,4 +1,10 @@
-import { type InteractionView, type ItemView, RPC_ERROR_CODES, type SessionSummary } from "@metis/app-protocol";
+import {
+	type AgentSummaryView,
+	type InteractionView,
+	type ItemView,
+	RPC_ERROR_CODES,
+	type SessionSummary,
+} from "@metis/app-protocol";
 import { rpcErrorCode } from "./rpc-error.ts";
 
 export type SessionIndicator = "attention" | "failed" | "completed" | "running" | "unread";
@@ -14,6 +20,36 @@ export function sessionIndicator(
 	if (notification && session.lastTurnOutcome === "completed") return "completed";
 	if (session.state === "running") return "running";
 	return notification ? "unread" : undefined;
+}
+
+/** Adapt agent task state to the same notification and viewing rules as a root session. */
+export function agentIndicator(
+	agent: Pick<AgentSummaryView, "status" | "runControl" | "archived">,
+	{
+		unread,
+		attentionRequired,
+		viewing,
+	}: { readonly unread: boolean; readonly attentionRequired: boolean; readonly viewing: boolean },
+): SessionIndicator | undefined {
+	const stopped =
+		agent.status === "stopped" ||
+		agent.archived ||
+		agent.runControl === "user_paused" ||
+		agent.runControl === "interrupted";
+	return sessionIndicator(
+		{
+			state: !stopped && (agent.status === "running" || agent.status === "queued") ? "running" : "idle",
+			unread: attentionRequired || (!stopped && unread),
+			attentionRequired,
+			lastTurnOutcome:
+				!stopped && agent.status === "done"
+					? "completed"
+					: !stopped && agent.status === "failed"
+						? "failed"
+						: undefined,
+		},
+		viewing,
+	);
 }
 
 export const SESSION_INDICATOR_LABELS: Readonly<Record<SessionIndicator, string | undefined>> = {
@@ -32,7 +68,7 @@ export function firstInteractionForSession(
 	if (!sessionId) return undefined;
 	for (const interactionId of interactionOrder) {
 		const interaction = interactionsById.get(interactionId);
-		if (interaction?.sessionId === sessionId) return interaction;
+		if (interaction && (interaction.actorSessionId ?? interaction.sessionId) === sessionId) return interaction;
 	}
 	return undefined;
 }

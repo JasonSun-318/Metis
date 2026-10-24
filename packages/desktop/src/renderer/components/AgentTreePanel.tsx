@@ -36,6 +36,7 @@ interface AgentTreePanelProps {
 		"archiveAgent" | "deleteAgent" | "interruptAgent" | "listAgents" | "readAgentItems"
 	>;
 	readonly onError: (cause: unknown) => void;
+	readonly onOpenConversation?: (agent: AgentSummaryView) => void;
 	readonly sessionId: string;
 	readonly store: AppStore;
 	readonly visible: boolean;
@@ -150,7 +151,7 @@ function StatusIcon({ status }: { readonly status: AgentSummaryView["status"] })
 	return <CheckCircle aria-hidden="true" size={13} />;
 }
 
-export function AgentTreePanel({ api, onError, sessionId, store, visible }: AgentTreePanelProps) {
+export function AgentTreePanel({ api, onError, onOpenConversation, sessionId, store, visible }: AgentTreePanelProps) {
 	const { t } = useTranslation();
 	const snapshot = useSyncExternalStore(visible ? store.subscribe : NOOP_SUBSCRIBE, store.getSnapshot);
 	const projection = snapshot.sessions.get(sessionId) ?? EMPTY_PROJECTION;
@@ -352,6 +353,11 @@ export function AgentTreePanel({ api, onError, sessionId, store, visible }: Agen
 	}, [selectedAgentId]);
 
 	const openTranscript = (agentId: string) => {
+		const agent = agents.find((candidate) => candidate.agentId === agentId);
+		if (onOpenConversation && agent) {
+			onOpenConversation(agent);
+			return;
+		}
 		returnFocusAgentId.current = agentId;
 		store.selectAgentTranscript(sessionId, agentId, null);
 	};

@@ -59,6 +59,7 @@ export interface MutableSessionProjection {
 	deliveredFiles: SessionSnapshot["deliveredFiles"];
 	goal: SessionSnapshot["goal"];
 	process: SessionSnapshot["process"];
+	retry: SessionSnapshot["retry"];
 	queuedTurns: QueuedTurnView[];
 }
 
@@ -126,6 +127,7 @@ export function emptyProjection() {
 		deliveredFiles: [] as SessionSnapshot["deliveredFiles"],
 		goal: null as SessionSnapshot["goal"],
 		process: undefined as SessionSnapshot["process"],
+		retry: undefined as SessionSnapshot["retry"],
 		queuedTurns: [] as QueuedTurnView[],
 	};
 }
@@ -417,6 +419,7 @@ export function replaceProjectionSnapshot(state: MutableProjectionState, snapsho
 
 	session.nextBeforeItemId = snapshot.nextBeforeItemId;
 	session.activeTurnId = snapshot.activeTurnId;
+	session.retry = snapshot.retry;
 	if (snapshot.serverEpoch !== state.serverEpoch || state.cursor === 0) {
 		const epochChanged = snapshot.serverEpoch !== state.serverEpoch;
 		state.serverEpoch = snapshot.serverEpoch;
@@ -506,6 +509,7 @@ export function eventSessionId(event: DomainEvent): string | undefined {
 		case "session/deliveredFilesChanged":
 		case "session/goalChanged":
 		case "session/processChanged":
+		case "session/retryChanged":
 		case "turn/queueChanged":
 			return event.sessionId;
 		case "interaction/notify":
@@ -561,7 +565,7 @@ function upsertOrdered<T>(map: Map<string, T>, order: string[], id: string, valu
 	return [...order, id];
 }
 
-function appendItemDelta(
+export function appendItemDelta(
 	item: ItemView,
 	delta: { readonly type: "text" | "thinking"; readonly text: string },
 ): ItemView {
@@ -574,6 +578,9 @@ function appendItemDelta(
 
 function applyEvent(state: MutableProjectionState, session: MutableSessionProjection | null, event: DomainEvent): void {
 	switch (event.type) {
+		case "session/retryChanged":
+			session!.retry = event.retry === null ? undefined : structuredClone(event.retry);
+			return;
 		case "session/processChanged":
 			session!.process = structuredClone(event.process);
 			return;

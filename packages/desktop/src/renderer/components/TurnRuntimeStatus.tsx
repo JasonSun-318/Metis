@@ -1,4 +1,4 @@
-import type { ItemView } from "@metis/app-protocol";
+import type { ItemView, RetryStatusView } from "@metis/app-protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -51,12 +51,14 @@ export function TurnRuntimeStatus({
 	startedAt,
 	waitingForAnswer = false,
 	variant = "turn",
+	retry,
 }: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
 	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
 	readonly variant?: "turn" | "compaction";
+	readonly retry?: RetryStatusView;
 }) {
 	const { t } = useTranslation();
 	const target = useMemo(() => turnTokenTarget(items), [items]);
@@ -83,9 +85,15 @@ export function TurnRuntimeStatus({
 	if (!running) return null;
 	if (waitingForAnswer)
 		return <output className="status-block turn-runtime-status is-waiting">{t("Waiting for your answer")}</output>;
+	const label =
+		variant === "compaction"
+			? t("Compacting conversation…")
+			: retry
+				? t("Retrying ({{attempt}}/{{maxAttempts}})", retry)
+				: t("Thinking…");
 	return (
 		<output
-			aria-label={t(variant === "compaction" ? "Compacting conversation…" : "Thinking…")}
+			aria-label={label}
 			className="status-block turn-runtime-status"
 			data-runtime-tokens={variant === "turn" ? displayedTokens : undefined}
 		>
@@ -96,8 +104,8 @@ export function TurnRuntimeStatus({
 			</span>
 			<span aria-hidden="true">
 				{variant === "compaction"
-					? `${elapsedSeconds}s · ${t("Compacting conversation…")}`
-					: `${elapsedSeconds}s · ${t("{{count}} tokens", { count: displayedTokens })} · ${t("Thinking…")}`}
+					? `${elapsedSeconds}s · ${label}`
+					: `${elapsedSeconds}s · ${t("{{count}} tokens", { count: displayedTokens })} · ${label}`}
 			</span>
 		</output>
 	);

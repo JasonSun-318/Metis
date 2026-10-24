@@ -1,4 +1,4 @@
-import type { AgentMode, ItemView, PlanView, SessionDeliveredFileView } from "@metis/app-protocol";
+import type { AgentMode, ItemView, PlanView, RetryStatusView, SessionDeliveredFileView } from "@metis/app-protocol";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,12 +9,14 @@ import { useConversationQuotes } from "./ConversationQuoteContext.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptQuoteSelection } from "./TranscriptQuoteSelection.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
-import { messageText } from "./transcript-turn-model.ts";
+import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
+import { isInternalAgentCoordinationItem, messageText } from "./transcript-turn-model.ts";
 
 interface TranscriptProps {
 	readonly quoteSessionId?: string;
 	readonly showNavigation?: boolean;
 	readonly waitingForAnswer?: boolean;
+	readonly retry?: RetryStatusView;
 	readonly activeTurnId?: string | null;
 	readonly activeTurnStartedAt?: string;
 	readonly appearance: AgentMode;
@@ -58,9 +60,24 @@ function transcriptRows(
 ): TranscriptRow[] {
 	const rows: TranscriptRow[] = [];
 	const byKey = new Map<string, number>();
+	let legacyRow: { sessionId: string; index: number } | undefined;
 	for (const itemId of itemIds) {
 		const item = itemsById.get(itemId);
-		if (!item) continue;
+		if (
+			!item ||
+			isInternalAgentCoordinationItem(item) ||
+			(item.role === "assistant" && item.state === "interrupted" && item.content.length === 0)
+		)
+			continue;
+		const boundary =
+			item.role === "system" || item.content.some((block) => block.type === "compaction" || block.type === "plan");
+		if (item.turnId || boundary) legacyRow = undefined;
+		else if (item.role !== "user" && legacyRow?.sessionId === item.sessionId) {
+			// Older automatic continuations had no durable turn ID. Keep their
+			// assistant/tool sequence together so results pair with their calls.
+			rows[legacyRow.index]!.itemIds.push(item.itemId);
+			continue;
+		}
 		const key = item.turnId
 			? `${item.sessionId}:${appearance}:${item.turnId}`
 			: `${item.sessionId}:${appearance}:${item.itemId}`;
@@ -71,6 +88,7 @@ function transcriptRows(
 		} else {
 			rows[existingIndex]!.itemIds.push(item.itemId);
 		}
+		if (!item.turnId && !boundary) legacyRow = { sessionId: item.sessionId, index: existingIndex ?? rows.length - 1 };
 	}
 	return rows;
 }
@@ -79,6 +97,7 @@ export function Transcript({
 	quoteSessionId,
 	showNavigation = false,
 	waitingForAnswer = false,
+	retry,
 	activeTurnId,
 	activeTurnStartedAt,
 	appearance,
@@ -129,6 +148,9 @@ export function Transcript({
 	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
 	const [pendingJump, setPendingJump] = useState<string | null>(null);
 	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
+	const activeTurnHasRow =
+		activeTurnId != null &&
+		transcript.some((row) => row.itemIds.some((id) => itemsById.get(id)?.turnId === activeTurnId));
 	const navigation = useMemo<ConversationNavigationEntry[]>(
 		() =>
 			!showNavigation
@@ -203,8 +225,13 @@ export function Transcript({
 		return () => cancelAnimationFrame(frame);
 	}, [pendingJump, virtualizer]);
 
-	const lastItemId = itemIds.at(-1);
-	const lastItem = lastItemId ? itemsById.get(lastItemId) : undefined;
+	const lastItem = useMemo(() => {
+		for (let index = itemIds.length - 1; index >= 0; index -= 1) {
+			const item = itemsById.get(itemIds[index]!);
+			if (item && !isInternalAgentCoordinationItem(item)) return item;
+		}
+		return undefined;
+	}, [itemIds, itemsById]);
 	useLayoutEffect(() => {
 		if (lastItem?.sessionId !== previousSessionId.current) {
 			previousSessionId.current = lastItem?.sessionId;
@@ -460,6 +487,7 @@ export function Transcript({
 										onOpenDeliveredFile={onOpenDeliveredFile}
 										onPreviewDeliveredFile={onPreviewDeliveredFile}
 										running={running}
+										retry={running ? retry : undefined}
 										waitingForAnswer={running && waitingForAnswer}
 										startedAt={activeTurnStartedAt}
 									/>
@@ -472,6 +500,7 @@ export function Transcript({
 										onOpenDeliveredFile={onOpenDeliveredFile}
 										onPreviewDeliveredFile={onPreviewDeliveredFile}
 										running={running}
+										retry={running ? retry : undefined}
 										waitingForAnswer={running && waitingForAnswer}
 										startedAt={activeTurnStartedAt}
 									/>
@@ -481,6 +510,15 @@ export function Transcript({
 					})}
 				</div>
 			</div>
+			{activeTurnId != null && !activeTurnHasRow && (
+				<TurnRuntimeStatus
+					items={[]}
+					running
+					retry={retry}
+					startedAt={activeTurnStartedAt}
+					waitingForAnswer={waitingForAnswer}
+				/>
+			)}
 			<TranscriptQuoteSelection
 				key={quoteSessionId ?? "readonly"}
 				root={rootRef}
