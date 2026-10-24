@@ -15,7 +15,7 @@ vi.mock("@pierre/diffs/react", () => ({
 	}) => (
 		<pre data-hunk-separators={options.hunkSeparators} data-testid="patch">
 			{patch}
-			<button onClick={() => void options.loadDiffFiles?.()} type="button">
+			<button onClick={() => void Promise.resolve(options.loadDiffFiles?.()).catch(() => {})} type="button">
 				Expand unchanged
 			</button>
 		</pre>
@@ -296,6 +296,89 @@ describe("ReviewPanel", () => {
 		await act(async () => header.click());
 		await flush();
 		expect(container.textContent).toContain("Binary file changed");
+		await act(async () => root.unmount());
+	});
+
+	it("announces an initial review failure and retries in place", async () => {
+		const getWorkspaceReview = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("review unavailable"))
+			.mockResolvedValueOnce(workingTree);
+		const api = { getWorkspaceReview } as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		const alert = container.querySelector(".review-empty.is-error");
+		expect(alert?.getAttribute("role")).toBe("alert");
+		expect(alert?.textContent).toContain("Unable to load review");
+		await act(async () => button(container, "Retry").click());
+		await flush();
+		expect(getWorkspaceReview).toHaveBeenCalledTimes(2);
+		expect(container.querySelector(".review-empty.is-error")).toBeNull();
+		expect(container.textContent).toContain("README.md");
+		await act(async () => root.unmount());
+	});
+
+	it("announces a diff failure and retries the expanded file", async () => {
+		const getWorkspaceReviewFileDiff = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("diff unavailable"))
+			.mockResolvedValueOnce({ kind: "text", patch: "README patch" });
+		const api = {
+			getWorkspaceReview: vi.fn().mockResolvedValue(workingTree),
+			getWorkspaceReviewFileDiff,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>(".review-file-header")!.click());
+		await flush();
+		const alert = container.querySelector(".review-diff-state.is-error");
+		expect(alert?.getAttribute("role")).toBe("alert");
+		expect(alert?.textContent).toContain("Unable to load diff");
+		await act(async () => button(container, "Retry").click());
+		await flush();
+		expect(getWorkspaceReviewFileDiff).toHaveBeenCalledTimes(2);
+		expect(container.querySelector(".review-diff-state.is-error")).toBeNull();
+		expect(container.querySelector('[data-testid="patch"]')?.textContent).toContain("README patch");
+		await act(async () => root.unmount());
+	});
+
+	it("reports supplemental context failure as status without replacing the diff", async () => {
+		const getWorkspaceReviewFileContext = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("context unavailable"))
+			.mockResolvedValueOnce({
+				kind: "text",
+				oldFile: { name: "README.md", contents: "old", cacheKey: "old" },
+				newFile: { name: "README.md", contents: "new", cacheKey: "new" },
+			});
+		const api = {
+			getWorkspaceReview: vi.fn().mockResolvedValue(workingTree),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "README patch" }),
+			getWorkspaceReviewFileContext,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		await act(async () => container.querySelector<HTMLButtonElement>(".review-file-header")!.click());
+		await flush();
+		await act(async () => button(container, "Expand unchanged").click());
+		await flush();
+		const status = container.querySelector(".review-context-error");
+		expect(status).toBeInstanceOf(HTMLOutputElement);
+		expect(status?.textContent).toContain("Unable to load unchanged context");
+		expect(container.querySelector('[data-testid="patch"]')?.textContent).toContain("README patch");
+		await act(async () => button(container, "Expand unchanged").click());
+		await flush();
+		expect(getWorkspaceReviewFileContext).toHaveBeenCalledTimes(2);
+		expect(container.querySelector(".review-context-error")).toBeNull();
 		await act(async () => root.unmount());
 	});
 });

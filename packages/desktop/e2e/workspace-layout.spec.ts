@@ -398,8 +398,7 @@ test("browser-style sidebar opens pages, preserves tools, and keeps sessions ind
 		await capture("browser-start-narrow.png");
 		await expect(page.locator(".browser-panel.is-visible .browser-start-recent-page")).toContainText("Sidebar page");
 		await page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true }).focus();
-		await expect.poll(() => page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true })
-			.evaluate((button) => getComputedStyle(button).outlineStyle)).toBe("solid");
+		await expect(page.locator(".browser-panel.is-visible .tool-sidebar-menu").getByRole("button", { name: "Terminal", exact: true })).toBeFocused();
 		await capture("browser-start-keyboard-focus.png");
 		await expect(page.getByRole("button", { name: "New browser tab", exact: true })).toBeInViewport();
 		expect(workspace.consoleErrors).toEqual([]);

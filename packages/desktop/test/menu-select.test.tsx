@@ -78,4 +78,70 @@ describe("MenuSelect", () => {
 		expect(document.activeElement).toBe(trigger);
 		expect(onChange).not.toHaveBeenCalled();
 	});
+
+	it("closes on Tab and Shift+Tab without preventing native focus traversal", async () => {
+		const onChange = vi.fn();
+		await act(async () =>
+			root.render(
+				<MenuSelect
+					ariaLabel="Models"
+					onChange={onChange}
+					options={Array.from({ length: 40 }, (_, i) => ({ value: String(i), label: `Model ${i}` }))}
+					value="0"
+				/>,
+			),
+		);
+		const trigger = container.querySelector<HTMLButtonElement>("button")!;
+		await act(async () => trigger.click());
+		expect(document.querySelectorAll('[role="option"]')).toHaveLength(40);
+		expect(
+			[...document.querySelectorAll('[role="option"]')].every((option) => option.getAttribute("tabindex") === "-1"),
+		).toBe(true);
+		const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+		await act(async () => document.activeElement!.dispatchEvent(tab));
+		expect(tab.defaultPrevented).toBe(false);
+		expect(document.querySelector('[role="listbox"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+		expect(onChange).not.toHaveBeenCalled();
+
+		await act(async () => trigger.click());
+		expect(document.activeElement?.textContent).toBe("Model 0");
+		const shiftTab = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+		await act(async () => document.activeElement!.dispatchEvent(shiftTab));
+		expect(shiftTab.defaultPrevented).toBe(false);
+		expect(document.querySelector('[role="listbox"]')).toBeNull();
+		expect(document.activeElement).toBe(trigger);
+	});
+
+	it("keeps the stable field name and describes the current value or placeholder", async () => {
+		await act(async () =>
+			root.render(
+				<MenuSelect
+					ariaLabel="Models"
+					onChange={vi.fn()}
+					options={[
+						{ value: "a", label: "Model A" },
+						{ value: "b", label: "Model B" },
+					]}
+					value="a"
+				/>,
+			),
+		);
+		const trigger = container.querySelector<HTMLButtonElement>("button")!;
+		expect(trigger.getAttribute("aria-label")).toBe("Models");
+		const descriptionId = trigger.getAttribute("aria-describedby");
+		expect(descriptionId).toBeTruthy();
+		expect(document.getElementById(descriptionId!)?.textContent).toBe("Model A");
+
+		await act(async () =>
+			root.render(
+				<MenuSelect ariaLabel="Models" onChange={vi.fn()} options={[]} placeholder="Choose model" value="" />,
+			),
+		);
+		const placeholderTrigger = container.querySelector<HTMLButtonElement>("button")!;
+		expect(placeholderTrigger.getAttribute("aria-label")).toBe("Models");
+		expect(document.getElementById(placeholderTrigger.getAttribute("aria-describedby")!)?.textContent).toBe(
+			"Choose model",
+		);
+	});
 });

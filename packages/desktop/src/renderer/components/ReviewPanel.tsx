@@ -268,7 +268,7 @@ function PatchBody({
 	if (!state || state.kind === "loading") return <p className="review-diff-state">{t("Loading diff…")}</p>;
 	if (state.kind === "error")
 		return (
-			<p className="review-diff-state is-error">
+			<p className="review-diff-state is-error" role="alert">
 				{t("Unable to load diff")}{" "}
 				<button onClick={onRetry} type="button">
 					{t("Retry")}
@@ -281,7 +281,7 @@ function PatchBody({
 		<>
 			<PatchDiff options={options} patch={state.value.patch} />
 			{contextError && (
-				<p className="review-context-error">
+				<output className="review-context-error">
 					{t(
 						contextError === "too-large"
 							? "Unchanged context is too large to display"
@@ -289,7 +289,7 @@ function PatchBody({
 								? "Binary context cannot be displayed"
 								: "Unable to load unchanged context",
 					)}
-				</p>
+				</output>
 			)}
 		</>
 	);
@@ -480,7 +480,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible }: ReviewP
 					{!visible ? null : !snapshot && loading ? (
 						<p className="review-empty">{t("Loading review…")}</p>
 					) : !snapshot && loadError ? (
-						<p className="review-empty is-error">
+						<p className="review-empty is-error" role="alert">
 							{t("Unable to load review")}{" "}
 							<button onClick={refresh} type="button">
 								{t("Retry")}

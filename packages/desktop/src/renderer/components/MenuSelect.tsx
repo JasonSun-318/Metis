@@ -119,6 +119,12 @@ export function MenuSelect<T extends string>({
 			className={`menu-select-popover ${popoverClassName}`.trim()}
 			id={id}
 			onKeyDown={(event) => {
+				if (event.key === "Tab") {
+					// Focus the trigger before unmounting so the browser's native Tab default continues from its DOM position.
+					trigger.current?.focus();
+					close();
+					return;
+				}
 				if (event.key === "Escape") {
 					event.preventDefault();
 					event.stopPropagation();
@@ -159,6 +165,7 @@ export function MenuSelect<T extends string>({
 							if (!active) onChange(option.value);
 						}}
 						role="option"
+						tabIndex={-1}
 						title={option.description}
 						type="button"
 					>
@@ -185,6 +192,7 @@ export function MenuSelect<T extends string>({
 		<div className={`menu-select ${className}`.trim()} ref={root}>
 			<button
 				aria-controls={open ? id : undefined}
+				aria-describedby={`${id}-value`}
 				aria-expanded={open}
 				aria-haspopup="listbox"
 				aria-label={ariaLabel}
@@ -202,7 +210,7 @@ export function MenuSelect<T extends string>({
 				type="button"
 			>
 				{triggerIcon}
-				<span className="menu-select-value">
+				<span className="menu-select-value" id={`${id}-value`}>
 					{prefix && <span className="menu-select-prefix">{prefix}</span>}
 					{selected?.label ?? t(placeholder)}
 				</span>

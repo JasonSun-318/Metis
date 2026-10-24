@@ -785,7 +785,7 @@ export function FilePanel({
 							<span>{t("Opening file…")}</span>
 						</div>
 					) : previewError ? (
-						<div className="file-empty-state is-error">
+						<div className="file-empty-state is-error" role="alert">
 							<File aria-hidden="true" size={27} />
 							<strong>{t("File could not be opened")}</strong>
 							<span>{previewError}</span>

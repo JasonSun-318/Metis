@@ -4,45 +4,66 @@
 	overscroll-behavior: contain;
 	scrollbar-color: var(--scrollbar-thumb) transparent;
 	scrollbar-width: thin;
+	scrollbar-gutter: stable both-edges;
 }
 
 .composer-panels:empty { display: none; }
 .workspace-body > .conversation-column:has(.composer-surface) { min-height: 0; }
 
-.composer-surface:has(> .composer-panels:not(:empty)) {
-	border: 1px solid var(--border-strong);
-	border-radius: var(--composer-radius);
-	background: var(--panel);
-	box-shadow: var(--shadow);
-	transition: border-color 160ms ease;
+/* Drawers sit behind the original composer, inset equally on both sides. */
+.composer-surface { position: relative; isolation: isolate; }
+.composer-surface > .composer { position: relative; z-index: 1; }
+.composer-surface > .composer-panels {
+	margin-inline: var(--space-16);
+	border-radius: 12px 12px 0 0;
+	overflow-x: hidden;
 }
-
-.composer-surface:has(> .composer-panels:not(:empty)):hover { border-color: var(--border-xstrong); }
-.composer-surface:has(> .composer-panels:not(:empty)):focus-within { border-color: var(--border-strong); }
-
-.composer-surface:has(> .composer-panels:not(:empty)) > .composer {
-	border: 0;
-	border-radius: 0 0 var(--composer-radius) var(--composer-radius);
-	box-shadow: none;
-}
-
-.composer-panels:not(:empty) {
-	border-bottom: 1px solid var(--border);
-	border-radius: calc(var(--composer-radius) - 1px) calc(var(--composer-radius) - 1px) 0 0;
-}
-
 .composer-surface > .composer-panels > * { margin: 0; }
-.composer-surface > .composer-panels > :not(.is-closing) { animation: composer-panel-enter 160ms ease; }
-.composer-surface > .composer-panels > .task-list-slot.is-closing { animation: composer-panel-exit 200ms ease forwards; }
-.composer-surface > .composer-panels > .ask-user-slot.is-submitting { transform: none; animation: none; }
+.composer-surface > .composer-panels > :not(.is-closing) { animation: composer-panel-enter 180ms cubic-bezier(.16, 1, .3, 1) both; }
+.composer-surface > .composer-panels > .is-closing { animation: composer-panel-exit 160ms ease forwards; pointer-events: none; }
+.composer-surface > .composer-panels > .task-list-slot.is-closing { animation-duration: 200ms; }
+.composer-surface > .composer-panels > .ask-user-slot.is-submitting { animation: composer-panel-exit 140ms ease forwards; pointer-events: none; }
 .composer-panels :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
-.composer-panels > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel) {
-	border: 0;
-	border-radius: 0;
+.composer-surface > .composer-panels > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel) {
+	border: 1px solid var(--border);
+	border-bottom: 0;
+	border-radius: 12px 12px 0 0;
 	box-shadow: none;
 }
+.composer-panels > * + * :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
+.composer-surface > .composer-panels > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel):not(:first-child) {
+	border-radius: 0;
+}
 
-.composer-surface > .composer-panels > * + * { border-top: 1px solid var(--border); }
+/* Shared action geometry; option rows and heading rows retain their own layouts. */
+.composer-panels .ask-user-actions button,
+.composer-panels .ask-user-resume button,
+.composer-panels .permission-approval-panel .permission-approval-body > footer button,
+.composer-panels .queued-turn-actions > :is(.queued-turn-send, .queued-turn-edit) {
+	min-height: var(--control-height-compact);
+	height: auto;
+	border-radius: var(--radius-control);
+	padding: 0 var(--space-12);
+	font-size: 12px;
+	line-height: 1.4;
+	font-weight: 500;
+}
+.composer-panels :is(.composer-panel-toggle, .goal-bar-action),
+.composer-panels .ask-user-actions .composer-panel-toggle,
+.composer-panels .session-status-panel > header button,
+.composer-panels .ask-user-header-actions button,
+.composer-panels .queued-turn-actions > button:not(.queued-turn-send, .queued-turn-edit) {
+	width: var(--control-icon-size);
+	min-width: var(--control-icon-size);
+	height: var(--control-icon-size);
+	min-height: var(--control-icon-size);
+	flex: none;
+	padding: 0;
+	border-radius: 6px;
+}
+.composer-panels .ask-user-actions { gap: var(--space-8); }
+.composer-panels .ask-user-actions > div { gap: var(--space-8); }
+.composer-panels .permission-approval-panel .permission-approval-body > footer { gap: var(--space-8); }
 
 .composer-panels > .queued-turn-list { max-height: none; overflow: visible; }
 .composer-panels .ask-user-panel { max-height: max(160px, min(var(--composer-panels-limit, 45vh), 360px)); }
@@ -95,6 +116,6 @@
 .composer.is-awaiting-interaction .composer-editable-input { max-height: 54px; opacity: .6; cursor: default; }
 
 :root[data-motion="reduced"] :is(.composer-panel-toggle, .queued-turn-heading) svg { transition: none; }
-:root[data-motion="reduced"] .composer-surface > .composer-panels > * { animation: none; }
-@keyframes composer-panel-enter { from { opacity: 0; } }
-@keyframes composer-panel-exit { to { grid-template-rows: 0fr; opacity: 0; } }
+:root[data-motion="reduced"] .composer-surface > .composer-panels > * { animation: none; transition: none; transform: none; }
+@keyframes composer-panel-enter { from { opacity: 0; transform: translateY(20px); clip-path: inset(100% 0 0); } to { opacity: 1; transform: translateY(0); clip-path: inset(0); } }
+@keyframes composer-panel-exit { from { opacity: 1; transform: translateY(0); clip-path: inset(0); } to { grid-template-rows: 0fr; opacity: 0; transform: translateY(20px); clip-path: inset(100% 0 0); } }

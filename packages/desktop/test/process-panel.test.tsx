@@ -161,6 +161,28 @@ describe("Process workspace tab", () => {
 		expect(container.textContent).toContain("This command produced no output.");
 	});
 
+	it("relocalizes the process panel name, status and copy control", async () => {
+		await render(command("one", "first\n", "completed"));
+		const panel = () => container.querySelector<HTMLElement>(".process-panel:not([hidden])");
+		expect(panel()?.getAttribute("aria-label")).toBe("Process");
+		expect(container.querySelector("output")?.textContent).toBe("Command completed");
+		expect(container.querySelector('button[aria-label="Copy output"]')).not.toBeNull();
+
+		await act(async () => {
+			await setLocale("zh-CN");
+		});
+		expect(panel()?.getAttribute("aria-label")).toBe("进程");
+		expect(container.querySelector("output")?.textContent).toBe("已完成");
+		expect(container.querySelector('button[aria-label="复制输出"]')).not.toBeNull();
+
+		await act(async () => {
+			await setLocale("en");
+		});
+		expect(panel()?.getAttribute("aria-label")).toBe("Process");
+		expect(container.querySelector("output")?.textContent).toBe("Command completed");
+		expect(container.querySelector('button[aria-label="Copy output"]')).not.toBeNull();
+	});
+
 	it("keeps session outputs separate and replaces a rolling output tail without duplicating it", async () => {
 		await render(command("one", "old text"));
 		await render({ ...command("one", "new tail"), truncated: true });

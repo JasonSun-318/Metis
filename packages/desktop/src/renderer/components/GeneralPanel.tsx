@@ -141,15 +141,23 @@ export function GeneralPanel({
 					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
-							<span>{t("Chat font")}</span>
-							<p>{t("Font used for Chat replies, greetings, and questions.")}</p>
+							<span>{t("Chat reply font")}</span>
+							<p>
+								{t(
+									"Font for Chat replies and questions. Your messages and interface controls use the system font.",
+								)}
+							</p>
 							{generalPreferences.chatFont === "anthropic-serif" ? (
-								<small>{t("Anthropic Serif falls back to the system serif for unsupported characters.")}</small>
+								<small>
+									{t(
+										"Anthropic Serif uses a locally installed font, with system serif fallback if unavailable or missing characters.",
+									)}
+								</small>
 							) : null}
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
-								ariaLabel={t("Chat font")}
+								ariaLabel={t("Chat reply font")}
 								className="general-font-select"
 								menuAlign="end"
 								onChange={(chatFont) => onGeneralPreferencesChange({ ...generalPreferences, chatFont })}
@@ -160,14 +168,23 @@ export function GeneralPanel({
 					</div>
 					<div className="general-setting-row">
 						<div className="general-setting-copy">
-							<span>{t("Code font")}</span>
+							<span>{t("Code reply font")}</span>
 							<p>
-								{t("Font used for Code replies, greetings, and questions. Code and tools remain monospaced.")}
+								{t(
+									"Font for Code replies and questions. Your messages use the system font; code and tools remain monospaced.",
+								)}
 							</p>
+							{generalPreferences.codeFont === "anthropic-serif" ? (
+								<small>
+									{t(
+										"Anthropic Serif uses a locally installed font, with system serif fallback if unavailable or missing characters.",
+									)}
+								</small>
+							) : null}
 						</div>
 						<div className="general-setting-control">
 							<MenuSelect<ProseFontPreference>
-								ariaLabel={t("Code font")}
+								ariaLabel={t("Code reply font")}
 								className="general-font-select"
 								menuAlign="end"
 								onChange={(codeFont) => onGeneralPreferencesChange({ ...generalPreferences, codeFont })}

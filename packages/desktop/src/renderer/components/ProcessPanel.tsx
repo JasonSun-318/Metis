@@ -84,7 +84,7 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 	}, [visible, process.processId]);
 
 	return (
-		<section aria-label="Process" className="process-panel" hidden={!visible} id={panelId} role="tabpanel">
+		<section aria-label={t("Process")} className="process-panel" hidden={!visible} id={panelId} role="tabpanel">
 			<div className="process-toolbar">
 				<output className={`process-state is-${process.state}`}>
 					<span aria-hidden="true" />

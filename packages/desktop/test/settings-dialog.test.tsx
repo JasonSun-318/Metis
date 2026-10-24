@@ -354,10 +354,10 @@ describe("SettingsDialog", () => {
 		expect(onThemeChange).toHaveBeenCalledWith("light");
 		await act(async () => button(container, "减少动效").click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, motion: "reduced" });
-		await act(async () => button(container, "Chat 字体").click());
+		await act(async () => button(container, "Chat 回复字体").click());
 		await act(async () => container.querySelector<HTMLButtonElement>('[role="option"]:last-of-type')!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, chatFont: "system-sans" });
-		await act(async () => button(container, "Code 字体").click());
+		await act(async () => button(container, "Code 回复字体").click());
 		await act(async () => container.querySelectorAll<HTMLButtonElement>('[role="option"]')[1]!.click());
 		expect(onGeneralPreferencesChange).toHaveBeenCalledWith({ ...generalPreferences, codeFont: "system-serif" });
 		const contentFontSize = button(container, "内容字号");

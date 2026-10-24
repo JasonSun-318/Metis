@@ -88,7 +88,6 @@ describe("AskUserPanel", () => {
 		expect(container.textContent).toContain("Which clients should be supported?");
 		act(() => option(container, "Desktop").click());
 		act(() => option(container, "Mobile").click());
-		act(() => button(container, "Something else").click());
 		const custom = container.querySelector<HTMLTextAreaElement>("textarea")!;
 		act(() => inputValue(custom, "Linux later\nAfter release"));
 		act(() => button(container, "Previous question").click());
@@ -169,7 +168,6 @@ describe("AskUserPanel", () => {
 	it("preserves custom text on failed submission and prevents duplicate requests", async () => {
 		const { container, onRespond } = mount({ ...interaction, questions: [interaction.questions[0]!] });
 		onRespond.mockRejectedValueOnce(new Error("Connection lost"));
-		act(() => button(container, "Something else").click());
 		act(() => inputValue(container.querySelector("textarea")!, "SQLite"));
 		const submit = button(container, "Confirm and continue");
 		await act(async () => {
@@ -185,6 +183,45 @@ describe("AskUserPanel", () => {
 			await new Promise((r) => setTimeout(r, 180));
 		});
 		expect(onRespond).toHaveBeenCalledTimes(2);
+	});
+
+	it("browses unanswered questions and returns to the first missing answer on confirmation", () => {
+		const { container, onRespond } = mount();
+		expect(button(container, "Previous question").disabled).toBe(true);
+		act(() => button(container, "Next question").click());
+		expect(button(container, "Next question").disabled).toBe(true);
+		act(() => option(container, "Desktop").click());
+		act(() => button(container, "Confirm and continue").click());
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Answer question 1 before submitting.");
+		expect(container.querySelector("h2")?.textContent).toBe(interaction.questions[0].question);
+		expect(onRespond).not.toHaveBeenCalled();
+		act(() => inputValue(container.querySelector("textarea")!, "Use SQLite"));
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+		act(() => button(container, "Next question").click());
+		expect(option(container, "Desktop").getAttribute("aria-checked")).toBe("true");
+		act(() => button(container, "Previous question").click());
+		expect(container.querySelector("textarea")?.value).toBe("Use SQLite");
+		expect(onRespond).not.toHaveBeenCalled();
+	});
+
+	it("offers custom input immediately, preserves single-choice semantics and reconnect drafts", () => {
+		const cache = new Map<string, AskUserDraft>();
+		const { container, root, onRespond } = mount(interaction, cache);
+		act(() => option(container, "Cloud sync").click());
+		act(() => inputValue(container.querySelector("textarea")!, "本地 SQLite"));
+		expect(option(container, "Cloud sync").getAttribute("aria-checked")).toBe("false");
+		act(() =>
+			root.render(<AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={cache} disabled />),
+		);
+		expect(container.querySelector("textarea")?.value).toBe("本地 SQLite");
+		expect(button(container, "Next question").disabled).toBe(true);
+		expect(container.querySelector("textarea")?.disabled).toBe(true);
+		act(() => button(container, "Skip all questions").click());
+		expect(onRespond).not.toHaveBeenCalled();
+		act(() => root.render(<AskUserPanel interaction={interaction} onRespond={onRespond} draftCache={cache} />));
+		act(() => option(container, "Local database").click());
+		expect(container.querySelector("textarea")?.value).toBe("");
+		expect(option(container, "Local database").getAttribute("aria-checked")).toBe("true");
 	});
 });
 

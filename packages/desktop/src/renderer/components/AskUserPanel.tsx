@@ -1,5 +1,13 @@
 import type { InteractionResponseInput, InteractionView } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretLeft, ChatCircleDots, Check, PencilSimple } from "@phosphor-icons/react";
+import {
+	ArrowRight,
+	CaretDown,
+	CaretLeft,
+	CaretRight,
+	ChatCircleDots,
+	Check,
+	PencilSimple,
+} from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,7 +20,6 @@ export interface AskUserDraft {
 	readonly sessionId: string;
 	readonly questionIndex: number;
 	readonly answers: readonly AnswerDraft[];
-	readonly customQuestionId?: string;
 	readonly collapsed: boolean;
 }
 interface AskUserPanelProps {
@@ -43,11 +50,9 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 	const panel = useRef<HTMLElement>(null);
 	const heading = useRef<HTMLHeadingElement>(null);
 	const resume = useRef<HTMLButtonElement>(null);
-	const customInput = useRef<HTMLTextAreaElement>(null);
 	const question = interaction.questions[draft.questionIndex]!;
 	const answer = draft.answers[draft.questionIndex]!;
 	const titleId = `ask-user-title-${interaction.interactionId}`;
-	const customOpen = draft.customQuestionId === question.id || answer.customAnswer.length > 0;
 	const finalQuestion = draft.questionIndex === interaction.questions.length - 1;
 	const unavailable = busy || disabled;
 
@@ -55,10 +60,10 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 		draftCache?.set(interaction.interactionId, next);
 		setDraft(next);
 	};
-	const updateAnswer = (next: AnswerDraft, customQuestionId: string | null | undefined = draft.customQuestionId) => {
+	const updateAnswer = (next: AnswerDraft) => {
+		setError(undefined);
 		update({
 			...draft,
-			customQuestionId: customQuestionId ?? undefined,
 			answers: draft.answers.map((value, index) => (index === draft.questionIndex ? next : value)),
 		});
 	};
@@ -85,7 +90,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 	const choose = (choiceId: string) => {
 		if (unavailable) return;
 		if (!question.multiple) {
-			updateAnswer({ choiceIds: [choiceId], customAnswer: "" }, null);
+			updateAnswer({ choiceIds: [choiceId], customAnswer: "" });
 			return;
 		}
 		updateAnswer({
@@ -96,7 +101,13 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 		});
 	};
 	const respond = async (cancelled: boolean) => {
-		if (busyRef.current || disabled || (!cancelled && !draft.answers.every(hasAnswer))) return;
+		if (busyRef.current || disabled) return;
+		const missing = draft.answers.findIndex((candidate) => !hasAnswer(candidate));
+		if (!cancelled && missing >= 0) {
+			setError(t("Answer question {{number}} before submitting.", { number: missing + 1 }));
+			update({ ...draft, questionIndex: missing });
+			return;
+		}
 		busyRef.current = true;
 		setBusy(true);
 		setError(undefined);
@@ -126,10 +137,15 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 			setBusy(false);
 		}
 	};
+	const navigate = (questionIndex: number) => {
+		if (unavailable || questionIndex < 0 || questionIndex >= interaction.questions.length) return;
+		setError(undefined);
+		update({ ...draft, questionIndex });
+	};
 	const continueCurrent = () => {
-		if (unavailable || !hasAnswer(answer)) return;
+		if (unavailable) return;
 		if (finalQuestion) void respond(false);
-		else update({ ...draft, questionIndex: draft.questionIndex + 1 });
+		else if (hasAnswer(answer)) navigate(draft.questionIndex + 1);
 	};
 	const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
 		if (event.nativeEvent.isComposing || event.keyCode === 229 || unavailable) return;
@@ -198,6 +214,14 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 							{question.question}
 						</h2>
 						<div className="ask-user-header-actions">
+							<button
+								aria-label={t("Previous question")}
+								disabled={unavailable || draft.questionIndex === 0}
+								onClick={() => navigate(draft.questionIndex - 1)}
+								type="button"
+							>
+								<CaretLeft aria-hidden="true" size={16} />
+							</button>
 							<small>
 								<span className="sr-only">
 									{t("{{current}} of {{total}}", {
@@ -210,12 +234,12 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 								</span>
 							</small>
 							<button
-								aria-label={t("Collapse questions")}
-								disabled={busy}
-								onClick={() => update({ ...draft, collapsed: true })}
+								aria-label={t("Next question")}
+								disabled={unavailable || finalQuestion}
+								onClick={() => navigate(draft.questionIndex + 1)}
 								type="button"
 							>
-								<CaretDown aria-hidden="true" size={16} />
+								<CaretRight aria-hidden="true" size={16} />
 							</button>
 						</div>
 					</header>
@@ -255,8 +279,12 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 							);
 						})}
 					</div>
-					{customOpen && (
-						<div className="ask-user-custom">
+					<div className={`ask-user-custom${answer.customAnswer.trim() ? " is-selected" : ""}`}>
+						<span className="ask-user-option-number" aria-hidden="true">
+							<PencilSimple size={14} />
+						</span>
+						<label className="ask-user-option-copy">
+							<strong>{t("Something else")}</strong>
 							<textarea
 								aria-label={t("Something else")}
 								disabled={unavailable}
@@ -268,12 +296,11 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 									})
 								}
 								placeholder={t("Type your own answer…")}
-								ref={customInput}
-								rows={2}
+								rows={1}
 								value={answer.customAnswer}
 							/>
-						</div>
-					)}
+						</label>
+					</div>
 					{disabled && <output className="status-paragraph">{t("Reconnecting. Your answers are kept.")}</output>}
 					{error && (
 						<p className="error-copy ask-user-error" role="alert">
@@ -284,21 +311,16 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 				<footer className="ask-user-actions">
 					<div>
 						<button
-							aria-expanded={customOpen}
-							className="ask-user-custom-trigger"
-							disabled={unavailable}
-							onClick={() => {
-								updateAnswer(
-									question.multiple ? answer : { choiceIds: [], customAnswer: answer.customAnswer },
-									question.id,
-								);
-								queueMicrotask(() => customInput.current?.focus());
-							}}
+							aria-label={t("Collapse questions")}
+							className="composer-panel-toggle"
+							disabled={busy}
+							onClick={() => update({ ...draft, collapsed: true })}
 							type="button"
 						>
-							<PencilSimple aria-hidden="true" size={14} />
-							{t("Something else")}
+							<CaretDown aria-hidden="true" size={16} />
 						</button>
+					</div>
+					<div>
 						<button
 							aria-label={t("Skip all questions")}
 							className="ask-user-skip"
@@ -308,23 +330,9 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 						>
 							{t("Skip all")}
 						</button>
-					</div>
-					<div>
-						{draft.questionIndex > 0 && (
-							<button
-								aria-label={t("Previous question")}
-								className="button-secondary"
-								disabled={unavailable}
-								onClick={() => update({ ...draft, questionIndex: draft.questionIndex - 1 })}
-								type="button"
-							>
-								<CaretLeft aria-hidden="true" size={15} />
-								{t("Back")}
-							</button>
-						)}
 						<button
 							className="ask-user-step"
-							disabled={!hasAnswer(answer) || unavailable}
+							disabled={(!finalQuestion && !hasAnswer(answer)) || unavailable}
 							onClick={continueCurrent}
 							type="button"
 						>

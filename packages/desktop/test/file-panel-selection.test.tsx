@@ -107,7 +107,9 @@ it("retries a failed same-path preview and loads the file without translating th
 	try {
 		await act(async () => root.render(<FilePanel {...props} />));
 		await flush();
-		expect(node.querySelector(".file-empty-state.is-error")?.textContent).toContain("EACCES: raw backend detail");
+		const failure = node.querySelector(".file-empty-state.is-error");
+		expect(failure?.getAttribute("role")).toBe("alert");
+		expect(failure?.textContent).toContain("EACCES: raw backend detail");
 		await act(async () => retryButton(node).click());
 		await flush();
 		expect(readWorkspaceFile).toHaveBeenCalledTimes(2);

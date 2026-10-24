@@ -2,6 +2,7 @@ import type { InteractionResponseInput, ItemView, SessionSnapshot } from "@metis
 import { createRef } from "react";
 import { createRoot } from "react-dom/client";
 import { SessionChatView, type SessionChatViewProps } from "../src/renderer/components/SessionChatView.tsx";
+import { applyGeneralPreferencesToDocument, DEFAULT_GENERAL_PREFERENCES } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { MetisDesktopApi } from "../src/shared/desktop-api.ts";
@@ -15,6 +16,16 @@ import {
 const params = new URLSearchParams(location.search);
 document.documentElement.dataset.theme = params.get("theme") === "light" ? "light" : "dark";
 document.documentElement.dataset.motion = params.has("reduced") ? "reduced" : "full";
+if (params.has("typography"))
+	applyGeneralPreferencesToDocument(
+		{
+			...DEFAULT_GENERAL_PREFERENCES,
+			chatFont: params.get("font") === "serif" ? "anthropic-serif" : "system-sans",
+			codeFont: params.get("font") === "serif" ? "anthropic-serif" : "system-sans",
+			contentFontSize: params.get("size") === "13" ? "13px" : params.get("size") === "20" ? "20px" : "15px",
+		},
+		{ matches: params.has("reduced") },
+	);
 const store = new AppStore();
 store.setSupervisor({ state: "ready", serverEpoch: COMPOSER_EPOCH, restartAttempt: 0, failure: null });
 let current = composerSnapshot();
@@ -43,6 +54,33 @@ const history: ItemView[] = [
 	},
 ];
 current = { ...current, recentItems: history };
+if (params.has("typography")) {
+	const sample = "检查中文与 English 字号。Keep the conversation readable and preserve every existing feature.";
+	current = {
+		...current,
+		tasks: [],
+		goal: null,
+		queuedTurns: [],
+		recentItems: [
+			{
+				itemId: "user-sample",
+				sessionId: COMPOSER_SESSION_ID,
+				role: "user",
+				state: "completed",
+				createdAt: "2026-10-17T00:00:00.000Z",
+				content: [{ type: "text", text: sample }],
+			},
+			{
+				itemId: "assistant-sample",
+				sessionId: COMPOSER_SESSION_ID,
+				role: "assistant",
+				state: "completed",
+				createdAt: "2026-10-17T00:00:01.000Z",
+				content: [{ type: "text", text: `${sample}\n\n\`const value = 1;\`` }],
+			},
+		],
+	};
+}
 if (params.has("many")) {
 	current = {
 		...current,
@@ -64,6 +102,29 @@ function update(overrides: Partial<SessionSnapshot>) {
 
 function request(kind: "ask_user" | "session_permission_approval") {
 	let interaction = composerInteraction(kind);
+	if (params.has("multi") && interaction.kind === "ask_user") {
+		interaction = {
+			...interaction,
+			questions: [
+				interaction.questions[0]!,
+				{
+					id: "clients",
+					question: "Which clients should be supported?",
+					multiple: true,
+					choices: [
+						{ id: "desktop", label: "Desktop" },
+						{ id: "web", label: "Web" },
+					],
+				},
+				{
+					id: "notes",
+					question: "Any additional requirements?",
+					multiple: false,
+					choices: [{ id: "none", label: "None" }],
+				},
+			],
+		};
+	}
 	if (params.has("many") && interaction.kind === "ask_user") {
 		interaction = {
 			...interaction,
@@ -84,7 +145,18 @@ function request(kind: "ask_user" | "session_permission_approval") {
 }
 
 const calls = { queued: 0, sent: 0, deleted: 0, responded: 0, openedPlan: 0 };
+const responses: InteractionResponseInput[] = [];
 const api = {
+	getSessionStatus: async () => ({
+		sessionId: COMPOSER_SESSION_ID,
+		mode: current.session.mode,
+		contextTokens: 3200,
+		contextWindow: 128000,
+		contextBasis: "reported_total",
+		contextBreakdown: [{ category: "conversation", tokens: 3200 }],
+		remainingPercent: 97.5,
+		cacheHitPercent: 25,
+	}),
 	queueTurn: async () => {
 		calls.queued += 1;
 		return {};
@@ -141,15 +213,16 @@ const props: SessionChatViewProps = {
 	onPickFiles: async () => [],
 	onPreviewDeliveredFile: noOp,
 	onResolveDroppedFiles: () => [],
-	onRespond: async (_response: InteractionResponseInput) => {
+	onRespond: async (response: InteractionResponseInput) => {
 		calls.responded += 1;
+		responses.push(response);
 		update({ pendingInteractions: [] });
 	},
 	reducedMotion: params.has("reduced"),
 	skillCatalogEpoch: 0,
 };
 
-Object.assign(window, { composerFixtureCalls: calls });
+Object.assign(window, { composerFixtureCalls: calls, composerFixtureResponses: responses });
 function Fixture() {
 	return (
 		<main className="fixture-root">

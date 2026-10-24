@@ -4,6 +4,7 @@ import { app, type BrowserWindow, type IpcMain, type IpcMainInvokeEvent, nativeT
 import { DESKTOP_THEME_CHANNEL, type DesktopThemePreference } from "../shared/desktop-api.ts";
 
 const THEME_FILE_NAME = "theme.json";
+let nativeThemeListenerRegistered = false;
 
 export const DARK_WINDOW_BACKGROUND = "#1f201e";
 export const LIGHT_WINDOW_BACKGROUND = "#faf9f6";
@@ -63,12 +64,16 @@ export function storeTheme(theme: DesktopThemePreference): void {
 	}
 }
 
-/** Apply the preference to native chrome (macOS titlebar, scrollbars) and the window background. */
-export function applyThemeToWindow(window: BrowserWindow, theme: DesktopThemePreference): void {
-	nativeTheme.themeSource = theme;
+function applyThemeColorsToWindow(window: BrowserWindow, theme: DesktopThemePreference): void {
 	if (window.isDestroyed()) return;
 	window.setBackgroundColor(windowBackgroundFor(theme));
 	if (process.platform === "win32") window.setTitleBarOverlay(windowsTitleBarOverlayFor(theme));
+}
+
+/** Apply the preference to native chrome (macOS titlebar, scrollbars) and the window background. */
+export function applyThemeToWindow(window: BrowserWindow, theme: DesktopThemePreference): void {
+	nativeTheme.themeSource = theme;
+	applyThemeColorsToWindow(window, theme);
 }
 
 /**
@@ -88,4 +93,15 @@ export function registerThemeHandlers(
 		const window = getMainWindow();
 		if (window) applyThemeToWindow(window, value);
 	});
+	if (nativeThemeListenerRegistered) return;
+	// Renderer media queries update the document theme, but native chrome and the
+	// window background only change when main reapplies the current system colors.
+	// Use the effective preference rather than the best-effort persisted file, and
+	// do not write themeSource here: that would re-enter this listener.
+	nativeTheme.on("updated", () => {
+		if (nativeTheme.themeSource !== "system") return;
+		const window = getMainWindow();
+		if (window) applyThemeColorsToWindow(window, "system");
+	});
+	nativeThemeListenerRegistered = true;
 }
