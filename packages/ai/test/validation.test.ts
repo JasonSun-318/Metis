@@ -181,4 +181,95 @@ describe("validateToolArguments", () => {
 			expect(() => validateToolArguments(tool, toolCall)).toThrow("Validation failed");
 		}
 	});
+	it.each([false, true])("reports only the matching action's validation errors (serialized: %s)", (serialized) => {
+		const parameters = Type.Object({
+			action: Type.Union([
+				Type.Object(
+					{ type: Type.Literal("click"), target: Type.Object({ elementId: Type.String() }) },
+					{ additionalProperties: false },
+				),
+				Type.Object({ type: Type.Literal("press"), key: Type.String() }),
+				Type.Object({ type: Type.Literal("type"), text: Type.String() }),
+			]),
+		});
+		const tool = {
+			name: "action",
+			description: "",
+			parameters: serialized ? JSON.parse(JSON.stringify(parameters)) : parameters,
+		};
+		const call: ToolCall = {
+			type: "toolCall",
+			id: "invalid",
+			name: "action",
+			arguments: { action: { type: "click" } },
+		};
+		let message = "";
+		try {
+			validateToolArguments(tool, call);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).toContain("action.target");
+		expect(message).not.toContain("action.key");
+		expect(message).not.toContain("action.text");
+		expect(message).not.toContain("must be equal to constant");
+	});
+	it("keeps same-tag alternatives strict and identifies conflicting fields", () => {
+		const tool = {
+			name: "action",
+			description: "",
+			parameters: Type.Object({
+				action: Type.Union([
+					Type.Object({ type: Type.Literal("click"), elementId: Type.String() }, { additionalProperties: false }),
+					Type.Object(
+						{ type: Type.Literal("click"), target: Type.Object({ elementId: Type.String() }) },
+						{ additionalProperties: false },
+					),
+					Type.Object({ type: Type.Literal("press"), key: Type.String() }),
+				]),
+			}),
+		};
+		const call: ToolCall = {
+			type: "toolCall",
+			id: "conflict",
+			name: "action",
+			arguments: { action: { type: "click", elementId: "e1", target: { elementId: "e2" } } },
+		};
+		let message = "";
+		try {
+			validateToolArguments(tool, call);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message).toContain("action.target: must not have additional properties");
+		expect(message).toContain("action.elementId: must not have additional properties");
+		expect(message).not.toContain("action.key");
+		expect(call.arguments.action).toEqual({ type: "click", elementId: "e1", target: { elementId: "e2" } });
+	});
+
+	it("retains diagnostics for unknown discriminators and non-discriminated unions", () => {
+		const tool = {
+			name: "unknown",
+			description: "",
+			parameters: Type.Object({
+				action: Type.Union([
+					Type.Object({ type: Type.Literal("click"), target: Type.String() }),
+					Type.Object({ type: Type.Literal("press"), key: Type.String() }),
+				]),
+			}),
+		};
+		const call: ToolCall = {
+			type: "toolCall",
+			id: "unknown",
+			name: "unknown",
+			arguments: { action: { type: "unknown" } },
+		};
+		expect(() => validateToolArguments(tool, call)).toThrow("action.type");
+		expect(() =>
+			validateToolArguments(
+				{ ...tool, parameters: Type.Object({ action: Type.Union([Type.String(), Type.Number()]) }) },
+				call,
+			),
+		).toThrow("action");
+	});
 });

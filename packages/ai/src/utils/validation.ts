@@ -7,6 +7,7 @@ const validatorCache = new WeakMap<object, ReturnType<typeof Compile>>();
 const TYPEBOX_KIND = Symbol.for("TypeBox.Kind");
 
 interface JsonSchemaObject {
+	const?: unknown;
 	type?: string | string[];
 	properties?: Record<string, JsonSchemaObject>;
 	items?: JsonSchemaObject | JsonSchemaObject[];
@@ -266,13 +267,44 @@ function getValidator(schema: Tool["parameters"]): ReturnType<typeof Compile> {
 	return validator;
 }
 
+/** Narrow diagnostics only; the original complete schema remains the validation authority. */
+function diagnosticSchema(schema: JsonSchemaObject, value: unknown): JsonSchemaObject {
+	if (!value || typeof value !== "object") return schema;
+	const data = value as Record<string, unknown>;
+	let result = schema;
+	for (const keyword of ["anyOf", "oneOf"] as const) {
+		const variants = schema[keyword];
+		if (!variants?.length) continue;
+		// A discriminator must exist as a literal in every branch. Unknown tags keep
+		// all diagnostics; same-tag variants (e.g. value vs index) remain strict.
+		const keys = Object.keys(variants[0]?.properties ?? {}).filter(
+			(key) =>
+				Object.hasOwn(data, key) &&
+				variants.every((variant) => variant.properties?.[key] && Object.hasOwn(variant.properties[key], "const")),
+		);
+		const matching = variants.filter((variant) => keys.every((key) => variant.properties![key]!.const === data[key]));
+		if (keys.length && matching.length && matching.length < variants.length) {
+			result = { ...result, [keyword]: matching.map((variant) => diagnosticSchema(variant, value)) };
+		}
+	}
+	if (schema.properties) {
+		result = {
+			...result,
+			properties: Object.fromEntries(
+				Object.entries(schema.properties).map(([key, child]) => [key, diagnosticSchema(child, data[key])]),
+			),
+		};
+	}
+	return result;
+}
+
 function formatValidationPath(error: TLocalizedValidationError): string {
-	if (error.keyword === "required") {
-		const requiredProperties = (error.params as { requiredProperties?: string[] }).requiredProperties;
-		const requiredProperty = requiredProperties?.[0];
-		if (requiredProperty) {
+	if (error.keyword === "required" || error.keyword === "additionalProperties") {
+		const params = error.params as { requiredProperties?: string[]; additionalProperties?: string[] };
+		const property = (error.keyword === "required" ? params.requiredProperties : params.additionalProperties)?.[0];
+		if (property) {
 			const basePath = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
-			return basePath ? `${basePath}.${requiredProperty}` : requiredProperty;
+			return basePath ? `${basePath}.${property}` : property;
 		}
 	}
 	const path = error.instancePath.replace(/^\//, "").replace(/\//g, ".");
@@ -324,7 +356,10 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 		return args;
 	}
 
-	const errorLines = validator.Errors(args).map((error) => `  - ${formatValidationPath(error)}: ${error.message}`);
+	const diagnostics = diagnosticSchema(tool.parameters as JsonSchemaObject, args);
+	const errorLines = getValidator(diagnostics as Tool["parameters"])
+		.Errors(args)
+		.map((error) => `  - ${formatValidationPath(error)}: ${error.message}`);
 	const errors = [...new Set(errorLines)].join("\n") || "Unknown validation error";
 
 	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`;
