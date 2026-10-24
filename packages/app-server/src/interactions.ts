@@ -9,6 +9,7 @@ import {
 	findBrowserStateElement,
 	type InteractionResponseInput,
 	type InteractionView,
+	MAX_BROWSER_STATE_UTF8_BYTES,
 	MAX_INTERACTION_CHOICES,
 	MAX_NAME_UTF16_UNITS,
 	MAX_PERMISSION_OPERATION_ROWS,
@@ -30,7 +31,9 @@ import {
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
 } from "@metis/coding-agent/host";
+import type { AgentHostIdentity } from "./agent-host-tools.ts";
 import { BrowserPermissionDecisionUnavailableError, BrowserPermissionDeniedError } from "./browser-permission-audit.ts";
+import { opaqueId } from "./item-projection.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const ASK_USER_TIMEOUT_MS = 15 * 60_000;
@@ -65,6 +68,14 @@ type BrowserStaleReason = Extract<
 	Extract<BrowserToolResult, { tool: "browser_act" }>["details"],
 	{ status: "stale" }
 >["reason"];
+
+function actorFields(sessionId: string, actor?: AgentHostIdentity): Partial<AgentHostIdentity> {
+	if (!actor) return {};
+	if (actor.rootSessionId !== sessionId || (actor.agentId && actor.actorSessionId !== actor.agentId)) {
+		throw new Error("Host interaction actor does not belong to this session");
+	}
+	return { ...actor };
+}
 
 function choiceId(index: number): string {
 	return `choice:${index}`;
@@ -114,9 +125,12 @@ function preflightBrowserAction(
 		return { staleReason: "origin_changed", target: input.action.type };
 	if (observation.revision !== input.snapshotRevision)
 		return { staleReason: "revision_changed", target: input.action.type };
-	const targets = browserActionElementIds(input.action).map((elementId) =>
-		findBrowserStateElement(observation.state, elementId),
-	);
+	// A very long node label can span pages. Do not approve from an incomplete
+	// line; the continuation must supply its full accessible target first.
+	const state = observation.statePage?.nextCursor
+		? observation.state.slice(0, observation.state.lastIndexOf("\n") + 1)
+		: observation.state;
+	const targets = browserActionElementIds(input.action).map((elementId) => findBrowserStateElement(state, elementId));
 	if (targets.some((target) => !target)) return { staleReason: "element_missing", target: input.action.type };
 	const target = targets.find((candidate) => candidate?.label ?? candidate?.role);
 	return { target: target?.label ?? target?.role ?? input.action.type };
@@ -272,7 +286,9 @@ export class InteractionBroker {
 		toolCallId: string,
 		call: BrowserToolCall,
 		signal: AbortSignal,
+		actor?: AgentHostIdentity,
 	): Promise<BrowserToolResult> {
+		actorFields(sessionId, actor);
 		const peer = this.owners.get(sessionId);
 		if (!peer) {
 			throw new BrowserPermissionDecisionUnavailableError(
@@ -286,17 +302,63 @@ export class InteractionBroker {
 					tool: "browser_observe",
 					input: { browserId: call.input.browserId },
 				} satisfies BrowserToolCall;
-				const preflight = await this.dispatchBrowserTool(peer, sessionId, this.createId(), preflightCall, signal);
+				let preflight = await this.dispatchBrowserTool(
+					peer,
+					sessionId,
+					this.createId(),
+					preflightCall,
+					signal,
+					actor,
+				);
 				if (preflight.tool !== "browser_observe")
 					throw new Error("Browser preflight returned the wrong tool result");
-				const { staleReason, target } = preflightBrowserAction(call.input, preflight.observation);
+				let state = preflight.observation.state;
+				let checked = preflightBrowserAction(call.input, preflight.observation);
+				while (checked.staleReason === "element_missing" && preflight.observation.statePage?.nextCursor) {
+					const cursor = preflight.observation.statePage.nextCursor;
+					const next = await this.dispatchBrowserTool(
+						peer,
+						sessionId,
+						this.createId(),
+						{
+							tool: "browser_observe",
+							input: { browserId: call.input.browserId, cursor },
+						},
+						signal,
+						actor,
+					);
+					if (next.tool !== "browser_observe") throw new Error("Browser preflight returned the wrong tool result");
+					preflight = next;
+					if (next.observation.documentId !== cursor.documentId || next.observation.revision !== cursor.revision) {
+						checked = preflightBrowserAction(call.input, next.observation);
+						break;
+					}
+					if (
+						next.observation.cursorReset ||
+						next.observation.statePage?.offset !== state.length ||
+						!next.observation.state
+					) {
+						throw new Error("Browser preflight returned an invalid continuation");
+					}
+					state += next.observation.state;
+					if (Buffer.byteLength(state, "utf8") > MAX_BROWSER_STATE_UTF8_BYTES)
+						throw new Error("Browser preflight exceeded the snapshot limit");
+					checked = preflightBrowserAction(call.input, { ...next.observation, state });
+				}
+				const { staleReason, target } = checked;
 				if (staleReason) {
 					return {
 						tool: "browser_act",
 						details: { status: "stale", reason: staleReason, observation: preflight.observation },
 					};
 				}
-				const confirmation = await this.requestBrowserActionConfirmation(sessionId, call.input, target, signal);
+				const confirmation = await this.requestBrowserActionConfirmation(
+					sessionId,
+					call.input,
+					target,
+					signal,
+					actor,
+				);
 				if (confirmation === "deny") {
 					throw new BrowserPermissionDeniedError("The user rejected this browser action");
 				}
@@ -309,6 +371,7 @@ export class InteractionBroker {
 					);
 				}
 			} catch (error) {
+				if (error instanceof Error && "code" in error && error.code === "PAGE_IN_USE") throw error;
 				if (
 					error instanceof BrowserPermissionDeniedError ||
 					error instanceof BrowserPermissionDecisionUnavailableError
@@ -321,7 +384,7 @@ export class InteractionBroker {
 				);
 			}
 		}
-		return this.dispatchBrowserTool(peer, sessionId, toolCallId, call, signal);
+		return this.dispatchBrowserTool(peer, sessionId, toolCallId, call, signal, actor);
 	}
 
 	private async dispatchBrowserTool(
@@ -330,6 +393,7 @@ export class InteractionBroker {
 		toolCallId: string,
 		call: BrowserToolCall,
 		signal: AbortSignal,
+		actor?: AgentHostIdentity,
 	): Promise<BrowserToolResult> {
 		// Provider call IDs can be compound or oversized; only the local RPC needs an opaque ID.
 		const wireToolCallId = opaqueIdValidator.Check(toolCallId)
@@ -339,7 +403,13 @@ export class InteractionBroker {
 			jsonrpc: "2.0",
 			id: this.createId(),
 			method: "browser/tool",
-			params: { serverEpoch: this.serverEpoch, sessionId, toolCallId: wireToolCallId, call },
+			params: {
+				serverEpoch: this.serverEpoch,
+				sessionId,
+				...actorFields(sessionId, actor),
+				toolCallId: wireToolCallId,
+				call,
+			},
 		}) as ServerRpcRequest<"browser/tool">;
 		const result = (await peer.request(request, signal)) as ServerResult<"browser/tool">;
 		validateResponseFor("server", request, { jsonrpc: "2.0", id: request.id, result });
@@ -351,6 +421,7 @@ export class InteractionBroker {
 		input: BrowserActInput,
 		target: string,
 		signal: AbortSignal,
+		actor?: AgentHostIdentity,
 	): Promise<BrowserActionConfirmation> {
 		const interactionId = this.createId();
 		const outcome = await this.requestOutcome(
@@ -358,6 +429,7 @@ export class InteractionBroker {
 			{
 				interactionId,
 				sessionId,
+				...actorFields(sessionId, actor),
 				title: "Allow browser action?",
 				message: boundedPublicText(
 					`Site: ${input.origin}\nRisk: ${input.risk}\nIntent: ${input.intent}\nTarget: ${target}`,
@@ -403,10 +475,25 @@ export class InteractionBroker {
 	async requestPermissionApproval(
 		sessionId: string,
 		approval: PermissionApprovalRequest,
+		actor?: AgentHostIdentity,
 	): Promise<PermissionApprovalDecision> {
+		const identity =
+			actor ??
+			(approval.actor
+				? {
+						rootSessionId: sessionId,
+						actorSessionId: approval.actor.id,
+						agentId: approval.actor.id,
+						taskId: approval.actor.taskId,
+					}
+				: undefined);
+		const fields = actorFields(sessionId, identity);
+		if (actor && approval.actor && (actor.agentId !== approval.actor.id || actor.taskId !== approval.actor.taskId)) {
+			throw new Error("Permission approval actor changed");
+		}
 		const operation = permissionOperation(approval);
 		const actionId = approval.action.actionId;
-		const actionKey = `${sessionId}\0${actionId}`;
+		const actionKey = `${sessionId}\0${identity?.actorSessionId ?? sessionId}\0${identity?.taskId ?? ""}\0${actionId}`;
 		if (this.pendingByAction.has(actionKey)) throw new Error("Approval was unavailable or cancelled");
 		const interactionId = this.createId();
 		this.pendingByAction.set(actionKey, interactionId);
@@ -420,13 +507,14 @@ export class InteractionBroker {
 				{
 					interactionId,
 					sessionId,
+					...fields,
 					title: boundedName(`Approve ${approval.action.toolName}?`, "Approve tool?"),
 					message: boundedPublicText(approval.reason || "This action needs approval."),
 					createdAt: new Date(this.now()).toISOString(),
 					expiresAt: deadline(this.now(), this.defaultTimeoutMs),
 					kind: "session_permission_approval",
 					requestId: interactionId,
-					actionId,
+					actionId: opaqueId(actionId, "tool"),
 					toolLabel: boundedName(approval.action.toolName, "tool"),
 					riskLevel: approvalRiskLevel(approval),
 					executionTarget: approvalExecutionTarget(approval),
@@ -460,13 +548,18 @@ export class InteractionBroker {
 		}
 	}
 
-	async requestUserInput(sessionId: string, input: AskUserRequest): Promise<AskUserResponse> {
+	async requestUserInput(
+		sessionId: string,
+		input: AskUserRequest,
+		actor?: AgentHostIdentity,
+	): Promise<AskUserResponse> {
 		const interactionId = this.createId();
 		const response = await this.request(
 			sessionId,
 			{
 				interactionId,
 				sessionId,
+				...actorFields(sessionId, actor),
 				title: "Metis has questions",
 				message: "Answer each question to continue.",
 				createdAt: new Date(this.now()).toISOString(),
@@ -499,7 +592,11 @@ export class InteractionBroker {
 		};
 	}
 
-	createExtensionUIContext(sessionId: string, publish: (event: NotificationEvent) => void): ExtensionUIContext {
+	createExtensionUIContext(
+		sessionId: string,
+		publish: (event: NotificationEvent) => void,
+		actor?: () => AgentHostIdentity,
+	): ExtensionUIContext {
 		return createDialogExtensionUIContext({
 			select: async (title, options, dialogOptions) => {
 				if (options.length === 0) return undefined;
@@ -508,6 +605,7 @@ export class InteractionBroker {
 					sessionId,
 					{
 						...this.baseInteraction(sessionId, interactionId, title, "Choose an option.", dialogOptions),
+						...actorFields(sessionId, actor?.()),
 						kind: "select",
 						choices: options.slice(0, MAX_INTERACTION_CHOICES).map((label, index) => ({
 							id: choiceId(index),
@@ -525,6 +623,7 @@ export class InteractionBroker {
 					sessionId,
 					{
 						...this.baseInteraction(sessionId, interactionId, title, message, dialogOptions),
+						...actorFields(sessionId, actor?.()),
 						kind: "confirm",
 					},
 					dialogOptions,
@@ -537,6 +636,7 @@ export class InteractionBroker {
 					sessionId,
 					{
 						...this.baseInteraction(sessionId, interactionId, title, "Enter a value.", dialogOptions),
+						...actorFields(sessionId, actor?.()),
 						kind: "input",
 						...(placeholder === undefined ? {} : { placeholder: boundedPublicText(placeholder) }),
 						secret: false,

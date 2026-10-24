@@ -43,6 +43,7 @@ function clone<T>(value: T): T {
 export class SessionProjection {
 	private session: SessionSummary;
 	private process: SessionSnapshot["process"];
+	private retry: SessionSnapshot["retry"];
 	private readonly turnsById = new Map<string, TurnView>();
 	private readonly turnOrder: string[] = [];
 	private readonly itemsById = new Map<string, ItemView>();
@@ -89,6 +90,10 @@ export class SessionProjection {
 	/** Applies one event and returns the exact event clients should observe. */
 	apply(event: DomainEvent): DomainEvent | undefined {
 		switch (event.type) {
+			case "session/retryChanged":
+				this.assertSession(event.sessionId);
+				this.retry = event.retry === null ? undefined : clone(event.retry);
+				return clone(event);
 			case "session/processChanged":
 				this.assertSession(event.sessionId);
 				this.process = clone(event.process);
@@ -224,6 +229,7 @@ export class SessionProjection {
 		return {
 			session: this.getSummary(),
 			...(this.process ? { process: clone(this.process) } : {}),
+			...(this.retry ? { retry: clone(this.retry) } : {}),
 			turns,
 			recentItems: recentItemIds.map((itemId) => clone(this.itemsById.get(itemId)!)),
 			nextBeforeItemId: startIndex > 0 ? recentItemIds[0]! : null,

@@ -10,6 +10,8 @@ import {
 	type ScheduleManager,
 	SessionManager,
 } from "@metis/coding-agent/host";
+import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
+import { listAgentCatalog, readAgentCatalogItems } from "./agent-catalog.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
@@ -824,14 +826,35 @@ export class Dispatcher {
 				return await this.registry.run(ref, (runtime) => runtime.readItems(request.params));
 			}
 			case "session/readImage": {
+				if (request.params.rootSessionId && request.params.rootSessionId !== request.params.sessionId) {
+					return await readAgentImage(
+						this.runtimeRef(request.params.rootSessionId),
+						this.catalog.agentDir,
+						request.params,
+					);
+				}
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readImage(request.params));
 			}
 			case "session/openDeliveredFile": {
+				if (request.params.rootSessionId && request.params.rootSessionId !== request.params.sessionId) {
+					return await openAgentDeliveredFile(
+						this.runtimeRef(request.params.rootSessionId),
+						this.catalog.agentDir,
+						request.params,
+					);
+				}
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.openDeliveredFile(request.params));
 			}
 			case "session/readDeliveredFile": {
+				if (request.params.rootSessionId && request.params.rootSessionId !== request.params.sessionId) {
+					return await readAgentDeliveredFile(
+						this.runtimeRef(request.params.rootSessionId),
+						this.catalog.agentDir,
+						request.params,
+					);
+				}
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.readDeliveredFile(request.params));
 			}
@@ -860,12 +883,33 @@ export class Dispatcher {
 				});
 			case "agent/readItems": {
 				const ref = this.runtimeRef(request.params.sessionId);
-				return await this.registry.run(ref, (runtime) => runtime.readAgentItems(request.params));
+				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) => {
+					if (!connection.subscriptions.has(runtime.sessionId)) await connection.subscriptions.subscribe(runtime);
+					return runtime.readAgentItems(request.params);
+				});
+				return opened.open ? opened.result : readAgentCatalogItems(ref, this.catalog.agentDir, request.params);
 			}
 			case "agent/list": {
 				const ref = this.runtimeRef(request.params.sessionId);
-				return await this.registry.run(ref, (runtime) => runtime.listAgents(request.params));
+				const opened = await this.registry.withOpenRuntime(request.params.sessionId, (runtime) =>
+					runtime.listAgents(request.params),
+				);
+				return opened.open ? opened.result : listAgentCatalog(ref, this.catalog.agentDir, request.params);
 			}
+			case "agent/send":
+			case "agent/control":
+				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
+					const ref = this.runtimeRef(request.params.sessionId);
+					this.interactions.assign(request.params.sessionId, connection.interactionPeer);
+					return await this.registry.run(ref, async (runtime) => {
+						if (!connection.subscriptions.has(runtime.sessionId))
+							await connection.subscriptions.subscribe(runtime);
+						return request.method === "agent/send"
+							? runtime.sendAgentMessage(request.params)
+							: runtime.controlAgent(request.params);
+					});
+				});
 			case "agent/interrupt":
 				return await this.replayMutation(request, async () => {
 					const ref = this.runtimeRef(request.params.sessionId);

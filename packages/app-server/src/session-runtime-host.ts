@@ -4,6 +4,7 @@ import type {
 	DomainEvent,
 	ItemView,
 	KnowledgeLibrary,
+	RpcErrorContext,
 	RpcErrorName,
 	SessionSnapshot,
 	SessionSummary,
@@ -64,6 +65,8 @@ export interface OpenedSessionRuntime {
 	clearGoal(input: ClientParams<"session/goal/clear">): Promise<ClientResult<"session/goal/clear">>;
 	listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">>;
 	readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">>;
+	sendAgentMessage(input: ClientParams<"agent/send">): Promise<ClientResult<"agent/send">>;
+	controlAgent(input: ClientParams<"agent/control">): Promise<ClientResult<"agent/control">>;
 	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
 	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;
 	deleteAgent(input: ClientParams<"agent/delete">): Promise<ClientResult<"agent/delete">>;
@@ -123,22 +126,9 @@ export interface SessionRuntimeHost {
 
 export class AppServerError extends Error {
 	readonly code: RpcErrorName;
-	readonly context: {
-		requestId?: string;
-		sessionId?: string;
-		operationId?: string;
-		interactionId?: string;
-	};
+	readonly context: RpcErrorContext;
 
-	constructor(
-		code: RpcErrorName,
-		context: {
-			requestId?: string;
-			sessionId?: string;
-			operationId?: string;
-			interactionId?: string;
-		} = {},
-	) {
+	constructor(code: RpcErrorName, context: RpcErrorContext = {}) {
 		super(code);
 		this.name = "AppServerError";
 		this.code = code;

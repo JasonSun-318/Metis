@@ -277,6 +277,33 @@ describe("agent runtime e2e", () => {
 			});
 			expect(JSON.stringify(liveRead)).toContain("leaf-live");
 
+			// A settled parent remains independently idle in the UI, while its live
+			// descendants still protect the shared runtime from idle-only changes.
+			await expect
+				.poll(async () => {
+					const response = await connection.handle({
+						jsonrpc: "2.0",
+						id: "root-idle-with-live-child",
+						method: "session/open",
+						params: { sessionId: SESSION_ID },
+					});
+					if (!("result" in response) || !("session" in response.result)) return undefined;
+					const session = response.result.session;
+					return session && "state" in session ? session.state : undefined;
+				})
+				.toBe("idle");
+			const modeChange = await connection.handle({
+				jsonrpc: "2.0",
+				id: "mode-change-with-live-child",
+				method: "session/setCollaborationMode",
+				params: {
+					sessionId: SESSION_ID,
+					requestId: "00000000-0000-4000-8000-000000000299",
+					collaborationMode: "plan",
+				},
+			});
+			expect(modeChange).toMatchObject({ error: { code: -32004 } });
+
 			chunk(leafResponse!, {}, "tool_calls");
 			leafResponse!.end("data: [DONE]\n\n");
 			leafResponse = undefined;

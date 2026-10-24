@@ -47,6 +47,11 @@ describe("Process projection", () => {
 		const completed = projector.apply(end("current", "hello"))!;
 		projection.apply({ type: "session/processChanged", sessionId: session.sessionId, process: completed });
 		expect(projection.snapshot("epoch", 2).process).toEqual(completed);
+		const retry = { attempt: 1, maxAttempts: 5, delayMs: 2000 };
+		projection.apply({ type: "session/retryChanged", sessionId: session.sessionId, retry });
+		expect(projection.snapshot("epoch", 3).retry).toEqual(retry);
+		projection.apply({ type: "session/retryChanged", sessionId: session.sessionId, retry: null });
+		expect(projection.snapshot("epoch", 4).retry).toBeUndefined();
 	});
 	it("streams a real shell command before it exits, then retains the final output", async () => {
 		const projector = new ProcessProjector();

@@ -9,6 +9,7 @@ import type {
 import { ProtocolValidationError, validateClientRequest, validateResponseFor } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
+import { opaqueId } from "../src/item-projection.ts";
 import { SessionProjection } from "../src/projection/session-projection.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
@@ -179,14 +180,34 @@ describe("permission protocol", () => {
 		expect(broker.hasPending(SESSION_ID)).toBe(false);
 	});
 
-	it("rejects a second in-flight approval for the same action", async () => {
+	it.each(["call_01|fc_02", `call_${"x".repeat(150)}`])(
+		"delivers approval for provider ID %s without changing its original identity",
+		async (actionId) => {
+			for (const choice of ["allow-once", "deny-once"] as const) {
+				const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+				const peer = new RecordingPeer();
+				peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice };
+				broker.assign(SESSION_ID, peer);
+				const approval = approvalRequest(actionId);
+				await expect(broker.requestPermissionApproval(SESSION_ID, approval)).resolves.toMatchObject({
+					decision: choice === "allow-once" ? "allow" : "deny",
+				});
+				expect(peer.requests).toHaveLength(1);
+				expect(peer.requests[0]).toMatchObject({ actionId: opaqueId(actionId, "tool") });
+				expect(approval.action.actionId).toBe(actionId);
+				expect(broker.hasPending(SESSION_ID)).toBe(false);
+			}
+		},
+	);
+
+	it.each(["action-dup", "call_dup|fc_dup"])("rejects duplicate approval %s", async (actionId) => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
 		const peer = new RecordingPeer();
 		peer.waitForever = true;
 		broker.assign(SESSION_ID, peer);
-		const first = broker.requestPermissionApproval(SESSION_ID, approvalRequest("action-dup"));
+		const first = broker.requestPermissionApproval(SESSION_ID, approvalRequest(actionId));
 		await new Promise((resolve) => setTimeout(resolve, 0));
-		await expect(broker.requestPermissionApproval(SESSION_ID, approvalRequest("action-dup"))).rejects.toThrow(
+		await expect(broker.requestPermissionApproval(SESSION_ID, approvalRequest(actionId))).rejects.toThrow(
 			"Approval was unavailable or cancelled",
 		);
 		broker.releaseSession(SESSION_ID);

@@ -392,6 +392,25 @@ export function projectPlanEntry(input: {
 	};
 }
 
+function hasScheduledRetry(message: Record<string, unknown>): boolean {
+	return (
+		Array.isArray(message.diagnostics) &&
+		message.diagnostics.some((diagnostic) => {
+			if (typeof diagnostic !== "object" || diagnostic === null || diagnostic.type !== "auto_retry_scheduled")
+				return false;
+			const details = diagnostic.details;
+			return (
+				typeof details === "object" &&
+				details !== null &&
+				Number.isSafeInteger(details.attempt) &&
+				Number.isSafeInteger(details.maxAttempts) &&
+				details.attempt > 0 &&
+				details.attempt <= details.maxAttempts
+			);
+		})
+	);
+}
+
 export function projectMessageEntry(input: MessageProjectionInput): ItemView | undefined {
 	const { entry, sessionId, turnStates, toolStates, deliveredFiles, fallbackTimestamp } = input;
 	if (entry.type !== "message" || typeof entry.message !== "object" || entry.message === null) return undefined;
@@ -419,6 +438,9 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 	if (message.role === "toolResult" && message.toolName === "submit_plan") return undefined;
 
 	if (message.role === "assistant") {
+		const failed = message.stopReason === "error";
+		const retryScheduled = failed && hasScheduledRetry(message);
+		const assistantState = failed ? "interrupted" : state;
 		const usage = projectAssistantUsage(message);
 		const content = assistantBlocks(
 			message.content,
@@ -429,17 +451,26 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 			},
 			toolStates,
 		);
-		if (content.length === 0 && state !== "streaming") return undefined;
+		// Persist a visible failure even when the provider produced no output. Raw
+		// diagnostics can contain credentials and endpoint URLs, so never project them.
+		if (failed && !retryScheduled) {
+			content.push({
+				type: "notice",
+				level: "error",
+				text: "The model provider could not complete the request. Try again or choose another configured model.",
+			});
+		}
+		if (content.length === 0 && assistantState !== "streaming" && !retryScheduled) return undefined;
 		return {
 			itemId,
 			sessionId,
 			...(turnId === undefined ? {} : { turnId }),
 			role: "assistant",
-			state,
+			state: assistantState,
 			content,
 			...(usage === undefined ? {} : { usage }),
 			createdAt,
-			...(state === "streaming" ? {} : { completedAt: createdAt }),
+			...(assistantState === "streaming" ? {} : { completedAt: createdAt }),
 		};
 	}
 
@@ -520,7 +551,12 @@ export function projectLiveMessage(input: {
 			id: input.itemId,
 			...(input.turnId === undefined ? {} : { turnId: input.turnId }),
 			timestamp: createdAt,
-			message: input.message,
+			// A start event is provisional, even if a provider filled its error
+			// fields early. Decide final failure visibility only at message_end.
+			message:
+				input.state === "streaming" && record.role === "assistant" && record.stopReason === "error"
+					? { ...input.message, stopReason: "stop" }
+					: input.message,
 		},
 		sessionId: input.sessionId,
 		turnStates:
@@ -540,11 +576,15 @@ export function projectLiveMessage(input: {
 		deliveredFiles: input.deliveredFiles,
 		fallbackTimestamp: createdAt,
 	});
+	const state =
+		input.state !== "streaming" && record.role === "assistant" && record.stopReason === "error"
+			? "interrupted"
+			: input.state;
 	return item
 		? {
 				...item,
-				state: input.state,
-				...(input.state === "streaming" ? {} : { completedAt: createdAt }),
+				state,
+				...(state === "streaming" ? {} : { completedAt: createdAt }),
 			}
 		: undefined;
 }

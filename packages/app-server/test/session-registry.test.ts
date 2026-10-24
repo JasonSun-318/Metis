@@ -166,6 +166,14 @@ class FakeRuntime implements OpenedSessionRuntime {
 		return { agents: [], nextAfterAgentId: null };
 	}
 
+	async sendAgentMessage(): Promise<ClientResult<"agent/send">> {
+		throw new Error("No child conversation in fixture");
+	}
+
+	async controlAgent(): Promise<ClientResult<"agent/control">> {
+		throw new Error("No child control in fixture");
+	}
+
 	async readAgentItems(_input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}
@@ -362,6 +370,21 @@ class FakeHost implements SessionRuntimeHost {
 }
 
 describe("SessionRegistry", () => {
+	it("reads only existing runtimes without opening a cold session", async () => {
+		const host = new FakeHost();
+		const registry = new SessionRegistry(host);
+		const operation = vi.fn(async (runtime: OpenedSessionRuntime) => runtime.sessionId);
+		await expect(registry.withOpenRuntime("session-1", operation)).resolves.toEqual({ open: false });
+		expect(host.open).not.toHaveBeenCalled();
+		expect(operation).not.toHaveBeenCalled();
+		await registry.run(ref("session-1"), async () => undefined);
+		await expect(registry.withOpenRuntime("session-1", operation)).resolves.toEqual({
+			open: true,
+			result: "session-1",
+		});
+		expect(host.open).toHaveBeenCalledTimes(1);
+		await registry.shutdown();
+	});
 	it("forwards draft Skill operations without opening a session runtime", async () => {
 		const base = new FakeHost();
 		const detail: ClientResult<"skill/get"> = {

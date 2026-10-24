@@ -205,6 +205,14 @@ export class AppServerConnection {
 						params: {
 							serverEpoch: browserRequest.params.serverEpoch,
 							sessionId: browserRequest.params.sessionId,
+							...(browserRequest.params.rootSessionId
+								? { rootSessionId: browserRequest.params.rootSessionId }
+								: {}),
+							...(browserRequest.params.actorSessionId
+								? { actorSessionId: browserRequest.params.actorSessionId }
+								: {}),
+							...(browserRequest.params.agentId ? { agentId: browserRequest.params.agentId } : {}),
+							...(browserRequest.params.taskId ? { taskId: browserRequest.params.taskId } : {}),
 							toolCallId: browserRequest.params.toolCallId,
 							requestId: request.id,
 						},
@@ -262,7 +270,20 @@ export class AppServerConnection {
 				| RpcErrorResponse;
 			if ("error" in response) {
 				const name = rpcErrorNameForCode(response.error.code) ?? "OPERATION_FAILED";
-				pending.reject(new AppServerError(name, "data" in response.error ? response.error.data : {}));
+				const data = "data" in response.error ? response.error.data : undefined;
+				const context: RpcErrorContext = data
+					? {
+							requestId: data.requestId,
+							sessionId: data.sessionId,
+							operationId: data.operationId,
+							interactionId: data.interactionId,
+							...(typeof data.ownerAgentId === "string" ? { ownerAgentId: data.ownerAgentId } : {}),
+							...(data.recovery === "wait_for_user" || data.recovery === "request_owner_release"
+								? { recovery: data.recovery }
+								: {}),
+						}
+					: {};
+				pending.reject(new AppServerError(name, context));
 			} else {
 				pending.resolve(response.result);
 			}

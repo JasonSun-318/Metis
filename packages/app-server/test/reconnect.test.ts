@@ -215,6 +215,14 @@ class PausableRuntime implements OpenedSessionRuntime {
 		return { agents: [], nextAfterAgentId: null };
 	}
 
+	async sendAgentMessage(): Promise<ClientResult<"agent/send">> {
+		throw new Error("No child conversation in fixture");
+	}
+
+	async controlAgent(): Promise<ClientResult<"agent/control">> {
+		throw new Error("No child control in fixture");
+	}
+
 	async readAgentItems(_input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
 		return { items: [], nextBeforeItemId: null };
 	}

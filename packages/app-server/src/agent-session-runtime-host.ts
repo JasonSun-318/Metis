@@ -19,17 +19,16 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
-	type AgentSummary,
 	AuthStorage,
-	agentTaskWindow,
 	assertSessionConversationQuotes,
+	BUILT_IN_TOOL_NAMES,
 	buildChildSystemPrompt,
 	type CreateAgentSessionRuntimeFactory,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createAgentSessionServices,
-	createAskUserToolDefinition,
 	DefaultResourceLoader,
+	type FileEntry,
 	formatSessionAttachments,
 	formatSessionConversationQuotes,
 	formatSessionFileSelections,
@@ -76,9 +75,17 @@ import {
 	storePluginMcpCredential,
 	upsertCustomAgentType,
 } from "@metis/coding-agent/host";
+import { listAgentCatalog, projectAgentItems } from "./agent-catalog.ts";
+import {
+	type AgentInputDelivery,
+	latestAgentInputs,
+	projectAgentMailboxItem,
+} from "./agent-conversation-projection.ts";
+import { createAgentHostTools, DELEGATABLE_HOST_TOOL_NAMES } from "./agent-host-tools.ts";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
+import { prepareAgentMessage } from "./agent-message-service.ts";
+import { agentSummaryView, boundedAgentSummaryViews } from "./agent-summary-projection.ts";
 import { createBrowserPermissionAudit } from "./browser-permission-audit.ts";
-import { BROWSER_TOOL_NAMES, browserToolCall, createBrowserToolDefinitions } from "./browser-tools.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
 import {
 	type DurableSessionMutation,
@@ -93,7 +100,6 @@ import {
 	projectGoal,
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
-	projectMessageEntry,
 	projectPlanEntry,
 	projectPlanView,
 	projectSessionEntry,
@@ -175,6 +181,8 @@ function throwAgentError(error: unknown, input: { sessionId: string; requestId?:
 		}
 		if (error.code === "INVALID_STATE") throw new AppServerError("BUSY", input);
 		if (error.code === "QUEUE_FULL") throw new AppServerError("OVERLOADED", input);
+		if (error.code === "REQUEST_ID_CONFLICT") throw new AppServerError("REQUEST_ID_REUSED", input);
+		if (error.code === "USER_PAUSED") throw new AppServerError("USER_PAUSED", input);
 	}
 	throw new AppServerError("OPERATION_FAILED", input);
 }
@@ -233,60 +241,6 @@ function completedTurnHasVisibleAssistantText(journal: readonly unknown[], turnI
 	return false;
 }
 
-function agentTaskView(
-	task: NonNullable<AgentSummary["currentTask"]>,
-	includeResult = true,
-): NonNullable<SessionSnapshot["agents"][number]["currentTask"]> {
-	return {
-		taskId: task.taskId,
-		status: task.status,
-		taskSummary: task.taskSummary,
-		...(includeResult && task.finalMessage ? { finalMessage: task.finalMessage } : {}),
-		...(includeResult && task.error ? { error: task.error } : {}),
-		...(task.usage ? { usage: { ...task.usage, model: { ...task.usage.model } } } : {}),
-		createdAt: task.createdAt,
-		updatedAt: task.updatedAt,
-	};
-}
-
-function agentSummaryView(summary: AgentSummary): SessionSnapshot["agents"][number] {
-	return {
-		agentId: summary.agentId,
-		name: summary.name,
-		agentType: summary.agentType,
-		depth: summary.depth,
-		status: summary.status,
-		archived: summary.archived,
-		parentSessionId: summary.parentSessionId,
-		rootSessionId: summary.rootSessionId,
-		agentPath: [...summary.agentPath],
-		tasks: summary.tasks.map((task) => agentTaskView(task, false)),
-		...(summary.currentTask ? { currentTask: agentTaskView(summary.currentTask) } : {}),
-		...(summary.latestTask ? { latestTask: agentTaskView(summary.latestTask) } : {}),
-		createdAt: summary.createdAt,
-		updatedAt: summary.updatedAt,
-	};
-}
-
-const MAX_AGENT_COLLECTION_UTF8_BYTES = 1024 * 1024;
-
-function boundedAgentSummaryViews(
-	summaries: readonly AgentSummary[],
-	limit: number,
-): SessionSnapshot["agents"][number][] {
-	const views: SessionSnapshot["agents"][number][] = [];
-	let bytes = 2;
-	for (const summary of summaries) {
-		if (views.length >= limit) break;
-		const view = agentSummaryView(summary);
-		const viewBytes = Buffer.byteLength(JSON.stringify(view), "utf8") + (views.length > 0 ? 1 : 0);
-		if (views.length > 0 && bytes + viewBytes > MAX_AGENT_COLLECTION_UTF8_BYTES) break;
-		views.push(view);
-		bytes += viewBytes;
-	}
-	return views;
-}
-
 function mapRuntimeTurns(
 	journal: readonly unknown[],
 	reduced: ReturnType<typeof reduceRuntimeJournal>,
@@ -339,6 +293,11 @@ function mapRuntimeTurns(
 }
 
 class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
+	// Projection needs delivery state, never the potentially large input text/images.
+	private readonly agentInputReceipts = new Map<string, AgentInputDelivery>();
+	private readonly pendingAgentReceiptRefreshes = new Set<string>();
+	private agentReceiptRefreshTask?: Promise<void>;
+	private agentReceiptEpoch = 0;
 	private readonly listeners = new Set<SessionEventListener>();
 	private readonly runtime: AgentSessionRuntime;
 	private session: AgentSession;
@@ -501,15 +460,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		if (this.interactions) {
 			const deliveredArtifacts = session.deliveredArtifacts;
 			if (!deliveredArtifacts) throw new Error("Interactive session is missing delivered artifact storage");
-			const browserTools = createBrowserToolDefinitions(
-				(request) =>
-					this.interactions!.requestBrowserTool(
-						this.sessionId,
-						request.toolCallId,
-						browserToolCall(request),
-						request.signal,
-					),
-				createBrowserPermissionAudit({
+			const hostTools = createAgentHostTools({
+				rootSessionId: this.sessionId,
+				allowedToolNames: DELEGATABLE_HOST_TOOL_NAMES,
+				interactions: this.interactions,
+				deliveredArtifacts,
+				audit: createBrowserPermissionAudit({
 					sessionId: this.sessionId,
 					sink: {
 						append: async (event) => {
@@ -517,17 +473,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						},
 					},
 				}),
-			);
-			session.installHostTools(
-				[
-					createAskUserToolDefinition((request) => this.interactions!.requestUserInput(this.sessionId, request)),
-					...browserTools,
-					deliveredArtifacts.createToolDefinition(),
-				],
-				{
-					automaticPermissionToolNames: ["ask_user", ...BROWSER_TOOL_NAMES],
-				},
-			);
+			});
+			session.installHostTools(hostTools.tools, hostTools);
 		}
 		session.setPermissionApprovalHandler((request) =>
 			this.interactions
@@ -552,15 +499,47 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		this.unsubscribeAgent?.();
 		this.unsubscribeSubagents?.();
 		this.agentLive.clear();
+		this.agentReceiptEpoch += 1;
+		this.agentInputReceipts.clear();
+		this.pendingAgentReceiptRefreshes.clear();
 		this.session = session;
 		this.unsubscribeAgent = session.subscribe((event) => this.onAgentEvent(event));
 		this.unsubscribeSubagents = this.runtime.subagentManager?.subscribe((event) => {
+			if (event.type === "notification_ready") {
+				if (event.event.parentSessionId === this.sessionId) {
+					const entry = this.session.sessionManager
+						.getDurableJournalSnapshot()
+						.find(
+							(candidate) =>
+								candidate.type === "agent_mailbox_event" && candidate.event.eventId === event.event.eventId,
+						);
+					if (entry?.type === "agent_mailbox_event")
+						this.publish({
+							type: "item/completed",
+							item: projectAgentMailboxItem(
+								entry,
+								this.sessionId,
+								this.ref.summary.createdAt,
+								this.agentInputReceipts,
+							),
+						});
+				} else {
+					this.publish({
+						type: "agent/itemsChanged",
+						sessionId: this.sessionId,
+						agentId: event.event.parentSessionId,
+						taskId: event.event.taskId,
+					});
+				}
+				return;
+			}
 			if (event.type === "activity") {
 				this.publishProcess(event.event, event.agentId);
 				this.agentLive.apply(event.agentId, event.taskId, event.event);
 				return;
 			}
 			if (event.type === "deleted") {
+				this.agentReceiptEpoch += 1;
 				for (let index = 0; index < event.deletedAgentIds.length; index += 256) {
 					this.publish({
 						type: "agent/deleted",
@@ -569,10 +548,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 						deletedAgentIds: event.deletedAgentIds.slice(index, index + 256),
 					});
 				}
-				for (const agentId of event.deletedAgentIds) this.agentLive.clear(agentId);
+				for (const agentId of event.deletedAgentIds) {
+					this.agentLive.clear(agentId);
+					this.pendingAgentReceiptRefreshes.delete(agentId);
+					for (const [id, receipt] of this.agentInputReceipts) {
+						if (receipt.agentId === agentId) this.agentInputReceipts.delete(id);
+					}
+				}
 				return;
 			}
 			if (event.type !== "updated") return;
+			void this.refreshAgentReceipts(event.summary.agentId);
 			this.publish({
 				type: "agent/updated",
 				sessionId: this.sessionId,
@@ -596,6 +582,87 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				}
 			}
 		});
+		const notificationAgents = new Set(
+			this.session.sessionManager
+				.getDurableJournalSnapshot()
+				.flatMap((entry) =>
+					entry.type === "agent_mailbox_event" && entry.event.type === "intervention" ? [entry.event.agentId] : [],
+				),
+		);
+		for (const agentId of notificationAgents) {
+			void this.refreshAgentReceipts(agentId);
+		}
+	}
+
+	private refreshAgentReceipts(agentId: string): Promise<void> {
+		this.pendingAgentReceiptRefreshes.add(agentId);
+		if (!this.agentReceiptRefreshTask) {
+			this.agentReceiptRefreshTask = Promise.resolve()
+				.then(async () => {
+					while (!this.closed && this.pendingAgentReceiptRefreshes.size) {
+						const next = this.pendingAgentReceiptRefreshes.values().next().value!;
+						this.pendingAgentReceiptRefreshes.delete(next);
+						await this.readAgentReceipts(next);
+					}
+				})
+				.finally(() => {
+					this.agentReceiptRefreshTask = undefined;
+				});
+		}
+		return this.agentReceiptRefreshTask;
+	}
+
+	private async readAgentReceipts(agentId: string): Promise<void> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) return;
+		const epoch = this.agentReceiptEpoch;
+		try {
+			const journal = await manager.readJournal(this.sessionId, agentId);
+			if (this.closed || manager !== this.runtime.subagentManager) return;
+			if (epoch !== this.agentReceiptEpoch) {
+				this.pendingAgentReceiptRefreshes.add(agentId);
+				return;
+			}
+			const inputs = latestAgentInputs(journal);
+			const changed = new Set<string>();
+			for (const [id, receipt] of inputs) {
+				if (this.agentInputReceipts.get(id)?.state !== receipt.state) changed.add(id);
+				this.agentInputReceipts.set(id, { agentId, state: receipt.state });
+			}
+			if (!changed.size) return;
+			for (const entry of this.session.sessionManager.getDurableJournalSnapshot()) {
+				if (
+					entry.type !== "agent_mailbox_event" ||
+					entry.event.agentId !== agentId ||
+					entry.event.type !== "intervention" ||
+					!changed.has(entry.event.messageId)
+				)
+					continue;
+				this.publish({
+					type: "item/completed",
+					item: projectAgentMailboxItem(
+						entry,
+						this.sessionId,
+						this.ref.summary.createdAt,
+						this.agentInputReceipts,
+					),
+				});
+			}
+			const taskId = [...inputs.values()].at(-1)?.taskId;
+			if (taskId) this.publish({ type: "agent/itemsChanged", sessionId: this.sessionId, agentId, taskId });
+		} catch (error) {
+			// A concurrent delete may remove the child before its final projection refresh.
+			if (!(error instanceof AgentError && error.code === "UNKNOWN_AGENT") && !this.closed) {
+				this.publish({
+					type: "interaction/notify",
+					sessionId: this.sessionId,
+					notificationId: randomUUID(),
+					level: "error",
+					message: "Could not refresh agent message receipts",
+					createdAt: new Date().toISOString(),
+				});
+			}
+		}
 	}
 
 	private publish(event: DomainEvent): void {
@@ -625,6 +692,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	private onAgentEvent(event: AgentSessionEvent): void {
 		this.publishProcess(event);
+		if (event.type === "auto_retry_start" || event.type === "auto_retry_end") {
+			this.publish({
+				type: "session/retryChanged",
+				sessionId: this.sessionId,
+				retry:
+					event.type === "auto_retry_start"
+						? { attempt: event.attempt, maxAttempts: event.maxAttempts, delayMs: event.delayMs }
+						: null,
+			});
+			return;
+		}
 		if (event.type === "message_start") {
 			const assistant = event.message.role === "assistant";
 			if (assistant) this.liveAssistantItemId = undefined;
@@ -778,7 +856,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.publish({
 				type: "session/permissionReviewStarted",
 				sessionId: this.sessionId,
-				actionId: event.actionId,
+				actionId: opaqueId(event.actionId, "tool"),
 				reviewer: event.reviewer,
 				riskLevel: event.riskLevel,
 			});
@@ -788,7 +866,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.publish({
 				type: "session/permissionReviewCompleted",
 				sessionId: this.sessionId,
-				actionId: event.actionId,
+				actionId: opaqueId(event.actionId, "tool"),
 				reviewer: event.reviewer,
 				outcome: event.outcome,
 				riskLevel: event.riskLevel,
@@ -885,6 +963,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	private projectJournalItem(entry: Record<string, unknown>): ItemView | undefined {
+		if (entry.type === "agent_mailbox_event")
+			return projectAgentMailboxItem(
+				entry as unknown as Extract<FileEntry, { type: "agent_mailbox_event" }>,
+				this.sessionId,
+				this.ref.summary.createdAt,
+				this.agentInputReceipts,
+			);
 		if (entry.type === "session_plan_proposal") {
 			const plan = this.session.sessionManager
 				.getPlanState()
@@ -923,6 +1008,13 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return journal
 			.map((entry) => {
 				const record = entry as Record<string, unknown>;
+				if (record.type === "agent_mailbox_event")
+					return projectAgentMailboxItem(
+						record as unknown as Extract<FileEntry, { type: "agent_mailbox_event" }>,
+						this.sessionId,
+						this.ref.summary.createdAt,
+						this.agentInputReceipts,
+					);
 				if (record.type === "session_plan_proposal") {
 					const plan = planByEntryId.get(String(record.id));
 					if (!plan) return undefined;
@@ -985,6 +1077,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	isActive(): boolean {
+		return this.isRootActive() || (this.runtime.subagentManager?.hasActiveWork() ?? false);
+	}
+
+	private isRootActive(): boolean {
 		return this.session.isStreaming || this.session.isCompacting || this.session.activeDurableTurnId !== undefined;
 	}
 
@@ -1465,7 +1561,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			...base,
 			...(sessionName === undefined ? {} : { name: sessionName }),
 			updatedAt: timestamp(lastActivity?.timestamp, this.ref.summary.updatedAt),
-			state: this.isActive() ? "running" : lastTurn?.state === "interrupted" ? "interrupted" : "idle",
+			state: this.isRootActive() ? "running" : lastTurn?.state === "interrupted" ? "interrupted" : "idle",
 			...(lastTurnOutcome ? { lastTurnOutcome } : {}),
 			attentionRequired: this.hasPendingInteractions(),
 			unread: this.unread,
@@ -1620,21 +1716,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	async listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">> {
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-		const agents = manager.listSummaries(this.sessionId, input.includeArchived ?? false);
-		const limit = input.limit ?? 20;
-		let start = 0;
-		if (input.afterAgentId) {
-			const cursor = agents.findIndex((agent) => agent.agentId === input.afterAgentId);
-			if (cursor < 0) throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
-			start = cursor + 1;
-		}
-		const candidates = agents.slice(start, start + limit);
-		const views = boundedAgentSummaryViews(candidates, limit);
-		const page = candidates.slice(0, views.length);
-		return {
-			agents: views,
-			nextAfterAgentId: start + page.length < agents.length ? (page.at(-1)?.agentId ?? null) : null,
-		};
+		return listAgentCatalog(this.ref, this.agentDir, input);
 	}
 
 	async readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">> {
@@ -1643,43 +1725,73 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const completeJournal = await manager
 			.readJournal(this.sessionId, input.agentId)
 			.catch((error: unknown) => throwAgentError(error, input));
-		let journal = completeJournal;
-		if (input.taskId) {
-			const window = agentTaskWindow(completeJournal, input.taskId);
-			if (!window) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
-			const scoped = completeJournal.slice(window.start, window.end + 1);
-			journal = completeJournal[0] ? [completeJournal[0], ...scoped] : scoped;
-		}
-		const reduced = reduceRuntimeJournal(journal);
-		const turns = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
-		const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const selected = manager.listSummaries(this.sessionId, true).find((agent) => agent.agentId === input.agentId);
 		const includeLive = !input.taskId || selected?.currentTask?.taskId === input.taskId;
-		const items = journal
-			.map((entry) =>
-				projectMessageEntry({
-					entry: entry as unknown as Record<string, unknown>,
-					sessionId: input.agentId,
-					turnStates: turns,
-					toolStates: tools,
-					fallbackTimestamp: this.ref.summary.createdAt,
-				}),
-			)
-			.filter((item): item is ItemView => item !== undefined)
-			.concat(includeLive ? this.agentLive.currentItems(input.agentId) : []);
-		const end = input.beforeItemId ? items.findIndex((item) => item.itemId === input.beforeItemId) : items.length;
-		if (input.beforeItemId && end < 0) {
-			throw new AppServerError("INVALID_CURSOR", { sessionId: input.sessionId });
+		return projectAgentItems(
+			completeJournal,
+			input,
+			this.ref.summary.createdAt,
+			includeLive ? this.agentLive.currentItems(input.agentId) : [],
+		);
+	}
+
+	async sendAgentMessage(input: ClientParams<"agent/send">): Promise<ClientResult<"agent/send">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		const journal = await manager
+			.readJournal(this.sessionId, input.agentId)
+			.catch((error: unknown) => throwAgentError(error, input));
+		const prepared = await prepareAgentMessage(input, { agentDir: this.agentDir, cwd: this.runtime.cwd, journal });
+		try {
+			return await manager.submitMessage(
+				{ kind: "user" },
+				{
+					agentId: input.agentId,
+					requestId: input.requestId,
+					delivery: input.delivery,
+					input: prepared.input,
+				},
+			);
+		} catch (error) {
+			prepared.rollback();
+			throwAgentError(error, input);
 		}
-		const start = Math.max(0, end - input.limit);
-		return { items: items.slice(start, end), nextBeforeItemId: start > 0 ? items[start]!.itemId : null };
+	}
+
+	async controlAgent(input: ClientParams<"agent/control">): Promise<ClientResult<"agent/control">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		try {
+			if (input.action === "stop" && input.agentId === this.sessionId) {
+				if (input.scope === "self") throw new AppServerError("INVALID_PARAMS", input);
+				return (await this.stopRoot(input.requestId, input.scope ?? "subtree")).receipt!;
+			}
+			const receipt = await manager.control(
+				{ kind: "user" },
+				{
+					agentId: input.agentId,
+					requestId: input.requestId,
+					action: input.action,
+					scope: input.scope ?? (input.action === "resume" ? "self" : "subtree"),
+				},
+			);
+			if (input.action === "resume" && input.agentId === this.sessionId) this.runtime.resumeAgentContinuations();
+			return receipt;
+		} catch (error) {
+			throwAgentError(error, input);
+		}
 	}
 
 	async interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">> {
+		// This legacy endpoint returns a child summary; root control has its own endpoint.
+		if (input.agentId === this.sessionId) throw new AppServerError("INVALID_PARAMS", input);
 		const manager = this.runtime.subagentManager;
 		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId, requestId: input.requestId });
 		try {
-			await manager.interrupt(this.sessionId, input.agentId);
+			await manager.control(
+				{ kind: "user" },
+				{ agentId: input.agentId, requestId: input.requestId, action: "stop", scope: "subtree" },
+			);
 		} catch (error) {
 			throwAgentError(error, input);
 		}
@@ -1906,7 +2018,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			collaborationMode: this.session.sessionManager.getCollaborationMode(),
 			...this.permissionProtocolView(),
 			...(this.session.permissionView.activeReview
-				? { activeReview: this.session.permissionView.activeReview }
+				? {
+						activeReview: {
+							...this.session.permissionView.activeReview,
+							actionId: opaqueId(this.session.permissionView.activeReview.actionId, "tool"),
+						},
+					}
 				: {}),
 			...(this.session.model
 				? { model: { provider: this.session.model.provider, modelId: this.session.model.id } }
@@ -1957,6 +2074,21 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		return formatSessionConversationQuotes(input.text, resolved);
 	}
 
+	private async resumeRootForHumanInput(requestId: string): Promise<void> {
+		const manager = this.runtime.subagentManager;
+		if (manager?.getRunControl(this.sessionId)?.state === "user_paused") {
+			await manager.control(
+				{ kind: "user" },
+				{
+					agentId: this.sessionId,
+					requestId,
+					action: "resume",
+					scope: "self",
+				},
+			);
+		}
+	}
+
 	async startTurn(input: ClientParams<"turn/start">): Promise<ClientResult<"turn/start">> {
 		const prompt = this.conversationQuotePrompt(input);
 		const selections = await resolveFileSelections(input.fileSelections ?? [], {
@@ -1978,6 +2110,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				})
 			: [];
 		try {
+			await this.resumeRootForHumanInput(input.requestId);
 			return await this.runtime.submitPrompt({
 				requestId: input.requestId,
 				text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
@@ -2010,6 +2143,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				})
 			: [];
 		try {
+			await this.resumeRootForHumanInput(input.requestId);
 			return await this.runtime.submitPrompt({
 				requestId: input.requestId,
 				text: formatSessionAttachments(formatSessionFileSelections(prompt, selections), attachments),
@@ -2093,6 +2227,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	async sendQueuedTurn(input: ClientParams<"turn/queue/send">): Promise<ClientResult<"turn/queue/send">> {
 		try {
+			await this.resumeRootForHumanInput(input.requestId);
 			return await this.runtime.sendQueuedTurn({
 				queueItemId: input.queueItemId,
 				expectedRevision: input.expectedRevision,
@@ -2104,9 +2239,29 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async interrupt(input: ClientParams<"turn/interrupt">): Promise<ClientResult<"turn/interrupt">> {
-		const result = await this.runtime.interrupt({ requestId: input.requestId });
-		this.refreshLifecycleProjection();
-		return result;
+		return (await this.stopRoot(input.requestId, "subtree")).result;
+	}
+
+	private async stopRoot(requestId: string, scope: "self" | "subtree") {
+		const control = this.runtime.subagentManager?.control(
+			{ kind: "user" },
+			{
+				agentId: this.sessionId,
+				action: "stop",
+				scope,
+				requestId,
+			},
+		);
+		// Abort the root model now; rebuilding its runtime also unloads children, so
+		// defer that rebuild until the concurrent child cleanup has settled.
+		const [controlled, aborted] = await Promise.allSettled([
+			control,
+			this.session.abortAndDrainAgentEventPersistence(),
+		]);
+		const result = await this.runtime.interrupt({ requestId }).finally(() => this.refreshLifecycleProjection());
+		if (controlled.status === "rejected") throw controlled.reason;
+		if (aborted.status === "rejected") throw aborted.reason;
+		return { receipt: controlled.value, result };
 	}
 
 	async prepareMutation(input: DurableSessionMutation): Promise<PreparedSessionMutation> {
@@ -2133,6 +2288,8 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					this.unsubscribeQueuedTurns?.();
 					this.unsubscribeQueuedTurns = undefined;
 					this.agentLive.clear();
+					this.pendingAgentReceiptRefreshes.clear();
+					this.agentInputReceipts.clear();
 					this.liveMessagesByItemId.clear();
 					this.durableEntryIdsByLiveItemId.clear();
 					this.listeners.clear();
@@ -2378,6 +2535,14 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 
+	async sendAgentMessage(): Promise<ClientResult<"agent/send">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async controlAgent(): Promise<ClientResult<"agent/control">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
 	async archiveAgent(): Promise<ClientResult<"agent/archive">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
@@ -2562,7 +2727,7 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 							model: childModel!,
 							thinkingLevel: child.thinkingLevel,
 							tools: [...child.tools],
-							additionalSystemPrompt: buildChildSystemPrompt(child),
+							additionalSystemPrompt: buildChildSystemPrompt(child, { agentDir: this.agentDir }),
 							includeAutoMemory: false,
 							permissionSettingsCeiling: options.permissionSettingsCeiling,
 							workspaceWritePolicy: child.writePolicy,
@@ -2571,6 +2736,32 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 						? { additionalSystemPrompt: SCHEDULE_MAIN_PROMPT }
 						: {}),
 			});
+			if (child) {
+				const hostTools = createAgentHostTools({
+					rootSessionId: child.rootSessionId,
+					actorSessionId: child.agentId,
+					agentId: child.agentId,
+					taskId: () => {
+						const tasks = new Map<string, string>();
+						for (const entry of options.sessionManager.getDurableJournalSnapshot()) {
+							if (entry.type === "agent_task") tasks.set(entry.taskId, entry.status);
+						}
+						return [...tasks].find(([, state]) => state === "running")?.[0];
+					},
+					allowedToolNames: child.tools,
+					interactions: this.options.interactions,
+					deliveredArtifacts: result.session.deliveredArtifacts,
+					audit: createBrowserPermissionAudit({
+						sessionId: child.agentId,
+						sink: {
+							append: async (event) => {
+								await result.session.appendPermissionAuditEvent(event);
+							},
+						},
+					}),
+				});
+				result.session.installHostTools(hostTools.tools, hostTools);
+			}
 			if (scheduleEligible) {
 				installScheduleHost({
 					session: result.session,
@@ -2648,6 +2839,12 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 		const definitions = loadAgentTypeDefinitions(this.agentDir);
 		const customs = new Map(readCustomAgentTypes(this.agentDir).map((entry) => [entry.id, entry]));
 		return {
+			availableTools: [
+				...BUILT_IN_TOOL_NAMES.filter(
+					(name) => !["set_tasks", "get_goal", "create_goal", "update_goal"].includes(name),
+				),
+				...(this.options.interactions ? DELEGATABLE_HOST_TOOL_NAMES : []),
+			],
 			types: Object.keys(definitions).map((id) => {
 				const custom = customs.get(id);
 				if (custom) return { ...custom, allowedTools: [...custom.allowedTools], builtIn: false };

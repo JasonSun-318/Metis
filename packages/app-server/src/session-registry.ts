@@ -44,6 +44,16 @@ export class SessionRegistry {
 		return this.slots.has(sessionId);
 	}
 
+	/** Read an already-open runtime without creating one when the session is cold. */
+	async withOpenRuntime<T>(
+		sessionId: string,
+		operation: (runtime: OpenedSessionRuntime) => Promise<T>,
+	): Promise<{ open: true; result: T } | { open: false }> {
+		const slot = this.slots.get(sessionId);
+		if (!slot) return { open: false };
+		return { open: true, result: await this.enqueue(slot, operation) };
+	}
+
 	async listDraftSkills(cwd: string | null): Promise<ClientResult<"skill/list">> {
 		return this.host.listSkills ? await this.host.listSkills(cwd) : { skills: [] };
 	}

@@ -137,6 +137,82 @@ describe("InteractionBroker", () => {
 		result: { tool: "browser_observe", observation: browserObservation(revision) },
 	});
 
+	it("keeps simultaneous child approvals with the same provider action id separate", async () => {
+		const pendingChanges: boolean[] = [];
+		const broker = new InteractionBroker({
+			serverEpoch: EPOCH,
+			onPendingChange: (_id, value) => pendingChanges.push(value),
+		});
+		const requests: Array<{ interaction: InteractionView; resolve(response: InteractionResponseInput): void }> = [];
+		broker.assign(SESSION_ID, {
+			request: async (request) =>
+				new Promise<InteractionResponseInput>((resolve) => {
+					requests.push({
+						interaction: (request as ServerRpcRequest<"interaction/request">).params.interaction,
+						resolve,
+					});
+				}),
+		});
+		const first = broker.requestPermissionApproval(SESSION_ID, childApproval());
+		const second = broker.requestPermissionApproval(
+			SESSION_ID,
+			childApproval({ actor: { type: "agent", id: "agent-child-2", name: "reviewer", taskId: "task-2" } }),
+		);
+		expect(requests).toHaveLength(2);
+		expect(requests.map(({ interaction }) => [interaction.actorSessionId, interaction.taskId])).toEqual([
+			["agent-child-1", "task-1"],
+			["agent-child-2", "task-2"],
+		]);
+		expect(broker.hasPending(SESSION_ID)).toBe(true);
+		requests[1]!.resolve({
+			interactionId: requests[1]!.interaction.interactionId,
+			kind: "session_permission_approval",
+			choice: "deny-once",
+		});
+		await expect(second).resolves.toMatchObject({ decision: "deny" });
+		expect(broker.hasPending(SESSION_ID)).toBe(true);
+		requests[0]!.resolve({
+			interactionId: requests[0]!.interaction.interactionId,
+			kind: "session_permission_approval",
+			choice: "allow-once",
+		});
+		await expect(first).resolves.toEqual({ decision: "allow" });
+		expect(broker.hasPending(SESSION_ID)).toBe(false);
+		expect(pendingChanges).toEqual([true, false]);
+	});
+
+	it("does not turn page ownership conflict during browser preflight into a generic unavailable approval", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH });
+		broker.assign(SESSION_ID, {
+			async request() {
+				throw Object.assign(new Error("PAGE_IN_USE"), {
+					code: "PAGE_IN_USE",
+					context: { ownerAgentId: "agent-other", recovery: "request_owner_release" },
+				});
+			},
+		});
+		await expect(
+			broker.requestBrowserTool(
+				SESSION_ID,
+				"busy-call",
+				{
+					tool: "browser_act",
+					input: {
+						browserId: "88888888-8888-4888-8888-888888888888",
+						documentId: "99999999-9999-4999-8999-999999999999",
+						snapshotRevision: 1,
+						origin: "https://example.test",
+						intent: "Delete",
+						risk: "destructive",
+						action: { type: "click", target: { elementId: "e1" } },
+					},
+				},
+				new AbortController().signal,
+				{ rootSessionId: SESSION_ID, actorSessionId: "agent-child-1", agentId: "agent-child-1", taskId: "task-1" },
+			),
+		).rejects.toMatchObject({ code: "PAGE_IN_USE", context: { ownerAgentId: "agent-other" } });
+	});
+
 	it("routes an ordinary browser tool directly to the desktop owner", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });
 		await expect(
@@ -257,6 +333,90 @@ describe("InteractionBroker", () => {
 			"browser_act",
 		]);
 	});
+
+	it.each([false, true])(
+		"preflights later-page targets without accepting changed snapshots (changed=%s)",
+		async (changed) => {
+			const broker = new InteractionBroker({ serverEpoch: EPOCH });
+			const peer = new FakePeer();
+			peer.responseFor = (interaction) => ({
+				interactionId: interaction.interactionId,
+				kind: "confirm",
+				confirmed: true,
+			});
+			const firstState = 'e1 button "Other"\n';
+			peer.browserResponseFor = (request) => {
+				const call = request.params.call;
+				if (call.tool !== "browser_observe")
+					return {
+						toolCallId: request.params.toolCallId,
+						result: { tool: "browser_act", details: { status: "cancelled", reason: "user_cancelled" } },
+					};
+				const observation = browserObservation(changed && call.input.cursor ? 5 : 4);
+				return {
+					toolCallId: request.params.toolCallId,
+					result: {
+						tool: "browser_observe",
+						observation: call.input.cursor
+							? {
+									...observation,
+									statePage: {
+										offset: firstState.length,
+										totalChars: firstState.length + observation.state.length,
+									},
+								}
+							: {
+									...observation,
+									state: firstState,
+									statePage: {
+										offset: 0,
+										totalChars: firstState.length + observation.state.length,
+										nextCursor: {
+											documentId: observation.documentId,
+											revision: 4,
+											offset: firstState.length,
+										},
+									},
+								},
+					},
+				};
+			};
+			broker.assign(SESSION_ID, peer);
+			const result = await broker.requestBrowserTool(
+				SESSION_ID,
+				"paged-action",
+				{
+					tool: "browser_act",
+					input: {
+						browserId: "88888888-8888-4888-8888-888888888888",
+						documentId: "99999999-9999-4999-8999-999999999999",
+						snapshotRevision: 4,
+						origin: "https://example.test",
+						intent: "Delete the fixture record",
+						risk: "destructive",
+						action: { type: "click", target: { elementId: "e4" } },
+					},
+				},
+				new AbortController().signal,
+			);
+			if (changed) {
+				expect(result).toMatchObject({
+					tool: "browser_act",
+					details: { status: "stale", reason: "revision_changed" },
+				});
+				expect(peer.requests).toHaveLength(0);
+			} else {
+				expect(result).toMatchObject({ tool: "browser_act", details: { status: "cancelled" } });
+				expect(peer.requests[0]).toMatchObject({
+					kind: "confirm",
+					message: expect.stringContaining("Target: Delete account"),
+				});
+			}
+			expect(peer.browserRequests.map((request) => request.params.call.tool)).toEqual(
+				changed ? ["browser_observe", "browser_observe"] : ["browser_observe", "browser_observe", "browser_act"],
+			);
+		},
+	);
 
 	it("does not dispatch a rejected or unowned browser action", async () => {
 		const broker = new InteractionBroker({ serverEpoch: EPOCH });

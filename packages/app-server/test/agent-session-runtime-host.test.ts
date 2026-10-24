@@ -1,12 +1,21 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { ServerRequestMethod, ServerResult, ServerRpcRequest } from "@metis/app-protocol";
+import {
+	compileSchema,
+	type DomainEvent,
+	DomainEventSchema,
+	type ServerRequestMethod,
+	type ServerResult,
+	type ServerRpcRequest,
+	SessionSnapshotSchema,
+} from "@metis/app-protocol";
 import { AgentSession, importSessionAttachments, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSessionRuntimeHost } from "../src/agent-session-runtime-host.ts";
 import { BROWSER_TOOL_NAMES } from "../src/browser-tools.ts";
 import { InteractionBroker, type InteractionPeer } from "../src/interactions.ts";
+import { opaqueId } from "../src/item-projection.ts";
 import type { OpenedSessionRuntime, SessionRef } from "../src/session-runtime-host.ts";
 
 const EPOCH = "11111111-1111-4111-8111-111111111111";
@@ -104,6 +113,70 @@ describe("AgentSessionRuntimeHost browser tools", () => {
 			}
 		},
 	);
+
+	it("projects the same provider approval ID into live events and reconnect snapshots", async () => {
+		const root = mkdtempSync(join(tmpdir(), "metis-review-identity-"));
+		temporaryRoots.push(root);
+		const cwd = join(root, "project");
+		const agentDir = join(root, "agent");
+		mkdirSync(cwd);
+		mkdirSync(agentDir);
+		const manager = SessionManager.create(cwd, join(agentDir, "sessions"), {
+			id: SESSION_ID,
+			mode: "code",
+			permissionPreset: "ask",
+		});
+		const path = manager.getSessionFile()!;
+		manager.close();
+		const opened = await new AgentSessionRuntimeHost({ agentDir }).open({
+			path,
+			relativePath: basename(path),
+			summary: {
+				sessionId: SESSION_ID,
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd,
+				createdAt: "2026-10-22T00:00:00.000Z",
+				updatedAt: "2026-10-22T00:00:00.000Z",
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		});
+		try {
+			const internal = opened as unknown as { session: AgentSession; onAgentEvent(event: unknown): void };
+			const events: DomainEvent[] = [];
+			opened.subscribe((event) => events.push(event));
+			const original = internal.session.permissionView;
+			const view = vi.spyOn(internal.session, "permissionView", "get");
+			for (const actionId of ["call_01|fc_02", `call_${"x".repeat(150)}`]) {
+				const activeReview = { actionId, reviewer: "user" as const, riskLevel: "medium" as const };
+				view.mockReturnValue({ ...original, activeReview });
+				internal.onAgentEvent({ type: "permission_review_started", ...activeReview });
+				const snapshot = await opened.snapshot(EPOCH, () => 1);
+				expect(compileSchema(SessionSnapshotSchema).Check(snapshot)).toBe(true);
+				expect(snapshot.activeReview?.actionId).toBe(opaqueId(actionId, "tool"));
+				internal.onAgentEvent({ type: "permission_review_completed", ...activeReview, outcome: "deny" });
+				const reviewEvents = events
+					.filter(
+						(event) =>
+							event.type === "session/permissionReviewStarted" ||
+							event.type === "session/permissionReviewCompleted",
+					)
+					.slice(-2);
+				expect(reviewEvents).toHaveLength(2);
+				for (const event of reviewEvents) {
+					expect(compileSchema(DomainEventSchema).Check(event)).toBe(true);
+					expect(event).toMatchObject({ actionId: snapshot.activeReview?.actionId });
+				}
+				expect(internal.session.permissionView.activeReview?.actionId).toBe(actionId);
+			}
+		} finally {
+			await opened.close();
+		}
+	}, 30_000);
 
 	it("keeps one browser tool registry across owner attach, release, and reconnect", async () => {
 		const root = mkdtempSync(join(tmpdir(), "metis-browser-runtime-host-"));
