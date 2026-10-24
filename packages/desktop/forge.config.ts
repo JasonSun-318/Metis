@@ -11,6 +11,7 @@ import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-nati
 import { namedHookWithTaskFn, PluginBase } from "@electron-forge/plugin-base";
 import { WebpackPlugin } from "@electron-forge/plugin-webpack";
 import type { ForgeConfig, ForgeMultiHookMap } from "@electron-forge/shared-types";
+import { isSignedBundledNativeTool, signBundledNativeTools } from "./scripts/native-tool-signing.ts";
 
 /** Forge 7's published fuse plugin still peers on fuses v1; Electron 43 needs v2's ninth fuse. */
 class CompleteFusesPlugin extends PluginBase<FuseConfig> {
@@ -59,11 +60,13 @@ const macosRelease = completeCredentialGroup([
 const macosSign = macosRelease
 	? {
 			identity: macosRelease.MACOS_SIGN_IDENTITY,
+			ignore: isSignedBundledNativeTool,
 			optionsForFile: () => ({ hardenedRuntime: true }),
 		}
 	: process.platform === "darwin"
 		? {
 				identity: "-",
+				ignore: isSignedBundledNativeTool,
 				identityValidation: false,
 				preAutoEntitlements: false,
 				preEmbedProvisioningProfile: false,
@@ -151,6 +154,36 @@ async function stageRipgrepRuntime(buildPath: string, platform: string, arch: st
 	if (platformTag !== "win32") await chmod(target, 0o755);
 }
 
+async function signNativeToolRuntime(buildPath: string, platform: string, arch: string): Promise<void> {
+	if (platform !== "darwin" && platform !== "mas") return;
+	const directory = path.join(
+		buildPath, ".webpack", arch, "app-server", "node_modules", "@metis", "coding-agent",
+		"dist", "vendor", "tools", `darwin-${arch}`,
+	);
+	await signBundledNativeTools(directory, async (binary) => {
+		const entitlementFile = platform === "mas"
+			? "default.mas.child.plist"
+			: path.basename(binary) === "officecli" ? "default.darwin.plist" : undefined;
+		const args = [
+			"--force", "--sign", macosRelease?.MACOS_SIGN_IDENTITY ?? "-",
+			"--identifier", `ai.metis.tool.${path.basename(binary)}`,
+			// OfficeCLI needs JIT; rg/fd do not need the Electron runtime entitlements.
+			...(macosRelease ? ["--options", "runtime", "--timestamp",
+				...(entitlementFile ? ["--entitlements", path.join(repoRoot, "node_modules", "@electron", "osx-sign", "entitlements", entitlementFile)] : [])]
+				: ["--timestamp=none"]), binary,
+		];
+		await new Promise<void>((resolve, reject) => {
+			const child = spawn("/usr/bin/codesign", args, { stdio: "inherit" });
+			child.once("error", reject);
+			child.once("exit", (code) => {
+				if (code === 0) resolve();
+				else reject(new Error(`Native-tool signing failed: ${path.basename(binary)}`));
+			});
+		});
+	});
+	console.log("Signed bundled native tools and sealed their manifest before ASAR creation");
+}
+
 const config: ForgeConfig = {
 	packagerConfig: {
 		asar: { unpackDir: "{.webpack/main/node_modules/node-pty,.webpack/main/native-tools,.webpack/app-server/node_modules/@metis/coding-agent/dist/vendor}" },
@@ -192,6 +225,7 @@ const config: ForgeConfig = {
 				stageNodePtyRuntime(buildPath, platform, arch),
 				stageRipgrepRuntime(buildPath, platform, arch),
 			]);
+			await signNativeToolRuntime(buildPath, platform, arch);
 		},
 	},
 	makers: [

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
@@ -33,6 +34,30 @@ const resourcesRoot =
 	process.platform === "darwin"
 		? path.join(packageRoot, "Metis.app", "Contents", "Resources")
 		: path.join(packageRoot, "resources");
+if (process.platform === "darwin" || process.platform === "win32") {
+	const nativeRoot = path.join(resourcesRoot, "app.asar.unpacked", ".webpack", "app-server", "node_modules", "@metis", "coding-agent", "dist", "vendor", "tools", `${process.platform}-${expectedArch}`);
+	const manifest = JSON.parse(await readFile(path.join(nativeRoot, "manifest.json"), "utf8"));
+	for (const name of ["rg", "fd", "officecli"]) {
+		const entry = manifest.tools?.[name];
+		const binary = `${name}${process.platform === "win32" ? ".exe" : ""}`;
+		if (entry?.binary !== binary) throw new Error(`Invalid packaged native-tool entry: ${name}`);
+		if (manifest.schemaVersion !== 1 || manifest.pair !== `${process.platform}-${expectedArch}`) throw new Error("Invalid packaged native-tool manifest");
+		const digest = createHash("sha256").update(await readFile(path.join(nativeRoot, binary))).digest("hex");
+		if (digest !== entry.binarySha256) throw new Error(`Packaged native-tool integrity mismatch after signing: ${name}`);
+		if (process.platform === "darwin") {
+			const signed = spawnSync("/usr/bin/codesign", ["-dv", path.join(nativeRoot, binary)], { encoding: "utf8" });
+			if (signed.status !== 0 || !signed.stderr.split("\n").includes(`Identifier=ai.metis.tool.${name}`))
+				throw new Error(`Packaged native tool was not signed before its manifest was sealed: ${name}`);
+		}
+		// OfficeCLI is exercised by checkSkillRuntime's actual document create/read below.
+		if (name !== "officecli") {
+			const smoke = spawnSync(path.join(nativeRoot, binary), ["--version"], { encoding: "utf8", timeout: 5_000 });
+			if (smoke.status !== 0) throw new Error(`Packaged native-tool execution failed: ${name}`);
+		}
+	}
+	console.log("Verified signed native-tool manifest hashes (rg, fd, officecli)");
+}
+
 const appAsar = path.join(resourcesRoot, "app.asar");
 await checkSkillRuntime({ packageDir: path.join(appAsar, ".webpack/app-server/node_modules/@metis/coding-agent") });
 const executable =
