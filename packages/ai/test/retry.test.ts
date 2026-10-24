@@ -11,6 +11,23 @@ const bunFetchSocketClosedMessage =
 	"The socket connection was closed unexpectedly. For more information, pass `verbose: true` in the second argument to fetch()";
 
 describe("provider retry classification", () => {
+	it.each(["ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "UND_ERR_SOCKET", "408 Request Timeout"])(
+		"retries transient transport failures (%s)",
+		(errorMessage) => {
+			expect(isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBe(true);
+		},
+	);
+
+	it.each([
+		"401 Unauthorized: upstream 503",
+		"403 Forbidden",
+		"400 Invalid request: retry this request",
+		"invalid_api_key",
+		"503 billing_scope_unavailable",
+		"429 insufficient_quota",
+	])("does not retry permanent request or account failures (%s)", (errorMessage) => {
+		expect(isRetryableAssistantError(fauxAssistantMessage("", { stopReason: "error", errorMessage }))).toBe(false);
+	});
 	it("matches explicit provider retry guidance", () => {
 		expect(
 			isRetryableAssistantError(

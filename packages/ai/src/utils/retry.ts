@@ -5,6 +5,13 @@ function buildProviderErrorPattern(patterns: readonly string[]): RegExp {
 }
 
 const NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN = buildProviderErrorPattern([
+	"\\b(?:400|401|403|404|422)\\b",
+	"invalid[ _-]?api[ _-]?key",
+	"unauthorized",
+	"forbidden",
+	"authentication[ _-]?(?:failed|error|required)",
+	"invalid[ _-]?request",
+	"unsupported[ _-]?parameter",
 	// OpenCode Go/free-tier limits returned as 429 JSON error types by OpenCode's
 	// Zen API. These are subscription/account limits, not transient throttles.
 	"GoUsageLimitError",
@@ -28,12 +35,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"overloaded",
 	"rate.?limit",
 	"too many requests",
-	"429",
-	"500",
-	"502",
-	"503",
-	"504",
-	"524",
+	"\\b(?:408|429|500|502|503|504|524)\\b",
 	"service.?unavailable",
 	"server.?error",
 	"internal.?error",
@@ -58,6 +60,7 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"timed? out",
 	"timeout",
 	"terminated",
+	"\\b(?:ECONNRESET|ECONNREFUSED|ECONNABORTED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|EPIPE|UND_ERR_(?:CONNECT_TIMEOUT|HEADERS_TIMEOUT|BODY_TIMEOUT|SOCKET))\\b",
 
 	// WebSocket transports can report close/error text instead of HTTP/fetch text.
 	"websocket.?closed",
