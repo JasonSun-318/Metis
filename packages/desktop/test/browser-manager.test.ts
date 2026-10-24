@@ -305,6 +305,170 @@ function browserHarness(
 }
 
 describe("BrowserManager", () => {
+	it("keeps page ownership across calls, allows distinct pages in parallel, and requires explicit release", async () => {
+		const harness = browserHarness();
+		const first = "10000000-0000-4000-8000-000000000081";
+		const second = "10000000-0000-4000-8000-000000000082";
+		const actor = (id: string) => ({
+			rootSessionId: SESSION_ID,
+			actorSessionId: id,
+			agentId: id,
+			taskId: `task-${id}`,
+		});
+		const a = actor("agent-a"),
+			b = actor("agent-b");
+		const signal = new AbortController().signal;
+		for (const browserId of [first, second])
+			harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		let releaseObservation!: () => void;
+		const gate = new Promise<void>((resolve) => {
+			releaseObservation = resolve;
+		});
+		harness.controllers.get(first)!.observe.mockImplementationOnce(async () => {
+			await gate;
+			return {
+				browserId: first,
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+				documentId: "30000000-0000-4000-8000-000000000001",
+				revision: 1,
+				change: "full",
+				url: "",
+				title: "Fixture",
+				loading: false,
+				state: "e1 button Continue",
+			};
+		});
+		const firstObservation = harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_observe", input: { browserId: first } },
+			signal,
+			a,
+		);
+		await expect(
+			harness.manager.executeTool(SESSION_ID, { tool: "browser_observe", input: { browserId: first } }, signal, b),
+		).rejects.toMatchObject({
+			rpcErrorName: "PAGE_IN_USE",
+			context: { ownerAgentId: "agent-a", recovery: "request_owner_release" },
+		});
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_tabs", input: { action: "release", browserId: first } },
+				signal,
+				a,
+			),
+		).rejects.toMatchObject({ rpcErrorName: "BUSY" });
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_tabs", input: { action: "release", browserId: first } },
+				signal,
+			),
+		).rejects.toMatchObject({ rpcErrorName: "BUSY" });
+		releaseObservation();
+		await Promise.all([
+			firstObservation,
+			harness.manager.executeTool(SESSION_ID, { tool: "browser_observe", input: { browserId: second } }, signal, b),
+		]);
+		expect(harness.controllers.get(first)!.observe).toHaveBeenCalledTimes(1);
+		await expect(
+			harness.manager.executeTool(
+				SESSION_ID,
+				{ tool: "browser_tabs", input: { action: "close", browserId: first } },
+				signal,
+				b,
+			),
+		).rejects.toMatchObject({ rpcErrorName: "PAGE_IN_USE" });
+		const listed = await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "list" } },
+			signal,
+			a,
+		);
+		expect(listed).toMatchObject({
+			details: {
+				tabs: [
+					{ browserId: first, ownerAgentId: "agent-a" },
+					{ browserId: second, ownerAgentId: "agent-b" },
+				],
+			},
+		});
+		await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "release", browserId: first } },
+			signal,
+			a,
+		);
+		await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_observe", input: { browserId: first } },
+			signal,
+			b,
+		);
+		expect(harness.controllers.get(first)!.observe).toHaveBeenCalledTimes(2);
+		await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "release", browserId: first } },
+			signal,
+		);
+		await harness.manager.executeTool(SESSION_ID, { tool: "browser_observe", input: { browserId: first } }, signal);
+		expect(harness.controllers.get(first)!.invalidate).toHaveBeenCalledTimes(2);
+		await expect(
+			harness.manager.executeTool(
+				OTHER_SESSION_ID,
+				{ tool: "browser_observe", input: { browserId: first } },
+				signal,
+				{ ...b, rootSessionId: OTHER_SESSION_ID },
+			),
+		).rejects.toMatchObject({ rpcErrorName: "NOT_FOUND" });
+		harness.manager.closeAll();
+	});
+
+	it("blocks every actor in the task tree immediately after user takeover without dispatching another action", async () => {
+		const harness = browserHarness();
+		const browserId = "10000000-0000-4000-8000-000000000083";
+		harness.manager.create({ sessionId: SESSION_ID, browserId, profileId: DEFAULT_BROWSER_PROFILE_ID });
+		const controller = harness.controllers.get(browserId)!;
+		controller.act.mockImplementation(
+			(_input: unknown, signal: AbortSignal) =>
+				new Promise((_resolve, reject) => {
+					signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+				}),
+		);
+		const input = {
+			browserId,
+			documentId: "30000000-0000-4000-8000-000000000001",
+			snapshotRevision: 1,
+			origin: "https://example.test",
+			intent: "Click",
+			risk: "ordinary" as const,
+			action: { type: "click" as const, target: { elementId: "e1" } },
+		};
+		const actor = { rootSessionId: SESSION_ID, actorSessionId: "agent-a", agentId: "agent-a", taskId: "task-a" };
+		const signal = new AbortController().signal;
+		const running = harness.manager.executeTool(SESSION_ID, { tool: "browser_act", input }, signal, actor);
+		await vi.waitFor(() => expect(controller.act).toHaveBeenCalledTimes(1));
+		harness.manager.takeControl(SESSION_ID, browserId);
+		for (const identity of [actor, { ...actor, actorSessionId: "agent-b", agentId: "agent-b" }, undefined]) {
+			await expect(
+				harness.manager.executeTool(SESSION_ID, { tool: "browser_act", input }, signal, identity),
+			).rejects.toMatchObject({
+				rpcErrorName: "PAGE_IN_USE",
+				context: { recovery: "wait_for_user" },
+			});
+		}
+		expect(controller.act).toHaveBeenCalledTimes(1);
+		harness.manager.resolveHandoff(SESSION_ID, browserId, "complete");
+		await expect(running).resolves.toMatchObject({ details: { status: "completed" } });
+		await harness.manager.executeTool(
+			SESSION_ID,
+			{ tool: "browser_tabs", input: { action: "release", browserId } },
+			signal,
+			actor,
+		);
+		harness.manager.closeAll();
+	});
+
 	it("coalesces rapid agent activity and releases the tab after 100 completed actions", async () => {
 		vi.useFakeTimers();
 		try {

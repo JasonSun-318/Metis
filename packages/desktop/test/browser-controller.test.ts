@@ -6,6 +6,7 @@ import {
 	type BrowserControllerDependencies,
 	type BrowserDebuggerTransport,
 } from "../src/main/browser-controller.ts";
+import { SELECT_NATIVE_OPTION } from "../src/main/browser-native-select.ts";
 
 const BROWSER_ID = "88888888-8888-4888-8888-888888888888";
 const PROFILE_ID = "00000000-0000-4000-8000-000000000001";
@@ -81,6 +82,7 @@ function fixture(
 ) {
 	const debug = new FakeDebugger();
 	debug.responses.set("Accessibility.getFullAXTree", axTree());
+	debug.responses.set("DOM.getNodeForLocation", { backendNodeId: 8 });
 	debug.responses.set("DOM.getBoxModel", { model: { content: [10, 20, 30, 20, 30, 40, 10, 40] } });
 	debug.responses.set("Page.getLayoutMetrics", { cssVisualViewport: { clientWidth: 800, clientHeight: 600 } });
 	const page = { url: "https://example.test/page", title: "Fixture", loading: false };
@@ -144,6 +146,169 @@ function action(
 }
 
 describe("BrowserController", () => {
+	it("discards frame replies from an invalidated document before publishing elements", async () => {
+		const { controller, debug, emit } = fixture();
+		let first = true;
+		debug.handler = async (method) => {
+			if (method === "Accessibility.getFullAXTree" && first) {
+				first = false;
+				emit("Page.frameNavigated", { frame: { id: "new-frame", loaderId: "new-loader" } });
+				return axTree("Old document action");
+			}
+			if (method === "Accessibility.getFullAXTree") return axTree("New document action");
+			return debug.responses.get(method) ?? {};
+		};
+		const current = await observe(controller);
+		expect(current.state).toContain("New document action");
+		expect(current.state).not.toContain("Old document action");
+		expect(debug.commands.filter(({ method }) => method === "Accessibility.getFullAXTree")).toHaveLength(2);
+		controller.close();
+	});
+	it("reads local frame trees separately and prunes remote frame subtrees from the parent session", async () => {
+		const { controller, debug, emit } = fixture();
+		const remote = { frame: { id: "remote" }, childFrames: [{ frame: { id: "remote-child" } }] };
+		debug.handler = async (method, params, sessionId) => {
+			if (method === "Page.getFrameTree")
+				return {
+					frameTree: sessionId
+						? remote
+						: { frame: { id: "main" }, childFrames: [{ frame: { id: "local" } }, remote] },
+				};
+			if (method === "Accessibility.getFullAXTree") {
+				const frame = String(params.frameId);
+				return {
+					nodes: [
+						{ nodeId: "root", role: { value: "RootWebArea" }, name: { value: frame } },
+						{
+							nodeId: "field",
+							parentId: "root",
+							backendDOMNodeId: frame === "local" ? 20 : 30,
+							role: { value: frame === "local" ? "textbox" : "button" },
+							name: { value: `Control ${frame}` },
+						},
+						{
+							nodeId: "text",
+							parentId: "field",
+							role: { value: "StaticText" },
+							name: { value: frame === "local" ? "SYNTHETIC_SECRET" : "Public text" },
+						},
+					],
+				};
+			}
+			return debug.responses.get(method) ?? {};
+		};
+		emit("Target.attachedToTarget", { sessionId: "remote-session" });
+		const first = await observe(controller);
+		expect(first.state).not.toContain("SYNTHETIC_SECRET");
+		for (const frame of ["main", "local", "remote", "remote-child"])
+			expect(first.state).toContain(`Control ${frame}`);
+		expect(debug.commands.filter(({ method }) => method === "Accessibility.getFullAXTree")).toEqual([
+			{ method: "Accessibility.getFullAXTree", params: { frameId: "main" } },
+			{ method: "Accessibility.getFullAXTree", params: { frameId: "local" } },
+			{ method: "Accessibility.getFullAXTree", params: { frameId: "remote" }, sessionId: "remote-session" },
+			{ method: "Accessibility.getFullAXTree", params: { frameId: "remote-child" }, sessionId: "remote-session" },
+		]);
+		expect((await observe(controller)).revision).toBe(first.revision);
+		controller.close();
+	});
+
+	it("never sends arbitrary Runtime code, including the select function on an unregistered object", async () => {
+		const { controller, debug } = fixture();
+		const transport = controller as unknown as {
+			command(
+				method: string,
+				params: Record<string, unknown>,
+				sessionId: undefined,
+				signal: AbortSignal,
+			): Promise<unknown>;
+		};
+		for (const [method, params] of [
+			["Runtime.evaluate", { expression: "document.body.innerHTML" }],
+			[
+				"Runtime.callFunctionOn",
+				{
+					objectId: "unknown",
+					functionDeclaration: SELECT_NATIVE_OPTION,
+					arguments: [{ value: "x" }],
+					returnByValue: true,
+					userGesture: true,
+				},
+			],
+			["Runtime.releaseObject", { objectId: "unknown" }],
+		] as const)
+			await expect(transport.command(method, params, undefined, new AbortController().signal)).rejects.toThrow(
+				"forbidden",
+			);
+		expect(debug.commands).toHaveLength(0);
+		controller.close();
+	});
+
+	it("releases the native select object when cancellation interrupts its operation", async () => {
+		const { controller, debug } = fixture();
+		debug.responses.set("Page.getFrameTree", { frameTree: { frame: { id: "main" } } });
+		debug.responses.set("Page.createIsolatedWorld", { executionContextId: 42 });
+		debug.responses.set("DOM.resolveNode", { object: { objectId: "select-object" } });
+		const first = await observe(controller);
+		const abort = new AbortController();
+		debug.handler = async (method) => {
+			if (method === "Runtime.callFunctionOn") {
+				abort.abort(new Error("Selection cancelled"));
+				return new Promise(() => {});
+			}
+			return debug.responses.get(method) ?? {};
+		};
+		await expect(
+			controller.act(
+				action(first, { type: "select", elementId: "e1", value: 'literal ";alert(1)//' }),
+				abort.signal,
+			),
+		).rejects.toThrow("Selection cancelled");
+		expect(debug.commands.filter(({ method }) => method === "Runtime.releaseObject")).toEqual([
+			{ method: "Runtime.releaseObject", params: { objectId: "select-object" } },
+		]);
+		expect(debug.commands.find(({ method }) => method === "Runtime.callFunctionOn")?.params).toMatchObject({
+			functionDeclaration: SELECT_NATIVE_OPTION,
+			arguments: [{ value: 'literal ";alert(1)//' }],
+		});
+		controller.close();
+	});
+
+	it("releases a composite shortcut exactly once when cancellation follows key down", async () => {
+		const { controller, debug } = fixture();
+		const first = await observe(controller);
+		const abort = new AbortController();
+		debug.handler = async (method, params) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown")
+				abort.abort(new Error("Chord cancelled"));
+			return debug.responses.get(method) ?? {};
+		};
+		await expect(
+			controller.act(action(first, { type: "press", key: "Control+Shift+ArrowLeft" }), abort.signal),
+		).rejects.toThrow("Chord cancelled");
+		expect(
+			debug.commands
+				.filter(({ method }) => method === "Input.dispatchKeyEvent")
+				.map(({ params }) => ({ type: params.type, key: params.key, modifiers: params.modifiers })),
+		).toEqual([
+			{ type: "rawKeyDown", key: "ArrowLeft", modifiers: 10 },
+			{ type: "keyUp", key: "ArrowLeft", modifiers: 10 },
+		]);
+		controller.close();
+	});
+	it.each(["true", "false", "mixed"])("preserves Chromium's string checked state %s", async (checked) => {
+		const { controller, debug } = fixture();
+		const tree = axTree();
+		debug.responses.set("Accessibility.getFullAXTree", {
+			nodes: tree.nodes.map((node) =>
+				node.nodeId === "checkbox"
+					? { ...node, properties: [{ name: "checked", value: { value: checked } }] }
+					: node,
+			),
+		});
+		expect((await observe(controller)).state).toContain(`checked=${checked}`);
+		controller.close();
+	});
+
 	it("keeps 100 observe/action cycles bounded and releases debugger subscriptions", async () => {
 		let sequence = 0;
 		const created = fixture();
@@ -195,6 +360,40 @@ describe("BrowserController", () => {
 		expect(result.state).toContain('e3 checkbox "Remember" [enabled, checked=true, selected=false, actions=click]');
 		expect(result.state).not.toContain("secret");
 		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
+	});
+
+	it("redacts editable descendants through ignored ancestors before building diffs", async () => {
+		const { controller, debug } = fixture();
+		const tree = {
+			nodes: [
+				...axTree().nodes,
+				{ nodeId: "ignored", parentId: "input", ignored: true },
+				{ nodeId: "text", parentId: "ignored", role: { value: "StaticText" }, name: { value: "private OTP" } },
+				{
+					nodeId: "rich",
+					role: { value: "generic" },
+					name: { value: "Editor" },
+					properties: [{ name: "editable", value: { value: "richtext" } }],
+				},
+				{
+					nodeId: "rich-text",
+					parentId: "rich",
+					role: { value: "StaticText" },
+					name: { value: "private document" },
+				},
+				{ nodeId: "article", role: { value: "StaticText" }, name: { value: "Public article" } },
+				{ nodeId: "select", role: { value: "combobox" }, name: { value: "Theme" } },
+				{ nodeId: "option", parentId: "select", role: { value: "option" }, name: { value: "Dark" } },
+			],
+		};
+		debug.responses.set("Accessibility.getFullAXTree", tree);
+		const first = await observe(controller);
+		expect(first.state).not.toContain("private");
+		for (const label of ["Email", "Editor", "Public article", "Dark"]) expect(first.state).toContain(label);
+		tree.nodes.find((node) => node.nodeId === "text")!.name = { value: "private changed OTP" };
+		const second = await observe(controller, { sinceRevision: first.revision });
+		expect(second).toMatchObject({ change: "unchanged", state: "" });
+		controller.close();
 	});
 
 	it("keeps only current and previous state for diff and unchanged observations", async () => {
@@ -286,7 +485,7 @@ describe("BrowserController", () => {
 		expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
 	});
 
-	it("fails closed when the same document changes after target resolution", async () => {
+	it("keeps strict mutation checks for higher-risk clicks after target resolution", async () => {
 		const created = fixture();
 		const first = await observe(created.controller);
 		created.debug.handler = async (method, _params, sessionId) => {
@@ -298,18 +497,125 @@ describe("BrowserController", () => {
 
 		await expect(
 			created.controller.act(
-				action(first, { type: "click", target: { elementId: "e2" } }),
+				{ ...action(first, { type: "click", target: { elementId: "e2" } }), risk: "external_side_effect" },
 				new AbortController().signal,
 			),
 		).resolves.toMatchObject({ status: "stale", reason: "revision_changed" });
 		expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
 	});
 
+	it("allows a stable ordinary target despite unrelated changes during each AX read", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		let tick = 0;
+		created.debug.handler = async (method) => {
+			if (method === "Accessibility.getFullAXTree") {
+				created.emit("DOM.characterDataModified", { nodeId: 999 });
+				return {
+					nodes: [
+						...axTree().nodes,
+						{ nodeId: "ticker", role: { value: "StaticText" }, name: { value: String(++tick) } },
+					],
+				};
+			}
+			return created.debug.responses.get(method) ?? {};
+		};
+		expect(
+			await created.controller.act(
+				action(first, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).toMatchObject({ status: "completed" });
+		expect(created.debug.commands.filter(({ params }) => params.type === "mousePressed")).toHaveLength(1);
+	});
+
+	it.each(["replacement", "label", "checked", "disabled", "url", "ancestor"])(
+		"rejects changed target %s even for an ordinary click",
+		async (change) => {
+			const created = fixture();
+			const first = await observe(created.controller);
+			const nodes = axTree().nodes.map((node) => {
+				if (change === "ancestor" && node.nodeId === "root")
+					return { ...node, name: { value: "Different context" } };
+				if (node.nodeId !== "button") return node;
+				if (change === "replacement") return { ...node, backendDOMNodeId: 88 };
+				if (change === "label") return { ...node, name: { value: "Different action" } };
+				return {
+					...node,
+					properties: [{ name: change, value: { value: change === "url" ? "https://different.test/" : true } }],
+				};
+			});
+			created.debug.responses.set("Accessibility.getFullAXTree", { nodes });
+			const result = await created.controller.act(
+				action(first, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			);
+			expect(result.status).toBe("stale");
+			expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
+		},
+	);
+
+	it("rechecks target semantics after hover before activation", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.handler = async (method, params) => {
+			if (method === "Input.dispatchMouseEvent" && params.type === "mouseMoved")
+				created.debug.responses.set("Accessibility.getFullAXTree", axTree("Changed on hover"));
+			return created.debug.responses.get(method) ?? {};
+		};
+		expect(
+			await created.controller.act(
+				action(first, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).toMatchObject({ status: "stale", reason: "revision_changed" });
+		expect(created.debug.commands.filter(({ params }) => params.type === "mousePressed")).toHaveLength(0);
+	});
+
+	it.each([
+		{ inputAction: { type: "click", target: { x: 20, y: 30 } }, risk: "ordinary" },
+		{ inputAction: { type: "press", key: "Enter" }, risk: "ordinary" },
+		{ inputAction: { type: "click", target: { elementId: "e2" } }, risk: "financial" },
+	] satisfies Array<{ inputAction: BrowserActInput["action"]; risk: BrowserActInput["risk"] }>)(
+		"retains full-state freshness for $inputAction.type with $risk risk",
+		async ({ inputAction, risk }) => {
+			const created = fixture();
+			const first = await observe(created.controller);
+			created.debug.responses.set("Accessibility.getFullAXTree", {
+				nodes: [...axTree().nodes, { nodeId: "ticker", role: { value: "StaticText" }, name: { value: "Tick" } }],
+			});
+			expect(
+				await created.controller.act({ ...action(first, inputAction), risk }, new AbortController().signal),
+			).toMatchObject({ status: "stale", reason: "revision_changed" });
+			expect(created.debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(0);
+		},
+	);
+
+	it("falls back to full paged state for an oversized diff and explicitly resets an expired cursor", async () => {
+		const created = fixture();
+		const first = await observe(created.controller);
+		created.debug.responses.set("Accessibility.getFullAXTree", {
+			nodes: Array.from({ length: 800 }, (_, i) => ({
+				nodeId: String(i),
+				role: { value: "StaticText" },
+				name: { value: `Item ${i} ${"text ".repeat(40)}` },
+			})),
+		});
+		const large = await observe(created.controller, { sinceRevision: first.revision });
+		expect(large.change).toBe("full");
+		expect(large.statePage?.nextCursor).toBeDefined();
+		expect(JSON.stringify(large).length).toBeLessThan(50_000);
+		created.debug.responses.set("Accessibility.getFullAXTree", axTree("New page state"));
+		const restarted = await observe(created.controller, { cursor: large.statePage!.nextCursor });
+		expect(restarted).toMatchObject({ change: "full", cursorReset: true, statePage: { offset: 0 } });
+		expect(restarted.state).toContain("New page state");
+	});
+
 	it("finishes an atomic key sequence when keyDown navigates", async () => {
 		const created = fixture();
 		const first = await observe(created.controller);
 		created.debug.handler = async (method, params, sessionId) => {
-			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown") {
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyDown") {
 				created.page.url = "https://example.test/next";
 				created.emit("Page.frameNavigated", { frame: { id: "main", loaderId: "loader-2" } });
 			}
@@ -325,7 +631,7 @@ describe("BrowserController", () => {
 			created.debug.commands
 				.filter(({ method }) => method === "Input.dispatchKeyEvent")
 				.map(({ params }) => params.type),
-		).toEqual(["rawKeyDown", "keyUp"]);
+		).toEqual(["keyDown", "keyUp"]);
 	});
 
 	it("rechecks document identity after focus before inserting text", async () => {
@@ -386,7 +692,7 @@ describe("BrowserController", () => {
 		const keyObservation = await observe(keyFixture.controller);
 		const keyAbort = new AbortController();
 		keyFixture.debug.handler = async (method, params, sessionId) => {
-			if (method === "Input.dispatchKeyEvent" && params.type === "rawKeyDown") {
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyDown") {
 				keyAbort.abort(new DOMException("Turn interrupted", "AbortError"));
 			}
 			return (
@@ -402,7 +708,7 @@ describe("BrowserController", () => {
 			keyFixture.debug.commands
 				.filter(({ method }) => method === "Input.dispatchKeyEvent")
 				.map(({ params }) => params.type),
-		).toEqual(["rawKeyDown", "keyUp"]);
+		).toEqual(["keyDown", "keyUp"]);
 
 		const pointerFixture = fixture();
 		const pointerObservation = await observe(pointerFixture.controller);
@@ -454,6 +760,7 @@ describe("BrowserController", () => {
 
 	it("uses DOM geometry and Input domain commands for click and text actions", async () => {
 		const { controller, debug } = fixture();
+		debug.responses.set("DOM.getNodeForLocation", { backendNodeId: 7 });
 		const first = await observe(controller);
 		const clicked = await controller.act(
 			action(first, { type: "click", target: { elementId: "e1" } }),
@@ -502,6 +809,64 @@ describe("BrowserController", () => {
 			params: { type: "mousePressed", x: 20, y: 30, button: "left", buttons: 1, clickCount: 1 },
 		});
 		expect(debug.commands.filter(({ method }) => method === "Input.dispatchKeyEvent")).toHaveLength(0);
+	});
+
+	it("rejects obscured and disabled elements without pointer activation", async () => {
+		for (const disabled of [false, true]) {
+			const { controller, debug } = fixture();
+			const tree = axTree();
+			if (disabled) tree.nodes[2]!.properties = [{ name: "disabled", value: { value: true } }];
+			debug.responses.set("Accessibility.getFullAXTree", tree);
+			debug.responses.set("DOM.getNodeForLocation", { backendNodeId: disabled ? 8 : 90 });
+			debug.responses.set("DOM.describeNode", { node: { backendNodeId: 8 } });
+			const current = await observe(controller);
+			expect(
+				await controller.act(
+					action(current, { type: "click", target: { elementId: "e2" } }),
+					new AbortController().signal,
+				),
+			).toMatchObject({ status: "stale", reason: "element_not_interactable" });
+			expect(
+				debug.commands.some(
+					({ method, params }) => method === "Input.dispatchMouseEvent" && params.type === "mousePressed",
+				),
+			).toBe(false);
+		}
+	});
+
+	it("converts viewport pointer coordinates to page coordinates for hit testing", async () => {
+		const { controller, debug } = fixture();
+		debug.responses.set("Page.getLayoutMetrics", {
+			cssLayoutViewport: { pageX: 40, pageY: 1800, clientWidth: 800, clientHeight: 600 },
+		});
+		const current = await observe(controller);
+		expect(
+			await controller.act(
+				action(current, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).toMatchObject({ status: "completed" });
+		expect(debug.commands).toContainEqual({
+			method: "DOM.getNodeForLocation",
+			params: { x: 60, y: 1830, includeUserAgentShadowDOM: true },
+		});
+		expect(debug.commands).toContainEqual({
+			method: "Input.dispatchMouseEvent",
+			params: { type: "mousePressed", x: 20, y: 30, button: "left", buttons: 1, clickCount: 1 },
+		});
+	});
+
+	it("allows a hit on the intended element's descendant", async () => {
+		const { controller, debug } = fixture();
+		debug.responses.set("DOM.getNodeForLocation", { backendNodeId: 81 });
+		debug.responses.set("DOM.describeNode", { node: { backendNodeId: 8, children: [{ backendNodeId: 81 }] } });
+		const current = await observe(controller);
+		expect(
+			await controller.act(
+				action(current, { type: "click", target: { elementId: "e2" } }),
+				new AbortController().signal,
+			),
+		).toMatchObject({ status: "completed" });
 	});
 
 	it("returns a fresh post-action observation after CDP pointer input", async () => {
@@ -608,16 +973,41 @@ describe("BrowserController", () => {
 		expect(Date.now() - startedAt).toBeGreaterThanOrEqual(10);
 	});
 
-	it("covers hover, press, scroll, drag, select, and dialog with native CDP commands", async () => {
+	it.each([
+		[{ result: { value: { failure: "selection_changed" } } }, "selection_changed", "dispatched"],
+		[{ result: { value: { failure: "option_unavailable" } } }, "option_unavailable", "not_started"],
+		[{ result: { value: { failure: "select_changed" } } }, "select_changed", "unknown"],
+		[{ result: { value: { failure: "PRIVATE_PAGE_VALUE" } } }, "selection_unconfirmed", "unknown"],
+		[{ exceptionDetails: { text: "PRIVATE_PAGE_VALUE" } }, "selection_unconfirmed", "unknown"],
+	])("preserves safe selection failure receipts and releases resolved objects", async (reply, reason, execution) => {
 		const { controller, debug } = fixture();
-		debug.responses.set("DOM.describeNode", {
-			node: {
-				children: [
-					{ attributes: ["value", "one"], nodeValue: "One" },
-					{ attributes: ["value", "two"], nodeValue: "Two" },
-				],
-			},
-		});
+		debug.responses.set("Page.getFrameTree", { frameTree: { frame: { id: "main-frame" } } });
+		debug.responses.set("Page.createIsolatedWorld", { executionContextId: 42 });
+		debug.responses.set("DOM.resolveNode", { object: { objectId: "select-object" } });
+		debug.responses.set("Runtime.callFunctionOn", reply);
+		try {
+			const before = await observe(controller);
+			const result = await controller.act(
+				action(before, { type: "select", elementId: "e1", value: "PRIVATE_CHOICE" }),
+				new AbortController().signal,
+			);
+			expect(result).toMatchObject({ status: "failed", reason, execution, recovery: "observe" });
+			expect(JSON.stringify(result)).not.toContain("PRIVATE_");
+			expect(debug.commands).toContainEqual({
+				method: "Runtime.releaseObject",
+				params: { objectId: "select-object" },
+			});
+		} finally {
+			controller.close();
+		}
+	});
+
+	it("covers native inputs and limits select runtime execution to a resolved isolated object", async () => {
+		const { controller, debug, emit } = fixture();
+		debug.responses.set("Page.getFrameTree", { frameTree: { frame: { id: "main-frame" } } });
+		debug.responses.set("Page.createIsolatedWorld", { executionContextId: 42 });
+		debug.responses.set("DOM.resolveNode", { object: { objectId: "select-object" } });
+		debug.responses.set("Runtime.callFunctionOn", { result: { value: { selected: true } } });
 		let current = await observe(controller);
 		const run = async (nextAction: BrowserActInput["action"]) => {
 			const result = await controller.act(action(current, nextAction), new AbortController().signal);
@@ -629,6 +1019,8 @@ describe("BrowserController", () => {
 		await run({ type: "scroll", direction: "down", pages: 2, elementId: "e2" });
 		await run({ type: "drag", from: { x: 1, y: 2 }, to: { elementId: "e2" } });
 		await run({ type: "select", elementId: "e1", value: "two" });
+		emit("Page.javascriptDialogOpening", { type: "confirm", message: "Continue?" });
+		current = await observe(controller);
 		await run({ type: "dialog", decision: "dismiss" });
 
 		expect(debug.commands).toContainEqual({
@@ -636,32 +1028,158 @@ describe("BrowserController", () => {
 			params: { type: "mouseWheel", x: 20, y: 30, deltaX: 0, deltaY: 1_600 },
 		});
 		expect(debug.commands).toContainEqual({
-			method: "DOM.describeNode",
-			params: { backendNodeId: 7, depth: 2, pierce: true },
+			method: "Page.createIsolatedWorld",
+			params: { frameId: "main-frame", worldName: "metis-browser-select" },
 		});
+		expect(debug.commands).toContainEqual({
+			method: "DOM.resolveNode",
+			params: { backendNodeId: 7, executionContextId: 42 },
+		});
+		expect(debug.commands.find(({ method }) => method === "Runtime.callFunctionOn")?.params).toMatchObject({
+			objectId: "select-object",
+			arguments: [{ value: "two" }],
+			returnByValue: true,
+			userGesture: true,
+		});
+		expect(debug.commands).toContainEqual({ method: "Runtime.releaseObject", params: { objectId: "select-object" } });
 		expect(debug.commands).toContainEqual({
 			method: "Input.dispatchKeyEvent",
 			params: {
 				type: "keyDown",
-				key: "t",
-				code: "KeyT",
-				windowsVirtualKeyCode: 84,
-				text: "t",
-				unmodifiedText: "t",
-			},
-		});
-		expect(debug.commands).toContainEqual({
-			method: "Input.dispatchKeyEvent",
-			params: {
-				type: "rawKeyDown",
+				text: "\r",
+				unmodifiedText: "\r",
 				key: "Enter",
 				code: "Enter",
 				windowsVirtualKeyCode: 13,
 				nativeVirtualKeyCode: 13,
+				modifiers: 0,
 			},
 		});
 		expect(debug.commands).toContainEqual({ method: "Page.handleJavaScriptDialog", params: { accept: false } });
-		expect(debug.commands.some(({ method }) => method.startsWith("Runtime."))).toBe(false);
+		expect(debug.commands.filter(({ method }) => method.startsWith("Runtime.")).map(({ method }) => method)).toEqual([
+			"Runtime.callFunctionOn",
+			"Runtime.releaseObject",
+		]);
+	});
+
+	it("yields suspended input to a dialog and releases input exactly once", async () => {
+		const { controller, debug, emit, captureScreenshot } = fixture();
+		const first = await observe(controller);
+		debug.handler = async (method, params) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyDown") {
+				emit(
+					"Page.javascriptDialogOpening",
+					{ type: "prompt", message: "Continue?", defaultPrompt: "private default" },
+					"",
+				);
+				return new Promise(() => undefined);
+			}
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyUp") return new Promise(() => undefined);
+			if (method === "Page.handleJavaScriptDialog") emit("Page.javascriptDialogClosed", { result: false }, "");
+			return debug.responses.get(method) ?? {};
+		};
+		const result = await controller.act(action(first, { type: "press", key: "Enter" }), new AbortController().signal);
+		expect(result.status).toBe("completed");
+		const pending = await observe(controller, { mode: "both" });
+		expect(pending.state).toContain('dialog "Continue?"');
+		expect(pending.state).toContain("type=prompt");
+		expect(pending.state).not.toContain("private default");
+		expect(captureScreenshot).not.toHaveBeenCalled();
+		expect(
+			debug.commands.filter(({ method, params }) => method === "Input.dispatchKeyEvent" && params.type === "keyUp"),
+		).toHaveLength(1);
+		const stale = await controller.act(
+			action(first, { type: "dialog", decision: "accept" }),
+			new AbortController().signal,
+		);
+		expect(stale.status).toBe("stale");
+		expect(debug.commands.some(({ method }) => method === "Page.handleJavaScriptDialog")).toBe(false);
+		const resolved = await controller.act(
+			action(pending, { type: "dialog", decision: "dismiss" }),
+			new AbortController().signal,
+		);
+		expect(resolved).toMatchObject({ status: "completed", observation: { change: "full" } });
+		const after = await observe(controller);
+		expect(after.documentId).not.toBe(pending.documentId);
+		expect(after.state).toContain("Continue");
+		emit("Page.javascriptDialogOpening", { type: "prompt", message: "Continue?" }, "");
+		const reopened = await observe(controller);
+		expect(reopened.state).not.toBe(pending.state);
+		expect(
+			await controller.act(action(pending, { type: "dialog", decision: "accept" }), new AbortController().signal),
+		).toMatchObject({ status: "stale", reason: "document_changed" });
+		controller.close();
+	});
+
+	it("interrupts a suspended AX read when a dialog opens and clears it on detach", async () => {
+		const { controller, debug, emit, detach } = fixture();
+		let open = true;
+		debug.handler = async (method) => {
+			if (method === "Accessibility.getFullAXTree" && open) {
+				open = false;
+				emit("Page.javascriptDialogOpening", { type: "alert", message: "Notice" });
+				return new Promise(() => undefined);
+			}
+			return debug.responses.get(method) ?? {};
+		};
+		const pending = await observe(controller);
+		expect(pending.state).toContain('dialog "Notice"');
+		const inputCount = debug.commands.filter(({ method }) => method.startsWith("Input.")).length;
+		expect(
+			await controller.act(action(pending, { type: "press", key: "Enter" }), new AbortController().signal),
+		).toMatchObject({ status: "stale" });
+		expect(debug.commands.filter(({ method }) => method.startsWith("Input."))).toHaveLength(inputCount);
+		detach();
+		expect((await observe(controller)).state).not.toContain('dialog "Notice"');
+		controller.close();
+	});
+
+	it("interrupts a suspended screenshot when a dialog opens", async () => {
+		const { controller, emit, captureScreenshot } = fixture();
+		captureScreenshot.mockImplementation(async () => {
+			emit("Page.javascriptDialogOpening", { type: "alert", message: "Screenshot interrupted" });
+			return new Promise<never>(() => undefined);
+		});
+		const result = await observe(controller, { mode: "both" });
+		expect(result.state).toContain('dialog "Screenshot interrupted"');
+		expect(result.screenshot).toBeUndefined();
+		expect(captureScreenshot).toHaveBeenCalledOnce();
+		controller.close();
+	});
+
+	it("keeps dialog interruption active when navigation occurs during an AX read", async () => {
+		const { controller, debug, emit } = fixture();
+		debug.handler = async (method) => {
+			if (method === "Accessibility.getFullAXTree") {
+				emit("Page.frameNavigated", { frame: { id: "main", loaderId: "next" } });
+				emit("Page.javascriptDialogOpening", { type: "alert", message: "After navigation" });
+				return new Promise(() => undefined);
+			}
+			return debug.responses.get(method) ?? {};
+		};
+		expect((await observe(controller)).state).toContain('dialog "After navigation"');
+		controller.close();
+	});
+
+	it("preserves cancellation while input opens a dialog", async () => {
+		const { controller, debug, emit } = fixture();
+		const first = await observe(controller);
+		const abort = new AbortController();
+		debug.handler = async (method, params) => {
+			if (method === "Input.dispatchKeyEvent" && params.type === "keyDown") {
+				emit("Page.javascriptDialogOpening", { type: "confirm", message: "Continue?" });
+				abort.abort(new Error("Turn interrupted"));
+				return new Promise(() => undefined);
+			}
+			return debug.responses.get(method) ?? {};
+		};
+		await expect(controller.act(action(first, { type: "press", key: "Enter" }), abort.signal)).rejects.toThrow(
+			"Turn interrupted",
+		);
+		expect(
+			debug.commands.filter(({ method, params }) => method === "Input.dispatchKeyEvent" && params.type === "keyUp"),
+		).toHaveLength(1);
+		controller.close();
 	});
 
 	it("observes OOPIF targets through flattened sessions", async () => {

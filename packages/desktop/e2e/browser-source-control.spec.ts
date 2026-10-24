@@ -1,43 +1,22 @@
-import { mkdtemp, mkdir, rm, symlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { build } from "esbuild";
-import { _electron, expect, test, type ElectronApplication } from "@playwright/test";
-import type { SourceBrowserApi } from "./browser-source-control.fixture.ts";
+import { expect, test, type ElectronApplication } from "@playwright/test";
 import { createBrowserAgentFixture, elementId } from "./browser-agent-fixture.ts";
-
-async function call(app: ElectronApplication, name: string, args: Record<string, unknown>) {
-	return app.evaluate(async (_electron, input) => {
-		const api: SourceBrowserApi = await globalThis.metisBrowserSourceReady;
-		return api.call(input.name, input.args);
-	}, { name, args });
-}
+import { callSourceBrowser as call, launchSourceBrowser } from "./browser-source-harness.ts";
 
 async function successfulCall(app: ElectronApplication, name: string, args: Record<string, unknown>) {
 	const result = await call(app, name, args);
-	expect(result.ok, result.text).toBe(true);
+	const diagnostics = result.ok ? [] : await app.evaluate(async () => (await globalThis.metisBrowserSourceReady).diagnostics);
+	expect(result.ok, [result.text, ...diagnostics].join("\n")).toBe(true);
 	return JSON.parse(result.text);
 }
 
 test("current source controls real Chromium with encoded actions and expired-tab recovery before packaging", async ({}, testInfo) => {
 	test.setTimeout(90_000);
 	const fixture = await createBrowserAgentFixture();
-	const tempRoot = await mkdtemp(path.join(tmpdir(), "metis-browser-source-"));
+	let source: Awaited<ReturnType<typeof launchSourceBrowser>> | undefined;
 	let app: ElectronApplication | undefined;
 	try {
-		await Promise.all([mkdir(path.join(tempRoot, "profile")), mkdir(path.join(tempRoot, "agent"))]);
-		await symlink(path.resolve(__dirname, "../../../node_modules"), path.join(tempRoot, "node_modules"), process.platform === "win32" ? "junction" : "dir");
-		const entry = path.join(tempRoot, "browser-source.mjs");
-		await build({ entryPoints: [path.join(__dirname, "browser-source-control.fixture.ts")], bundle: true,
-			platform: "node", format: "esm", packages: "external", outfile: entry, target: "node24",
-			tsconfigRaw: { compilerOptions: {} },
-			plugins: [{ name: "source-tool-validation", setup(builder) {
-				builder.onResolve({ filter: /^@metis\/ai$/ }, (args) => args.importer === path.join(__dirname, "browser-source-control.fixture.ts")
-					? { path: path.resolve(__dirname, "../../ai/src/utils/validation.ts") }
-					: { path: args.path, external: true });
-			} }] });
-		app = await _electron.launch({ args: [entry, ...(process.platform === "linux" ? ["--no-sandbox"] : [])],
-			env: { ...process.env, METIS_BROWSER_SOURCE_PROFILE: path.join(tempRoot, "profile"), METIS_CODING_AGENT_DIR: path.join(tempRoot, "agent") } });
+		source = await launchSourceBrowser();
+		app = source.app;
 		const opened = await successfulCall(app, "browser_tabs", { action: "open" });
 		const browserId = opened.tabs[0].browserId as string;
 		await successfulCall(app, "browser_navigate", { browserId, action: "goto", url: `${fixture.origin}/controls` });
@@ -66,6 +45,9 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		await expect(controlled.locator("#message-status")).toHaveText('Message: {"keep":"as text"}');
 		await act({ type: "select", elementId: themeId, value: "dark" });
 		await expect(controlled.locator("#theme-status")).toHaveText("Theme: dark");
+		observation = await successfulCall(app, "browser_observe", { browserId });
+		await act({ type: "click", target: { elementId: elementId(observation.state, "Frame action") } });
+		await expect(controlled.frameLocator("iframe").locator("#frame-status")).toHaveText("Frame: complete");
 		const capture = await call(app, "browser_observe", { browserId, mode: "both" });
 		expect(capture.ok, capture.text).toBe(true);
 		expect(capture.imageCount).toBe(1);
@@ -75,7 +57,7 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		expect(screenshot.state).toContain("Count: 2");
 		expect(screenshot.screenshot).toBeUndefined();
 		const stale = await call(app, "browser_act", {
-			browserId, documentId: screenshot.documentId, snapshotRevision: screenshot.revision - 1,
+			browserId, documentId: screenshot.documentId, snapshotRevision: 0,
 			origin: fixture.origin, intent: "Reject stale click", risk: "ordinary",
 			action: JSON.stringify({ type: "click", target: { elementId: incrementId } }),
 		});
@@ -143,11 +125,7 @@ test("current source controls real Chromium with encoded actions and expired-tab
 		expect(diagnostics.join("\n")).toContain("Browser is not running");
 		expect(diagnostics.join("\n")).toContain("NOT_FOUND");
 	} finally {
-		if (app) {
-			await app.evaluate(async () => (await globalThis.metisBrowserSourceReady).close()).catch(() => undefined);
-			await app.close();
-		}
+		await source?.close();
 		await fixture.close();
-		await rm(tempRoot, { recursive: true, force: true });
 	}
 });

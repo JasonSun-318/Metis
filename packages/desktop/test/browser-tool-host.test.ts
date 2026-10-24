@@ -103,6 +103,88 @@ function harness() {
 }
 
 describe("BrowserToolHost", () => {
+	it("passes trusted actor identity to the manager and rejects cancellation from a different child task", () => {
+		const { host, browserManager } = harness();
+		browserManager.executeTool.mockReturnValue(new Promise(() => undefined));
+		const base = browserRequest();
+		const request = {
+			...base,
+			params: {
+				...base.params,
+				rootSessionId: SESSION_ID,
+				actorSessionId: "child-a",
+				agentId: "child-a",
+				taskId: "task-a",
+			},
+		};
+		host.handleRequest(request);
+		expect(browserManager.executeTool.mock.calls[0]?.[3]).toEqual({
+			rootSessionId: SESSION_ID,
+			actorSessionId: "child-a",
+			agentId: "child-a",
+			taskId: "task-a",
+		});
+		const signal = browserManager.executeTool.mock.calls[0]?.[2] as AbortSignal;
+		const tuple = { rootSessionId: SESSION_ID, actorSessionId: "child-a", agentId: "child-a", taskId: "task-a" };
+		host.handleCancellation(cancellation(request, { ...tuple, taskId: "task-b" }));
+		expect(signal.aborted).toBe(false);
+		host.handleCancellation(cancellation(request, tuple));
+		expect(signal.aborted).toBe(true);
+	});
+
+	it("preserves the page owner and bounded recovery instruction in PAGE_IN_USE errors", async () => {
+		const { host, browserManager, supervisor } = harness();
+		browserManager.executeTool.mockRejectedValue(
+			new BrowserToolError("PAGE_IN_USE", "private page data", {
+				ownerAgentId: "child-a",
+				recovery: "request_owner_release",
+			}),
+		);
+		host.handleRequest(browserRequest());
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledTimes(1));
+		const response = supervisor.respondToServerRequest.mock.calls[0]![1];
+		expect(response).toMatchObject({
+			error: { data: { name: "PAGE_IN_USE", ownerAgentId: "child-a", recovery: "request_owner_release" } },
+		});
+		expect(JSON.stringify(response)).not.toContain("private page data");
+	});
+
+	it("preserves structured operation failure details in the correlated RPC result", async () => {
+		const { host, supervisor, browserManager } = harness();
+		const result = {
+			tool: "browser_act",
+			details: {
+				status: "failed",
+				reason: "selection_changed",
+				execution: "dispatched",
+				recovery: "observe",
+				message: "Call browser_observe before retrying.",
+			},
+		};
+		browserManager.executeTool.mockResolvedValueOnce(result);
+		const request = browserRequest({
+			call: {
+				tool: "browser_act",
+				input: {
+					browserId: BROWSER_ID,
+					documentId: EPOCH,
+					snapshotRevision: 1,
+					origin: "https://example.test",
+					intent: "Select option",
+					risk: "ordinary",
+					action: { type: "select", elementId: "e1", optionIndex: 1 },
+				},
+			},
+		});
+		host.handleRequest(request);
+		await vi.waitFor(() => expect(supervisor.respondToServerRequest).toHaveBeenCalledOnce());
+		expect(supervisor.respondToServerRequest).toHaveBeenCalledWith(request, {
+			jsonrpc: "2.0",
+			id: request.id,
+			result: { toolCallId: request.params.toolCallId, result },
+		});
+	});
+
 	it("preserves missing-tab errors and logs the original failure without exposing it in RPC", async () => {
 		const { host, supervisor, browserManager, onDiagnostic } = harness();
 		browserManager.executeTool.mockRejectedValueOnce(new BrowserToolError("NOT_FOUND", "Browser is not running"));

@@ -7,7 +7,9 @@ import { BrowserManager } from "../src/main/browser-manager.ts";
 import { BrowserToolHost } from "../src/main/browser-tool-host.ts";
 
 export interface SourceBrowserApi {
-	call(name: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string; imageCount?: number; imageBytes?: number }>;
+	call(name: string, args: Record<string, unknown>, actorId?: string): Promise<{ ok: boolean; text: string; imageCount?: number; imageBytes?: number }>;
+	takeControl(browserId: string): void;
+	resolveHandoff(browserId: string, decision: "complete" | "cancel"): void;
 	readonly diagnostics: string[];
 	close(): void;
 }
@@ -41,6 +43,7 @@ globalThis.metisBrowserSourceReady = app.whenReady().then(() => {
 				if ("error" in response) {
 					entry.reject(Object.assign(new Error(response.error.message), {
 						code: "data" in response.error ? response.error.data.name : "OPERATION_FAILED",
+						context: "data" in response.error ? response.error.data : {},
 					}));
 				} else {
 					entry.resolve((response.result as { result: BrowserToolResult }).result);
@@ -48,10 +51,10 @@ globalThis.metisBrowserSourceReady = app.whenReady().then(() => {
 			},
 		},
 	});
-	const tools = createBrowserToolDefinitions((request) => new Promise((resolve, reject) => {
+	const toolsFor = (actorId?: string) => createBrowserToolDefinitions((request) => new Promise((resolve, reject) => {
 		const rpc: ServerRpcRequest<"browser/tool"> = {
 			jsonrpc: "2.0", id: randomUUID(), method: "browser/tool",
-			params: { serverEpoch, sessionId, toolCallId: request.toolCallId, call: browserToolCall(request) },
+			params: { serverEpoch, sessionId, ...(actorId ? { rootSessionId: sessionId, actorSessionId: actorId, agentId: actorId, taskId: `task-${actorId}` } : {}), toolCallId: request.toolCallId, call: browserToolCall(request) },
 		};
 		pending.set(rpc.id, { resolve, reject });
 		host.handleRequest(rpc);
@@ -59,9 +62,11 @@ globalThis.metisBrowserSourceReady = app.whenReady().then(() => {
 	return {
 		diagnostics,
 		close: () => manager.closeAll(),
-		async call(name, args) {
+		takeControl: (browserId) => manager.takeControl(sessionId, browserId),
+		resolveHandoff: (browserId, decision) => manager.resolveHandoff(sessionId, browserId, decision),
+		async call(name, args, actorId) {
 			try {
-				const tool = tools.find((candidate) => candidate.name === name);
+				const tool = toolsFor(actorId).find((candidate) => candidate.name === name);
 				if (!tool) throw new Error(`Unknown browser fixture tool: ${name}`);
 				const callId = randomUUID();
 				const input = validateToolArguments(tool, { type: "toolCall", id: callId, name, arguments: args });

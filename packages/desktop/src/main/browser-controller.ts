@@ -10,6 +10,14 @@ import {
 	MAX_BROWSER_SCREENSHOT_UTF8_BYTES,
 	MAX_BROWSER_STATE_UTF8_BYTES,
 } from "@metis/app-protocol";
+import { parseBrowserKey } from "./browser-keyboard.ts";
+import {
+	type NativeSelect,
+	NativeSelectionError,
+	nativeSelectMetadata,
+	SELECT_NATIVE_OPTION,
+} from "./browser-native-select.ts";
+import { observationNeedsPaging, pageBrowserObservation } from "./browser-observation.ts";
 
 const MAX_AX_NODES = 3_000;
 const MAX_ELEMENT_ID = 999_999;
@@ -45,21 +53,6 @@ const LANDMARK_ROLES = new Set([
 	"search",
 ]);
 const EDITABLE_ROLES = new Set(["combobox", "searchbox", "spinbutton", "textbox"]);
-const KEY_DETAILS: Readonly<
-	Record<string, { readonly code: string; readonly keyCode: number; readonly text?: string }>
-> = {
-	" ": { code: "Space", keyCode: 32, text: " " },
-	ArrowDown: { code: "ArrowDown", keyCode: 40 },
-	ArrowLeft: { code: "ArrowLeft", keyCode: 37 },
-	ArrowRight: { code: "ArrowRight", keyCode: 39 },
-	ArrowUp: { code: "ArrowUp", keyCode: 38 },
-	Backspace: { code: "Backspace", keyCode: 8 },
-	End: { code: "End", keyCode: 35 },
-	Enter: { code: "Enter", keyCode: 13 },
-	Escape: { code: "Escape", keyCode: 27 },
-	Home: { code: "Home", keyCode: 36 },
-	Tab: { code: "Tab", keyCode: 9 },
-};
 
 type CdpParams = Record<string, unknown>;
 
@@ -107,18 +100,30 @@ interface ElementTarget {
 	readonly elementId: string;
 	readonly backendNodeId: number;
 	readonly sessionId?: string;
+	readonly frameId?: string;
 	readonly role: string;
 	readonly label: string;
+	readonly disabled: boolean;
+	readonly signature: string;
+	readonly nativeSelect?: NativeSelect;
 }
 
 interface Snapshot {
 	readonly revision: number;
 	readonly state: string;
+	readonly elements: ReadonlyMap<string, ElementTarget>;
 }
 
 interface Point {
 	readonly x: number;
 	readonly y: number;
+	readonly sessionId?: string;
+}
+
+interface PendingDialog {
+	readonly id: number;
+	readonly type: string;
+	readonly message: string;
 	readonly sessionId?: string;
 }
 
@@ -132,6 +137,74 @@ function booleanProperty(node: AxNode, name: string): boolean {
 
 function propertyValue(node: AxNode, name: string): unknown {
 	return node.properties?.find((property) => property.name === name)?.value?.value;
+}
+
+function isEditableNode(node: AxNode): boolean {
+	const editable = propertyValue(node, "editable");
+	return (
+		editable === "plaintext" ||
+		editable === "richtext" ||
+		["textbox", "searchbox", "spinbutton"].includes(stringValue(node.role).toLowerCase())
+	);
+}
+
+function hasEditableAncestor(node: AxNode, byId: ReadonlyMap<string, AxNode>): boolean {
+	const visited = new Set<string>();
+	let parentId = node.parentId;
+	while (parentId && !visited.has(parentId)) {
+		visited.add(parentId);
+		const parent = byId.get(parentId);
+		if (!parent) return false;
+		if (isEditableNode(parent)) return true;
+		parentId = parent.parentId;
+	}
+	return false;
+}
+
+function targetSignature(node: AxNode, byId: ReadonlyMap<string, AxNode>): string {
+	const context: unknown[] = [];
+	let current: AxNode | undefined = node;
+	for (let depth = 0; current && depth < 13; depth++) {
+		context.push([
+			current.nodeId,
+			current.backendDOMNodeId,
+			stringValue(current.role),
+			stringValue(current.name),
+			...(["disabled", "checked", "selected", "expanded", "pressed", "readonly", "required", "url"] as const).map(
+				(name) => propertyValue(current!, name),
+			),
+		]);
+		current = current.parentId ? byId.get(current.parentId) : undefined;
+	}
+	return JSON.stringify(context);
+}
+
+function sameTarget(left: ElementTarget | undefined, right: ElementTarget | undefined): boolean {
+	return Boolean(
+		left &&
+			right &&
+			left.backendNodeId === right.backendNodeId &&
+			left.sessionId === right.sessionId &&
+			left.frameId === right.frameId &&
+			left.signature === right.signature,
+	);
+}
+
+function sameTargets(left: ReadonlyMap<string, ElementTarget>, right: ReadonlyMap<string, ElementTarget>): boolean {
+	return left.size === right.size && [...left].every(([id, target]) => sameTarget(target, right.get(id)));
+}
+
+function frameIds(response: unknown, skipRoots: ReadonlySet<string> = new Set()): string[] {
+	const result: string[] = [];
+	const visit = (tree: unknown) => {
+		if (!tree || typeof tree !== "object") return;
+		const { frame, childFrames } = tree as { frame?: { id?: string }; childFrames?: unknown[] };
+		if (frame?.id && skipRoots.has(frame.id)) return;
+		if (typeof frame?.id === "string") result.push(frame.id);
+		if (Array.isArray(childFrames)) childFrames.forEach(visit);
+	};
+	visit((response as { frameTree?: unknown } | null)?.frameTree);
+	return result;
 }
 
 function supportedActions(role: string, focusable: boolean): readonly string[] {
@@ -241,16 +314,18 @@ function viewportSize(value: unknown): { readonly width: number; readonly height
 	return undefined;
 }
 
-function describedNodeText(value: unknown): string {
-	if (typeof value !== "object" || value === null) return "";
-	const node = value as { readonly nodeValue?: unknown; readonly children?: unknown };
-	const own = typeof node.nodeValue === "string" ? node.nodeValue : "";
-	const children = Array.isArray(node.children) ? node.children.map(describedNodeText).join("") : "";
-	return `${own}${children}`;
+function containsBackendNode(value: unknown, backendNodeId: number): boolean {
+	if (typeof value !== "object" || value === null) return false;
+	const node = value as CdpParams;
+	if (node.backendNodeId === backendNodeId) return true;
+	return [node.children, node.shadowRoots, node.pseudoElements, node.distributedNodes].some(
+		(children) => Array.isArray(children) && children.some((child) => containsBackendNode(child, backendNodeId)),
+	);
 }
 
-/** CDP-only browser observation and input controller. It never evaluates page JavaScript. */
+/** CDP browser controller. Runtime calls are limited to the fixed isolated native-select routine. */
 export class BrowserController {
+	private readonly nativeSelectObjects = new Set<string>();
 	private readonly dependencies: BrowserControllerDependencies;
 	private readonly targetSessions = new Set<string>();
 	private readonly loaderIds = new Map<string, string>();
@@ -267,6 +342,9 @@ export class BrowserController {
 	private closed = false;
 	private lastStateChangeAt = 0;
 	private stateChangeSequence = 0;
+	private pendingDialog?: PendingDialog;
+	private dialogSequence = 0;
+	private dialogOpened = new AbortController();
 	private readonly unsubscribeMessage: () => void;
 	private readonly unsubscribeDetach: () => void;
 
@@ -276,6 +354,7 @@ export class BrowserController {
 			this.onDebuggerMessage(method, params, sessionId);
 		});
 		this.unsubscribeDetach = dependencies.subscribeDetach(() => {
+			this.clearDialog();
 			this.debuggerAbort.abort(new Error("Browser debugger detached"));
 			this.debuggerAbort = new AbortController();
 			this.attachedByController = false;
@@ -305,21 +384,32 @@ export class BrowserController {
 			});
 			if (input.documentId !== this.documentId) return stale("document_changed");
 			if (input.origin !== originOf(this.dependencies.pageState().url)) return stale("origin_changed");
+			// Only ordinary element clicks can tolerate unrelated page changes. Keep
+			// the exact observed target, including its semantic ancestors and link URL.
+			const snapshot = [this.current, this.previous].find((entry) => entry?.revision === input.snapshotRevision);
+			const expectedTarget =
+				input.risk === "ordinary" && input.action.type === "click" && "elementId" in input.action.target
+					? snapshot?.elements.get(input.action.target.elementId)
+					: undefined;
 			const fresh = await this.observeCurrent(
 				{ browserId: input.browserId, sinceRevision: input.snapshotRevision },
 				signal,
 			);
 			if (fresh.documentId !== input.documentId)
 				return { status: "stale", reason: "document_changed", observation: fresh };
-			if (fresh.revision !== input.snapshotRevision)
+			if (fresh.revision !== input.snapshotRevision && !expectedTarget)
 				return { status: "stale", reason: "revision_changed", observation: fresh };
 			if (this.referencesMissingElement(input.action))
 				return { status: "stale", reason: "element_missing", observation: fresh };
 			try {
-				await this.performAction(input, signal);
+				await this.performAction(input, signal, expectedTarget);
 				this.markStateChange();
 			} catch (cause) {
-				if (signal.aborted) throw cause;
+				signal.throwIfAborted();
+				if (cause instanceof NativeSelectionError) {
+					this.markStateChange();
+					return cause.details;
+				}
 				if (cause instanceof StaleActionError) return stale(cause.reason);
 				if (cause instanceof MissingElementError) {
 					return {
@@ -331,7 +421,9 @@ export class BrowserController {
 						),
 					};
 				}
-				throw cause;
+				// An input can synchronously open a modal and suspend its CDP reply.
+				// Return the pending dialog instead of waiting for the renderer or retrying input.
+				if (!(cause instanceof DialogOpenedError)) throw cause;
 			}
 			return {
 				status: "completed",
@@ -356,6 +448,7 @@ export class BrowserController {
 	close(): void {
 		if (this.closed) return;
 		this.closed = true;
+		this.clearDialog();
 		this.debuggerAbort.abort(new Error("Browser controller is closed"));
 		this.unsubscribeMessage();
 		this.unsubscribeDetach();
@@ -382,6 +475,7 @@ export class BrowserController {
 	}
 
 	private async ensureAttached(signal: AbortSignal): Promise<void> {
+		if (this.pendingDialog && this.dependencies.debugger.isAttached()) return;
 		if (this.attachPromise) return this.attachPromise;
 		this.attachPromise = (async () => {
 			signal.throwIfAborted();
@@ -401,6 +495,7 @@ export class BrowserController {
 			await this.attachPromise;
 		} catch (cause) {
 			this.attachPromise = undefined;
+			if (cause instanceof DialogOpenedError && this.pendingDialog) return;
 			throw cause;
 		}
 	}
@@ -413,7 +508,25 @@ export class BrowserController {
 	}
 
 	private onDebuggerMessage(method: string, params: CdpParams, sessionId?: string): void {
+		sessionId ||= undefined;
 		if (/^(?:Accessibility|DOM|Page|Target)\./u.test(method)) this.markStateChange();
+		if (method === "Page.javascriptDialogOpening") {
+			this.pendingDialog = {
+				id: ++this.dialogSequence,
+				type: typeof params.type === "string" ? limitUtf8(params.type, 64) : "dialog",
+				message: typeof params.message === "string" ? limitUtf8(params.message, 8_192) : "",
+				...(sessionId ? { sessionId } : {}),
+			};
+			this.dialogOpened.abort(new DialogOpenedError());
+			return;
+		}
+		if (method === "Page.javascriptDialogClosed") {
+			if (this.pendingDialog && this.pendingDialog.sessionId === sessionId) {
+				this.clearDialog();
+				this.invalidate();
+			}
+			return;
+		}
 		if (method === "Target.attachedToTarget" && typeof params.sessionId === "string") {
 			this.targetSessions.add(params.sessionId);
 			const controller = new AbortController();
@@ -423,6 +536,7 @@ export class BrowserController {
 			return;
 		}
 		if (method === "Target.detachedFromTarget" && typeof params.sessionId === "string") {
+			if (this.pendingDialog?.sessionId === params.sessionId) this.clearDialog();
 			this.targetSessions.delete(params.sessionId);
 			for (const key of this.loaderIds.keys()) {
 				if (key.startsWith(`${params.sessionId}:`)) this.loaderIds.delete(key);
@@ -447,6 +561,7 @@ export class BrowserController {
 			if (typeof frame?.id === "string" && typeof frame.loaderId === "string") {
 				this.loaderIds.set(`${sessionId ?? "main"}:${frame.id}`, frame.loaderId);
 			}
+			if (this.pendingDialog && this.pendingDialog.sessionId === sessionId && !frame?.parentId) this.clearDialog();
 			this.invalidate();
 			return;
 		}
@@ -459,26 +574,34 @@ export class BrowserController {
 	private async observeCurrent(input: BrowserObserveInput, signal: AbortSignal): Promise<BrowserObservation> {
 		await this.ensureAttached(signal);
 		await this.waitForStableState(signal);
-		const state = await this.readState(signal);
-		if (!this.current) this.current = { revision: 1, state };
-		else if (this.current.state !== state) {
+		const state = await this.readObservableState(signal);
+		if (!this.current) this.current = { revision: 1, state, elements: this.elements };
+		else if (this.current.state !== state || !sameTargets(this.current.elements, this.elements)) {
 			this.previous = this.current;
-			this.current = { revision: this.current.revision + 1, state };
+			this.current = { revision: this.current.revision + 1, state, elements: this.elements };
 		}
 		const current = this.current;
 		let change: BrowserObservation["change"] = "full";
 		let exposedState = current.state;
-		if (input.sinceRevision === current.revision) {
+		if (!input.cursor && input.sinceRevision === current.revision) {
 			change = "unchanged";
 			exposedState = "";
-		} else if (this.previous && input.sinceRevision === this.previous.revision) {
+		} else if (!input.cursor && this.previous && input.sinceRevision === this.previous.revision) {
 			change = "diff";
 			exposedState = diffText(this.previous.state, current.state);
 		}
 		const page = this.dependencies.pageState();
-		const screenshot =
-			input.mode === "screenshot" || input.mode === "both" ? await this.screenshot(signal) : undefined;
-		return {
+		let screenshot: BrowserObservation["screenshot"];
+		try {
+			if (!this.pendingDialog && (input.mode === "screenshot" || input.mode === "both")) {
+				screenshot = await this.screenshot(signal);
+			}
+		} catch (cause) {
+			signal.throwIfAborted();
+			if (!(cause instanceof DialogOpenedError) || !this.pendingDialog) throw cause;
+			return this.observeCurrent({ ...input, mode: "state" }, signal);
+		}
+		let observation: BrowserObservation = {
 			browserId: this.dependencies.browserId,
 			profileId: this.dependencies.profileId,
 			documentId: this.documentId,
@@ -490,45 +613,119 @@ export class BrowserController {
 			state: exposedState,
 			...(screenshot ? { screenshot } : {}),
 		};
+		// Continuations always refer to a full snapshot, never a disappearing diff.
+		if (observation.change === "diff" && observationNeedsPaging(observation)) {
+			observation = { ...observation, change: "full", state: current.state };
+		}
+		return pageBrowserObservation(observation, input.cursor);
+	}
+
+	private clearDialog(): void {
+		this.pendingDialog = undefined;
+		this.dialogOpened = new AbortController();
+	}
+
+	private async readObservableState(signal: AbortSignal): Promise<string> {
+		signal.throwIfAborted();
+		for (let attempt = 0; !this.pendingDialog; attempt++) {
+			const documentId = this.documentId;
+			try {
+				return await this.readState(signal);
+			} catch (cause) {
+				signal.throwIfAborted();
+				if (documentId !== this.documentId && attempt < 2) continue;
+				if (!(cause instanceof DialogOpenedError) || !this.pendingDialog) throw cause;
+			}
+		}
+		const dialog = this.pendingDialog;
+		// Do not read AX, screenshot the blocked renderer, or expose prompt default values.
+		this.elements.clear();
+		return formatBrowserStateNode({
+			depth: 0,
+			role: "dialog",
+			label: dialog.message,
+			flags: [`type=${dialog.type}`, `dialogId=${dialog.id}`, "actions=dialog"],
+		});
 	}
 
 	private async readState(signal: AbortSignal): Promise<string> {
+		const documentId = this.documentId;
 		const sessions: Array<string | undefined> = [undefined, ...this.targetSessions];
+		const frameTrees = await Promise.all(
+			sessions.map(async (sessionId) => {
+				const response = await this.command("Page.getFrameTree", {}, sessionId, signal);
+				return { sessionId, response, frames: frameIds(response) };
+			}),
+		);
+		// A remote frame may appear in its parent's Page tree as well as in its
+		// own target. Read it only through the session that owns its root.
+		const owners = new Map(
+			frameTrees.flatMap(({ sessionId, frames }) => (frames[0] ? [[frames[0], sessionId] as const] : [])),
+		);
 		const trees = await Promise.all(
-			sessions.map(async (sessionId) => ({
-				sessionId,
-				nodes: axNodes(await this.command("Accessibility.getFullAXTree", {}, sessionId, signal)),
-			})),
+			frameTrees.flatMap(({ sessionId, response, frames }) =>
+				(frames.length
+					? frameIds(response, new Set([...owners].filter(([, owner]) => owner !== sessionId).map(([id]) => id)))
+					: [undefined]
+				).map(async (frameId) => ({
+					sessionId,
+					frameId,
+					nodes: axNodes(
+						await this.command("Accessibility.getFullAXTree", frameId ? { frameId } : {}, sessionId, signal),
+					),
+				})),
+			),
 		);
-		const candidates = trees.flatMap(({ sessionId, nodes }) =>
-			nodes.map((node, index) => ({ sessionId, node, index, priority: nodePriority(node) })),
-		);
+		const candidates = trees.flatMap(({ sessionId, frameId, nodes }) => {
+			const byId = new Map(nodes.flatMap((node) => (node.nodeId ? [[node.nodeId, node] as const] : [])));
+			// Chromium repeats editable values in StaticText/InlineTextBox descendants,
+			// including through ignored nodes. Filter before limiting, caching or diffing.
+			return nodes.flatMap((node, index) =>
+				hasEditableAncestor(node, byId)
+					? []
+					: [{ sessionId, frameId, byId, node, index, priority: nodePriority(node) }],
+			);
+		});
 		const selected = [...candidates]
 			.sort((left, right) => left.priority - right.priority || left.index - right.index)
 			.slice(0, MAX_AX_NODES);
+		const nativeSelects = new Map<AxNode, NativeSelect>();
+		for (const { node, sessionId } of selected) {
+			if (
+				!["combobox", "listbox"].includes(stringValue(node.role).toLowerCase()) ||
+				!Number.isSafeInteger(node.backendDOMNodeId)
+			)
+				continue;
+			const metadata = nativeSelectMetadata(
+				await this.command(
+					"DOM.describeNode",
+					{ backendNodeId: node.backendDOMNodeId, depth: -1 },
+					sessionId,
+					signal,
+				),
+			);
+			if (metadata) nativeSelects.set(node, metadata);
+		}
+		// Navigation can occur while frame/AX/DOM replies are outstanding. Never
+		// publish those old nodes under the new document's identity.
+		if (documentId !== this.documentId) throw new StaleActionError("document_changed");
 		if (this.nextElementId + selected.length > MAX_ELEMENT_ID) {
 			this.elementIds.clear();
 			this.nextElementId = 1;
 		}
-		const nodesBySession = new Map(
-			trees.map(({ sessionId, nodes }) => [
-				sessionId ?? "main",
-				new Map(nodes.flatMap((node) => (node.nodeId ? [[node.nodeId, node] as const] : []))),
-			]),
-		);
 		const nextElements = new Map<string, ElementTarget>();
 		const activeElementKeys = new Set<string>();
 		const lines: string[] = [];
-		for (const { sessionId, node } of selected) {
+		for (const { sessionId, frameId, byId, node } of selected) {
 			if (node.ignored || !node.nodeId) continue;
-			const byId = nodesBySession.get(sessionId ?? "main")!;
 			const role = stringValue(node.role).toLowerCase() || "node";
 			const name = stringValue(node.name);
 			const focusable = booleanProperty(node, "focusable");
 			const actionable = INTERACTIVE_ROLES.has(role) || focusable;
+			const nativeSelect = nativeSelects.get(node);
 			let elementId = "";
 			if (actionable && Number.isSafeInteger(node.backendDOMNodeId)) {
-				const key = `${sessionId ?? "main"}:${node.backendDOMNodeId}`;
+				const key = `${sessionId ?? "main"}:${frameId ?? "root"}:${node.backendDOMNodeId}`;
 				activeElementKeys.add(key);
 				elementId = this.elementIds.get(key) ?? `e${this.nextElementId++}`;
 				this.elementIds.set(key, elementId);
@@ -536,8 +733,12 @@ export class BrowserController {
 					elementId,
 					backendNodeId: node.backendDOMNodeId!,
 					...(sessionId ? { sessionId } : {}),
+					...(frameId ? { frameId } : {}),
 					role,
 					label: name,
+					disabled: booleanProperty(node, "disabled"),
+					signature: JSON.stringify([targetSignature(node, byId), nativeSelect]),
+					...(nativeSelect ? { nativeSelect } : {}),
 				});
 			}
 			let depth = 0;
@@ -548,14 +749,26 @@ export class BrowserController {
 			}
 			const checked = propertyValue(node, "checked");
 			const selected = propertyValue(node, "selected");
-			const actions = supportedActions(role, focusable);
+			const actions = supportedActions(role, focusable).filter(
+				(action) => action !== "select" || (nativeSelect && !nativeSelect.multiple),
+			);
 			const flags = [
 				booleanProperty(node, "focused") ? "focused" : "",
 				actionable ? (booleanProperty(node, "disabled") ? "disabled" : "enabled") : "",
-				typeof checked === "boolean" || checked === "mixed" ? `checked=${String(checked)}` : "",
+				typeof checked === "boolean" || checked === "true" || checked === "false" || checked === "mixed"
+					? `checked=${String(checked)}`
+					: "",
 				typeof selected === "boolean" ? `selected=${String(selected)}` : "",
-				EDITABLE_ROLES.has(role) ? (stringValue(node.value) === "" ? "empty" : "non-empty") : "",
+				EDITABLE_ROLES.has(role) || isEditableNode(node)
+					? stringValue(node.value) === ""
+						? "empty"
+						: "non-empty"
+					: "",
 				actions.length > 0 ? `actions=${actions.join("|")}` : "",
+				nativeSelect
+					? `options=${JSON.stringify(nativeSelect.options.map(({ value: _value, ...option }) => option))}`
+					: "",
+				nativeSelect?.truncated ? "options-truncated" : "",
 			].filter(Boolean);
 			lines.push(formatBrowserStateNode({ depth, ...(elementId ? { elementId } : {}), role, label: name, flags }));
 		}
@@ -567,8 +780,21 @@ export class BrowserController {
 	}
 
 	private async screenshot(signal: AbortSignal): Promise<BrowserObservation["screenshot"] | undefined> {
-		signal.throwIfAborted();
-		const data = (await this.dependencies.captureScreenshot(SCREENSHOT_QUALITY)).toString("base64");
+		const pending = AbortSignal.any([signal, this.debuggerAbort.signal, this.dialogOpened.signal]);
+		pending.throwIfAborted();
+		let onAbort!: () => void;
+		const interrupted = new Promise<never>((_resolve, reject) => {
+			onAbort = () => reject(pending.reason);
+			pending.addEventListener("abort", onAbort, { once: true });
+		});
+		let buffer: Buffer;
+		try {
+			buffer = await Promise.race([this.dependencies.captureScreenshot(SCREENSHOT_QUALITY), interrupted]);
+			pending.throwIfAborted();
+		} finally {
+			pending.removeEventListener("abort", onAbort);
+		}
+		const data = buffer.toString("base64");
 		if (Buffer.byteLength(data, "utf8") > MAX_BROWSER_SCREENSHOT_UTF8_BYTES) {
 			throw new RangeError("Browser screenshot exceeds the 4 MiB limit");
 		}
@@ -579,22 +805,29 @@ export class BrowserController {
 		return browserActionElementIds(action).some((elementId) => !this.elements.has(elementId));
 	}
 
-	private async performAction(input: BrowserActInput, signal: AbortSignal): Promise<void> {
+	private async performAction(
+		input: BrowserActInput,
+		signal: AbortSignal,
+		expectedTarget?: ElementTarget,
+	): Promise<void> {
 		const { action } = input;
-		const verifiedSequence = await this.validateAction(input, signal);
+		const verifiedSequence = await this.validateAction(input, signal, expectedTarget);
+		if (this.pendingDialog && action.type !== "dialog") throw new StaleActionError("revision_changed");
 		const leaseSignal = this.debuggerAbort.signal;
 		switch (action.type) {
 			case "click": {
 				const point = await this.resolvePoint(action.target, signal);
 				const button = action.button ?? "left";
 				const buttons = button === "left" ? 1 : 2;
-				this.assertAction(input, verifiedSequence);
+				this.assertAction(input, verifiedSequence, expectedTarget);
 				await this.command(
 					"Input.dispatchMouseEvent",
 					{ type: "mouseMoved", x: point.x, y: point.y },
 					point.sessionId,
 					signal,
 				);
+				if (expectedTarget) await this.validateAction(input, signal, expectedTarget);
+				if ("elementId" in action.target) await this.assertHitTarget(action.target.elementId, point, signal);
 				this.assertActionIdentity(input);
 				await this.pressAndRelease(
 					"Input.dispatchMouseEvent",
@@ -673,16 +906,23 @@ export class BrowserController {
 				return;
 			}
 			case "select":
-				await this.select(action.elementId, action.value, input, verifiedSequence, signal, leaseSignal);
+				await this.select(action.elementId, action, input, verifiedSequence, signal, leaseSignal);
 				return;
-			case "dialog":
+			case "dialog": {
 				this.assertAction(input, verifiedSequence);
+				const dialog = this.pendingDialog;
+				if (!dialog) throw new Error("No JavaScript dialog is open");
 				await this.command(
 					"Page.handleJavaScriptDialog",
 					{ accept: action.decision === "accept" },
-					undefined,
+					dialog.sessionId,
 					signal,
 				);
+				if (this.pendingDialog === dialog) {
+					this.clearDialog();
+					this.invalidate();
+				}
+			}
 		}
 	}
 
@@ -772,6 +1012,39 @@ export class BrowserController {
 		return element;
 	}
 
+	private async assertHitTarget(elementId: string, point: Point, signal: AbortSignal): Promise<void> {
+		const element = this.requiredElement(elementId);
+		if (element.disabled) throw new StaleActionError("element_not_interactable");
+		const metrics = (await this.command("Page.getLayoutMetrics", {}, point.sessionId, signal)) as {
+			cssLayoutViewport?: { pageX?: number; pageY?: number };
+			layoutViewport?: { pageX?: number; pageY?: number };
+		};
+		const viewport = metrics.cssLayoutViewport ?? metrics.layoutViewport;
+		// Input uses viewport CSS pixels, but DOM hit-testing uses page coordinates.
+		const hit = (await this.command(
+			"DOM.getNodeForLocation",
+			{
+				x: Math.round(point.x + (viewport?.pageX ?? 0)),
+				y: Math.round(point.y + (viewport?.pageY ?? 0)),
+				includeUserAgentShadowDOM: true,
+			},
+			point.sessionId,
+			signal,
+		)) as { backendNodeId?: number };
+		if (hit.backendNodeId === element.backendNodeId) return;
+		if (Number.isSafeInteger(hit.backendNodeId)) {
+			// A button's span, SVG or shadow content is a valid hit; a covering sibling is not.
+			const described = (await this.command(
+				"DOM.describeNode",
+				{ backendNodeId: element.backendNodeId, depth: -1, pierce: true },
+				element.sessionId,
+				signal,
+			)) as { node?: unknown };
+			if (containsBackendNode(described.node, hit.backendNodeId!)) return;
+		}
+		throw new StaleActionError("element_not_interactable");
+	}
+
 	private async replaceSelection(
 		sessionId: string | undefined,
 		input: BrowserActInput,
@@ -787,21 +1060,7 @@ export class BrowserController {
 			leaseSignal,
 		);
 		this.assertActionIdentity(input);
-		const backspace = KEY_DETAILS.Backspace!;
-		const identity = {
-			key: "Backspace",
-			code: backspace.code,
-			windowsVirtualKeyCode: backspace.keyCode,
-			nativeVirtualKeyCode: backspace.keyCode,
-		};
-		await this.pressAndRelease(
-			"Input.dispatchKeyEvent",
-			{ type: "rawKeyDown", ...identity },
-			{ type: "keyUp", ...identity },
-			sessionId,
-			signal,
-			leaseSignal,
-		);
+		await this.press("Backspace", sessionId, signal, leaseSignal);
 	}
 
 	private async press(
@@ -810,73 +1069,78 @@ export class BrowserController {
 		signal: AbortSignal,
 		leaseSignal: AbortSignal,
 	): Promise<void> {
-		const detail = KEY_DETAILS[key];
-		const identity = detail
-			? { key, code: detail.code, windowsVirtualKeyCode: detail.keyCode, nativeVirtualKeyCode: detail.keyCode }
-			: { key };
-		await this.pressAndRelease(
-			"Input.dispatchKeyEvent",
-			{
-				type: detail?.text ? "keyDown" : "rawKeyDown",
-				...identity,
-				...(detail?.text ? { text: detail.text, unmodifiedText: detail.text } : {}),
-			},
-			{ type: "keyUp", ...identity },
-			sessionId,
-			signal,
-			leaseSignal,
+		const { down, up } = parseBrowserKey(
+			key,
+			this.dependencies.acceleratorModifier ?? (process.platform === "darwin" ? 4 : 2),
 		);
+		await this.pressAndRelease("Input.dispatchKeyEvent", down, up, sessionId, signal, leaseSignal);
 	}
 
 	private async select(
 		elementId: string,
-		value: string,
+		selection: Extract<BrowserAction, { type: "select" }>,
 		input: BrowserActInput,
 		verifiedSequence: number,
 		signal: AbortSignal,
 		leaseSignal: AbortSignal,
 	): Promise<void> {
 		const element = this.requiredElement(elementId);
-		const described = await this.command(
-			"DOM.describeNode",
-			{ backendNodeId: element.backendNodeId, depth: 2, pierce: true },
+		const option = "optionIndex" in selection ? element.nativeSelect?.options[selection.optionIndex] : undefined;
+		if ("optionIndex" in selection && !option) throw new NativeSelectionError("option_not_found");
+		const choice =
+			"value" in selection ? selection.value : { index: option!.index, value: option!.value, label: option!.label };
+		if (element.disabled) throw new StaleActionError("element_not_interactable");
+		if (!element.frameId) throw new NativeSelectionError("select_unavailable");
+		const world = (await this.command(
+			"Page.createIsolatedWorld",
+			{
+				frameId: element.frameId,
+				worldName: "metis-browser-select",
+			},
 			element.sessionId,
 			signal,
-		);
-		const node =
-			typeof described === "object" && described !== null ? (described as { node?: unknown }).node : undefined;
-		const children =
-			typeof node === "object" && node !== null && Array.isArray((node as { children?: unknown }).children)
-				? ((node as { children: Array<{ attributes?: unknown; nodeValue?: unknown; children?: unknown }> })
-						.children ?? [])
-				: [];
-		const index = children.findIndex((child) => {
-			const attributes = Array.isArray(child.attributes) ? child.attributes : [];
-			for (let offset = 0; offset < attributes.length - 1; offset += 2) {
-				if (attributes[offset] === "value" && attributes[offset + 1] === value) return true;
-			}
-			return child.nodeValue === value;
-		});
-		if (index < 0) throw new MissingElementError();
-		this.assertAction(input, verifiedSequence);
-		await this.command("DOM.focus", { backendNodeId: element.backendNodeId }, element.sessionId, signal);
-		this.assertActionIdentity(input);
-		const label = (describedNodeText(children[index]).trim() || value).toLocaleLowerCase();
-		for (const character of label) {
-			this.assertActionIdentity(input);
-			const upper = character.toLocaleUpperCase();
-			const asciiLetter = /^[A-Z]$/u.test(upper);
-			const identity = asciiLetter
-				? { key: character, code: `Key${upper}`, windowsVirtualKeyCode: upper.charCodeAt(0) }
-				: { key: character };
-			await this.pressAndRelease(
-				"Input.dispatchKeyEvent",
-				{ type: "keyDown", ...identity, text: character, unmodifiedText: character },
-				{ type: "keyUp", ...identity },
+		)) as { executionContextId?: number };
+		if (!Number.isSafeInteger(world.executionContextId)) throw new NativeSelectionError("select_unavailable");
+		const resolved = (await this.command(
+			"DOM.resolveNode",
+			{
+				backendNodeId: element.backendNodeId,
+				executionContextId: world.executionContextId,
+			},
+			element.sessionId,
+			signal,
+		)) as { object?: { objectId?: string } };
+		const objectId = resolved.object?.objectId;
+		if (!objectId) throw new MissingElementError();
+		const objectKey = `${element.sessionId ?? "main"}:${objectId}`;
+		this.nativeSelectObjects.add(objectKey);
+		try {
+			this.assertAction(input, verifiedSequence);
+			const result = (await this.command(
+				"Runtime.callFunctionOn",
+				{
+					objectId,
+					functionDeclaration: SELECT_NATIVE_OPTION,
+					arguments: [{ value: choice }],
+					returnByValue: true,
+					userGesture: true,
+				},
 				element.sessionId,
 				signal,
+			)) as { result?: { value?: { selected?: boolean; failure?: unknown } }; exceptionDetails?: unknown };
+			if (result.exceptionDetails) throw new NativeSelectionError("selection_unconfirmed");
+			if (result.result?.value?.selected !== true) throw new NativeSelectionError(result.result?.value?.failure);
+		} finally {
+			// Navigation/dialogs may destroy or suspend the context. Cleanup is bounded
+			// and must not replace the original operation's result or cancellation.
+			await this.command(
+				"Runtime.releaseObject",
+				{ objectId },
+				element.sessionId,
+				AbortSignal.timeout(INPUT_RELEASE_TIMEOUT_MS),
 				leaseSignal,
-			);
+			).catch(() => undefined);
+			this.nativeSelectObjects.delete(objectKey);
 		}
 	}
 
@@ -893,6 +1157,7 @@ export class BrowserController {
 		let operationFailure: unknown;
 		try {
 			await this.command(method, down, sessionId, signal, leaseSignal);
+			if (this.pendingDialog) throw new DialogOpenedError();
 			await between?.();
 			signal.throwIfAborted();
 		} catch (cause) {
@@ -904,8 +1169,8 @@ export class BrowserController {
 		} catch (cause) {
 			releaseFailure = cause;
 		}
-		if (operationFailure) throw operationFailure;
 		signal.throwIfAborted();
+		if (operationFailure) throw operationFailure;
 		if (releaseFailure) throw releaseFailure;
 	}
 
@@ -928,23 +1193,40 @@ export class BrowserController {
 		}
 	}
 
-	private async validateAction(input: BrowserActInput, signal: AbortSignal): Promise<number> {
+	private async validateAction(
+		input: BrowserActInput,
+		signal: AbortSignal,
+		expectedTarget?: ElementTarget,
+	): Promise<number> {
 		this.assertActionIdentity(input);
-		if (this.current?.revision !== input.snapshotRevision) throw new StaleActionError("revision_changed");
+		if (!expectedTarget && this.current?.revision !== input.snapshotRevision)
+			throw new StaleActionError("revision_changed");
 		const sequence = this.stateChangeSequence;
-		const state = await this.readState(signal);
+		const state = await this.readObservableState(signal);
 		this.assertActionIdentity(input);
-		if (sequence !== this.stateChangeSequence || this.current.state !== state) {
+		if (expectedTarget) this.assertTarget(expectedTarget);
+		else if (
+			sequence !== this.stateChangeSequence ||
+			this.current?.state !== state ||
+			!sameTargets(this.current.elements, this.elements)
+		) {
 			throw new StaleActionError("revision_changed");
 		}
 		if (this.referencesMissingElement(input.action)) throw new StaleActionError("element_missing");
 		return sequence;
 	}
 
-	private assertAction(input: BrowserActInput, verifiedSequence: number): void {
+	private assertAction(input: BrowserActInput, verifiedSequence: number, expectedTarget?: ElementTarget): void {
 		this.assertActionIdentity(input);
-		if (verifiedSequence !== this.stateChangeSequence) throw new StaleActionError("revision_changed");
+		if (expectedTarget) this.assertTarget(expectedTarget);
+		else if (verifiedSequence !== this.stateChangeSequence) throw new StaleActionError("revision_changed");
 		if (this.referencesMissingElement(input.action)) throw new StaleActionError("element_missing");
+	}
+
+	private assertTarget(expected: ElementTarget): void {
+		const current = this.elements.get(expected.elementId);
+		if (!current) throw new StaleActionError("element_missing");
+		if (!sameTarget(expected, current)) throw new StaleActionError("revision_changed");
 	}
 
 	private assertActionIdentity(input: Pick<BrowserActInput, "documentId" | "origin">): void {
@@ -959,9 +1241,33 @@ export class BrowserController {
 		signal: AbortSignal,
 		debuggerSignal = this.debuggerAbort.signal,
 	): Promise<unknown> {
-		if (method.startsWith("Runtime.")) throw new Error("Page JavaScript evaluation is forbidden");
+		if (method.startsWith("Runtime.")) {
+			// The only runtime capability is our fixed native-select routine on an
+			// object resolved by select(). Arbitrary source and other Runtime APIs stay forbidden.
+			const knownSelect =
+				typeof params.objectId === "string" &&
+				this.nativeSelectObjects.has(`${sessionId ?? "main"}:${params.objectId}`);
+			const selects =
+				method === "Runtime.callFunctionOn" &&
+				params.functionDeclaration === SELECT_NATIVE_OPTION &&
+				Array.isArray(params.arguments) &&
+				params.arguments.length === 1 &&
+				(typeof params.arguments[0]?.value === "string" ||
+					(typeof params.arguments[0]?.value?.index === "number" &&
+						typeof params.arguments[0]?.value?.value === "string" &&
+						typeof params.arguments[0]?.value?.label === "string")) &&
+				params.returnByValue === true &&
+				params.userGesture === true;
+			if (!knownSelect || !(selects || method === "Runtime.releaseObject"))
+				throw new Error("Page JavaScript evaluation is forbidden");
+		}
 		signal.throwIfAborted();
 		debuggerSignal.throwIfAborted();
+		const handlesDialog = method === "Page.handleJavaScriptDialog";
+		const releasesInput = method.startsWith("Input.") && (params.type === "keyUp" || params.type === "mouseReleased");
+		const releasesResource = releasesInput || method === "Runtime.releaseObject";
+		const dialogSignal = this.dialogOpened.signal;
+		if (this.pendingDialog && !handlesDialog && !releasesResource) throw new DialogOpenedError();
 		return new Promise((resolve, reject) => {
 			let settled = false;
 			const finish = (complete: () => void) => {
@@ -969,24 +1275,31 @@ export class BrowserController {
 				settled = true;
 				signal.removeEventListener("abort", onAbort);
 				debuggerSignal.removeEventListener("abort", onDebuggerAbort);
+				dialogSignal.removeEventListener("abort", onDialog);
 				complete();
 			};
 			const onAbort = () => finish(() => reject(signal.reason ?? new DOMException("Aborted", "AbortError")));
 			const onDebuggerAbort = () =>
 				finish(() => reject(debuggerSignal.reason ?? new Error("Browser debugger detached")));
+			const onDialog = () => finish(() => (releasesResource ? resolve(undefined) : reject(new DialogOpenedError())));
 			signal.addEventListener("abort", onAbort, { once: true });
 			debuggerSignal.addEventListener("abort", onDebuggerAbort, { once: true });
+			if (!handlesDialog) dialogSignal.addEventListener("abort", onDialog, { once: true });
 			void this.dependencies.debugger.sendCommand(method, params, sessionId).then(
 				(result) => finish(() => resolve(result)),
 				(cause) => finish(() => reject(cause)),
 			);
 			if (signal.aborted) onAbort();
 			if (debuggerSignal.aborted) onDebuggerAbort();
+			// Send release exactly once even while the original input reply is suspended.
+			if (!handlesDialog && dialogSignal.aborted) onDialog();
 		});
 	}
 }
 
 class MissingElementError extends Error {}
+
+class DialogOpenedError extends Error {}
 
 class StaleActionError extends Error {
 	readonly reason: Extract<BrowserOperationDetails, { status: "stale" }>["reason"];

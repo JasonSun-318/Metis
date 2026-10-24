@@ -47,7 +47,12 @@ export class BrowserToolHost {
 		const pending = { request, abort: new AbortController() };
 		this.pending.set(request.id, pending);
 		void this.options.browserManager
-			.executeTool(request.params.sessionId, request.params.call, pending.abort.signal)
+			.executeTool(request.params.sessionId, request.params.call, pending.abort.signal, {
+				rootSessionId: request.params.rootSessionId,
+				actorSessionId: request.params.actorSessionId,
+				agentId: request.params.agentId,
+				taskId: request.params.taskId,
+			})
 			.then((result) => this.respondWithResult(pending, result))
 			.catch((cause) => this.respondWithError(pending, cause))
 			.finally(() => {
@@ -61,6 +66,10 @@ export class BrowserToolHost {
 			!pending ||
 			pending.request.params.serverEpoch !== notification.params.serverEpoch ||
 			pending.request.params.sessionId !== notification.params.sessionId ||
+			pending.request.params.rootSessionId !== notification.params.rootSessionId ||
+			pending.request.params.actorSessionId !== notification.params.actorSessionId ||
+			pending.request.params.agentId !== notification.params.agentId ||
+			pending.request.params.taskId !== notification.params.taskId ||
 			pending.request.params.toolCallId !== notification.params.toolCallId
 		)
 			return;
@@ -132,6 +141,7 @@ export class BrowserToolHost {
 			id: pending.request.id,
 			error: createRpcError(errorName, {
 				sessionId: pending.request.params.sessionId,
+				...(cause instanceof BrowserToolError ? cause.context : {}),
 			}),
 		});
 	}

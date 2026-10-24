@@ -95,10 +95,21 @@ function renderPanel(api: MetisDesktopApi, onError: (cause: unknown) => void = v
 	return { container };
 }
 
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (cause: unknown) => void;
+	const promise = new Promise<T>((onResolve, onReject) => {
+		resolve = onResolve;
+		reject = onReject;
+	});
+	return { promise, reject, resolve };
+}
+
 function browserPanelApi(
 	overrides: {
 		controlBrowserDownload?: MetisDesktopApi["controlBrowserDownload"];
 		downloads?: readonly DesktopDownloadItem[];
+		listBrowserDownloads?: MetisDesktopApi["listBrowserDownloads"];
 	} = {},
 ): { api: MetisDesktopApi; emitBrowserEvent: (event: DesktopBrowserEvent) => void } {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
@@ -118,7 +129,7 @@ function browserPanelApi(
 		captureBrowserPreview: vi.fn().mockResolvedValue("data:image/png;base64,cHJldmlldw=="),
 		controlBrowser: vi.fn().mockResolvedValue(undefined),
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
-		listBrowserDownloads: vi.fn().mockResolvedValue(overrides.downloads ?? []),
+		listBrowserDownloads: overrides.listBrowserDownloads ?? vi.fn().mockResolvedValue(overrides.downloads ?? []),
 		controlBrowserDownload: overrides.controlBrowserDownload ?? vi.fn().mockResolvedValue(undefined),
 		listBrowserHistory: vi.fn().mockResolvedValue([]),
 		clearBrowserHistory: vi.fn().mockResolvedValue(undefined),
@@ -369,5 +380,75 @@ describe("BrowserPanel downloads", () => {
 		expect(onError).toHaveBeenCalledOnce();
 		expect(container.textContent).toContain("Browser action failed");
 		expect(downloadRow(container, "report.pdf")).toBeDefined();
+	});
+
+	it("shows loading instead of an empty placeholder until the first read settles", async () => {
+		const first = deferred<readonly DesktopDownloadItem[]>();
+		const listBrowserDownloads = vi.fn().mockReturnValue(first.promise);
+		const { api } = browserPanelApi({ listBrowserDownloads });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () => button(container, "Downloads")!.click());
+		expect(container.textContent).toContain("Loading downloads…");
+		expect(container.textContent).not.toContain("No downloads yet");
+
+		await act(async () => first.resolve([]));
+		await flush();
+		expect(container.textContent).toContain("No downloads yet");
+	});
+
+	it("shows a local alert and sends only one retry while busy", async () => {
+		const retry = deferred<readonly DesktopDownloadItem[]>();
+		const listBrowserDownloads = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("first read failed"))
+			.mockRejectedValueOnce(new Error("first read failed"))
+			.mockReturnValueOnce(retry.promise);
+		const { api } = browserPanelApi({ listBrowserDownloads });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () => button(container, "Downloads")!.click());
+		await flush();
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Downloads could not be loaded");
+		expect(container.textContent).not.toContain("No downloads yet");
+
+		const retryButton = button(container, "Retry")!;
+		await act(async () => {
+			retryButton.click();
+			retryButton.click();
+		});
+		await flush();
+		expect(document.activeElement).toBe(button(container, "Downloads"));
+		expect(listBrowserDownloads).toHaveBeenCalledTimes(3);
+		expect(api.createBrowser).toHaveBeenCalledTimes(1);
+
+		await act(async () => retry.resolve([download({ downloadId: "d-recovered" })]));
+		await flush();
+		expect(container.textContent).toContain("report.pdf");
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+	});
+
+	it("keeps event data when the initial read fails and offers a retry", async () => {
+		const first = deferred<readonly DesktopDownloadItem[]>();
+		const listBrowserDownloads = vi.fn().mockReturnValue(first.promise);
+		const { api, emitBrowserEvent } = browserPanelApi({ listBrowserDownloads });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () =>
+			emitBrowserEvent({
+				type: "downloads",
+				downloads: [download({ downloadId: "d-event", filename: "fresh-event.zip" })],
+			}),
+		);
+		await act(async () => first.reject(new Error("read failed")));
+		await flush();
+		await act(async () => button(container, "Downloads")!.click());
+
+		expect(downloadRow(container, "fresh-event.zip")).toBeDefined();
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("Downloads could not be loaded");
+		expect(button(container, "Retry")).toBeDefined();
 	});
 });

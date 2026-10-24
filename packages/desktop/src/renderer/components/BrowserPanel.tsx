@@ -20,7 +20,7 @@ import {
 	User,
 	X,
 } from "@phosphor-icons/react";
-import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
 	DesktopBrowserBounds,
@@ -212,8 +212,10 @@ export function BrowserPanel({
 	const [notice, setNotice] = useState<string | null>(null);
 	const [downloads, setDownloads] = useState<readonly DesktopDownloadItem[]>([]);
 	const [downloadsOpen, setDownloadsOpen] = useState(false);
+	const [downloadsStatus, setDownloadsStatus] = useState<"loading" | "ready" | "error">("loading");
 	const [history, setHistory] = useState<readonly DesktopHistoryEntry[]>([]);
 	const [historyOpen, setHistoryOpen] = useState(false);
+	const [historyStatus, setHistoryStatus] = useState<"loading" | "ready" | "error">("loading");
 	const [takeoverBusy, setTakeoverBusy] = useState(false);
 	const [handoffBusy, setHandoffBusy] = useState(false);
 	const takeoverBusyRef = useRef(false);
@@ -242,6 +244,14 @@ export function BrowserPanel({
 	const moreOpenRef = useRef(moreOpen);
 	const previewRequestRef = useRef(0);
 	const zoomBusyRef = useRef(false);
+	const downloadsRequestRef = useRef(0);
+	const historyRequestRef = useRef(0);
+	const downloadsEventVersionRef = useRef(0);
+	const historyEventVersionRef = useRef(0);
+	const downloadsRetryBusyRef = useRef(false);
+	const historyRetryBusyRef = useRef(false);
+	const profileIdRef = useRef(profile.profileId);
+	const previousProfileIdRef = useRef(profile.profileId);
 	onErrorRef.current = onError;
 	onStateRef.current = onState;
 	translateRef.current = t;
@@ -249,6 +259,7 @@ export function BrowserPanel({
 	coveredRef.current = covered;
 	pageUrlRef.current = state.url;
 	moreOpenRef.current = moreOpen;
+	profileIdRef.current = profile.profileId;
 	useEffect(() => {
 		if (focusAddressOnMount.current) addressInputRef.current?.focus();
 	}, []);
@@ -491,6 +502,63 @@ export function BrowserPanel({
 		);
 	}
 
+	const beginDownloadsRead = useCallback(() => {
+		const request = ++downloadsRequestRef.current;
+		const eventVersion = downloadsEventVersionRef.current;
+		setDownloadsStatus("loading");
+		void api.listBrowserDownloads().then(
+			(listed) => {
+				if (request !== downloadsRequestRef.current) return;
+				downloadsRetryBusyRef.current = false;
+				if (eventVersion === downloadsEventVersionRef.current) setDownloads(listed);
+				setDownloadsStatus("ready");
+			},
+			() => {
+				if (request !== downloadsRequestRef.current) return;
+				downloadsRetryBusyRef.current = false;
+				setDownloadsStatus("error");
+			},
+		);
+	}, [api]);
+
+	const beginHistoryRead = useCallback(
+		(profileId: string) => {
+			const request = ++historyRequestRef.current;
+			const eventVersion = historyEventVersionRef.current;
+			setHistoryStatus("loading");
+			void api.listBrowserHistory({ profileId }).then(
+				(listed) => {
+					if (request !== historyRequestRef.current || profileIdRef.current !== profileId) return;
+					historyRetryBusyRef.current = false;
+					if (eventVersion === historyEventVersionRef.current) setHistory(listed);
+					setHistoryStatus("ready");
+				},
+				() => {
+					if (request !== historyRequestRef.current || profileIdRef.current !== profileId) return;
+					historyRetryBusyRef.current = false;
+					setHistoryStatus("error");
+				},
+			);
+		},
+		[api],
+	);
+
+	function retryDownloadsRead() {
+		if (downloadsRetryBusyRef.current) return;
+		downloadsRetryBusyRef.current = true;
+		const trigger = downloadsRef.current?.firstElementChild;
+		if (trigger instanceof HTMLButtonElement) trigger.focus();
+		beginDownloadsRead();
+	}
+
+	function retryHistoryRead() {
+		if (historyRetryBusyRef.current) return;
+		historyRetryBusyRef.current = true;
+		const trigger = historyRef.current?.firstElementChild;
+		if (trigger instanceof HTMLButtonElement) trigger.focus();
+		beginHistoryRead(profileIdRef.current);
+	}
+
 	useEffect(() => {
 		let active = true;
 		const removeBrowserListener = api.subscribeBrowser((event) => {
@@ -507,11 +575,16 @@ export function BrowserPanel({
 				return;
 			}
 			if (event.type === "downloads") {
+				downloadsEventVersionRef.current += 1;
 				setDownloads(event.downloads);
+				setDownloadsStatus("ready");
 				return;
 			}
 			if (event.type === "history") {
-				if (event.profileId === profile.profileId) setHistory(event.entries);
+				if (event.profileId !== profileIdRef.current) return;
+				historyEventVersionRef.current += 1;
+				setHistory(event.entries);
+				setHistoryStatus("ready");
 				return;
 			}
 			if (event.type === "command") {
@@ -525,18 +598,14 @@ export function BrowserPanel({
 			if (!addressEditedRef.current) setAddress(event.state.url);
 			onStateRef.current(event.state);
 		});
-		void api.listBrowserDownloads().then(
-			(listed) => {
-				if (active) setDownloads(listed);
-			},
-			() => undefined,
-		);
-		void api.listBrowserHistory({ profileId: profile.profileId }).then(
-			(listed) => {
-				if (active) setHistory(listed);
-			},
-			() => undefined,
-		);
+		if (previousProfileIdRef.current !== profile.profileId) {
+			previousProfileIdRef.current = profile.profileId;
+			setHistory([]);
+		}
+		downloadsRetryBusyRef.current = false;
+		historyRetryBusyRef.current = false;
+		beginDownloadsRead();
+		beginHistoryRead(profile.profileId);
 		creationRef.current ??= api.createBrowser({ sessionId, browserId, profileId: profile.profileId });
 		void creationRef.current.then(
 			(created) => {
@@ -552,10 +621,12 @@ export function BrowserPanel({
 		);
 		return () => {
 			active = false;
+			downloadsRequestRef.current += 1;
+			historyRequestRef.current += 1;
 			previewRequestRef.current += 1;
 			removeBrowserListener();
 		};
-	}, [api, sessionId, browserId, profile.profileId]);
+	}, [api, sessionId, browserId, profile.profileId, beginDownloadsRead, beginHistoryRead]);
 
 	useEffect(() => setZoomDraft(String(state.zoomPercent)), [state.zoomPercent]);
 
@@ -908,25 +979,34 @@ export function BrowserPanel({
 									{t("Clear history")}
 								</button>
 							</div>
-							{history.length === 0 ? (
-								<p className="browser-downloads-empty">{t("No history yet")}</p>
-							) : (
-								history.map((entry) => (
-									<button
-										className="browser-history-row"
-										key={entry.entryId}
-										onClick={() => openHistoryEntry(entry.url)}
-										role="menuitem"
-										title={entry.url}
-										type="button"
-									>
-										<span className="browser-download-name">{entry.title}</span>
-										<span className="browser-download-meta">
-											{formatHistoryTime(entry.visitedAt)} · {entry.url}
-										</span>
-									</button>
-								))
+							{historyStatus === "loading" && history.length === 0 && (
+								<p className="browser-downloads-empty">{t("Loading browsing history…")}</p>
 							)}
+							{historyStatus === "error" && (
+								<div className="browser-downloads-error" role="alert">
+									<span>{t("History could not be loaded")}</span>
+									<button className="browser-history-clear" onClick={retryHistoryRead} type="button">
+										{t("Retry")}
+									</button>
+								</div>
+							)}
+							{history.length === 0
+								? historyStatus === "ready" && <p className="browser-downloads-empty">{t("No history yet")}</p>
+								: history.map((entry) => (
+										<button
+											className="browser-history-row"
+											key={entry.entryId}
+											onClick={() => openHistoryEntry(entry.url)}
+											role="menuitem"
+											title={entry.url}
+											type="button"
+										>
+											<span className="browser-download-name">{entry.title}</span>
+											<span className="browser-download-meta">
+												{formatHistoryTime(entry.visitedAt)} · {entry.url}
+											</span>
+										</button>
+									))}
 						</div>
 					)}
 				</div>
@@ -948,17 +1028,28 @@ export function BrowserPanel({
 					{downloadsOpen && (
 						<div aria-label={t("Downloads")} className="browser-downloads-menu" role="menu">
 							<div className="browser-downloads-header">{t("Downloads")}</div>
-							{downloads.length === 0 ? (
-								<p className="browser-downloads-empty">{t("No downloads yet")}</p>
-							) : (
-								downloads.map((download) => (
-									<BrowserDownloadRow
-										download={download}
-										key={download.downloadId}
-										onAction={runDownloadAction}
-									/>
-								))
+							{downloadsStatus === "loading" && downloads.length === 0 && (
+								<p className="browser-downloads-empty">{t("Loading downloads…")}</p>
 							)}
+							{downloadsStatus === "error" && (
+								<div className="browser-downloads-error" role="alert">
+									<span>{t("Downloads could not be loaded")}</span>
+									<button className="browser-history-clear" onClick={retryDownloadsRead} type="button">
+										{t("Retry")}
+									</button>
+								</div>
+							)}
+							{downloads.length === 0
+								? downloadsStatus === "ready" && (
+										<p className="browser-downloads-empty">{t("No downloads yet")}</p>
+									)
+								: downloads.map((download) => (
+										<BrowserDownloadRow
+											download={download}
+											key={download.downloadId}
+											onAction={runDownloadAction}
+										/>
+									))}
 						</div>
 					)}
 				</div>

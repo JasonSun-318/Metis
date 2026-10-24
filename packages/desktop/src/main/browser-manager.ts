@@ -6,6 +6,7 @@ import {
 	type BrowserHandoffDetails,
 	type BrowserNavigateInput,
 	type BrowserToolCall,
+	type BrowserToolRequestParams,
 	type BrowserToolResult,
 	MAX_BROWSER_TABS_PER_SESSION,
 	type RpcErrorName,
@@ -92,6 +93,9 @@ interface BrowserRecord {
 	lastProgressEventType?: BrowserProgressEvent["type"];
 	pendingStateEvent: boolean;
 	pendingActivityEvent?: boolean;
+	ownerAgentId?: string;
+	userControlRequested?: boolean;
+	activeAgentCalls?: number;
 }
 
 type BrowserViewHost = Pick<View, "addChildView" | "removeChildView">;
@@ -103,13 +107,20 @@ type BrowserBackgroundWindow = Pick<
 
 type BrowserControllerLike = Pick<BrowserController, "observe" | "act" | "invalidate" | "close" | "leaseSignal">;
 
+export type BrowserToolActor = Pick<
+	BrowserToolRequestParams,
+	"rootSessionId" | "actorSessionId" | "agentId" | "taskId"
+>;
+
 export class BrowserToolError extends Error {
 	readonly rpcErrorName: RpcErrorName;
+	readonly context?: { readonly ownerAgentId?: string; readonly recovery: "wait_for_user" | "request_owner_release" };
 
-	constructor(rpcErrorName: RpcErrorName, message: string) {
+	constructor(rpcErrorName: RpcErrorName, message: string, context?: BrowserToolError["context"]) {
 		super(message);
 		this.name = "BrowserToolError";
 		this.rpcErrorName = rpcErrorName;
+		this.context = context;
 	}
 }
 
@@ -428,6 +439,7 @@ export class BrowserManager {
 				record.pendingActivityEvent = undefined;
 			},
 			emitHandoff: (event) => {
+				record.userControlRequested = event.status === "requested";
 				if (event.status === "requested") {
 					this.emit({
 						type: "handoff",
@@ -663,52 +675,115 @@ export class BrowserManager {
 		}
 	}
 
-	async executeTool(sessionId: string, call: BrowserToolCall, signal: AbortSignal): Promise<BrowserToolResult> {
+	async executeTool(
+		sessionId: string,
+		call: BrowserToolCall,
+		signal: AbortSignal,
+		actor?: BrowserToolActor,
+	): Promise<BrowserToolResult> {
 		signal.throwIfAborted();
+		if (
+			(actor?.rootSessionId && actor.rootSessionId !== sessionId) ||
+			(actor?.agentId && actor.actorSessionId !== actor.agentId)
+		) {
+			throw new BrowserToolError("NOT_FOUND", "Browser actor does not belong to this task");
+		}
+		const ownerAgentId = actor?.agentId ?? actor?.actorSessionId ?? sessionId;
+		const ownedRecord = (browserId: string) => this.claimPage(sessionId, browserId, ownerAgentId);
 		switch (call.tool) {
 			case "browser_tabs": {
 				if (call.input.action === "open") {
+					const browserId = randomUUID();
 					this.create({
 						sessionId,
-						browserId: randomUUID(),
+						browserId,
 						profileId: call.input.profileId ?? DEFAULT_BROWSER_PROFILE_ID,
 					});
+					ownedRecord(browserId);
 				} else if (call.input.action === "close") {
+					ownedRecord(call.input.browserId);
 					this.close(sessionId, call.input.browserId);
+				} else if (call.input.action === "release") {
+					const record = this.claimPage(sessionId, call.input.browserId, ownerAgentId, true);
+					if (record.activeAgentCalls || record.runtime.view().controlState !== "idle") {
+						throw new BrowserToolError(
+							"BUSY",
+							"Wait for the current browser operation before releasing ownership",
+						);
+					}
+					record.ownerAgentId = undefined;
+					record.controller.invalidate();
 				}
 				return { tool: call.tool, details: this.tabsDetails(sessionId) };
 			}
 			case "browser_navigate": {
-				const record = this.recordForSession(sessionId, call.input.browserId);
-				const details = await record.runtime.runMutation(signal, async (operationSignal) => {
-					operationSignal.throwIfAborted();
-					await this.applyNavigation(record, call.input, operationSignal);
-					return {
-						status: "completed" as const,
-						observation: await record.controller.observe({ browserId: record.browserId }, operationSignal),
-					};
-				});
+				const record = ownedRecord(call.input.browserId);
+				const details = await this.runPageOperation(record, () =>
+					record.runtime.runMutation(signal, async (operationSignal) => {
+						operationSignal.throwIfAborted();
+						await this.applyNavigation(record, call.input, operationSignal);
+						return {
+							status: "completed" as const,
+							observation: await record.controller.observe({ browserId: record.browserId }, operationSignal),
+						};
+					}),
+				);
 				return { tool: call.tool, details };
 			}
 			case "browser_observe": {
-				const record = this.recordForSession(sessionId, call.input.browserId);
-				const observation = await record.runtime.runObservation(signal, (operationSignal) =>
-					record.controller.observe(call.input, operationSignal),
+				const record = ownedRecord(call.input.browserId);
+				const observation = await this.runPageOperation(record, () =>
+					record.runtime.runObservation(signal, (operationSignal) =>
+						record.controller.observe(call.input, operationSignal),
+					),
 				);
 				return { tool: call.tool, observation };
 			}
 			case "browser_act": {
-				const record = this.recordForSession(sessionId, call.input.browserId);
-				const details = await record.runtime.runMutation(signal, (operationSignal) =>
-					record.controller.act(call.input, operationSignal),
+				const record = ownedRecord(call.input.browserId);
+				const details = await this.runPageOperation(record, () =>
+					record.runtime.runMutation(signal, (operationSignal) =>
+						record.controller.act(call.input, operationSignal),
+					),
 				);
 				return { tool: call.tool, details };
 			}
 			case "browser_handoff": {
-				const record = this.recordForSession(sessionId, call.input.browserId);
-				return { tool: call.tool, details: await record.runtime.handoff(call.input.reason, signal) };
+				const record = ownedRecord(call.input.browserId);
+				return {
+					tool: call.tool,
+					details: await this.runPageOperation(record, () => record.runtime.handoff(call.input.reason, signal)),
+				};
 			}
 		}
+	}
+
+	private async runPageOperation<T>(record: BrowserRecord, operation: () => Promise<T>): Promise<T> {
+		record.activeAgentCalls = (record.activeAgentCalls ?? 0) + 1;
+		try {
+			return await operation();
+		} finally {
+			record.activeAgentCalls -= 1;
+		}
+	}
+
+	private claimPage(sessionId: string, browserId: string, ownerAgentId: string, releasing = false): BrowserRecord {
+		const record = this.recordForSession(sessionId, browserId);
+		if (record.userControlRequested || record.runtime.view().controlState === "handoff") {
+			throw new BrowserToolError("PAGE_IN_USE", "Browser page is controlled by the user", {
+				...(record.ownerAgentId ? { ownerAgentId: record.ownerAgentId } : {}),
+				recovery: "wait_for_user",
+			});
+		}
+		if (record.ownerAgentId && record.ownerAgentId !== ownerAgentId && !(releasing && ownerAgentId === sessionId)) {
+			throw new BrowserToolError("PAGE_IN_USE", "Browser page is controlled by another agent", {
+				ownerAgentId: record.ownerAgentId,
+				recovery: "request_owner_release",
+			});
+		}
+		// Claim synchronously, before awaiting the page queue, so siblings cannot both acquire it.
+		if (!releasing) record.ownerAgentId = ownerAgentId;
+		return record;
 	}
 
 	private async applyNavigation(
@@ -741,7 +816,9 @@ export class BrowserManager {
 	}
 
 	takeControl(sessionId: string, browserId: string): void {
-		this.recordForSession(sessionId, browserId).runtime.takeControl();
+		const record = this.recordForSession(sessionId, browserId);
+		record.runtime.takeControl();
+		record.userControlRequested = true;
 	}
 
 	resolveHandoff(sessionId: string, browserId: string, decision: "complete" | "cancel"): void {
@@ -898,6 +975,7 @@ export class BrowserManager {
 					url: record.state.url,
 					loading: record.state.loading,
 					controlState: record.runtime.view().controlState,
+					...(record.ownerAgentId ? { ownerAgentId: record.ownerAgentId } : {}),
 				})),
 		};
 	}
@@ -1193,10 +1271,11 @@ export class BrowserManager {
 				overrideBrowserWindowOptions: { webPreferences },
 				createWindow: (options) => {
 					const view = this.dependencies.createView(options);
-					this.registerView(
+					const state = this.registerView(
 						{ sessionId: record.sessionId, browserId: randomUUID(), profileId: record.profileId },
 						view,
 					);
+					this.record(state.browserId).ownerAgentId = record.ownerAgentId;
 					return view.webContents;
 				},
 			};

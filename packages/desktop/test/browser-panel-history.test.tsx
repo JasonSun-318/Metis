@@ -37,7 +37,13 @@ async function flush() {
 	});
 }
 
-function renderPanel(api: MetisDesktopApi) {
+function renderPanel(
+	api: MetisDesktopApi,
+	profile: { readonly profileId: string; readonly name: string } = {
+		profileId: DEFAULT_BROWSER_PROFILE_ID,
+		name: "Default",
+	},
+) {
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -52,20 +58,31 @@ function renderPanel(api: MetisDesktopApi) {
 					onError={vi.fn()}
 					onProfileImported={vi.fn()}
 					onState={vi.fn()}
-					profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }}
+					profile={profile}
 					visible
 				/>
 			</StrictMode>,
 		),
 	);
 	roots.push(root);
-	return { container };
+	return { container, root };
+}
+
+function deferred<T>() {
+	let resolve!: (value: T) => void;
+	let reject!: (cause: unknown) => void;
+	const promise = new Promise<T>((onResolve, onReject) => {
+		resolve = onResolve;
+		reject = onReject;
+	});
+	return { promise, reject, resolve };
 }
 
 function browserPanelApi(
 	overrides: {
 		clearBrowserHistory?: MetisDesktopApi["clearBrowserHistory"];
 		history?: readonly DesktopHistoryEntry[];
+		listBrowserHistory?: MetisDesktopApi["listBrowserHistory"];
 	} = {},
 ): { api: MetisDesktopApi; emitBrowserEvent: (event: DesktopBrowserEvent) => void } {
 	let listener: ((event: DesktopBrowserEvent) => void) | undefined;
@@ -87,7 +104,7 @@ function browserPanelApi(
 		closeBrowser: vi.fn().mockResolvedValue(undefined),
 		listBrowserDownloads: vi.fn().mockResolvedValue([]),
 		controlBrowserDownload: vi.fn().mockResolvedValue(undefined),
-		listBrowserHistory: vi.fn().mockResolvedValue(overrides.history ?? []),
+		listBrowserHistory: overrides.listBrowserHistory ?? vi.fn().mockResolvedValue(overrides.history ?? []),
 		clearBrowserHistory: overrides.clearBrowserHistory ?? vi.fn().mockResolvedValue(undefined),
 		subscribeBrowser: (incoming: (event: DesktopBrowserEvent) => void) => {
 			listener = incoming;
@@ -311,5 +328,143 @@ describe("BrowserPanel history", () => {
 
 		expect(container.textContent).toContain("No history yet");
 		expect(button(container, "Clear history")!.disabled).toBe(true);
+	});
+
+	it("shows loading instead of an empty placeholder until the first read settles", async () => {
+		const first = deferred<readonly DesktopHistoryEntry[]>();
+		const listBrowserHistory = vi.fn().mockReturnValue(first.promise);
+		const { api } = browserPanelApi({ listBrowserHistory });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () => button(container, "History")!.click());
+		expect(container.textContent).toContain("Loading browsing history…");
+		expect(container.textContent).not.toContain("No history yet");
+
+		await act(async () => first.resolve([]));
+		await flush();
+		expect(container.textContent).toContain("No history yet");
+	});
+
+	it("shows a local alert and recovers from a failed read only once per retry", async () => {
+		const listBrowserHistory = vi
+			.fn()
+			.mockRejectedValueOnce(new Error("first read failed"))
+			.mockRejectedValueOnce(new Error("first read failed"))
+			.mockResolvedValueOnce([historyEntry({ entryId: "recovered" })]);
+		const { api } = browserPanelApi({ listBrowserHistory });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () => button(container, "History")!.click());
+		await flush();
+		const alert = container.querySelector('[role="alert"]');
+		expect(alert?.textContent).toContain("History could not be loaded");
+		expect(container.textContent).not.toContain("No history yet");
+
+		const retry = button(container, "Retry")!;
+		await act(async () => {
+			retry.click();
+			retry.click();
+		});
+		await flush();
+		expect(document.activeElement).toBe(button(container, "History"));
+		expect(listBrowserHistory).toHaveBeenCalledTimes(3);
+		expect(api.createBrowser).toHaveBeenCalledTimes(1);
+		expect(container.textContent).toContain("Example Domain");
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+	});
+
+	it("keeps event data that arrived while an older read was still pending", async () => {
+		const first = deferred<readonly DesktopHistoryEntry[]>();
+		const listBrowserHistory = vi.fn().mockReturnValue(first.promise);
+		const { api, emitBrowserEvent } = browserPanelApi({ listBrowserHistory });
+		const { container } = renderPanel(api);
+		await flush();
+
+		await act(async () =>
+			emitBrowserEvent({
+				type: "history",
+				profileId: DEFAULT_BROWSER_PROFILE_ID,
+				entries: [historyEntry({ entryId: "new-event", title: "Fresh event entry" })],
+			}),
+		);
+		await act(async () => button(container, "History")!.click());
+		expect(container.textContent).toContain("Fresh event entry");
+
+		await act(async () => first.resolve([historyEntry({ entryId: "old-read", title: "Stale read entry" })]));
+		await flush();
+		expect(container.textContent).toContain("Fresh event entry");
+		expect(container.textContent).not.toContain("Stale read entry");
+	});
+
+	it("ignores a read that resolves after the profile changed", async () => {
+		const oldProfile = deferred<readonly DesktopHistoryEntry[]>();
+		const nextProfile = deferred<readonly DesktopHistoryEntry[]>();
+		const listBrowserHistory = vi.fn((options: { profileId: string }) =>
+			options.profileId === DEFAULT_BROWSER_PROFILE_ID ? oldProfile.promise : nextProfile.promise,
+		);
+		const { api } = browserPanelApi({ listBrowserHistory });
+		const { container, root } = renderPanel(api);
+		await flush();
+
+		await act(async () =>
+			root.render(
+				<StrictMode>
+					<BrowserPanel
+						api={api}
+						sessionId="11111111-1111-4111-8111-111111111111"
+						browserId="browser-1"
+						controlState="idle"
+						onError={vi.fn()}
+						onProfileImported={vi.fn()}
+						onState={vi.fn()}
+						profile={{ profileId: "profile-2", name: "Second" }}
+						visible
+					/>
+				</StrictMode>,
+			),
+		);
+		await act(async () =>
+			nextProfile.resolve([historyEntry({ entryId: "new-profile", title: "Second profile entry" })]),
+		);
+		await flush();
+		await act(async () => button(container, "History")!.click());
+		expect(container.textContent).toContain("Second profile entry");
+
+		await act(async () => oldProfile.resolve([historyEntry({ entryId: "old-profile", title: "Old profile entry" })]));
+		await flush();
+		expect(container.textContent).toContain("Second profile entry");
+		expect(container.textContent).not.toContain("Old profile entry");
+		expect(container.querySelector('[role="alert"]')).toBeNull();
+	});
+
+	it("drops a read that resolves after unmount", async () => {
+		const first = deferred<readonly DesktopHistoryEntry[]>();
+		const listBrowserHistory = vi.fn().mockReturnValue(first.promise);
+		const { api } = browserPanelApi({ listBrowserHistory });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<BrowserPanel
+					api={api}
+					sessionId="11111111-1111-4111-8111-111111111111"
+					browserId="browser-1"
+					controlState="idle"
+					onError={vi.fn()}
+					onProfileImported={vi.fn()}
+					onState={vi.fn()}
+					profile={{ profileId: DEFAULT_BROWSER_PROFILE_ID, name: "Default" }}
+					visible
+				/>,
+			),
+		);
+		await flush();
+		await act(async () => root.unmount());
+		await act(async () => first.resolve([historyEntry({ entryId: "late" })]));
+		await flush();
+		expect(container.textContent).toBe("");
 	});
 });
