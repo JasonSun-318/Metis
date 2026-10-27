@@ -1,8 +1,11 @@
-import { fauxAssistantMessage } from "@metis/ai/compat";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { type Context, fauxAssistantMessage } from "@metis/ai/compat";
 import { describe, expect, it, vi } from "vitest";
 import {
 	appendKnowledgeContext,
 	buildKnowledgeContext,
+	filterKnowledgeContext,
 	KNOWLEDGE_LINKS_CUSTOM_TYPE,
 	latestKnowledgeContext,
 	readKnowledgeLinks,
@@ -117,5 +120,178 @@ describe("Knowledge conversation context", () => {
 		expect(appendKnowledgeContext(captured, [b], [])).toBe(captured);
 		expect(appendKnowledgeContext(undefined, [], [userMessage(captured)])).toBe(buildKnowledgeContext([]));
 		expect(buildKnowledgeContext([])).toContain("当前对话已取消链接知识库");
+	});
+
+	it("resolves persisted links by registered identity and authoritative metadata", () => {
+		const manager = SessionManager.inMemory("/tmp");
+		manager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a, b] });
+		const renamed = { ...b, name: "更新名称" };
+		expect(readKnowledgeLinks(manager.getBranch(), [renamed])).toEqual([renamed]);
+		expect(readKnowledgeLinks(manager.getBranch(), [])).toEqual([]);
+		expect(readKnowledgeLinks(manager.getBranch(), [{ ...a, id: "new-id" }])).toEqual([]);
+	});
+
+	it("removes deleted libraries from prepared context while retaining other hooks and accepted links", () => {
+		const manager = SessionManager.inMemory("/tmp");
+		manager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a, b] });
+		const captured = `before hook\n\n${buildKnowledgeContext([a, b])}\n\nafter hook`;
+		expect(filterKnowledgeContext(captured, [b], manager.getBranch())).toBe(
+			`before hook\n\n${buildKnowledgeContext([b])}\n\nafter hook`,
+		);
+		expect(filterKnowledgeContext(captured, [a, b], manager.getBranch())).toBe(captured);
+		expect(filterKnowledgeContext(buildKnowledgeContext([a]), [{ ...a, id: "new-id" }], manager.getBranch())).toBe(
+			buildKnowledgeContext([]),
+		);
+	});
+
+	it("does not revive an old id from legacy context when its directory is registered again", () => {
+		const manager = SessionManager.inMemory("/tmp");
+		manager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+		const legacy = `<knowledge_context>\n当前对话已链接知识库：\n${JSON.stringify({ name: a.name, path: a.path })}\n</knowledge_context>`;
+		expect(filterKnowledgeContext(legacy, [a], manager.getBranch())).toBe(legacy);
+		expect(filterKnowledgeContext(legacy, [{ ...a, id: "new-id" }], manager.getBranch())).toBe(
+			buildKnowledgeContext([]),
+		);
+	});
+
+	it("filters a prepared prompt after removal without losing its extension hook", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		try {
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a, b] });
+			await writeFile(join(harness.tempDir, "knowledge-libraries.json"), JSON.stringify({ libraries: [b] }));
+			harness.setResponses([fauxAssistantMessage("done")]);
+			await harness.session.prompt("prepared", {
+				hookEvaluated: true,
+				hookContext: `extension hook\n\n${buildKnowledgeContext([a, b])}`,
+			});
+			const user = harness.session.messages.find((message) => message.role === "user") as
+				| { hookContext?: string }
+				| undefined;
+			expect(user?.hookContext).toBe(`extension hook\n\n${buildKnowledgeContext([b])}`);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("keeps the provider history prefix stable while registered links are unchanged", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		try {
+			await writeFile(join(harness.tempDir, "knowledge-libraries.json"), JSON.stringify({ libraries: [a] }));
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+			const requests: unknown[][] = [];
+			harness.setResponses(
+				["first", "second"].map((answer) => async (context: Context) => {
+					requests.push(structuredClone(context.messages));
+					return fauxAssistantMessage(answer);
+				}),
+			);
+			await harness.session.prompt("first");
+			await harness.session.prompt("second");
+			expect(requests[1].slice(0, requests[0].length)).toEqual(requests[0]);
+			expect(JSON.stringify(requests[1].at(-1))).not.toContain("<knowledge_context>");
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("overrides a queued old block at provider time without rewriting its history", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		let release!: () => void;
+		let started!: () => void;
+		const firstStarted = new Promise<void>((resolve) => {
+			started = resolve;
+		});
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const requests: unknown[] = [];
+		try {
+			const catalog = join(harness.tempDir, "knowledge-libraries.json");
+			await writeFile(catalog, JSON.stringify({ libraries: [a] }));
+			harness.setResponses([
+				async () => {
+					started();
+					await gate;
+					return fauxAssistantMessage("first");
+				},
+				async (context) => {
+					requests.push(context.messages);
+					return fauxAssistantMessage("queued");
+				},
+			]);
+			const running = harness.session.prompt("first request");
+			await firstStarted;
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+			await harness.session.prompt("queued request", { streamingBehavior: "followUp" });
+			await writeFile(catalog, JSON.stringify({ libraries: [] }));
+			release();
+			await running;
+			expect(requests).toHaveLength(1);
+			const last = (requests[0] as unknown[]).at(-1);
+			expect(JSON.stringify(last)).toContain("当前对话已取消链接知识库");
+			const queued = harness.session.messages.find(
+				(message) => message.role === "user" && getMessageText(message) === "queued request",
+			) as { hookContext?: string } | undefined;
+			// The accepted message is not rewritten just to update the provider view.
+			expect(queued?.hookContext).toBe(buildKnowledgeContext([a]));
+			expect(harness.session.messages.some((message) => message.role === "custom")).toBe(false);
+		} finally {
+			release();
+			await harness.cleanup();
+		}
+	});
+
+	it("keeps host-less catalog compatibility and rejects a corrupt catalog before model execution", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		try {
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+			harness.setResponses([fauxAssistantMessage("first"), fauxAssistantMessage("must not execute")]);
+			await harness.session.prompt("without catalog");
+			const user = harness.session.messages.find((message) => message.role === "user") as
+				| { hookContext?: string }
+				| undefined;
+			expect(user?.hookContext).toBe(buildKnowledgeContext([a]));
+			await writeFile(join(harness.tempDir, "knowledge-libraries.json"), '{"libraries":false}');
+			await expect(harness.session.prompt("corrupt catalog")).rejects.toThrow("Invalid knowledge directory catalog");
+			expect(harness.getPendingResponseCount()).toBe(1);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("does not make unrelated conversations depend on the knowledge directory catalog", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		try {
+			await writeFile(join(harness.tempDir, "knowledge-libraries.json"), "{");
+			harness.setResponses([fauxAssistantMessage("normal response")]);
+			await harness.session.prompt("ordinary request");
+			expect(harness.session.messages.some((message) => message.role === "assistant")).toBe(true);
+		} finally {
+			await harness.cleanup();
+		}
+	});
+
+	it("declares removal after compaction even when an old block remains only inside the summary", async () => {
+		const harness = await createHarness({ withAgentDir: true });
+		try {
+			const catalog = join(harness.tempDir, "knowledge-libraries.json");
+			await writeFile(catalog, JSON.stringify({ libraries: [a] }));
+			harness.sessionManager.appendCustomEntry(KNOWLEDGE_LINKS_CUSTOM_TYPE, { libraries: [a] });
+			const requests: unknown[] = [];
+			harness.setResponses([
+				async (context) => {
+					requests.push(context.messages);
+					return fauxAssistantMessage("done");
+				},
+			]);
+			harness.session.agent.state.messages = [
+				{ role: "compactionSummary", summary: buildKnowledgeContext([a]), tokensBefore: 1, timestamp: 1 },
+			];
+			await writeFile(catalog, JSON.stringify({ libraries: [] }));
+			await harness.session.prompt("after removal");
+			expect(JSON.stringify((requests[0] as unknown[]).at(-1))).toContain("当前对话已取消链接知识库");
+		} finally {
+			await harness.cleanup();
+		}
 	});
 });

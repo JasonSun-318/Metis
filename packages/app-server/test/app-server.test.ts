@@ -244,6 +244,20 @@ class FakeRuntime implements OpenedSessionRuntime {
 		throw new Error("No child conversation in fixture");
 	}
 
+	async readAgentQueuedMessages(): Promise<ClientResult<"agent/queue/read">> {
+		return { queuedTurns: [] };
+	}
+
+	async deleteAgentQueuedMessage(
+		input: ClientParams<"agent/queue/delete">,
+	): Promise<ClientResult<"agent/queue/delete">> {
+		return { queueItemId: input.queueItemId, deleted: true };
+	}
+
+	async sendAgentQueuedMessage(): Promise<ClientResult<"agent/queue/send">> {
+		throw new Error("No child conversation in fixture");
+	}
+
 	async controlAgent(): Promise<ClientResult<"agent/control">> {
 		throw new Error("No child control in fixture");
 	}

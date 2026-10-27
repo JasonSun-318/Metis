@@ -34,6 +34,33 @@ describe("Markdown knowledge directories", () => {
 		expect((await service.scan(library.id)).notes).toEqual([]);
 		await expect(service.register("relative/path")).rejects.toThrow("absolute");
 	});
+	it("removes only the registration, preserving the directory and allowing an explicit fresh registration", async () => {
+		await mkdir(join(vault, "nested"));
+		await writeFile(join(vault, "nested", "Note.md"), "# Keep this note");
+		await writeFile(join(vault, "original.bin"), Buffer.from([0, 1, 255]));
+		const library = await service.register(vault);
+		const otherPath = join(root, "Other library");
+		await mkdir(otherPath);
+		const other = await service.register(otherPath);
+		await service.scan(library.id);
+
+		expect(service.remove(library.id)).toEqual({ libraries: [other] });
+		expect(service.remove(library.id)).toEqual({ libraries: [other] });
+		expect(new KnowledgeService(join(root, "agent")).list()).toEqual({ libraries: [other] });
+		expect(await readFile(join(vault, "nested", "Note.md"), "utf8")).toBe("# Keep this note");
+		expect(await readFile(join(vault, "original.bin"))).toEqual(Buffer.from([0, 1, 255]));
+		await expect(service.read(library.id, "nested/Note.md")).rejects.toThrow("not registered");
+		await expect(service.scan(library.id)).rejects.toThrow("not registered");
+		const addedAgain = await service.register(vault);
+		expect(addedAgain.id).not.toBe(library.id);
+		expect((await service.read(addedAgain.id, "nested/Note.md")).content).toBe("# Keep this note");
+	});
+	it("removes the last registration even when its directory is no longer available", async () => {
+		const library = await service.register(vault);
+		await rm(vault, { recursive: true });
+		expect(service.remove(library.id)).toEqual({ libraries: [] });
+		expect(new KnowledgeService(join(root, "agent")).list()).toEqual({ libraries: [] });
+	});
 	it("shows nested notes and resolves path, alias, heading and Markdown links while ignoring code", async () => {
 		await mkdir(join(vault, "topic", "deep"), { recursive: true });
 		await writeFile(

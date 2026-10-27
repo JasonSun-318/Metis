@@ -8,6 +8,7 @@ export {
 	hasConfiguredManualThinkingLevel,
 	normalizeManualThinkingLevelMap,
 } from "./core/custom-model-reasoning.ts";
+export { readKnowledgeCatalog } from "./core/knowledge-catalog.ts";
 export {
 	KNOWLEDGE_LINKS_CUSTOM_TYPE,
 	type KnowledgeLibraryLink,
@@ -19,9 +20,11 @@ export type { DurablePromptInput } from "./core/runtime-recovery.ts";
 export { trashScheduledTaskData } from "./core/schedules/delete.ts";
 export { resolveDeliveredFilePath } from "./core/session-attachments.ts";
 export { agentSummaryFromRecord } from "./core/subagents/manager.ts";
+export { queuedAdmissionRequestId, queuedAgentMessages } from "./core/subagents/queued-messages.ts";
 export { AgentStore } from "./core/subagents/store.ts";
 export { BUILT_IN_TOOL_NAMES } from "./core/tools/index.ts";
 export type {
+	AgentQueuedMessage,
 	AgentSessionEvent,
 	AgentSessionRuntime,
 	AgentSummary,

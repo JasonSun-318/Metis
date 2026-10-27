@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:metis:schemas:app-server:v25",
-  "title": "Metis App-Server Protocol v25",
+  "$id": "urn:metis:schemas:app-server:v26",
+  "title": "Metis App-Server Protocol v26",
   "$ref": "#/$defs/AppProtocolEnvelope",
   "$defs": {
     "AppProtocolEnvelope": {
@@ -105,6 +105,50 @@
                 },
                 "method": {
                   "type": "string",
+                  "const": "knowledge/remove"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "requestId",
+                    "libraryId"
+                  ],
+                  "properties": {
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "libraryId": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
                   "const": "knowledge/scan"
                 },
                 "params": {
@@ -161,6 +205,69 @@
                       "type": "string",
                       "minLength": 1,
                       "x-metis-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "knowledge/resource/resolve"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "libraryId",
+                    "sourcePath",
+                    "reference",
+                    "kind"
+                  ],
+                  "properties": {
+                    "libraryId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "sourcePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    },
+                    "reference": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "wiki"
+                        },
+                        {
+                          "type": "string",
+                          "const": "markdown"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -6704,6 +6811,195 @@
                         }
                       },
                       "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "agent/queue/read"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "agentId"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "agent/queue/delete"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "queueItemId",
+                    "expectedRevision",
+                    "agentId"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "queueItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "expectedRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "method",
+                "params"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "method": {
+                  "type": "string",
+                  "const": "agent/queue/send"
+                },
+                "params": {
+                  "type": "object",
+                  "required": [
+                    "sessionId",
+                    "requestId",
+                    "queueItemId",
+                    "expectedRevision",
+                    "agentId",
+                    "delivery"
+                  ],
+                  "properties": {
+                    "sessionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "queueItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "expectedRevision": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "delivery": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "steer"
+                        },
+                        {
+                          "type": "string",
+                          "const": "start"
+                        }
+                      ]
                     }
                   },
                   "additionalProperties": false
@@ -20161,6 +20457,63 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "libraries"
+                  ],
+                  "properties": {
+                    "libraries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "id",
+                          "name",
+                          "path"
+                        ],
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "format": "uuid"
+                          },
+                          "name": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 65536
+                          },
+                          "path": {
+                            "type": "string",
+                            "minLength": 1,
+                            "x-metis-maxUtf8Bytes": 32768
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "notes",
                     "edges",
                     "warnings"
@@ -20328,6 +20681,89 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "libraryId",
+                    "path",
+                    "kind",
+                    "mimeType",
+                    "revision",
+                    "absolutePath",
+                    "rootPath"
+                  ],
+                  "properties": {
+                    "libraryId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "path": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    },
+                    "kind": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "note"
+                        },
+                        {
+                          "type": "string",
+                          "const": "image"
+                        },
+                        {
+                          "type": "string",
+                          "const": "pdf"
+                        }
+                      ]
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "revision": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "fragment": {
+                      "type": "string",
+                      "x-metis-maxUtf8Bytes": 65536
+                    },
+                    "absolutePath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    },
+                    "rootPath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "x-metis-maxUtf8Bytes": 32768
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "libraries"
                   ],
                   "properties": {
@@ -20450,7 +20886,7 @@
                   "properties": {
                     "protocolVersion": {
                       "type": "number",
-                      "const": 25
+                      "const": 26
                     },
                     "server": {
                       "type": "object",
@@ -37804,6 +38240,251 @@
                 "result": {
                   "type": "object",
                   "required": [
+                    "queuedTurns"
+                  ],
+                  "properties": {
+                    "queuedTurns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "queueItemId",
+                          "revision",
+                          "state",
+                          "text",
+                          "attachments"
+                        ],
+                        "properties": {
+                          "queueItemId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "revision": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 128,
+                            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                          },
+                          "state": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "queued"
+                              },
+                              {
+                                "type": "string",
+                                "const": "paused"
+                              },
+                              {
+                                "type": "string",
+                                "const": "sending"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "x-metis-maxUtf8Bytes": 2097152
+                          },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": [
+                                "name",
+                                "byteLength"
+                              ],
+                              "properties": {
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "byteLength": {
+                                  "type": "integer",
+                                  "minimum": 1,
+                                  "maximum": 134217728
+                                }
+                              },
+                              "additionalProperties": false
+                            },
+                            "maxItems": 16
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "maxItems": 32
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "queueItemId",
+                    "deleted"
+                  ],
+                  "properties": {
+                    "queueItemId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "deleted": {
+                      "type": "boolean",
+                      "const": true
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
+                    "agentId",
+                    "taskId",
+                    "messageId",
+                    "requestId",
+                    "delivery",
+                    "state",
+                    "instructionRevision"
+                  ],
+                  "properties": {
+                    "agentId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "taskId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                    },
+                    "messageId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128,
+                      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "requestId": {
+                      "type": "string",
+                      "format": "uuid"
+                    },
+                    "delivery": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "steer"
+                        },
+                        {
+                          "type": "string",
+                          "const": "start"
+                        },
+                        {
+                          "type": "string",
+                          "const": "queue"
+                        }
+                      ]
+                    },
+                    "state": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "const": "accepted"
+                        },
+                        {
+                          "type": "string",
+                          "const": "queued"
+                        },
+                        {
+                          "type": "string",
+                          "const": "delivered"
+                        },
+                        {
+                          "type": "string",
+                          "const": "cancelled"
+                        },
+                        {
+                          "type": "string",
+                          "const": "failed"
+                        }
+                      ]
+                    },
+                    "instructionRevision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              },
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "required": [
+                "jsonrpc",
+                "id",
+                "result"
+              ],
+              "properties": {
+                "jsonrpc": {
+                  "type": "string",
+                  "const": "2.0"
+                },
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "x-metis-maxUtf16Units": 128
+                },
+                "result": {
+                  "type": "object",
+                  "required": [
                     "agentId",
                     "requestId",
                     "state",
@@ -51404,6 +52085,50 @@
             },
             "method": {
               "type": "string",
+              "const": "knowledge/remove"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "requestId",
+                "libraryId"
+              ],
+              "properties": {
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "libraryId": {
+                  "type": "string",
+                  "format": "uuid"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "knowledge/scan"
             },
             "params": {
@@ -51460,6 +52185,69 @@
                   "type": "string",
                   "minLength": 1,
                   "x-metis-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "knowledge/resource/resolve"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "libraryId",
+                "sourcePath",
+                "reference",
+                "kind"
+              ],
+              "properties": {
+                "libraryId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "sourcePath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                },
+                "reference": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "kind": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "wiki"
+                    },
+                    {
+                      "type": "string",
+                      "const": "markdown"
+                    }
+                  ]
                 }
               },
               "additionalProperties": false
@@ -58031,6 +58819,195 @@
             },
             "method": {
               "type": "string",
+              "const": "agent/queue/read"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "agentId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "agent/queue/delete"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "queueItemId",
+                "expectedRevision",
+                "agentId"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "queueItemId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "expectedRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
+              "const": "agent/queue/send"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "requestId",
+                "queueItemId",
+                "expectedRevision",
+                "agentId",
+                "delivery"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "queueItemId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "expectedRevision": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "delivery": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "steer"
+                    },
+                    {
+                      "type": "string",
+                      "const": "start"
+                    }
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "method": {
+              "type": "string",
               "const": "agent/control"
             },
             "params": {
@@ -62019,6 +62996,63 @@
             "result": {
               "type": "object",
               "required": [
+                "libraries"
+              ],
+              "properties": {
+                "libraries": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "name",
+                      "path"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "format": "uuid"
+                      },
+                      "name": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 65536
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "x-metis-maxUtf8Bytes": 32768
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
                 "notes",
                 "edges",
                 "warnings"
@@ -62186,6 +63220,89 @@
             "result": {
               "type": "object",
               "required": [
+                "libraryId",
+                "path",
+                "kind",
+                "mimeType",
+                "revision",
+                "absolutePath",
+                "rootPath"
+              ],
+              "properties": {
+                "libraryId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "path": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                },
+                "kind": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "note"
+                    },
+                    {
+                      "type": "string",
+                      "const": "image"
+                    },
+                    {
+                      "type": "string",
+                      "const": "pdf"
+                    }
+                  ]
+                },
+                "mimeType": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "revision": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "fragment": {
+                  "type": "string",
+                  "x-metis-maxUtf8Bytes": 65536
+                },
+                "absolutePath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                },
+                "rootPath": {
+                  "type": "string",
+                  "minLength": 1,
+                  "x-metis-maxUtf8Bytes": 32768
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
                 "libraries"
               ],
               "properties": {
@@ -62308,7 +63425,7 @@
               "properties": {
                 "protocolVersion": {
                   "type": "number",
-                  "const": 25
+                  "const": 26
                 },
                 "server": {
                   "type": "object",
@@ -79533,6 +80650,251 @@
                       "type": "null"
                     }
                   ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "agentId",
+                "taskId",
+                "messageId",
+                "requestId",
+                "delivery",
+                "state",
+                "instructionRevision"
+              ],
+              "properties": {
+                "agentId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "taskId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$"
+                },
+                "messageId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "requestId": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "delivery": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "steer"
+                    },
+                    {
+                      "type": "string",
+                      "const": "start"
+                    },
+                    {
+                      "type": "string",
+                      "const": "queue"
+                    }
+                  ]
+                },
+                "state": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "accepted"
+                    },
+                    {
+                      "type": "string",
+                      "const": "queued"
+                    },
+                    {
+                      "type": "string",
+                      "const": "delivered"
+                    },
+                    {
+                      "type": "string",
+                      "const": "cancelled"
+                    },
+                    {
+                      "type": "string",
+                      "const": "failed"
+                    }
+                  ]
+                },
+                "instructionRevision": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "queuedTurns"
+              ],
+              "properties": {
+                "queuedTurns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "queueItemId",
+                      "revision",
+                      "state",
+                      "text",
+                      "attachments"
+                    ],
+                    "properties": {
+                      "queueItemId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "revision": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                      },
+                      "state": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "queued"
+                          },
+                          {
+                            "type": "string",
+                            "const": "paused"
+                          },
+                          {
+                            "type": "string",
+                            "const": "sending"
+                          }
+                        ]
+                      },
+                      "text": {
+                        "type": "string",
+                        "x-metis-maxUtf8Bytes": 2097152
+                      },
+                      "attachments": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "required": [
+                            "name",
+                            "byteLength"
+                          ],
+                          "properties": {
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "byteLength": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 134217728
+                            }
+                          },
+                          "additionalProperties": false
+                        },
+                        "maxItems": 16
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "maxItems": 32
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "jsonrpc",
+            "id",
+            "result"
+          ],
+          "properties": {
+            "jsonrpc": {
+              "type": "string",
+              "const": "2.0"
+            },
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128,
+              "x-metis-maxUtf16Units": 128
+            },
+            "result": {
+              "type": "object",
+              "required": [
+                "queueItemId",
+                "deleted"
+              ],
+              "properties": {
+                "queueItemId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128,
+                  "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "const": true
                 }
               },
               "additionalProperties": false

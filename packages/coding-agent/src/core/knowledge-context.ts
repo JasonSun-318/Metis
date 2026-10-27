@@ -7,15 +7,18 @@ export interface KnowledgeLibraryLink {
 }
 export const KNOWLEDGE_LINKS_CUSTOM_TYPE = "metis.knowledge.links.v1";
 
+type KnowledgeEntry = { type: string; customType?: string; data?: unknown };
+
 export function readKnowledgeLinks(
-	entries: readonly { type: string; customType?: string; data?: unknown }[],
+	entries: readonly KnowledgeEntry[],
+	registeredLibraries?: readonly KnowledgeLibraryLink[],
 ): KnowledgeLibraryLink[] {
 	for (let index = entries.length - 1; index >= 0; index--) {
 		const entry = entries[index];
 		if (entry.type !== "custom" || entry.customType !== KNOWLEDGE_LINKS_CUSTOM_TYPE) continue;
 		const libraries = (entry.data as { libraries?: unknown } | undefined)?.libraries;
 		if (!Array.isArray(libraries)) return [];
-		return libraries.filter(
+		const links = libraries.filter(
 			(library): library is KnowledgeLibraryLink =>
 				library !== null &&
 				typeof library === "object" &&
@@ -24,6 +27,12 @@ export function readKnowledgeLinks(
 				typeof library.path === "string" &&
 				isAbsolute(library.path),
 		);
+		if (registeredLibraries === undefined) return links;
+		const registered = new Map(registeredLibraries.map((library) => [library.id, library]));
+		return links.flatMap((library) => {
+			const current = registered.get(library.id);
+			return current ? [current] : [];
+		});
 	}
 	return [];
 }
@@ -37,7 +46,7 @@ export function buildKnowledgeContext(libraries: readonly KnowledgeLibraryLink[]
 		...(libraries.length
 			? [
 					"当前对话已链接知识库（path 为完整绝对路径）：",
-					...libraries.map(({ name, path }) => JSON.stringify({ name, path })),
+					...libraries.map(({ id, name, path }) => JSON.stringify({ name, path, id })),
 					"请根据用户请求使用上述目录及其子目录。以最近一次 knowledge_context 为准，不从其他对话或侧边栏查看状态推断链接。",
 				]
 			: [
@@ -46,6 +55,53 @@ export function buildKnowledgeContext(libraries: readonly KnowledgeLibraryLink[]
 		"知识库整理和查询请使用 knowledge skill。链接信息是工作上下文，沿用现有文件工具权限。",
 		"</knowledge_context>",
 	].join("\n");
+}
+
+/** Revalidate accepted knowledge blocks without changing unrelated extension context. */
+export function filterKnowledgeContext(
+	context: string | undefined,
+	registeredLibraries: readonly KnowledgeLibraryLink[],
+	entries: readonly KnowledgeEntry[],
+): string | undefined {
+	if (!context) return context;
+	const registered = new Map(registeredLibraries.map((library) => [library.id, library]));
+	const known = new Map<string, KnowledgeLibraryLink>();
+	for (const entry of entries) {
+		for (const library of readKnowledgeLinks([entry])) known.set(library.id, library);
+	}
+	return context.replace(KNOWLEDGE_CONTEXT_PATTERN, (block) => {
+		const rows = block.split("\n").filter((line) => line.trimStart().startsWith("{"));
+		if (rows.length === 0) return block;
+		const retained: KnowledgeLibraryLink[] = [];
+		let changed = false;
+		for (const row of rows) {
+			let captured: { id?: unknown; name?: unknown; path?: unknown };
+			try {
+				captured = JSON.parse(row);
+			} catch {
+				changed = true;
+				continue;
+			}
+			if (!captured || typeof captured.name !== "string" || typeof captured.path !== "string") {
+				changed = true;
+				continue;
+			}
+			// Old blocks omitted IDs. Resolve only an unambiguous identity from this branch's
+			// persisted links, never from a newly registered directory with the same path.
+			const legacy = [...known.values()].filter(
+				(library) => library.name === captured.name && library.path === captured.path,
+			);
+			const id = typeof captured.id === "string" ? captured.id : legacy.length === 1 ? legacy[0].id : undefined;
+			const current = id === undefined ? undefined : registered.get(id);
+			if (!current) {
+				changed = true;
+				continue;
+			}
+			retained.push(current);
+			if (current.name !== captured.name || current.path !== captured.path) changed = true;
+		}
+		return changed ? buildKnowledgeContext(retained) : block;
+	});
 }
 
 /** Returns the newest knowledge context block still present in the model-visible messages. */

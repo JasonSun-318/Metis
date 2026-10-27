@@ -132,7 +132,14 @@ import {
 	createInteractiveBashBoundary,
 	type InteractiveBashBoundary,
 } from "./interactive-bash-boundary.ts";
-import { appendKnowledgeContext, readKnowledgeLinks } from "./knowledge-context.ts";
+import { readKnowledgeCatalog } from "./knowledge-catalog.ts";
+import {
+	appendKnowledgeContext,
+	buildKnowledgeContext,
+	filterKnowledgeContext,
+	latestKnowledgeContext,
+	readKnowledgeLinks,
+} from "./knowledge-context.ts";
 import { externalizeLargeToolOutput, type PersistedToolOutput } from "./large-tool-output.ts";
 import { createMcpToolDefinitions, type McpManager } from "./mcp/index.ts";
 import { MemoryVault, type UndoRunResult } from "./memory/vault.ts";
@@ -934,6 +941,7 @@ export class AgentSession {
 		this._installAgentToolHooks();
 		this._installAgentMailboxHook();
 		this._installPlanContextHook();
+		this._installKnowledgeContextHook();
 		this._installToolResultMicrocompactionHook();
 		this._installAgentDurabilityHooks();
 		this._installAgentNextTurnRefresh();
@@ -1581,6 +1589,38 @@ export class AgentSession {
 	}
 
 	private _planProjectionSources = new Map<AgentMessage, AgentMessage>();
+
+	private _installKnowledgeContextHook(): void {
+		const transformContext = this.agent.transformContext;
+		this.agent.transformContext = async (messages, signal) => {
+			const transformed = transformContext ? await transformContext(messages, signal) : messages;
+			if (!this._agentDir) return transformed;
+			const entries = this.sessionManager.getBranch();
+			const latest = latestKnowledgeContext(transformed);
+			const links = readKnowledgeLinks(entries);
+			const capturedLinks = latest?.split("\n").some((line) => line.trimStart().startsWith("{"));
+			if (links.length === 0 && !capturedLinks) return transformed;
+			const catalog = readKnowledgeCatalog(this._agentDir);
+			if (catalog === undefined) return transformed;
+			const filtered = filterKnowledgeContext(latest, catalog, entries);
+			const effectiveLinks = readKnowledgeLinks(entries, catalog);
+			if (latest === filtered && !(latest === undefined && links.length !== effectiveLinks.length))
+				return transformed;
+			// Queue messages may have been accepted before removal; summaries can retain old
+			// paths after their hook metadata is gone. Override only this provider view so
+			// durable user messages and their cached prefix remain byte-for-byte unchanged.
+			return [
+				...transformed,
+				{
+					role: "custom",
+					customType: "metis_knowledge_context",
+					content: filtered ?? buildKnowledgeContext(effectiveLinks),
+					display: false,
+					timestamp: Date.now(),
+				},
+			];
+		};
+	}
 
 	/**
 	 * Attach stable durable origins to converted LLM messages so provider cache
@@ -4635,9 +4675,15 @@ export class AgentSession {
 	}
 
 	private _withKnowledgeContext(context: string | undefined): string | undefined {
+		const entries = this.sessionManager.getBranch();
+		const links = readKnowledgeLinks(entries);
+		const catalog =
+			this._agentDir && (links.length > 0 || context?.includes("<knowledge_context>"))
+				? readKnowledgeCatalog(this._agentDir)
+				: undefined;
 		return appendKnowledgeContext(
-			context,
-			readKnowledgeLinks(this.sessionManager.getBranch()),
+			catalog === undefined ? context : filterKnowledgeContext(context, catalog, entries),
+			readKnowledgeLinks(entries, catalog),
 			this.agent.state.messages,
 		);
 	}

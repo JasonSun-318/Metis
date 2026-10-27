@@ -6,7 +6,7 @@
 			"jsonrpc": "2.0",
 			"id": "client-1",
 			"result": {
-				"protocolVersion": 25,
+				"protocolVersion": 26,
 				"server": {
 					"name": "metis-app-server",
 					"version": "0.80.6"
@@ -1397,6 +1397,17 @@
 	},
 	{
 		"direction": "client",
+		"method": "knowledge/remove",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-remove",
+			"result": {
+				"libraries": []
+			}
+		}
+	},
+	{
+		"direction": "client",
 		"method": "knowledge/scan",
 		"envelope": {
 			"jsonrpc": "2.0",
@@ -1444,6 +1455,24 @@
 			"result": {
 				"path": "topic/Note.md",
 				"content": "# Note"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "knowledge/resource/resolve",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "knowledge-knowledge-resource-resolve",
+			"result": {
+				"libraryId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+				"path": "topic/设计说明.md",
+				"kind": "note",
+				"mimeType": "text/markdown",
+				"revision": "1762900000000:1762900000000:128",
+				"fragment": "核心流程",
+				"absolutePath": "/Users/test/knowledge/topic/设计说明.md",
+				"rootPath": "/Users/test/knowledge"
 			}
 		}
 	},
@@ -1509,6 +1538,46 @@
 				"requestId": "77777777-7777-4777-8777-777777777777",
 				"state": "user_paused",
 				"scope": "subtree"
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/queue/read",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-queue-1",
+			"result": {
+				"queuedTurns": []
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/queue/delete",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-queue-2",
+			"result": {
+				"queueItemId": "message-queued",
+				"deleted": true
+			}
+		}
+	},
+	{
+		"direction": "client",
+		"method": "agent/queue/send",
+		"envelope": {
+			"jsonrpc": "2.0",
+			"id": "client-agent-queue-3",
+			"result": {
+				"agentId": "22222222-2222-4222-8222-222222222222",
+				"taskId": "44444444-4444-4444-8444-444444444444",
+				"messageId": "message-queued",
+				"requestId": "33333333-3333-4333-8333-333333333333",
+				"delivery": "steer",
+				"state": "accepted",
+				"instructionRevision": 2
 			}
 		}
 	}

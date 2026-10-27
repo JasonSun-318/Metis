@@ -56,6 +56,7 @@ import {
 	QueuedTurnNotFoundError,
 	RequestIdReusedError,
 	readCustomAgentTypes,
+	readKnowledgeCatalog,
 	readKnowledgeLinks,
 	readPluginSnapshot,
 	readThreadGoal,
@@ -84,6 +85,7 @@ import {
 import { createAgentHostTools, DELEGATABLE_HOST_TOOL_NAMES } from "./agent-host-tools.ts";
 import { AgentLiveProjector } from "./agent-live-projector.ts";
 import { prepareAgentMessage } from "./agent-message-service.ts";
+import { projectAgentQueuedTurns } from "./agent-queued-message-projection.ts";
 import { agentSummaryView, boundedAgentSummaryViews } from "./agent-summary-projection.ts";
 import { createBrowserPermissionAudit } from "./browser-permission-audit.ts";
 import type { CredentialCoordinator } from "./credential-coordinator.ts";
@@ -1782,6 +1784,83 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		}
 	}
 
+	async readAgentQueuedMessages(input: ClientParams<"agent/queue/read">): Promise<ClientResult<"agent/queue/read">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		try {
+			return {
+				queuedTurns: projectAgentQueuedTurns(manager.listQueuedMessages({ kind: "user" }, input.agentId)),
+			};
+		} catch (error) {
+			throwAgentError(error, input);
+		}
+	}
+
+	async deleteAgentQueuedMessage(
+		input: ClientParams<"agent/queue/delete">,
+	): Promise<ClientResult<"agent/queue/delete">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		try {
+			const queued = manager
+				.listQueuedMessages({ kind: "user" }, input.agentId)
+				.find((message) => opaqueId(message.messageId, "queue") === input.queueItemId);
+			if (!queued) throw new QueuedTurnNotFoundError(input.queueItemId);
+			if (opaqueId(queued.revision, "entry") !== input.expectedRevision)
+				throw new QueuedTurnConflictError(input.queueItemId);
+			await manager.deleteQueuedMessage(
+				{ kind: "user" },
+				{
+					agentId: input.agentId,
+					requestId: input.requestId,
+					messageId: queued.messageId,
+					expectedRevision: queued.revision,
+				},
+			);
+			return { queueItemId: input.queueItemId, deleted: true };
+		} catch (error) {
+			if (
+				error instanceof QueuedTurnConflictError ||
+				error instanceof QueuedTurnNotFoundError ||
+				error instanceof QueuedTurnBusyError
+			)
+				throwQueuedTurnError(error, input);
+			throwAgentError(error, input);
+		}
+	}
+
+	async sendAgentQueuedMessage(input: ClientParams<"agent/queue/send">): Promise<ClientResult<"agent/queue/send">> {
+		const manager = this.runtime.subagentManager;
+		if (!manager) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		try {
+			const queued = manager
+				.listQueuedMessages({ kind: "user" }, input.agentId)
+				.find((message) => opaqueId(message.messageId, "queue") === input.queueItemId);
+			if (!queued) throw new QueuedTurnNotFoundError(input.queueItemId);
+			if (opaqueId(queued.revision, "entry") !== input.expectedRevision)
+				throw new QueuedTurnConflictError(input.queueItemId);
+			const receipt = await manager.sendQueuedMessage(
+				{ kind: "user" },
+				{
+					agentId: input.agentId,
+					requestId: input.requestId,
+					messageId: queued.messageId,
+					expectedRevision: queued.revision,
+					delivery: input.delivery,
+				},
+			);
+			return { ...receipt, messageId: opaqueId(receipt.messageId, "agent-message"), requestId: input.requestId };
+		} catch (error) {
+			if (
+				error instanceof QueuedTurnConflictError ||
+				error instanceof QueuedTurnNotFoundError ||
+				error instanceof QueuedTurnBusyError
+			)
+				throwQueuedTurnError(error, input);
+			throwAgentError(error, input);
+		}
+	}
+
 	async interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">> {
 		// This legacy endpoint returns a child summary; root control has its own endpoint.
 		if (input.agentId === this.sessionId) throw new AppServerError("INVALID_PARAMS", input);
@@ -2046,7 +2125,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	getKnowledgeLinks(): ClientResult<"session/knowledge/get"> {
-		return { libraries: readKnowledgeLinks(this.session.sessionManager.getBranch()) };
+		return {
+			libraries: readKnowledgeLinks(
+				this.session.sessionManager.getBranch(),
+				readKnowledgeCatalog(this.agentDir) ?? [],
+			),
+		};
 	}
 
 	setKnowledgeLinks(
@@ -2536,6 +2620,18 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 	}
 
 	async sendAgentMessage(): Promise<ClientResult<"agent/send">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async readAgentQueuedMessages(): Promise<ClientResult<"agent/queue/read">> {
+		throw new AppServerError("NOT_FOUND", { sessionId: this.sessionId });
+	}
+
+	async deleteAgentQueuedMessage(): Promise<ClientResult<"agent/queue/delete">> {
+		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
+	}
+
+	async sendAgentQueuedMessage(): Promise<ClientResult<"agent/queue/send">> {
 		throw new AppServerError("READ_ONLY_SESSION", { sessionId: this.sessionId });
 	}
 

@@ -11,7 +11,7 @@ import {
 	SessionManager,
 } from "@metis/coding-agent/host";
 import { openAgentDeliveredFile, readAgentDeliveredFile, readAgentImage } from "./agent-assets.ts";
-import { listAgentCatalog, readAgentCatalogItems } from "./agent-catalog.ts";
+import { listAgentCatalog, readAgentCatalogItems, readAgentCatalogQueue } from "./agent-catalog.ts";
 import type { DurableSessionMutation, PreparedSessionMutation } from "./durable-mutation.ts";
 import type { HooksService } from "./hooks.ts";
 import type { InteractionBroker, InteractionPeer } from "./interactions.ts";
@@ -529,21 +529,30 @@ export class Dispatcher {
 				return this.knowledge.list();
 			case "knowledge/register":
 				return await this.replayMutation(request, () => this.knowledge.register(request.params.path));
+			case "knowledge/remove":
+				return await this.replayMutation(request, async () => this.knowledge.remove(request.params.libraryId));
 			case "knowledge/scan":
 				return await this.knowledge.scan(request.params.libraryId);
 			case "knowledge/read":
 				return await this.knowledge.read(request.params.libraryId, request.params.path);
+			case "knowledge/resource/resolve":
+				return await this.knowledge.resolve(
+					request.params.libraryId,
+					request.params.sourcePath,
+					request.params.reference,
+					request.params.kind,
+				);
 			case "session/knowledge/get": {
 				const ref = this.runtimeRef(request.params.sessionId);
 				return await this.registry.run(ref, (runtime) => runtime.getKnowledgeLinks?.() ?? { libraries: [] });
 			}
 			case "session/knowledge/set":
 				return await this.replayMutation(request, async () => {
-					const libraries = this.knowledge.libraries(request.params.libraryIds);
 					const ref = this.runtimeRef(request.params.sessionId);
 					return await this.registry.run(ref, (runtime) => {
 						if (!runtime.setKnowledgeLinks)
 							throw new AppServerError("READ_ONLY_SESSION", { sessionId: request.params.sessionId });
+						const libraries = this.knowledge.libraries(request.params.libraryIds);
 						return runtime.setKnowledgeLinks(libraries);
 					});
 				});
@@ -908,6 +917,28 @@ export class Dispatcher {
 						return request.method === "agent/send"
 							? runtime.sendAgentMessage(request.params)
 							: runtime.controlAgent(request.params);
+					});
+				});
+			case "agent/queue/read": {
+				const ref = this.runtimeRef(request.params.sessionId);
+				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) => {
+					if (!connection.subscriptions.has(runtime.sessionId)) await connection.subscriptions.subscribe(runtime);
+					return runtime.readAgentQueuedMessages(request.params);
+				});
+				return opened.open ? opened.result : readAgentCatalogQueue(ref, this.catalog.agentDir, request.params);
+			}
+			case "agent/queue/delete":
+			case "agent/queue/send":
+				return await this.replayMutation(request, async () => {
+					this.assertMutableSession(request.params.sessionId);
+					const ref = this.runtimeRef(request.params.sessionId);
+					this.interactions.assign(request.params.sessionId, connection.interactionPeer);
+					return await this.registry.run(ref, async (runtime) => {
+						if (!connection.subscriptions.has(runtime.sessionId))
+							await connection.subscriptions.subscribe(runtime);
+						return request.method === "agent/queue/delete"
+							? runtime.deleteAgentQueuedMessage(request.params)
+							: runtime.sendAgentQueuedMessage(request.params);
 					});
 				});
 			case "agent/interrupt":

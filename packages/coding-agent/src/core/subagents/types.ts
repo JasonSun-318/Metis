@@ -297,6 +297,21 @@ export interface AgentMessageReceipt {
 	readonly state: AgentDeliveryState;
 	readonly instructionRevision: number;
 }
+export interface AgentQueuedMessage {
+	readonly messageId: string;
+	readonly revision: string;
+	readonly state: "queued" | "paused" | "sending";
+	readonly input: DurablePromptInput;
+}
+export interface AgentDeleteQueuedMessageInput {
+	readonly agentId: string;
+	readonly requestId: string;
+	readonly messageId: string;
+	readonly expectedRevision: string;
+}
+export interface AgentSendQueuedMessageInput extends AgentDeleteQueuedMessageInput {
+	readonly delivery: "steer" | "start";
+}
 export interface AgentControlInput {
 	readonly agentId: string;
 	readonly action: "stop" | "resume";

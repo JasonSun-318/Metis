@@ -1,13 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { readdir, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, sep } from "node:path";
 import type { ClientResult, KnowledgeLibrary } from "@metis/app-protocol";
 import {
 	parseKnowledgeNote,
-	readSingleLinkTextFileSync,
+	readKnowledgeCatalog,
 	replaceFileAtomicallySync,
 	resolveKnowledgeLink,
 } from "@metis/coding-agent/host";
+import { readKnowledgeFile } from "./knowledge-file.ts";
+import { type KnowledgeNoteIndex, resolveKnowledgeResource } from "./knowledge-resource.ts";
 
 const MAX_NOTE_BYTES = 4 * 1024 * 1024;
 // A library is polled while visible, so a broad directory such as a home folder must not walk forever.
@@ -15,32 +17,26 @@ const MAX_SCAN_ENTRIES = 50_000;
 const MAX_SCAN_NOTES = 5_000;
 const SKIP_DIRECTORIES = new Set(["node_modules", "vendor"]);
 type ParsedNote = ReturnType<typeof parseKnowledgeNote>;
+type WalkIndex = Awaited<ReturnType<KnowledgeService["walk"]>>;
+// A visible library's graph scan refreshes every few seconds, so resolving one embedded
+// note can reuse the recent index instead of walking thousands of notes again.
+const INDEX_REUSE_MS = 5_000;
+const ATTACHMENT_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "pdf"]);
 
 export class KnowledgeService {
+	private readonly agentDir: string;
 	private readonly catalogPath: string;
 	private readonly cache = new Map<string, { stamp: string; note: ParsedNote }>();
+	private indexInFlight: { key: string; root: string; promise: Promise<WalkIndex> } | undefined;
+	private indexCached: { key: string; root: string; at: number; value: WalkIndex } | undefined;
 
 	constructor(agentDir: string) {
+		this.agentDir = agentDir;
 		this.catalogPath = join(agentDir, "knowledge-libraries.json");
 	}
 
 	list(): ClientResult<"knowledge/list"> {
-		const content = readSingleLinkTextFileSync(this.catalogPath, { maxBytes: 4 * 1024 * 1024 });
-		if (!content) return { libraries: [] };
-		const data = JSON.parse(content) as { libraries?: KnowledgeLibrary[] };
-		if (
-			!Array.isArray(data.libraries) ||
-			data.libraries.some(
-				(item) =>
-					!item ||
-					typeof item.id !== "string" ||
-					typeof item.name !== "string" ||
-					typeof item.path !== "string" ||
-					!isAbsolute(item.path),
-			)
-		)
-			throw new Error("Invalid knowledge directory catalog");
-		return { libraries: data.libraries };
+		return { libraries: readKnowledgeCatalog(this.agentDir) ?? [] };
 	}
 
 	async register(path: string): Promise<KnowledgeLibrary> {
@@ -58,6 +54,18 @@ export class KnowledgeService {
 		return library;
 	}
 
+	/** Forget a directory without inspecting or modifying any of its files. */
+	remove(id: string): ClientResult<"knowledge/remove"> {
+		const current = this.list().libraries;
+		const libraries = current.filter((library) => library.id !== id);
+		if (libraries.length !== current.length) {
+			replaceFileAtomicallySync(this.catalogPath, JSON.stringify({ libraries }, null, 2), { mode: 0o600 });
+			this.cache.clear();
+			this.indexCached = undefined;
+		}
+		return { libraries };
+	}
+
 	libraries(ids: readonly string[]): KnowledgeLibrary[] {
 		const catalog = new Map(this.list().libraries.map((item) => [item.id, item]));
 		return [...new Set(ids)].map((id) => {
@@ -71,31 +79,39 @@ export class KnowledgeService {
 		return this.libraries([id])[0];
 	}
 
+	private async root(library: KnowledgeLibrary): Promise<string> {
+		const root = await realpath(library.path);
+		// Registration stores a canonical path. Replacing that root with a symlink grants no new directory.
+		if (root !== library.path) throw new Error("Knowledge directory root has changed; register it again");
+		return root;
+	}
+
 	async read(id: string, path: string): Promise<ClientResult<"knowledge/read">> {
 		const library = this.library(id);
-		const root = await realpath(library.path);
-		return { path, content: await this.readAt(root, path) };
+		const root = await this.root(library);
+		const content = await this.readAt(root, path);
+		// Confirm the registration survived the read so a removed id never delivers content.
+		if (this.library(id).path !== library.path) throw new Error("Knowledge directory registration has changed");
+		return { path, content };
 	}
 
 	private async readAt(root: string, path: string): Promise<string> {
 		if (isAbsolute(path) || path.split(/[\\/]/).includes("..") || !/\.md$/i.test(path))
 			throw new Error("Invalid knowledge note path");
-		const absolute = await realpath(join(root, path));
-		const within = relative(root, absolute);
-		if (within.startsWith(`..${sep}`) || within === ".." || isAbsolute(within))
-			throw new Error("Note is outside the selected directory");
-		const info = await stat(absolute);
-		if (!info.isFile() || info.size > MAX_NOTE_BYTES)
-			throw new Error("Note preview supports Markdown files up to 4 MiB");
-		const content = await readFile(absolute, "utf8");
-		if (Buffer.byteLength(content, "utf8") > MAX_NOTE_BYTES)
-			throw new Error("Note preview supports Markdown files up to 4 MiB");
-		return content;
+		const { bytes } = await readKnowledgeFile(root, path, MAX_NOTE_BYTES);
+		return Buffer.from(bytes).toString("utf8");
 	}
 
-	async scan(id: string): Promise<ClientResult<"knowledge/scan">> {
+	/** Walks the library once, returning the live note index used by scans and reference resolution. */
+	private async walk(id: string): Promise<
+		KnowledgeNoteIndex & {
+			notes: Map<string, ParsedNote>;
+			names: Map<string, string[]>;
+			warnings: string[];
+		}
+	> {
 		const library = this.library(id);
-		const root = await realpath(library.path);
+		const root = await this.root(library);
 		const notes = new Map<string, ParsedNote>();
 		const live = new Set<string>();
 		const warnings: string[] = [];
@@ -162,6 +178,14 @@ export class KnowledgeService {
 				names.set(name, [...(names.get(name) ?? []), path]);
 			}
 		}
+		return { root, notes, paths, names, warnings };
+	}
+
+	async scan(id: string): Promise<ClientResult<"knowledge/scan">> {
+		const index = await this.walk(id);
+		this.library(id);
+		this.indexCached = { key: id, root: index.root, at: Date.now(), value: index };
+		const { notes, paths, names, warnings } = index;
 		const projected = [...notes]
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([path, note]) => ({
@@ -185,5 +209,50 @@ export class KnowledgeService {
 				}
 			}
 		return { notes: projected, edges, warnings };
+	}
+
+	/** Reuses the fresh scan index, coalescing concurrent walks for the same library. */
+	private async acquireIndex(id: string, root: string): Promise<WalkIndex> {
+		const cached = this.indexCached;
+		if (cached && cached.key === id && cached.root === root && Date.now() - cached.at < INDEX_REUSE_MS)
+			return cached.value;
+		if (!this.indexInFlight || this.indexInFlight.key !== id || this.indexInFlight.root !== root) {
+			const promise = this.walk(id).then((value) => {
+				this.indexCached = { key: id, root, at: Date.now(), value };
+				return value;
+			});
+			this.indexInFlight = { key: id, root, promise };
+			// The cleanup chain swallows its own rejection; the original promise still rejects for callers.
+			promise
+				.then(
+					() => undefined,
+					() => undefined,
+				)
+				.then(() => {
+					if (this.indexInFlight?.promise === promise) this.indexInFlight = undefined;
+				});
+		}
+		return this.indexInFlight.promise;
+	}
+
+	/** Resolves one embedded reference against the current registration and note index. */
+	async resolve(
+		id: string,
+		sourcePath: string,
+		reference: string,
+		kind: "wiki" | "markdown",
+	): Promise<ClientResult<"knowledge/resource/resolve">> {
+		// Re-check registration on every call so a removed library id is rejected even with a warm cache.
+		const library = this.library(id);
+		const root = await this.root(library);
+		// Attachment references resolve by path only; they must not trigger a full note walk.
+		const targetExt = (/\.([a-z\d]+)$/i.exec(reference.split("#")[0] ?? "")?.[1] ?? "").toLowerCase();
+		const index: KnowledgeNoteIndex = ATTACHMENT_EXTENSIONS.has(targetExt)
+			? { root, paths: new Set(), names: new Map() }
+			: await this.acquireIndex(id, root);
+		const resolved = await resolveKnowledgeResource({ library, index, sourcePath, reference, kind });
+		// Final registration check so an id removed during resolution never resolves.
+		if (this.library(id).path !== library.path) throw new Error("Knowledge directory registration has changed");
+		return resolved;
 	}
 }

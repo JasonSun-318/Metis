@@ -4,6 +4,8 @@ import {
 	agentSummaryFromRecord,
 	agentTaskWindow,
 	type FileEntry,
+	queuedAdmissionRequestId,
+	queuedAgentMessages,
 	reduceRuntimeJournal,
 	SessionManager,
 } from "@metis/coding-agent/host";
@@ -13,6 +15,7 @@ import {
 	projectPendingAgentInput,
 	withAgentInput,
 } from "./agent-conversation-projection.ts";
+import { projectAgentQueuedTurns } from "./agent-queued-message-projection.ts";
 import { boundedAgentSummaryViews } from "./agent-summary-projection.ts";
 import { opaqueId, projectMessageEntry } from "./item-projection.ts";
 import { AppServerError, type SessionRef } from "./session-runtime-host.ts";
@@ -75,8 +78,21 @@ export function projectAgentItems(
 	const turns = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 	const tools = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 	const inputs = latestAgentInputs(selected);
+	const admissionMessages = new Map(
+		journal.flatMap((entry) =>
+			entry.type === "agent_input"
+				? [[queuedAdmissionRequestId(entry.messageId, entry.id), entry.messageId] as const]
+				: [],
+		),
+	);
+	const inputForMessage = (messageId: string) =>
+		inputs.get(messageId) ?? inputs.get(admissionMessages.get(messageId) ?? "");
 	const persistedMessageIds = new Set(
-		selected.flatMap((entry) => (entry.type === "message" && entry.agentMessageId ? [entry.agentMessageId] : [])),
+		selected.flatMap((entry) =>
+			entry.type === "message" && entry.agentMessageId
+				? [inputForMessage(entry.agentMessageId)?.messageId ?? entry.agentMessageId]
+				: [],
+		),
 	);
 	const emittedInputs = new Set<string>();
 	const items = selected
@@ -84,7 +100,11 @@ export function projectAgentItems(
 			if (entry.type === "agent_input") {
 				if (persistedMessageIds.has(entry.messageId) || emittedInputs.has(entry.messageId)) return undefined;
 				emittedInputs.add(entry.messageId);
-				return projectPendingAgentInput(inputs.get(entry.messageId)!, input.agentId, fallbackTimestamp);
+				const pending = inputs.get(entry.messageId)!;
+				// A deleted draft was never conversation history; persisted messages remain visible above.
+				if (pending.origin.kind === "user" && pending.delivery === "queue" && pending.state === "cancelled")
+					return undefined;
+				return projectPendingAgentInput(pending, input.agentId, fallbackTimestamp);
 			}
 			if (entry.type === "agent_mailbox_event")
 				return projectAgentMailboxItem(entry, input.agentId, fallbackTimestamp, inputs);
@@ -98,7 +118,7 @@ export function projectAgentItems(
 			return item
 				? withAgentInput(
 						item,
-						entry.type === "message" && entry.agentMessageId ? inputs.get(entry.agentMessageId) : undefined,
+						entry.type === "message" && entry.agentMessageId ? inputForMessage(entry.agentMessageId) : undefined,
 					)
 				: undefined;
 		})
@@ -120,5 +140,18 @@ export function readAgentCatalogItems(
 		const record = tree.agents.find((agent) => agent.agentId === input.agentId);
 		if (!record) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
 		return projectAgentItems(store.readJournal(record.agentId, record), input, ref.summary.createdAt);
+	});
+}
+
+/** Queue inspection has the same read-only lifetime as the child transcript. */
+export function readAgentCatalogQueue(
+	ref: SessionRef,
+	agentDir: string,
+	input: ClientParams<"agent/queue/read">,
+): ClientResult<"agent/queue/read"> {
+	return withStore(ref, agentDir, (store) => {
+		const record = store.listTree().agents.find((agent) => agent.agentId === input.agentId);
+		if (!record) throw new AppServerError("NOT_FOUND", { sessionId: input.sessionId });
+		return { queuedTurns: projectAgentQueuedTurns(queuedAgentMessages(record)) };
 	});
 }

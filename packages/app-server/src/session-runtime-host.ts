@@ -66,6 +66,9 @@ export interface OpenedSessionRuntime {
 	listAgents(input: ClientParams<"agent/list">): Promise<ClientResult<"agent/list">>;
 	readAgentItems(input: ClientParams<"agent/readItems">): Promise<ClientResult<"agent/readItems">>;
 	sendAgentMessage(input: ClientParams<"agent/send">): Promise<ClientResult<"agent/send">>;
+	readAgentQueuedMessages(input: ClientParams<"agent/queue/read">): Promise<ClientResult<"agent/queue/read">>;
+	deleteAgentQueuedMessage(input: ClientParams<"agent/queue/delete">): Promise<ClientResult<"agent/queue/delete">>;
+	sendAgentQueuedMessage(input: ClientParams<"agent/queue/send">): Promise<ClientResult<"agent/queue/send">>;
 	controlAgent(input: ClientParams<"agent/control">): Promise<ClientResult<"agent/control">>;
 	interruptAgent(input: ClientParams<"agent/interrupt">): Promise<ClientResult<"agent/interrupt">>;
 	archiveAgent(input: ClientParams<"agent/archive">): Promise<ClientResult<"agent/archive">>;

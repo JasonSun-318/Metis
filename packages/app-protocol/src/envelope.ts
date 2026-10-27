@@ -309,6 +309,7 @@ function hasUniqueIds(values: readonly string[]): boolean {
 function validateClientResultCorrelation(request: ClientRpcRequest, result: unknown): void {
 	switch (request.method) {
 		case "agent/send":
+		case "agent/queue/send":
 		case "agent/control": {
 			const receipt = result as ClientResult<"agent/send"> | ClientResult<"agent/control">;
 			if (receipt.agentId !== request.params.agentId || receipt.requestId !== request.params.requestId) {
@@ -322,6 +323,14 @@ function validateClientResultCorrelation(request: ClientRpcRequest, result: unkn
 			}
 			return;
 		}
+		case "agent/queue/delete":
+			if ((result as ClientResult<"agent/queue/delete">).queueItemId !== request.params.queueItemId)
+				failResponseCorrelation("Deleted agent queue item does not match its request");
+			return;
+		case "agent/queue/read":
+			if (!hasUniqueIds((result as ClientResult<"agent/queue/read">).queuedTurns.map((turn) => turn.queueItemId)))
+				failResponseCorrelation("Agent queue contains duplicate message ids");
+			return;
 		case "agent/list": {
 			const agents = (result as ClientResult<"agent/list">).agents;
 			if (

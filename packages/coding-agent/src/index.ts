@@ -756,6 +756,7 @@ export {
 	buildChildSystemPrompt,
 	safePromptJson,
 } from "./core/subagents/prompts.ts";
+export { queuedAdmissionRequestId, queuedAgentMessages } from "./core/subagents/queued-messages.ts";
 export { type AgentDiskRecord, AgentStore } from "./core/subagents/store.ts";
 export { agentTaskWindow } from "./core/subagents/trace.ts";
 export {
@@ -763,6 +764,7 @@ export {
 	type AgentConfig,
 	type AgentControlInput,
 	type AgentControlReceipt,
+	type AgentDeleteQueuedMessageInput,
 	type AgentDeliveryMode,
 	type AgentDeliveryState,
 	AgentError,
@@ -771,7 +773,9 @@ export {
 	type AgentMessageActor,
 	type AgentMessageOrigin,
 	type AgentMessageReceipt,
+	type AgentQueuedMessage,
 	type AgentRunControl,
+	type AgentSendQueuedMessageInput,
 	type AgentSubmitMessageInput,
 	type AgentSummary,
 	type AgentToolName,

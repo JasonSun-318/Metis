@@ -1,0 +1,9 @@
+[
+  {"source":"Math $\\text{[[Hidden]]}$ then [[Real]]", "targets":["Real"]},
+  {"source":"Price $5 and $10 then [[Real]] then $x$", "targets":["Real"]},
+  {"source":"$$\n\n[[Hidden]]", "targets":[]},
+  {"source":"\\(\\text{[[Hidden]]}\\) [[Real]]", "targets":["Real"]},
+  {"source":"\\$5 [[Real]]", "targets":["Real"]},
+  {"source":"`[[Hidden]]` and $\\text{[[Also hidden]]}$ then ![[Real]]", "targets":["Real"]},
+  {"source":"```md\n$[[Hidden]]$\n```\n![[Real]]", "targets":["Real"]}
+]

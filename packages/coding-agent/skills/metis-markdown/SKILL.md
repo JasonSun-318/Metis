@@ -9,6 +9,10 @@ Create and edit valid Obsidian Flavored Markdown. Obsidian extends CommonMark an
 
 This reference describes Obsidian-compatible syntax, including advanced forms that Metis may not fully display. For Metis knowledge tasks, follow the `knowledge` skill for library selection, optional artifacts, and current reading capabilities. The examples describe available syntax; they are not a checklist of required note content.
 
+Metis desktop renders KaTeX math with `$...$`, `$$...$$`, `\(...\)` and `\[...\]`; callouts with aliases, nesting and `+`/`-` folding; local PNG/JPEG/GIF/WebP images; note embeds with unique heading/block fragments; and PDF embeds with a 1-based `#page=N`. Images accept wiki dimensions such as `![[diagram.png|480]]` and `![[diagram.png|640x480]]`. Note examples include `![[Design]]`, `![[Design#Flow]]` and `![[Design#^decision]]`. File-based readers resolve resources using the owning document's authorization; knowledge resources stay inside the registered library. Missing, ambiguous, circular or oversized embeds show a local diagnostic rather than substituting guessed content.
+
+Remote images remain links without automatic fetching. This support does not include inline SVG, audio/video, iframe, Mermaid, highlights, hidden comments, Dataview/query, Bases or Canvas rendering. Those reference examples describe syntax for compatible editors, not a promise that Metis renders them. Reading advanced syntax does not run a model, organize notes in the background or replace the `knowledge` workflow.
+
 ## Optional Note Authoring
 
 1. **Add frontmatter when useful or requested**, with properties (title, tags, aliases) at the top of the file. See `references/PROPERTIES.md` for all property types.

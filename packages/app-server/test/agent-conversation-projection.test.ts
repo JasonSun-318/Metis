@@ -1,4 +1,4 @@
-import type { FileEntry } from "@metis/coding-agent/host";
+import { type FileEntry, queuedAdmissionRequestId } from "@metis/coding-agent/host";
 import { describe, expect, it } from "vitest";
 import { projectAgentItems } from "../src/agent-catalog.ts";
 import { latestAgentInputs, projectAgentMailboxItem } from "../src/agent-conversation-projection.ts";
@@ -30,6 +30,55 @@ function read(journal: FileEntry[]) {
 }
 
 describe("agent conversation provenance", () => {
+	it("removes a cancelled human draft without hiding an already persisted message", () => {
+		const queued = { ...input("draft", "queued", { kind: "user" }), delivery: "queue" as const };
+		const cancelled = { ...queued, id: "draft-cancelled", state: "cancelled" as const };
+		expect(read([queued, cancelled])).toEqual([]);
+		expect(
+			read([
+				queued,
+				cancelled,
+				{
+					type: "message",
+					id: "persisted-before-stop",
+					parentId: null,
+					timestamp: time,
+					agentMessageId: queued.messageId,
+					message: { role: "user", content: "Same text", timestamp: 1 },
+				},
+			]),
+		).toMatchObject([{ itemId: "persisted-before-stop", deliveryState: "cancelled" }]);
+	});
+	it("reconciles a guided draft's admission identity to one durable human message", () => {
+		const queued = { ...input("m1", "queued", { kind: "user" }), delivery: "queue" as const, taskId: "later-task" };
+		const delivered = {
+			...queued,
+			id: "guided-delivered",
+			taskId: "task-1",
+			delivery: "steer" as const,
+			state: "delivered" as const,
+		};
+		const items = read([
+			queued,
+			delivered,
+			{
+				type: "message",
+				id: "guided-message",
+				parentId: null,
+				timestamp: time,
+				agentMessageId: queuedAdmissionRequestId(queued.messageId, queued.id),
+				message: { role: "user", content: "Same text", timestamp: 1 },
+			},
+		]);
+		expect(items).toHaveLength(1);
+		expect(items[0]).toMatchObject({
+			itemId: "guided-message",
+			agentMessageId: "m1",
+			agentTaskId: "task-1",
+			deliveryState: "delivered",
+			origin: { kind: "user" },
+		});
+	});
 	it.each([false, true])("retains task input provenance outside the running window (persisted=%s)", (persisted) => {
 		const admitted = { ...input("m1", "queued", { kind: "agent", sessionId: root }), delivery: "start" as const };
 		const task: Extract<FileEntry, { type: "agent_task" }> = {

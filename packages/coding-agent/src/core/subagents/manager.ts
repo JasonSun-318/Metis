@@ -13,12 +13,25 @@ import {
 	type PermissionSettings,
 	settingsForPreset,
 } from "../permissions/settings.ts";
-import type { AgentControlPayload, AgentInputEntry, AgentRunControlEntry } from "../session-control.ts";
+import { QueuedTurnConflictError, QueuedTurnNotFoundError } from "../queued-turn-queue.ts";
+import { reduceRuntimeJournal } from "../runtime-recovery.ts";
+import type {
+	AgentControlPayload,
+	AgentInputEntry,
+	AgentRunControlEntry,
+	AgentStateReason,
+} from "../session-control.ts";
 import { createSessionId } from "../session-id.ts";
 import { type FileEntry, SessionManager } from "../session-manager.ts";
 import { captureAgentRoleSnapshot, loadAgentTypeDefinitions, resolveAgentRoleSnapshot } from "./agent-type-registry.ts";
 import { decideAgentDelivery, validateAgentSubmission } from "./message-admission.ts";
 import { effectiveAgentToolNames, MAX_AGENT_DEPTH, resolveAgentProfile } from "./profiles.ts";
+import {
+	isManageableQueuedMessage,
+	queuedAdmissionRequestId,
+	queuedAgentMessages,
+	queuedAgentTaskCount,
+} from "./queued-messages.ts";
 import { defaultSubagentScheduler, type SubagentSchedulerApi } from "./scheduler.ts";
 import {
 	type AgentDiskRecord,
@@ -33,6 +46,7 @@ import {
 	type AgentConfig,
 	type AgentControlInput,
 	type AgentControlReceipt,
+	type AgentDeleteQueuedMessageInput,
 	AgentError,
 	type AgentForkTurns,
 	type AgentMailboxEvent,
@@ -40,7 +54,9 @@ import {
 	type AgentManagerEvent,
 	type AgentMessageActor,
 	type AgentMessageReceipt,
+	type AgentQueuedMessage,
 	type AgentRunControl,
+	type AgentSendQueuedMessageInput,
 	type AgentSubmitMessageInput,
 	type AgentSummary,
 	type AgentTaskSummary,
@@ -115,6 +131,9 @@ export interface SubagentManagerApi {
 		input: AgentSubmitMessageInput,
 		signal?: AbortSignal,
 	): Promise<AgentMessageReceipt>;
+	listQueuedMessages(actor: AgentMessageActor, agentId: string): readonly AgentQueuedMessage[];
+	deleteQueuedMessage(actor: AgentMessageActor, input: AgentDeleteQueuedMessageInput): Promise<void>;
+	sendQueuedMessage(actor: AgentMessageActor, input: AgentSendQueuedMessageInput): Promise<AgentMessageReceipt>;
 	control(actor: AgentMessageActor, input: AgentControlInput): Promise<AgentControlReceipt>;
 	isRunAllowed(agentId: string): boolean;
 	hasActiveWork(): boolean;
@@ -291,6 +310,7 @@ export class SubagentManager implements SubagentManagerApi {
 	private readonly approvalRequests = new Map<string, { readonly taskId: string; readonly toolName: string }>();
 	private readonly tails = new Map<string, Promise<unknown>>();
 	private readonly scheduledRuns = new Map<string, string>();
+	private readonly suppressedTasks = new Set<string>();
 	private readonly activeTasks = new Map<string, Set<string>>();
 	private readonly mailboxContinuations = new Set<string>();
 	private readonly attemptedMailboxBatches = new Map<string, Set<string>>();
@@ -386,10 +406,7 @@ export class SubagentManager implements SubagentManagerApi {
 		if (tree.diagnostics.length > 0) {
 			throw new AgentError("INVALID_STATE", "Cannot create an agent while an existing child session is unreadable");
 		}
-		if (
-			tree.agents.flatMap((record) => record.tasks).filter((task) => task.status === "queued").length >=
-			MAX_AGENT_QUEUED_TASKS
-		) {
+		if (queuedAgentTaskCount(tree.agents) >= MAX_AGENT_QUEUED_TASKS) {
 			throw new AgentError("QUEUE_FULL", `Agent task queue is limited to ${MAX_AGENT_QUEUED_TASKS} tasks`);
 		}
 		const actorPath = this.actorPath(actorId);
@@ -633,11 +650,7 @@ export class SubagentManager implements SubagentManagerApi {
 					)
 						throw new AgentError("INVALID_STATE", "Writable agents cannot receive follow-up tasks in Plan mode");
 					if (!record.tasks.some((task) => task.taskId === previous.taskId)) {
-						if (
-							record.tasks.length >= MAX_AGENT_TASKS ||
-							tree.flatMap((item) => item.tasks).filter((task) => task.status === "queued").length >=
-								MAX_AGENT_QUEUED_TASKS
-						)
+						if (record.tasks.length >= MAX_AGENT_TASKS || queuedAgentTaskCount(tree) >= MAX_AGENT_QUEUED_TASKS)
 							throw new AgentError("QUEUE_FULL", "Agent task queue or history is full");
 						const text = previous.input.text || "Image input";
 						this.appendControl(
@@ -673,14 +686,15 @@ export class SubagentManager implements SubagentManagerApi {
 			if (tree.some((item) => item.archived && record.config.agentPath.includes(item.agentId)))
 				throw new AgentError("INVALID_STATE", "Archived agents must be unarchived before follow-up tasks");
 			const hot = this.hot.get(submission.agentId);
-			const delivery = decideAgentDelivery(!!hot?.accepting, submission.delivery ?? "auto");
+			const delivery = decideAgentDelivery(
+				!!hot?.accepting || this.starting.has(submission.agentId),
+				submission.delivery ?? "auto",
+			);
 			if (delivery === "reject") throw new AgentError("INVALID_STATE", "send_message requires a running agent task");
 			const tasks = record.tasks;
 			if (
 				delivery !== "steer" &&
-				(tasks.length >= MAX_AGENT_TASKS ||
-					tree.flatMap((item) => item.tasks).filter((task) => task.status === "queued").length >=
-						MAX_AGENT_QUEUED_TASKS)
+				(tasks.length >= MAX_AGENT_TASKS || queuedAgentTaskCount(tree) >= MAX_AGENT_QUEUED_TASKS)
 			)
 				throw new AgentError("QUEUE_FULL", "Agent task queue or history is full");
 			if (input.images?.length)
@@ -769,6 +783,170 @@ export class SubagentManager implements SubagentManagerApi {
 			this.emitUpdate(this.buildSummary(updated));
 			return this.messageReceipt(accepted);
 		});
+	}
+
+	listQueuedMessages(actor: AgentMessageActor, agentId: string): readonly AgentQueuedMessage[] {
+		this.assertActive();
+		const record = this.assertMessageActor(actor, agentId);
+		return queuedAgentMessages({
+			inputs: this.inputsForRecord(record),
+			tasks: record.tasks,
+			archived: record.archived,
+			...(record.runControl ? { runControl: record.runControl } : {}),
+		});
+	}
+
+	deleteQueuedMessage(actor: AgentMessageActor, input: AgentDeleteQueuedMessageInput): Promise<void> {
+		return this.serialize(input.agentId, async () => {
+			this.assertActive();
+			const record = this.assertMessageActor(actor, input.agentId);
+			if (actor.kind !== "user" || record.archived)
+				throw new AgentError("INVALID_STATE", "Only human input can manage an active agent queue");
+			this.assertQueueMutationInput(input);
+			const current = this.requireQueuedMessage(record, input.messageId, input.expectedRevision);
+			const task = record.tasks.find((candidate) => candidate.taskId === current.taskId);
+			if (!isManageableQueuedMessage(current, task)) {
+				throw new QueuedTurnConflictError(input.messageId);
+			}
+			const { id: _id, parentId: _parentId, timestamp: _timestamp, ...payload } = current;
+			this.appendControl(input.agentId, { ...payload, state: "cancelled", error: "Queued message deleted" }, record);
+			if (this.scheduledRuns.get(input.agentId) === current.taskId) this.cancelScheduled(input.agentId);
+			if (task?.status === "queued") {
+				this.appendTaskState(
+					input.agentId,
+					{ taskId: task.taskId, status: "stopped", reason: "interrupted" },
+					record,
+				);
+			}
+			this.publishIntervention(
+				record,
+				this.inputsForRecord(record).find((entry) => entry.messageId === current.messageId)!,
+			);
+			this.emitUpdate(this.buildSummary(this.store.reload(record)));
+			this.scheduleNext(input.agentId);
+		});
+	}
+
+	sendQueuedMessage(actor: AgentMessageActor, input: AgentSendQueuedMessageInput): Promise<AgentMessageReceipt> {
+		return this.serialize(input.agentId, async () => {
+			this.assertActive();
+			const record = this.assertMessageActor(actor, input.agentId);
+			if (actor.kind !== "user") throw new AgentError("INVALID_STATE", "Only humans can manage queued messages");
+			this.assertQueueMutationInput(input);
+			if (input.delivery !== "steer" && input.delivery !== "start") {
+				throw new AgentError("INVALID_INPUT", "Invalid queued message delivery");
+			}
+			const current = this.requireQueuedMessage(record, input.messageId, input.expectedRevision);
+			const task = record.tasks.find((candidate) => candidate.taskId === current.taskId);
+			if (!isManageableQueuedMessage(current, task) || this.deleting.has(input.agentId) || record.archived) {
+				throw new QueuedTurnConflictError(input.messageId);
+			}
+			this.assertRunAllowed(input.agentId, true, record);
+			if (input.delivery === "start" && queuedAgentMessages(record)[0]?.messageId !== current.messageId)
+				throw new QueuedTurnConflictError(input.messageId);
+			const hot = this.hot.get(input.agentId);
+			const accepting = hot?.accepting === true && hot.runtime.session.isStreaming !== false;
+			if (
+				(input.delivery === "steer" && !accepting) ||
+				(input.delivery === "start" &&
+					(hot !== undefined || (task!.status !== "queued" && task!.status !== "stopped")))
+			) {
+				throw new AgentError("INVALID_STATE", "Queued message delivery does not match the current task");
+			}
+			const { id: _id, parentId: _parentId, timestamp: _timestamp, ...payload } = current;
+			const sending: Omit<AgentInputEntry, "id" | "parentId" | "timestamp"> = {
+				...payload,
+				taskId: input.delivery === "steer" ? hot!.taskId : payload.taskId,
+				delivery: input.delivery === "steer" ? "steer" : payload.delivery,
+				state: "accepted",
+			};
+			this.appendControl(input.agentId, sending, record);
+			if (input.delivery === "steer") {
+				this.suppressedTasks.add(current.taskId);
+				const cancelled = this.cancelScheduled(input.agentId);
+				try {
+					await this.admitSteerUnlocked(hot!, current, queuedAdmissionRequestId(current.messageId, current.id));
+				} catch (error) {
+					this.suppressedTasks.delete(current.taskId);
+					this.appendControl(input.agentId, payload, record);
+					if (cancelled) this.scheduleNext(input.agentId, this.store.reload(record));
+					this.publishIntervention(
+						record,
+						this.inputsForRecord(record).find((entry) => entry.messageId === current.messageId)!,
+					);
+					this.emitUpdate(this.buildSummary(this.store.reload(record)));
+					throw error;
+				}
+				this.appendTaskState(
+					input.agentId,
+					{ taskId: current.taskId, status: "stopped", reason: "interrupted" },
+					record,
+				);
+				this.suppressedTasks.delete(current.taskId);
+				const delivered = this.inputsForRecord(record).find((entry) => entry.messageId === current.messageId);
+				if (
+					!delivered ||
+					delivered.taskId !== hot!.taskId ||
+					delivered.delivery !== "steer" ||
+					delivered.requestId !== current.requestId ||
+					delivered.requestHash !== current.requestHash
+				) {
+					throw new Error("Guided message receipt was not retained");
+				}
+				this.publishIntervention(record, delivered);
+				this.emitUpdate(this.buildSummary(this.store.reload(record)));
+				return this.messageReceipt(delivered);
+			}
+			this.resumeForAdmittedInput(record, actor, input.requestId);
+			const restored = this.inputsForRecord(record).find((entry) => entry.messageId === current.messageId)!;
+			this.appendControl(input.agentId, { ...payload, state: "queued" }, record);
+			if (task!.status !== "queued") {
+				this.appendTaskState(
+					input.agentId,
+					{ taskId: current.taskId, status: "queued", reason: "recovered" },
+					record,
+				);
+			}
+			this.scheduleNext(input.agentId, this.store.reload(record));
+			this.publishIntervention(
+				record,
+				this.inputsForRecord(record).find((entry) => entry.messageId === current.messageId)!,
+			);
+			this.emitUpdate(this.buildSummary(this.store.reload(record)));
+			return this.messageReceipt(restored);
+		});
+	}
+
+	private assertQueueMutationInput(input: AgentDeleteQueuedMessageInput): void {
+		if (!input.requestId || input.requestId.length > 256 || /[\u0000-\u001f]/u.test(input.requestId)) {
+			throw new AgentError("INVALID_INPUT", "Invalid queued message request ID");
+		}
+		if (!input.messageId || !input.expectedRevision) {
+			throw new AgentError("INVALID_INPUT", "Queued message identity is required");
+		}
+	}
+
+	private requireQueuedMessage(record: AgentDiskRecord, messageId: string, expectedRevision: string): AgentInputEntry {
+		const current = this.inputsForRecord(record).find((entry) => entry.messageId === messageId);
+		if (!current || current.origin.kind !== "user") throw new QueuedTurnNotFoundError(messageId);
+		if (current.id !== expectedRevision || (current.state !== "queued" && current.state !== "accepted")) {
+			throw new QueuedTurnConflictError(messageId);
+		}
+		return current;
+	}
+
+	private async admitSteerUnlocked(hot: HotChild, input: AgentInputEntry, admissionRequestId: string): Promise<void> {
+		const admission = hot.runtime.submitPrompt({
+			requestId: admissionRequestId,
+			...input.input,
+			streamingBehavior: "steer",
+		});
+		hot.admissions.add(admission);
+		try {
+			await admission;
+		} finally {
+			hot.admissions.delete(admission);
+		}
 	}
 
 	private resumeForAdmittedInput(record: AgentDiskRecord, actor: AgentMessageActor, requestId: string): void {
@@ -1183,6 +1361,12 @@ export class SubagentManager implements SubagentManagerApi {
 					if (task.status !== "queued" && task.status !== "running") continue;
 					this.appendTaskState(record.agentId, { taskId: task.taskId, status: "stopped", reason });
 				}
+				this.cancelPendingInputs(
+					record.agentId,
+					"Parent unloaded before this input reached a model request",
+					record,
+					record.inputs.filter((entry) => entry.origin.kind !== "user" || entry.state === "accepted"),
+				);
 			} catch (error) {
 				errors.push(error);
 			}
@@ -1196,7 +1380,18 @@ export class SubagentManager implements SubagentManagerApi {
 		const current = record?.agentId === agentId ? record : undefined;
 		if (this.unloaded || this.deleting.has(agentId) || !this.isRunAllowed(agentId, current)) return undefined;
 		if (this.hot.has(agentId) || this.starting.has(agentId)) return undefined;
-		const task = (current?.tasks ?? this.store.listTasks(agentId)).find((candidate) => candidate.status === "queued");
+		const inputs = current ? this.inputsForRecord(current) : this.inputs(agentId);
+		const task = (current?.tasks ?? this.store.listTasks(agentId)).find(
+			(candidate) =>
+				candidate.status === "queued" &&
+				!this.suppressedTasks.has(candidate.taskId) &&
+				inputs.some(
+					(input) =>
+						input.taskId === candidate.taskId &&
+						input.delivery !== "steer" &&
+						(input.state === "queued" || input.state === "accepted"),
+				),
+		);
 		if (task) return this.schedule(agentId, task.taskId);
 		if (!this.mailboxContinuations.has(agentId)) return undefined;
 		return this.scheduleMailboxContinuation(agentId);
@@ -1217,10 +1412,7 @@ export class SubagentManager implements SubagentManagerApi {
 		if (attempted.has(hash)) return undefined;
 		if (
 			record.tasks.length >= MAX_AGENT_TASKS ||
-			this.store
-				.listTree()
-				.agents.flatMap((item) => item.tasks)
-				.filter((task) => task.status === "queued").length >= MAX_AGENT_QUEUED_TASKS
+			queuedAgentTaskCount(this.store.listTree().agents) >= MAX_AGENT_QUEUED_TASKS
 		)
 			return undefined;
 		const taskId = this.createId();
@@ -1362,6 +1554,21 @@ export class SubagentManager implements SubagentManagerApi {
 		markReady: () => void,
 	): Promise<AgentTaskSummary | undefined> {
 		const record = this.store.load(agentId);
+		const task = record.tasks.find((candidate) => candidate.taskId === taskId);
+		if (!task || task.status !== "queued" || this.suppressedTasks.has(taskId)) return undefined;
+		const originalInputs = this.store
+			.readJournal(agentId, record)
+			.filter((entry) => entry.type === "agent_input" && entry.taskId === taskId);
+		if (
+			originalInputs.length > 0 &&
+			!record.inputs.some(
+				(entry) =>
+					entry.taskId === taskId &&
+					entry.delivery !== "steer" &&
+					(entry.state === "queued" || entry.state === "accepted"),
+			)
+		)
+			return undefined;
 		let config = record.config;
 		const childManager = SessionManager.open(record.path);
 		this.writers.set(agentId, childManager);
@@ -1467,7 +1674,17 @@ export class SubagentManager implements SubagentManagerApi {
 			this.emitUpdate(this.buildSummary(this.store.load(agentId)));
 			const text = taskText(runtime.session.sessionManager.getDurableJournalSnapshot(), taskId);
 			const baselineStats = runtime.session.getSessionStats();
-			const admitted = this.inputs(agentId).find((entry) => entry.taskId === taskId && entry.delivery !== "steer");
+			const admitted = this.inputs(agentId).find(
+				(entry) =>
+					entry.taskId === taskId &&
+					entry.delivery !== "steer" &&
+					(entry.state === "queued" || entry.state === "accepted"),
+			);
+			if ((originalInputs.length > 0 && !admitted) || this.suppressedTasks.has(taskId)) {
+				this.suppressedTasks.delete(taskId);
+				this.appendHotTaskState(runtime, { taskId, status: "stopped", reason: "interrupted" });
+				return undefined;
+			}
 			await runtime.submitPrompt(
 				admitted
 					? { requestId: admitted.messageId, ...admitted.input }
@@ -1516,12 +1733,13 @@ export class SubagentManager implements SubagentManagerApi {
 			const reason =
 				outcome === "timeout"
 					? "timeout"
-					: (hot.stopReason ??
-						(assistant?.stopReason === "error"
+					: hot.stopReason
+						? hot.stopReason
+						: assistant?.stopReason === "error"
 							? "error"
 							: assistant?.stopReason === "aborted"
 								? "interrupted"
-								: "completed"));
+								: "completed";
 			const terminalError =
 				outcome === "timeout"
 					? `Agent task timed out after ${config.timeoutSeconds} seconds`
@@ -1581,7 +1799,7 @@ export class SubagentManager implements SubagentManagerApi {
 		input: {
 			readonly taskId: string;
 			readonly status: AgentTaskSummary["status"];
-			readonly reason?: "completed" | "error" | "timeout" | "interrupted" | "parent_unloaded" | "recovered";
+			readonly reason?: AgentStateReason;
 			readonly finalMessage?: string;
 			readonly error?: string;
 			readonly usage?: AgentUsage;
@@ -1613,7 +1831,7 @@ export class SubagentManager implements SubagentManagerApi {
 		input: {
 			readonly taskId: string;
 			readonly status: AgentTaskSummary["status"];
-			readonly reason?: "completed" | "error" | "timeout" | "interrupted" | "parent_unloaded" | "recovered";
+			readonly reason?: AgentStateReason;
 			readonly finalMessage?: string;
 			readonly error?: string;
 			readonly usage?: AgentUsage;
@@ -1673,7 +1891,12 @@ export class SubagentManager implements SubagentManagerApi {
 				};
 			}
 		}
-		this.cancelPendingInputs(agentId, "Task interrupted before this input reached a model request");
+		this.cancelPendingInputs(
+			agentId,
+			"Task interrupted before this input reached a model request",
+			undefined,
+			this.inputs(agentId).filter((entry) => entry.origin.kind !== "user"),
+		);
 		const cancelledTaskIds: string[] = [];
 		const cancelledTasks: AgentTaskSummary[] = [];
 		const hot = this.hot.get(agentId);
@@ -1716,7 +1939,8 @@ export class SubagentManager implements SubagentManagerApi {
 
 	private recoverInterruptedWork(records: readonly AgentDiskRecord[]): void {
 		for (const record of records) {
-			for (const input of record.inputs) this.publishIntervention(record, input, false);
+			const recoveredGuidance = this.recoverPendingGuidance(record);
+			for (const input of this.store.reload(record).inputs) this.publishIntervention(record, input, false);
 			if (record.tasks.some((task) => task.status === "queued" || task.status === "running")) {
 				if (record.runControl?.state !== "user_paused")
 					this.appendControl(
@@ -1736,7 +1960,11 @@ export class SubagentManager implements SubagentManagerApi {
 					record.agentId,
 					"Process interrupted before input delivery; resume with a new instruction",
 					record,
-					record.inputs,
+					record.inputs.filter(
+						(entry) =>
+							!recoveredGuidance.has(entry.messageId) &&
+							(entry.origin.kind !== "user" || entry.state === "accepted"),
+					),
 				);
 			}
 			for (const task of record.tasks) {
@@ -1752,6 +1980,39 @@ export class SubagentManager implements SubagentManagerApi {
 				);
 			}
 		}
+	}
+
+	/** The original queued revision is the durable promotion intent; consumption wins over recovery. */
+	private recoverPendingGuidance(record: AgentDiskRecord): ReadonlySet<string> {
+		const journal = this.store.readJournal(record.agentId, record);
+		const runtime = reduceRuntimeJournal(journal);
+		const recovered = new Set<string>();
+		for (const input of record.inputs) {
+			if (input.origin.kind !== "user" || input.state !== "accepted" || input.delivery !== "steer") continue;
+			const index = journal.findIndex((entry) => entry.id === input.id);
+			if (index < 0) continue;
+			const original = journal
+				.slice(0, index)
+				.reverse()
+				.find(
+					(entry): entry is AgentInputEntry =>
+						entry.type === "agent_input" &&
+						entry.messageId === input.messageId &&
+						entry.state === "queued" &&
+						entry.taskId !== input.taskId,
+				);
+			if (!original) continue;
+			const requestId = queuedAdmissionRequestId(original.messageId, original.id);
+			const operation = runtime.operations.find((entry) => entry.requestId === requestId);
+			const consumed =
+				runtime.queues.some(
+					(entry) => entry.operationId === operation?.operationId && entry.state === "consumed",
+				) || journal.some((entry) => entry.type === "message" && entry.agentMessageId === requestId);
+			const { id: _id, parentId: _parentId, timestamp: _timestamp, ...payload } = consumed ? input : original;
+			this.appendControl(record.agentId, { ...payload, state: consumed ? "delivered" : "queued" }, record);
+			recovered.add(input.messageId);
+		}
+		return recovered;
 	}
 
 	private actorCeiling(actorId: string, actorPreset: PermissionPreset): PermissionSettings {
@@ -2088,7 +2349,17 @@ export class SubagentManager implements SubagentManagerApi {
 	}
 
 	private markInputConsumed(agentId: string, messageId: string): void {
-		const input = this.inputs(agentId).find((entry) => entry.messageId === messageId);
+		const inputs = this.inputs(agentId);
+		let input = inputs.find((entry) => entry.messageId === messageId);
+		if (!input) {
+			const origin = [...this.journal(agentId)]
+				.reverse()
+				.find(
+					(entry): entry is AgentInputEntry =>
+						entry.type === "agent_input" && queuedAdmissionRequestId(entry.messageId, entry.id) === messageId,
+				);
+			if (origin) input = inputs.find((entry) => entry.messageId === origin.messageId);
+		}
 		if (!input || input.state === "delivered" || input.state === "cancelled" || input.state === "failed") return;
 		const { id: _id, parentId: _parentId, timestamp: _timestamp, ...payload } = input;
 		this.appendControl(agentId, { ...payload, state: "delivered" });

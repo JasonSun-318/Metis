@@ -5,6 +5,9 @@ import {
 	KnowledgeReadParamsSchema,
 	KnowledgeReadSchema,
 	KnowledgeRegisterParamsSchema,
+	KnowledgeRemoveParamsSchema,
+	KnowledgeResourceResolveParamsSchema,
+	KnowledgeResourceResolveSchema,
 	KnowledgeScanParamsSchema,
 	KnowledgeScanSchema,
 	KnowledgeSessionParamsSchema,
@@ -836,6 +839,17 @@ export const QueuedTurnDeleteResultSchema = StrictObject({
 	deleted: Type.Literal(true),
 });
 
+export const AgentQueueReadParamsSchema = StrictObject({ sessionId: SessionIdSchema, agentId: SessionIdSchema });
+export const AgentQueueReadResultSchema = StrictObject({
+	queuedTurns: Type.Array(QueuedTurnViewSchema, { maxItems: 32 }),
+});
+export const AgentQueueDeleteParamsSchema = StrictObject({ ...QueueItemMutationFields, agentId: SessionIdSchema });
+export const AgentQueueSendParamsSchema = StrictObject({
+	...QueueItemMutationFields,
+	agentId: SessionIdSchema,
+	delivery: Type.Union([Type.Literal("steer"), Type.Literal("start")]),
+});
+
 export const ConnectionAckParamsSchema = StrictObject({
 	serverEpoch: UuidSchema,
 	cursor: CursorSchema,
@@ -1625,8 +1639,10 @@ export const PluginUpdateParamsSchema = StrictObject({
 export const ClientRequestMethods = {
 	"knowledge/list": method(StrictObject({}), KnowledgeLibrariesSchema),
 	"knowledge/register": method(KnowledgeRegisterParamsSchema, KnowledgeLibrarySchema),
+	"knowledge/remove": method(KnowledgeRemoveParamsSchema, KnowledgeLibrariesSchema),
 	"knowledge/scan": method(KnowledgeScanParamsSchema, KnowledgeScanSchema),
 	"knowledge/read": method(KnowledgeReadParamsSchema, KnowledgeReadSchema),
+	"knowledge/resource/resolve": method(KnowledgeResourceResolveParamsSchema, KnowledgeResourceResolveSchema),
 	"session/knowledge/get": method(KnowledgeSessionParamsSchema, KnowledgeLibrariesSchema),
 	"session/knowledge/set": method(KnowledgeSetParamsSchema, KnowledgeLibrariesSchema),
 	initialize: method(InitializeParamsSchema, InitializeResultSchema),
@@ -1714,6 +1730,9 @@ export const ClientRequestMethods = {
 	"agent/list": method(AgentListParamsSchema, AgentListResultSchema),
 	"agent/readItems": method(AgentReadItemsParamsSchema, SessionReadItemsResultSchema),
 	"agent/send": method(AgentSendParamsSchema, AgentSendResultSchema),
+	"agent/queue/read": method(AgentQueueReadParamsSchema, AgentQueueReadResultSchema),
+	"agent/queue/delete": method(AgentQueueDeleteParamsSchema, QueuedTurnDeleteResultSchema),
+	"agent/queue/send": method(AgentQueueSendParamsSchema, AgentSendResultSchema),
 	"agent/control": method(AgentControlParamsSchema, AgentControlResultSchema),
 	"agent/interrupt": method(AgentInterruptParamsSchema, AgentResultSchema),
 	"agent/archive": method(AgentArchiveParamsSchema, AgentResultSchema),

@@ -23,8 +23,27 @@ export const KnowledgeScanSchema = StrictObject({
 });
 export const KnowledgeReadSchema = StrictObject({ path: PathSchema, content: Utf8String(4 * 1024 * 1024) });
 export const KnowledgeRegisterParamsSchema = StrictObject({ requestId: UuidSchema, path: PathSchema });
+export const KnowledgeRemoveParamsSchema = StrictObject({ requestId: UuidSchema, libraryId: UuidSchema });
 export const KnowledgeScanParamsSchema = StrictObject({ libraryId: UuidSchema });
 export const KnowledgeReadParamsSchema = StrictObject({ libraryId: UuidSchema, path: PathSchema });
+export const KnowledgeResourceResolveParamsSchema = StrictObject({
+	libraryId: UuidSchema,
+	sourcePath: PathSchema,
+	reference: PublicTextSchema,
+	kind: Type.Union([Type.Literal("wiki"), Type.Literal("markdown")]),
+});
+export const KnowledgeResourceResolveSchema = StrictObject({
+	libraryId: UuidSchema,
+	path: PathSchema,
+	kind: Type.Union([Type.Literal("note"), Type.Literal("image"), Type.Literal("pdf")]),
+	mimeType: PublicTextSchema,
+	revision: PublicTextSchema,
+	fragment: Type.Optional(PublicTextSchema),
+	// Trusted main-process metadata for the byte reader; not a renderer file grant.
+	absolutePath: PathSchema,
+	rootPath: PathSchema,
+});
+export type KnowledgeResourceResolveResult = Static<typeof KnowledgeResourceResolveSchema>;
 export const KnowledgeSessionParamsSchema = StrictObject({ sessionId: SessionIdSchema });
 export const KnowledgeSetParamsSchema = StrictObject({
 	sessionId: SessionIdSchema,

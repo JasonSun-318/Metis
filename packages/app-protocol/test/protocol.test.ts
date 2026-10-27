@@ -906,6 +906,38 @@ describe("manual model thinking map schema", () => {
 });
 
 describe("golden protocol fixtures", () => {
+	it("accepts knowledge removal by registered id and rejects arbitrary filesystem targets", () => {
+		const params = {
+			requestId: "00000000-0000-4000-8000-000000000002",
+			libraryId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		};
+		const request = makeClientRequest("knowledge/remove", params);
+		expect(validateClientRequest(request)).toEqual(request);
+		expect(() => validateClientRequest({ ...request, params: { ...params, path: "/Users/test/private" } })).toThrow();
+		expect(() => validateClientRequest({ ...request, params: { ...params, libraryId: "../private" } })).toThrow();
+	});
+	it("resolves embedded knowledge resources only by registered library and relative reference", () => {
+		const params = {
+			libraryId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+			sourcePath: "topic/Source.md",
+			reference: "设计说明#核心流程",
+			kind: "wiki",
+		} as const;
+		const request = makeClientRequest("knowledge/resource/resolve", params);
+		expect(validateClientRequest(request)).toEqual(request);
+		const markdown = makeClientRequest("knowledge/resource/resolve", {
+			...params,
+			reference: "./assets/x.png",
+			kind: "markdown",
+		});
+		expect(validateClientRequest(markdown)).toEqual(markdown);
+		for (const invalid of [
+			{ ...params, kind: "embed" },
+			{ ...params, libraryId: "/Users/test/knowledge" },
+		]) {
+			expect(() => validateClientRequest({ ...request, params: invalid })).toThrow();
+		}
+	});
 	it("allows partial agent catalogs to report unreadable entries without losing valid pagination", () => {
 		const validator = Compile(ClientRequestMethods["agent/list"].result);
 		expect(validator.Check({ agents: [], nextAfterAgentId: null, unreadableAgentCount: 2 })).toBe(true);
