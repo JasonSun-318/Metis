@@ -27,6 +27,7 @@ const config: Configuration = {
 			},
 			{ test: /\.css$/u, use: [MiniCssExtractPlugin.loader, "css-loader"] },
 			{ test: /\.(?:png|svg)$/u, type: "asset/resource" },
+			{ test: /\.(?:woff2?|ttf|otf)$/u, type: "asset/resource" }, // KaTeX bundles its fonts beside its CSS.
 			{ test: /pdf\.worker\.min\.mjs$/u, type: "asset/resource" },
 		],
 	},
@@ -35,6 +36,8 @@ const config: Configuration = {
 		new CopyWebpackPlugin({
 			patterns: [
 				{ from: path.join(import.meta.dirname, "assets/licenses/lucide-animated.txt"), to: "licenses/lucide-animated.txt" },
+				{ from: path.join(import.meta.dirname, "assets/licenses/reicon.txt"), to: "licenses/reicon.txt" },
+				{ from: path.join(import.meta.dirname, "assets/licenses/github-octicons.txt"), to: "licenses/github-octicons.txt" },
 				{ from: path.join(pdfjsRoot, "build/pdf.worker.min.mjs"), to: "pdf.worker.min.mjs" },
 				{ from: path.join(pdfjsRoot, "cmaps"), to: "pdfjs/cmaps" }, // pdfjs-dist/cmaps
 				{ from: path.join(pdfjsRoot, "standard_fonts"), to: "pdfjs/standard_fonts" }, // pdfjs-dist/standard_fonts

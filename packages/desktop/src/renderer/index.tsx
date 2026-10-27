@@ -9,6 +9,9 @@ import "./styles/tokens.css";
 import "./styles/app.css";
 import "./styles/transcript-navigation.css";
 import "./styles/knowledge.css";
+import "./styles/markdown.css";
+import "./styles/markdown-embeds.css";
+import "katex/dist/katex.min.css";
 
 // Apply the persisted theme before the first paint to avoid a flash.
 applyThemeToDocument(loadTheme(localStorage));

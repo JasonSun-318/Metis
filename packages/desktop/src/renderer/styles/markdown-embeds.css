@@ -1,0 +1,98 @@
+.markdown-embed {
+	margin: 12px 0;
+	padding: 12px;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.markdown-embed-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	margin-bottom: 10px;
+	color: var(--muted);
+	font-size: 12px;
+}
+.markdown-embed-header button,
+.markdown-resource-dialog-header button {
+	flex-shrink: 0;
+	border: 0;
+	background: transparent;
+	color: var(--text);
+	cursor: pointer;
+}
+.markdown-image-embed {
+	padding: 0;
+	border: 0;
+}
+.markdown-image-button {
+	display: block;
+	max-width: 100%;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	cursor: zoom-in;
+}
+.markdown-image-button img {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	object-fit: contain;
+	border-radius: 6px;
+}
+.markdown-embed-error,
+.markdown-resource-unavailable {
+	color: var(--muted);
+	font-size: 13px;
+}
+.markdown-resource-dialog {
+	display: flex;
+	flex-direction: column;
+	width: min(1100px, calc(100vw - 48px));
+	height: min(850px, calc(100vh - 48px));
+	background: var(--panel);
+	color: var(--text);
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	overflow: hidden;
+	min-width: 0;
+}
+.markdown-resource-dialog-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	padding: 12px 16px;
+	border-bottom: 1px solid var(--border);
+	font-size: 13px;
+}
+.markdown-resource-dialog-header strong {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.markdown-resource-document {
+	padding: 20px;
+	overflow: auto;
+}
+.markdown-resource-dialog > .universal-previewer {
+	flex: 1;
+	min-height: 0;
+}
+.markdown-embed .pdf-inline-preview {
+	max-width: 100%;
+	overflow: auto;
+}
+.markdown-embed .pdf-page-wrapper {
+	max-width: 100%;
+}
+
+.pdf-inline-preview { margin: 0; }
+.pdf-inline-preview-viewport { width: 100%; overflow: auto; min-height: 80px; }
+.pdf-inline-preview-caption { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.pdf-inline-preview-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pdf-inline-preview-page, .pdf-inline-preview-open { flex-shrink: 0; }
+.markdown-embed button:focus-visible, .markdown-resource-dialog button:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

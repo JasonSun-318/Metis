@@ -1,154 +1,43 @@
-import { SpinnerGap } from "@phosphor-icons/react";
-import * as pdfjsLib from "pdfjs-dist";
-import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SpinnerGap } from "../../icons.tsx";
+import { PdfPage } from "./PdfPage.tsx";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
-import { pdfCMapUrl, pdfStandardFontDataUrl, pdfWorkerSrc } from "./pdf-assets.ts";
 import { pdfTextSelection } from "./pdf-selection.ts";
 import type { UniversalPreviewTarget } from "./preview-kinds.ts";
-import { type PreviewSize, type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
+import { type PreviewZoom, previewScale, usePreviewViewport } from "./preview-layout.ts";
 import { useDocumentSelection } from "./use-document-selection.tsx";
-
-const workerSrc = pdfWorkerSrc();
-if (workerSrc) pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+import { usePdfDocument } from "./use-pdf-document.ts";
 
 export interface PdfViewerProps {
 	readonly file?: UniversalPreviewTarget;
 	readonly fileName: string;
 	readonly byteLength?: number;
 	readonly bytes: Uint8Array;
+	/** 1-based page to show once the document loads; clamped to the real page count. */
+	readonly initialPage?: number;
 	readonly onClose?: () => void;
 	readonly onOpenDefault?: () => void;
 	readonly onReveal?: () => void;
 }
 
-function PdfPage({
-	doc,
-	number,
-	mode,
-	viewport,
-	initialSize,
-	scrollRef,
-}: {
-	doc: pdfjsLib.PDFDocumentProxy;
-	number: number;
-	mode: PreviewZoom;
-	viewport: PreviewSize;
-	initialSize: PreviewSize;
-	scrollRef: RefObject<HTMLDivElement | null>;
-}) {
-	const { t } = useTranslation();
-	const wrapper = useRef<HTMLDivElement>(null);
-	const canvas = useRef<HTMLCanvasElement>(null);
-	const textLayer = useRef<HTMLDivElement>(null);
-	const renderChain = useRef<Promise<void>>(Promise.resolve());
-	const [nearby, setNearby] = useState(number <= 3);
-	const [page, setPage] = useState<pdfjsLib.PDFPageProxy | null>(null);
-	const [error, setError] = useState(false);
-	const size = page?.getViewport({ scale: 1 }) ?? initialSize;
-	const scale = previewScale(mode, size, viewport);
-
-	useEffect(() => {
-		if (!wrapper.current || typeof IntersectionObserver === "undefined") {
-			setNearby(true);
-			return;
-		}
-		const observer = new IntersectionObserver((entries) => setNearby(entries.some((entry) => entry.isIntersecting)), {
-			root: scrollRef.current,
-			rootMargin: "600px 0px",
-		});
-		observer.observe(wrapper.current);
-		return () => observer.disconnect();
-	}, [scrollRef]);
-
-	useEffect(() => {
-		if (!nearby || page) return;
-		let cancelled = false;
-		void doc.getPage(number).then(
-			(value) => {
-				if (!cancelled) setPage(value);
-			},
-			() => {
-				if (!cancelled) setError(true);
-			},
-		);
-		return () => {
-			cancelled = true;
-		};
-	}, [doc, number, nearby, page]);
-
-	useEffect(() => {
-		if (!page || !nearby || !canvas.current || !textLayer.current) return;
-		let cancelled = false;
-		let task: ReturnType<pdfjsLib.PDFPageProxy["render"]> | undefined;
-		let layer: InstanceType<typeof pdfjsLib.TextLayer> | undefined;
-		const target = canvas.current;
-		const textTarget = textLayer.current;
-		// A cancelled render must settle before the same canvas can be reused.
-		renderChain.current = renderChain.current
-			.catch(() => {})
-			.then(async () => {
-				if (cancelled) return;
-				const context = target.getContext("2d");
-				if (!context) return;
-				setError(false);
-				const dpr = window.devicePixelRatio || 1;
-				const displayViewport = page.getViewport({ scale });
-				const renderViewport = page.getViewport({ scale: scale * dpr });
-				target.width = Math.ceil(renderViewport.width);
-				target.height = Math.ceil(renderViewport.height);
-				target.style.width = `${displayViewport.width}px`;
-				target.style.height = `${displayViewport.height}px`;
-				task = page.render({ canvasContext: context, viewport: renderViewport });
-				await task.promise;
-				if (cancelled) return;
-				textTarget.replaceChildren();
-				textTarget.style.setProperty("--scale-factor", String(scale));
-				layer = new pdfjsLib.TextLayer({
-					container: textTarget,
-					textContentSource: page.streamTextContent(),
-					viewport: displayViewport,
-				});
-				await layer.render();
-			})
-			.catch(() => {
-				if (!cancelled) setError(true);
-			});
-		return () => {
-			cancelled = true;
-			task?.cancel();
-			layer?.cancel();
-		};
-	}, [page, nearby, scale]);
-
-	return (
-		<div
-			ref={wrapper}
-			className="pdf-page-wrapper"
-			data-page={number}
-			style={{ width: size.width * scale, height: size.height * scale }}
-		>
-			<canvas ref={canvas} />
-			<div ref={textLayer} className="textLayer" />
-			{error && (
-				<div className="preview-error-state" role="alert">
-					{t("Failed to render page")}
-				</div>
-			)}
-		</div>
-	);
-}
-
-export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDefault, onReveal }: PdfViewerProps) {
+export function PdfViewer({
+	fileName,
+	file,
+	byteLength,
+	bytes,
+	initialPage,
+	onClose,
+	onOpenDefault,
+	onReveal,
+}: PdfViewerProps) {
 	const { t } = useTranslation();
 	const selection = useDocumentSelection(file, bytes);
-	const [doc, setDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
-	const [initialSize, setInitialSize] = useState<PreviewSize>({ width: 800, height: 1130 });
+	const { doc, initialSize, error } = usePdfDocument(bytes);
 	const [currentPage, setCurrentPage] = useState(1);
 	const [mode, setMode] = useState<PreviewZoom>("width");
 	const [inverted, setInverted] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const { ref: scrollRef, size } = usePreviewViewport();
 	const resizing = usePreviewExpansion()?.resizing ?? false;
 	const anchor = useRef({ page: 1, fraction: 0 });
@@ -161,40 +50,12 @@ export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDe
 		if (value) selection.select(value.target, value.text, range);
 	};
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies(bytes): A new bytes payload must reset viewer state even though only the loader reads it.
 	useEffect(() => {
-		let cancelled = false;
-		setDoc(null);
-		setError(null);
 		setMode("width");
 		setCurrentPage(1);
 		anchor.current = { page: 1, fraction: 0 };
-		if (!pdfjsLib.GlobalWorkerOptions.workerSrc) {
-			setError(t("Failed to load PDF document"));
-			return;
-		}
-		// PDF.js transfers ownership to its worker. Keep the preview cache's bytes intact.
-		const task = pdfjsLib.getDocument({
-			data: Uint8Array.from(bytes),
-			cMapUrl: pdfCMapUrl(),
-			cMapPacked: true,
-			standardFontDataUrl: pdfStandardFontDataUrl(),
-		});
-		void task.promise
-			.then(async (document) => {
-				const first = await document.getPage(1);
-				if (cancelled) return;
-				const viewport = first.getViewport({ scale: 1 });
-				setInitialSize({ width: viewport.width, height: viewport.height });
-				setDoc(document);
-			})
-			.catch((cause) => {
-				if (!cancelled) setError(cause instanceof Error ? cause.message : t("Failed to load PDF document"));
-			});
-		return () => {
-			cancelled = true;
-			void task.destroy();
-		};
-	}, [bytes, t]);
+	}, [bytes]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(resizing): Mode, viewport size, and resize completion require restoring the saved page anchor after layout.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(size): Mode, viewport size, and resize completion require restoring the saved page anchor after layout.
@@ -230,14 +91,23 @@ export function PdfViewer({ fileName, file, byteLength, bytes, onClose, onOpenDe
 		};
 		setCurrentPage(number);
 	};
-	const goToPage = (number: number) => {
-		const container = scrollRef.current;
-		const page = container?.querySelector<HTMLElement>(`[data-page="${number}"]`);
-		if (!container || !page) return;
-		container.scrollTop += page.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
-		anchor.current = { page: number, fraction: 0 };
-		setCurrentPage(number);
-	};
+	const goToPage = useCallback(
+		(number: number) => {
+			const container = scrollRef.current;
+			const page = container?.querySelector<HTMLElement>(`[data-page="${number}"]`);
+			if (!container || !page) return;
+			container.scrollTop += page.getBoundingClientRect().top - container.getBoundingClientRect().top - 16;
+			anchor.current = { page: number, fraction: 0 };
+			setCurrentPage(number);
+		},
+		[scrollRef],
+	);
+
+	useLayoutEffect(() => {
+		if (!doc || !initialPage) return;
+		goToPage(Math.min(Math.max(1, Math.floor(initialPage)), doc.numPages));
+	}, [doc, initialPage, goToPage]);
+
 	return (
 		<div className="universal-previewer pdf-previewer">
 			<PreviewToolbar
