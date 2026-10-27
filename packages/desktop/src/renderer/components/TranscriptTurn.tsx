@@ -1,4 +1,6 @@
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	CaretRight,
 	CheckCircle,
@@ -7,10 +9,8 @@ import {
 	GitFork,
 	ImageSquare,
 	TerminalWindow,
-	Wrench,
-} from "@phosphor-icons/react";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+	Tool,
+} from "../icons.tsx";
 import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import { CopyFeedbackIcon } from "./CopyFeedbackIcon.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
@@ -79,7 +79,7 @@ function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly res
 		return (
 			<div className="tool-step tool-step-static">
 				<div className="tool-step-static-label">
-					<Wrench aria-hidden="true" size={17} />
+					<Tool aria-hidden="true" size={17} />
 					<span>{presentation.label}</span>
 					{call.state === "running" && (
 						<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
@@ -151,6 +151,7 @@ function ExecutionChain({
 	results,
 	running,
 	startedAt,
+	runId,
 	waitingForAnswer,
 	retry,
 }: {
@@ -159,6 +160,7 @@ function ExecutionChain({
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 	readonly running: boolean;
 	readonly startedAt?: string;
+	readonly runId?: string;
 	readonly waitingForAnswer: boolean;
 	readonly retry?: TranscriptTurnProps["retry"];
 }) {
@@ -294,6 +296,7 @@ function ExecutionChain({
 							running
 							retry={retry}
 							startedAt={startedAt}
+							runId={runId}
 							waitingForAnswer={waitingForAnswer}
 						/>
 					) : (
@@ -356,6 +359,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	running: runtimeRunning = false,
 	retry,
 	startedAt,
+	runId,
 	onFork,
 	onCopy,
 	onJumpToQuote,
@@ -467,6 +471,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							results={results}
 							running={index === activeActivityIndex}
 							startedAt={startedAt}
+							runId={runId}
 							retry={retry}
 							waitingForAnswer={waitingForAnswer}
 						/>
@@ -513,6 +518,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 					running
 					retry={retry}
 					startedAt={startedAt}
+					runId={runId}
 					waitingForAnswer={waitingForAnswer}
 				/>
 			)}

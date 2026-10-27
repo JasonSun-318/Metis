@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { expect, type Page, type Locator, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 import { build } from "esbuild";
 
 test.use({ channel: "chrome" });
@@ -25,8 +25,15 @@ test.beforeAll(async () => {
 	});
 	await build({
 		stdin: {
-			contents: ["tokens.css", "app.css", "transcript-navigation.css", path.resolve(__dirname, "../../../node_modules/@xterm/xterm/css/xterm.css")]
-				.map((file) => `@import "${path.resolve(__dirname, "../src/renderer/styles", file).replaceAll("\\", "/")}";`)
+			contents: [
+				"tokens.css",
+				"app.css",
+				"transcript-navigation.css",
+				path.resolve(__dirname, "../../../node_modules/@xterm/xterm/css/xterm.css"),
+			]
+				.map(
+					(file) => `@import "${path.resolve(__dirname, "../src/renderer/styles", file).replaceAll("\\", "/")}";`,
+				)
 				.join("\n"),
 			loader: "css",
 			resolveDir: directory,
@@ -71,6 +78,15 @@ function pageErrors(page: Page) {
 	return errors;
 }
 
+async function hoverNavigationMark(page: Page, mark: Locator) {
+	// Each visible index row retains the corresponding message identity while the index scrolls.
+	const bounds = await mark.boundingBox();
+	if (!bounds) throw new Error("Navigation mark has no bounds");
+	const point = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
+	await page.mouse.move(point.x, point.y);
+	return point;
+}
+
 async function selectQuote(page: Page, target: Locator, text: string) {
 	await target.scrollIntoViewIfNeeded();
 	// A click collapses an existing selection before a fresh drag (rather than dragging its text).
@@ -81,79 +97,109 @@ async function selectQuote(page: Page, target: Locator, text: string) {
 		while ((node = walker.nextNode() as Text | null)) {
 			const start = node.data.indexOf(text);
 			if (start < 0) continue;
-			const range = document.createRange(); range.setStart(node, start); range.setEnd(node, start + text.length);
+			const range = document.createRange();
+			range.setStart(node, start);
+			range.setEnd(node, start + text.length);
 			const bounds = range.getBoundingClientRect();
 			return { x: bounds.x, y: bounds.y + bounds.height / 2, width: bounds.width };
 		}
 		throw new Error("Quote fixture text missing");
 	}, text);
-	await page.mouse.move(rect.x + .2, rect.y); await page.mouse.down();
-	await page.mouse.move(rect.x + rect.width - .2, rect.y, { steps: 12 }); await page.mouse.up();
+	await page.mouse.move(rect.x + 0.2, rect.y);
+	await page.mouse.down();
+	await page.mouse.move(rect.x + rect.width - 0.2, rect.y, { steps: 12 });
+	await page.mouse.up();
 	await expect.poll(() => page.evaluate(() => window.getSelection()?.toString())).toBe(text);
 	await expect(page.locator(".conversation-selection-popover")).toBeVisible();
 }
 
-test("conversation selections become compact annotations and survive reload in both modes and themes", async ({ page }, info) => {
+test("conversation selections become compact annotations and survive reload in both modes and themes", async ({
+	page,
+}, info) => {
 	test.setTimeout(90_000);
 	const errors = pageErrors(page);
-	for (const mode of ["chat", "code"]) for (const theme of ["dark", "light"]) {
-		await page.setViewportSize({ width: 1000, height: 840 });
-		await page.goto(`${url}/?mode=${mode}&theme=${theme}&count=2&selection=1&quotes=1`);
-		const selected = "selectable conversation content.";
-		const paragraph = page.getByText("Selection paragraph: selectable conversation content.", { exact: true }).last();
-		await selectQuote(page, paragraph, selected);
-		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
-		const editor = page.locator('[contenteditable="true"]');
-		await expect(editor).toBeFocused();
-		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
-		await editor.fill("详细解释引用的内容");
-		const userText = "请整理产品资料中的知识点";
-		await selectQuote(page, page.locator('[data-quote-item="user-1"]'), userText);
-		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
-		await expect(editor).toHaveText("详细解释引用的内容");
-		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("2 段对话引用");
-		await page.locator(".composer-conversation-quotes summary").click();
-		await page.getByRole("button", { name: "移除对话引用", exact: true }).first().click();
-		await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
-		await selectQuote(page, paragraph, selected);
-		await page.getByRole("button", { name: "添加到会话", exact: true }).click();
-		await editor.press("Enter");
-		const sent = page.locator('[data-user-message^="sent-"]');
-		const trigger = sent.locator(".message-annotations-trigger");
-		await expect(trigger).toHaveText("2 条注释");
-		await expect(trigger).toBeInViewport();
-		await expect(page.locator(".composer-conversation-quotes")).toHaveCount(0);
-		const submission = await page.evaluate(() => (globalThis as typeof globalThis & { quoteSubmission: { text: string; conversationQuotes: { sourceItemId: string; sourceRole: string; selectedText: string }[] } }).quoteSubmission);
-		expect(submission.text).toBe("详细解释引用的内容");
-		expect(submission.conversationQuotes).toEqual([
-			{ sourceItemId: "user-1", sourceRole: "user", selectedText: userText },
-			{ sourceItemId: "answer-1", sourceRole: "assistant", selectedText: selected },
-		]);
-		const bubble = sent.locator(".message-user, .code-turn-user-bubble");
-		expect((await trigger.boundingBox())!.y).toBeGreaterThanOrEqual((await bubble.boundingBox())!.y + (await bubble.boundingBox())!.height);
-		await page.screenshot({ path: info.outputPath(`annotations-${mode}-${theme}.png`) });
-		await trigger.click();
-		const popup = page.getByRole("dialog", { name: "对话注释", exact: true });
-		await expect(popup).toContainText(selected);
-		await expect(popup).toContainText("来自 Metis");
-		await page.screenshot({ path: info.outputPath(`annotation-preview-${mode}-${theme}.png`) });
-		await popup.locator("section").filter({ hasText: selected }).getByRole("button", { name: "跳转到原消息" }).click();
-		await expect(popup).toHaveCount(0);
-		await expect(page.locator('[data-quote-item="answer-1"]').first()).toBeInViewport();
-		await trigger.scrollIntoViewIfNeeded();
-		await trigger.focus(); await trigger.press("Enter");
-		await expect(popup).toBeVisible();
-		await page.keyboard.press("Escape"); await expect(popup).toHaveCount(0); await expect(trigger).toBeFocused();
-		await page.reload();
-		await expect(trigger).toHaveText("2 条注释");
-		await page.setViewportSize({ width: 420, height: 720 });
-		await trigger.click();
-		await expect(popup).toContainText(selected);
-		const bounds = (await popup.boundingBox())!;
-		expect(bounds.x).toBeGreaterThanOrEqual(7); expect(bounds.x + bounds.width).toBeLessThanOrEqual(413);
-		expect(bounds.y).toBeGreaterThanOrEqual(7); expect(bounds.y + bounds.height).toBeLessThanOrEqual(713);
-		await page.keyboard.press("Escape");
-	}
+	for (const mode of ["chat", "code"])
+		for (const theme of ["dark", "light"]) {
+			await page.setViewportSize({ width: 1000, height: 840 });
+			await page.goto(`${url}/?mode=${mode}&theme=${theme}&count=2&selection=1&quotes=1`);
+			const selected = "selectable conversation content.";
+			const paragraph = page
+				.getByText("Selection paragraph: selectable conversation content.", { exact: true })
+				.last();
+			await selectQuote(page, paragraph, selected);
+			await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+			const editor = page.locator('[contenteditable="true"]');
+			await expect(editor).toBeFocused();
+			await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
+			await editor.fill("详细解释引用的内容");
+			const userText = "请整理产品资料中的知识点";
+			await selectQuote(page, page.locator('[data-quote-item="user-1"]'), userText);
+			await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+			await expect(editor).toHaveText("详细解释引用的内容");
+			await expect(page.locator(".composer-conversation-quotes summary")).toContainText("2 段对话引用");
+			await page.locator(".composer-conversation-quotes summary").click();
+			await page.getByRole("button", { name: "移除对话引用", exact: true }).first().click();
+			await expect(page.locator(".composer-conversation-quotes summary")).toContainText("1 段对话引用");
+			await selectQuote(page, paragraph, selected);
+			await page.getByRole("button", { name: "添加到会话", exact: true }).click();
+			await editor.press("Enter");
+			const sent = page.locator('[data-user-message^="sent-"]');
+			const trigger = sent.locator(".message-annotations-trigger");
+			await expect(trigger).toHaveText("2 条注释");
+			await expect(trigger).toBeInViewport();
+			await expect(page.locator(".composer-conversation-quotes")).toHaveCount(0);
+			const submission = await page.evaluate(
+				() =>
+					(
+						globalThis as typeof globalThis & {
+							quoteSubmission: {
+								text: string;
+								conversationQuotes: { sourceItemId: string; sourceRole: string; selectedText: string }[];
+							};
+						}
+					).quoteSubmission,
+			);
+			expect(submission.text).toBe("详细解释引用的内容");
+			expect(submission.conversationQuotes).toEqual([
+				{ sourceItemId: "user-1", sourceRole: "user", selectedText: userText },
+				{ sourceItemId: "answer-1", sourceRole: "assistant", selectedText: selected },
+			]);
+			const bubble = sent.locator(".message-user, .code-turn-user-bubble");
+			expect((await trigger.boundingBox())!.y).toBeGreaterThanOrEqual(
+				(await bubble.boundingBox())!.y + (await bubble.boundingBox())!.height,
+			);
+			await page.screenshot({ path: info.outputPath(`annotations-${mode}-${theme}.png`) });
+			await trigger.click();
+			const popup = page.getByRole("dialog", { name: "对话注释", exact: true });
+			await expect(popup).toContainText(selected);
+			await expect(popup).toContainText("来自 Metis");
+			await page.screenshot({ path: info.outputPath(`annotation-preview-${mode}-${theme}.png`) });
+			await popup
+				.locator("section")
+				.filter({ hasText: selected })
+				.getByRole("button", { name: "跳转到原消息" })
+				.click();
+			await expect(popup).toHaveCount(0);
+			await expect(page.locator('[data-quote-item="answer-1"]').first()).toBeInViewport();
+			await trigger.scrollIntoViewIfNeeded();
+			await trigger.focus();
+			await trigger.press("Enter");
+			await expect(popup).toBeVisible();
+			await page.keyboard.press("Escape");
+			await expect(popup).toHaveCount(0);
+			await expect(trigger).toBeFocused();
+			await page.reload();
+			await expect(trigger).toHaveText("2 条注释");
+			await page.setViewportSize({ width: 420, height: 720 });
+			await trigger.click();
+			await expect(popup).toContainText(selected);
+			const bounds = (await popup.boundingBox())!;
+			expect(bounds.x).toBeGreaterThanOrEqual(7);
+			expect(bounds.x + bounds.width).toBeLessThanOrEqual(413);
+			expect(bounds.y).toBeGreaterThanOrEqual(7);
+			expect(bounds.y + bounds.height).toBeLessThanOrEqual(713);
+			await page.keyboard.press("Escape");
+		}
 	expect(errors).toEqual([]);
 });
 
@@ -173,11 +219,19 @@ test("quote drafts stay in their session and selections in code remain usable", 
 test("a quote waits for a streaming reply to finish before it can be added", async ({ page }) => {
 	await page.setViewportSize({ width: 1000, height: 840 });
 	await page.goto(`${url}/?mode=chat&theme=dark&count=1&selection=1&quotes=1&streaming=1`);
-	await selectQuote(page, page.getByText("Selection paragraph: selectable conversation content.", { exact: true }), "selectable conversation content.");
+	await selectQuote(
+		page,
+		page.getByText("Selection paragraph: selectable conversation content.", { exact: true }),
+		"selectable conversation content.",
+	);
 	await expect(page.getByRole("button", { name: "添加到会话", exact: true })).toBeDisabled();
 	await expect(page.locator(".conversation-selection-notice")).toHaveText("回复完成后即可引用");
 	await page.getByRole("button", { name: "Finish reply" }).click();
-	await selectQuote(page, page.getByText("Selection paragraph: selectable conversation content.", { exact: true }), "selectable conversation content.");
+	await selectQuote(
+		page,
+		page.getByText("Selection paragraph: selectable conversation content.", { exact: true }),
+		"selectable conversation content.",
+	);
 	await expect(page.getByRole("button", { name: "添加到会话", exact: true })).toBeEnabled();
 	await page.getByRole("button", { name: "添加到会话", exact: true }).click();
 	await expect(page.locator(".composer-conversation-quotes")).toHaveCount(1);
@@ -208,30 +262,43 @@ test("sent file references stay readable and expandable in Chat and Code", async
 			await expect(toggle).toContainText("AGENTS.md");
 			await expect(toggle).toContainText("第 1–8 行");
 			await expect(cards.first().locator("details")).not.toHaveAttribute("open");
-			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height).toBe(0);
+			await expect
+				.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height)
+				.toBe(0);
 			await toggle.click();
 			await expect(cards.first().locator("details")).toHaveAttribute("open");
-			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height ?? 0).toBeGreaterThan(50);
+			await expect
+				.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height ?? 0)
+				.toBeGreaterThan(50);
 			await expect(quote).toContainText("Default language: Chinese.");
 			expect(await quote.evaluate((element) => getComputedStyle(element).userSelect)).toBe("text");
 			await page.screenshot({ path: info.outputPath(`sent-references-${mode}-${theme}.png`) });
 			await toggle.focus();
 			await page.keyboard.press("Enter");
 			await expect(cards.first().locator("details")).not.toHaveAttribute("open");
-			await expect.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height).toBe(0);
+			await expect
+				.poll(async () => (await cards.first().locator(".transcript-drawer").boundingBox())?.height)
+				.toBe(0);
 		}
 	}
 	expect(errors).toEqual([]);
 });
 
-test("Chat and Code text can be selected and terminal action hints appear on hover and focus", async ({ page }, info) => {
+test("Chat and Code text can be selected and terminal action hints appear on hover and focus", async ({
+	page,
+}, info) => {
 	for (const mode of ["chat", "code"]) {
 		await page.setViewportSize({ width: 1280, height: 1000 });
 		await page.goto(`${url}/?mode=${mode}&count=1&selection=1&terminal=1`);
 		const paragraph = page.getByText("Selection paragraph: selectable conversation content.", { exact: true });
 		await expect(paragraph).toBeVisible();
 		const user = page.locator(mode === "chat" ? ".message-user p" : ".code-turn-user-bubble p").first();
-		for (const content of [user, paragraph, page.getByRole("cell", { name: "Table content", exact: true }), page.locator("pre code")]) {
+		for (const content of [
+			user,
+			paragraph,
+			page.getByRole("cell", { name: "Table content", exact: true }),
+			page.locator("pre code"),
+		]) {
 			await content.scrollIntoViewIfNeeded();
 			const rect = await content.evaluate((element) => {
 				const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
@@ -249,7 +316,10 @@ test("Chat and Code text can be selected and terminal action hints appear on hov
 			await page.mouse.down();
 			await page.mouse.move(rect.x + rect.width - 1, rect.y, { steps: 8 });
 			await page.mouse.up();
-			expect(await page.evaluate(() => window.getSelection()?.toString().trim()), await content.innerText()).toBeTruthy();
+			expect(
+				await page.evaluate(() => window.getSelection()?.toString().trim()),
+				await content.innerText(),
+			).toBeTruthy();
 		}
 		const link = page.getByRole("link", { name: "Selectable link" });
 		expect(await link.evaluate((element) => getComputedStyle(element).userSelect)).toBe("text");
@@ -259,11 +329,17 @@ test("Chat and Code text can be selected and terminal action hints appear on hov
 			const button = page.getByRole("button", { name, exact: true });
 			await button.hover();
 			await expect(page.getByRole("tooltip", { name, exact: true })).toBeVisible();
-			await page.screenshot({ path: info.outputPath(`terminal-hint-${mode}-${name === "滚动到底部" ? "scroll" : "clear"}.png`) });
+			await page.screenshot({
+				path: info.outputPath(`terminal-hint-${mode}-${name === "滚动到底部" ? "scroll" : "clear"}.png`),
+			});
 			await page.mouse.move(10, 10);
 			await expect(page.getByRole("tooltip", { name, exact: true })).toHaveCount(0);
 			await page.locator("header button").first().focus();
-			for (let index = 0; index < 12 && !await button.evaluate((element) => element === document.activeElement); index += 1) {
+			for (
+				let index = 0;
+				index < 12 && !(await button.evaluate((element) => element === document.activeElement));
+				index += 1
+			) {
 				await page.keyboard.press("Tab");
 			}
 			await expect(button).toBeFocused();
@@ -284,8 +360,9 @@ test("Agent rail previews, jumps to virtualized messages, and retains history po
 	await expect(page.locator('[data-user-message="user-120"]')).toBeVisible();
 	await expect(page.locator(".message-file-card").last()).toContainText("系统设计说明.md");
 	expect(await page.locator("[data-transcript-turn]").count()).toBeLessThan(30);
-	const bounds = (await rail.boundingBox())!;
-	await page.mouse.move(bounds.x + 15, bounds.y + bounds.height * 0.36);
+	const marks = page.locator("[data-navigation-turn]");
+	const mark = marks.nth(Math.floor((await marks.count()) * 0.36));
+	const selectedPoint = await hoverNavigationMark(page, mark);
 	const preview = page.locator(".conversation-navigation-preview");
 	await expect(preview).toBeVisible();
 	await expect(preview).toContainText("知识点");
@@ -296,7 +373,7 @@ test("Agent rail previews, jumps to virtualized messages, and retains history po
 	expect(Math.max(...widths)).toBeGreaterThan(18);
 	expect(Math.min(...widths)).toBe(6);
 	await page.screenshot({ path: info.outputPath("agent-navigation-hover.png") });
-	await rail.click({ position: { x: 15, y: bounds.height * 0.36 } });
+	await page.mouse.click(selectedPoint.x, selectedPoint.y);
 	await expect(preview).not.toBeVisible();
 	await expect.poll(() => scroll.evaluate((element) => element.scrollTop)).toBeGreaterThan(1000);
 	await rail.focus();
@@ -305,9 +382,30 @@ test("Agent rail previews, jumps to virtualized messages, and retains history po
 	await expect(page.locator('[data-user-message="user-0"]')).toBeInViewport();
 	await expect(page.locator('[data-user-message="user-0"] .message-file-card')).toHaveCount(2);
 	await page.screenshot({ path: info.outputPath("agent-attachment-cards.png") });
-	await page.getByRole("button", { name: "更早的消息" }).click();
+	await expect(page.locator(".conversation-navigation-older")).toHaveCount(0);
+	const anchor = page.locator('[data-user-message="user-0"]');
+	const anchorOffset = await anchor.evaluate(
+		(element) =>
+			element.getBoundingClientRect().top - element.closest(".transcript-scroll")!.getBoundingClientRect().top,
+	);
+	// PageUp pages the conversation; wheel input is reserved for browsing index rows.
+	await rail.focus();
+	await rail.press("PageUp");
 	await expect(rail).toHaveAttribute("aria-valuemax", "122");
-	await expect(page.locator('[data-user-message="user-0"]')).toBeInViewport();
+	await expect(anchor).toBeInViewport();
+	await expect
+		.poll(() =>
+			anchor.evaluate(
+				(element, offset) =>
+					Math.abs(
+						element.getBoundingClientRect().top -
+							element.closest(".transcript-scroll")!.getBoundingClientRect().top -
+							offset,
+					),
+				anchorOffset,
+			),
+		)
+		.toBeLessThan(5);
 	// A newly appended reply must not pull the reader back to the bottom.
 	await page.getByRole("button", { name: "Append reply" }).click();
 	await expect(page.locator('[data-user-message="user-0"]')).toBeInViewport();
@@ -320,7 +418,9 @@ test("Agent rail previews, jumps to virtualized messages, and retains history po
 	expect(errors).toEqual([]);
 });
 
-test("one mark per turn, keyboard navigation, narrow light layout and Editor exclusion", async ({ page }, info) => {
+test("message lookup preserves turn boundaries, keyboard navigation, narrow light layout and Editor exclusion", async ({
+	page,
+}, info) => {
 	const errors = pageErrors(page);
 	await page.setViewportSize({ width: 420, height: 720 });
 	await page.goto(`${url}?mode=code&theme=light`);
@@ -331,7 +431,7 @@ test("one mark per turn, keyboard navigation, narrow light layout and Editor exc
 	await expect(page.locator(".conversation-navigation-preview")).toContainText("第 46 个问题");
 	await expect(page.locator(".conversation-navigation-excerpt")).toContainText("第 46 条回答");
 	await expect(rail).toHaveAttribute("aria-valuemax", "121");
-	await expect(page.locator('[data-navigation-turn="steer-45"]')).toHaveCount(0);
+	await expect(rail).toHaveAttribute("aria-valuenow", "46");
 	await page.screenshot({ path: info.outputPath("agent-navigation-narrow.png") });
 	await rail.press("Enter");
 	await expect(page.locator('[data-user-message="user-45"]')).toBeInViewport();
@@ -348,7 +448,10 @@ test("one mark per turn, keyboard navigation, narrow light layout and Editor exc
 				),
 		)
 		.toBeLessThan(5);
+	await expect(page.locator('[data-user-message="steer-45"]')).toHaveCount(1);
 	await rail.press("ArrowDown");
+	await expect(rail).toHaveAttribute("aria-valuenow", "47");
+	await expect(page.locator(".conversation-navigation-preview")).toContainText("第 47 个问题");
 	await rail.press("Escape");
 	await expect(page.locator(".conversation-navigation-preview")).toHaveCount(0);
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -358,24 +461,27 @@ test("one mark per turn, keyboard navigation, narrow light layout and Editor exc
 	expect(errors).toEqual([]);
 });
 
-
-test("reference-sized rail keeps one discrete line per question and a question-answer preview", async ({ page }, info) => {
+test("reference-sized index keeps one real tick per turn and precise keyboard question-answer lookup", async ({
+	page,
+}, info) => {
 	await page.setViewportSize({ width: 1280, height: 840 });
 	await page.goto(`${url}?count=40`);
 	const rail = page.getByRole("slider", { name: "会话导航" });
 	await expect(rail).toBeVisible();
+	await expect(rail).toHaveAttribute("aria-valuemax", "40");
 	await expect(page.locator("[data-navigation-turn]")).toHaveCount(40);
-	const bounds = (await rail.boundingBox())!;
-	await page.mouse.move(bounds.x + 18, bounds.y + 210);
+	await rail.focus();
+	await rail.press("Home");
+	for (let index = 0; index < 20; index += 1) await rail.press("ArrowDown");
 	const preview = page.locator(".conversation-navigation-preview");
 	await expect(preview).toContainText("第 21 个问题");
 	await expect(preview).toContainText("第 21 条回答");
 	await expect.poll(() => preview.evaluate((element) => getComputedStyle(element).opacity)).toBe("1");
 	await page.screenshot({ path: info.outputPath("agent-navigation-reference.png") });
-	await expect(page.locator('[data-navigation-turn="user-20"]')).toHaveClass("is-current");
-	await expect(page.locator('[data-navigation-turn="user-20"]')).toHaveCSS("width", "26px");
-	await expect(page.locator('[data-navigation-turn="user-19"]')).toHaveCSS("width", "20px");
-	await expect(page.locator('[data-navigation-turn="user-18"]')).toHaveCSS("width", "14px");
-	await expect(page.locator('[data-navigation-turn="user-17"]')).toHaveCSS("width", "8px");
-	await expect(page.locator('[data-navigation-turn="user-16"]')).toHaveCSS("width", "6px");
+	const current = page.locator("[data-navigation-turn].is-current");
+	await expect(current).toHaveAttribute("data-navigation-turn", "user-20");
+	const slot = Number(await current.getAttribute("data-navigation-index"));
+	for (const [distance, width] of [26, 20, 14, 8, 6].entries()) {
+		await expect(page.locator(`[data-navigation-index="${slot - distance}"]`)).toHaveCSS("width", `${width}px`);
+	}
 });

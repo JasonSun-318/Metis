@@ -18,6 +18,7 @@ interface TranscriptProps {
 	readonly waitingForAnswer?: boolean;
 	readonly retry?: RetryStatusView;
 	readonly activeTurnId?: string | null;
+	readonly activeRunId?: string;
 	readonly activeTurnStartedAt?: string;
 	readonly appearance: AgentMode;
 	readonly autoLoadOlder?: boolean;
@@ -99,6 +100,7 @@ export function Transcript({
 	waitingForAnswer = false,
 	retry,
 	activeTurnId,
+	activeRunId,
 	activeTurnStartedAt,
 	appearance,
 	ariaLabel = "Conversation transcript",
@@ -137,8 +139,12 @@ export function Transcript({
 	const quoteRequestedCount = useRef<number | null>(null);
 	const loadingOlderRef = useRef(false);
 	const followLatest = useRef(true);
+	const railDragging = useRef(false);
+	const scrollIntent = useRef(0);
 	useLayoutEffect(() => {
 		if (quoteContext?.lastAccepted?.sessionId !== quoteSessionId || !quoteSessionId) return;
+		if (railDragging.current) return;
+		scrollIntent.current += 1;
 		followLatest.current = true;
 		const scroll = scrollRef.current;
 		if (scroll) scroll.scrollTop = scroll.scrollHeight;
@@ -147,6 +153,12 @@ export function Transcript({
 	const [hasNewItems, setHasNewItems] = useState(false);
 	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
 	const [pendingJump, setPendingJump] = useState<string | null>(null);
+	const beginManualScroll = useCallback(() => {
+		scrollIntent.current += 1;
+		followLatest.current = false;
+		setPendingJump(null);
+		setQuoteJump(null);
+	}, []);
 	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
 	const activeTurnHasRow =
 		activeTurnId != null &&
@@ -186,8 +198,9 @@ export function Transcript({
 		initialRect: { width: 760, height: 640 },
 	});
 	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item) =>
-		shouldAdjustTranscriptScroll(item.end, scrollRef.current?.scrollTop ?? 0);
+		!railDragging.current && shouldAdjustTranscriptScroll(item.end, scrollRef.current?.scrollTop ?? 0);
 	const jumpToMessage = (entry: ConversationNavigationEntry) => {
+		scrollIntent.current += 1;
 		followLatest.current = false;
 		setHasNewItems(false);
 		setPendingJump(entry.itemId);
@@ -201,7 +214,9 @@ export function Transcript({
 		let frame = 0;
 		let stableFrames = 0;
 		const startedAt = performance.now();
+		const intent = scrollIntent.current;
 		const alignMessage = () => {
+			if (railDragging.current || scrollIntent.current !== intent) return;
 			const scroll = scrollRef.current;
 			const target = Array.from(
 				scroll?.querySelectorAll<HTMLElement>("[data-user-message], [data-quote-item]") ?? [],
@@ -234,6 +249,8 @@ export function Transcript({
 	}, [itemIds, itemsById]);
 	useLayoutEffect(() => {
 		if (lastItem?.sessionId !== previousSessionId.current) {
+			scrollIntent.current += 1;
+			railDragging.current = false;
 			previousSessionId.current = lastItem?.sessionId;
 			followLatest.current = true;
 			setHasNewItems(false);
@@ -246,12 +263,13 @@ export function Transcript({
 		}
 		const scroll = scrollRef.current;
 		if (!scroll || !lastItem || transcript.length === 0) return;
-		if (!followLatest.current) {
+		if (!followLatest.current || railDragging.current) {
 			if (latestLabel) setHasNewItems(true);
 			return;
 		}
 		const frame = requestAnimationFrame(() => {
-			if (followLatest.current) virtualizer.scrollToIndex(transcript.length - 1, { align: "end" });
+			if (followLatest.current && !railDragging.current)
+				virtualizer.scrollToIndex(transcript.length - 1, { align: "end" });
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [lastItem, latestLabel, transcript.length, virtualizer]);
@@ -259,13 +277,14 @@ export function Transcript({
 		const scroll = scrollRef.current;
 		if (!scroll) return;
 		const observer = new ResizeObserver(() => {
-			if (followLatest.current) scroll.scrollTop = scroll.scrollHeight;
+			if (followLatest.current && !railDragging.current) scroll.scrollTop = scroll.scrollHeight;
 		});
 		observer.observe(scroll);
 		return () => observer.disconnect();
 	}, []);
 
 	const scrollToLatest = () => {
+		scrollIntent.current += 1;
 		followLatest.current = true;
 		setHasNewItems(false);
 		const scroll = scrollRef.current;
@@ -277,6 +296,7 @@ export function Transcript({
 				!hasOlder ||
 				loadingOlder ||
 				loadingOlderRef.current ||
+				railDragging.current ||
 				(!requested && (!autoLoadOlder || scroll.scrollTop > 48))
 			)
 				return;
@@ -284,23 +304,94 @@ export function Transcript({
 			loadingOlderRef.current = true;
 			const previousHeight = scroll.scrollHeight;
 			const previousTop = scroll.scrollTop;
+			const scrollTop = scroll.getBoundingClientRect().top;
+			const anchor = Array.from(
+				scroll.querySelectorAll<HTMLElement>("[data-transcript-turn], [data-transcript-plan]"),
+			).find((node) => node.getBoundingClientRect().bottom > scrollTop);
+			const anchorKey = anchor?.dataset.transcriptTurn ?? anchor?.dataset.transcriptPlan;
+			const anchorOffset = anchor ? anchor.getBoundingClientRect().top - scrollTop : 0;
+			const sourceSession = previousSessionId.current;
+			const intent = scrollIntent.current;
 			try {
 				await onLoadOlder();
 			} finally {
-				await new Promise<void>((resolve) =>
-					requestAnimationFrame(() => {
-						if (scrollRef.current === scroll)
-							scroll.scrollTop = previousTop + Math.max(0, scroll.scrollHeight - previousHeight);
+				await new Promise<void>((resolve) => {
+					let stableFrames = 0;
+					let lastHeight = previousHeight;
+					const startedAt = performance.now();
+					const restore = () => {
+						if (
+							scrollRef.current === scroll &&
+							previousSessionId.current === sourceSession &&
+							scrollIntent.current === intent &&
+							!railDragging.current
+						) {
+							// A native wheel's state update may commit after the first frame.
+							// Keep the visible row anchored while virtual rows settle their measurements.
+							const target = anchorKey
+								? Array.from(
+										scroll.querySelectorAll<HTMLElement>("[data-transcript-turn], [data-transcript-plan]"),
+									).find((node) => (node.dataset.transcriptTurn ?? node.dataset.transcriptPlan) === anchorKey)
+								: undefined;
+							const height = scroll.scrollHeight;
+							const desired = target
+								? scroll.scrollTop +
+									target.getBoundingClientRect().top -
+									scroll.getBoundingClientRect().top -
+									anchorOffset
+								: previousTop + Math.max(0, height - previousHeight);
+							const changed = Math.abs(desired - scroll.scrollTop) > 1 || height !== lastHeight;
+							if (changed) scroll.scrollTop = desired;
+							stableFrames = changed ? 0 : stableFrames + 1;
+							lastHeight = height;
+							if (stableFrames < 4 && performance.now() - startedAt < 1000) {
+								requestAnimationFrame(restore);
+								return;
+							}
+						}
 						loadingOlderRef.current = false;
 						resolve();
-					}),
-				);
+					};
+					requestAnimationFrame(restore);
+				});
 			}
 		},
 		[autoLoadOlder, hasOlder, loadingOlder, onLoadOlder],
 	);
+	const scrollFromNavigation = useCallback(
+		(offset: number) => {
+			const scroll = scrollRef.current;
+			if (!scroll) return;
+			if (!railDragging.current) beginManualScroll();
+			virtualizer.scrollToOffset(Math.max(0, Math.min(scroll.scrollHeight - scroll.clientHeight, offset)));
+			if (!railDragging.current) {
+				followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+				if (followLatest.current) setHasNewItems(false);
+				if (scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
+			}
+		},
+		[beginManualScroll, loadOlderAtTop, virtualizer],
+	);
+	const onRailGesture = useCallback(
+		(active: boolean) => {
+			if (lastItem?.sessionId !== previousSessionId.current) return;
+			const wasDragging = railDragging.current;
+			railDragging.current = active;
+			if (active) {
+				beginManualScroll();
+				return;
+			}
+			const scroll = scrollRef.current;
+			if (!wasDragging || !scroll) return;
+			followLatest.current = shouldFollowTranscript(scroll.scrollHeight, scroll.scrollTop, scroll.clientHeight);
+			if (followLatest.current) setHasNewItems(false);
+			if (scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
+		},
+		[beginManualScroll, lastItem?.sessionId, loadOlderAtTop],
+	);
 
 	const jumpToQuote = useCallback((itemId: string, liveItemId?: string) => {
+		scrollIntent.current += 1;
 		followLatest.current = false;
 		setHasNewItems(false);
 		setQuoteNotice("");
@@ -339,6 +430,7 @@ export function Transcript({
 	}, [quoteJump, quoteLoading, hasOlder, loadingOlder, loadOlderAtTop, itemIds.length, transcript, virtualizer, t]);
 
 	const measuredRows = virtualizer.getVirtualItems();
+	const contentHeight = virtualizer.getTotalSize();
 	const rows =
 		measuredRows.length > 0
 			? measuredRows
@@ -354,43 +446,59 @@ export function Transcript({
 	return (
 		<section
 			ref={rootRef}
-			className={`transcript transcript-${appearance}${navigation.length > 1 ? " has-navigation" : ""}`}
+			className={`transcript transcript-${appearance}${navigation.length > 0 ? " has-navigation" : ""}`}
 			aria-label={t(ariaLabel)}
 		>
 			{showNavigation && (
 				<ConversationNavigation
-					key={lastItem?.sessionId ?? "empty"}
+					key={`navigation:${lastItem?.sessionId ?? "empty"}`}
 					entries={navigation}
 					activeIndex={activeNavigationIndex}
-					hasOlder={hasOlder}
-					loadingOlder={loadingOlder}
-					onLoadOlder={() => {
-						const scroll = scrollRef.current;
-						if (scroll) void loadOlderAtTop(scroll, true);
-					}}
+					scrollRef={scrollRef}
+					contentHeight={contentHeight}
+					onScrollToOffset={scrollFromNavigation}
+					onScrollGesture={onRailGesture}
 					onJump={jumpToMessage}
 				/>
 			)}
-			{hasOlder && !autoLoadOlder && (
+			{hasOlder && (
 				<button
-					className="history-button button-secondary"
+					className={autoLoadOlder ? "transcript-history-access sr-only" : "history-button button-secondary"}
 					disabled={loadingOlder}
-					onClick={() => void onLoadOlder()}
+					onClick={() => {
+						const scroll = scrollRef.current;
+						if (scroll) void loadOlderAtTop(scroll, true);
+					}}
 					type="button"
 				>
 					{loadingOlder ? t("Loading…") : t(olderLabel)}
 				</button>
 			)}
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: Observe bubbled native scroll intent without changing the scroller's default behavior or focus order. */}
 			<div
 				aria-busy={loadingOlder || undefined}
 				className="transcript-scroll"
-				onWheel={() => {
+				onKeyDown={(event) => {
+					if (
+						event.defaultPrevented ||
+						!["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(event.key)
+					)
+						return;
+					const target = event.target instanceof HTMLElement ? event.target : null;
+					if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
+					if (event.key === " " && target?.closest('button, summary, [role="button"]')) return;
+					beginManualScroll();
+				}}
+				onWheel={(event) => {
+					scrollIntent.current += 1;
 					setPendingJump(null);
 					setQuoteJump(null);
+					if (event.deltaY < 0) followLatest.current = false;
+					if (event.deltaY < 0 && event.currentTarget.scrollTop <= 48) void loadOlderAtTop(event.currentTarget);
 				}}
 				onScroll={(event) => {
 					const scroll = event.currentTarget;
-					if (!pendingJump)
+					if (!pendingJump && !railDragging.current)
 						followLatest.current = shouldFollowTranscript(
 							scroll.scrollHeight,
 							scroll.scrollTop,
@@ -408,15 +516,11 @@ export function Transcript({
 						setActiveNavigationIndex(Math.max(0, index));
 					}
 					if (followLatest.current) setHasNewItems(false);
-					if (!pendingJump && scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
+					if (!pendingJump && !railDragging.current && scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
 				}}
 				ref={scrollRef}
 			>
-				<div
-					className="transcript-space"
-					ref={scrollContentRef}
-					style={{ height: `${virtualizer.getTotalSize()}px` }}
-				>
+				<div className="transcript-space" ref={scrollContentRef} style={{ height: `${contentHeight}px` }}>
 					{rows.map((row) => {
 						const transcriptRow = transcript[row.index];
 						if (!transcriptRow) return null;
@@ -490,6 +594,7 @@ export function Transcript({
 										retry={running ? retry : undefined}
 										waitingForAnswer={running && waitingForAnswer}
 										startedAt={activeTurnStartedAt}
+										runId={activeRunId ?? activeTurnId ?? undefined}
 									/>
 								) : (
 									<CodeTranscriptTurn
@@ -503,6 +608,7 @@ export function Transcript({
 										retry={running ? retry : undefined}
 										waitingForAnswer={running && waitingForAnswer}
 										startedAt={activeTurnStartedAt}
+										runId={activeRunId ?? activeTurnId ?? undefined}
 									/>
 								)}
 							</article>
@@ -516,18 +622,17 @@ export function Transcript({
 					running
 					retry={retry}
 					startedAt={activeTurnStartedAt}
+					runId={activeRunId ?? activeTurnId ?? undefined}
 					waitingForAnswer={waitingForAnswer}
 				/>
 			)}
 			<TranscriptQuoteSelection
-				key={quoteSessionId ?? "readonly"}
+				key={`quote-selection:${quoteSessionId ?? "readonly"}`}
 				root={rootRef}
 				sessionId={quoteSessionId}
 				items={itemsById}
 				onSelectText={() => {
-					followLatest.current = false;
-					setPendingJump(null);
-					setQuoteJump(null);
+					beginManualScroll();
 				}}
 			/>
 			{(quoteJump || quoteNotice) && (

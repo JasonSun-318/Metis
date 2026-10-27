@@ -1,7 +1,7 @@
 import type { CodeChangesView, ItemContentBlockView } from "@metis/app-protocol";
-import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Wrench } from "@phosphor-icons/react";
 import { memo, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Tool } from "../icons.tsx";
 import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -123,7 +123,7 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 	const presentation = toolTranscriptPresentation(call, result, t);
 	const changes = result?.codeChanges?.files.length ? result.codeChanges : undefined;
 	const running = call.state === "running" || call.state === "pending";
-	const Icon = isCommandTool(call.name) ? TerminalWindow : Wrench;
+	const Icon = isCommandTool(call.name) ? TerminalWindow : Tool;
 	return (
 		<details
 			className={isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool"}
@@ -179,7 +179,7 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 					setOpen((current) => !current);
 				}}
 			>
-				<Wrench aria-hidden="true" size={15} />
+				<Tool aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
@@ -272,6 +272,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	running = false,
 	retry,
 	startedAt,
+	runId,
 	onFork,
 	onCopy,
 	onJumpToQuote,
@@ -407,6 +408,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 					running
 					retry={retry}
 					startedAt={startedAt}
+					runId={runId}
 					waitingForAnswer={waitingForAnswer}
 				/>
 			)}

@@ -6,6 +6,7 @@ export interface TranscriptTurnProps {
 	readonly retry?: RetryStatusView;
 	readonly waitingForAnswer?: boolean;
 	readonly startedAt?: string;
+	readonly runId?: string;
 	readonly onFork?: (entryId: string) => void;
 	readonly onCopy?: (text: string) => void;
 	readonly onJumpToQuote?: (itemId: string, liveItemId?: string) => void;
@@ -19,6 +20,7 @@ export function sameTurnProps(left: TranscriptTurnProps, right: TranscriptTurnPr
 		left.retry === right.retry &&
 		left.waitingForAnswer === right.waitingForAnswer &&
 		left.startedAt === right.startedAt &&
+		left.runId === right.runId &&
 		left.onFork === right.onFork &&
 		left.onCopy === right.onCopy &&
 		left.onJumpToQuote === right.onJumpToQuote &&
