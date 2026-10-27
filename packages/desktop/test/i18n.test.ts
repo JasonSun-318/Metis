@@ -27,7 +27,12 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("Enter URL")).toBe("输入 URL");
 		expect(i18n.t("Start browsing")).toBe("开始浏览");
 		expect(i18n.t("Enter a URL to open a page")).toBe("输入 URL 以打开页面");
-		expect(i18n.t("{{count}} tokens", { count: 44 })).toBe("44 个 Token");
+		expect(i18n.t("{{count}} tokens", { count: 44 })).toBe("44 Token");
+		expect(i18n.t("{{count}} tokens", { count: 0 })).toBe("0 Token");
+		expect(i18n.t("{{date}}: {{tokens}} Tokens", { date: "2026-10-26", tokens: 0 })).toBe("2026-10-26：0 Token");
+		expect(i18n.t("{{date}} · {{tokens}} Tokens", { date: "2026-10-26", tokens: 128 })).toBe(
+			"2026-10-26 · 128 Token",
+		);
 		expect(i18n.t("Thinking…")).toBe("思考中…");
 		expect(i18n.t("Completed")).toBe("已完成");
 		expect(i18n.t("Working")).toBe("进行中");
