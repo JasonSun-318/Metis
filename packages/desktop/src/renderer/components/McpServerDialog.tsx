@@ -1,7 +1,7 @@
 import type { ClientParams, McpServerSummaryView } from "@metis/app-protocol";
-import { Plus, Trash, X } from "@phosphor-icons/react";
 import { type FormEvent, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Plus, Trash, X } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 

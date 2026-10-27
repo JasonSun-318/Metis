@@ -1,9 +1,10 @@
 import type { ClientParams, ClientResult, WritableSkillSourceView } from "@metis/app-protocol";
-import { ArrowLeft, CaretRight, Code, FolderSimple, GithubLogo, Robot, UploadSimple, X } from "@phosphor-icons/react";
 import { type DragEvent, type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+import { ArrowLeft, CaretRight, Code, FolderSimple, Robot, UploadSimple, X } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
+import { GitHubBrandIcon } from "./GitHubBrandIcon.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 export type SkillCreationTarget =
@@ -273,7 +274,7 @@ export function SkillCreationDialog({
 						type="button"
 					>
 						<span>
-							<GithubLogo aria-hidden="true" size={20} />
+							<GitHubBrandIcon aria-hidden="true" size={20} />
 						</span>
 						<span>
 							<strong>{t("Import from GitHub")}</strong>

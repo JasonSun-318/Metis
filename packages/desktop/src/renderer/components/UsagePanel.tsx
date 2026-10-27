@@ -1,9 +1,9 @@
 import type { UsageDailyView, UsageRangeDays, UsageSummaryView } from "@metis/app-protocol";
-import { ChartBar, Rows } from "@phosphor-icons/react";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import { ChartBar, Rows } from "../icons.tsx";
 
 type UsageDisplay = "chart" | "table";
 

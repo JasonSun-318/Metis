@@ -1,9 +1,9 @@
 import type { SessionProcessView } from "@metis/app-protocol";
-import { Copy } from "@phosphor-icons/react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { Copy } from "../icons.tsx";
 import { TERMINAL_THEMES } from "./TerminalPanel.tsx";
 
 interface ProcessPanelProps {

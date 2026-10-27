@@ -1,7 +1,7 @@
-import { Globe } from "@phosphor-icons/react";
 import { type ReactNode, useId } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopHistoryEntry } from "../../shared/desktop-api.ts";
+import { Globe } from "../icons.tsx";
 
 interface BrowserStartPageProps {
 	readonly tools: ReactNode;

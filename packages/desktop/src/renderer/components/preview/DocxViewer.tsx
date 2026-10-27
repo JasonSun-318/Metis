@@ -1,6 +1,6 @@
-import { SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SpinnerGap } from "../../icons.tsx";
 import { PreviewToolbar } from "./PreviewToolbar.tsx";
 
 export interface DocxViewerProps {

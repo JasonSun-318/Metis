@@ -1,8 +1,8 @@
 import type { ItemView } from "@metis/app-protocol";
-import { ChatText } from "@phosphor-icons/react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { ChatText } from "../icons.tsx";
 import { type ConversationQuoteInput, useConversationQuotes } from "./ConversationQuoteContext.tsx";
 
 function elementOf(node: Node): Element | null {

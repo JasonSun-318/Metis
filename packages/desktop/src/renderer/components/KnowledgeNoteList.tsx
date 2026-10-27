@@ -1,6 +1,6 @@
 import type { KnowledgeNote } from "@metis/app-protocol";
-import { CaretRight, FileText, Folder } from "@phosphor-icons/react";
 import { useMemo } from "react";
+import { CaretRight, FileText, Folder } from "../icons.tsx";
 
 interface NoteFolder {
 	readonly name: string;

@@ -1,18 +1,18 @@
-import {
-	ArrowLeft,
-	Brain,
-	Browser,
-	Cpu,
-	GearSix,
-	Robot,
-	ShieldCheck,
-	Sparkle,
-	UserCircle,
-} from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { GeneralPreferences } from "../general-preferences.ts";
+import {
+	ArrowLeft,
+	Browser,
+	Database,
+	GearSix,
+	Robot,
+	ShieldCheck,
+	Sparkles,
+	TuningSquare,
+	UserCircle,
+} from "../icons.tsx";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
 import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
@@ -166,19 +166,19 @@ export function SettingsDialog({
 			id: "model" as const,
 			label: "Model",
 			description: "Configure model providers and defaults for new tasks.",
-			icon: Cpu,
+			icon: Sparkles,
 		},
 		{
 			id: "personalization" as const,
 			label: "Personalization",
 			description: "Set instructions Metis keeps in mind across new tasks.",
-			icon: Sparkle,
+			icon: TuningSquare,
 		},
 		{
 			id: "memory" as const,
 			label: "Memory",
 			description: "Configure long-term memory and review recent changes.",
-			icon: Brain,
+			icon: Database,
 		},
 		{
 			id: "agentTypes" as const,

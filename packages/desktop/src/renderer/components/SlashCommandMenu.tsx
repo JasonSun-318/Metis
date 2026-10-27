@@ -1,7 +1,7 @@
 import type { SkillSummaryView } from "@metis/app-protocol";
-import { ArrowsIn, Brain, Cube, Gauge, ListChecks, Plugs, Scroll, Target } from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowsIn, Brain, Cube, Gauge, ListChecks, Plugs, Scroll, Target } from "../icons.tsx";
 
 export type ComposerSlashCommand = "compact" | "goal" | "plan" | "model" | "thinking" | "status" | "mcp";
 

@@ -1,7 +1,7 @@
 import type { QueuedTurnView } from "@metis/app-protocol";
-import { ArrowBendUpLeft, CaretDown, Paperclip, PencilSimple, Trash } from "@phosphor-icons/react";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowBendUpLeft, CaretDown, Paperclip, PencilSimple, Trash } from "../icons.tsx";
 
 interface QueuedTurnListProps {
 	readonly disabled: boolean;

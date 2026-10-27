@@ -17,6 +17,21 @@ import type {
 	WritableSkillSourceView,
 } from "@metis/app-protocol";
 import {
+	type CSSProperties,
+	type KeyboardEvent,
+	type ReactNode,
+	type RefObject,
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { localeForIntl } from "../i18n.ts";
+import {
 	ArrowLeft,
 	ArrowsClockwise,
 	CaretDown,
@@ -33,22 +48,7 @@ import {
 	Trash,
 	X,
 	XCircle,
-} from "@phosphor-icons/react";
-import {
-	type CSSProperties,
-	type KeyboardEvent,
-	type ReactNode,
-	type RefObject,
-	useCallback,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-} from "react";
-import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
-import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { localeForIntl } from "../i18n.ts";
+} from "../icons.tsx";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
 import type { ProjectPreferenceMap } from "../store/project-preferences.ts";
 import { DialogFrame } from "./DialogFrame.tsx";

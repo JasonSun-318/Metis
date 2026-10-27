@@ -1,4 +1,8 @@
 import type { SessionDeliveredFileView } from "@metis/app-protocol";
+import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import { fileBaseName, fileTypeLabel } from "../file-type-label.ts";
 import {
 	Archive,
 	CaretDown,
@@ -19,11 +23,7 @@ import {
 	FileZip,
 	FolderOpen,
 	type Icon,
-} from "@phosphor-icons/react";
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
-import { fileBaseName, fileTypeLabel } from "../file-type-label.ts";
+} from "../icons.tsx";
 import { actionMenuPosition } from "./action-menu-position.ts";
 
 interface DeliveredFileCardProps {

@@ -1,8 +1,8 @@
 import type { McpServerSummaryView, SkillSummaryView } from "@metis/app-protocol";
-import { Books, Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "@phosphor-icons/react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMenuDismiss } from "../hooks/use-menu-dismiss.ts";
+import { Books, Briefcase, CaretRight, Paperclip, Plug, Plus, Scroll } from "../icons.tsx";
 import { KnowledgeLinkMenu, type KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 
 interface ComposerAddMenuProps {

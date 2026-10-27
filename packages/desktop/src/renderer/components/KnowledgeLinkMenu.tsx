@@ -1,7 +1,7 @@
-import { Books, Check, SidebarSimple } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { Books, Check, SidebarSimple } from "../icons.tsx";
 import { useKnowledgeLinks } from "./use-knowledge-links.ts";
 
 export interface KnowledgeLinkMenuProps {

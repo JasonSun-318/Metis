@@ -1,8 +1,8 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { Info, Terminal } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { Info, Plus, Terminal, X } from "../icons.tsx";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 
 const MAX_AUTO_COMMAND_RULES = 64;
@@ -195,7 +195,7 @@ export function AutoCommandAllowlistPanel({
 										}
 										type="button"
 									>
-										{t("Remove {{command}}", { command: rule.command })}
+										<X aria-hidden="true" size={14} />
 									</button>
 								</span>
 							))}
@@ -215,7 +215,8 @@ export function AutoCommandAllowlistPanel({
 											onClick={() => void add(suggestion, false)}
 											type="button"
 										>
-											{`+ ${suggestion}`}
+											<Plus aria-hidden="true" size={12} />
+											{suggestion}
 										</button>
 									))}
 								</div>

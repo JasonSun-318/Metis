@@ -1,8 +1,8 @@
 import type { SessionSummary } from "@metis/app-protocol";
-import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { CaretRight, ChatCircle, Code, MagnifyingGlass } from "../icons.tsx";
 
 import { MemoryDialog } from "./MemoryDialog.tsx";
 

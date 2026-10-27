@@ -5,10 +5,14 @@ import type {
 	MemorySettingsView,
 	ModelSettingsView,
 } from "@metis/app-protocol";
+import { PatchDiff, type WorkerInitializationRenderOptions, WorkerPoolContextProvider } from "@pierre/diffs/react";
+import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
 	ArrowCounterClockwise,
-	Brain,
 	CaretRight,
+	Database,
 	FilePlus,
 	FolderOpen,
 	Info,
@@ -16,11 +20,7 @@ import {
 	Moon,
 	Trash,
 	XCircle,
-} from "@phosphor-icons/react";
-import { PatchDiff, type WorkerInitializationRenderOptions, WorkerPoolContextProvider } from "@pierre/diffs/react";
-import { useEffect, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+} from "../icons.tsx";
 import { MemoryDialog } from "./MemoryDialog.tsx";
 import { MemoryDreamSettings } from "./MemoryDreamSettings.tsx";
 import { MemorySessionSettings } from "./MemorySessionSettings.tsx";
@@ -749,7 +749,7 @@ export function MemorySettingsPanel({
 						onClick={() => openPanel("notes")}
 						type="button"
 					>
-						<Brain aria-hidden="true" size={19} />
+						<Database aria-hidden="true" size={19} />
 						<span className="memory-manage-copy">
 							<strong>{t("Saved memories")}</strong>
 							<span>{t("Review what Metis remembers. You can edit or remove any note.")}</span>
@@ -961,7 +961,7 @@ export function MemorySettingsPanel({
 						</output>
 					) : notes.length === 0 ? (
 						<div className="memory-empty-state">
-							<Brain aria-hidden="true" size={22} />
+							<Database aria-hidden="true" size={22} />
 							<strong>{notesQuery.trim() ? t("No matching memories") : t("No memories yet")}</strong>
 							<p>
 								{notesQuery.trim()
@@ -1156,7 +1156,7 @@ export function MemorySettingsPanel({
 							</output>
 						) : history.length === 0 ? (
 							<div className="memory-info-banner">
-								<Brain aria-hidden="true" size={15} />
+								<Database aria-hidden="true" size={15} />
 								<span>{t("No memory changes yet.")}</span>
 							</div>
 						) : (

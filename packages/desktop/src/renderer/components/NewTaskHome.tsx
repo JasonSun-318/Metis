@@ -1,4 +1,7 @@
 import type { AgentMode, SkillSummaryView } from "@metis/app-protocol";
+import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import {
 	Bug,
 	CalendarBlank,
@@ -17,12 +20,9 @@ import {
 	PresentationChart,
 	Scales,
 	TestTube,
+	Tool,
 	TreeStructure,
-	Wrench,
-} from "@phosphor-icons/react";
-import { type ReactNode, type Ref, useEffect, useId, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
+} from "../icons.tsx";
 import { getHomeStarters, type HomeStarter, type HomeStarterId, pickHomeGreeting } from "../new-task-home-content.ts";
 import { useProfileIdentity } from "../profile-identity.ts";
 import type { ProjectSessionGroup } from "../session-groups.ts";
@@ -41,7 +41,7 @@ const starterIcons: Record<HomeStarterId, typeof FileText> = {
 	writing: PencilSimple,
 	compare: Scales,
 	meeting: ListChecks,
-	feature: Wrench,
+	feature: Tool,
 	debug: Bug,
 	explain: TreeStructure,
 	review: GitDiff,

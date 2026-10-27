@@ -1,11 +1,11 @@
 import type { ModelOptionView, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import scheduleEmptyIcon from "../assets/scheduled-tasks-empty.svg";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { localeForIntl } from "../i18n.ts";
+import { ChatCircleDots, FolderSimple, Gear, Info, MagnifyingGlass, Sun, X } from "../icons.tsx";
 import type { ScheduleStore } from "../store/schedule-store.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ScheduledTaskDetail, scheduleLabel } from "./ScheduledTaskDetail.tsx";

@@ -1,7 +1,7 @@
 import type { PptxViewer as PptxRendererInstance } from "@aiden0z/pptx-renderer";
-import { SpinnerGap } from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { SpinnerGap } from "../../icons.tsx";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import { PreviewPageControls, PreviewToolbar } from "./PreviewToolbar.tsx";
 import { mountPptxSelectionLayer } from "./pptx-selection.ts";

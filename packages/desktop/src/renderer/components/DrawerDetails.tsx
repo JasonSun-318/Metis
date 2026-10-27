@@ -1,5 +1,5 @@
-import { CaretRight } from "@phosphor-icons/react";
 import { type ReactNode, useState } from "react";
+import { CaretRight } from "../icons.tsx";
 
 /** Native keyboard disclosure with the same persistent height drawer as tool execution. */
 export function DrawerDetails({

@@ -1,7 +1,7 @@
 import type { DeclarativeHookView, HookEventNameView, HookProtocolView, HookRunModeView } from "@metis/app-protocol";
-import { CaretDown, CaretRight, X } from "@phosphor-icons/react";
 import { type FormEvent, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CaretDown, CaretRight, X } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 

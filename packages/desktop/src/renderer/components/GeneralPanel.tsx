@@ -1,4 +1,3 @@
-import { Desktop, Moon, Sun } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import {
@@ -9,6 +8,7 @@ import {
 	type ProseFontPreference,
 } from "../general-preferences.ts";
 import { APP_LOCALES, type AppLocale, setLocale } from "../i18n.ts";
+import { Desktop, Moon, Sun } from "../icons.tsx";
 import { APP_THEMES, type AppTheme } from "../theme.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { WebSearchSettingsPanel } from "./WebSearchSettingsPanel.tsx";

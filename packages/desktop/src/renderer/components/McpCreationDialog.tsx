@@ -1,15 +1,7 @@
 import type { ClientResult } from "@metis/app-protocol";
-import {
-	ArrowLeft,
-	BracketsCurly,
-	CaretRight,
-	FolderSimple,
-	LinkSimple,
-	SlidersHorizontal,
-	X,
-} from "@phosphor-icons/react";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowLeft, BracketsCurly, CaretRight, FolderSimple, LinkSimple, SlidersHorizontal, X } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { type McpServerDraft, McpServerForm } from "./McpServerDialog.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";

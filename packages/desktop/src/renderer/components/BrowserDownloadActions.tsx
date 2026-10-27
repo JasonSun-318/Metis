@@ -1,6 +1,6 @@
-import { ArrowCounterClockwise, ArrowSquareOut, type Icon, Pause, Play, Trash, X } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import type { DesktopDownloadControlType } from "../../shared/desktop-api.ts";
+import { ArrowCounterClockwise, ArrowSquareOut, type Icon, Pause, Play, Trash, X } from "../icons.tsx";
 import { DOWNLOAD_ACTION_LABELS } from "./browser-download-presentation.ts";
 
 const ACTION_ICONS: Readonly<Record<Exclude<DesktopDownloadControlType, "reveal">, Icon>> = {

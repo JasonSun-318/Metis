@@ -1,9 +1,9 @@
 import type { CustomAgentTypeView } from "@metis/app-protocol";
-import { ArrowLeft, CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import { ArrowLeft, CheckCircle, Copy, PencilSimple, Plus, Robot, Trash } from "../icons.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 const AGENT_TYPE_ID_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;

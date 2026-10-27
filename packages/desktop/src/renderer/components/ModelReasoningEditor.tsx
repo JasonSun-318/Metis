@@ -1,6 +1,6 @@
 import type { ThinkingSelectionView } from "@metis/app-protocol";
-import { Plus, Trash } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { Plus, Trash } from "../icons.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 
 export const MODEL_THINKING_LEVELS: readonly ThinkingSelectionView[] = [

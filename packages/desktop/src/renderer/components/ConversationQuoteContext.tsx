@@ -1,7 +1,7 @@
 import type { ClientParams } from "@metis/app-protocol";
-import { ChatText, X } from "@phosphor-icons/react";
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ChatText, X } from "../icons.tsx";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 
 export type ConversationQuoteInput = NonNullable<ClientParams<"turn/start">["conversationQuotes"]>[number];

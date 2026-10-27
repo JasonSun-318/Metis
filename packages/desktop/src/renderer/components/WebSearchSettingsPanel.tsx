@@ -1,8 +1,8 @@
 import type { WebSearchProvider, WebSearchSettingsView } from "@metis/app-protocol";
-import { Eye, EyeSlash, XCircle } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { Eye, EyeSlash, XCircle } from "../icons.tsx";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { FloatingSystemNotice } from "./SystemNotice.tsx";
 

@@ -1,7 +1,7 @@
-import { MagnifyingGlass, SpinnerGap, Table } from "@phosphor-icons/react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { MagnifyingGlass, SpinnerGap, Table } from "../../icons.tsx";
 import {
 	cellKey,
 	type ExcelSelection,

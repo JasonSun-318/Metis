@@ -1,8 +1,8 @@
 import type { SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, Question } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMenuDismiss } from "../hooks/use-menu-dismiss.ts";
+import { CaretDown, Question } from "../icons.tsx";
 
 interface ThinkingSelectorProps {
 	readonly actualThinkingLevel: SessionSnapshot["actualThinkingLevel"];

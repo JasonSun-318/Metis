@@ -5,10 +5,10 @@ import type {
 	ScheduleTaskView,
 	SessionSummary,
 } from "@metis/app-protocol";
-import { FolderSimple, X } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { FolderSimple, X } from "../icons.tsx";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 

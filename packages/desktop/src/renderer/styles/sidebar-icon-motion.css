@@ -1,0 +1,73 @@
+/* The library owns all paths. Only existing sidebar SVG parts receive motion. */
+.sidebar-semantic-icon {
+	flex-shrink: 0;
+	overflow: visible;
+	vertical-align: middle;
+}
+
+.sidebar-folder-icon {
+	display: inline-grid;
+	flex-shrink: 0;
+	vertical-align: middle;
+}
+
+.sidebar-folder-icon > svg {
+	grid-area: 1 / 1;
+}
+
+.session-sidebar .sidebar-folder-icon > svg {
+	transition: opacity 180ms ease, transform 220ms cubic-bezier(.2, .7, .3, 1);
+}
+
+.sidebar-folder-icon > [data-folder-state="open"] {
+	opacity: 0;
+	transform: translateY(1px) scale(.92);
+}
+
+.sidebar-folder-icon[data-expanded="true"] > [data-folder-state="closed"] {
+	opacity: 0;
+	transform: translateY(-1px) scale(.92);
+}
+
+.sidebar-folder-icon[data-expanded="true"] > [data-folder-state="open"] {
+	opacity: 1;
+	transform: none;
+}
+
+:root[data-motion="reduced"] .sidebar-folder-icon > svg {
+	transition: none;
+}
+
+.session-sidebar .sidebar-semantic-icon > path {
+	transform-box: view-box;
+	transform-origin: 12px 12px;
+}
+
+.session-sidebar .animated-nav-icon-schedule > path:nth-of-type(1) {
+	transform-origin: 4.8px 4.8px;
+}
+
+.session-sidebar .animated-nav-icon-schedule > path:nth-of-type(2) {
+	transform-origin: 19.2px 4.8px;
+}
+
+.session-sidebar .animated-nav-icon-schedule > path:nth-of-type(3) {
+	transform-origin: 12px 12.5px;
+}
+
+:root[data-motion="reduced"] .session-sidebar .sidebar-semantic-icon > path {
+	transform: none !important;
+	opacity: 1 !important;
+	transition: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.session-sidebar .sidebar-folder-icon > svg {
+		transition: none;
+	}
+	.session-sidebar .sidebar-semantic-icon > path {
+		transform: none !important;
+		opacity: 1 !important;
+		transition: none !important;
+	}
+}

@@ -9,6 +9,11 @@ import type {
 	PluginRecord,
 	PluginUpdateInspectionView,
 } from "@metis/app-protocol";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import i18n from "../i18n.ts";
 import {
 	ArrowLeft,
 	ArrowSquareOut,
@@ -26,12 +31,7 @@ import {
 	WarningCircle,
 	X,
 	XCircle,
-} from "@phosphor-icons/react";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { useTranslation } from "react-i18next";
-import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import i18n from "../i18n.ts";
+} from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 
 function message(cause: unknown): string {

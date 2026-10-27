@@ -1,9 +1,9 @@
 import type { ScheduleTaskView } from "@metis/app-protocol";
-import { DotsThree, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { DotsThree, Trash } from "../icons.tsx";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
 

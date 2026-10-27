@@ -1,8 +1,8 @@
 import type { ItemView } from "@metis/app-protocol";
-import { ArrowUpRight, ChatText, X } from "@phosphor-icons/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { ArrowUpRight, ChatText, X } from "../icons.tsx";
 
 export function MessageAnnotations({
 	quotes,

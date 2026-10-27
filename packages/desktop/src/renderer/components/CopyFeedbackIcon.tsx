@@ -1,4 +1,4 @@
-import { Check, Copy } from "@phosphor-icons/react";
+import { Check, Copy } from "../icons.tsx";
 
 export function CopyFeedbackIcon({ copied }: { readonly copied: boolean }) {
 	return (

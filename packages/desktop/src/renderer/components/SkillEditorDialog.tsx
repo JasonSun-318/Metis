@@ -1,7 +1,7 @@
 import type { SkillDetailView, WritableSkillSourceView } from "@metis/app-protocol";
-import { X } from "@phosphor-icons/react";
 import { type FormEvent, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { X } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;

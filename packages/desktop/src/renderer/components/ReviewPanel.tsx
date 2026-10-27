@@ -1,11 +1,3 @@
-import {
-	ArrowClockwise,
-	CaretDown,
-	CaretRight,
-	ClockCounterClockwise,
-	FolderOpen,
-	GitCommit,
-} from "@phosphor-icons/react";
 import { PatchDiff, type WorkerInitializationRenderOptions, WorkerPoolContextProvider } from "@pierre/diffs/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -17,6 +9,7 @@ import type {
 	DesktopWorkspaceReviewSnapshot,
 	MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
+import { ArrowClockwise, CaretDown, CaretRight, ClockCounterClockwise, FolderOpen, GitCommit } from "../icons.tsx";
 import { buildReviewTree, type ReviewTreeNode, reviewPatchKey } from "./review-model.ts";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 

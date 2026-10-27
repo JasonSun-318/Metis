@@ -1,9 +1,9 @@
 import type { ProfileUsageSummaryView } from "@metis/app-protocol";
-import { ArrowClockwise, Camera, PencilSimple, Sparkle, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import { ArrowClockwise, Camera, PencilSimple, Sparkle, Trash } from "../icons.tsx";
 import {
 	DEFAULT_PROFILE_IDENTITY,
 	type ProfileIdentity,

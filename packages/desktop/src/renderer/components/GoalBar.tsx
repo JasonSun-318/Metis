@@ -1,8 +1,8 @@
 import type { SessionGoalView } from "@metis/app-protocol";
-import { CaretDown, Pause, Play, Target, Trash } from "@phosphor-icons/react";
 import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatElapsed } from "../format-elapsed.ts";
+import { CaretDown, Pause, Play, Target, Trash } from "../icons.tsx";
 
 interface GoalBarProps {
 	readonly goal: SessionGoalView | null;

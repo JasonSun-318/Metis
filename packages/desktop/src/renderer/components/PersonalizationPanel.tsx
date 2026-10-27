@@ -1,3 +1,7 @@
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { localeForIntl } from "../i18n.ts";
 import {
 	ArrowClockwise,
 	Code,
@@ -7,11 +11,7 @@ import {
 	ShieldCheck,
 	Sparkle,
 	Trash,
-} from "@phosphor-icons/react";
-import { useEffect, useMemo, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
-import { localeForIntl } from "../i18n.ts";
+} from "../icons.tsx";
 
 const MAX_INSTRUCTION_BYTES = 64 * 1024;
 

@@ -4,10 +4,10 @@ import type {
 	ThinkingSelectionView,
 	VisionApiView,
 } from "@metis/app-protocol";
-import { CheckCircle, Key, Plus, Trash, X, XCircle } from "@phosphor-icons/react";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { CheckCircle, Key, Plus, Trash, X, XCircle } from "../icons.tsx";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { MenuSelect } from "./MenuSelect.tsx";
 import { ModelCatalog } from "./ModelCatalog.tsx";

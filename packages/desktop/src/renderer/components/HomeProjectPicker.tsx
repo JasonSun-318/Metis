@@ -1,6 +1,6 @@
 import type { AgentMode } from "@metis/app-protocol";
-import { FolderSimple, Plus, X } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { FolderSimple, Plus, X } from "../icons.tsx";
 
 export interface HomeProjectPickerProps {
 	readonly busy: boolean;

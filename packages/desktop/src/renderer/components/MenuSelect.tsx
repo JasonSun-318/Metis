@@ -1,8 +1,8 @@
-import { CaretDown, Check } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { CaretDown, Check } from "../icons.tsx";
 
 export interface MenuSelectOption<T extends string> {
 	readonly value: T;

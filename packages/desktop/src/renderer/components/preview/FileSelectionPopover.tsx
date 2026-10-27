@@ -1,6 +1,6 @@
-import { ArrowUp, ChatText, NotePencil, SpinnerGap, X } from "@phosphor-icons/react";
 import { useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowUp, ChatText, NotePencil, SpinnerGap, X } from "../../icons.tsx";
 import type { DraftFileSelection } from "./file-selection.ts";
 
 export function FileSelectionPopover({

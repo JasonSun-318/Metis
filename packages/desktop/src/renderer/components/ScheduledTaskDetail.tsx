@@ -1,9 +1,9 @@
 import type { ScheduleRunView, ScheduleTaskView } from "@metis/app-protocol";
-import { ArrowLeft, NotePencil, Play, Trash } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { localeForIntl } from "../i18n.ts";
+import { ArrowLeft, NotePencil, Play, Trash } from "../icons.tsx";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import { ScheduledTaskDeleteDialog } from "./ScheduledTaskDeleteDialog.tsx";
 
