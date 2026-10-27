@@ -1,18 +1,12 @@
 import type { AgentMode, PlanView, SessionProcessView, SessionSummary } from "@metis/app-protocol";
-import {
-	Books,
-	ChatCircle,
-	ClipboardText,
-	Code,
-	FileText,
-	Globe,
-	Plus,
-	Robot,
-	TerminalWindow,
-	X,
-} from "@phosphor-icons/react";
-import type { CSSProperties, DragEvent, ReactNode, PointerEvent as ReactPointerEvent } from "react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type {
+	CSSProperties,
+	DragEvent,
+	KeyboardEvent as ReactKeyboardEvent,
+	ReactNode,
+	PointerEvent as ReactPointerEvent,
+} from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -23,8 +17,10 @@ import {
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import type { AgentConversationTarget } from "../conversation-target.ts";
+import { Books, ChatCircle, ClipboardText, Code, FileText, Globe, Plus, Robot, TerminalWindow, X } from "../icons.tsx";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
+import { useWorkspaceLayout } from "../use-workspace-layout.ts";
 import {
 	displayFileName,
 	FILE_BROWSER_STORAGE_PREFIX,
@@ -33,17 +29,21 @@ import {
 	remapPath,
 	saveStoredFiles,
 } from "../workspace-files.ts";
+import { projectPaneSizes } from "../workspace-layout.ts";
+import { tabMotionAnimationsSupported, tabMotionReduced, tabStripLayout } from "../workspace-tab-motion.ts";
+import { applyWorkspaceTabSizing, useWorkspaceTabSizing } from "../workspace-tab-sizing.ts";
 import {
 	activateTab,
 	activePane,
 	addTab,
 	canSplit,
 	chatTab,
+	closeEmptyPane,
 	collapsedTabIds,
-	defaultWorkspace,
 	findChatTab,
 	findToolLocation,
 	focusedChatTab,
+	getSplitLimitReason,
 	mapTabs,
 	moveTab,
 	moveTabGroup,
@@ -55,7 +55,10 @@ import {
 	revealTab,
 	type SessionWorkspace,
 	type SplitDirection,
+	type SplitLimitReason,
 	setActivePane,
+	setPaneWeights,
+	setRowWeights,
 	splitTab,
 	tabGroupRuns,
 	toggleTabGroup,
@@ -78,8 +81,18 @@ import { ReviewPanel } from "./ReviewPanel.tsx";
 import { SessionChatView, type SessionChatViewContext } from "./SessionChatView.tsx";
 import { TerminalPanel } from "./TerminalPanel.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
+import { WorkspacePaneResizer } from "./WorkspacePaneResizer.tsx";
+import { WorkspaceTabMotion } from "./WorkspaceTabMotion.tsx";
+import "../styles/workspace-pane-layout.css";
+import { WorkspaceTabMenu, type WorkspaceTabMenuItem } from "./WorkspaceTabMenu.tsx";
 
 const BROWSER_PROFILE_STORAGE_KEY = "metis.browser-profile.v1";
+
+function revealTabInStrip(tab: HTMLElement, strip: HTMLElement): void {
+	const { left, width } = tabStripLayout(tab, strip);
+	if (left < strip.scrollLeft) strip.scrollLeft = left;
+	else if (left + width > strip.scrollLeft + strip.clientWidth) strip.scrollLeft = left + width - strip.clientWidth;
+}
 
 interface PendingFileClose {
 	readonly sessionId: string;
@@ -92,7 +105,18 @@ interface TabMenuState {
 	readonly tabId: string;
 	readonly x: number;
 	readonly y: number;
+	/** The tab button that opened the menu; non-null for keyboard activation. */
+	readonly trigger: HTMLElement | null;
+	readonly focusTrigger?: HTMLElement | null;
 }
+
+// Split refusal copy distinguishes grid limits from a window that is too small.
+const SPLIT_LIMIT_LABEL: Record<SplitLimitReason, string> = {
+	"missing-pane": "Up to 6 panes",
+	"pane-limit": "Up to 6 panes",
+	"row-limit": "Up to 6 panes",
+	"column-limit": "Up to 6 panes",
+};
 
 // A drag carries one tab, or a whole project group when it starts on the group's label.
 type DragState = { readonly tabId: string } | { readonly group: { readonly paneId: string; readonly key: string } };
@@ -193,15 +217,6 @@ export function clampToolsSidebarWidth(
 	return Math.max(TOOLS_SIDEBAR_MIN_WIDTH, Math.min(maximum, value));
 }
 
-function workspaceSeed(chatSessionId: string | null): SessionWorkspace {
-	const workspace = defaultWorkspace();
-	const tab = chatTab(chatSessionId);
-	return {
-		...workspace,
-		panes: [{ ...workspace.panes[0]!, tabs: [tab], activeId: tab.id }],
-	};
-}
-
 // Keeps one chat tab per session in sync with the projected session. A draft
 // tab adopts the real sessionId when it materializes; a stale draft tab is
 // removed once the draft is gone. `pendingSessionId` forces focus onto the
@@ -214,6 +229,8 @@ function syncChatTabs(
 	place: PlaceTab,
 ): SessionWorkspace {
 	const pane = activePane(workspace);
+	// An intentional empty split waits for an explicit sidebar/new-task gesture.
+	if (pane.placeholder && pendingSessionId === undefined) return workspace;
 	const activeTab = pane.tabs.find((tab) => tab.id === pane.activeId);
 	const shouldFocus =
 		activeTab === undefined ||
@@ -289,7 +306,15 @@ export function SessionWorkspaceView({
 	visible,
 }: SessionWorkspaceViewProps) {
 	const { t } = useTranslation();
-	const [workspace, setWorkspace] = useState<SessionWorkspace>(() => workspaceSeed(chatSessionId));
+	const { workspace, setWorkspace, cancelRestore, markLayoutIntent, setLayoutResizing } = useWorkspaceLayout({
+		api,
+		sessionsById,
+		chatSessionId,
+		store,
+	});
+	const [paneViewport, setPaneViewport] = useState({ width: 0, height: 0 });
+	const [resizingAxis, setResizingAxis] = useState<"column" | "row" | null>(null);
+	const [toolsResizing, setToolsResizing] = useState(false);
 	const [expandedBySession, setExpandedBySession] = useState<ReadonlyMap<string, readonly string[]>>(new Map());
 	const [fileDrafts, setFileDrafts] = useState<ReadonlyMap<string, WorkspaceFileDraft>>(new Map());
 	const [savingFileTabIds, setSavingFileTabIds] = useState<ReadonlySet<string>>(new Set());
@@ -320,6 +345,13 @@ export function SessionWorkspaceView({
 	const tabStripObserver = useRef<ResizeObserver | null>(null);
 	const tabStripRefCallbacks = useRef(new Map<string, (el: HTMLDivElement | null) => void>());
 	const tabStripActiveTab = useRef(new WeakMap<HTMLElement, Element>());
+	// A narrower projection can leave the same active tab outside the viewport;
+	// reveal only when the width changes so unrelated renders never move scroll.
+	const revealActiveTabAfterSizing = useCallback((strip: HTMLDivElement) => {
+		const tab = strip.querySelector<HTMLElement>(".tool-tab.is-active:not([inert])");
+		if (tab) revealTabInStrip(tab, strip);
+	}, []);
+	const registerTabSizing = useWorkspaceTabSizing(revealActiveTabAfterSizing);
 	const syncTabIndicators = useCallback(() => {
 		for (const scrollEl of tabStripEls.current.values()) {
 			const indicator = scrollEl.querySelector<HTMLElement>(".tool-tab-indicator");
@@ -329,14 +361,14 @@ export function SessionWorkspaceView({
 				indicator.classList.remove("is-set");
 				continue;
 			}
+			const layout = tabStripLayout(tabEl, scrollEl);
 			if (tabStripActiveTab.current.get(scrollEl) !== tabEl) {
 				tabStripActiveTab.current.set(scrollEl, tabEl);
-				// Keep the new pick visible now that overflowing strips scroll.
-				tabEl.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+				// Reveal only within this strip; ancestor panes keep their scroll positions.
+				revealTabInStrip(tabEl, scrollEl);
 			}
-			const tabRect = tabEl.getBoundingClientRect();
-			indicator.style.width = `${Math.max(0, tabRect.width - 20)}px`;
-			indicator.style.transform = `translateX(${tabRect.left - scrollEl.getBoundingClientRect().left + scrollEl.scrollLeft + 10}px)`;
+			indicator.style.width = `${Math.max(0, layout.width - 20)}px`;
+			indicator.style.transform = `translateX(${layout.left + 10}px)`;
 			// Grouped strips tint the line with the tab's group accent color.
 			indicator.style.setProperty(
 				"--tab-group-color",
@@ -381,6 +413,7 @@ export function SessionWorkspaceView({
 				} else {
 					tabStripEls.current.delete(paneId);
 				}
+				registerTabSizing(el, previous);
 			};
 			tabStripRefCallbacks.current.set(paneId, callback);
 		}
@@ -393,6 +426,7 @@ export function SessionWorkspaceView({
 		if (previous && previous !== el) previous.removeEventListener("wheel", onTabStripWheel);
 		if (el) el.addEventListener("wheel", onTabStripWheel, { passive: false });
 		toolsScrollEl.current = el;
+		registerTabSizing(el, previous);
 	};
 	// The tools sidebar follows the focused pane's session.
 	const focusedChatSession = focusedChatTab(workspace)?.sessionId;
@@ -403,6 +437,15 @@ export function SessionWorkspaceView({
 		focusedChatSession === undefined || focusedChatSession === null
 			? { tabs: [] as readonly WorkspaceTab[], activeId: "" }
 			: toolStripOf(workspace, focusedChatSession);
+	const toolsActiveTab = useRef<HTMLElement | null>(null);
+	useLayoutEffect(() => {
+		if (!visible || !sidebarOpen) return;
+		const strip = toolsScrollEl.current;
+		const tab = strip?.querySelector<HTMLElement>(".tool-tab.is-active");
+		if (!strip || !tab || toolsActiveTab.current === tab) return;
+		toolsActiveTab.current = tab;
+		revealTabInStrip(tab, strip);
+	});
 	// Titlebar tabs and keyboard focus participate too: tools portal outside the aside.
 	const toolsFocusedRef = useRef(false);
 	const pendingCloseCancelRef = useRef<HTMLButtonElement>(null);
@@ -444,9 +487,9 @@ export function SessionWorkspaceView({
 		const live = new Set(
 			workspace.panes.flatMap((pane) => {
 				const tab = pane.tabs.find((candidate) => candidate.id === pane.activeId);
-				return ((tab?.kind === "chat" && !tab.agentId) || tab?.kind === "agent") && tab.sessionId !== null
-					? [tab.sessionId]
-					: [];
+				// Child chat tabs carry their owning root sessionId; keeping that root
+				// subscribed is what lets the visible child recover live updates.
+				return (tab?.kind === "chat" || tab?.kind === "agent") && tab.sessionId !== null ? [tab.sessionId] : [];
 			}),
 		);
 		// An open Agents tool tab keeps its session live even off the chat pane.
@@ -510,7 +553,7 @@ export function SessionWorkspaceView({
 				return next === current ? current : next;
 			});
 		},
-		[groupOf],
+		[groupOf, setWorkspace],
 	);
 
 	// A project keeps its group color while it has tabs open; new projects take
@@ -552,6 +595,7 @@ export function SessionWorkspaceView({
 	// through updateWorkspace and stay silent.
 	const mutateWorkspace = useCallback(
 		(update: (workspace: SessionWorkspace) => SessionWorkspace) => {
+			markLayoutIntent();
 			const next = normalizeTabGroups(update(workspaceRef.current), groupOf);
 			if (next === workspaceRef.current) return;
 			workspaceRef.current = next;
@@ -572,7 +616,7 @@ export function SessionWorkspaceView({
 				onChatSessionRef.current(focused.sessionId);
 			}
 		},
-		[groupOf],
+		[groupOf, markLayoutIntent, setWorkspace],
 	);
 
 	const openAgentConversation = useCallback(
@@ -607,9 +651,10 @@ export function SessionWorkspaceView({
 	// While a drawer closes the label already looks collapsed, so the count and
 	// chip shape arrive with the animation instead of popping in at the commit.
 	const [closingGroups, setClosingGroups] = useState<ReadonlySet<string>>(new Set());
-	const groupsCanAnimate = () =>
-		typeof HTMLElement.prototype.animate === "function" &&
-		!(globalThis.matchMedia?.("(prefers-reduced-motion: reduce)") ?? { matches: false }).matches;
+	// Expanding bodies mount while their drawer animation runs; both directions
+	// suppress tab motion until the drawer owns the layout again.
+	const [expandingGroupKeys, setExpandingGroupKeys] = useState<ReadonlySet<string>>(new Set());
+	const groupsCanAnimate = () => tabMotionAnimationsSupported() && !tabMotionReduced();
 	const setGroupClosing = (id: string, closing: boolean) => {
 		setClosingGroups((current) => {
 			const next = new Set(current);
@@ -618,6 +663,41 @@ export function SessionWorkspaceView({
 			return next;
 		});
 	};
+	const setGroupExpanding = (id: string, expanding: boolean) => {
+		setExpandingGroupKeys((current) => {
+			if (current.has(id) === expanding) return current;
+			const next = new Set(current);
+			if (expanding) next.add(id);
+			else next.delete(id);
+			return next;
+		});
+	};
+	// A live reduced-motion change cancels drawers already in flight, not just
+	// the next gesture.
+	useEffect(() => {
+		const cancel = () => {
+			if (!tabMotionReduced()) return;
+			for (const { anim } of groupAnims.current.values()) {
+				try {
+					anim.cancel();
+				} catch {
+					// Animations may already have finished or been detached.
+				}
+			}
+			groupAnims.current.clear();
+			expandingGroups.current.clear();
+			setClosingGroups(new Set());
+			setExpandingGroupKeys(new Set());
+		};
+		const observer = typeof MutationObserver === "function" ? new MutationObserver(cancel) : null;
+		observer?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-motion"] });
+		const media = typeof matchMedia === "function" ? matchMedia("(prefers-reduced-motion: reduce)") : null;
+		media?.addEventListener("change", cancel);
+		return () => {
+			observer?.disconnect();
+			media?.removeEventListener("change", cancel);
+		};
+	}, []);
 
 	const collapseGroupBody = (body: HTMLElement, id: string, paneId: string, key: string) => {
 		const anim = body.animate(
@@ -634,7 +714,10 @@ export function SessionWorkspaceView({
 				if (groupAnims.current.get(id)?.anim === anim) {
 					groupAnims.current.delete(id);
 					mutateWorkspace((current) => toggleTabGroup(current, paneId, key, groupOf));
-					setGroupClosing(id, false);
+					// Keep the strip suppressed through the drawer's layout commit.
+					const release = () => setGroupClosing(id, false);
+					if (typeof requestAnimationFrame === "function") requestAnimationFrame(release);
+					else release();
 				}
 			},
 			() => {},
@@ -655,7 +738,10 @@ export function SessionWorkspaceView({
 		running?.anim.cancel();
 		groupAnims.current.delete(id);
 		if (collapsed) {
-			if (groupsCanAnimate()) expandingGroups.current.add(id);
+			if (groupsCanAnimate()) {
+				expandingGroups.current.add(id);
+				setGroupExpanding(id, true);
+			}
 		} else {
 			const body = label.parentElement?.querySelector<HTMLElement>(".tool-tab-group-body");
 			if (body && groupsCanAnimate()) {
@@ -680,17 +766,25 @@ export function SessionWorkspaceView({
 					{ duration: 220, easing: "cubic-bezier(.16,1,.3,1)" },
 				);
 				groupAnims.current.set(id, { anim, closing: false });
-				anim.finished.then(
-					() => {
-						if (groupAnims.current.get(id)?.anim === anim) groupAnims.current.delete(id);
-					},
-					() => {},
-				);
+				const settle = () => {
+					if (groupAnims.current.get(id)?.anim === anim) groupAnims.current.delete(id);
+					setGroupExpanding(id, false);
+				};
+				anim.finished.then(settle, settle).catch(() => undefined);
 			};
 			groupBodyRefCallbacks.current.set(id, callback);
 		}
 		return callback;
 	};
+
+	// Drag, split/sidebar resize and group drawers own layout geometry while they
+	// run; strip motion cancels instead of fighting those gestures.
+	const tabMotionSuspended =
+		dragState !== null ||
+		resizingAxis !== null ||
+		toolsResizing ||
+		closingGroups.size > 0 ||
+		expandingGroupKeys.size > 0;
 
 	// A tab's project can resolve after the tab opens (the session list loads
 	// later); regroup whenever the project behind any tab changes.
@@ -726,6 +820,7 @@ export function SessionWorkspaceView({
 	useEffect(() => {
 		if (!chatFocusRequest || chatFocusRequest.nonce === handledFocusNonce.current) return;
 		handledFocusNonce.current = chatFocusRequest.nonce;
+		markLayoutIntent();
 		onAgentConversationFocusRef.current?.(null);
 		pendingChatFocus.current = chatFocusRequest.sessionId;
 		updateWorkspace((current) => {
@@ -735,7 +830,7 @@ export function SessionWorkspaceView({
 				? placeTab(current, chatTab(chatFocusRequest.sessionId))
 				: current;
 		});
-	}, [chatFocusRequest, chatSessionId, placeTab, updateWorkspace]);
+	}, [chatFocusRequest, chatSessionId, markLayoutIntent, placeTab, updateWorkspace]);
 
 	// A question or approval blocks its session until answered, but it renders
 	// only inside that session's conversation. When another tab (an auto-opened
@@ -938,25 +1033,17 @@ export function SessionWorkspaceView({
 		onCleanupSessionIdsHandled(cleanupSessionIds);
 	}, [api, cleanupSessionIds, onCleanupSessionIdsHandled, onError, updateWorkspace, workspace]);
 
+	// The menu's own portal handles focus, outside presses and Escape; here it
+	// only closes when split or close actions remove its target tab or pane.
 	useEffect(() => {
 		if (!tabMenu) return;
-		const close = (event: PointerEvent) => {
-			const target = event.target as Node;
-			if ((target as HTMLElement | null)?.closest?.(".workspace-tab-menu")) return;
-			setTabMenu(null);
-		};
-		const handleEscape = (event: KeyboardEvent) => {
-			if (event.key === "Escape") {
-				setTabMenu(null);
-			}
-		};
-		document.addEventListener("pointerdown", close);
-		document.addEventListener("keydown", handleEscape);
-		return () => {
-			document.removeEventListener("pointerdown", close);
-			document.removeEventListener("keydown", handleEscape);
-		};
-	}, [tabMenu]);
+		// "tools" is the sidebar strip's sentinel pane id, not a real pane.
+		const paneGone = tabMenu.paneId !== "tools" && !workspace.panes.some((pane) => pane.id === tabMenu.paneId);
+		const tabGone =
+			findToolLocation(workspace, tabMenu.tabId) === null &&
+			!workspace.panes.some((pane) => pane.tabs.some((tab) => tab.id === tabMenu.tabId));
+		if (paneGone || tabGone) setTabMenu(null);
+	}, [tabMenu, workspace]);
 
 	useEffect(() => {
 		if (!pendingFileClose) return;
@@ -1683,6 +1770,23 @@ export function SessionWorkspaceView({
 		);
 	};
 
+	useLayoutEffect(() => {
+		const root = panesRef.current;
+		if (!root || !visible) return;
+		const measure = () => {
+			const rect = root.getBoundingClientRect();
+			const width = Math.max(0, rect.width - (sidebarOpen && !sidebarClosing ? toolsSidebarWidth : 0));
+			const height = rect.height;
+			setPaneViewport((current) =>
+				current.width === width && current.height === height ? current : { width, height },
+			);
+		};
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(root);
+		return () => observer.disconnect();
+	}, [sidebarOpen, sidebarClosing, toolsSidebarWidth, visible]);
+
 	const layoutPanels = useCallback(() => {
 		const root = panesRef.current;
 		const layer = panelLayerRef.current;
@@ -1718,9 +1822,10 @@ export function SessionWorkspaceView({
 	// biome-ignore lint/correctness/useExhaustiveDependencies(chatIsDraft): Switching between a draft and a session changes the mounted pane geometry.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(chatSessionId): Changing sessions dismisses tab actions and remeasures the active panes.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(workspace): Workspace changes mount different pane bodies and require layout and observer registration.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(paneViewport): Grid track projections change panel bounds.
 	useLayoutEffect(() => {
 		layoutPanels();
-	}, [layoutPanels, workspace, chatSessionId, chatIsDraft, visible]);
+	}, [layoutPanels, workspace, chatSessionId, chatIsDraft, visible, paneViewport]);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies(visible): Visibility changes require layout and observer registration.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(chatSessionId): Changing sessions dismisses tab actions and remeasures the active panes.
@@ -1797,6 +1902,14 @@ export function SessionWorkspaceView({
 		const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
 		// The status goes in the description, like the sidebar, so a tab keeps a stable name.
 		const label = dirty ? `${displayTitle}, ${t("Unsaved")}` : displayTitle;
+		const openMenu = (anchor: {
+			x: number;
+			y: number;
+			trigger: HTMLElement | null;
+			focusTrigger?: HTMLElement | null;
+		}) => {
+			setTabMenu({ paneId: stripId, tabId: tab.id, ...anchor });
+		};
 		return (
 			// biome-ignore lint/a11y/noStaticElementInteractions: The tab wrapper owns dragging and pointer shortcuts; its native buttons supply the same keyboard actions.
 			<div
@@ -1809,9 +1922,15 @@ export function SessionWorkspaceView({
 				}}
 				onContextMenu={(event) => {
 					event.preventDefault();
-					setTabMenu({ paneId: stripId, tabId: tab.id, x: event.clientX, y: event.clientY });
+					openMenu({
+						x: event.clientX,
+						y: event.clientY,
+						trigger: null,
+						focusTrigger: event.currentTarget.querySelector<HTMLElement>(".tool-tab-select"),
+					});
 				}}
 				data-drop-index={tabs.indexOf(tab)}
+				data-tab-motion-key={tab.id}
 				draggable
 				key={tab.id}
 				onDragEnd={() => {
@@ -1829,11 +1948,20 @@ export function SessionWorkspaceView({
 					aria-selected={active}
 					aria-label={label}
 					className="tool-tab-select"
+					data-tab-id={tab.id}
 					onClick={() => selectTab(tab.id)}
 					onFocus={() => {
 						toolsFocusedRef.current = stripId === "tools";
 					}}
+					onKeyDown={(event) => {
+						// Keyboard context menu (Menu key / Shift+F10) anchors to the tab.
+						if (event.key !== "ContextMenu" && !(event.key === "F10" && event.shiftKey)) return;
+						event.preventDefault();
+						const rect = event.currentTarget.getBoundingClientRect();
+						openMenu({ x: rect.left, y: rect.bottom, trigger: event.currentTarget });
+					}}
 					role="tab"
+					tabIndex={active ? 0 : -1}
 					title={project ? `${displayTitle}\n${project.cwd}` : displayTitle}
 					type="button"
 				>
@@ -1853,6 +1981,33 @@ export function SessionWorkspaceView({
 				</button>
 			</div>
 		);
+	};
+
+	// Roving focus across one strip's tabs: arrows/Home/End move focus and
+	// selection together, matching the Ctrl+Tab cycle; the strip's own DOM
+	// order already skips tabs folded into collapsed groups.
+	const handleStripKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+		const current = (event.target as HTMLElement).closest<HTMLElement>('[role="tab"]');
+		if (!current) return;
+		const tabs = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')];
+		const index = tabs.indexOf(current);
+		if (index < 0) return;
+		const delta = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+		const target =
+			delta !== 0
+				? tabs[(index + delta + tabs.length) % tabs.length]
+				: event.key === "Home"
+					? tabs[0]
+					: event.key === "End"
+						? tabs[tabs.length - 1]
+						: undefined;
+		if (target === undefined) return;
+		event.preventDefault();
+		target.focus({ preventScroll: true });
+		const strip = target.closest<HTMLElement>(".tool-tabs-scroll");
+		if (strip) revealTabInStrip(target.closest<HTMLElement>(".tool-tab") ?? target, strip);
+		const tabId = target.dataset.tabId;
+		if (tabId) selectTab(tabId);
 	};
 
 	const renderTabStrip = (pane: WorkspacePane, inTitlebar = false) => {
@@ -1875,6 +2030,7 @@ export function SessionWorkspaceView({
 				onFocusCapture={() => {
 					toolsFocusedRef.current = false;
 				}}
+				onKeyDown={handleStripKeyDown}
 				onPointerDownCapture={() => {
 					toolsFocusedRef.current = false;
 				}}
@@ -1899,85 +2055,104 @@ export function SessionWorkspaceView({
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll" ref={tabStripRef(pane.id)}>
-					{grouped
-						? runs.map((run, index) => {
-								const first = run.tabs[0]!;
-								if (!run.group) {
-									const tabs = run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, null));
-									return index === 0
-										? tabs
-										: [
-												<span aria-hidden="true" className="tool-tab-group-gap" key={`gap-${first.id}`} />,
-												...tabs,
-											];
-								}
-								const group = run.group;
-								const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
-								// A drawer on its way shut already wears the collapsed look.
-								const shownCollapsed = collapsed || closingGroups.has(`${pane.id}${group.key}`);
-								const groupLabel = t("{{name}} tab group", { name: group.name });
-								return (
-									<div
-										className={`tool-tab-group${shownCollapsed ? " is-collapsed" : ""}`}
-										key={`group-${group.key}`}
-										role="presentation"
-										style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
-									>
-										<button
-											aria-description={
-												shownCollapsed ? t("{{count}} tabs hidden", { count: run.tabs.length }) : undefined
-											}
-											aria-expanded={!shownCollapsed}
-											aria-label={groupLabel}
-											className="tool-tab-group-label"
-											data-drop-index={pane.tabs.indexOf(first)}
-											draggable
-											onClick={(event) =>
-												toggleGroupAnimated(event.currentTarget, pane.id, group.key, collapsed)
-											}
-											onDragEnd={() => {
-												setDragState(null);
-												setDropTarget(null);
-											}}
-											onDragStart={(event) => {
-												event.dataTransfer.setData("text/plain", group.key);
-												event.dataTransfer.effectAllowed = "move";
-												setDragState({ group: { paneId: pane.id, key: group.key } });
-											}}
-											title={group.cwd}
-											type="button"
+					<WorkspaceTabMotion
+						layoutKey={pane.tabs.map((tab) => tab.id).join("\0")}
+						onSettled={syncTabIndicators}
+						prepareLayout={applyWorkspaceTabSizing}
+						scope={pane.id}
+						suspended={tabMotionSuspended}
+					>
+						{grouped
+							? runs.map((run, index) => {
+									const first = run.tabs[0]!;
+									if (!run.group) {
+										const tabs = run.tabs.map((tab) =>
+											renderTab(pane.id, pane.tabs, pane.activeId, tab, null),
+										);
+										return index === 0
+											? tabs
+											: [
+													<span
+														aria-hidden="true"
+														className="tool-tab-group-gap"
+														key={`gap-${first.id}`}
+													/>,
+													...tabs,
+												];
+									}
+									const group = run.group;
+									const collapsed = run.tabs.every((tab) => hidden.has(tab.id));
+									// A drawer on its way shut already wears the collapsed look.
+									const shownCollapsed = collapsed || closingGroups.has(`${pane.id}${group.key}`);
+									const groupLabel = t("{{name}} tab group", { name: group.name });
+									return (
+										<div
+											className={`tool-tab-group${shownCollapsed ? " is-collapsed" : ""}`}
+											key={`group-${group.key}`}
+											role="presentation"
+											style={{ "--tab-group-color": tabGroupColor(group.key) } as CSSProperties}
 										>
-											<span className="tool-tab-group-name">{group.name}</span>
-											{shownCollapsed && (
-												<span aria-hidden="true" className="tool-tab-group-count">
-													{run.tabs.length}
-												</span>
+											<button
+												aria-description={
+													shownCollapsed
+														? t("{{count}} tabs hidden", { count: run.tabs.length })
+														: undefined
+												}
+												aria-expanded={!shownCollapsed}
+												aria-label={groupLabel}
+												className="tool-tab-group-label"
+												data-drop-index={pane.tabs.indexOf(first)}
+												draggable
+												onClick={(event) =>
+													toggleGroupAnimated(event.currentTarget, pane.id, group.key, collapsed)
+												}
+												onDragEnd={() => {
+													setDragState(null);
+													setDropTarget(null);
+												}}
+												onDragStart={(event) => {
+													event.dataTransfer.setData("text/plain", group.key);
+													event.dataTransfer.effectAllowed = "move";
+													setDragState({ group: { paneId: pane.id, key: group.key } });
+												}}
+												title={group.cwd}
+												type="button"
+											>
+												<span className="tool-tab-group-name">{group.name}</span>
+												{shownCollapsed && (
+													<span aria-hidden="true" className="tool-tab-group-count">
+														{run.tabs.length}
+													</span>
+												)}
+											</button>
+											{!collapsed && (
+												<div className="tool-tab-group-body" ref={groupBodyRef(pane.id, group.key)}>
+													{run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, group))}
+												</div>
 											)}
-										</button>
-										{!collapsed && (
-											<div className="tool-tab-group-body" ref={groupBodyRef(pane.id, group.key)}>
-												{run.tabs.map((tab) => renderTab(pane.id, pane.tabs, pane.activeId, tab, group))}
-											</div>
-										)}
-									</div>
-								);
-							})
-						: pane.tabs.map((tab) =>
-								renderTab(
-									pane.id,
-									pane.tabs,
-									pane.activeId,
-									tab,
-									tab.sessionId === null ? null : projectFor(tab.sessionId),
-								),
-							)}
+										</div>
+									);
+								})
+							: pane.tabs.map((tab) =>
+									renderTab(
+										pane.id,
+										pane.tabs,
+										pane.activeId,
+										tab,
+										tab.sessionId === null ? null : projectFor(tab.sessionId),
+									),
+								)}
+					</WorkspaceTabMotion>
 					<span aria-hidden="true" className="tool-tab-indicator" />
 				</div>
 				<div className="tool-add">
 					<button
 						aria-label={t("New session")}
 						className="session-add-trigger"
-						onClick={() => onNewSession?.(sessionTargetFor(pane.id))}
+						onClick={() => {
+							focusPane(pane.id);
+							onNewSession?.(sessionTargetFor(pane.id));
+						}}
 						type="button"
 					>
 						<Plus aria-hidden="true" size={13} />
@@ -2003,7 +2178,9 @@ export function SessionWorkspaceView({
 			}
 		}
 		return workspace.panes.flatMap((pane) => {
-			const panelVisible = (tabId: string) => visible && pane.activeId === tabId && tabMenu?.paneId !== pane.id;
+			// The portal tab menu no longer hides pane content; only native browser
+			// surfaces need covering while it is open.
+			const panelVisible = (tabId: string) => visible && pane.activeId === tabId;
 			const host = chatHost && chatHost.pane === pane ? chatHost : null;
 			const wrap = (tabId: string, content: ReactNode) => (
 				<div
@@ -2122,7 +2299,7 @@ export function SessionWorkspaceView({
 											api={api}
 											browserId={tab.id}
 											controlState={tab.controlState}
-											covered={tabMenu?.paneId === "tools"}
+											covered={tabMenu !== null || resizingAxis !== null}
 											handoffReason={tab.handoffReason}
 											sessionId={tab.sessionId}
 											onError={onError}
@@ -2252,7 +2429,7 @@ export function SessionWorkspaceView({
 		});
 
 	// The tools strip sits level with the session strips in the titlebar row;
-	// tool tabs keep their own widths and the row scrolls instead of squeezing.
+	// it shares the same measured tab width and scrolls when the sidebar is narrow.
 	const renderToolsStrip = () => {
 		return (
 			<div
@@ -2286,21 +2463,29 @@ export function SessionWorkspaceView({
 				onFocusCapture={() => {
 					toolsFocusedRef.current = true;
 				}}
+				onKeyDown={handleStripKeyDown}
 				onPointerDownCapture={() => {
 					toolsFocusedRef.current = true;
 				}}
 				role="tablist"
 			>
 				<div className="tool-tabs-scroll" ref={toolsScrollRef}>
-					{toolsStrip.tabs.map((tab) =>
-						renderTab(
-							"tools",
-							toolsStrip.tabs,
-							toolsStrip.activeId,
-							tab,
-							tab.sessionId ? projectFor(tab.sessionId) : null,
-						),
-					)}
+					<WorkspaceTabMotion
+						layoutKey={toolsStrip.tabs.map((tab) => tab.id).join("\0")}
+						prepareLayout={applyWorkspaceTabSizing}
+						scope={`tools:${focusedChatSession ?? ""}`}
+						suspended={tabMotionSuspended}
+					>
+						{toolsStrip.tabs.map((tab) =>
+							renderTab(
+								"tools",
+								toolsStrip.tabs,
+								toolsStrip.activeId,
+								tab,
+								tab.sessionId ? projectFor(tab.sessionId) : null,
+							),
+						)}
+					</WorkspaceTabMotion>
 				</div>
 				{toolsStrip.tabs.length > 0 && (
 					<div className="tool-add">
@@ -2321,6 +2506,7 @@ export function SessionWorkspaceView({
 	const startToolsResize = (event: ReactPointerEvent<HTMLElement>) => {
 		if (!onToolsSidebarWidthChange) return;
 		event.preventDefault();
+		setToolsResizing(true);
 		const startX = event.clientX;
 		const startWidth = toolsSidebarWidth;
 		const move = (moveEvent: globalThis.PointerEvent) => {
@@ -2329,9 +2515,12 @@ export function SessionWorkspaceView({
 		const up = () => {
 			window.removeEventListener("pointermove", move);
 			window.removeEventListener("pointerup", up);
+			window.removeEventListener("pointercancel", up);
+			setToolsResizing(false);
 		};
 		window.addEventListener("pointermove", move);
 		window.addEventListener("pointerup", up);
+		window.addEventListener("pointercancel", up);
 	};
 
 	const splitTarget = dropTarget && "split" in dropTarget ? dropTarget.split : null;
@@ -2343,16 +2532,88 @@ export function SessionWorkspaceView({
 	// titlebar slot (standalone rendering/tests) every strip stays in its pane.
 	const stripsInTitlebar = titlebarTabsSlot != null;
 	const topPanes = workspace.panes.filter((pane) => pane.row === 0);
+	const rows = ([0, 1] as const).filter((row) => workspace.panes.some((pane) => pane.row === row));
+	const rowSizes = projectPaneSizes(
+		rows.map((row) => workspace.rowWeights?.[row] ?? 1),
+		Math.max(0, paneViewport.height - (rows.length - 1)),
+		MIN_PANE_HEIGHT,
+	);
+	const gridTracks = (sizes: readonly number[], weights: readonly number[], measured: number) =>
+		sizes
+			.map(
+				(size, index) =>
+					`${index ? "1px " : ""}${measured > 0 ? `${size}px` : `minmax(0, ${weights[index] ?? 1}fr)`}`,
+			)
+			.join(" ");
+	const columnSizes = (panes: readonly WorkspacePane[]) =>
+		projectPaneSizes(
+			panes.map((pane) => pane.weight ?? 1),
+			Math.max(0, paneViewport.width - (panes.length - 1)),
+			MIN_PANE_WIDTH,
+		);
+	const columnTemplate = (panes: readonly WorkspacePane[]) =>
+		gridTracks(
+			columnSizes(panes),
+			panes.map((pane) => pane.weight ?? 1),
+			paneViewport.width,
+		);
+	const resizeState = (axis: "column" | "row", active: boolean) => {
+		setResizingAxis(active ? axis : null);
+		setLayoutResizing(active);
+	};
+	const columnResizer = (panes: readonly WorkspacePane[], boundary: number, header = false) => (
+		<WorkspacePaneResizer
+			axis="column"
+			label={t("Resize workspace columns")}
+			sizes={columnSizes(panes)}
+			boundary={boundary}
+			minimum={MIN_PANE_WIDTH}
+			focusable={!header}
+			groupKey={panes.map((pane) => pane.id).join(",")}
+			onChange={(sizes) => {
+				markLayoutIntent();
+				updateWorkspace((current) =>
+					setPaneWeights(current, panes[0]!.row, new Map(panes.map((pane, index) => [pane.id, sizes[index]!]))),
+				);
+			}}
+			onCommit={markLayoutIntent}
+			onResizingChange={(active) => resizeState("column", active)}
+			onReset={() => {
+				markLayoutIntent();
+				updateWorkspace((current) =>
+					setPaneWeights(current, panes[0]!.row, new Map(panes.map((pane) => [pane.id, 1]))),
+				);
+			}}
+		/>
+	);
 
 	return (
-		<div className="session-workspace-root" hidden={!visible}>
+		<div
+			className={`session-workspace-root${resizingAxis ? ` is-pane-resizing is-pane-resizing--${resizingAxis}` : ""}`}
+			hidden={!visible}
+			onPointerDownCapture={cancelRestore}
+			onKeyDownCapture={cancelRestore}
+		>
 			{visible && stripsInTitlebar
 				? createPortal(
-						<div className="workspace-titlebar-strips">
-							{topPanes.map((pane) => (
-								<div className="workspace-titlebar-cell" key={pane.id}>
-									{renderTabStrip(pane, true)}
-								</div>
+						<div
+							className="workspace-titlebar-strips"
+							style={{ display: "grid", gridTemplateColumns: columnTemplate(topPanes) }}
+						>
+							{topPanes.map((pane, index) => (
+								<Fragment key={pane.id}>
+									{index > 0 && columnResizer(topPanes, index, true)}
+									<div
+										className="workspace-titlebar-cell"
+										key={pane.id}
+										style={{
+											paddingRight:
+												index === topPanes.length - 1 && (!sidebarOpen || sidebarClosing) ? 36 : 0,
+										}}
+									>
+										{renderTabStrip(pane, true)}
+									</div>
+								</Fragment>
 							))}
 						</div>,
 						titlebarTabsSlot!,
@@ -2363,70 +2624,128 @@ export function SessionWorkspaceView({
 				<div
 					className={`session-workspace-panes${dragState ? " is-dragging" : ""}`}
 					ref={panesRef}
-					style={{ paddingRight: sidebarOpen && !sidebarClosing ? toolsSidebarWidth : 0 }}
+					style={{
+						paddingRight: sidebarOpen && !sidebarClosing ? toolsSidebarWidth : 0,
+						display: "grid",
+						gridTemplateRows: gridTracks(
+							rowSizes,
+							rows.map((row) => workspace.rowWeights?.[row] ?? 1),
+							paneViewport.height,
+						),
+					}}
 				>
-					{([0, 1] as const).map((row) => {
+					{rows.map((row, rowIndex) => {
 						const rowPanes = workspace.panes.filter((pane) => pane.row === row);
 						if (rowPanes.length === 0) return null;
 						return (
-							<div className="workspace-row" key={row}>
-								{rowPanes.map((pane) => (
-									<section
-										aria-label={t("Workspace")}
-										className={`workspace-pane${splitTarget?.paneId === pane.id ? " is-split-target" : ""}`}
-										data-split-direction={splitTarget?.paneId === pane.id ? splitTarget.direction : undefined}
-										key={pane.id}
-										onDragLeave={(event) => {
-											if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
-											setDropTarget((current) =>
-												current && "split" in current && current.split.paneId === pane.id ? null : current,
-											);
+							<Fragment key={row}>
+								{rowIndex > 0 && (
+									<WorkspacePaneResizer
+										axis="row"
+										label={t("Resize workspace rows")}
+										sizes={rowSizes}
+										boundary={rowIndex}
+										minimum={MIN_PANE_HEIGHT}
+										groupKey={rows.join(",")}
+										onChange={(sizes) => {
+											markLayoutIntent();
+											updateWorkspace((current) => setRowWeights(current, sizes));
 										}}
-										onDragOver={(event) => {
-											if (!dragState) return;
-											event.preventDefault();
-											const direction = splitDropDirection(event, pane.id);
-											if (direction) {
-												event.dataTransfer.dropEffect = "move";
-												setDropTarget({ split: { paneId: pane.id, direction } });
-											} else {
-												setDropTarget({ paneId: pane.id, index: pane.tabs.length });
-											}
+										onCommit={markLayoutIntent}
+										onResizingChange={(active) => resizeState("row", active)}
+										onReset={() => {
+											markLayoutIntent();
+											updateWorkspace((current) => setRowWeights(current, [1, 1]));
 										}}
-										onDrop={(event) => {
-											event.preventDefault();
-											const direction = splitDropDirection(event, pane.id);
-											if (direction) handleDropSplit(pane.id, direction);
-											else handleDropOnStrip(pane.id, pane.tabs.length);
-										}}
-									>
-										{stripsInTitlebar && pane.row === 0 ? null : renderTabStrip(pane)}
-										<div
-											className="workspace-pane-body"
-											ref={(element) => {
-												if (element) paneBodiesRef.current.set(pane.id, element);
-												else paneBodiesRef.current.delete(pane.id);
-											}}
-										>
-											{pane.tabs.length === 0 && (
-												<div className="workspace-empty" role="tabpanel">
-													<p>{t("Pick a session from the sidebar.")}</p>
-													{onNewSession && (
-														<button
-															className="button-secondary"
-															onClick={() => onNewSession(null)}
-															type="button"
+									/>
+								)}
+								<div
+									className="workspace-row"
+									style={{ display: "grid", gridTemplateColumns: columnTemplate(rowPanes) }}
+								>
+									{rowPanes.map((pane, index) => (
+										<Fragment key={pane.id}>
+											{index > 0 && columnResizer(rowPanes, index)}
+											<section
+												aria-label={t("Workspace")}
+												className={`workspace-pane${splitTarget?.paneId === pane.id ? " is-split-target" : ""}`}
+												data-split-direction={
+													splitTarget?.paneId === pane.id ? splitTarget.direction : undefined
+												}
+												key={pane.id}
+												onDragLeave={(event) => {
+													if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+													setDropTarget((current) =>
+														current && "split" in current && current.split.paneId === pane.id
+															? null
+															: current,
+													);
+												}}
+												onDragOver={(event) => {
+													if (!dragState) return;
+													event.preventDefault();
+													const direction = splitDropDirection(event, pane.id);
+													if (direction) {
+														event.dataTransfer.dropEffect = "move";
+														setDropTarget({ split: { paneId: pane.id, direction } });
+													} else {
+														setDropTarget({ paneId: pane.id, index: pane.tabs.length });
+													}
+												}}
+												onDrop={(event) => {
+													event.preventDefault();
+													const direction = splitDropDirection(event, pane.id);
+													if (direction) handleDropSplit(pane.id, direction);
+													else handleDropOnStrip(pane.id, pane.tabs.length);
+												}}
+											>
+												{stripsInTitlebar && pane.row === 0 ? null : renderTabStrip(pane)}
+												<div
+													className="workspace-pane-body"
+													ref={(element) => {
+														if (element) paneBodiesRef.current.set(pane.id, element);
+														else paneBodiesRef.current.delete(pane.id);
+													}}
+												>
+													{pane.tabs.length === 0 && (
+														<div
+															className="workspace-empty"
+															role="tabpanel"
+															onPointerDown={() => focusPane(pane.id)}
 														>
-															<Plus aria-hidden="true" size={13} />
-															{t("Start a new task")}
-														</button>
+															<p>{t("Pick a session from the sidebar.")}</p>
+															{onNewSession && (
+																<button
+																	className="button-secondary"
+																	onClick={() => {
+																		focusPane(pane.id);
+																		onNewSession(null);
+																	}}
+																	type="button"
+																>
+																	<Plus aria-hidden="true" size={13} />
+																	{t("Start a new task")}
+																</button>
+															)}
+															{workspace.panes.length > 1 && (
+																<button
+																	className="button-secondary"
+																	type="button"
+																	onClick={() =>
+																		mutateWorkspace((current) => closeEmptyPane(current, pane.id))
+																	}
+																>
+																	{t("Close empty pane")}
+																</button>
+															)}
+														</div>
 													)}
 												</div>
-											)}
-										</div>
-									</section>
-								))}
-							</div>
+											</section>
+										</Fragment>
+									))}
+								</div>
+							</Fragment>
 						);
 					})}
 					<div className="workspace-panel-layer" ref={panelLayerRef}>
@@ -2473,64 +2792,55 @@ export function SessionWorkspaceView({
 				(() => {
 					const isToolTab = findToolLocation(workspace, tabMenu.tabId) !== null;
 					const otherPanes = workspace.panes.filter((pane) => pane.id !== tabMenu.paneId);
-					const menuStyle: CSSProperties = { left: `${tabMenu.x}px`, top: `${tabMenu.y}px` };
+					const items: WorkspaceTabMenuItem[] = [
+						...(isToolTab
+							? []
+							: (["right", "down"] as const).flatMap((direction): WorkspaceTabMenuItem[] => {
+									// Grid limits and a too-small window get distinct copy.
+									const limit = getSplitLimitReason(workspace, tabMenu.paneId, direction);
+									const reason = limit
+										? t(SPLIT_LIMIT_LABEL[limit])
+										: !fitsSplit(tabMenu.paneId, direction)
+											? t("Not enough room to split")
+											: undefined;
+									return [
+										{
+											key: `split-${direction}`,
+											label: direction === "right" ? t("Split right") : t("Split down"),
+											disabled: reason !== undefined,
+											title: reason,
+											onSelect: () =>
+												mutateWorkspace((ws) => splitTab(ws, tabMenu.tabId, tabMenu.paneId, direction)),
+										},
+									];
+								})),
+						...(isToolTab
+							? []
+							: otherPanes.map(
+									(pane, index): WorkspaceTabMenuItem => ({
+										key: `move-${pane.id}`,
+										label: t("Move to pane {{index}}", { index: index + 1 }),
+										onSelect: () => mutateWorkspace((ws) => moveTab(ws, tabMenu.tabId, pane.id)),
+									}),
+								)),
+						{
+							key: "close",
+							label: t("Close"),
+							onSelect: () => closeTab(tabMenu.tabId),
+						},
+					];
 					return (
-						<div
-							aria-label={t("Tab actions")}
-							className="tool-add-menu workspace-tab-menu"
-							role="menu"
-							style={menuStyle}
-						>
-							{isToolTab
-								? null
-								: (["right", "down"] as const).map((direction) => {
-										const reason = !canSplit(workspace, tabMenu.paneId, direction)
-											? t("Up to 6 panes")
-											: !fitsSplit(tabMenu.paneId, direction)
-												? t("Not enough room to split")
-												: undefined;
-										return (
-											<button
-												disabled={reason !== undefined}
-												key={direction}
-												onClick={() => {
-													mutateWorkspace((ws) => splitTab(ws, tabMenu.tabId, tabMenu.paneId, direction));
-													setTabMenu(null);
-												}}
-												role="menuitem"
-												title={reason}
-												type="button"
-											>
-												<span>{direction === "right" ? t("Split right") : t("Split down")}</span>
-											</button>
-										);
-									})}
-							{isToolTab
-								? null
-								: otherPanes.map((pane, index) => (
-										<button
-											key={pane.id}
-											onClick={() => {
-												mutateWorkspace((ws) => moveTab(ws, tabMenu.tabId, pane.id));
-												setTabMenu(null);
-											}}
-											role="menuitem"
-											type="button"
-										>
-											<span>{t("Move to pane {{index}}", { index: index + 1 })}</span>
-										</button>
-									))}
-							<button
-								onClick={() => {
-									closeTab(tabMenu.tabId);
-									setTabMenu(null);
-								}}
-								role="menuitem"
-								type="button"
-							>
-								<span>{t("Close")}</span>
-							</button>
-						</div>
+						<WorkspaceTabMenu
+							anchor={
+								tabMenu.trigger
+									? { kind: "element", element: tabMenu.trigger }
+									: { kind: "point", x: tabMenu.x, y: tabMenu.y }
+							}
+							ariaLabel={t("Tab actions")}
+							items={items}
+							onClose={() => setTabMenu(null)}
+							restoreFocusTo={tabMenu.focusTrigger ?? tabMenu.trigger}
+						/>
 					);
 				})()}
 			{pendingFileClose && (

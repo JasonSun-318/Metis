@@ -44,7 +44,7 @@ describe("Terminal sidebar shell", () => {
 		expect(rule(".tool-add-menu").width).toBe("200px");
 		expect(rule(".workspace-pane-body").position).toBe("relative");
 		expect(rule(".browser-toolbar").height).toBe("42px");
-		expect(rule(".browser-address-field").borderRadius).toBe("16px");
+		expect(rule(".browser-address-field").borderRadius).toBe("8px");
 		expect(rule(".browser-panel").overflow).toBe("visible");
 		expect(rule(".browser-find-panel").top).toBe("-40px");
 		expect(rule(".browser-find-panel").right).toBe("0px");

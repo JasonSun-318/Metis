@@ -11,7 +11,6 @@ import type {
 	SkillSummaryView,
 	ThinkingSelectionView,
 } from "@metis/app-protocol";
-import { ArrowLeft, ArrowRight, SidebarSimple } from "@phosphor-icons/react";
 import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopApiEvent, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -26,6 +25,7 @@ import {
 import { useAppStore } from "../hooks/use-app-store.ts";
 import { useScheduleStore } from "../hooks/use-schedule-store.ts";
 import { useSessionWorkspace } from "../hooks/use-session-workspace.ts";
+import { ArrowLeft, ArrowRight, SidebarSimple } from "../icons.tsx";
 import { animateNewTaskComposer } from "../new-task-composer-transition.ts";
 import type { ProjectSessionGroup } from "../session-groups.ts";
 import { firstInteractionForSession } from "../session-view-utils.ts";
@@ -94,6 +94,8 @@ export function sessionDisplayTitle(session: Pick<SessionSummary, "cwd" | "cwdOr
 }
 
 const SESSION_SIDEBAR_WIDTH_KEY = "metis.session-sidebar-width.v1";
+const TOOLS_SIDEBAR_WIDTH_KEY = "metis.tools-sidebar-width.v3";
+const TOOLS_SIDEBAR_DEFAULT_WIDTH = 393;
 const selectSidebarRevision = (snapshot: AppStoreSnapshot) => snapshot.sidebarRevision;
 
 function loadSessionSidebarPreferredWidth(): number {
@@ -104,6 +106,20 @@ function loadSessionSidebarPreferredWidth(): number {
 	} catch {
 		return sessionSidebarDefaultWidth();
 	}
+}
+
+function loadToolsSidebarPreferredWidth(sessionId?: string): number | undefined {
+	try {
+		const keys = [TOOLS_SIDEBAR_WIDTH_KEY];
+		if (sessionId) keys.push(`metis.tools-sidebar-width.v2:${sessionId}`);
+		for (const key of keys) {
+			const value = Number(localStorage.getItem(key));
+			if (Number.isFinite(value) && value > 0) return value;
+		}
+	} catch {
+		// The current in-memory preference remains usable when storage is unavailable.
+	}
+	return undefined;
 }
 
 export function App({ api, store }: AppProps) {
@@ -449,8 +465,11 @@ export function App({ api, store }: AppProps) {
 		},
 		[],
 	);
-	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(393);
-	const toolsSidebarPreferredWidthRef = useRef(393);
+	const [toolsSidebarPreferredWidth, setToolsSidebarPreferredWidth] = useState(() => loadToolsSidebarPreferredWidth());
+	const [toolsSidebarWidth, setToolsSidebarWidth] = useState(() =>
+		clampToolsSidebarWidth(toolsSidebarPreferredWidth ?? TOOLS_SIDEBAR_DEFAULT_WIDTH),
+	);
+	const toolsSidebarPreferredWidthRef = useRef(toolsSidebarPreferredWidth ?? TOOLS_SIDEBAR_DEFAULT_WIDTH);
 	// Bumped by the Cmd/Ctrl+W shortcut that the main process forwards.
 	const [closeTabRequest, setCloseTabRequest] = useState(0);
 	// Every mounted SessionChatView registers its own submit here so the shared
@@ -940,39 +959,26 @@ export function App({ api, store }: AppProps) {
 				})
 			: undefined);
 	const toolsSidebarAvailable = toolsSession !== undefined;
-	// The sidebar remembers its width per session, like the old tools sidebar.
-	const toolsSidebarSessionRef = useRef<string | undefined>(undefined);
-	const updateToolsSidebarWidth = useCallback(
-		(width: number) => {
-			const clamped = clampToolsSidebarWidth(width);
-			toolsSidebarPreferredWidthRef.current = clamped;
-			setToolsSidebarWidth(clamped);
-			const sessionId = toolsSession?.sessionId;
-			if (sessionId) {
-				try {
-					localStorage.setItem(`metis.tools-sidebar-width.v2:${sessionId}`, String(clamped));
-				} catch {
-					// Ignore storage failures; the width still applies in memory.
-				}
-			}
-		},
-		[toolsSession?.sessionId],
-	);
-	useEffect(() => {
-		const sessionId = toolsSession?.sessionId;
-		if (sessionId === toolsSidebarSessionRef.current) return;
-		toolsSidebarSessionRef.current = sessionId;
-		let stored = 393;
+	const updateToolsSidebarWidth = useCallback((width: number) => {
+		const clamped = clampToolsSidebarWidth(width);
+		toolsSidebarPreferredWidthRef.current = clamped;
+		setToolsSidebarPreferredWidth(clamped);
+		setToolsSidebarWidth(clamped);
 		try {
-			const parsed =
-				sessionId === undefined ? NaN : Number(localStorage.getItem(`metis.tools-sidebar-width.v2:${sessionId}`));
-			if (Number.isFinite(parsed) && parsed > 0) stored = parsed;
+			localStorage.setItem(TOOLS_SIDEBAR_WIDTH_KEY, String(clamped));
 		} catch {
-			// Fall back to the default width when storage is unavailable.
+			// The shared preference still applies in memory when storage is unavailable.
 		}
-		toolsSidebarPreferredWidthRef.current = stored;
-		setToolsSidebarWidth(clampToolsSidebarWidth(stored));
-	}, [toolsSession?.sessionId]);
+	}, []);
+	useEffect(() => {
+		// Preserve older per-session widths until the user first adjusts the shared preference.
+		const preferred =
+			toolsSidebarPreferredWidth ??
+			loadToolsSidebarPreferredWidth(toolsSession?.sessionId) ??
+			TOOLS_SIDEBAR_DEFAULT_WIDTH;
+		toolsSidebarPreferredWidthRef.current = preferred;
+		setToolsSidebarWidth(clampToolsSidebarWidth(preferred));
+	}, [toolsSession?.sessionId, toolsSidebarPreferredWidth]);
 	useEffect(() => {
 		const workspace = document.querySelector<HTMLElement>(".workspace");
 		const sync = () => setToolsSidebarWidth(clampToolsSidebarWidth(toolsSidebarPreferredWidthRef.current));

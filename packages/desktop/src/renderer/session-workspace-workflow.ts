@@ -936,7 +936,7 @@ export class SessionWorkspaceWorkflow {
 			return;
 		}
 		// Tab shortcuts belong to the workspace view, not the session workflow.
-		if (event.type === "close-tab") return;
+		if (event.type === "close-tab" || event.type === "knowledge-libraries") return;
 		if ("id" in event.envelope) {
 			this.store.addInteraction(event.envelope.params.interaction);
 			return;

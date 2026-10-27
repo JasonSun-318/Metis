@@ -1,0 +1,104 @@
+/* Split-pane separators for the workspace header/body grids.
+   Parent integration adds `is-pane-resizing` (+ axis modifier) to the app root
+   while dragging and covers native browser surfaces; this sheet only styles
+   the separators themselves and root cursor/user-select helpers. */
+
+.workspace-pane-resizer {
+	background: transparent;
+	border: 0;
+	flex: 0 0 auto;
+	margin: 0;
+	overflow: visible;
+	padding: 0;
+	position: relative;
+	z-index: 1;
+}
+
+.workspace-pane-resizer--column {
+	cursor: col-resize;
+	width: 1px;
+}
+
+.workspace-pane-resizer--row {
+	cursor: row-resize;
+	height: 1px;
+}
+
+/* 1px visual line with a 7px hit area centered on it. */
+.workspace-pane-resizer::before {
+	background: var(--border-xstrong);
+	content: "";
+	position: absolute;
+	z-index: -1;
+}
+
+.workspace-pane-resizer--column::before {
+	height: 100%;
+	left: 0;
+	top: 0;
+	width: 1px;
+}
+
+.workspace-pane-resizer--row::before {
+	height: 1px;
+	left: 0;
+	top: 0;
+	width: 100%;
+}
+
+.workspace-pane-resizer::after {
+	content: "";
+	position: absolute;
+}
+
+.workspace-pane-resizer--column::after {
+	bottom: 0;
+	left: -3px;
+	top: 0;
+	width: 7px;
+}
+
+.workspace-pane-resizer--row::after {
+	height: 7px;
+	left: 0;
+	top: -3px;
+	width: 100%;
+}
+
+.workspace-pane-resizer:hover::before,
+.workspace-pane-resizer:focus-visible::before {
+	background: var(--accent);
+}
+
+.workspace-pane-resizer:focus {
+	outline: none;
+}
+
+.workspace-pane-resizer:focus-visible {
+	outline: none;
+}
+
+/* Keep separators interactive inside the draggable native titlebar. */
+.workspace-pane-resizer,
+.workspace-pane-resizer::before,
+.workspace-pane-resizer::after {
+	-webkit-app-region: no-drag;
+}
+
+/* Root-level drag affordances; parent toggles these classes on the app root. */
+.is-pane-resizing {
+	user-select: none;
+}
+
+.is-pane-resizing,
+.is-pane-resizing * {
+	cursor: inherit;
+}
+
+.is-pane-resizing.is-pane-resizing--column {
+	cursor: col-resize;
+}
+
+.is-pane-resizing.is-pane-resizing--row {
+	cursor: row-resize;
+}

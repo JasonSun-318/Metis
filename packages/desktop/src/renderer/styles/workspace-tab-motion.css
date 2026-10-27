@@ -1,0 +1,13 @@
+/* Tab lifecycle motion is strip-local: only headers move, never flow widths. */
+.workspace-tabbar .tool-tabs-scroll[data-tab-motion-animating="true"] .tool-tab-indicator,
+.workspace-tabbar.is-unfocused .tool-tabs-scroll[data-tab-motion-animating="true"] .tool-tab-indicator {
+	opacity: 0;
+	transition: none;
+}
+
+.tool-tab-motion-ghost {
+	overflow: hidden;
+	contain: layout paint;
+	cursor: default;
+	user-select: none;
+}

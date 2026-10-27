@@ -91,6 +91,7 @@ function mount() {
 }
 
 beforeEach(() => {
+	localStorage.clear();
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	setLocale("en");
 });
@@ -122,8 +123,139 @@ describe("workspace tab strip", () => {
 		expect(view.container.querySelector<HTMLInputElement>('[data-agent-draft="child-one"]')).toBe(firstDraft);
 		expect(firstDraft.value).toBe("Preserved child draft");
 		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
-			expect.objectContaining({ liveSessionIds: [] }),
+			expect.objectContaining({ liveSessionIds: [ALPHA_1] }),
 		);
+	});
+	it("retains a visible child's root alongside another visible root and deduplicates siblings", async () => {
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
+			toJSON: () => ({}),
+		});
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		const childOne = { sessionId: ALPHA_1, agentId: "child-one", name: "Image task" };
+		const childTwo = { sessionId: ALPHA_1, agentId: "child-two", name: "Cart task" };
+		await view.render({ agentFocusRequest: { nonce: 1, target: childOne } });
+		await view.render({ agentFocusRequest: { nonce: 2, target: childTwo } });
+
+		// A different root hides both children: only the visible root stays live.
+		await view.render({ chatSessionId: BETA });
+		const betaTab = view.container.querySelector<HTMLElement>('[role="tab"][aria-label="Beta"]')!;
+		await act(async () => betaTab.click());
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ sessionIds: [ALPHA_1, BETA], liveSessionIds: [BETA] }),
+		);
+
+		// Split Beta right; the source pane falls back to Cart task while Beta moves
+		// to the second pane. Both roots are now visible simultaneously.
+		await act(async () =>
+			betaTab.dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
+		await act(async () =>
+			[...document.body.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")]
+				.find((button) => button.textContent === "Split right")!
+				.click(),
+		);
+		expect(view.container.querySelectorAll(".workspace-pane")).toHaveLength(2);
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [ALPHA_1, BETA] }),
+		);
+
+		const firstPane = view.container.querySelector<HTMLElement>(".workspace-pane")!;
+		const childTab = firstPane.querySelector<HTMLElement>('[role="tab"][aria-label="Image task"]')!;
+		await act(async () => childTab.click());
+		const retained = vi.mocked(view.api.retainWorkspaceSessions).mock.lastCall![0]!;
+		expect(retained.liveSessionIds).toEqual(expect.arrayContaining([ALPHA_1, BETA]));
+		expect(retained.liveSessionIds.filter((sessionId) => sessionId === ALPHA_1)).toHaveLength(1);
+
+		const siblingTab = firstPane.querySelector<HTMLElement>('[role="tab"][aria-label="Cart task"]')!;
+		await act(async () => siblingTab.click());
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [ALPHA_1, BETA] }),
+		);
+	});
+	it("uses the latest visible child or root after rapid tab switching", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		const switchToChild = (nonce: number) =>
+			view.render({
+				agentFocusRequest: {
+					nonce,
+					target: { sessionId: ALPHA_1, agentId: `child-${nonce}`, name: `Child ${nonce}` },
+				},
+			});
+		await switchToChild(1);
+		// A projection change keeps the focused child in front.
+		await view.render({ chatSessionId: BETA });
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [ALPHA_1] }),
+		);
+		await act(async () => view.container.querySelector<HTMLElement>('[role="tab"][aria-label="Beta"]')!.click());
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [BETA] }),
+		);
+		await switchToChild(2);
+		await switchToChild(3);
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [ALPHA_1] }),
+		);
+	});
+	it("releases a child's root after its final visible pane closes", async () => {
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			right: 1600,
+			bottom: 900,
+			left: 0,
+			width: 1600,
+			height: 900,
+			toJSON: () => ({}),
+		});
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({
+			agentFocusRequest: { nonce: 1, target: { sessionId: ALPHA_1, agentId: "child-one", name: "Image task" } },
+		});
+		await view.render({
+			agentFocusRequest: { nonce: 2, target: { sessionId: ALPHA_1, agentId: "child-two", name: "Cart task" } },
+		});
+		await view.render({ chatSessionId: BETA });
+		const betaTab = view.container.querySelector<HTMLElement>('[role="tab"][aria-label="Beta"]')!;
+		await act(async () =>
+			betaTab.dispatchEvent(
+				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
+			),
+		);
+		await act(async () =>
+			[...document.body.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")]
+				.find((button) => button.textContent === "Split right")!
+				.click(),
+		);
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith(
+			expect.objectContaining({ liveSessionIds: [ALPHA_1, BETA] }),
+		);
+
+		for (const label of ["Cart task", "Image task", "Alpha one"]) {
+			const firstPane = view.container.querySelector<HTMLElement>(".workspace-pane")!;
+			const tab = firstPane.querySelector<HTMLElement>(`[role="tab"][aria-label="${label}"]`)!;
+			const close = tab.closest(".tool-tab")!.querySelector<HTMLButtonElement>(".tool-tab-close")!;
+			await act(async () => close.click());
+		}
+		expect(view.container.querySelectorAll(".workspace-pane")).toHaveLength(1);
+		expect(view.api.retainWorkspaceSessions).toHaveBeenLastCalledWith({
+			sessionIds: [BETA],
+			liveSessionIds: [BETA],
+		});
 	});
 	it("keeps a child focused when an unrelated root projection changes", async () => {
 		const view = mount();
@@ -242,6 +374,16 @@ describe("workspace tab strip", () => {
 	});
 
 	it("slides one shared underline under the active tab", async () => {
+		// Layout coordinates stay stable while lifecycle motion translates the visual rect.
+		vi.spyOn(HTMLElement.prototype, "offsetLeft", "get").mockImplementation(function (this: HTMLElement) {
+			const tabs = [...(this.parentElement?.children ?? [])].filter((el) => el.classList.contains("tool-tab"));
+			return this.classList.contains("tool-tab") ? Math.max(0, tabs.indexOf(this)) * 100 : 0;
+		});
+		vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (this: HTMLElement) {
+			return this.classList.contains("tool-tab") ? 100 : 1000;
+		});
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1000);
+
 		// jsdom has no layout; give each tab a deterministic rect by position.
 		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
 			const tabs = [...(this.parentElement?.children ?? [])].filter((el) => el.classList.contains("tool-tab"));
@@ -357,7 +499,8 @@ describe("workspace tab strip", () => {
 		await act(async () =>
 			betaTab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })),
 		);
-		const split = [...view.container.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")].find(
+		// The menu lives in a body portal now, outside the view container.
+		const split = [...document.body.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")].find(
 			(button) => button.textContent === "Split right",
 		)!;
 		await act(async () => split.click());
@@ -388,6 +531,29 @@ describe("workspace tab strip", () => {
 		expect(view.tabs()).toEqual(["Beta", "Alpha one*"]);
 	});
 
+	it("keys tab motion by stable id and keeps roving focus after closing the active tab", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		const keys = () =>
+			[...view.container.querySelectorAll<HTMLElement>("[data-tab-motion-key]")].map(
+				(tab) => tab.dataset.tabMotionKey,
+			);
+		expect(keys()).toHaveLength(2);
+		expect(new Set(keys()).size).toBe(2);
+		const activeKey = view.container.querySelector<HTMLElement>(".tool-tab.is-active")!.dataset.tabMotionKey;
+		await act(async () =>
+			view.container
+				.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!
+				.parentElement!.querySelector<HTMLButtonElement>(".tool-tab-close")!
+				.click(),
+		);
+		expect(view.tabs()).toEqual(["Alpha one*"]);
+		expect(view.container.querySelector(`[data-tab-motion-key="${activeKey}"]`)).toBeNull();
+		expect(view.container.querySelector(".tool-tab-motion-ghost")).toBeNull();
+		expect(view.container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe("Alpha one");
+	});
+
 	it("puts the add button right after the tabs and leaves the rest of the strip empty", async () => {
 		const view = mount();
 		await view.render({ chatSessionId: ALPHA_1 });
@@ -397,5 +563,98 @@ describe("workspace tab strip", () => {
 			"tool-add",
 			"workspace-tabbar-fill",
 		]);
+	});
+
+	it("keeps pane content visible while the tab menu is open", async () => {
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 1200,
+			bottom: 800,
+			width: 1200,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect);
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		const paneId = view.container.querySelector<HTMLElement>(".workspace-panel")!.dataset.paneId!;
+		const betaTab = [...view.container.querySelectorAll<HTMLElement>(".tool-tab")].find((tab) =>
+			tab.textContent?.includes("Beta"),
+		)!;
+		await act(async () =>
+			betaTab.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 300, clientY: 40 })),
+		);
+		expect(document.body.querySelector(".workspace-tab-menu")).not.toBeNull();
+		const panels = [...view.container.querySelectorAll<HTMLElement>(`.workspace-panel[data-pane-id="${paneId}"]`)];
+		expect(panels.length).toBeGreaterThan(0);
+		// The menu must not hide the pane's active content; only inactive tabs stay hidden.
+		expect(panels.some((panel) => !panel.hidden)).toBe(true);
+		// Closing the tab from the menu still works through the portal.
+		const close = [...document.body.querySelectorAll<HTMLButtonElement>(".workspace-tab-menu button")].find(
+			(button) => button.textContent === "Close",
+		)!;
+		await act(async () => close.click());
+		expect(view.tabs()).toEqual(["Alpha one*"]);
+		expect(document.body.querySelector(".workspace-tab-menu")).toBeNull();
+	});
+
+	it("opens the menu from the keyboard anchored to the focused tab and restores focus on Escape", async () => {
+		vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+			x: 0,
+			y: 0,
+			top: 0,
+			left: 0,
+			right: 1200,
+			bottom: 800,
+			width: 1200,
+			height: 800,
+			toJSON: () => ({}),
+		} as DOMRect);
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		const betaButton = view.container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Beta"]')!;
+		betaButton.focus();
+		await act(async () => {
+			betaButton.dispatchEvent(new KeyboardEvent("keydown", { key: "ContextMenu", bubbles: true }));
+		});
+		const menu = document.body.querySelector<HTMLElement>(".workspace-tab-menu")!;
+		expect(menu).not.toBeNull();
+		// Keyboard activation focuses the first enabled item for immediate navigation.
+		expect(menu.contains(document.activeElement)).toBe(true);
+		await act(async () => {
+			document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+		});
+		expect(document.body.querySelector(".workspace-tab-menu")).toBeNull();
+		expect(document.activeElement).toBe(betaButton);
+	});
+
+	it("moves focus and selection across the strip with arrows, Home and End", async () => {
+		const view = mount();
+		await view.render({ chatSessionId: ALPHA_1 });
+		await view.render({ chatSessionId: BETA });
+		const alphaButton = view.container.querySelector<HTMLButtonElement>('[role="tab"][aria-label="Alpha one"]')!;
+		expect(alphaButton.tabIndex).toBe(-1);
+		const activeButton = view.container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')!;
+		expect(activeButton.tabIndex).toBe(0);
+		await act(async () => {
+			activeButton.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+		});
+		expect(document.activeElement).toBe(alphaButton);
+		expect(view.tabs()).toEqual(["Alpha one*", "Beta"]);
+		await act(async () => {
+			alphaButton.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
+		});
+		expect(view.tabs()).toEqual(["Alpha one", "Beta*"]);
+		await act(async () => {
+			(document.activeElement as HTMLElement).dispatchEvent(
+				new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }),
+			);
+		});
+		// ArrowRight wraps from the last tab back to the first.
+		expect(view.tabs()).toEqual(["Alpha one*", "Beta"]);
 	});
 });

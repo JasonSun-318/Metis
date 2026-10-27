@@ -1,0 +1,16 @@
+/* Each strip projects its measured equal width into this inherited property. */
+.workspace-tabbar {
+	--workspace-tab-width: 160px;
+}
+
+.workspace-tabbar .tool-tab:not(.tool-tab-motion-ghost) {
+	width: var(--workspace-tab-width, 160px);
+	min-width: var(--workspace-tab-width, 160px);
+	max-width: var(--workspace-tab-width, 160px);
+}
+
+/* A closing clone keeps the width captured at snapshot time. */
+.workspace-tabbar .tool-tab.tool-tab-motion-ghost {
+	min-width: 0;
+	max-width: none;
+}

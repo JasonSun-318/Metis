@@ -108,6 +108,10 @@ export interface WorkspacePane {
 	readonly activeId: string;
 	/** Project groups whose tabs this pane's strip folds behind their label. */
 	readonly collapsedGroups?: readonly string[];
+	/** Preferred share of the pane's row; positive finite, siblings may normalize it to sum 1. */
+	readonly weight?: number;
+	/** Explicit empty split source awaiting session selection; cleared once tabs land in it. */
+	readonly placeholder?: boolean;
 }
 
 /** One session's tool tabs (terminal, files, …) shown in the tools sidebar. */
@@ -122,6 +126,8 @@ export interface SessionWorkspace {
 	readonly nextNumber: number;
 	/** Tool tabs keyed by owning sessionId. */
 	readonly tools: ReadonlyMap<string, ToolStrip>;
+	/** Preferred share of the top and bottom rows; positive finite, may be normalized to sum 1. */
+	readonly rowWeights?: readonly [number, number];
 }
 
 export function chatTab(sessionId: string | null): ChatTab {
@@ -210,13 +216,65 @@ export function activePane(workspace: SessionWorkspace): WorkspacePane {
 }
 
 function collapseEmptyPanes(workspace: SessionWorkspace): SessionWorkspace {
-	const nonEmpty = workspace.panes.filter((pane) => pane.tabs.length > 0);
+	// Placeholder panes are explicit empty splits kept for session selection; they survive collapse.
+	const nonEmpty = workspace.panes.filter((pane) => pane.tabs.length > 0 || pane.placeholder === true);
 	const kept = nonEmpty.length > 0 ? nonEmpty : [workspace.panes[0]!];
 	const panes = kept.some((pane) => pane.row === 0) ? kept : kept.map((pane) => ({ ...pane, row: 0 as const }));
 	const activePaneId = panes.some((pane) => pane.id === workspace.activePaneId)
 		? workspace.activePaneId
 		: panes.at(-1)!.id;
-	return { ...workspace, panes, activePaneId };
+	// Row weights are meaningless once a single row remains.
+	const next: SessionWorkspace = { ...workspace, panes, activePaneId };
+	if (!panes.some((pane) => pane.row === 1)) {
+		const { rowWeights: _dropped, ...rest } = next;
+		return rest;
+	}
+	return next;
+}
+
+function positiveFinite(value: number | undefined): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0;
+}
+
+/** Applies preferred pane weights within one row, normalizing valid entries to sum 1. */
+export function setPaneWeights(
+	workspace: SessionWorkspace,
+	row: 0 | 1,
+	weightsById: ReadonlyMap<string, number>,
+): SessionWorkspace {
+	const applied = new Map<string, number>();
+	for (const pane of workspace.panes) {
+		if (pane.row !== row) continue;
+		const weight = weightsById.get(pane.id);
+		if (positiveFinite(weight)) applied.set(pane.id, weight);
+	}
+	if (applied.size === 0) return workspace;
+	const maximum = Math.max(...applied.values());
+	const total = [...applied.values()].reduce((sum, weight) => sum + weight / maximum, 0);
+	const panes = workspace.panes.map((pane) => {
+		const weight = applied.get(pane.id);
+		return weight === undefined ? pane : { ...pane, weight: weight / maximum / total };
+	});
+	return { ...workspace, panes };
+}
+
+/** Applies preferred row weights, normalizing the pair to sum 1; invalid input is a no-op. */
+export function setRowWeights(workspace: SessionWorkspace, weights: readonly number[]): SessionWorkspace {
+	if (weights.length !== 2 || !weights.every((weight) => positiveFinite(weight))) return workspace;
+	const maximum = Math.max(weights[0]!, weights[1]!);
+	const first = weights[0]! / maximum;
+	const second = weights[1]! / maximum;
+	const total = first + second;
+	return { ...workspace, rowWeights: [first / total, second / total] };
+}
+
+/** Closes one pane, but only while it holds no tabs (e.g. an explicit empty split placeholder). */
+export function closeEmptyPane(workspace: SessionWorkspace, paneId: string): SessionWorkspace {
+	const pane = workspace.panes.find((candidate) => candidate.id === paneId);
+	if (!pane || pane.tabs.length > 0) return workspace;
+	const remaining = workspace.panes.filter((candidate) => candidate.id !== paneId);
+	if (remaining.length === 0) return workspace;
+	return collapseEmptyPanes({ ...workspace, panes: remaining });
 }
 
 export function setActivePane(workspace: SessionWorkspace, paneId: string): SessionWorkspace {
@@ -272,7 +330,10 @@ export function addTab(
 		if (current !== paneIndex) return pane;
 		const at = index === undefined ? pane.tabs.length : Math.min(Math.max(index, 0), pane.tabs.length);
 		const tabs = [...pane.tabs.slice(0, at), tab, ...pane.tabs.slice(at)];
-		return { ...pane, tabs, activeId: activate ? tab.id : pane.activeId };
+		// Landing content in a placeholder pane turns it back into a normal pane.
+		return pane.placeholder
+			? { ...pane, tabs, activeId: activate ? tab.id : pane.activeId, placeholder: false }
+			: { ...pane, tabs, activeId: activate ? tab.id : pane.activeId };
 	});
 	return { ...workspace, panes, activePaneId: activate ? paneId : workspace.activePaneId };
 }
@@ -448,11 +509,15 @@ export function moveTabGroup(
 				pane.id !== source.id && wasCollapsed && !carriesActive
 					? [...(pane.collapsedGroups ?? []).filter((candidate) => candidate !== key), key]
 					: pane.collapsedGroups;
+			const tabs = [...remaining.slice(0, at), ...moving, ...remaining.slice(at)];
+			// A group landing in a placeholder pane fills it with real content.
+			const filled = pane.placeholder ? { placeholder: false } : {};
 			return {
 				...pane,
-				tabs: [...remaining.slice(0, at), ...moving, ...remaining.slice(at)],
+				tabs,
 				activeId: carriesActive ? source.activeId : pane.activeId,
 				collapsedGroups,
+				...filled,
 			};
 		}
 		const collapsedGroups = pane.collapsedGroups?.filter((candidate) => candidate !== key);
@@ -535,7 +600,9 @@ export function moveTab(
 			const without = pane.tabs.filter((candidate) => candidate.id !== tabId);
 			const insertAt = index === undefined ? without.length : Math.min(Math.max(index, 0), without.length);
 			const tabs = [...without.slice(0, insertAt), tab, ...without.slice(insertAt)];
-			return { ...pane, tabs, activeId: tabId };
+			return pane.placeholder
+				? { ...pane, tabs, activeId: tabId, placeholder: false }
+				: { ...pane, tabs, activeId: tabId };
 		}
 		if (paneIndex === location.paneIndex) {
 			const without = pane.tabs.filter((candidate) => candidate.id !== tabId);
@@ -545,22 +612,36 @@ export function moveTab(
 		if (paneIndex === targetIndex) {
 			const insertAt = index === undefined ? pane.tabs.length : Math.min(Math.max(index, 0), pane.tabs.length);
 			const tabs = [...pane.tabs.slice(0, insertAt), tab, ...pane.tabs.slice(insertAt)];
-			return { ...pane, tabs, activeId: tabId };
+			return pane.placeholder
+				? { ...pane, tabs, activeId: tabId, placeholder: false }
+				: { ...pane, tabs, activeId: tabId };
 		}
 		return pane;
 	});
 	return collapseEmptyPanes({ ...workspace, panes, activePaneId: targetPaneId });
 }
 
-export function canSplit(workspace: SessionWorkspace, targetPaneId: string, direction: SplitDirection): boolean {
+export type SplitLimitReason = "missing-pane" | "pane-limit" | "row-limit" | "column-limit";
+
+/** Why a split would be refused, or null when it fits the 2-row × 3-column grid. */
+export function getSplitLimitReason(
+	workspace: SessionWorkspace,
+	targetPaneId: string,
+	direction: SplitDirection,
+): SplitLimitReason | null {
 	const target = workspace.panes.find((pane) => pane.id === targetPaneId);
-	if (!target) return false;
+	if (!target) return "missing-pane";
+	if (workspace.panes.length >= MAX_ROW_PANES * 2) return "pane-limit";
 	if (direction === "left" || direction === "right") {
-		return workspace.panes.filter((pane) => pane.row === target.row).length < MAX_ROW_PANES;
+		return workspace.panes.filter((pane) => pane.row === target.row).length >= MAX_ROW_PANES ? "column-limit" : null;
 	}
-	const targetRow = direction === "down" ? 0 : 1;
+	if (target.row !== (direction === "down" ? 0 : 1)) return "row-limit";
 	const otherRow = direction === "down" ? 1 : 0;
-	return target.row === targetRow && workspace.panes.filter((pane) => pane.row === otherRow).length < MAX_ROW_PANES;
+	return workspace.panes.filter((pane) => pane.row === otherRow).length >= MAX_ROW_PANES ? "row-limit" : null;
+}
+
+export function canSplit(workspace: SessionWorkspace, targetPaneId: string, direction: SplitDirection): boolean {
+	return getSplitLimitReason(workspace, targetPaneId, direction) === null;
 }
 
 export function splitTab(
@@ -579,6 +660,15 @@ export function splitTab(
 	const sourceActiveId = source.activeId === tabId ? (without.at(-1)?.id ?? "") : source.activeId;
 	const paneId = `pane-${crypto.randomUUID()}`;
 	const row: 0 | 1 = direction === "down" ? 1 : direction === "up" ? 0 : target.row;
+	// Horizontal splits share the target's existing width; moving a tab from elsewhere must not
+	// resize its source. Missing weights use the same equal-share default as the renderer.
+	const targetWeight = positiveFinite(target.weight) ? target.weight : 1;
+	const splitWeight = row === target.row ? { weight: targetWeight / 2 } : {};
+	// Opening the second row seeds balanced row weights unless a preference already exists.
+	const rowWeights =
+		row !== target.row && !workspace.panes.some((pane) => pane.row === row)
+			? (workspace.rowWeights ?? [1, 1])
+			: workspace.rowWeights;
 	const targetColumn = workspace.panes.slice(0, targetIndex + 1).filter((pane) => pane.row === target.row).length - 1;
 	let insertIndex: number;
 	if (direction === "right") insertIndex = targetIndex + 1;
@@ -594,14 +684,17 @@ export function splitTab(
 	}
 	const panes = [
 		...workspace.panes.slice(0, insertIndex),
-		{ id: paneId, row, tabs: [tab], activeId: tabId },
+		{ id: paneId, row, tabs: [tab], activeId: tabId, ...splitWeight },
 		...workspace.panes.slice(insertIndex),
-	].map((pane, index) =>
-		index === (location.paneIndex >= insertIndex ? location.paneIndex + 1 : location.paneIndex)
-			? { ...pane, tabs: without, activeId: sourceActiveId }
-			: pane,
-	);
-	return collapseEmptyPanes({ ...workspace, panes, activePaneId: paneId });
+	].map((pane) => {
+		const next = pane.id === target.id ? { ...pane, ...splitWeight } : pane;
+		if (pane.id !== source.id) return next;
+		// Splitting a pane's sole tab leaves the source as an explicit empty placeholder.
+		if (without.length === 0) return { ...next, tabs: without, activeId: "", placeholder: true };
+		return { ...next, tabs: without, activeId: sourceActiveId };
+	});
+	const collapsed = collapseEmptyPanes({ ...workspace, panes, activePaneId: paneId });
+	return rowWeights === undefined ? collapsed : { ...collapsed, rowWeights };
 }
 
 export function removeTabs(workspace: SessionWorkspace, tabIds: ReadonlySet<string>): SessionWorkspace {

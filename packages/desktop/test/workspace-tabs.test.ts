@@ -5,12 +5,14 @@ import {
 	addTab,
 	canSplit,
 	chatTab,
+	closeEmptyPane,
 	collapsedTabIds,
 	defaultWorkspace,
 	findChatTab,
 	findTabLocation,
 	findToolLocation,
 	focusedChatTab,
+	getSplitLimitReason,
 	moveTab,
 	moveTabGroup,
 	moveToolTab,
@@ -20,6 +22,8 @@ import {
 	removeTabs,
 	revealTab,
 	type SessionWorkspace,
+	setPaneWeights,
+	setRowWeights,
 	splitTab,
 	tabGroupRuns,
 	toggleTabGroup,
@@ -458,5 +462,240 @@ describe("revealTab", () => {
 		expect(revealed.panes[0]!.activeId).toBe(chatId);
 		expect(revealed.activePaneId).toBe(focusedPane);
 		expect(revealTab(revealed, chatId)).toBe(revealed);
+	});
+});
+
+describe("getSplitLimitReason", () => {
+	it("reports a missing pane and allows ordinary splits", () => {
+		const { workspace } = seededWorkspace();
+		expect(getSplitLimitReason(workspace, "nope", "right")).toBe("missing-pane");
+		expect(getSplitLimitReason(workspace, workspace.panes[0]!.id, "right")).toBeNull();
+		expect(getSplitLimitReason(workspace, workspace.panes[0]!.id, "down")).toBeNull();
+		expect(canSplit(workspace, workspace.panes[0]!.id, "right")).toBe(true);
+	});
+
+	it("reports column-limit once a row holds three panes", () => {
+		const { workspace: seeded } = seededWorkspace();
+		let workspace = addTab(seeded, extra("t1"));
+		workspace = addTab(workspace, extra("t2"));
+		workspace = split(workspace, "t1", "right");
+		workspace = split(workspace, "t2", "right");
+		expect(getSplitLimitReason(workspace, workspace.panes[0]!.id, "left")).toBe("column-limit");
+		expect(canSplit(workspace, workspace.panes[0]!.id, "right")).toBe(false);
+	});
+
+	it("reports row-limit for wrong-row or full-row vertical splits and pane-limit at six panes", () => {
+		const { workspace: seeded } = seededWorkspace();
+		let workspace = addTab(seeded, extra("t1"));
+		workspace = split(workspace, "t1", "down");
+		expect(getSplitLimitReason(workspace, workspace.panes[1]!.id, "down")).toBe("row-limit");
+		expect(getSplitLimitReason(workspace, workspace.panes[0]!.id, "up")).toBe("row-limit");
+		workspace = addTab(workspace, extra("t2"), workspace.panes[0]!.id);
+		workspace = split(workspace, "t2", "right");
+		workspace = split(workspace, "t2", "down");
+		workspace = addTab(workspace, extra("t3"), workspace.panes[0]!.id);
+		workspace = split(workspace, "t3", "right");
+		workspace = addTab(workspace, extra("t4"), workspace.panes[0]!.id);
+		workspace = split(workspace, "t4", "down");
+		expect(workspace.panes).toHaveLength(6);
+		expect(getSplitLimitReason(workspace, workspace.panes[0]!.id, "right")).toBe("pane-limit");
+	});
+});
+
+describe("placeholder splits", () => {
+	it("keeps the source pane as an empty placeholder when its sole tab splits away", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		const workspace = split(seeded, chatId, "right");
+		expect(workspace.panes).toHaveLength(2);
+		expect(workspace.panes[0]!.tabs).toEqual([]);
+		expect(workspace.panes[0]!.placeholder).toBe(true);
+		expect(workspace.panes[1]!.tabs.map((tab) => tab.id)).toEqual([chatId]);
+		expect(workspace.activePaneId).toBe(workspace.panes[1]!.id);
+	});
+
+	it("clears the placeholder once a tab lands in the pane", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		let workspace = split(seeded, chatId, "right");
+		workspace = addTab(workspace, extra("t1"), workspace.panes[0]!.id);
+		expect(workspace.panes[0]!.placeholder).toBe(false);
+		expect(workspace.panes[0]!.tabs.map((tab) => tab.id)).toEqual(["t1"]);
+	});
+
+	it("reclaims a placeholder-free pane when its last tab closes normally", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		const workspace = removeTab(seeded, chatId);
+		expect(workspace.panes).toHaveLength(1);
+		expect(workspace.panes[0]!.tabs).toEqual([]);
+		expect(workspace.panes[0]!.placeholder).toBeUndefined();
+	});
+
+	it("keeps a placeholder pane across unrelated pane collapses", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		let workspace = addTab(seeded, extra("t1"));
+		workspace = split(workspace, chatId, "right");
+		// Source pane (index 0) still holds t1, so only the sole-tab case is a placeholder;
+		// instead split the single tab of pane 1 downward.
+		workspace = split(workspace, "t1", "down");
+		const placeholder = workspace.panes.find((pane) => pane.placeholder === true);
+		expect(placeholder).toBeDefined();
+		expect(workspace.panes).toHaveLength(3);
+	});
+});
+
+describe("closeEmptyPane", () => {
+	it("closes only an empty pane and hands activation to a neighbor", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		let workspace = split(seeded, chatId, "right");
+		const placeholderId = workspace.panes[0]!.id;
+		workspace = closeEmptyPane(workspace, placeholderId);
+		expect(workspace.panes).toHaveLength(1);
+		expect(workspace.panes[0]!.tabs.map((tab) => tab.id)).toEqual([chatId]);
+		expect(workspace.activePaneId).toBe(workspace.panes[0]!.id);
+	});
+
+	it("refuses panes with tabs, unknown ids and the last remaining pane", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		expect(closeEmptyPane(seeded, seeded.panes[0]!.id)).toBe(seeded);
+		expect(closeEmptyPane(seeded, "nope")).toBe(seeded);
+		const emptied = removeTab(seeded, chatId);
+		expect(closeEmptyPane(emptied, emptied.panes[0]!.id)).toBe(emptied);
+	});
+
+	it("drops row weights when closing the only bottom-row pane", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		let workspace = split(seeded, chatId, "down");
+		expect(workspace.rowWeights).toEqual([1, 1]);
+		workspace = removeTab(workspace, chatId);
+		expect(workspace.panes.some((pane) => pane.row === 1)).toBe(false);
+		expect(workspace.rowWeights).toBeUndefined();
+	});
+});
+
+describe("weights", () => {
+	it("halves both sides when a weighted pane splits its sole tab", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		const weighted = setPaneWeights(seeded, 0, new Map([[seeded.activePaneId, 1]]));
+		const workspace = split(weighted, chatId, "right");
+		expect(workspace.panes.map((pane) => pane.weight)).toEqual([0.5, 0.5]);
+		expect(workspace.panes[0]!.placeholder).toBe(true);
+	});
+
+	it("halves a target's default share without changing its neighbor", () => {
+		const left = { id: "left", row: 0 as const, tabs: [extra("left-tab")], activeId: "left-tab" };
+		const right = { id: "right", row: 0 as const, tabs: [extra("right-tab")], activeId: "right-tab" };
+		const input = { ...defaultWorkspace(), panes: [left, right], activePaneId: "left" };
+		const workspace = splitTab(input, "left-tab", "left", "right");
+		expect(workspace.panes.map((pane) => pane.weight)).toEqual([0.5, 0.5, undefined]);
+		expect(workspace.panes.find((pane) => pane.id === "right")).toBe(right);
+	});
+
+	it("splits the target share rather than the source when a tab moves across panes", () => {
+		const left = {
+			id: "left",
+			row: 0 as const,
+			tabs: [extra("moving"), extra("remaining")],
+			activeId: "moving",
+			weight: 0.8,
+		};
+		const right = { id: "right", row: 0 as const, tabs: [extra("target")], activeId: "target", weight: 0.2 };
+		const input = { ...defaultWorkspace(), panes: [left, right], activePaneId: "left" };
+		const workspace = splitTab(input, "moving", "right", "left");
+		expect(workspace.panes.map((pane) => pane.weight)).toEqual([0.8, 0.1, 0.1]);
+		expect(workspace.panes[0]!.tabs.map((tab) => tab.id)).toEqual(["remaining"]);
+		expect(workspace.panes[1]!.tabs.map((tab) => tab.id)).toEqual(["moving"]);
+		expect(input.panes[0]!.weight).toBe(0.8);
+	});
+
+	it("preserves an emptied source's share when splitting a different target", () => {
+		const left = { id: "left", row: 0 as const, tabs: [extra("moving")], activeId: "moving", weight: 0.8 };
+		const right = { id: "right", row: 0 as const, tabs: [extra("target")], activeId: "target", weight: 0.2 };
+		const workspace = splitTab(
+			{ ...defaultWorkspace(), panes: [left, right], activePaneId: "left" },
+			"moving",
+			"right",
+			"right",
+		);
+		expect(workspace.panes.map((pane) => pane.weight)).toEqual([0.8, 0.1, 0.1]);
+		expect(workspace.panes[0]!.placeholder).toBe(true);
+	});
+
+	it("splits the source pane's weight in half on a same-row split", () => {
+		const { workspace: seeded } = seededWorkspace();
+		let workspace = addTab(seeded, extra("t1"));
+		workspace = setPaneWeights(workspace, 0, new Map([[workspace.panes[0]!.id, 2]]));
+		expect(workspace.panes[0]!.weight).toBe(1);
+		workspace = split(workspace, "t1", "right");
+		expect(workspace.panes[0]!.weight).toBeCloseTo(0.5);
+		expect(workspace.panes.find((pane) => pane.tabs.some((tab) => tab.id === "t1"))!.weight).toBeCloseTo(0.5);
+	});
+
+	it("normalizes pane weights per row and ignores unknown or invalid entries", () => {
+		const { workspace: seeded } = seededWorkspace();
+		let workspace = addTab(seeded, extra("t1"));
+		workspace = split(workspace, "t1", "right");
+		const first = workspace.panes[0]!.id;
+		const second = workspace.panes[1]!.id;
+		workspace = setPaneWeights(
+			workspace,
+			0,
+			new Map([
+				[first, 3],
+				[second, 1],
+				["nope", 9],
+			]),
+		);
+		expect(workspace.panes.find((pane) => pane.id === first)!.weight).toBeCloseTo(0.75);
+		expect(workspace.panes.find((pane) => pane.id === second)!.weight).toBeCloseTo(0.25);
+		const before = workspace;
+		expect(
+			setPaneWeights(
+				before,
+				0,
+				new Map([
+					[first, 0],
+					[second, -2],
+				]),
+			),
+		).toBe(before);
+		expect(setPaneWeights(before, 0, new Map([["nope", 1]]))).toBe(before);
+	});
+
+	it("normalizes row weights and rejects invalid pairs", () => {
+		const { workspace } = seededWorkspace();
+		const weighted = setRowWeights(workspace, [3, 1]);
+		expect(weighted.rowWeights).toEqual([0.75, 0.25]);
+		expect(setRowWeights(workspace, [1, 0])).toBe(workspace);
+		expect(setRowWeights(workspace, [1])).toBe(workspace);
+		expect(setRowWeights(workspace, [1, Number.POSITIVE_INFINITY])).toBe(workspace);
+	});
+
+	it("normalizes finite pane weights without overflowing their total", () => {
+		const { workspace: seeded, chatId } = seededWorkspace();
+		const splitWorkspace = split(seeded, chatId, "right");
+		const [first, second] = splitWorkspace.panes;
+		const weighted = setPaneWeights(
+			splitWorkspace,
+			0,
+			new Map([
+				[first!.id, Number.MAX_VALUE],
+				[second!.id, Number.MAX_VALUE],
+			]),
+		);
+		expect(weighted.panes.map((pane) => pane.weight)).toEqual([0.5, 0.5]);
+		const proportional = setPaneWeights(
+			splitWorkspace,
+			0,
+			new Map([
+				[first!.id, Number.MAX_VALUE / 2],
+				[second!.id, Number.MAX_VALUE],
+			]),
+		);
+		expect(proportional.panes.map((pane) => pane.weight)).toEqual([1 / 3, 2 / 3]);
+	});
+
+	it("normalizes finite row weights without overflowing their total", () => {
+		const { workspace } = seededWorkspace();
+		expect(setRowWeights(workspace, [Number.MAX_VALUE, Number.MAX_VALUE]).rowWeights).toEqual([0.5, 0.5]);
+		expect(setRowWeights(workspace, [Number.MAX_VALUE / 2, Number.MAX_VALUE]).rowWeights).toEqual([1 / 3, 2 / 3]);
 	});
 });

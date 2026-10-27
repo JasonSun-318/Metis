@@ -193,10 +193,10 @@ describe("per-session tools sidebar", () => {
 				.closest(".tool-tab")!
 				.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true })),
 		);
-		expect(button(view.container, "Split right").disabled).toBe(true);
-		expect(button(view.container, "Split right").title).toBe("Not enough room to split");
+		expect(button(document.body, "Split right").disabled).toBe(true);
+		expect(button(document.body, "Split right").title).toBe("Not enough room to split");
 		await view.render({ toolsSidebarOpen: false });
-		expect(button(view.container, "Split right").disabled).toBe(false);
+		expect(button(document.body, "Split right").disabled).toBe(false);
 	});
 
 	it("opens a new browser tab with tools and makes the plus button create another tab", async () => {

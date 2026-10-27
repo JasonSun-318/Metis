@@ -1,0 +1,39 @@
+/* Body-portal tab menu; fixed to the viewport, independent of pane/sidebar
+   stacking contexts. `[data-open]` out-specifies the legacy shared rules. */
+.workspace-tab-menu[data-open] {
+	position: fixed;
+	z-index: 300;
+	display: grid;
+	width: 200px;
+	max-height: calc(100vh - 16px);
+	overflow-y: auto;
+	gap: 2px;
+	border: 1px solid var(--border-strong);
+	border-radius: 8px;
+	background: var(--menu-bg);
+	box-shadow: var(--overlay-shadow);
+	padding: 4px;
+}
+.workspace-tab-menu[data-open] button {
+	display: flex;
+	width: 100%;
+	height: 30px;
+	align-items: center;
+	gap: 8px;
+	border-radius: 6px;
+	background: transparent;
+	color: var(--text-24);
+	padding: 0 8px;
+	text-align: left;
+	font-size: 12px;
+	transition: background-color 140ms ease, color 140ms ease;
+}
+.workspace-tab-menu[data-open] button:hover:not(:disabled),
+.workspace-tab-menu[data-open] button:focus-visible {
+	background: var(--menu-hover);
+	color: var(--text-strong);
+}
+.workspace-tab-menu[data-open] button:disabled {
+	color: var(--text-03);
+	cursor: default;
+}
