@@ -4,5 +4,5 @@ export function formatElapsed(milliseconds: number): string {
 	const minutes = Math.floor(seconds / 60);
 	if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
 	const hours = Math.floor(minutes / 60);
-	return `${hours}h ${minutes % 60}m`;
+	return `${hours}h ${minutes % 60}m${Number.isFinite(seconds) ? ` ${seconds % 60}s` : ""}`;
 }

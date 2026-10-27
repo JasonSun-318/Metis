@@ -11,9 +11,10 @@ describe("formatElapsed", () => {
 		[61_000, "1m 1s"],
 		[90_000, "1m 30s"],
 		[3_599_999, "59m 59s"],
-		[3_600_000, "1h 0m"],
-		[3_661_000, "1h 1m"],
-		[86_400_000, "24h 0m"],
+		[3_600_000, "1h 0m 0s"],
+		[3_661_000, "1h 1m 1s"],
+		[12_039_000, "3h 20m 39s"],
+		[86_400_000, "24h 0m 0s"],
 	])("formats %i milliseconds as %s", (milliseconds, expected) => {
 		expect(formatElapsed(milliseconds)).toBe(expected);
 	});

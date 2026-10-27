@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import type { AgentSummaryView, ItemView } from "@metis/app-protocol";
+import type { AgentSummaryView, ItemView, QueuedTurnView } from "@metis/app-protocol";
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,7 +19,12 @@ const mock = vi.hoisted(() => ({
 vi.mock("../src/renderer/components/Composer.tsx", () => ({
 	Composer: (props: ComponentProps<typeof Composer>) => {
 		mock.composers.set(props.inputId!, props);
-		return <div data-composer={props.inputId}>{props.collaborationControl}</div>;
+		return (
+			<div data-composer={props.inputId}>
+				{props.collaborationControl}
+				{props.queuedTurnControl}
+			</div>
+		);
 	},
 }));
 vi.mock("../src/renderer/components/Transcript.tsx", () => ({
@@ -79,6 +84,17 @@ const roots: Root[] = [];
 function setup() {
 	const listeners = new Set<(event: DesktopApiEvent) => void>();
 	const api = {
+		readAgentQueuedMessages: vi.fn().mockResolvedValue({ queuedTurns: [] as QueuedTurnView[] }),
+		deleteAgentQueuedMessage: vi.fn().mockResolvedValue({ queueItemId: "pending", deleted: true }),
+		sendAgentQueuedMessage: vi.fn().mockResolvedValue({
+			agentId: CHILD,
+			taskId: TASK,
+			messageId: "pending",
+			requestId: "request",
+			delivery: "steer",
+			state: "accepted",
+			instructionRevision: 1,
+		}),
 		listAgents: vi.fn().mockResolvedValue({ agents: [agent()], nextAfterAgentId: null }),
 		readAgentItems: vi
 			.fn()
@@ -103,7 +119,13 @@ function setup() {
 		subscribeSession: vi.fn(),
 	} satisfies Partial<MetisDesktopApi>;
 	const store = new AppStore();
-	const context = { api, store, bootstrapped: true, onError: vi.fn() } as unknown as SessionChatViewContext;
+	const context = {
+		api,
+		store,
+		bootstrapped: true,
+		onError: vi.fn(),
+		onNotice: vi.fn(),
+	} as unknown as SessionChatViewContext;
 	const container = document.createElement("div");
 	document.body.append(container);
 	const root = createRoot(container);
@@ -121,7 +143,7 @@ function setup() {
 			),
 		);
 	};
-	return { api, container, render, listeners, onOpenParent };
+	return { api, container, render, listeners, onOpenParent, context, store };
 }
 const submission = { text: "Check sizes first", attachments: [{ path: "/tmp/image.png", name: "image.png" }] };
 beforeEach(async () => {
@@ -137,6 +159,27 @@ afterEach(async () => {
 });
 
 describe("AgentConversation", () => {
+	it("does not restore an edited queued message into a different child's composer after navigation", async () => {
+		const { api, container, render } = setup();
+		api.readAgentQueuedMessages.mockResolvedValue({
+			queuedTurns: [
+				{ queueItemId: "pending", revision: "rev", text: "Child A only", state: "queued", attachments: [] },
+			],
+		});
+		let resolve!: () => void;
+		api.deleteAgentQueuedMessage.mockImplementationOnce(
+			() =>
+				new Promise((done) => {
+					resolve = () => done({ queueItemId: "pending", deleted: true });
+				}),
+		);
+		await render();
+		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit queued message"]')!.click());
+		const other = "55555555-5555-4555-8555-555555555555";
+		await render(other);
+		await act(async () => resolve());
+		expect(mock.composers.get(`agent-composer-${other}`)?.prefillRequest).toBeUndefined();
+	});
 	it("preserves older paged messages sharing the tail boundary timestamp", () => {
 		const older = item("older", "Earlier message in the same millisecond");
 		const boundary = item("boundary", "First tail message");
@@ -258,7 +301,7 @@ describe("AgentConversation", () => {
 		await render();
 		await act(async () => mock.composers.get(`agent-composer-${CHILD}`)!.onSubmit(submission));
 		expect(api.sendAgentMessage).toHaveBeenCalledWith(
-			expect.objectContaining({ sessionId: ROOT, agentId: CHILD, delivery: "auto", input: submission }),
+			expect.objectContaining({ sessionId: ROOT, agentId: CHILD, delivery: "queue", input: submission }),
 		);
 		expect(container.textContent).toContain("Message saved; waiting for delivery");
 		expect(container.textContent).not.toContain("Sent to the agent’s model");
@@ -266,11 +309,7 @@ describe("AgentConversation", () => {
 	it("lets the user queue a followup and stop the child subtree", async () => {
 		const { api, container, render } = setup();
 		await render();
-		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Message timing"]')!.click());
-		const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="option"]')).find((node) =>
-			node.textContent?.includes("After current task"),
-		)!;
-		await act(async () => option.click());
+		expect(container.querySelector('[aria-label="Message timing"]')).toBeNull();
 		await act(async () => mock.composers.get(`agent-composer-${CHILD}`)!.onSubmit(submission));
 		expect(api.sendAgentMessage).toHaveBeenLastCalledWith(expect.objectContaining({ delivery: "queue" }));
 		await act(async () => mock.composers.get(`agent-composer-${CHILD}`)!.onInterrupt());
@@ -300,7 +339,7 @@ describe("AgentConversation", () => {
 		const props = mock.composers.get(`agent-composer-${CHILD}`)!;
 		await act(async () => props.onSubmit({ text: "不用看了", attachments: [] }));
 		expect(api.controlAgent).not.toHaveBeenCalled();
-		expect(api.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({ delivery: "auto" }));
+		expect(api.sendAgentMessage).toHaveBeenCalledWith(expect.objectContaining({ delivery: "queue" }));
 		await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Stop agent"]')!.click());
 		expect(api.controlAgent).toHaveBeenCalledWith(expect.objectContaining({ action: "stop", scope: "subtree" }));
 	});
@@ -376,4 +415,36 @@ describe("AgentConversation", () => {
 			mergeAgentItems([], [item("z-user", "task"), item("a-assistant", "answer")]).map((entry) => entry.itemId),
 		).toEqual(["z-user", "a-assistant"]);
 	});
+});
+
+it("reloads the durable tail when a cold catalog reaches done after the history read", async () => {
+	const { api, container, render } = setup();
+	let finishCatalog!: (value: Awaited<ReturnType<MetisDesktopApi["listAgents"]>>) => void;
+	api.listAgents.mockImplementationOnce(
+		() =>
+			new Promise((resolve) => {
+				finishCatalog = resolve;
+			}),
+	);
+	const user = { ...item("user", "still there"), role: "user" as const, turnId: "turn" };
+	api.readAgentItems.mockResolvedValue({ items: [user], nextBeforeItemId: null });
+	await render();
+	expect(container.textContent).not.toContain("durable final reply");
+	api.readAgentItems.mockResolvedValue({
+		items: [user, item("reply", "durable final reply")],
+		nextBeforeItemId: null,
+	});
+	api.listAgents.mockResolvedValue({
+		agents: [{ ...agent(), status: "done", updatedAt: "2026-10-23T00:00:09Z" }],
+		nextAfterAgentId: null,
+	});
+	await act(async () =>
+		finishCatalog({
+			agents: [{ ...agent(), status: "done", updatedAt: "2026-10-23T00:00:09Z" }],
+			nextAfterAgentId: null,
+		}),
+	);
+	expect(container.textContent).toContain("durable final reply");
+	expect(container.querySelector(".agent-conversation-state")?.textContent).toBe("Completed");
+	expect(mock.transcripts.at(-1)?.activeTurnId).toBeNull();
 });

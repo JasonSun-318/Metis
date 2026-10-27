@@ -104,6 +104,67 @@ describe("TurnRuntimeStatus", () => {
 		await act(async () => root.unmount());
 	});
 
+	it("resets token progress and elapsed time only when the run identity changes", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const runA = [assistant("a", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
+		const runB = [assistant("b", [{ type: "text", text: "新的任务正在执行" }])];
+
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={runA} running runId="run-a" startedAt="2026-08-08T00:00:00.000Z" />),
+		);
+		await act(async () => vi.advanceTimersByTimeAsync(1_200));
+		const output = container.querySelector("output");
+		expect(output?.textContent).toContain("1s");
+		expect(Number(output?.getAttribute("data-runtime-tokens"))).toBeGreaterThan(0);
+
+		await act(async () => root.render(<TurnRuntimeStatus items={runB} running runId="run-b" />));
+		expect(container.querySelector("output")).toBe(output);
+		expect(output?.textContent).toContain("0s");
+		expect(output?.textContent).toContain("0 tokens");
+		expect(vi.getTimerCount()).toBe(1);
+		await act(async () => root.unmount());
+	});
+
+	it("applies a corrected start time for the same run without resetting token progress", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const items = [assistant("streaming", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
+
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={items} running runId="run-a" startedAt="2026-08-08T00:00:00.000Z" />),
+		);
+		await act(async () => vi.advanceTimersByTimeAsync(5_200));
+		const output = container.querySelector("output");
+		expect(output?.textContent).toContain("5s");
+		const tokens = output?.getAttribute("data-runtime-tokens");
+
+		await act(async () =>
+			root.render(<TurnRuntimeStatus items={items} running runId="run-a" startedAt="2026-08-08T00:00:02.000Z" />),
+		);
+		expect(output?.textContent).toContain("3s");
+		expect(output?.getAttribute("data-runtime-tokens")).toBe(tokens);
+		expect(vi.getTimerCount()).toBe(1);
+		await act(async () => root.unmount());
+	});
+
+	it("does not schedule progress while waiting for an answer", async () => {
+		vi.useFakeTimers();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running waitingForAnswer={true} />));
+		expect(container.textContent).toContain("Waiting for your answer");
+		expect(vi.getTimerCount()).toBe(0);
+		await act(async () => root.unmount());
+	});
+
 	it("replaces token progress with the compaction state", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));

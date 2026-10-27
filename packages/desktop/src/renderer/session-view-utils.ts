@@ -5,6 +5,7 @@ import {
 	RPC_ERROR_CODES,
 	type SessionSummary,
 } from "@metis/app-protocol";
+import { type AgentActivity, isAgentRunning } from "./agent-activity.ts";
 import { rpcErrorCode } from "./rpc-error.ts";
 
 export type SessionIndicator = "attention" | "failed" | "completed" | "running" | "unread";
@@ -13,12 +14,13 @@ export type SessionIndicator = "attention" | "failed" | "completed" | "running" 
 export function sessionIndicator(
 	session: Partial<Pick<SessionSummary, "state" | "unread" | "attentionRequired" | "lastTurnOutcome">>,
 	viewing: boolean,
+	activity?: AgentActivity,
 ): SessionIndicator | undefined {
 	const notification = !viewing && session.unread;
-	if (notification && session.attentionRequired) return "attention";
+	if (activity?.attentionRequired || (notification && session.attentionRequired)) return "attention";
+	if (session.state === "running" || activity?.running) return "running";
 	if (notification && session.lastTurnOutcome === "failed") return "failed";
 	if (notification && session.lastTurnOutcome === "completed") return "completed";
-	if (session.state === "running") return "running";
 	return notification ? "unread" : undefined;
 }
 
@@ -38,7 +40,7 @@ export function agentIndicator(
 		agent.runControl === "interrupted";
 	return sessionIndicator(
 		{
-			state: !stopped && (agent.status === "running" || agent.status === "queued") ? "running" : "idle",
+			state: isAgentRunning(agent) ? "running" : "idle",
 			unread: attentionRequired || (!stopped && unread),
 			attentionRequired,
 			lastTurnOutcome:

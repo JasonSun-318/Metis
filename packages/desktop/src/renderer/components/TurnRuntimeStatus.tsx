@@ -1,6 +1,7 @@
 import type { ItemView, RetryStatusView } from "@metis/app-protocol";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { formatElapsed } from "../format-elapsed.ts";
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
@@ -52,6 +53,7 @@ export function TurnRuntimeStatus({
 	waitingForAnswer = false,
 	variant = "turn",
 	retry,
+	runId,
 }: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
@@ -59,32 +61,46 @@ export function TurnRuntimeStatus({
 	readonly startedAt?: string;
 	readonly variant?: "turn" | "compaction";
 	readonly retry?: RetryStatusView;
+	readonly runId?: string;
 }) {
 	const { t } = useTranslation();
 	const target = useMemo(() => turnTokenTarget(items), [items]);
 	const targetRef = useRef(target.tokens);
 	targetRef.current = target.tokens;
-	const [startedAtMs] = useState(() => {
+	const parsedStartedAt = useMemo(() => {
 		const parsed = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
-		return Number.isFinite(parsed) ? parsed : Date.now();
-	});
+		return Number.isFinite(parsed) ? parsed : undefined;
+	}, [startedAt]);
+	const [now, setNow] = useState(() => Date.now());
+	const [runClock, setRunClock] = useState(() => ({
+		runId,
+		startedAtMs: parsedStartedAt ?? Date.now(),
+	}));
 	const [displayedTokens, setDisplayedTokens] = useState(0);
-	const [elapsedSeconds, setElapsedSeconds] = useState(() =>
-		Math.max(0, Math.floor((Date.now() - startedAtMs) / 1_000)),
-	);
+	let startedAtMs = runClock.startedAtMs;
+
+	if (runClock.runId !== runId) {
+		startedAtMs = parsedStartedAt ?? Date.now();
+		setRunClock({ runId, startedAtMs });
+		setDisplayedTokens(0);
+	} else if (parsedStartedAt !== undefined && parsedStartedAt !== runClock.startedAtMs) {
+		startedAtMs = parsedStartedAt;
+		setRunClock({ runId, startedAtMs: parsedStartedAt });
+	}
 
 	useEffect(() => {
 		if (!running || waitingForAnswer) return;
 		const interval = window.setInterval(() => {
 			if (variant === "turn") setDisplayedTokens((current) => advanceDisplayedTokens(current, targetRef.current));
-			setElapsedSeconds(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1_000)));
+			setNow(Date.now());
 		}, 100);
 		return () => window.clearInterval(interval);
-	}, [running, startedAtMs, variant, waitingForAnswer]);
+	}, [running, variant, waitingForAnswer]);
 
 	if (!running) return null;
 	if (waitingForAnswer)
 		return <output className="status-block turn-runtime-status is-waiting">{t("Waiting for your answer")}</output>;
+	const elapsed = formatElapsed(Math.max(0, now - startedAtMs));
 	const label =
 		variant === "compaction"
 			? t("Compacting conversation…")
@@ -104,8 +120,8 @@ export function TurnRuntimeStatus({
 			</span>
 			<span aria-hidden="true">
 				{variant === "compaction"
-					? `${elapsedSeconds}s · ${label}`
-					: `${elapsedSeconds}s · ${t("{{count}} tokens", { count: displayedTokens })} · ${label}`}
+					? `${elapsed} · ${label}`
+					: `${elapsed} · ${t("{{count}} tokens", { count: displayedTokens })} · ${label}`}
 			</span>
 		</output>
 	);

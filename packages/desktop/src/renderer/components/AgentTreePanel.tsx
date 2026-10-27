@@ -1,18 +1,5 @@
 import { type AgentSummaryView, RPC_ERROR_CODES } from "@metis/app-protocol";
 import {
-	Archive,
-	ArrowLeft,
-	CaretDown,
-	CaretRight,
-	CheckCircle,
-	Clock,
-	Robot,
-	SpinnerGap,
-	StopCircle,
-	Trash,
-	WarningCircle,
-} from "@phosphor-icons/react";
-import {
 	type KeyboardEvent,
 	type ReactNode,
 	useCallback,
@@ -25,6 +12,19 @@ import {
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
 import { formatElapsed } from "../format-elapsed.ts";
+import {
+	Archive,
+	ArrowLeft,
+	CaretDown,
+	CaretRight,
+	CheckCircle,
+	Clock,
+	Robot,
+	SpinnerGap,
+	StopCircle,
+	Trash,
+	WarningCircle,
+} from "../icons.tsx";
 import type { AppStore } from "../store/app-store.ts";
 import { emptyProjection } from "../store/reducer.ts";
 import { MenuSelect } from "./MenuSelect.tsx";

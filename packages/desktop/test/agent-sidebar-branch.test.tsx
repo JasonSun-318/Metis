@@ -74,6 +74,14 @@ async function mount(
 	await render();
 	return { container, api, onOpen, onOpenRoot, render };
 }
+function expectDrawer(element: Element, open: boolean): HTMLElement {
+	const drawer = element.closest<HTMLElement>(".agent-sidebar-drawer");
+	expect(drawer).not.toBeNull();
+	expect(drawer?.getAttribute("data-open")).toBe(String(open));
+	expect(drawer?.getAttribute("aria-hidden")).toBe(String(!open));
+	expect(drawer?.hasAttribute("inert")).toBe(!open);
+	return drawer!;
+}
 beforeEach(async () => {
 	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 	localStorage.clear();
@@ -189,13 +197,95 @@ describe("AgentSidebarBranch", () => {
 		await act(async () => container.querySelector<HTMLButtonElement>(".agent-sidebar-toggle")!.click());
 		expect(container.querySelectorAll('.agent-sidebar-open[tabindex="0"]')).toHaveLength(1);
 	});
+	it("keeps root tree nodes mounted while closing and reopening without reloading or navigating", async () => {
+		const { container, api, onOpen, onOpenRoot } = await mount();
+		const tree = container.querySelector('[role="tree"]')!;
+		const child = container.querySelector('button[title^="child"]')!;
+		const toggle = container.querySelector<HTMLButtonElement>(".agent-root-toggle")!;
+		const summary = container.querySelector(".agent-sidebar-summary")!;
+		expectDrawer(tree, true);
+		expectDrawer(summary, false);
+		await act(async () => toggle.click());
+		expect(container.querySelector('[role="tree"]')).toBe(tree);
+		expect(container.querySelector('button[title^="child"]')).toBe(child);
+		expectDrawer(tree, false);
+		expectDrawer(summary, true);
+		await act(async () => toggle.click());
+		expect(container.querySelector('[role="tree"]')).toBe(tree);
+		expect(container.querySelector('button[title^="child"]')).toBe(child);
+		expectDrawer(tree, true);
+		expectDrawer(summary, false);
+		expect(api.listAgents).toHaveBeenCalledTimes(1);
+		expect(onOpen).not.toHaveBeenCalled();
+		expect(onOpenRoot).not.toHaveBeenCalled();
+	});
+	it("keeps nested nodes mounted and skips closed descendants during keyboard navigation", async () => {
+		const { container, onOpen } = await mount();
+		const child = container.querySelector<HTMLButtonElement>('button[title^="child"]')!;
+		const grandchild = container.querySelector<HTMLButtonElement>('button[title^="grandchild"]')!;
+		const sibling = container.querySelector<HTMLButtonElement>('button[title^="sibling"]')!;
+		const parent = child.closest('[role="treeitem"]')!;
+		const toggle = parent.querySelector<HTMLButtonElement>(":scope > .agent-sidebar-row > .agent-sidebar-toggle")!;
+		await act(async () => toggle.click());
+		expect(parent.getAttribute("aria-expanded")).toBe("false");
+		expect(container.querySelector('button[title^="grandchild"]')).toBe(grandchild);
+		expectDrawer(grandchild, false);
+		await act(async () => {
+			child.focus();
+			child.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }));
+		});
+		expect(document.activeElement).toBe(sibling);
+		await act(async () => {
+			child.focus();
+			child.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }));
+		});
+		expectDrawer(grandchild, true);
+		expect(parent.getAttribute("aria-expanded")).toBe("true");
+		await act(async () => child.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" })));
+		expect(document.activeElement).toBe(grandchild);
+		expect(onOpen).not.toHaveBeenCalled();
+	});
+	it("keeps the latest drawer state after rapid repeated toggles", async () => {
+		const { container, api, onOpen, onOpenRoot } = await mount();
+		const toggle = container.querySelector<HTMLButtonElement>(".agent-root-toggle")!;
+		const tree = container.querySelector('[role="tree"]')!;
+		for (let count = 0; count < 5; count++) await act(async () => toggle.click());
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
+		expectDrawer(tree, false);
+		expect(container.querySelector('[role="tree"]')).toBe(tree);
+		expect(localStorage.getItem("metis.agent-tree.root")).toBe("closed");
+		await act(async () => toggle.click());
+		expect(toggle.getAttribute("aria-expanded")).toBe("true");
+		expectDrawer(tree, true);
+		expect(localStorage.getItem("metis.agent-tree.root")).toBe("open");
+		expect(api.listAgents).toHaveBeenCalledTimes(1);
+		expect(onOpen).not.toHaveBeenCalled();
+		expect(onOpenRoot).not.toHaveBeenCalled();
+	});
+	it("restores a closed root preference and expands its retained tree from the summary", async () => {
+		localStorage.setItem("metis.agent-tree.root", "closed");
+		const { container, api, onOpen } = await mount();
+		const toggle = container.querySelector<HTMLButtonElement>(".agent-root-toggle")!;
+		const tree = container.querySelector('[role="tree"]')!;
+		const summary = container.querySelector<HTMLButtonElement>(".agent-sidebar-summary")!;
+		expect(toggle.getAttribute("aria-expanded")).toBe("false");
+		expectDrawer(tree, false);
+		expectDrawer(summary, true);
+		await act(async () => summary.click());
+		expect(container.querySelector('[role="tree"]')).toBe(tree);
+		expectDrawer(tree, true);
+		expectDrawer(summary, false);
+		expect(toggle.getAttribute("aria-expanded")).toBe("true");
+		expect(api.listAgents).toHaveBeenCalledTimes(1);
+		expect(onOpen).not.toHaveBeenCalled();
+	});
 	it("restores nested collapse preferences when the sidebar is remounted", async () => {
 		const first = await mount();
 		await act(async () => first.container.querySelector<HTMLButtonElement>(".agent-sidebar-toggle")!.click());
-		expect(first.container.querySelector('button[title^="grandchild"]')).toBeNull();
+		expectDrawer(first.container.querySelector('button[title^="grandchild"]')!, false);
 		const restored = await mount();
 		expect(restored.container.querySelector('button[title^="child"]')).not.toBeNull();
-		expect(restored.container.querySelector('button[title^="grandchild"]')).toBeNull();
+		expectDrawer(restored.container.querySelector('button[title^="grandchild"]')!, false);
 	});
 	it("nests descendants under the parent and opens the actual child target", async () => {
 		const { container, onOpen } = await mount();
@@ -213,7 +303,7 @@ describe("AgentSidebarBranch", () => {
 		});
 		expect(document.activeElement?.getAttribute("title")).toContain("grandchild");
 		await act(async () => container.querySelector<HTMLButtonElement>(".agent-root-toggle")!.click());
-		expect(container.querySelector('[role="tree"]')).toBeNull();
+		expectDrawer(container.querySelector('[role="tree"]')!, false);
 		expect(container.textContent).toContain("3 agents");
 		expect(localStorage.getItem("metis.agent-tree.root")).toBe("closed");
 	});

@@ -55,6 +55,8 @@ export function useAgentHistory(
 		let reading = false;
 		let requested = false;
 		let latestEvents = new Map<string, ItemView>();
+		let knownEpoch: string | null | undefined;
+		let supervisorState: "stopped" | "starting" | "ready" | "restarting" | "failed" | "shuttingDown" | undefined;
 		const active = () => mounted.current && generation.current === currentGeneration;
 		const request = () => {
 			requested = true;
@@ -69,7 +71,11 @@ export function useAgentHistory(
 						if (!active()) return;
 						if (page.items.some((item) => item.sessionId !== agentId))
 							throw new Error("History page does not belong to child");
-						setItems((old) => refreshAgentItems(old, page.items, [...latestEvents.values()]));
+						setItems((old) =>
+							page.items.length === 0
+								? mergeAgentItems(old, [...latestEvents.values()])
+								: refreshAgentItems(old, page.items, [...latestEvents.values()]),
+						);
 						setCursor((previous) => (hasLoadedOlder.current ? previous : page.nextBeforeItemId));
 						setError(undefined);
 					}
@@ -77,14 +83,40 @@ export function useAgentHistory(
 					if (active()) setError(cause);
 				} finally {
 					reading = false;
-					if (active()) setLoading(false);
+					if (active()) {
+						setLoading(false);
+						if (requested) request();
+					}
 				}
 			})();
 		};
 		refresh.current = request;
 		const unsubscribe = api.subscribe((event) => {
-			if (!active() || event.type !== "app-server" || event.envelope.method !== "connection/events") return;
-			for (const change of event.envelope.params.events) {
+			if (!active()) return;
+			if (event.type === "supervisor") {
+				const previousState = supervisorState;
+				const previousEpoch = knownEpoch;
+				const epochChanged = previousEpoch !== undefined && event.view.serverEpoch !== previousEpoch;
+				supervisorState = event.view.state;
+				knownEpoch = event.view.serverEpoch;
+				if (event.view.state === "ready" && (previousState !== "ready" || epochChanged)) request();
+				return;
+			}
+			if (event.type !== "app-server" || event.envelope.method !== "connection/events") return;
+			const batch = event.envelope.params;
+			const epochChanged = knownEpoch !== undefined && batch.serverEpoch !== knownEpoch;
+			knownEpoch = batch.serverEpoch;
+			for (const change of batch.events) {
+				if (change.type === "agent/updated") {
+					if (change.sessionId !== sessionId || change.agent.agentId !== agentId) continue;
+					if (
+						change.agent.status === "done" ||
+						change.agent.status === "failed" ||
+						change.agent.status === "stopped"
+					)
+						request();
+					continue;
+				}
 				if (!("agentId" in change) || change.agentId !== agentId || change.sessionId !== sessionId) continue;
 				if (change.type === "agent/item/started" || change.type === "agent/item/completed") {
 					latestEvents.set(change.item.itemId, change.item);
@@ -100,6 +132,7 @@ export function useAgentHistory(
 					);
 				} else if (change.type === "agent/itemsChanged") request();
 			}
+			if (epochChanged) request();
 		});
 		request();
 		return () => {
@@ -107,6 +140,7 @@ export function useAgentHistory(
 			unsubscribe();
 		};
 	}, [api, sessionId, agentId]);
+	const reload = useCallback(() => refresh.current(), []);
 	const loadOlder = useCallback(async () => {
 		if (!cursor || loadingOlder.current) return;
 		loadingOlder.current = true;
@@ -127,5 +161,5 @@ export function useAgentHistory(
 			if (mounted.current && requestedGeneration === generation.current) setLoading(false);
 		}
 	}, [api, sessionId, agentId, cursor]);
-	return { items, cursor, loading, error, loadOlder, reload: () => refresh.current() };
+	return { items, cursor, loading, error, loadOlder, reload };
 }
