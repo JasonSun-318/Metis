@@ -1,3 +1,5 @@
+import { type ReactNode, useId, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import {
 	ArrowsIn,
 	ArrowsOut,
@@ -7,9 +9,7 @@ import {
 	MagnifyingGlassMinus,
 	MagnifyingGlassPlus,
 	X,
-} from "@phosphor-icons/react";
-import { type ReactNode, useId, useRef } from "react";
-import { useTranslation } from "react-i18next";
+} from "../../icons.tsx";
 import { WorkspaceFileIcon } from "../WorkspaceFileIcon.tsx";
 import { usePreviewExpansion } from "./PreviewFrame.tsx";
 import type { PreviewZoom } from "./preview-layout.ts";

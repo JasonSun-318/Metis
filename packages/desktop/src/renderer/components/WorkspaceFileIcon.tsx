@@ -1,3 +1,5 @@
+import type { ComponentType } from "react";
+import type { DesktopWorkspaceEntry } from "../../shared/desktop-api.ts";
 import {
 	File,
 	FileC,
@@ -24,9 +26,7 @@ import {
 	FileVideo,
 	FileXls,
 	FileZip,
-} from "@phosphor-icons/react";
-import type { ComponentType } from "react";
-import type { DesktopWorkspaceEntry } from "../../shared/desktop-api.ts";
+} from "../icons.tsx";
 import { AnimatedNavIcon } from "./AnimatedNavIcon.tsx";
 
 interface WorkspaceFileIconProps {

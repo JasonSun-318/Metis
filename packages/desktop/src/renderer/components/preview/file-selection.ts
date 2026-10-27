@@ -66,7 +66,27 @@ export function selectionFromRange({
 	)
 		return null;
 	for (const button of Array.from(root.querySelectorAll("button, textarea, [contenteditable=true]")))
-		if (range.intersectsNode(button)) return null;
+		if (!button.hasAttribute("data-math-copy") && range.intersectsNode(button)) return null;
+	// Embedded content has another file owner and cannot inherit this document's line numbers.
+	for (const embed of Array.from(root.querySelectorAll("[data-markdown-embed]")))
+		if (range.intersectsNode(embed)) return null;
+	if (kind === "markdown") {
+		const startElement =
+			range.startContainer instanceof Element ? range.startContainer : range.startContainer.parentElement;
+		const endElement = range.endContainer instanceof Element ? range.endContainer : range.endContainer.parentElement;
+		const startMath = startElement?.closest<HTMLElement>("[data-markdown-math-source]");
+		if (startMath && startMath === endElement?.closest("[data-markdown-math-source]")) {
+			selectedText = startMath.dataset.markdownMathSource ?? selectedText;
+		} else if (
+			Array.from(root.querySelectorAll("[data-markdown-math-source]")).some((math) => range.intersectsNode(math))
+		) {
+			const fragment = range.cloneContents();
+			for (const button of Array.from(fragment.querySelectorAll("[data-math-copy]"))) button.remove();
+			for (const math of Array.from(fragment.querySelectorAll<HTMLElement>("[data-markdown-math-source]")))
+				math.replaceWith(document.createTextNode(math.dataset.markdownMathSource ?? ""));
+			selectedText = fragment.textContent ?? selectedText;
+		}
+	}
 	const source = kind === "markdown" ? sourceText.replace(/\r\n?/gu, "\n") : sourceText;
 	let start: number | undefined;
 	let end: number | undefined;

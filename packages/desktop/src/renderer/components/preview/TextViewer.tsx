@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { MetisDesktopApi } from "../../../shared/desktop-api.ts";
 import { Markdown } from "../Markdown.tsx";
+import type { MarkdownDocument } from "../markdown-resources.ts";
 import { useFileSelections } from "./FileSelectionContext.tsx";
 import { FileSelectionPopover } from "./FileSelectionPopover.tsx";
 import { type DraftFileSelection, selectionFromRange } from "./file-selection.ts";
@@ -10,6 +12,7 @@ import { decodePreviewText, formatPreviewText } from "./preview-bytes.ts";
 import type { UniversalPreviewTarget } from "./preview-kinds.ts";
 
 export interface TextViewerProps {
+	readonly api?: MetisDesktopApi;
 	readonly fileName: string;
 	readonly file?: UniversalPreviewTarget;
 	readonly byteLength?: number;
@@ -21,6 +24,7 @@ export interface TextViewerProps {
 }
 
 export function TextViewer({
+	api,
 	byteLength,
 	bytes,
 	fileName,
@@ -42,6 +46,29 @@ export function TextViewer({
 		() => (kind === "markdown" ? sourceText : formatPreviewText(fileName, sourceText)),
 		[sourceText, fileName, kind],
 	);
+	const markdownDocument = useMemo<MarkdownDocument | undefined>(() => {
+		if (!api || !file?.relativePath) return;
+		const owner =
+			file.source === "knowledge" && file.libraryId
+				? {
+						source: "knowledge" as const,
+						libraryId: file.libraryId,
+						path: file.relativePath,
+						sessionId: file.sessionId,
+					}
+				: file.source === "workspace"
+					? { source: "workspace" as const, sessionId: file.sessionId, path: file.relativePath }
+					: file.source === "delivered" && file.fileId
+						? {
+								source: "delivered" as const,
+								sessionId: file.sessionId,
+								rootSessionId: file.rootSessionId,
+								fileId: file.fileId,
+								path: file.relativePath,
+							}
+						: undefined;
+		return owner ? { api, owner, revision: sourceText } : undefined;
+	}, [api, file, sourceText]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.fileId): New content or file identity invalidates the previous text selection.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.relativePath): New content or file identity invalidates the previous text selection.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(file?.sessionId): New content or file identity invalidates the previous text selection.
@@ -109,7 +136,7 @@ export function TextViewer({
 			>
 				{kind === "markdown" ? (
 					<article className="file-markdown">
-						<Markdown text={text} sourcePositions />
+						<Markdown text={text} sourcePositions document={markdownDocument} />
 					</article>
 				) : (
 					<pre className="preview-plain-text">{text}</pre>

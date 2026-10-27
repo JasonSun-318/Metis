@@ -1,6 +1,7 @@
 import { createContext, type ReactNode, useContext, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConversationSubmission } from "../../composer-submission.ts";
+import { X } from "../../icons.tsx";
 import { DrawerDetails } from "../DrawerDetails.tsx";
 import { type DraftFileSelection, selectionTargetLabel, validateSelectionSize } from "./file-selection.ts";
 
@@ -117,7 +118,7 @@ export function FileSelectionChips({ sessionId }: { readonly sessionId?: string 
 								aria-label={t("Remove reference {{name}}", { name: selection.name })}
 								onClick={() => context?.remove([selection.id])}
 							>
-								×
+								<X aria-hidden="true" size={14} />
 							</button>
 						</div>
 						<small>

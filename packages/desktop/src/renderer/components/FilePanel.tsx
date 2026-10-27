@@ -1,3 +1,13 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type {
+	DesktopWorkspaceEntry,
+	DesktopWorkspaceFile,
+	DesktopWorkspaceMutationInput,
+	DesktopWorkspaceMutationResult,
+	MetisDesktopApi,
+} from "../../shared/desktop-api.ts";
 import {
 	CaretRight,
 	Code,
@@ -15,17 +25,7 @@ import {
 	SidebarSimple,
 	SpinnerGap,
 	Trash,
-} from "@phosphor-icons/react";
-import { useVirtualizer } from "@tanstack/react-virtual";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type {
-	DesktopWorkspaceEntry,
-	DesktopWorkspaceFile,
-	DesktopWorkspaceMutationInput,
-	DesktopWorkspaceMutationResult,
-	MetisDesktopApi,
-} from "../../shared/desktop-api.ts";
+} from "../icons.tsx";
 import { CodeEditor, type CodeTextSelection } from "./CodeEditor.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -34,6 +34,7 @@ import { FileSelectionPopover } from "./preview/FileSelectionPopover.tsx";
 import { type DraftFileSelection, selectionFromRange, selectionFromText } from "./preview/file-selection.ts";
 import { classifyPreviewKind, isHostedPreviewKind } from "./preview/preview-kinds.ts";
 import { UniversalFilePreviewer } from "./preview/UniversalFilePreviewer.tsx";
+import { ToolbarTooltip } from "./ToolbarTooltip.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const DIRECTORY_CACHE_MS = 5_000;
@@ -678,64 +679,69 @@ export function FilePanel({
 						{displayedFile && activePath && (
 							<>
 								{displayedFile.kind === "text" && draftMatchesActivePath && (
-									<button
-										aria-label={t("Save file")}
-										disabled={draft.text === draft.savedText || saving}
-										onClick={() => void save().catch(onError)}
-										title={t(saving ? "Saving…" : "Save")}
-										type="button"
-									>
-										<FloppyDisk aria-hidden="true" size={14} />
-									</button>
+									<ToolbarTooltip active={visible} label={t(saving ? "Saving…" : "Save")}>
+										<button
+											aria-label={t("Save file")}
+											disabled={draft.text === draft.savedText || saving}
+											onClick={() => void save().catch(onError)}
+											type="button"
+										>
+											<FloppyDisk aria-hidden="true" size={14} />
+										</button>
+									</ToolbarTooltip>
 								)}
 								{displayedFile.kind === "text" && isMarkdown(activePath) && (
-									<button
-										aria-label={t(previewMode ? "View source" : "Show preview")}
-										onClick={() => setPreviewMode((value) => !value)}
-										title={t(previewMode ? "Source" : "Preview")}
-										type="button"
-									>
-										{previewMode ? (
-											<Code aria-hidden="true" size={14} />
-										) : (
-											<Eye aria-hidden="true" size={14} />
-										)}
-									</button>
+									<ToolbarTooltip active={visible} label={t(previewMode ? "Source" : "Preview")}>
+										<button
+											aria-label={t(previewMode ? "View source" : "Show preview")}
+											onClick={() => setPreviewMode((value) => !value)}
+											type="button"
+										>
+											{previewMode ? (
+												<Code aria-hidden="true" size={14} />
+											) : (
+												<Eye aria-hidden="true" size={14} />
+											)}
+										</button>
+									</ToolbarTooltip>
 								)}
-								<button
-									aria-label={t("Copy path")}
-									onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))}
-									title={t("Copy path")}
-									type="button"
-								>
-									<Copy aria-hidden="true" size={14} />
-								</button>
-								{displayedFile.kind === "text" && (
+								<ToolbarTooltip active={visible} label={t("Copy path")}>
 									<button
-										aria-label={t("Copy contents")}
-										onClick={() =>
-											void copy(
-												draftMatchesActivePath ? draft.text : displayedFile.text,
-												t("Contents copied"),
-											)
-										}
-										title={t("Copy contents")}
+										aria-label={t("Copy path")}
+										onClick={() => void copy(displayedFile.absolutePath, t("Path copied"))}
 										type="button"
 									>
-										<FileText aria-hidden="true" size={14} />
+										<Copy aria-hidden="true" size={14} />
 									</button>
+								</ToolbarTooltip>
+								{displayedFile.kind === "text" && (
+									<ToolbarTooltip active={visible} label={t("Copy contents")}>
+										<button
+											aria-label={t("Copy contents")}
+											onClick={() =>
+												void copy(
+													draftMatchesActivePath ? draft.text : displayedFile.text,
+													t("Contents copied"),
+												)
+											}
+											type="button"
+										>
+											<FileText aria-hidden="true" size={14} />
+										</button>
+									</ToolbarTooltip>
 								)}
 								<div className="file-open-menu" ref={actionMenuRef}>
-									<button
-										aria-expanded={actionMenuOpen}
-										aria-haspopup="menu"
-										aria-label={t("Open file actions")}
-										onClick={() => setActionMenuOpen((value) => !value)}
-										title={t("Open file actions")}
-										type="button"
-									>
-										<DotsThree aria-hidden="true" size={16} />
-									</button>
+									<ToolbarTooltip active={visible} label={t("Open file actions")}>
+										<button
+											aria-expanded={actionMenuOpen}
+											aria-haspopup="menu"
+											aria-label={t("Open file actions")}
+											onClick={() => setActionMenuOpen((value) => !value)}
+											type="button"
+										>
+											<DotsThree aria-hidden="true" size={16} />
+										</button>
+									</ToolbarTooltip>
 									{actionMenuOpen && (
 										<div aria-label={t("Open file actions")} className="file-open-popover" role="menu">
 											<button onClick={() => open("default")} role="menuitem" type="button">
@@ -749,16 +755,17 @@ export function FilePanel({
 								</div>
 							</>
 						)}
-						<button
-							aria-expanded={treeOpen}
-							aria-label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}
-							className={`file-tree-toggle${treeOpen ? " is-active" : ""}`}
-							onClick={() => setTreeOpen((val) => !val)}
-							title={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}
-							type="button"
-						>
-							<SidebarSimple aria-hidden="true" size={14} />
-						</button>
+						<ToolbarTooltip active={visible} label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}>
+							<button
+								aria-expanded={treeOpen}
+								aria-label={t(treeOpen ? "Hide workspace tree" : "Show workspace tree")}
+								className={`file-tree-toggle${treeOpen ? " is-active" : ""}`}
+								onClick={() => setTreeOpen((val) => !val)}
+								type="button"
+							>
+								<SidebarSimple aria-hidden="true" size={14} />
+							</button>
+						</ToolbarTooltip>
 					</div>
 				</header>
 				{notice && <output className="status-block file-preview-notice">{notice}</output>}
@@ -835,7 +842,16 @@ export function FilePanel({
 						</div>
 					) : visible && draftMatchesActivePath && isMarkdown(draft.file.relativePath) && previewMode ? (
 						<article className="file-markdown code-turn-answer">
-							<Markdown text={draft.text} sourcePositions />
+							<Markdown
+								key={draft.file.relativePath}
+								text={draft.text}
+								sourcePositions
+								document={{
+									api,
+									owner: { source: "workspace", sessionId, path: draft.file.relativePath },
+									revision: draft.file.revision,
+								}}
+							/>
 						</article>
 					) : visible && draftMatchesActivePath ? (
 						<CodeEditor
@@ -964,11 +980,13 @@ export function FilePanel({
 									) : (
 										<span className="file-tree-caret" />
 									)}
-									<WorkspaceFileIcon
-										expanded={isExpanded}
-										kind={entry.kind}
-										path={isCreateRow ? editName : entry.relativePath}
-									/>
+									<span className="file-tree-row-icon">
+										<WorkspaceFileIcon
+											expanded={isExpanded}
+											kind={entry.kind}
+											path={isCreateRow ? editName : entry.relativePath}
+										/>
+									</span>
 									{isEditing ? (
 										<input
 											aria-label={t("Name")}
@@ -999,7 +1017,9 @@ export function FilePanel({
 											value={editName}
 										/>
 									) : (
-										<span>{query.trim() ? entry.relativePath : entry.name}</span>
+										<span className="file-tree-row-name">
+											{query.trim() ? entry.relativePath : entry.name}
+										</span>
 									)}
 									{loading && <SpinnerGap aria-hidden="true" className="is-spinning" size={12} />}
 								</>

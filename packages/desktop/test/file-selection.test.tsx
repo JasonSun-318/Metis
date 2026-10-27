@@ -124,3 +124,33 @@ it("falls back to a quote when rendered Markdown has no source metadata", () => 
 	expect(input.basis).toBe("markdown");
 	expect(input.startLine).toBeUndefined();
 });
+
+it("uses TeX once instead of duplicate visual and MathML content", () => {
+	const root = document.createElement("article");
+	root.innerHTML =
+		'<div data-source-start="0" data-source-end="11"><span data-markdown-math-source="x^2"><span>hidden</span><span>visual</span></span></div>';
+	document.body.append(root);
+	const input = selectionFromRange({
+		root,
+		range: select(root, "visual"),
+		file,
+		sourceText: "$x^2$\r\n",
+		displayText: "$x^2$\n",
+		kind: "markdown",
+	})!.input;
+	expect(input.selectedText).toBe("x^2");
+	expect(input.sourceExcerpt).toContain("$x^2$");
+	expect(input.startLine).toBe(1);
+});
+
+it("rejects parent-file references when a selection intersects a child embed", () => {
+	const root = document.createElement("article");
+	root.innerHTML =
+		'<div data-source-start="0" data-source-end="10">parent<div data-markdown-embed="true">child text</div></div>';
+	document.body.append(root);
+	const range = document.createRange();
+	range.selectNodeContents(root);
+	expect(
+		selectionFromRange({ root, range, file, sourceText: "![[child]]", displayText: "![[child]]", kind: "markdown" }),
+	).toBeNull();
+});

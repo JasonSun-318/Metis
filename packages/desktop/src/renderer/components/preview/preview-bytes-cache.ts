@@ -10,8 +10,16 @@ export function previewCacheKey(
 				readonly rootSessionId?: string;
 				readonly fileId: string;
 		  }
-		| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string },
+		| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string }
+		| {
+				readonly source: "knowledge";
+				readonly libraryId: string;
+				readonly relativePath: string;
+				readonly revision?: string;
+		  },
 ): PreviewCacheKey {
+	if (target.source === "knowledge")
+		return `knowledge:${target.libraryId}:${target.relativePath}:${target.revision ?? ""}`;
 	return target.source === "delivered"
 		? `delivered:${target.rootSessionId ? `${target.rootSessionId}:` : ""}${target.sessionId}:${target.fileId}`
 		: `workspace:${target.sessionId}:${target.relativePath}`;
@@ -58,6 +66,14 @@ export class PreviewBytesCache {
 			const value = this.entries.get(key);
 			this.entries.delete(key);
 			if (value) this.bytes -= value.byteLength;
+		}
+	}
+
+	deleteLibrary(libraryId: string): void {
+		for (const key of [...this.entries.keys()]) {
+			if (!key.startsWith(`knowledge:${libraryId}:`)) continue;
+			this.bytes -= this.entries.get(key)!.byteLength;
+			this.entries.delete(key);
 		}
 	}
 

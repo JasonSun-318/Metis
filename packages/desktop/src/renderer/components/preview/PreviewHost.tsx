@@ -1,7 +1,7 @@
-import { File, SpinnerGap } from "@phosphor-icons/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopPreviewFileInput, MetisDesktopApi } from "../../../shared/desktop-api.ts";
+import { File, SpinnerGap } from "../../icons.tsx";
 import { DocxViewer } from "./DocxViewer.tsx";
 import { ExcelViewer } from "./ExcelViewer.tsx";
 import { ImageViewer } from "./ImageViewer.tsx";
@@ -31,8 +31,18 @@ interface LoadedPreview {
 }
 
 function previewInput(
-	file: Pick<UniversalPreviewTarget, "source" | "sessionId" | "rootSessionId" | "fileId" | "relativePath">,
+	file: Pick<
+		UniversalPreviewTarget,
+		"source" | "sessionId" | "rootSessionId" | "fileId" | "relativePath" | "libraryId" | "revision"
+	>,
 ): DesktopPreviewFileInput | null {
+	if (file.source === "knowledge" && file.libraryId && file.relativePath)
+		return {
+			source: "knowledge",
+			libraryId: file.libraryId,
+			relativePath: file.relativePath,
+			revision: file.revision,
+		};
 	if (file.source === "delivered" && file.fileId) {
 		return {
 			source: "delivered",
@@ -90,17 +100,32 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 	const [data, setData] = useState<LoadedPreview | null>(null);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { source, sessionId, fileId, relativePath } = file;
+	const { source, sessionId, rootSessionId, fileId, relativePath, libraryId, revision: resourceRevision } = file;
 	const input = useMemo(
-		() => previewInput({ source, sessionId, fileId, relativePath }),
-		[source, sessionId, fileId, relativePath],
+		() =>
+			previewInput({
+				source,
+				sessionId,
+				rootSessionId,
+				fileId,
+				relativePath,
+				libraryId,
+				revision: resourceRevision,
+			}),
+		[source, sessionId, rootSessionId, fileId, relativePath, libraryId, resourceRevision],
 	);
-	const liveText = file.source === "workspace";
+	const liveText = file.source === "workspace" || file.source === "knowledge";
 	const loadedKey = useRef<string | null>(null);
 	const [revision, setRevision] = useState(0);
 	useEffect(() => {
 		if (!active || !liveText) return;
 		return api.subscribe?.((event) => {
+			if (file.source === "knowledge" && event.type === "knowledge-libraries") {
+				if (file.libraryId) previewBytesCache.deleteLibrary(file.libraryId);
+				setData(null);
+				setRevision((value) => value + 1);
+				return;
+			}
 			if (event.type !== "app-server" || event.envelope.method !== "connection/events") return;
 			if (
 				event.envelope.params.events.some(
@@ -111,7 +136,7 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 			)
 				setRevision((value) => value + 1);
 		});
-	}, [active, api, file.sessionId, liveText]);
+	}, [active, api, file.sessionId, file.source, file.libraryId, liveText]);
 
 	const handleOpenDefault = () => {
 		if (file.source === "delivered" && file.fileId) {
@@ -269,13 +294,13 @@ function PreviewContent({ file, api, active, onClose, onError }: PreviewHostProp
 		onReveal: handleReveal,
 	};
 
-	if (kind === "pdf") return <PdfViewer {...viewerProps} />;
+	if (kind === "pdf") return <PdfViewer {...viewerProps} initialPage={file.initialPage} />;
 	if (kind === "docx") return <DocxViewer {...viewerProps} />;
 	if (kind === "pptx") return <PptxViewer {...viewerProps} />;
 	if (kind === "xlsx" || kind === "csv") return <ExcelViewer {...viewerProps} />;
 	if (kind === "image") return <ImageViewer mediaType={data.mediaType} {...viewerProps} />;
 	if (kind === "markdown" || kind === "text")
-		return <TextViewer key={JSON.stringify(input)} kind={kind} {...viewerProps} />;
+		return <TextViewer key={JSON.stringify(input)} api={api} kind={kind} {...viewerProps} />;
 
 	return (
 		<PreviewShell
