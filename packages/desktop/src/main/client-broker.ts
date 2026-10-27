@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import {
 	type ClientParams,
@@ -43,6 +44,7 @@ import {
 	validateBrowserControlInput,
 	validateBrowserDownloadControlInput,
 	validateBrowserImportInput,
+	validateChooseBrowserImportDirectoryInput,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -67,7 +69,11 @@ import {
 } from "../shared/desktop-api.ts";
 import type { BrowserManager } from "./browser-manager.ts";
 import { BrowserToolHost } from "./browser-tool-host.ts";
-import { deliveredPreviewDirectories, readDeliveredPreviewBytes } from "./preview-file-reader.ts";
+import {
+	deliveredPreviewDirectories,
+	readDeliveredPreviewBytes,
+	readKnowledgePreviewBytes,
+} from "./preview-file-reader.ts";
 import { validateProjectFolderInput } from "./project-folder.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
@@ -115,6 +121,9 @@ interface ClientBrokerOptions {
 		| "controlDownload"
 		| "listProfiles"
 		| "listImportSources"
+		| "chooseBrowserImportDirectory"
+		| "pickBrowserImportDirectory"
+		| "rememberBrowserImportDirectory"
 		| "importData"
 		| "listHistory"
 		| "clearHistory"
@@ -148,6 +157,8 @@ interface ClientBrokerOptions {
 	readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
 	readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	readonly onSessionOpened?: (sessionId: string) => void;
+	/** Broadcasts to every open window, not just the broker owner. */
+	readonly broadcastEvent?: (event: DesktopApiEvent) => void;
 	readonly onDiagnostic?: (message: string) => void;
 }
 
@@ -222,6 +233,9 @@ export class ClientBroker {
 		| "controlDownload"
 		| "listProfiles"
 		| "listImportSources"
+		| "chooseBrowserImportDirectory"
+		| "pickBrowserImportDirectory"
+		| "rememberBrowserImportDirectory"
 		| "importData"
 		| "listHistory"
 		| "clearHistory"
@@ -256,6 +270,7 @@ export class ClientBroker {
 	private readonly onProjectDeleted?: (mode: SessionSummary["mode"], cwd: string) => void;
 	private readonly onUserInterruptPending?: (sessionId: string, pending: boolean) => void;
 	private readonly onSessionOpened?: (sessionId: string) => void;
+	private readonly broadcastEvent?: (event: DesktopApiEvent) => void;
 	private readonly onDiagnostic?: (message: string) => void;
 	private pendingRendererOpenSession?: Extract<DesktopApiEvent, { type: "open-session" }>;
 	private readonly pendingInteractions = new Map<string, PendingInteraction>();
@@ -353,6 +368,9 @@ export class ClientBroker {
 				},
 			],
 			listImportSources: async () => [],
+			chooseBrowserImportDirectory: async () => false,
+			pickBrowserImportDirectory: async () => null,
+			rememberBrowserImportDirectory: () => undefined,
 			importData: async () => {
 				throw new Error("Browser import is unavailable");
 			},
@@ -422,6 +440,7 @@ export class ClientBroker {
 		this.onProjectDeleted = options.onProjectDeleted;
 		this.onUserInterruptPending = options.onUserInterruptPending;
 		this.onSessionOpened = options.onSessionOpened;
+		this.broadcastEvent = options.broadcastEvent;
 		this.onDiagnostic = options.onDiagnostic;
 		this.registerHandlers();
 		this.removeTerminalListener = this.terminalManager.onEvent((event) => this.sendTerminalEvent(event));
@@ -612,6 +631,27 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.readPreviewFile, 1, async (_event, [input]) => {
 			const params = validateReadPreviewFileInput(input);
 			if (params.source === "workspace") return this.workspaceFiles.readPreviewBytes(params);
+			if (params.source === "knowledge") {
+				// Knowledge reads never fall back to delivered directories and re-check the
+				// registration on every delivery so removed ids stop resolving immediately.
+				try {
+					const list = await this.clientCall("knowledge/list", {});
+					const library = list.libraries.find((library) => library.id === params.libraryId);
+					if (!library) return { ok: false as const, reason: "not-found" as const };
+					if ((await realpath(library.path)) !== library.path)
+						return { ok: false as const, reason: "not-found" as const };
+					const file = await readKnowledgePreviewBytes(library.path, params.relativePath, params.revision);
+					if (file.ok) {
+						// Bytes are only delivered when the same library id still registers the same root path.
+						const recheck = await this.clientCall("knowledge/list", {});
+						if (!recheck.libraries.some((item) => item.id === params.libraryId && item.path === library.path))
+							return { ok: false as const, reason: "not-found" as const };
+					}
+					return file;
+				} catch {
+					return { ok: false as const, reason: "not-found" as const };
+				}
+			}
 			if (params.rootSessionId) {
 				try {
 					const file = await this.clientCall("session/readDeliveredFile", {
@@ -739,6 +779,15 @@ export class ClientBroker {
 		this.register(DESKTOP_IPC_CHANNELS.listBrowserImportSources, 0, async () =>
 			this.browserManager.listImportSources(),
 		);
+		this.register(DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory, 1, async (event, [input]) => {
+			const requested = validateChooseBrowserImportDirectoryInput(input);
+			const directory = await this.selectForRenderer(event, () =>
+				this.browserManager.pickBrowserImportDirectory(requested),
+			);
+			if (directory === null) return false;
+			this.browserManager.rememberBrowserImportDirectory(requested.sourceId, directory);
+			return true;
+		});
 		this.register(DESKTOP_IPC_CHANNELS.importBrowserData, 1, async (_event, [input]) =>
 			this.browserManager.importData(validateBrowserImportInput(input)),
 		);
@@ -814,9 +863,18 @@ export class ClientBroker {
 
 	private registerAppServerForwarders(): void {
 		for (const definition of Object.values(DESKTOP_RPC_FORWARDING)) {
-			this.register(definition.channel, 1, async (_event, [input]) =>
-				this.rpcIpcResult(() => this.clientCall(definition.method, input)),
-			);
+			this.register(definition.channel, 1, async (_event, [input]) => {
+				const result = await this.rpcIpcResult(() => this.clientCall(definition.method, input));
+				// Registration changes invalidate knowledge resources in every window, not just the owner.
+				if (
+					result !== null &&
+					typeof result === "object" &&
+					!("kind" in result) &&
+					(definition.method === "knowledge/remove" || definition.method === "knowledge/register")
+				)
+					this.broadcastEvent?.({ type: "knowledge-libraries" });
+				return result;
+			});
 		}
 	}
 

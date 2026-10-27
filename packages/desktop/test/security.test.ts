@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -7,12 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 import { resolveRendererAsset } from "../src/main/app-protocol-scheme.ts";
 import { ClientBroker, isTrustedRendererUrl } from "../src/main/client-broker.ts";
 import { isSafeExternalUrl } from "../src/main/external-url.ts";
-import { DESKTOP_RPC_FORWARDING } from "../src/shared/app-server-rpc-forwarding.ts";
+import { DESKTOP_RPC_FORWARDING, DESKTOP_RPC_FORWARDING_CHANNELS } from "../src/shared/app-server-rpc-forwarding.ts";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
 	DESKTOP_BROWSER_EVENT_CHANNEL,
 	DESKTOP_IPC_CHANNELS,
 	DESKTOP_TERMINAL_EVENT_CHANNEL,
+	type DesktopApiEvent,
 	type DesktopBrowserEvent,
 	type DesktopTerminalEvent,
 	type SupervisorView,
@@ -764,6 +765,71 @@ describe("desktop trust boundaries", () => {
 		}
 	});
 
+	it("reads knowledge preview bytes only for currently registered libraries without delivered fallback", async () => {
+		const vault = realpathSync(mkdtempSync(join(tmpdir(), "metis-knowledge-vault-")));
+		mkdirSync(join(vault, "assets"));
+		const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);
+		writeFileSync(join(vault, "assets", "diagram.png"), png);
+		const libraryId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+		const library = { id: libraryId, name: "vault", path: vault };
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const broadcasts: DesktopApiEvent[] = [];
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			broadcastEvent: (event) => broadcasts.push(event),
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({ webContents: webContents as never });
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		const respondList = (libraries: unknown[]) => {
+			supervisor.request.mockImplementation(async (request) => ({
+				jsonrpc: "2.0",
+				id: request.id,
+				result: { libraries },
+			}));
+		};
+		try {
+			const read = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.readPreviewFile)!;
+			respondList([library]);
+			const delivered = (await read(event, {
+				source: "knowledge",
+				libraryId,
+				relativePath: "assets/diagram.png",
+			})) as { ok: boolean; bytes?: Uint8Array };
+			expect(delivered).toMatchObject({ ok: true, mediaType: "image/png", byteLength: png.length });
+			if (delivered.ok && delivered.bytes) expect(Buffer.from(delivered.bytes)).toEqual(png);
+			expect(supervisor.request).toHaveBeenCalledWith(
+				expect.objectContaining({ method: "knowledge/list", params: {} }),
+			);
+			let reads = 0;
+			supervisor.request.mockImplementation(async (request) => ({
+				jsonrpc: "2.0",
+				id: request.id,
+				result: { libraries: ++reads === 1 ? [library] : [] },
+			}));
+			await expect(
+				read(event, { source: "knowledge", libraryId, relativePath: "assets/diagram.png" }),
+			).resolves.toEqual({ ok: false, reason: "not-found" });
+
+			// A removed library id must be rejected at delivery time, even mid-cache.
+			respondList([]);
+			await expect(
+				read(event, { source: "knowledge", libraryId, relativePath: "assets/diagram.png" }),
+			).resolves.toEqual({ ok: false, reason: "not-found" });
+
+			// Registration changes are broadcast to every window, not just the owner.
+			respondList([]);
+			const remove = ipcMain.handlers.get(DESKTOP_RPC_FORWARDING_CHANNELS.removeKnowledgeLibrary)!;
+			await remove(event, { requestId: "00000000-0000-4000-8000-000000000003", libraryId });
+			expect(broadcasts).toContainEqual({ type: "knowledge-libraries" });
+		} finally {
+			broker.dispose();
+			rmSync(vault, { recursive: true, force: true });
+		}
+	});
+
 	it("keeps PTY creation behind validated IPC and closes terminals with their renderer owner", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { supervisor } = supervisorHarness();
@@ -908,6 +974,9 @@ describe("desktop trust boundaries", () => {
 					profiles: [{ sourceProfileId: "Default", name: "Personal", email: null }],
 				},
 			]),
+			chooseBrowserImportDirectory: vi.fn(async () => true),
+			pickBrowserImportDirectory: vi.fn(async () => "/Users/test/Library/Application Support/Google/Chrome"),
+			rememberBrowserImportDirectory: vi.fn(),
 			importData: vi.fn(async () => ({
 				profile: {
 					profileId: "20000000-0000-4000-8000-000000000001",
@@ -980,6 +1049,21 @@ describe("desktop trust boundaries", () => {
 			1,
 		);
 		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory)!(event, { sourceId: "chrome" }),
+		).resolves.toBe(true);
+		expect(browserManager.pickBrowserImportDirectory).toHaveBeenCalledWith({ sourceId: "chrome" });
+		expect(browserManager.rememberBrowserImportDirectory).toHaveBeenCalledWith(
+			"chrome",
+			"/Users/test/Library/Application Support/Google/Chrome",
+		);
+		browserManager.rememberBrowserImportDirectory.mockClear();
+		await expect(
+			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory)!(event, {
+				sourceId: "chrome",
+				path: "/tmp/forged",
+			}),
+		).rejects.toThrow("Invalid browser import directory input");
+		await expect(
 			ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.importBrowserData)!(event, {
 				sourceId: "chrome",
 				sourceProfileId: "Default",
@@ -1004,6 +1088,65 @@ describe("desktop trust boundaries", () => {
 		broker.dispose();
 	});
 
+	it("does not remember a browser folder chosen after the renderer changed", async () => {
+		const ipcMain = new FakeIpcMain();
+		const { supervisor } = supervisorHarness();
+		const browserManager = {
+			attach: vi.fn(),
+			suspendRenderer: vi.fn(),
+			create: vi.fn(),
+			capturePreview: vi.fn(),
+			control: vi.fn(),
+			close: vi.fn(),
+			closeAll: vi.fn(),
+			getDownloadDirectory: vi.fn(() => "/Users/test/Downloads"),
+			openDownloadDirectory: vi.fn(),
+			listDownloads: vi.fn(() => []),
+			controlDownload: vi.fn(),
+			listProfiles: vi.fn(() => []),
+			listImportSources: vi.fn(async () => []),
+			chooseBrowserImportDirectory: vi.fn(async () => false),
+			pickBrowserImportDirectory: vi.fn(async (): Promise<string | null> => null),
+			rememberBrowserImportDirectory: vi.fn(),
+			importData: vi.fn(),
+			listHistory: vi.fn(() => []),
+			clearHistory: vi.fn(),
+			onEvent: vi.fn(() => () => undefined),
+			executeTool: vi.fn(),
+			takeControl: vi.fn(),
+			resolveHandoff: vi.fn(),
+			cancelSessionHandoffs: vi.fn(),
+			replayEvents: vi.fn(() => []),
+		};
+		const broker = new ClientBroker({
+			ipcMain: ipcMain as never,
+			supervisor,
+			browserManager: browserManager as never,
+		});
+		const webContents = new FakeWebContents();
+		broker.attach({
+			webContents: webContents as never,
+			contentView: { addChildView: vi.fn(), removeChildView: vi.fn() },
+			getBounds: vi.fn(),
+		} as never);
+		const event = { sender: webContents, senderFrame: webContents.mainFrame };
+		let pending!: (value: string | null) => void;
+		browserManager.pickBrowserImportDirectory.mockImplementationOnce(
+			() =>
+				new Promise<string | null>((resolve) => {
+					pending = resolve;
+				}),
+		);
+		const stale = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory)!(event, {
+			sourceId: "edge",
+		});
+		webContents.emit("did-start-navigation", {}, "app://renderer/index.html", false, true);
+		pending("/Users/test/Edge");
+		await expect(stale).rejects.toThrow("Desktop renderer changed during selection");
+		expect(browserManager.rememberBrowserImportDirectory).not.toHaveBeenCalled();
+		broker.dispose();
+	});
+
 	it("executes browser RPCs only in main and cancels the exact correlated call", async () => {
 		const ipcMain = new FakeIpcMain();
 		const { emitMessage, supervisor } = supervisorHarness();
@@ -1022,6 +1165,9 @@ describe("desktop trust boundaries", () => {
 			controlDownload: vi.fn(),
 			listProfiles: vi.fn(() => []),
 			listImportSources: vi.fn(async () => []),
+			chooseBrowserImportDirectory: vi.fn(async () => false),
+			pickBrowserImportDirectory: vi.fn(async (): Promise<string | null> => null),
+			rememberBrowserImportDirectory: vi.fn(),
 			importData: vi.fn(),
 			listHistory: vi.fn(() => []),
 			clearHistory: vi.fn(),

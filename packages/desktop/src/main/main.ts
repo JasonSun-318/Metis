@@ -16,6 +16,7 @@ import {
 } from "electron";
 import squirrelStartup from "electron-squirrel-startup";
 import {
+	DESKTOP_EVENT_CHANNEL,
 	DESKTOP_FULLSCREEN_CHANNEL,
 	DESKTOP_IS_FULLSCREEN_CHANNEL,
 	DESKTOP_UPDATE_EVENT_CHANNEL,
@@ -232,6 +233,10 @@ async function launch(): Promise<void> {
 		workspaceFiles,
 		openPath: (path) => shell.openPath(path),
 		writeClipboardText: (text) => clipboard.writeText(text),
+		broadcastEvent: (event) => {
+			for (const window of BrowserWindow.getAllWindows())
+				if (!window.isDestroyed()) window.webContents.send(DESKTOP_EVENT_CHANNEL, event);
+		},
 		setWorkspaceEditState: (state) => {
 			workspaceEditState = state;
 		},

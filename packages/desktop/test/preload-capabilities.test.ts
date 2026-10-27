@@ -71,3 +71,16 @@ it("validates theme senders before reading or changing preferences", async () =>
 	handler(trusted, "light");
 	expect(setBackgroundColor).toHaveBeenCalledWith("#faf9f6");
 });
+
+it("chooses a browser import directory by source id and never forwards a renderer path", async () => {
+	electron.ipcRenderer.invoke.mockResolvedValue(true);
+	await import("../src/preload.ts");
+	const api = electron.contextBridge.exposeInMainWorld.mock.calls[0][1] as MetisDesktopApi;
+	await expect(api.chooseBrowserImportDirectory({ sourceId: "chrome" })).resolves.toBe(true);
+	expect(electron.ipcRenderer.invoke).toHaveBeenCalledWith(DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory, {
+		sourceId: "chrome",
+	});
+	await expect(api.chooseBrowserImportDirectory({ sourceId: "chrome", path: "/tmp/forged" } as never)).rejects.toThrow(
+		"Invalid browser import directory input",
+	);
+});

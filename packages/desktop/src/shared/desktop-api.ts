@@ -73,6 +73,7 @@ export type DesktopApiEvent =
 			readonly envelope: ServerRpcRequest<"interaction/request"> | ServerRpcNotification<"connection/events">;
 	  }
 	| { readonly type: "close-tab" }
+	| { readonly type: "knowledge-libraries" }
 	| { readonly type: "interaction-cancelled"; readonly interactionId: string }
 	| { readonly type: "open-session"; readonly sessionId: string; readonly mode: "chat" | "code" }
 	| { readonly type: "supervisor"; readonly view: SupervisorView };
@@ -116,6 +117,7 @@ export const DESKTOP_IPC_CHANNELS = {
 	openBrowserDownloadDirectory: "metis:open-browser-download-directory",
 	listBrowserProfiles: "metis:list-browser-profiles",
 	listBrowserImportSources: "metis:list-browser-import-sources",
+	chooseBrowserImportDirectory: "metis:choose-browser-import-directory",
 	importBrowserData: "metis:import-browser-data",
 	listBrowserHistory: "metis:list-browser-history",
 	clearBrowserHistory: "metis:clear-browser-history",
@@ -301,11 +303,32 @@ export interface DesktopBrowserImportSourceProfile {
 	readonly email: string | null;
 }
 
+export type DesktopBrowserImportStatus =
+	| "ready"
+	| "not-found"
+	| "permission-denied"
+	| "invalid-metadata"
+	| "no-profiles"
+	| "unreadable"
+	| "process-check-failed";
+
+export interface DesktopBrowserImportDiagnostic {
+	readonly stage: "root" | "local-state" | "profiles" | "process";
+	readonly code: string;
+}
+
 export interface DesktopBrowserImportSource {
 	readonly sourceId: DesktopBrowserSourceId;
 	readonly name: string;
 	readonly running: boolean;
 	readonly profiles: readonly DesktopBrowserImportSourceProfile[];
+	readonly status?: DesktopBrowserImportStatus;
+	readonly diagnostic?: DesktopBrowserImportDiagnostic;
+	readonly location?: "default" | "selected";
+}
+
+export interface ChooseBrowserImportDirectoryInput {
+	readonly sourceId: DesktopBrowserSourceId;
 }
 
 export interface DesktopBrowserImportInput {
@@ -508,7 +531,13 @@ export type DesktopPreviewFileInput =
 			readonly rootSessionId?: string;
 			readonly fileId: string;
 	  }
-	| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string };
+	| { readonly source: "workspace"; readonly sessionId: string; readonly relativePath: string }
+	| {
+			readonly source: "knowledge";
+			readonly libraryId: string;
+			readonly relativePath: string;
+			readonly revision?: string;
+	  };
 
 export type DesktopPreviewFile =
 	| {
@@ -518,7 +547,7 @@ export type DesktopPreviewFile =
 			readonly mediaType: string;
 			readonly bytes: Uint8Array;
 	  }
-	| { readonly ok: false; readonly reason: "too-large" | "not-found" };
+	| { readonly ok: false; readonly reason: "too-large" | "not-found" | "stale" };
 
 export type DesktopWorkspaceFile =
 	| (DesktopWorkspaceFileBase & { readonly kind: "text"; readonly text: string; readonly revision: string })
@@ -603,6 +632,7 @@ export interface MetisDesktopApi extends DesktopRpcForwardingApi {
 	openBrowserDownloadDirectory(): Promise<void>;
 	listBrowserProfiles(): Promise<readonly DesktopBrowserProfile[]>;
 	listBrowserImportSources(): Promise<readonly DesktopBrowserImportSource[]>;
+	chooseBrowserImportDirectory(input: ChooseBrowserImportDirectoryInput): Promise<boolean>;
 	importBrowserData(input: DesktopBrowserImportInput): Promise<DesktopBrowserImportResult>;
 	listBrowserHistory(input: DesktopListBrowserHistoryInput): Promise<readonly DesktopHistoryEntry[]>;
 	clearBrowserHistory(input: DesktopListBrowserHistoryInput): Promise<void>;
@@ -644,12 +674,26 @@ const interactionIdValidator = compileSchema(UuidSchema);
 const sessionIdValidator = compileSchema(SessionIdSchema);
 
 function exactRecord(value: unknown, keys: readonly string[], label: string): Record<string, unknown> {
+	return recordWithKeys(value, keys, label, false);
+}
+
+function recordWithKeys(
+	value: unknown,
+	keys: readonly string[],
+	label: string,
+	optional: boolean,
+): Record<string, unknown> {
 	assertEnvelopeByteLimit(value);
 	if (typeof value !== "object" || value === null || Array.isArray(value)) throw new TypeError(`Invalid ${label}`);
 	const record = value as Record<string, unknown>;
 	const actual = Object.keys(record);
-	if (actual.length !== keys.length || actual.some((key) => !keys.includes(key)))
+	const allowed = new Set(keys);
+	if (
+		actual.some((key) => !allowed.has(key)) ||
+		(!optional && (actual.length !== keys.length || keys.some((key) => !actual.includes(key))))
+	) {
 		throw new TypeError(`Invalid ${label}`);
+	}
 	return record;
 }
 
@@ -740,6 +784,24 @@ export function validateReadPreviewFileInput(value: unknown): DesktopPreviewFile
 			source: "workspace",
 			sessionId: workspaceSessionId(input.sessionId),
 			relativePath: workspaceRelativePath(input.relativePath, false),
+		};
+	}
+	if (record.source === "knowledge") {
+		const input = exactRecord(
+			value,
+			Object.hasOwn(record, "revision")
+				? ["source", "libraryId", "relativePath", "revision"]
+				: ["source", "libraryId", "relativePath"],
+			"preview file input",
+		);
+		assertSchema(sessionIdValidator, input.libraryId, "invalid_params", "knowledge library id");
+		if (input.revision !== undefined && (typeof input.revision !== "string" || input.revision.length > 128))
+			throw new TypeError("Invalid knowledge revision");
+		return {
+			source: "knowledge",
+			libraryId: input.libraryId as string,
+			relativePath: workspaceRelativePath(input.relativePath, false),
+			...(input.revision !== undefined ? { revision: input.revision as string } : {}),
 		};
 	}
 	throw new TypeError("Invalid preview file input");
@@ -1154,22 +1216,72 @@ function validateBrowserImportSourceProfile(value: unknown): DesktopBrowserImpor
 	};
 }
 
+const BROWSER_IMPORT_STATUSES: readonly DesktopBrowserImportStatus[] = [
+	"ready",
+	"not-found",
+	"permission-denied",
+	"invalid-metadata",
+	"no-profiles",
+	"unreadable",
+	"process-check-failed",
+];
+
+function diagnosticCode(value: unknown): string {
+	if (typeof value !== "string" || value === "" || value.length > 64 || value.includes("\0")) {
+		throw new TypeError("Invalid browser import diagnostic");
+	}
+	return value;
+}
+
 export function validateBrowserImportSourceList(value: unknown): readonly DesktopBrowserImportSource[] {
 	assertEnvelopeByteLimit(value);
 	if (!Array.isArray(value) || value.length > BROWSER_SOURCE_IDS.length)
 		throw new TypeError("Invalid browser import sources");
 	return value.map((candidate) => {
-		const source = exactRecord(candidate, ["sourceId", "name", "running", "profiles"], "browser import source");
+		const source = recordWithKeys(
+			candidate,
+			["sourceId", "name", "running", "profiles", "status", "diagnostic", "location"],
+			"browser import source",
+			true,
+		);
+		if (!("sourceId" in source) || !("name" in source) || !("running" in source) || !("profiles" in source)) {
+			throw new TypeError("Invalid browser import source");
+		}
 		if (typeof source.running !== "boolean" || !Array.isArray(source.profiles) || source.profiles.length > 128) {
 			throw new TypeError("Invalid browser import source");
+		}
+		if (source.status !== undefined && !(BROWSER_IMPORT_STATUSES as readonly unknown[]).includes(source.status)) {
+			throw new TypeError("Invalid browser import status");
+		}
+		let diagnostic: DesktopBrowserImportDiagnostic | undefined;
+		if (source.diagnostic !== undefined) {
+			const record = exactRecord(source.diagnostic, ["stage", "code"], "browser import diagnostic");
+			if (!["root", "local-state", "profiles", "process"].includes(String(record.stage))) {
+				throw new TypeError("Invalid browser import diagnostic");
+			}
+			diagnostic = {
+				stage: record.stage as DesktopBrowserImportDiagnostic["stage"],
+				code: diagnosticCode(record.code),
+			};
+		}
+		if (source.location !== undefined && source.location !== "default" && source.location !== "selected") {
+			throw new TypeError("Invalid browser import location");
 		}
 		return {
 			sourceId: browserSourceId(source.sourceId),
 			name: browserText(source.name, "source name", 128),
 			running: source.running,
 			profiles: source.profiles.map(validateBrowserImportSourceProfile),
+			...(source.status === undefined ? {} : { status: source.status as DesktopBrowserImportStatus }),
+			...(diagnostic === undefined ? {} : { diagnostic }),
+			...(source.location === undefined ? {} : { location: source.location }),
 		};
 	});
+}
+
+export function validateChooseBrowserImportDirectoryInput(value: unknown): ChooseBrowserImportDirectoryInput {
+	const input = exactRecord(value, ["sourceId"], "browser import directory input");
+	return { sourceId: browserSourceId(input.sourceId) };
 }
 
 export function validateBrowserImportInput(value: unknown): DesktopBrowserImportInput {
@@ -1598,6 +1710,7 @@ export function validateDesktopApiEvent(value: unknown): DesktopApiEvent {
 		return { type: "supervisor", view: event.view };
 	}
 	if (event.type === "close-tab" && Object.keys(event).length === 1) return { type: "close-tab" };
+	if (event.type === "knowledge-libraries" && Object.keys(event).length === 1) return { type: "knowledge-libraries" };
 	if (event.type === "interaction-cancelled" && Object.keys(event).length === 2) {
 		assertSchema(interactionIdValidator, event.interactionId, "invalid_params", "interaction id");
 		return { type: "interaction-cancelled", interactionId: event.interactionId as string };

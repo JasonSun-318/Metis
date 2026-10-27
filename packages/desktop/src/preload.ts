@@ -26,6 +26,7 @@ import {
 	validateBrowserImportResult,
 	validateBrowserImportSourceList,
 	validateBrowserProfileList,
+	validateChooseBrowserImportDirectoryInput,
 	validateCloseBrowserInput,
 	validateCloseTerminalInput,
 	validateCreateBrowserInput,
@@ -198,6 +199,14 @@ const api = {
 		validateBrowserProfileList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserProfiles)),
 	listBrowserImportSources: async () =>
 		validateBrowserImportSourceList(await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.listBrowserImportSources)),
+	chooseBrowserImportDirectory: async (input) => {
+		const chosen = await ipcRenderer.invoke(
+			DESKTOP_IPC_CHANNELS.chooseBrowserImportDirectory,
+			validateChooseBrowserImportDirectoryInput(input),
+		);
+		if (typeof chosen !== "boolean") throw new TypeError("Invalid browser import directory result");
+		return chosen;
+	},
 	importBrowserData: async (input) =>
 		validateBrowserImportResult(
 			await ipcRenderer.invoke(DESKTOP_IPC_CHANNELS.importBrowserData, validateBrowserImportInput(input)),
