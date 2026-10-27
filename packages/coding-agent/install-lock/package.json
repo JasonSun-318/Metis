@@ -1,11 +1,11 @@
 {
 	"name": "@metis/coding-agent-install",
-	"version": "0.0.8",
+	"version": "0.1.9",
 	"private": true,
 	"description": "Lockfile root used by the Metis installer and updater.",
 	"dependencies": {
-		"@metis/app-server": "0.0.8",
-		"@metis/coding-agent": "0.0.8"
+		"@metis/app-server": "0.1.9",
+		"@metis/coding-agent": "0.1.9"
 	},
 	"overrides": {
 		"rimraf": "6.1.2",
