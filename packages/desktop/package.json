@@ -29,7 +29,6 @@
 		"@lezer/highlight": "1.2.3",
 		"@metis/app-protocol": "^0.1.9",
 		"@metis/app-server": "^0.1.9",
-		"@phosphor-icons/react": "2.1.10",
 		"@pierre/diffs": "1.3.0-beta.7",
 		"@tanstack/react-virtual": "3.14.6",
 		"@xterm/addon-fit": "0.10.0",
