@@ -1,7 +1,7 @@
 import type { ModelOptionView, SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, CaretRight, Check } from "@phosphor-icons/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CaretDown, CaretRight, Check } from "../icons.tsx";
 import { providerDisplayName } from "../provider-names.ts";
 
 interface ModelSelectorProps {
@@ -12,17 +12,25 @@ interface ModelSelectorProps {
 	readonly value: SessionSnapshot["model"];
 }
 
+function focusMenuItem(menu: HTMLDivElement | null) {
+	const item =
+		menu?.querySelector<HTMLButtonElement>('[aria-checked="true"]') ??
+		menu?.querySelector<HTMLButtonElement>("button");
+	item?.focus();
+}
+
 export function ModelSelector({ available, commandRequest, disabled, onChange, value }: ModelSelectorProps) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const [activeProvider, setActiveProvider] = useState<string | null>(null);
-	const [providerQuery, setProviderQuery] = useState("");
-	const [modelQuery, setModelQuery] = useState("");
 	const [pending, setPending] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
-	const providerSearchRef = useRef<HTMLInputElement>(null);
-	const modelSearchRef = useRef<HTMLInputElement>(null);
+	const providerMenuRef = useRef<HTMLDivElement>(null);
+	const modelMenuRef = useRef<HTMLDivElement>(null);
+	const providerItemsRef = useRef(new Map<string, HTMLButtonElement>());
+	const focusedItemRef = useRef<HTMLButtonElement | null>(null);
+	const returnProviderRef = useRef<string | null>(null);
 	const lastCommandRequest = useRef(commandRequest?.id);
 	const selected = available.find((model) => model.provider === value?.provider && model.modelId === value.modelId);
 
@@ -35,41 +43,21 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 			return left[1].localeCompare(right[1]);
 		});
 	}, [available, value?.provider]);
-
-	const visibleProviders = useMemo(() => {
-		const query = providerQuery.trim().toLowerCase();
-		if (query === "") return providers;
-		return providers.filter(
-			([provider, name]) => name.toLowerCase().includes(query) || provider.toLowerCase().includes(query),
-		);
-	}, [providers, providerQuery]);
-
 	const activeModels = useMemo(
 		() => (activeProvider === null ? [] : available.filter((model) => model.provider === activeProvider)),
 		[activeProvider, available],
 	);
 
-	const visibleModels = useMemo(() => {
-		const query = modelQuery.trim().toLowerCase();
-		if (query === "") return activeModels;
-		return activeModels.filter(
-			(model) => model.name.toLowerCase().includes(query) || model.modelId.toLowerCase().includes(query),
-		);
-	}, [activeModels, modelQuery]);
-
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
 		setActiveProvider(null);
-		setProviderQuery("");
-		setModelQuery("");
-		if (restoreFocus) triggerRef.current?.focus();
+		returnProviderRef.current = null;
+		focusedItemRef.current = null;
+		if (restoreFocus) triggerRef.current?.focus({ preventScroll: true });
 	}, []);
 	const selectModel = useCallback(
 		async (model: ModelOptionView) => {
-			setOpen(false);
-			setActiveProvider(null);
-			setProviderQuery("");
-			setModelQuery("");
+			close();
 			setPending(true);
 			try {
 				await onChange(model);
@@ -77,57 +65,110 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				setPending(false);
 			}
 		},
-		[onChange],
+		[close, onChange],
 	);
 
 	useEffect(() => {
-		if (disabled) setOpen(false);
-	}, [disabled]);
-
+		if (disabled) close();
+	}, [close, disabled]);
 	useEffect(() => {
 		if (commandRequest === undefined || commandRequest.id === lastCommandRequest.current) return;
 		lastCommandRequest.current = commandRequest.id;
-		setOpen(commandRequest.open && !disabled);
+		setOpen(commandRequest.open && !disabled && !pending && available.length > 0);
 		setActiveProvider(null);
-		setProviderQuery("");
-		setModelQuery("");
-	}, [commandRequest, disabled]);
+		returnProviderRef.current = null;
+	}, [available.length, commandRequest, disabled, pending]);
 
-	useEffect(() => {
-		if (open && activeProvider === null) providerSearchRef.current?.focus();
-		else if (open && activeProvider !== null) modelSearchRef.current?.focus();
+	useLayoutEffect(() => {
+		if (!open) return;
+		if (activeProvider !== null) focusMenuItem(modelMenuRef.current);
+		else {
+			if (providerMenuRef.current?.contains(document.activeElement)) return;
+			const returning =
+				returnProviderRef.current === null ? undefined : providerItemsRef.current.get(returnProviderRef.current);
+			if (returning) returning.focus();
+			else focusMenuItem(providerMenuRef.current);
+		}
 	}, [open, activeProvider]);
+
+	useLayoutEffect(() => {
+		if (!open) return;
+		if (available.length === 0) {
+			close();
+			return;
+		}
+		if (activeProvider !== null && activeModels.length === 0) {
+			setActiveProvider(null);
+			return;
+		}
+		// Recover only focus lost when this menu's own row was removed. Ordinary
+		// discovery refreshes and focus intentionally moved elsewhere stay untouched.
+		if (focusedItemRef.current?.isConnected === false && document.activeElement === document.body) {
+			focusMenuItem(activeProvider === null ? providerMenuRef.current : modelMenuRef.current);
+		}
+	}, [activeModels.length, activeProvider, available, close, open]);
 
 	useEffect(() => {
 		if (!open) return;
-		const onPointerDown = (event: PointerEvent) => {
+		const dismissOutside = (event: Event) => {
 			if (!rootRef.current?.contains(event.target as Node)) close();
 		};
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key === "Escape") {
-				event.preventDefault();
-				if (activeProvider !== null) {
-					setActiveProvider(null);
-					setModelQuery("");
-					return;
-				}
-				close(true);
-				return;
-			}
-			if (activeProvider === null || event.target instanceof HTMLInputElement) return;
-			const model = /^[1-9]$/.test(event.key) ? visibleModels[Number(event.key) - 1] : undefined;
-			if (!model) return;
-			event.preventDefault();
-			close(true);
-			void selectModel(model).catch(() => undefined);
-		};
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
+		document.addEventListener("pointerdown", dismissOutside);
+		document.addEventListener("focusin", dismissOutside);
 		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
+			document.removeEventListener("pointerdown", dismissOutside);
+			document.removeEventListener("focusin", dismissOutside);
 		};
-	}, [activeProvider, close, open, selectModel, visibleModels]);
+	}, [close, open]);
+
+	const enterProvider = (provider: string) => {
+		returnProviderRef.current = provider;
+		if (activeProvider === provider) focusMenuItem(modelMenuRef.current);
+		else setActiveProvider(provider);
+	};
+	const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+		if (event.defaultPrevented || event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey)
+			return;
+		if (event.key === "Tab") {
+			close();
+			return;
+		}
+		if (event.key === "Escape" || (event.key === "ArrowLeft" && event.currentTarget === modelMenuRef.current)) {
+			event.preventDefault();
+			event.stopPropagation();
+			if (activeProvider !== null) setActiveProvider(null);
+			else close(true);
+			return;
+		}
+		const items = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')];
+		const target = event.target instanceof HTMLElement ? event.target.closest("button") : null;
+		if (event.key === "ArrowRight" && event.currentTarget === providerMenuRef.current) {
+			const provider = target?.dataset.provider;
+			if (provider) {
+				event.preventDefault();
+				enterProvider(provider);
+			}
+			return;
+		}
+		if (["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key) && items.length > 0) {
+			event.preventDefault();
+			const current = items.indexOf(target as HTMLButtonElement);
+			const next =
+				event.key === "Home"
+					? 0
+					: event.key === "End"
+						? items.length - 1
+						: (current + (event.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+			items[next]?.focus();
+			return;
+		}
+		if (event.currentTarget !== modelMenuRef.current) return;
+		const model = /^[1-9]$/.test(event.key) ? activeModels[Number(event.key) - 1] : undefined;
+		if (!model) return;
+		event.preventDefault();
+		close(true);
+		void selectModel(model).catch(() => undefined);
+	};
 
 	return (
 		<div className="composer-selector model-selector model-control" ref={rootRef}>
@@ -137,7 +178,20 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				aria-label={t("Select model")}
 				className="composer-selector-trigger"
 				disabled={disabled || pending || available.length === 0}
-				onClick={() => setOpen((value) => !value)}
+				onClick={() => {
+					if (open) close();
+					else {
+						returnProviderRef.current = null;
+						setOpen(true);
+					}
+				}}
+				onKeyDown={(event) => {
+					if (!open && (event.key === "ArrowDown" || event.key === "ArrowUp")) {
+						event.preventDefault();
+						returnProviderRef.current = null;
+						setOpen(true);
+					}
+				}}
 				ref={triggerRef}
 				type="button"
 			>
@@ -145,84 +199,80 @@ export function ModelSelector({ available, commandRequest, disabled, onChange, v
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{open && (
-				<div aria-label={t("Providers")} className="model-selector-popover is-provider" role="menu">
-					<input
-						aria-label={t("Search providers")}
-						autoComplete="off"
-						className="model-selector-search"
-						onChange={(event) => setProviderQuery(event.target.value)}
-						placeholder={t("Search providers")}
-						ref={providerSearchRef}
-						spellCheck={false}
-						type="text"
-						value={providerQuery}
-					/>
-					{visibleProviders.length === 0 ? (
-						<p className="model-selector-empty">{t("No matches")}</p>
-					) : (
-						visibleProviders.map(([provider, name]) => {
-							const isSelected = provider === value?.provider;
-							const expanded = provider === activeProvider;
-							return (
-								<button
-									aria-checked={isSelected}
-									aria-expanded={expanded}
-									className="model-selector-provider"
-									key={provider}
-									onClick={() => setActiveProvider(expanded ? null : provider)}
-									role="menuitemradio"
-									type="button"
-								>
-									<span>{name}</span>
-									{isSelected ? (
-										<Check aria-hidden="true" size={16} weight="bold" />
-									) : (
-										<CaretRight aria-hidden="true" size={14} />
-									)}
-								</button>
-							);
-						})
-					)}
+				<div
+					aria-label={t("Providers")}
+					className="model-selector-popover is-provider"
+					onFocus={(event) => {
+						if (event.target instanceof HTMLButtonElement) focusedItemRef.current = event.target;
+					}}
+					onKeyDown={onMenuKeyDown}
+					ref={providerMenuRef}
+					role="menu"
+				>
+					{providers.map(([provider, name]) => {
+						const isSelected = provider === value?.provider;
+						const expanded = provider === activeProvider;
+						return (
+							<button
+								aria-checked={isSelected}
+								aria-expanded={expanded}
+								className="model-selector-provider"
+								data-provider={provider}
+								key={provider}
+								onClick={() => {
+									returnProviderRef.current = provider;
+									setActiveProvider(expanded ? null : provider);
+								}}
+								ref={(button) => {
+									if (button) providerItemsRef.current.set(provider, button);
+									else providerItemsRef.current.delete(provider);
+								}}
+								role="menuitemradio"
+								type="button"
+							>
+								<span>{name}</span>
+								{isSelected ? (
+									<Check aria-hidden="true" size={16} weight="bold" />
+								) : (
+									<CaretRight aria-hidden="true" size={14} />
+								)}
+							</button>
+						);
+					})}
 				</div>
 			)}
 			{open && activeProvider !== null && (
-				<div aria-label={t("Models")} className="model-selector-submenu" role="menu">
-					<input
-						aria-label={t("Search models")}
-						autoComplete="off"
-						className="model-selector-search"
-						onChange={(event) => setModelQuery(event.target.value)}
-						placeholder={t("Search models")}
-						ref={modelSearchRef}
-						spellCheck={false}
-						type="text"
-						value={modelQuery}
-					/>
-					{visibleModels.length === 0 ? (
-						<p className="model-selector-empty">{t("No matches")}</p>
-					) : (
-						visibleModels.map((model, index) => {
-							const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
-							return (
-								<button
-									aria-checked={isSelected}
-									key={`${model.provider}/${model.modelId}`}
-									onClick={() => {
-										if (!isSelected) void selectModel(model).catch(() => undefined);
-									}}
-									role="menuitemradio"
-									type="button"
-								>
-									<span>{model.name}</span>
-									{isSelected ? (
-										<Check aria-hidden="true" size={16} weight="bold" />
-									) : index < 9 ? (
-										<kbd>{index + 1}</kbd>
-									) : null}
-								</button>
-							);
-						})
-					)}
+				<div
+					aria-label={t("Models")}
+					className="model-selector-submenu"
+					onFocus={(event) => {
+						if (event.target instanceof HTMLButtonElement) focusedItemRef.current = event.target;
+					}}
+					onKeyDown={onMenuKeyDown}
+					ref={modelMenuRef}
+					role="menu"
+				>
+					{activeModels.map((model, index) => {
+						const isSelected = model.provider === value?.provider && model.modelId === value.modelId;
+						return (
+							<button
+								aria-checked={isSelected}
+								key={`${model.provider}/${model.modelId}`}
+								onClick={() => {
+									if (!isSelected) void selectModel(model).catch(() => undefined);
+								}}
+								role="menuitemradio"
+								type="button"
+							>
+								<span>{model.name}</span>
+								{isSelected ? (
+									<Check aria-hidden="true" size={16} weight="bold" />
+								) : index < 9 ? (
+									<kbd>{index + 1}</kbd>
+								) : null}
+							</button>
+						);
+					})}
 				</div>
 			)}
 		</div>

@@ -1,17 +1,23 @@
 import type { PermissionPresetView, SessionSnapshot } from "@metis/app-protocol";
-import { CaretDown, Check, Shield } from "@phosphor-icons/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CaretDown, Check, LockOpen, ShieldCheck, ShieldPlain } from "../icons.tsx";
 
 interface PermissionSelectorProps {
 	readonly activeReview?: SessionSnapshot["activeReview"];
 	readonly constrainedByParent?: boolean;
 	readonly disabled: boolean;
+	readonly interactionPending?: boolean;
 	readonly onChange: (mode: PermissionPresetView) => void | Promise<void>;
 	readonly onSetupSandbox?: () => void | Promise<void>;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
 	readonly value: PermissionPresetView;
 }
+
+const MODE_ICONS = { ask: ShieldPlain, auto: ShieldCheck, full: LockOpen } satisfies Record<
+	PermissionPresetView,
+	typeof ShieldPlain
+>;
 
 const OPTIONS: ReadonlyArray<{
 	readonly value: PermissionPresetView;
@@ -43,6 +49,7 @@ export function PermissionSelector({
 	activeReview,
 	constrainedByParent = false,
 	disabled,
+	interactionPending = false,
 	onChange,
 	onSetupSandbox,
 	sandboxHealth = "healthy",
@@ -57,14 +64,17 @@ export function PermissionSelector({
 	const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
 	const sandboxReady = sandboxHealth === "healthy";
 	const label = t(value === "ask" ? "Ask" : value === "auto" ? "Auto" : "Full");
+	const ModeIcon = MODE_ICONS[value];
 	const reviewing = activeReview?.reviewer === "model";
-	const status = reviewing
-		? t("Checking security…")
-		: !sandboxReady
-			? t("Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.")
-			: constrainedByParent
-				? t("A parent session limits the effective permissions for this task.")
-				: undefined;
+	const status = interactionPending
+		? undefined
+		: reviewing
+			? t("Checking security…")
+			: !sandboxReady
+				? t("Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.")
+				: constrainedByParent
+					? t("A parent session limits the effective permissions for this task.")
+					: undefined;
 
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
@@ -145,13 +155,14 @@ export function PermissionSelector({
 				ref={triggerRef}
 				type="button"
 			>
-				<Shield aria-hidden="true" size={14} weight={value === "full" ? "fill" : "regular"} />
+				<ModeIcon aria-hidden="true" size={14} />
 				<span>{label}</span>
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
 			{status && (
 				<output
-					className={`status-paragraph ${`permission-selector-status${!sandboxReady || constrainedByParent ? " is-warning" : ""}`}`}
+					className={`permission-selector-status${!sandboxReady || constrainedByParent ? " is-warning" : ""}`}
+					aria-live="polite"
 				>
 					{status}
 				</output>

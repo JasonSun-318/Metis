@@ -42,6 +42,52 @@ function option(container: HTMLElement, label: string) {
 }
 
 describe("PermissionSelector", () => {
+	it("distinguishes each preset visually while preserving its accessible label and saved value", async () => {
+		const { container, onChange, root } = mount();
+		const artwork = new Set<string>();
+		for (const [value, label] of [
+			["ask", "Ask"],
+			["auto", "Auto"],
+			["full", "Full"],
+		] as const) {
+			await act(async () => root.render(<PermissionSelector disabled={false} onChange={onChange} value={value} />));
+			const trigger = container.querySelector<HTMLButtonElement>(".composer-selector-trigger")!;
+			const icon = trigger.querySelector("svg")!;
+			expect(icon.getAttribute("aria-hidden")).toBe("true");
+			expect(icon.getAttribute("width")).toBe("14");
+			expect(trigger.getAttribute("aria-label")).toContain(label);
+			artwork.add(icon.innerHTML);
+			await openMenu(container);
+			expect(option(container, label).getAttribute("aria-checked")).toBe("true");
+			await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
+		}
+		expect(artwork.size).toBe(3);
+		expect(onChange).not.toHaveBeenCalled();
+	});
+
+	it("gives a pending human interaction priority over automatic review status", async () => {
+		const { container, root } = mount({
+			activeReview: { actionId: "action-1", reviewer: "model", riskLevel: "high" },
+			interactionPending: true,
+			sandboxHealth: "unavailable",
+		});
+		expect(container.querySelector(".permission-selector-status")).toBeNull();
+		await openMenu(container);
+		expect(option(container, "Ask").disabled).toBe(true);
+		expect(option(container, "Auto").disabled).toBe(true);
+		await act(async () =>
+			root.render(
+				<PermissionSelector
+					disabled={false}
+					onChange={vi.fn()}
+					value="auto"
+					activeReview={{ actionId: "action-1", reviewer: "model", riskLevel: "high" }}
+				/>,
+			),
+		);
+		expect(container.querySelector(".permission-selector-status")?.textContent).toBe("Checking security…");
+	});
+
 	it("describes sandboxed Ask/Auto and unrestricted Full", async () => {
 		const { container } = mount({ value: "ask" });
 		await openMenu(container);
