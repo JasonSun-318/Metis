@@ -14,13 +14,14 @@ import {
 import {
 	app,
 	BaseWindow,
-	type BrowserWindow,
+	BrowserWindow,
 	type DownloadItem,
 	dialog,
 	type Event,
 	type FoundInPageResult,
 	type Input,
 	type NativeImage,
+	type OpenDialogOptions,
 	type Session,
 	screen,
 	session,
@@ -33,6 +34,7 @@ import {
 	type WebContentsWillRedirectEventParams,
 } from "electron";
 import {
+	type ChooseBrowserImportDirectoryInput,
 	DEFAULT_BROWSER_PROFILE_ID,
 	type DesktopBrowserBounds,
 	type DesktopBrowserCommand,
@@ -53,7 +55,7 @@ import {
 import { BrowserController } from "./browser-controller.ts";
 import { BrowserProfileStore, mergeBrowserHistory } from "./browser-profile-store.ts";
 import { BrowserTabRuntime } from "./browser-tab-runtime.ts";
-import { ChromiumBrowserImporter } from "./chromium-browser-import.ts";
+import { type ChromiumBrowserImporter, createChromiumBrowserImporter } from "./chromium-browser-import.ts";
 import { isCloseTabShortcut } from "./close-tab-shortcut.ts";
 
 const BLANK_URL = "about:blank";
@@ -141,7 +143,7 @@ interface DownloadRecord {
 
 interface BrowserManagerDependencies {
 	readonly profileStore: BrowserProfileStore;
-	readonly importer: Pick<ChromiumBrowserImporter, "listSources" | "readProfile">;
+	readonly importer: Pick<ChromiumBrowserImporter, "listSources" | "readProfile" | "resolveImportDirectory">;
 	readonly sessionForPartition: (partition: string) => Session;
 	readonly createView: (options: WebContentsViewConstructorOptions) => WebContentsView;
 	readonly createBackgroundWindow: () => BrowserBackgroundWindow;
@@ -160,6 +162,7 @@ interface BrowserManagerDependencies {
 	readonly handoffTimeoutMs?: number;
 	readonly navigationTimeoutMs?: number;
 	readonly watchDisplayMetrics?: (listener: () => void) => () => void;
+	readonly selectImportDirectory?: () => Promise<string | null>;
 }
 
 function normalizeBrowserUrl(value: string): string {
@@ -261,6 +264,67 @@ function uniqueFilename(directory: string, filename: string, pathExists: (path: 
 	return `${stem}-${Date.now()}${extension}`;
 }
 
+function nativeImportDirectoryPicker(): Promise<string | null> {
+	const options: OpenDialogOptions = {
+		title: "Choose browser data folder",
+		buttonLabel: "Choose Folder",
+		properties: ["openDirectory"],
+	};
+	const owner = BrowserWindow.getFocusedWindow();
+	return (owner ? dialog.showOpenDialog(owner, options) : dialog.showOpenDialog(options)).then((result) =>
+		result.canceled ? null : (result.filePaths[0] ?? null),
+	);
+}
+
+function importSourceUnavailableMessage(source: DesktopBrowserImportSource): string {
+	switch (source.status) {
+		case "not-found":
+			return `${source.name} data folder was not found. Choose the browser data folder and retry`;
+		case "permission-denied":
+			return `${source.name} data cannot be read because access was denied. Choose the data folder or grant access and retry`;
+		case "no-profiles":
+			return `${source.name} has no importable profiles. Choose the data folder and retry`;
+		case "process-check-failed":
+			return `${source.name} running state could not be checked. Close the browser and retry`;
+		default:
+			return `${source.name} profile data could not be read. Choose the data folder and retry`;
+	}
+}
+
+function defaultBrowserManagerDependencies(): BrowserManagerDependencies {
+	const profileStore = new BrowserProfileStore(app.getPath("userData"));
+	return {
+		profileStore,
+		importer: createChromiumBrowserImporter(() => profileStore.getImportRoots()),
+		sessionForPartition: (partition) => session.fromPartition(partition),
+		createView: (options) => new WebContentsView(options),
+		createBackgroundWindow: () =>
+			new BaseWindow({
+				show: false,
+				frame: false,
+				focusable: true,
+				hasShadow: false,
+				hiddenInMissionControl: true,
+				opacity: 0,
+				skipTaskbar: true,
+				width: DEFAULT_BROWSER_BOUNDS.width,
+				height: DEFAULT_BROWSER_BOUNDS.height,
+			}),
+		openExternal: (url) => shell.openExternal(url),
+		savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
+		saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
+		resolveDownloadDirectory: () => app.getPath("downloads"),
+		pathExists: (path) => existsSync(path),
+		openPath: (path) => shell.openPath(path),
+		showItemInFolder: (path) => shell.showItemInFolder(path),
+		selectImportDirectory: nativeImportDirectoryPicker,
+		watchDisplayMetrics: (listener) => {
+			screen.on("display-metrics-changed", listener);
+			return () => screen.off("display-metrics-changed", listener);
+		},
+	};
+}
+
 export class BrowserManager {
 	private readonly dependencies: BrowserManagerDependencies;
 	private readonly records = new Map<string, BrowserRecord>();
@@ -274,37 +338,7 @@ export class BrowserManager {
 	private automationWindow?: BrowserBackgroundWindow;
 	private stopDisplayMetrics?: () => void;
 
-	constructor(
-		dependencies: BrowserManagerDependencies = {
-			profileStore: new BrowserProfileStore(app.getPath("userData")),
-			importer: new ChromiumBrowserImporter(),
-			sessionForPartition: (partition) => session.fromPartition(partition),
-			createView: (options) => new WebContentsView(options),
-			createBackgroundWindow: () =>
-				new BaseWindow({
-					show: false,
-					frame: false,
-					focusable: true,
-					hasShadow: false,
-					hiddenInMissionControl: true,
-					opacity: 0,
-					skipTaskbar: true,
-					width: DEFAULT_BROWSER_BOUNDS.width,
-					height: DEFAULT_BROWSER_BOUNDS.height,
-				}),
-			openExternal: (url) => shell.openExternal(url),
-			savePdf: (data, defaultFilename) => saveBuffer(data, defaultFilename, "PDF document", "pdf"),
-			saveScreenshot: (image, defaultFilename) => saveBuffer(image.toPNG(), defaultFilename, "PNG image", "png"),
-			resolveDownloadDirectory: () => app.getPath("downloads"),
-			pathExists: (path) => existsSync(path),
-			openPath: (path) => shell.openPath(path),
-			showItemInFolder: (path) => shell.showItemInFolder(path),
-			watchDisplayMetrics: (listener) => {
-				screen.on("display-metrics-changed", listener);
-				return () => screen.off("display-metrics-changed", listener);
-			},
-		},
-	) {
+	constructor(dependencies: BrowserManagerDependencies = defaultBrowserManagerDependencies()) {
 		this.dependencies = dependencies;
 		this.stopDisplayMetrics = dependencies.watchDisplayMetrics?.(() => this.relayoutPresentedSurfaces());
 	}
@@ -339,12 +373,31 @@ export class BrowserManager {
 		return this.dependencies.importer.listSources();
 	}
 
+	async chooseBrowserImportDirectory(input: ChooseBrowserImportDirectoryInput): Promise<boolean> {
+		const directory = await this.pickBrowserImportDirectory(input);
+		if (directory === null) return false;
+		this.rememberBrowserImportDirectory(input.sourceId, directory);
+		return true;
+	}
+
+	rememberBrowserImportDirectory(sourceId: ChooseBrowserImportDirectoryInput["sourceId"], directory: string): void {
+		this.dependencies.profileStore.setImportRoot(sourceId, directory);
+	}
+
+	async pickBrowserImportDirectory(input: ChooseBrowserImportDirectoryInput): Promise<string | null> {
+		const directory = await (this.dependencies.selectImportDirectory ?? nativeImportDirectoryPicker)();
+		if (directory === null) return null;
+		return this.dependencies.importer.resolveImportDirectory(input.sourceId, directory);
+	}
+
 	async importData(input: DesktopBrowserImportInput): Promise<DesktopBrowserImportResult> {
 		const source = (await this.dependencies.importer.listSources()).find(
 			(candidate) => candidate.sourceId === input.sourceId,
 		);
 		const sourceProfile = source?.profiles.find((candidate) => candidate.sourceProfileId === input.sourceProfileId);
 		if (!source || !sourceProfile) throw new Error("Browser profile is no longer available");
+		if (source.status !== undefined && source.status !== "ready")
+			throw new Error(importSourceUnavailableMessage(source));
 		if (source.running) throw new Error(`Close ${source.name} before importing`);
 		const imported = await this.dependencies.importer.readProfile(input);
 		if (imported.cookies.length === 0 && imported.history.length === 0) {
@@ -354,6 +407,7 @@ export class BrowserManager {
 			sourceId: input.sourceId,
 			sourceProfileId: input.sourceProfileId,
 			name: sourceProfile.name,
+			...(imported.rootPath ? { rootPath: imported.rootPath } : {}),
 		});
 		let importedCount = 0;
 		let skippedCount = imported.cookieSkipped;

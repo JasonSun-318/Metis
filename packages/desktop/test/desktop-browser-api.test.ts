@@ -5,6 +5,7 @@ import {
 	validateBrowserImportResult,
 	validateBrowserImportSourceList,
 	validateBrowserProfileList,
+	validateChooseBrowserImportDirectoryInput,
 	validateCreateBrowserInput,
 	validateListBrowserHistoryInput,
 } from "../src/shared/desktop-api.ts";
@@ -62,6 +63,27 @@ describe("desktop browser profile contracts", () => {
 			]),
 		).toHaveLength(1);
 		expect(
+			validateBrowserImportSourceList([
+				{
+					sourceId: "edge",
+					name: "Microsoft Edge",
+					running: false,
+					profiles: [],
+					status: "permission-denied",
+					diagnostic: { stage: "local-state", code: "EPERM" },
+					location: "selected",
+				},
+			]),
+		).toEqual([
+			expect.objectContaining({
+				sourceId: "edge",
+				status: "permission-denied",
+				diagnostic: { stage: "local-state", code: "EPERM" },
+				location: "selected",
+			}),
+		]);
+		expect(validateChooseBrowserImportDirectoryInput({ sourceId: "brave" })).toEqual({ sourceId: "brave" });
+		expect(
 			validateBrowserProfileList([
 				{
 					profileId: DEFAULT_BROWSER_PROFILE_ID,
@@ -107,5 +129,30 @@ describe("desktop browser profile contracts", () => {
 				history: null,
 			}),
 		).toThrow();
+		expect(() =>
+			validateBrowserImportSourceList([
+				{
+					sourceId: "chrome",
+					name: "Google Chrome",
+					running: false,
+					profiles: [],
+					status: "unknown",
+				},
+			]),
+		).toThrow("Invalid browser import status");
+		expect(() =>
+			validateBrowserImportSourceList([
+				{
+					sourceId: "chrome",
+					name: "Google Chrome",
+					running: false,
+					profiles: [],
+					diagnostic: { stage: "root", code: "EPERM", message: "secret stack" },
+				},
+			]),
+		).toThrow("Invalid browser import diagnostic");
+		expect(() => validateChooseBrowserImportDirectoryInput({ sourceId: "chrome", path: "/tmp" })).toThrow(
+			"Invalid browser import directory input",
+		);
 	});
 });

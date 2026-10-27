@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
-import { Folder, FolderOpen, type Icon } from "@phosphor-icons/react";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserSettingsPanel } from "../src/renderer/components/BrowserSettingsPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
+import { Folder, FolderOpen, type Icon } from "../src/renderer/icons.tsx";
 import {
 	DEFAULT_BROWSER_PROFILE_ID,
 	type DesktopBrowserEvent,

@@ -70,6 +70,7 @@ function browserHarness(
 			readonly cookies: readonly { readonly url: string; readonly name: string; readonly value: string }[];
 			readonly cookieSkipped: number;
 			readonly history: readonly DesktopHistoryEntry[];
+			readonly rootPath?: string;
 		};
 	} = {},
 ) {
@@ -183,22 +184,24 @@ function browserHarness(
 	const saveHistory = vi.spyOn(profileStore, "saveHistory");
 	const sessionForPartition = vi.fn(() => browserSession as never);
 	const importer = {
-		listSources: vi.fn(async () =>
-			options.importedData
-				? [
-						{
-							sourceId: "chrome" as const,
-							name: "Google Chrome",
-							running: false,
-							profiles: [
-								{ sourceProfileId: "Default", name: "Personal", email: null },
-								{ sourceProfileId: "Profile 2", name: "Work", email: null },
-							],
-						},
-					]
-				: [],
+		listSources: vi.fn(
+			async (): Promise<import("../src/shared/desktop-api.ts").DesktopBrowserImportSource[]> =>
+				options.importedData
+					? [
+							{
+								sourceId: "chrome" as const,
+								name: "Google Chrome",
+								running: false,
+								profiles: [
+									{ sourceProfileId: "Default", name: "Personal", email: null },
+									{ sourceProfileId: "Profile 2", name: "Work", email: null },
+								],
+							},
+						]
+					: [],
 		),
 		readProfile: vi.fn(async () => options.importedData ?? { cookies: [], cookieSkipped: 0, history: [] }),
+		resolveImportDirectory: vi.fn(async (_sourceId: string, directory: string) => directory),
 	};
 	const controllers = new Map<
 		string,
@@ -1781,5 +1784,123 @@ describe("BrowserManager", () => {
 		expect(harness.sessionForPartition).toHaveBeenCalledWith(`persist:metis-browser-${work.profile.profileId}`);
 		expect(harness.browserSession.cookies.flushStore).toHaveBeenCalledTimes(3);
 		expect(events).toContainEqual({ type: "profiles", profiles: harness.manager.listProfiles() });
+	});
+
+	it("keeps the root identity returned with imported data instead of consulting a later folder selection", async () => {
+		const entry = (name: string): DesktopHistoryEntry => ({
+			entryId: crypto.randomUUID(),
+			url: `https://${name}.example/`,
+			title: name,
+			faviconUrl: null,
+			visitedAt: 1_000,
+		});
+		const data = { cookies: [], cookieSkipped: 0, history: [entry("legacy")] };
+		const harness = browserHarness({ importedData: data });
+		const input = {
+			sourceId: "chrome" as const,
+			sourceProfileId: "Default",
+			dataTypes: { cookies: false, history: true },
+		};
+		const legacy = await harness.manager.importData(input);
+		const rootA = join(tmpdir(), "canonical-browser-a");
+		const rootB = join(tmpdir(), "canonical-browser-b");
+		harness.profileStore.setImportRoot("chrome", rootB);
+		harness.importer.readProfile.mockResolvedValueOnce({ ...data, rootPath: rootA, history: [entry("source-a")] });
+		const first = await harness.manager.importData(input);
+		harness.profileStore.setImportRoot("chrome", join(tmpdir(), "another-current-selection"));
+		harness.importer.readProfile.mockResolvedValueOnce({
+			...data,
+			rootPath: rootA,
+			history: [entry("source-a-new")],
+		});
+		const repeated = await harness.manager.importData(input);
+		harness.importer.readProfile.mockResolvedValueOnce({ ...data, rootPath: rootB, history: [entry("source-b")] });
+		const second = await harness.manager.importData(input);
+
+		expect(repeated.profile.profileId).toBe(first.profile.profileId);
+		expect(new Set([legacy.profile.profileId, first.profile.profileId, second.profile.profileId]).size).toBe(3);
+		const urls = (profileId: string) =>
+			harness.manager
+				.listHistory({ profileId })
+				.map((item) => item.url)
+				.sort();
+		expect(urls(legacy.profile.profileId)).toEqual(["https://legacy.example/"]);
+		expect(urls(first.profile.profileId)).toEqual(["https://source-a-new.example/", "https://source-a.example/"]);
+		expect(urls(second.profile.profileId)).toEqual(["https://source-b.example/"]);
+		expect(JSON.stringify([first, repeated, second, harness.manager.listProfiles()])).not.toContain(rootA);
+	});
+
+	it("blocks import when discovery says the source is unavailable", async () => {
+		const harness = browserHarness({
+			importedData: { cookies: [], cookieSkipped: 0, history: [] },
+		});
+		harness.importer.listSources.mockResolvedValueOnce([
+			{
+				sourceId: "chrome" as const,
+				name: "Google Chrome",
+				running: false,
+				status: "permission-denied" as const,
+				diagnostic: { stage: "local-state", code: "EPERM" },
+				profiles: [{ sourceProfileId: "Default", name: "Personal", email: null }],
+			},
+		]);
+		await expect(
+			harness.manager.importData({
+				sourceId: "chrome",
+				sourceProfileId: "Default",
+				dataTypes: { cookies: false, history: true },
+			}),
+		).rejects.toThrow("access was denied");
+		expect(harness.importer.readProfile).not.toHaveBeenCalled();
+		harness.importer.listSources.mockResolvedValueOnce([
+			{
+				sourceId: "chrome" as const,
+				name: "Google Chrome",
+				running: false,
+				status: "process-check-failed" as const,
+				diagnostic: { stage: "process" as const, code: "EAGAIN" },
+				profiles: [{ sourceProfileId: "Default", name: "Personal", email: null }],
+			},
+		]);
+		await expect(
+			harness.manager.importData({
+				sourceId: "chrome",
+				sourceProfileId: "Default",
+				dataTypes: { cookies: false, history: true },
+			}),
+		).rejects.toThrow("could not be checked");
+		expect(harness.importer.readProfile).not.toHaveBeenCalled();
+	});
+
+	it("registers a native folder choice and treats cancellation as no change", async () => {
+		const harness = browserHarness();
+		const selectImportDirectory = vi.fn(async (): Promise<string | null> => "/tmp/metis-browser-import/Chrome");
+		const manager = new (
+			harness.manager.constructor as typeof import("../src/main/browser-manager.ts").BrowserManager
+		)({
+			profileStore: harness.profileStore,
+			importer: harness.importer,
+			sessionForPartition: harness.sessionForPartition,
+			createView: () => harness.view as never,
+			createBackgroundWindow: () => harness.backgroundWindow as never,
+			openExternal: harness.openExternal,
+			pathExists: harness.pathExists,
+			openPath: harness.openPath,
+			resolveDownloadDirectory: harness.resolveDownloadDirectory,
+			savePdf: harness.savePdf,
+			saveScreenshot: harness.saveScreenshot,
+			showItemInFolder: harness.showItemInFolder,
+			selectImportDirectory,
+		});
+		onTestFinished(() => manager.closeAll());
+		await expect(manager.chooseBrowserImportDirectory({ sourceId: "chrome" })).resolves.toBe(true);
+		expect(harness.importer.resolveImportDirectory).toHaveBeenCalledWith(
+			"chrome",
+			"/tmp/metis-browser-import/Chrome",
+		);
+		expect(harness.profileStore.getImportRoots()).toEqual({ chrome: "/tmp/metis-browser-import/Chrome" });
+		selectImportDirectory.mockResolvedValueOnce(null);
+		await expect(manager.chooseBrowserImportDirectory({ sourceId: "edge" })).resolves.toBe(false);
+		expect(harness.profileStore.getImportRoots()).toEqual({ chrome: "/tmp/metis-browser-import/Chrome" });
 	});
 });

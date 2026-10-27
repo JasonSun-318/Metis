@@ -2,13 +2,13 @@
 
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { Folder, FolderOpen, type Icon } from "@phosphor-icons/react";
 import { act, StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { BrowserPanel } from "../src/renderer/components/BrowserPanel.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
+import { Folder, FolderOpen, type Icon } from "../src/renderer/icons.tsx";
 import type {
 	DesktopBrowserEvent,
 	DesktopBrowserState,

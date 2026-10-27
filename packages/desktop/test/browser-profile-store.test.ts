@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
-import { BrowserProfileStore, mergeBrowserHistory } from "../src/main/browser-profile-store.ts";
+import { BrowserProfileStore, browserRootFingerprint, mergeBrowserHistory } from "../src/main/browser-profile-store.ts";
 import { DEFAULT_BROWSER_PROFILE_ID, type DesktopHistoryEntry } from "../src/shared/desktop-api.ts";
 
 function entry(url: string, visitedAt: number): DesktopHistoryEntry {
@@ -31,6 +31,42 @@ describe("BrowserProfileStore", () => {
 		expect(second.profileId).toBe(first.profileId);
 		expect(second.name).toBe("Personal renamed");
 		expect(JSON.parse(await readFile(join(userDataPath, "browser-profiles.json"), "utf8")).profiles).toHaveLength(1);
+	});
+
+	it("reuses one profile for the same canonical root and isolates a different root", async () => {
+		const userDataPath = await mkdtemp(join(tmpdir(), "metis-browser-root-identity-"));
+		onTestFinished(() => rm(userDataPath, { recursive: true, force: true }));
+		const store = new BrowserProfileStore(userDataPath);
+		const identity = { sourceId: "chrome" as const, sourceProfileId: "Default", name: "Personal" };
+		const first = store.ensureImportedProfile({ ...identity, rootPath: "/Users/test/Chrome" });
+		const again = store.ensureImportedProfile({ ...identity, rootPath: "/Users/test/Chrome" });
+		const other = store.ensureImportedProfile({ ...identity, name: "Other", rootPath: "/Users/test/Chrome-Other" });
+		const legacy = store.ensureImportedProfile(identity);
+		expect(again.profileId).toBe(first.profileId);
+		expect(new Set([first.profileId, other.profileId, legacy.profileId]).size).toBe(3);
+		expect(JSON.stringify(store.listProfiles())).not.toContain("/Users/test/Chrome");
+		const persisted = JSON.parse(await readFile(join(userDataPath, "browser-profiles.json"), "utf8"));
+		expect(persisted.profiles).toContainEqual(
+			expect.objectContaining({
+				profileId: first.profileId,
+				rootFingerprint: browserRootFingerprint("/Users/test/Chrome"),
+			}),
+		);
+		expect(new BrowserProfileStore(userDataPath).listProfiles().map((profile) => profile.profileId)).toEqual(
+			store.listProfiles().map((profile) => profile.profileId),
+		);
+	});
+
+	it("remembers a validated import root and ignores corrupt or unsafe metadata", async () => {
+		const userDataPath = await mkdtemp(join(tmpdir(), "metis-browser-import-locations-"));
+		onTestFinished(() => rm(userDataPath, { recursive: true, force: true }));
+		const store = new BrowserProfileStore(userDataPath);
+		store.setImportRoot("chrome", "/Users/test/Library/Application Support/Google/Chrome");
+		expect(store.getImportRoots()).toEqual({ chrome: "/Users/test/Library/Application Support/Google/Chrome" });
+		expect(() => store.setImportRoot("chrome", "relative/Chrome")).toThrow("Invalid browser import location");
+		expect(new BrowserProfileStore(userDataPath).getImportRoots().chrome).toContain("Google/Chrome");
+		await writeFile(join(userDataPath, "browser-import-locations.json"), "{broken", "utf8");
+		expect(new BrowserProfileStore(userDataPath).getImportRoots()).toEqual({});
 	});
 
 	it("falls back to Default for corrupt metadata", async () => {

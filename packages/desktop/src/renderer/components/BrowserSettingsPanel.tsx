@@ -1,11 +1,3 @@
-import {
-	ArrowLeft,
-	CaretDown,
-	ClockCounterClockwise,
-	DownloadSimple,
-	FolderOpen,
-	MagnifyingGlass,
-} from "@phosphor-icons/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -18,6 +10,7 @@ import {
 	type MetisDesktopApi,
 } from "../../shared/desktop-api.ts";
 import { browserProfileLabel } from "../browser-display.ts";
+import { ArrowLeft, CaretDown, ClockCounterClockwise, DownloadSimple, FolderOpen, MagnifyingGlass } from "../icons.tsx";
 import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
 import { browserDownloadPresentation } from "./browser-download-presentation.ts";

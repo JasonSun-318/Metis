@@ -127,6 +127,54 @@ afterEach(async () => {
 });
 
 describe("BrowserPanel history", () => {
+	it.each(["Cancel", "Escape"])(
+		"restores import-dialog focus to the persistent More button after %s",
+		async (close) => {
+			const { api } = browserPanelApi();
+			Object.assign(api, {
+				platform: "darwin",
+				listBrowserImportSources: vi.fn().mockResolvedValue([
+					{
+						sourceId: "chrome",
+						name: "Google Chrome",
+						running: false,
+						status: "permission-denied",
+						profiles: [],
+					},
+				]),
+				chooseBrowserImportDirectory: vi.fn().mockResolvedValue(false),
+				importBrowserData: vi.fn(),
+			});
+			const { container } = renderPanel(api);
+			await flush();
+			const more = button(container, "More browser actions")!;
+			const focus = vi.spyOn(more, "focus");
+			await act(async () => more.click());
+			const importAction = button(container, "Import browser data…")!;
+			importAction.focus();
+			await act(async () => importAction.click());
+			await flush();
+			expect(importAction.isConnected).toBe(false);
+			expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+			const dialog = container.querySelector<HTMLElement>('.browser-import-dialog[role="dialog"]')!;
+			expect(dialog).not.toBeNull();
+			const choose = button(dialog, "Choose data folder")!;
+			await act(async () => choose.click());
+			await flush();
+			expect(api.chooseBrowserImportDirectory).toHaveBeenCalledExactlyOnceWith({ sourceId: "chrome" });
+			expect(document.activeElement).toBe(choose);
+			expect(api.importBrowserData).not.toHaveBeenCalled();
+			await act(async () => {
+				if (close === "Cancel") button(dialog, "Cancel")!.click();
+				else choose.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+			});
+			await flush();
+			expect(container.querySelector(".browser-import-dialog")).toBeNull();
+			expect(document.activeElement).toBe(more);
+			expect(api.importBrowserData).not.toHaveBeenCalled();
+		},
+	);
+
 	it("keeps an address draft through initialization and navigates after the browser is ready", async () => {
 		const { api, emitBrowserEvent } = browserPanelApi();
 		const initial: DesktopBrowserState = {

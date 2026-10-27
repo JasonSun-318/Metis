@@ -1,3 +1,18 @@
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type {
+	DesktopBrowserBounds,
+	DesktopBrowserCommand,
+	DesktopBrowserHandoffReason,
+	DesktopBrowserProfile,
+	DesktopBrowserSourceId,
+	DesktopBrowserState,
+	DesktopDownloadControlType,
+	DesktopDownloadItem,
+	DesktopHistoryEntry,
+	MetisDesktopApi,
+} from "../../shared/desktop-api.ts";
+import { browserProfileLabel } from "../browser-display.ts";
 import {
 	ArrowClockwise,
 	ArrowCounterClockwise,
@@ -19,22 +34,7 @@ import {
 	Trash,
 	User,
 	X,
-} from "@phosphor-icons/react";
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
-import type {
-	DesktopBrowserBounds,
-	DesktopBrowserCommand,
-	DesktopBrowserHandoffReason,
-	DesktopBrowserProfile,
-	DesktopBrowserSourceId,
-	DesktopBrowserState,
-	DesktopDownloadControlType,
-	DesktopDownloadItem,
-	DesktopHistoryEntry,
-	MetisDesktopApi,
-} from "../../shared/desktop-api.ts";
-import { browserProfileLabel } from "../browser-display.ts";
+} from "../icons.tsx";
 import { useModalPresence } from "../modal-presence.ts";
 import { BrowserDownloadActions } from "./BrowserDownloadActions.tsx";
 import { BrowserImportDialog } from "./BrowserImportDialog.tsx";
@@ -1155,6 +1155,8 @@ export function BrowserPanel({
 							<hr className="browser-menu-separator" />
 							<button
 								onClick={() => {
+									const trigger = moreRef.current?.firstElementChild;
+									if (trigger instanceof HTMLButtonElement) trigger.focus({ preventScroll: true });
 									setMoreOpen(false);
 									setImportOpen(true);
 								}}
