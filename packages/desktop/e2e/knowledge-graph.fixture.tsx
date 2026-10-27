@@ -2,6 +2,7 @@ import { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { KnowledgeGraph } from "../src/renderer/components/KnowledgeGraph.tsx";
 import type { KnowledgeGraphData } from "../src/renderer/components/knowledge-graph-layout.ts";
+import { createGraphSession } from "../src/renderer/components/knowledge-graph-session.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
 
 const params = new URLSearchParams(location.search);
@@ -27,6 +28,9 @@ const titles = [
 	"鼠标缩放",
 ];
 const count = Number(params.get("count") ?? titles.length);
+const panel = document.getElementById("root")!;
+if (params.has("width")) panel.style.maxWidth = `${Number(params.get("width"))}px`;
+if (params.has("height")) panel.style.height = `${Number(params.get("height"))}px`;
 const graph: KnowledgeGraphData = {
 	notes: Array.from({ length: count }, (_, index) => ({
 		path: `主题/笔记${index}.md`,
@@ -43,15 +47,24 @@ const graph: KnowledgeGraphData = {
 function Fixture() {
 	const [data, setData] = useState(graph);
 	const [opened, setOpened] = useState("");
+	const [query, setQuery] = useState("");
+	const [session] = useState(createGraphSession);
 	return (
-		<aside className="knowledge-panel">
+		<aside className="knowledge-panel" data-knowledge-explorer>
 			<div className="knowledge-toolbar">
 				<strong>产品资料</strong>
 				<button onClick={() => setData(structuredClone(graph))} type="button" aria-label="Refresh">
 					刷新
 				</button>
 			</div>
-			<KnowledgeGraph graph={data} onOpen={setOpened} />
+			<input aria-label="Search notes" value={query} onChange={(event) => setQuery(event.target.value)} />
+			{opened ? (
+				<button type="button" onClick={() => setOpened("")}>
+					Back to graph
+				</button>
+			) : (
+				<KnowledgeGraph graph={data} session={session} query={query} onOpen={setOpened} />
+			)}
 			<div className="knowledge-footer">
 				<span>/资料/产品资料</span>
 				<span>{count} 篇笔记</span>
@@ -61,7 +74,7 @@ function Fixture() {
 	);
 }
 
-await setLocale("en");
+await setLocale(params.get("locale") === "zh-CN" ? "zh-CN" : "en");
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<Fixture />

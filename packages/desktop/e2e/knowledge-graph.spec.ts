@@ -63,7 +63,7 @@ test.beforeAll(async () => {
 	});
 	await writeFile(
 		path.join(directory, "index.html"),
-		`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><style>body{padding:12px;font-family:Arial,sans-serif}#root{width:100%;height:100%;max-width:920px;margin:auto;border:1px solid var(--border);border-radius:10px;overflow:hidden}.knowledge-toolbar{justify-content:space-between;font-size:12px}.knowledge-toolbar button{padding:4px}output{display:none}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`,
+		`<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><style>body{padding:12px;font-family:Arial,sans-serif}#root{width:100%;height:100%;max-width:920px;margin:auto;border:1px solid var(--border);border-radius:10px;overflow:hidden}.knowledge-toolbar{justify-content:space-between;font-size:12px}.knowledge-toolbar button{padding:4px}[data-opened-note]{display:none}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`,
 	);
 	server = createServer((request, response) => {
 		const name = new URL(request.url ?? "/", "http://localhost").pathname;
@@ -92,6 +92,39 @@ test.afterAll(async () => {
 	if (directory) await rm(directory, { force: true, recursive: true });
 });
 
+for (const theme of ["dark", "light"]) {
+	test(`${theme} graph pointer focus has no frame while keyboard focus and navigation remain visible`, async ({ page }, info) => {
+		const errors = errorsOn(page);
+		await page.setViewportSize({ width: 520, height: 700 });
+		await page.goto(`${url}/?theme=${theme}`);
+		await settle(page);
+		const canvas = page.locator(".knowledge-graph-canvas");
+		await canvas.click({ position: { x: 10, y: 10 } });
+		await expect(canvas).toBeFocused();
+		await expect(canvas).toHaveCSS("outline-style", "none");
+		await expect(canvas).toHaveCSS("box-shadow", "none");
+		await page.screenshot({ path: info.outputPath(`graph-pointer-focus-${theme}.png`) });
+		await page.getByRole("button", { name: "Reset view" }).focus();
+		await page.keyboard.press("Tab");
+		await expect(canvas).toBeFocused();
+		expect(await canvas.evaluate((element) => element.matches(":focus-visible"))).toBe(true);
+		await expect(canvas).not.toHaveCSS("box-shadow", "none");
+		await expect(canvas).toHaveCSS("outline-style", "none");
+		const viewport = page.locator(".knowledge-graph-viewport");
+		const before = await viewport.getAttribute("transform");
+		await page.keyboard.press("+");
+		await expect(viewport).not.toHaveAttribute("transform", before!);
+		await page.keyboard.press("Tab");
+		const node = page.locator(".knowledge-node").first();
+		await expect(node).toBeFocused();
+		await page.keyboard.press("Space");
+		await expect(node).toHaveAttribute("aria-pressed", "true");
+		await page.keyboard.press("Enter");
+		await expect(page.locator("[data-opened-note]")).toHaveText("主题/笔记0.md");
+		expect(errors).toEqual([]);
+	});
+}
+
 test("native node capture pulls linked notes, avoids accidental opening, and still permits clicking", async ({
 	page,
 }, info) => {
@@ -113,7 +146,12 @@ test("native node capture pulls linked notes, avoids accidental opening, and sti
 	await expect(page.locator("[data-opened-note]")).toHaveText("");
 	await settle(page);
 	await node.locator(".knowledge-node-dot").click();
+	await expect(node).toHaveAttribute("aria-pressed", "true");
+	await expect(page.locator("[data-opened-note]")).toHaveText("");
+	await node.locator(".knowledge-node-dot").dblclick();
 	await expect(page.locator("[data-opened-note]")).toHaveText("主题/笔记0.md");
+	await page.getByRole("button", { name: "Back to graph" }).click();
+	await expect(node).toHaveAttribute("aria-pressed", "true");
 	expect(errors).toEqual([]);
 });
 
@@ -126,9 +164,14 @@ test("wheel zoom and background pan remain responsive and refresh preserves posi
 	const node = page.locator(".knowledge-node").first();
 	const before = await node.getAttribute("transform");
 	const camera = await viewport.getAttribute("transform");
-	await page.mouse.move(35, 110);
+	const canvas = await page.locator(".knowledge-graph-canvas").boundingBox();
+	expect(canvas).not.toBeNull();
+	const start = { x: canvas!.x + 20, y: canvas!.y + 20 };
+	// Anchor the gesture to the canvas, independently of toolbar and icon metrics.
+	expect(await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains("knowledge-graph-canvas"), start)).toBe(true);
+	await page.mouse.move(start.x, start.y);
 	await page.mouse.down();
-	await page.mouse.move(80, 160, { steps: 8 });
+	await page.mouse.move(start.x + 45, start.y + 50, { steps: 8 });
 	await page.mouse.up();
 	await expect(viewport).not.toHaveAttribute("transform", camera!);
 	const panned = await viewport.getAttribute("transform");
@@ -151,6 +194,11 @@ for (const theme of ["dark", "light"]) {
 		]) {
 			await page.setViewportSize(size);
 			await page.getByRole("button", { name: "Reset view" }).click();
+			let camera = "";
+			await expect.poll(async () => {
+				const next = await page.locator(".knowledge-graph-viewport").getAttribute("transform");
+				const stable = next === camera; camera = next ?? ""; return stable;
+			}, { intervals: [250] }).toBe(true);
 			const bounds = await page.locator(".knowledge-graph-canvas").boundingBox();
 			if (!bounds) throw new Error("Missing canvas");
 			const viewBox = await page.locator(".knowledge-graph-canvas").getAttribute("viewBox");
@@ -165,7 +213,7 @@ for (const theme of ["dark", "light"]) {
 				expect(box.x + box.width).toBeLessThanOrEqual(bounds.x + bounds.width);
 				expect(box.y + box.height).toBeLessThanOrEqual(bounds.y + bounds.height);
 			}
-			const labels = await page.locator('.knowledge-node text[opacity="1"]').all();
+			const labels = await page.locator('.knowledge-node text:not([opacity="0"])').all();
 			expect(labels.length).toBeGreaterThan(0);
 			const labelBoxes = await Promise.all(labels.map((label) => label.boundingBox()));
 			for (let index = 0; index < labelBoxes.length; index++) {
@@ -188,16 +236,19 @@ for (const theme of ["dark", "light"]) {
 	});
 }
 
-test("one thousand notes keep controls usable and labels out of the crowded overview", async ({ page }, info) => {
+test("two thousand notes keep controls usable and budget labels in the crowded overview", async ({ page }, info) => {
 	const errors = errorsOn(page);
 	await page.setViewportSize({ width: 520, height: 780 });
-	await page.goto(`${url}/?count=1000`);
-	await expect(page.locator(".knowledge-node")).toHaveCount(1000);
-	await expect(page.locator(".knowledge-node text")).toHaveCount(0);
+	await page.goto(`${url}/?count=2000`);
+	await expect(page.locator(".knowledge-node")).toHaveCount(2000);
+	await expect(page.locator(".knowledge-node text")).toHaveCount(2000);
+	const labels = page.locator('.knowledge-node text:not([opacity="0"])');
+	await expect.poll(() => labels.count()).toBeGreaterThan(0);
+	expect(await labels.count()).toBeLessThan(80);
 	// Controls must work while the large simulation is still running.
 	await page.getByRole("button", { name: "Zoom in", exact: true }).click({ timeout: 1500 });
 	await page.getByRole("button", { name: "Reset view" }).click({ timeout: 1500 });
 	await settle(page, 20_000);
-	await page.screenshot({ path: info.outputPath("1000-notes.png") });
+	await page.screenshot({ path: info.outputPath("2000-notes.png") });
 	expect(errors).toEqual([]);
 });
