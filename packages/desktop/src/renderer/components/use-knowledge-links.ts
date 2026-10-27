@@ -48,12 +48,24 @@ export function useKnowledgeLinks(
 		};
 		window.addEventListener(KNOWLEDGE_CHANGED_EVENT, refresh);
 		window.addEventListener("focus", refresh);
+		const unsubscribe = api.subscribe?.((event) => {
+			if (event.type === "knowledge-libraries") refresh();
+		});
 		return () => {
 			++revision.current;
 			window.removeEventListener(KNOWLEDGE_CHANGED_EVENT, refresh);
 			window.removeEventListener("focus", refresh);
+			unsubscribe?.();
 		};
-	}, [active, reload]);
+	}, [active, api, reload]);
+	const forgetRemovedLibraries = useCallback((ids: readonly string[]) => {
+		if (ids.length === 0) return;
+		// Invalidate in-flight reloads so a stale catalog cannot resurrect a removed library.
+		++revision.current;
+		const removed = new Set(ids);
+		setLibraries((current) => current.filter((library) => !removed.has(library.id)));
+		setLinked((current) => current.filter((library) => !removed.has(library.id)));
+	}, []);
 	const toggle = async (library: KnowledgeLibrary) => {
 		if (busy) return;
 		const request = revision.current;
@@ -80,5 +92,5 @@ export function useKnowledgeLinks(
 			setBusy(false);
 		}
 	};
-	return { libraries, linked, busy, loading, error, reload, toggle };
+	return { libraries, linked, busy, loading, error, reload, toggle, forgetRemovedLibraries };
 }

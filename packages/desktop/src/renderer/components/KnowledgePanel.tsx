@@ -1,68 +1,20 @@
-import type { ClientResult, KnowledgeNote } from "@metis/app-protocol";
-import {
-	ArrowLeft,
-	ArrowsClockwise,
-	Books,
-	FileText,
-	FolderPlus,
-	Graph,
-	MagnifyingGlass,
-	X,
-} from "@phosphor-icons/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import type { ClientResult } from "@metis/app-protocol";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
+import { ArrowLeft, ArrowsClockwise, Books, FileText, FolderPlus, Graph, MagnifyingGlass, X } from "../icons.tsx";
 import { KnowledgeGraph } from "./KnowledgeGraph.tsx";
+import { KnowledgeLibraryRemove } from "./KnowledgeLibraryRemove.tsx";
+import { KnowledgeLibrarySelect } from "./KnowledgeLibrarySelect.tsx";
 import { KnowledgeNoteList } from "./KnowledgeNoteList.tsx";
-import { Markdown } from "./Markdown.tsx";
-import { MenuSelect } from "./MenuSelect.tsx";
+import { createGraphSession, type GraphSession } from "./knowledge-graph-session.ts";
+import { Markdown, type MarkdownFragment } from "./Markdown.tsx";
+import { stripMarkdownFrontmatter } from "./markdown-fragments.ts";
+import type { MarkdownDocument } from "./markdown-resources.ts";
 import { notifyKnowledgeChanged, useKnowledgeLinks } from "./use-knowledge-links.ts";
 
 const EMPTY_GRAPH: ClientResult<"knowledge/scan"> = { notes: [], edges: [], warnings: [] };
 const VIEW_KEY = "metis.knowledge-view.v1";
-
-export function knowledgeNoteMarkdown(content: string, note: KnowledgeNote): string {
-	const paths = new Map(note.links.map((link) => [`${link.kind}:${link.target}`, link.path]));
-	let fence: string | undefined;
-	return content
-		.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/, "")
-		.split("\n")
-		.map((line) => {
-			const match = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
-			if (match) {
-				if (!fence) fence = match[1];
-				else if (match[1][0] === fence[0] && match[1].length >= fence.length) fence = undefined;
-				return line;
-			}
-			if (fence) return line;
-			return line.replace(
-				/(`+)[\s\S]*?\1|!?\[\[([^\]\n]+)\]\]|(?<!!)\[([^\]\n]*)\]\(<?([^\s)>]+)>?(?:\s+[^)]*)?\)/g,
-				(
-					original,
-					code: string | undefined,
-					wiki: string | undefined,
-					label: string | undefined,
-					href: string | undefined,
-				) => {
-					if (code) return original;
-					const target = (wiki?.split("|")[0] ?? href ?? "").split("#")[0].trim();
-					const kind = wiki ? "wiki" : "markdown";
-					let path = paths.get(`${kind}:${target}`);
-					if (!path && href) {
-						try {
-							path = paths.get(`${kind}:${decodeURIComponent(target)}`);
-						} catch {
-							return original;
-						}
-					}
-					if (!path) return original;
-					const text = wiki ? (wiki.split("|")[1] ?? wiki.split("#")[0]) : (label ?? target);
-					return `[${text.replace(/([[\]\\])/g, "\\$1")}](#knowledge-note/${encodeURIComponent(path)})`;
-				},
-			);
-		})
-		.join("\n");
-}
 
 export function KnowledgePanel({
 	api,
@@ -76,21 +28,29 @@ export function KnowledgePanel({
 	const { t } = useTranslation();
 	const {
 		libraries,
+		busy,
 		loading: catalogLoading,
 		error: catalogError,
+		forgetRemovedLibraries,
 		reload,
 	} = useKnowledgeLinks(api, sessionId, visible);
 	const [selectedId, setSelectedId] = useState(() => localStorage.getItem(VIEW_KEY) ?? "");
-	const [graph, setGraph] = useState(EMPTY_GRAPH);
+	const [scan, setScan] = useState({ key: "", graph: EMPTY_GRAPH });
+	const graphSessions = useRef(new Map<string, { path: string; session: GraphSession }>());
+	const catalogWasVisible = useRef(visible);
 	const [mode, setMode] = useState<"graph" | "notes">("graph");
 	const [query, setQuery] = useState("");
 	const [selectedPath, setSelectedPath] = useState<string | null>(null);
 	const [content, setContent] = useState<string>();
+	const [fragment, setFragment] = useState<MarkdownFragment>();
 	const [readError, setReadError] = useState<string>();
 	const [readRetry, setReadRetry] = useState(0);
 	const [error, setError] = useState<string>();
+	const [mutationError, setMutationError] = useState<string>();
 	const [loading, setLoading] = useState(false);
 	const [adding, setAdding] = useState(false);
+	const [removing, setRemoving] = useState(false);
+	const mutation = useRef(false);
 	const [refresh, setRefresh] = useState(0);
 	// Bumped by every successful poll so the open note re-reads without replacing an unchanged graph.
 	const [scanRevision, setScanRevision] = useState(0);
@@ -99,24 +59,59 @@ export function KnowledgePanel({
 	const library = libraries.find((item) => item.id === selectedId);
 	const libraryId = library?.id;
 	const libraryPath = library?.path;
+	const libraryKey = libraryId && libraryPath ? `${libraryId}\0${libraryPath}` : "";
+	const graph = scan.key === libraryKey ? scan.graph : EMPTY_GRAPH;
+	const graphSession = useMemo(() => {
+		if (!libraryId || !libraryPath) return undefined;
+		const cached = graphSessions.current.get(libraryId);
+		if (cached?.path === libraryPath) return cached.session;
+		cached?.session.layout.stop();
+		const session = createGraphSession();
+		graphSessions.current.set(libraryId, { path: libraryPath, session });
+		return session;
+	}, [libraryId, libraryPath]);
 	const note = graph.notes.find((item) => item.path === selectedPath);
+	const openNote = useCallback((path: string, fragment?: string) => {
+		setFragment({ target: fragment ?? "", requestId: crypto.randomUUID() });
+		setSelectedPath(path);
+	}, []);
+	const markdownDocument = useMemo<MarkdownDocument | undefined>(
+		() =>
+			libraryId && selectedPath
+				? {
+						api,
+						owner: { source: "knowledge", libraryId, path: selectedPath, sessionId },
+						revision: scanRevision,
+						onOpenNote: openNote,
+					}
+				: undefined,
+		[api, libraryId, selectedPath, sessionId, scanRevision, openNote],
+	);
 
 	useEffect(() => {
-		if (libraries.length && !libraries.some((item) => item.id === selectedId)) setSelectedId(libraries[0].id);
-	}, [libraries, selectedId]);
-	useEffect(() => {
+		const becomingVisible = visible && !catalogWasVisible.current;
+		catalogWasVisible.current = visible;
+		if (!visible || becomingVisible || catalogLoading || catalogError) return;
+		for (const [id, cached] of graphSessions.current) {
+			if (!libraries.some((item) => item.id === id && item.path === cached.path)) {
+				cached.session.layout.stop();
+				graphSessions.current.delete(id);
+			}
+		}
+		if (!libraries.some((item) => item.id === selectedId)) setSelectedId(libraries[0]?.id ?? "");
 		if (library) localStorage.setItem(VIEW_KEY, library.id);
-	}, [library]);
+		else if (!libraries.length) localStorage.removeItem(VIEW_KEY);
+	}, [catalogError, catalogLoading, libraries, library, selectedId, visible]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(selectedId): Switching libraries resets note selection and search.
 	useEffect(() => {
 		setSelectedPath(null);
 		setContent(undefined);
+		setReadError(undefined);
 		setQuery("");
 	}, [selectedId]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(refresh): Retry explicitly restarts library scanning.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(libraryPath): Moving a library restarts scanning its file roots.
 	useEffect(() => {
-		setGraph(EMPTY_GRAPH);
 		setError(undefined);
 		if (!visible || !libraryId) {
 			setLoading(false);
@@ -132,7 +127,11 @@ export function KnowledgePanel({
 				const result = await api.scanKnowledgeLibrary({ libraryId });
 				if (active) {
 					// Keep the previous object when nothing changed so the graph layout is not restarted.
-					setGraph((current) => (JSON.stringify(current) === JSON.stringify(result) ? current : result));
+					setScan((current) =>
+						current.key === libraryKey && JSON.stringify(current.graph) === JSON.stringify(result)
+							? current
+							: { key: libraryKey, graph: result },
+					);
 					setScanRevision((revision) => revision + 1);
 					setSelectedPath((path) => (result.notes.some((item) => item.path === path) ? path : null));
 					setError(undefined);
@@ -157,7 +156,7 @@ export function KnowledgePanel({
 			window.clearInterval(timer);
 			window.removeEventListener("focus", focus);
 		};
-	}, [api, libraryId, libraryPath, visible, refresh]);
+	}, [api, libraryId, libraryPath, libraryKey, visible, refresh]);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(scanRevision): A successful scan refreshes the open note even when the graph is unchanged.
 	// biome-ignore lint/correctness/useExhaustiveDependencies(readRetry): Retry explicitly re-reads the open note even when its path is unchanged.
 	useEffect(() => {
@@ -194,7 +193,10 @@ export function KnowledgePanel({
 		return { ...graph, notes, edges: graph.edges.filter((edge) => paths.has(edge.source) && paths.has(edge.target)) };
 	}, [graph, query]);
 	const chooseDirectory = async () => {
+		if (mutation.current) return;
+		mutation.current = true;
 		setAdding(true);
+		setMutationError(undefined);
 		try {
 			const path = await api.selectProjectFolder();
 			if (!path) return;
@@ -203,67 +205,104 @@ export function KnowledgePanel({
 			setSelectedId(added.id);
 			notifyKnowledgeChanged();
 		} catch (cause) {
-			setError(cause instanceof Error ? cause.message : String(cause));
+			setMutationError(cause instanceof Error ? cause.message : String(cause));
 		} finally {
 			setAdding(false);
+			mutation.current = false;
+		}
+	};
+	// Serial batch removal under the panel-wide mutation lock; successful IDs are reported back so the dialog keeps only failed and unattempted items checked.
+	const removeLibraries = async (ids: readonly string[]): Promise<string[]> => {
+		const removed: string[] = [];
+		if (mutation.current || ids.length === 0) return removed;
+		mutation.current = true;
+		setRemoving(true);
+		setMutationError(undefined);
+		try {
+			for (const id of ids) {
+				try {
+					await api.removeKnowledgeLibrary({ libraryId: id, requestId: crypto.randomUUID() });
+					removed.push(id);
+					// Apply the known result immediately so a later failed or stale reload cannot redisplay the library.
+					forgetRemovedLibraries([id]);
+				} catch (cause) {
+					setMutationError(cause instanceof Error ? cause.message : String(cause));
+					break;
+				}
+			}
+			await reload();
+			if (removed.length > 0) notifyKnowledgeChanged();
+			return removed;
+		} finally {
+			setRemoving(false);
+			mutation.current = false;
 		}
 	};
 	return (
 		<section
 			className="tool-panel knowledge-panel"
+			data-knowledge-explorer
 			hidden={!visible}
 			id={`knowledge-panel-${sessionId}`}
 			role="tabpanel"
 			aria-label={t("Knowledge")}
 		>
 			<div className="knowledge-toolbar">
-				<MenuSelect
-					ariaLabel={t("Choose knowledge library")}
-					placeholder={t("Choose knowledge library")}
-					triggerIcon={<Books aria-hidden="true" size={17} />}
+				<KnowledgeLibrarySelect
+					busy={busy}
+					disabled={adding || removing}
+					libraries={libraries}
 					value={selectedId}
-					options={libraries.map((item) => ({
-						value: item.id,
-						label: item.name,
-						description: item.path,
-						icon: <Books aria-hidden="true" size={15} />,
-					}))}
-					popoverClassName="knowledge-library-options"
 					onChange={setSelectedId}
 				/>
-				<button
-					type="button"
-					className="knowledge-icon-button"
-					disabled={adding}
-					aria-label={t("Choose knowledge directory")}
-					title={t("Choose knowledge directory")}
-					onClick={() => void chooseDirectory()}
-				>
-					<FolderPlus aria-hidden="true" size={17} />
-				</button>
-				<button
-					type="button"
-					className="knowledge-icon-button"
-					disabled={!library || loading}
-					aria-label={t("Refresh knowledge")}
-					title={t("Refresh knowledge")}
-					onClick={() => setRefresh((value) => value + 1)}
-				>
-					<ArrowsClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={17} />
-				</button>
-			</div>
-			{(error || catalogError) && (
-				<div className="knowledge-error" role="alert">
-					<span>{error || catalogError}</span>
+				<div className="knowledge-toolbar-actions">
 					<button
 						type="button"
-						onClick={() => {
-							void reload();
-							setRefresh((value) => value + 1);
-						}}
+						className="knowledge-create-button"
+						disabled={adding || busy || removing}
+						title={t("Choose knowledge directory")}
+						onClick={() => void chooseDirectory()}
 					>
-						{t("Retry")}
+						<FolderPlus aria-hidden="true" size={17} />
+						<span>{t("New knowledge library")}</span>
 					</button>
+					<KnowledgeLibraryRemove
+						active={visible}
+						disabled={adding || busy}
+						libraries={libraries}
+						pending={removing}
+						onRemove={removeLibraries}
+					/>
+					<button
+						type="button"
+						className="knowledge-icon-button"
+						disabled={!library || loading}
+						aria-label={t("Refresh knowledge")}
+						title={t("Refresh knowledge")}
+						onClick={() => setRefresh((value) => value + 1)}
+					>
+						<ArrowsClockwise aria-hidden="true" className={loading ? "is-spinning" : undefined} size={17} />
+					</button>
+				</div>
+			</div>
+			{(mutationError || error || catalogError) && (
+				<div className="knowledge-error" role="alert">
+					<span>{mutationError || error || catalogError}</span>
+					{mutationError ? (
+						<button type="button" onClick={() => setMutationError(undefined)}>
+							{t("Close")}
+						</button>
+					) : (
+						<button
+							type="button"
+							onClick={() => {
+								void reload();
+								setRefresh((value) => value + 1);
+							}}
+						>
+							{t("Retry")}
+						</button>
+					)}
 				</div>
 			)}
 			{graph.warnings.length > 0 && (
@@ -287,11 +326,11 @@ export function KnowledgePanel({
 					<button
 						className="knowledge-action"
 						type="button"
-						disabled={adding}
+						disabled={adding || busy}
 						onClick={() => void chooseDirectory()}
 					>
 						<FolderPlus aria-hidden="true" size={15} />
-						{t("Choose knowledge directory")}
+						{t("New knowledge library")}
 					</button>
 				</div>
 			) : !graph.notes.length ? (
@@ -331,19 +370,13 @@ export function KnowledgePanel({
 							</div>
 						)}
 						{content !== undefined && note ? (
-							/* biome-ignore lint/a11y/useKeyWithClickEvents: Native links generate keyboard clicks; the wrapper only resolves internal knowledge links. */
-							/* biome-ignore lint/a11y/noStaticElementInteractions: This container delegates clicks only from native links, including keyboard-generated link activation. */
-							<div
-								className="knowledge-markdown turn-answer"
-								onClick={(event) => {
-									const href = (event.target as Element).closest("a")?.getAttribute("href");
-									if (href?.startsWith("#knowledge-note/")) {
-										event.preventDefault();
-										setSelectedPath(decodeURIComponent(href.slice("#knowledge-note/".length)));
-									}
-								}}
-							>
-								<Markdown text={knowledgeNoteMarkdown(content, note)} />
+							<div className="knowledge-markdown turn-answer">
+								<Markdown
+									key={`${libraryId}:${selectedPath}`}
+									text={stripMarkdownFrontmatter(content)}
+									document={markdownDocument}
+									fragment={fragment}
+								/>
 							</div>
 						) : !readError ? (
 							<output className="status-paragraph">{t("Loading…")}</output>
@@ -378,7 +411,16 @@ export function KnowledgePanel({
 							)}
 						</div>
 					</div>
-					{!filtered.notes.length ? (
+					{mode === "graph" ? (
+						<KnowledgeGraph
+							key={libraryKey}
+							graph={graph}
+							session={graphSession}
+							query={query}
+							onOpen={openNote}
+							active={visible}
+						/>
+					) : !filtered.notes.length ? (
 						<div className="knowledge-empty">
 							<MagnifyingGlass aria-hidden="true" size={28} weight="light" />
 							<strong>{t("No matching notes")}</strong>
@@ -386,14 +428,8 @@ export function KnowledgePanel({
 								{t("Clear search")}
 							</button>
 						</div>
-					) : mode === "graph" ? (
-						<KnowledgeGraph key={library.id} graph={filtered} onOpen={setSelectedPath} active={visible} />
 					) : (
-						<KnowledgeNoteList
-							notes={filtered.notes}
-							onOpen={setSelectedPath}
-							expandAll={Boolean(query.trim())}
-						/>
+						<KnowledgeNoteList notes={filtered.notes} onOpen={openNote} expandAll={Boolean(query.trim())} />
 					)}
 				</>
 			)}
