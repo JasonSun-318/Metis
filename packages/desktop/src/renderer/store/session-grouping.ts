@@ -1,10 +1,12 @@
 import type { AgentMode, SessionSummary } from "@metis/app-protocol";
+import type { AgentActivity } from "../agent-activity.ts";
+import { firstInteractionForSession } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "./app-store.ts";
 
 const SESSION_GROUPING_KEY = "metis.session-grouping.v1";
 const DAY_MS = 86_400_000;
 
-export type SessionGroupBy = "date" | "project" | "unread" | "none";
+export type SessionGroupBy = "date" | "project" | "status" | "unread" | "none";
 export type SessionGroupingPreferences = Readonly<Record<AgentMode, SessionGroupBy>>;
 
 export interface SessionSection {
@@ -16,7 +18,7 @@ export interface SessionSection {
 export const DEFAULT_SESSION_GROUPING: SessionGroupingPreferences = { chat: "date", code: "date" };
 
 function isSessionGroupBy(value: unknown): value is SessionGroupBy {
-	return value === "date" || value === "project" || value === "unread" || value === "none";
+	return value === "date" || value === "project" || value === "status" || value === "unread" || value === "none";
 }
 
 export function loadSessionGroupingPreferences(storage: Pick<Storage, "getItem">): SessionGroupingPreferences {
@@ -90,4 +92,35 @@ export function groupSessionsByUnread(sessions: readonly SessionSummary[]): Sess
 		{ key: "unread", label: "Unread", sessions: sessions.filter((session) => session.unread) },
 		{ key: "read", label: "Read", sessions: sessions.filter((session) => !session.unread) },
 	].filter((section) => section.sessions.length > 0);
+}
+
+export function groupSessionsByStatus(
+	sessions: readonly SessionSummary[],
+	interactions: Pick<AppStoreSnapshot, "interactionOrder" | "interactionsById">,
+	activityBySession?: ReadonlyMap<string, AgentActivity>,
+): SessionSection[] {
+	const sections: { key: string; label: string; sessions: SessionSummary[] }[] = [
+		{ key: "pending", label: "Needs attention", sessions: [] },
+		{ key: "running", label: "Running", sessions: [] },
+		{ key: "interrupted", label: "Interrupted or error", sessions: [] },
+		{ key: "completed", label: "Completed", sessions: [] },
+		{ key: "idle", label: "Idle or unknown", sessions: [] },
+	];
+	for (const session of sessions) {
+		const activity = activityBySession?.get(session.sessionId);
+		const pending =
+			activity?.attentionRequired ||
+			session.attentionRequired ||
+			firstInteractionForSession(interactions.interactionOrder, interactions.interactionsById, session.sessionId);
+		let index = 4;
+		if (pending) index = 0;
+		else if (session.state === "running" || activity?.running) index = 1;
+		else if (session.state !== "in_use") {
+			if (session.state === "interrupted" || session.state === "corrupt" || session.lastTurnOutcome === "failed")
+				index = 2;
+			else if (session.lastTurnOutcome === "completed") index = 3;
+		}
+		sections[index]!.sessions.push(session);
+	}
+	return sections.filter((section) => section.sessions.length > 0);
 }

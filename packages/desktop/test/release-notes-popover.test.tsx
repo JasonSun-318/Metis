@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act } from "react";
+import { act, useRef, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -32,6 +32,37 @@ async function view(root: Root, loadChangelog: () => Promise<DesktopChangelog>) 
 	await act(async () => new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
+function AccountMenuHarness({
+	loadChangelog,
+	availableVersion,
+	onUnreadChange,
+}: {
+	readonly loadChangelog: () => Promise<DesktopChangelog>;
+	readonly availableVersion?: string;
+	readonly onUnreadChange: (unread: boolean) => void;
+}) {
+	const accountRef = useRef<HTMLButtonElement>(null);
+	const [open, setOpen] = useState(false);
+	return (
+		<>
+			<button onClick={() => setOpen((previous) => !previous)} ref={accountRef} type="button">
+				Account
+			</button>
+			<div aria-hidden={!open} hidden={!open} inert={!open} role="menu">
+				<ReleaseNotesPopover
+					anchorRef={accountRef}
+					availableVersion={availableVersion}
+					loadChangelog={loadChangelog}
+					onOpen={() => setOpen(false)}
+					onUnreadChange={onUnreadChange}
+					returnFocusRef={accountRef}
+					variant="menu"
+				/>
+			</div>
+		</>
+	);
+}
+
 beforeEach(async () => {
 	await setLocale("en");
 	localStorage.clear();
@@ -45,6 +76,159 @@ afterEach(() => {
 });
 
 describe("ReleaseNotesPopover", () => {
+	it.each(["Escape", "close button"])(
+		"keeps the dialog outside a hidden menu and returns focus to its persistent anchor on %s",
+		async (dismiss) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const onUnreadChange = vi.fn();
+			const loadChangelog = vi.fn().mockResolvedValue(CHANGELOG);
+			vi.spyOn(document.documentElement, "clientWidth", "get").mockReturnValue(1024);
+			vi.spyOn(document.documentElement, "clientHeight", "get").mockReturnValue(768);
+			try {
+				await act(async () =>
+					root.render(<AccountMenuHarness loadChangelog={loadChangelog} onUnreadChange={onUnreadChange} />),
+				);
+				const account = findButton(container, "Account");
+				const notifications = findButton(container, "Notifications");
+				const menu = container.querySelector<HTMLElement>('[role="menu"]')!;
+				expect(onUnreadChange).toHaveBeenLastCalledWith(true);
+				expect(notifications.getAttribute("role")).toBe("menuitem");
+				expect(notifications.className).toBe("account-menu-item account-menu-notifications");
+				expect(notifications.querySelector(".account-menu-item-dot")).not.toBeNull();
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBeNull();
+				await act(async () => account.click());
+				expect(menu.hidden).toBe(false);
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBeNull();
+				vi.spyOn(account, "getBoundingClientRect").mockReturnValue({
+					left: 24,
+					right: 300,
+					top: 700,
+					bottom: 732,
+					width: 276,
+					height: 32,
+					x: 24,
+					y: 700,
+					toJSON: () => ({}),
+				});
+				vi.spyOn(notifications, "getBoundingClientRect").mockImplementation(() => {
+					throw new Error("The hidden menu item must not be used as the dialog anchor");
+				});
+				await act(async () => notifications.click());
+				const panel = document.querySelector<HTMLElement>('[role="dialog"]')!;
+				expect(menu.hidden).toBe(true);
+				expect(menu.hasAttribute("inert")).toBe(true);
+				expect(menu.getAttribute("aria-hidden")).toBe("true");
+				expect(panel.parentElement).toBe(document.body);
+				expect(panel.style.bottom).toBe("76px");
+				expect(panel.textContent).toContain("Added history");
+				expect(document.activeElement).toBe(findButton(panel, "Close release notes"));
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.82.0");
+				expect(onUnreadChange).toHaveBeenLastCalledWith(false);
+				expect(notifications.getAttribute("aria-label")).toBe("Notifications");
+				if (dismiss === "Escape") {
+					const escapeEvent = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+					const parentEscape = vi.fn();
+					const onKeyDown = (event: KeyboardEvent) => {
+						if (event.key === "Escape" && !event.defaultPrevented) parentEscape();
+					};
+					document.addEventListener("keydown", onKeyDown);
+					try {
+						await act(async () => findButton(panel, "Close release notes").dispatchEvent(escapeEvent));
+						expect(escapeEvent.defaultPrevented).toBe(true);
+						expect(parentEscape).not.toHaveBeenCalled();
+					} finally {
+						document.removeEventListener("keydown", onKeyDown);
+					}
+				} else await act(async () => findButton(panel, "Close release notes").click());
+				expect(document.querySelector('[role="dialog"]')).toBeNull();
+				expect(document.activeElement).toBe(account);
+				expect(menu.hidden).toBe(true);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["failure", "stale history"])(
+		"reports a newer menu notification unread through %s and acknowledges only displayed history",
+		async (result) => {
+			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			const onUnreadChange = vi.fn();
+			const oldHistory: DesktopChangelog = { schemaVersion: 1, releases: [CHANGELOG.releases[1]!] };
+			const loadChangelog = vi.fn().mockResolvedValue(oldHistory);
+			try {
+				await act(async () =>
+					root.render(
+						<AccountMenuHarness
+							loadChangelog={loadChangelog}
+							availableVersion="0.83.0"
+							onUnreadChange={onUnreadChange}
+						/>,
+					),
+				);
+				if (result === "failure") loadChangelog.mockRejectedValue(new Error("offline"));
+				await act(async () => findButton(container, "Account").click());
+				await act(async () => findButton(container, "Notifications").click());
+				expect(onUnreadChange).toHaveBeenLastCalledWith(true);
+				expect(container.querySelector(".account-menu-item-dot")).not.toBeNull();
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.81.0");
+				await act(async () => findButton(container, "Close release notes").click());
+				loadChangelog.mockResolvedValue(CHANGELOG);
+				await act(async () => findButton(container, "Account").click());
+				await act(async () => findButton(container, "Notifications").click());
+				expect(document.querySelector('[role="dialog"]')?.textContent).toContain("0.82.0");
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.82.0");
+				expect(onUnreadChange).toHaveBeenLastCalledWith(true);
+				await act(async () => findButton(container, "Close release notes").click());
+				loadChangelog.mockResolvedValue({
+					schemaVersion: 1,
+					releases: [{ version: "0.83.0", notes: "Published latest" }],
+				});
+				await act(async () => findButton(container, "Account").click());
+				await act(async () => findButton(container, "Notifications").click());
+				expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.83.0");
+				expect(onUnreadChange).toHaveBeenLastCalledWith(false);
+				expect(container.querySelector(".account-menu-item-dot")).toBeNull();
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it("reuses cached menu history without marking it read until the notification dialog opens", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		const loadChangelog = vi.fn().mockResolvedValue(CHANGELOG);
+		const onUnreadChange = vi.fn();
+		try {
+			await act(async () =>
+				root.render(<AccountMenuHarness loadChangelog={loadChangelog} onUnreadChange={onUnreadChange} />),
+			);
+			await act(async () => root.unmount());
+			root = createRoot(container);
+			await act(async () =>
+				root.render(<AccountMenuHarness loadChangelog={loadChangelog} onUnreadChange={onUnreadChange} />),
+			);
+			expect(loadChangelog).toHaveBeenCalledOnce();
+			expect(onUnreadChange).toHaveBeenLastCalledWith(true);
+			await act(async () => findButton(container, "Account").click());
+			expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBeNull();
+			expect(loadChangelog).toHaveBeenCalledOnce();
+			await act(async () => findButton(container, "Notifications").click());
+			expect(loadChangelog).toHaveBeenCalledTimes(2);
+			expect(localStorage.getItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY)).toBe("0.82.0");
+			expect(onUnreadChange).toHaveBeenLastCalledWith(false);
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("escapes sidebar clipping and stays within the viewport while preserving close behavior", async () => {
 		const container = document.createElement("div");
 		container.style.overflow = "hidden";

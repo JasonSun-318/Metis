@@ -1,9 +1,10 @@
-import type { SessionSummary } from "@metis/app-protocol";
+import type { InteractionView, SessionSummary } from "@metis/app-protocol";
 import { describe, expect, it } from "vitest";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import {
 	DEFAULT_SESSION_GROUPING,
 	groupSessionsByDate,
+	groupSessionsByStatus,
 	groupSessionsByUnread,
 	loadSessionGroupingPreferences,
 	saveSessionGroupingPreferences,
@@ -74,9 +75,76 @@ describe("session grouping", () => {
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
 		saveSessionGroupingPreferences(storage, { chat: "unread", code: "none" });
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "unread", code: "none" });
+		saveSessionGroupingPreferences(storage, { chat: "status", code: "project" });
+		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "status", code: "project" });
 		values.set("metis.session-grouping.v1", '{"chat":"broken","code":"project"}');
 		expect(loadSessionGroupingPreferences(storage)).toEqual({ chat: "date", code: "project" });
 		values.set("metis.session-grouping.v1", "{");
 		expect(loadSessionGroupingPreferences(storage)).toEqual(DEFAULT_SESSION_GROUPING);
+	});
+
+	it("groups durable task states in priority order without treating unread or idle as unfinished or completed work", () => {
+		const make = (id: string, overrides: Partial<SessionSummary> = {}): SessionSummary => ({
+			...session(id, "chat", "2026-10-25T12:00:00Z"),
+			...overrides,
+		});
+		const sessions = [
+			make("idle-unread", { unread: true }),
+			make("completed", { lastTurnOutcome: "completed" }),
+			make("failed", { lastTurnOutcome: "failed" }),
+			make("interrupted", { state: "interrupted", lastTurnOutcome: "completed" }),
+			make("corrupt", { state: "corrupt", lastTurnOutcome: "completed" }),
+			make("external", { state: "in_use", lastTurnOutcome: "completed" }),
+			make("external-old-failure", { state: "in_use", lastTurnOutcome: "failed" }),
+			make("running", { state: "running", lastTurnOutcome: "failed" }),
+			make("pending", { attentionRequired: true, state: "running", lastTurnOutcome: "failed" }),
+		];
+		const interactions = { interactionOrder: [], interactionsById: new Map<string, InteractionView>() };
+		expect(
+			groupSessionsByStatus(sessions, interactions).map((section) => [
+				section.key,
+				section.sessions.map((item) => item.sessionId),
+			]),
+		).toEqual([
+			["pending", ["pending"]],
+			["running", ["running"]],
+			["interrupted", ["failed", "interrupted", "corrupt"]],
+			["completed", ["completed"]],
+			["idle", ["idle-unread", "external", "external-old-failure"]],
+		]);
+		expect(groupSessionsByStatus([], interactions)).toEqual([]);
+	});
+
+	it("uses live interaction order and the effective actor owner, independent of viewing or unread state", () => {
+		const make = (id: string) => session(id, "chat", "2026-10-25T12:00:00Z");
+		const request: InteractionView = {
+			interactionId: "request",
+			sessionId: "root",
+			actorSessionId: "actor",
+			rootSessionId: "root",
+			kind: "confirm",
+			title: "Confirm",
+			message: "Continue?",
+			createdAt: "2026-10-25T12:00:00Z",
+		};
+		const interactions = {
+			interactionOrder: ["missing", "request"],
+			interactionsById: new Map([
+				["request", request],
+				["orphan", { ...request, interactionId: "orphan", actorSessionId: "orphan-owner" }],
+			]),
+		};
+		const sessions = [make("root"), make("actor"), make("orphan-owner")];
+		expect(
+			groupSessionsByStatus(sessions, interactions).map((section) => [
+				section.key,
+				section.sessions.map((item) => item.sessionId),
+			]),
+		).toEqual([
+			["pending", ["actor"]],
+			["idle", ["root", "orphan-owner"]],
+		]);
+		const read = sessions.map((item) => ({ ...item, unread: !item.unread }));
+		expect(groupSessionsByStatus(read, interactions).map((section) => section.key)).toEqual(["pending", "idle"]);
 	});
 });

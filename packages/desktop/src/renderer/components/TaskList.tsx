@@ -1,7 +1,7 @@
 import type { SessionTaskView } from "@metis/app-protocol";
-import { CaretDown, CheckCircle, CircleNotch } from "@phosphor-icons/react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { CaretDown, CheckCircle, CircleNotch } from "../icons.tsx";
 
 interface TaskListProps {
 	readonly tasks: readonly SessionTaskView[];
@@ -72,7 +72,10 @@ export function TaskList({ tasks }: TaskListProps) {
 	const current = tasks.find(({ completed }) => !completed) ?? tasks.at(-1)!;
 
 	return (
-		<div className={`task-list-slot${visibility === "closing" ? " is-closing" : ""}`}>
+		<div
+			className={`task-list-slot${visibility === "closing" ? " is-closing" : ""}`}
+			inert={visibility === "closing"}
+		>
 			<section aria-label={t("Tasks")} className={`task-list-panel${expanded ? "" : " is-collapsed"}`}>
 				{expanded ? (
 					<button

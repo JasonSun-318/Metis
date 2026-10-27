@@ -45,7 +45,6 @@ import { PluginsPanel } from "./PluginsPanel.tsx";
 import { FileSelectionProvider } from "./preview/FileSelectionContext.tsx";
 import type { UniversalPreviewTarget } from "./preview/preview-kinds.ts";
 import { RecoveryBanner } from "./RecoveryBanner.tsx";
-import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
 import { SCHEDULE_KEEP_AWAKE_KEY, ScheduledTasksPanel } from "./ScheduledTasksPanel.tsx";
 import type { SessionChatSubmit, SessionChatViewContext } from "./SessionChatView.tsx";
 import {
@@ -1779,12 +1778,7 @@ export function App({ api, store }: AppProps) {
 							onSchedules={openSchedulesDestination}
 							onOpenSchedule={openSchedule}
 							onWidthChange={updateSessionSidebarWidth}
-							footerExtra={
-								<ReleaseNotesPopover
-									loadChangelog={api.getChangelog}
-									availableVersion={"version" in updateState ? updateState.version : null}
-								/>
-							}
+							loadChangelog={api.getChangelog}
 							scheduleTasks={sidebarScheduleTasks}
 							selectedScheduleTaskId={selectedScheduleTaskId}
 							state={sidebarState}

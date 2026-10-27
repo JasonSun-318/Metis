@@ -1,8 +1,8 @@
-import { BellSimple, CaretDown, X } from "@phosphor-icons/react";
-import { type CSSProperties, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type CSSProperties, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
+import { BellRing, CaretDown, X } from "../icons.tsx";
 import { DrawerDetails } from "./DrawerDetails.tsx";
 import { Markdown } from "./Markdown.tsx";
 
@@ -11,6 +11,11 @@ export const RELEASE_NOTES_READ_VERSION_STORAGE_KEY = "metis.release-notes-read-
 interface ReleaseNotesPopoverProps {
 	readonly loadChangelog: () => Promise<DesktopChangelog>;
 	readonly availableVersion?: string | null;
+	readonly variant?: "icon" | "menu";
+	readonly anchorRef?: RefObject<HTMLElement | null>;
+	readonly returnFocusRef?: RefObject<HTMLElement | null>;
+	readonly onOpen?: () => void;
+	readonly onUnreadChange?: (unread: boolean) => void;
 }
 
 type ChangelogLoader = ReleaseNotesPopoverProps["loadChangelog"];
@@ -78,7 +83,15 @@ function ReleaseNotesEntry({
 	);
 }
 
-export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: ReleaseNotesPopoverProps) {
+export function ReleaseNotesPopover({
+	loadChangelog,
+	availableVersion = null,
+	variant = "icon",
+	anchorRef,
+	returnFocusRef,
+	onOpen,
+	onUnreadChange,
+}: ReleaseNotesPopoverProps) {
 	const { t } = useTranslation();
 	const [changelog, setChangelog] = useState<DesktopChangelog | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -95,6 +108,9 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 	const unread = isNewerVersion(latestVersion, readVersion) || isNewerVersion(availableVersion, readVersion);
 	const mountedRef = useRef(true);
 	const loadTaskRef = useRef<Promise<void> | null>(null);
+	useEffect(() => {
+		onUnreadChange?.(unread);
+	}, [onUnreadChange, unread]);
 
 	const refresh = useCallback(
 		(force = false) => {
@@ -148,7 +164,7 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 	const [position, setPosition] = useState<CSSProperties>({});
 	const close = useCallback(() => setOpen(false), []);
 	const updatePosition = useCallback(() => {
-		const rect = triggerRef.current?.getBoundingClientRect();
+		const rect = (anchorRef ?? triggerRef).current?.getBoundingClientRect();
 		if (!rect) return;
 		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
 		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
@@ -161,7 +177,7 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 				? { left, width, bottom: viewportHeight - rect.top + 8, maxHeight: Math.min(480, above) }
 				: { left, width, top: rect.bottom + 8, maxHeight: Math.min(480, below) },
 		);
-	}, []);
+	}, [anchorRef]);
 
 	useLayoutEffect(() => {
 		if (!open) return;
@@ -173,8 +189,9 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 			if (!rootRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (event.key !== "Escape" || event.defaultPrevented) return;
 			event.preventDefault();
+			event.stopPropagation();
 			close();
 		};
 		document.addEventListener("pointerdown", onPointerDown);
@@ -186,9 +203,10 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 			document.removeEventListener("keydown", onKeyDown);
 			window.removeEventListener("resize", updatePosition);
 			window.removeEventListener("scroll", updatePosition, true);
-			if (triggerRef.current?.isConnected) triggerRef.current.focus();
+			const target = (returnFocusRef ?? triggerRef).current;
+			if (target?.isConnected) target.focus({ preventScroll: true });
 		};
-	}, [close, open, updatePosition]);
+	}, [close, open, returnFocusRef, updatePosition]);
 
 	const toggle = () => {
 		if (open) {
@@ -196,24 +214,40 @@ export function ReleaseNotesPopover({ loadChangelog, availableVersion = null }: 
 			return;
 		}
 		setOpen(true);
+		onOpen?.();
 		void refresh(true);
 	};
 
 	return (
-		<div className="release-notes-control" ref={rootRef}>
+		<div
+			className={variant === "menu" ? "release-notes-control release-notes-menu-control" : "release-notes-control"}
+			ref={rootRef}
+		>
 			<button
 				aria-controls="release-notes-popover"
+				aria-description={variant === "menu" && unread ? t("Unread notifications") : undefined}
 				aria-expanded={open}
 				aria-haspopup="dialog"
-				aria-label={t(unread ? "Open unread release notes" : "Open release notes")}
-				className="release-notes-trigger"
+				aria-label={t(
+					variant === "menu" ? "Notifications" : unread ? "Open unread release notes" : "Open release notes",
+				)}
+				className={variant === "menu" ? "account-menu-item account-menu-notifications" : "release-notes-trigger"}
 				onClick={toggle}
 				ref={triggerRef}
-				title={t(unread ? "Open unread release notes" : "Open release notes")}
+				role={variant === "menu" ? "menuitem" : undefined}
+				title={t(
+					variant === "menu" ? "Notifications" : unread ? "Open unread release notes" : "Open release notes",
+				)}
 				type="button"
 			>
-				<BellSimple aria-hidden="true" size={17} />
-				{unread && <span aria-hidden="true" className="release-notes-unread-dot" />}
+				<BellRing aria-hidden="true" size={17} />
+				{variant === "menu" && <span>{t("Notifications")}</span>}
+				{unread && (
+					<span
+						aria-hidden="true"
+						className={variant === "menu" ? "account-menu-item-dot" : "release-notes-unread-dot"}
+					/>
+				)}
 			</button>
 			{open &&
 				createPortal(

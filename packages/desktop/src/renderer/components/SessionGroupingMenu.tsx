@@ -1,18 +1,16 @@
-import { CaretRight, Check, Sliders } from "@phosphor-icons/react";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { Check, ListBullets } from "../icons.tsx";
 import type { SessionGroupBy } from "../store/session-grouping.ts";
 
 const OPTIONS = [
 	{ value: "date", label: "Date" },
 	{ value: "project", label: "Project" },
+	{ value: "status", label: "Status" },
 	{ value: "unread", label: "Unread" },
 	{ value: "none", label: "None" },
 ] as const;
-
-const PRIMARY_WIDTH = 200;
-const SECONDARY_WIDTH = 128;
 
 export function SessionGroupingMenu({
 	onChange,
@@ -23,70 +21,70 @@ export function SessionGroupingMenu({
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
-	const [submenuOpen, setSubmenuOpen] = useState(false);
-	const [primaryPosition, setPrimaryPosition] = useState<React.CSSProperties>({});
-	const [secondaryPosition, setSecondaryPosition] = useState<React.CSSProperties>({});
+	const [position, setPosition] = useState<React.CSSProperties>({});
 	const root = useRef<HTMLDivElement>(null);
 	const trigger = useRef<HTMLButtonElement>(null);
-	const primary = useRef<HTMLDivElement>(null);
-	const primaryItem = useRef<HTMLButtonElement>(null);
-	const secondary = useRef<HTMLDivElement>(null);
-	const primaryId = useId();
-	const secondaryId = useId();
-	const currentLabel = t(OPTIONS.find((option) => option.value === value)?.label ?? "Date");
+	const menu = useRef<HTMLDivElement>(null);
+	const menuId = useId();
+	const currentLabel = t(OPTIONS.find((option) => option.value === value)?.label ?? "Date", {
+		context: "session_grouping",
+	});
 
 	const updatePosition = useCallback(() => {
 		const rect = trigger.current?.getBoundingClientRect();
 		if (!rect) return;
 		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
 		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-		const primaryLeft = Math.max(8, Math.min(rect.right - PRIMARY_WIDTH, viewportWidth - PRIMARY_WIDTH - 8));
-		const primaryTop = Math.min(rect.bottom + 3, viewportHeight - 44);
-		const preferredSecondaryLeft = primaryLeft + PRIMARY_WIDTH + 2;
-		const secondaryLeft =
-			preferredSecondaryLeft + SECONDARY_WIDTH <= viewportWidth - 8
-				? preferredSecondaryLeft
-				: Math.max(8, primaryLeft - SECONDARY_WIDTH - 2);
-		setPrimaryPosition({ left: primaryLeft, top: primaryTop, width: PRIMARY_WIDTH });
-		setSecondaryPosition({
-			left: secondaryLeft,
-			top: Math.min(primaryTop + 5, viewportHeight - 133),
-			width: SECONDARY_WIDTH,
+		const width = Math.min(180, Math.max(0, viewportWidth - 16));
+		const height = Math.min(menu.current?.getBoundingClientRect().height || 156, Math.max(0, viewportHeight - 16));
+		const preferredTop = rect.bottom + 4 + height <= viewportHeight - 8 ? rect.bottom + 4 : rect.top - height - 4;
+		setPosition({
+			left: Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8)),
+			top: Math.max(8, Math.min(preferredTop, viewportHeight - height - 8)),
+			width,
+			maxHeight: Math.max(0, viewportHeight - 16),
+			overflowY: "auto",
 		});
 	}, []);
 
 	const close = useCallback((restoreFocus = false) => {
+		const previousMenu = menu.current;
 		setOpen(false);
-		setSubmenuOpen(false);
-		if (restoreFocus) queueMicrotask(() => trigger.current?.focus());
-	}, []);
-
-	const showSubmenu = useCallback((focusSelected = false) => {
-		setSubmenuOpen(true);
-		if (focusSelected) {
+		if (restoreFocus)
 			queueMicrotask(() => {
-				secondary.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
+				const active = document.activeElement;
+				if (
+					trigger.current?.isConnected &&
+					(active === document.body || (active && previousMenu?.contains(active)))
+				)
+					trigger.current.focus({ preventScroll: true });
 			});
-		}
 	}, []);
 
 	useLayoutEffect(() => {
 		if (!open) return;
 		updatePosition();
-		queueMicrotask(() => primaryItem.current?.focus());
+		menu.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus({ preventScroll: true });
 	}, [open, updatePosition]);
 
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (event: PointerEvent) => {
 			const node = event.target as Node;
-			if (!root.current?.contains(node) && !primary.current?.contains(node) && !secondary.current?.contains(node))
-				close();
+			if (!root.current?.contains(node) && !menu.current?.contains(node)) close();
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
-			event.preventDefault();
-			close(true);
+			const target = event.target as Node;
+			if (event.defaultPrevented || (!root.current?.contains(target) && !menu.current?.contains(target))) return;
+			if (event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+				close(true);
+			} else if (event.key === "Tab") {
+				close();
+				// Restore the natural tab origin before the browser moves to its next control.
+				trigger.current?.focus({ preventScroll: true });
+			}
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		document.addEventListener("keydown", onKeyDown);
@@ -100,115 +98,76 @@ export function SessionGroupingMenu({
 		};
 	}, [close, open, updatePosition]);
 
-	const menus = open ? (
-		<>
-			<div
-				aria-label={t("Session grouping")}
-				className="session-grouping-menu-primary"
-				id={primaryId}
-				ref={primary}
-				role="menu"
-				style={primaryPosition}
-			>
-				<button
-					aria-controls={submenuOpen ? secondaryId : undefined}
-					aria-expanded={submenuOpen}
-					aria-haspopup="menu"
-					aria-label={t("Group by {{label}}", { label: currentLabel })}
-					onClick={() => showSubmenu(true)}
-					onKeyDown={(event) => {
-						if (event.key !== "ArrowRight") return;
-						event.preventDefault();
-						showSubmenu(true);
-					}}
-					onPointerEnter={() => showSubmenu()}
-					ref={primaryItem}
-					role="menuitem"
-					type="button"
-				>
-					<span>{t("Group by")}</span>
-					<span className="session-grouping-current">
-						{currentLabel}
-						<CaretRight aria-hidden="true" size={15} />
-					</span>
-				</button>
-			</div>
-			{submenuOpen && (
-				<div
-					aria-label={t("Group sessions")}
-					className="session-grouping-menu-secondary"
-					id={secondaryId}
-					onKeyDown={(event) => {
-						if (event.key === "ArrowLeft") {
-							event.preventDefault();
-							setSubmenuOpen(false);
-							queueMicrotask(() => primaryItem.current?.focus());
-							return;
-						}
-						if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-						event.preventDefault();
-						const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
-						const current = items.indexOf(document.activeElement as HTMLButtonElement);
-						const next =
-							event.key === "Home"
-								? items[0]
-								: event.key === "End"
-									? items.at(-1)
-									: event.key === "ArrowDown"
-										? items[(current + 1) % items.length]
-										: items[(current <= 0 ? items.length : current) - 1];
-						next?.focus();
-					}}
-					ref={secondary}
-					role="menu"
-					style={secondaryPosition}
-				>
-					{OPTIONS.map((option, index) => {
-						const selected = option.value === value;
-						return (
-							<div
-								className={index === 3 ? "session-grouping-menu-last" : undefined}
-								key={option.value}
-								role="none"
-							>
-								<button
-									aria-checked={selected}
-									onClick={() => {
-										close(true);
-										if (!selected) onChange(option.value);
-									}}
-									role="menuitemradio"
-									type="button"
-								>
-									<span>{t(option.label)}</span>
-									{selected && <Check aria-hidden="true" size={16} weight="bold" />}
-								</button>
-							</div>
-						);
-					})}
-				</div>
-			)}
-		</>
-	) : null;
-
 	return (
 		<div className="session-grouping-control" ref={root}>
 			<button
-				aria-controls={open ? primaryId : undefined}
+				aria-controls={open ? menuId : undefined}
+				aria-description={t("Group by {{label}}", { label: currentLabel })}
 				aria-expanded={open}
 				aria-haspopup="menu"
 				aria-label={t("Group sessions")}
 				className="session-grouping-trigger"
-				onClick={() => {
-					setOpen((current) => !current);
-					setSubmenuOpen(false);
+				onClick={() => setOpen((current) => !current)}
+				onKeyDown={(event) => {
+					if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+					event.preventDefault();
+					setOpen(true);
 				}}
 				ref={trigger}
+				title={t("Group by {{label}}", { label: currentLabel })}
 				type="button"
 			>
-				<Sliders aria-hidden="true" size={16} />
+				<ListBullets aria-hidden="true" size={16} />
 			</button>
-			{menus && createPortal(menus, document.body)}
+			{open &&
+				createPortal(
+					<div
+						aria-label={t("Session grouping")}
+						className="session-grouping-menu"
+						id={menuId}
+						onKeyDown={(event) => {
+							if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+							event.preventDefault();
+							const items = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button"));
+							const current = items.indexOf(document.activeElement as HTMLButtonElement);
+							const index =
+								event.key === "Home"
+									? 0
+									: event.key === "End"
+										? items.length - 1
+										: event.key === "ArrowDown"
+											? (current + 1) % items.length
+											: (current + items.length - 1) % items.length;
+							items[index]?.focus({ preventScroll: true });
+						}}
+						ref={menu}
+						role="menu"
+						style={position}
+					>
+						{OPTIONS.map((option) => (
+							<div
+								className={option.value === "none" ? "session-grouping-menu-last" : undefined}
+								key={option.value}
+								role="none"
+							>
+								<button
+									aria-checked={option.value === value}
+									onClick={() => {
+										close(true);
+										if (option.value !== value) onChange(option.value);
+									}}
+									role="menuitemradio"
+									tabIndex={option.value === value ? 0 : -1}
+									type="button"
+								>
+									<span>{t(option.label, { context: "session_grouping" })}</span>
+									{option.value === value && <Check aria-hidden="true" size={16} weight="bold" />}
+								</button>
+							</div>
+						))}
+					</div>,
+					document.body,
+				)}
 		</div>
 	);
 }

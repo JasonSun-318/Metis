@@ -1,10 +1,12 @@
 import type { AgentMode, ClientResult, ScheduleTaskView, SessionSummary } from "@metis/app-protocol";
-import { ArrowRight, CaretDown, CaretRight, ChatCircleDots, Code } from "@phosphor-icons/react";
 import type { ReactNode } from "react";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { DesktopChangelog, DesktopUpdateState, MetisDesktopApi } from "../../shared/desktop-api.ts";
+import type { AgentActivity } from "../agent-activity.ts";
+import { useAgentActivities } from "../hooks/use-agent-activities.ts";
 import { localeForIntl } from "../i18n.ts";
+import { CaretDown, CaretRight } from "../icons.tsx";
 import type { ProjectSessionGroup } from "../session-groups.ts";
 import { SESSION_INDICATOR_LABELS, sessionIndicator } from "../session-view-utils.ts";
 import type { AppStoreSnapshot } from "../store/app-store.ts";
@@ -12,6 +14,7 @@ import type { ProjectPreference, ProjectPreferenceMap } from "../store/project-p
 import {
 	DEFAULT_SESSION_GROUPING,
 	groupSessionsByDate,
+	groupSessionsByStatus,
 	groupSessionsByUnread,
 	loadSessionGroupingPreferences,
 	type SessionGroupBy,
@@ -26,6 +29,8 @@ import { ScheduledTaskActions } from "./ScheduledTaskActions.tsx";
 import { SessionActions } from "./SessionActions.tsx";
 import { SessionGroupingMenu } from "./SessionGroupingMenu.tsx";
 import { SessionStatusIndicator } from "./SessionStatusIndicator.tsx";
+import { SidebarListMotion } from "./SidebarListMotion.tsx";
+import { SidebarModeIcon } from "./SidebarModeIcon.tsx";
 
 export type { ProjectSessionGroup } from "../session-groups.ts";
 
@@ -71,8 +76,7 @@ interface SessionSidebarProps {
 	readonly onOpenSchedule: (taskId: string) => void;
 	readonly onDeleteSchedule: MetisDesktopApi["deleteSchedule"];
 	readonly onWidthChange: (width: number, persist?: boolean) => void;
-	/** Extra control rendered next to the update button in the footer (release notes bell). */
-	readonly footerExtra?: ReactNode;
+	readonly loadChangelog?: () => Promise<DesktopChangelog>;
 	readonly scheduleTasks: readonly ScheduleTaskView[];
 	readonly selectedScheduleTaskId: string | null;
 	readonly updateState: DesktopUpdateState;
@@ -151,6 +155,7 @@ export function taskTitle(session: SessionSummary, locale: Intl.LocalesArgument 
 }
 
 function SessionButton({
+	activity,
 	busy,
 	deleteDisabled,
 	onCopy,
@@ -163,6 +168,7 @@ function SessionButton({
 	onOpen,
 	agentNavigation,
 }: {
+	readonly activity?: AgentActivity;
 	readonly agentNavigation?: AgentSidebarNavigation;
 	readonly busy: boolean;
 	readonly deleteDisabled: boolean;
@@ -177,8 +183,8 @@ function SessionButton({
 }) {
 	const { t, i18n } = useTranslation();
 	const title = taskTitle(session, localeForIntl(i18n.resolvedLanguage), t("Task"));
-	const running = session.state === "running";
-	const indicator = sessionIndicator(session, selected);
+	const running = session.state === "running" || activity?.running;
+	const indicator = sessionIndicator(session, selected, activity);
 	const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
 	const indicatorDescription = indicatorLabel ? t(indicatorLabel) : undefined;
 	const row = (agentToggle: ReactNode = null) => (
@@ -214,22 +220,40 @@ function SessionButton({
 			{agentToggle}
 		</div>
 	);
-	return agentNavigation ? (
-		<AgentSidebarBranch sessionId={session.sessionId} navigation={agentNavigation}>
-			{row}
-		</AgentSidebarBranch>
-	) : (
-		row()
+	return (
+		<div className="session-motion-item" data-sidebar-motion-key={`session:${session.sessionId}`}>
+			{agentNavigation ? (
+				<AgentSidebarBranch sessionId={session.sessionId} navigation={agentNavigation}>
+					{row}
+				</AgentSidebarBranch>
+			) : (
+				row()
+			)}
+		</div>
 	);
 }
 
-function SessionSection({ children, label }: { readonly children: ReactNode; readonly label: string }) {
+function SessionSection({
+	children,
+	label,
+	motionKey,
+}: {
+	readonly children: ReactNode;
+	readonly label: string;
+	readonly motionKey: string;
+}) {
 	const [open, setOpen] = useState(true);
+	const expansion = useRef({ motionKey, open });
+	if (expansion.current.motionKey !== motionKey) expansion.current = { motionKey, open: true };
+	else expansion.current = { motionKey, open };
+	if (open !== expansion.current.open) setOpen(expansion.current.open);
 	return (
-		<section className="session-section" data-open={open}>
+		<section className="session-section" data-open={open} data-sidebar-motion-key={motionKey}>
 			<button
 				aria-expanded={open}
 				className="session-section-heading"
+				data-sidebar-motion-exit="true"
+				data-sidebar-motion-key={`${motionKey}:header`}
 				onClick={() => setOpen((current) => !current)}
 				type="button"
 			>
@@ -244,6 +268,7 @@ function SessionSection({ children, label }: { readonly children: ReactNode; rea
 }
 
 function ProjectGroup({
+	activityBySession,
 	actionsActive,
 	group,
 	onActivateActions,
@@ -253,6 +278,7 @@ function ProjectGroup({
 	agentNavigation,
 	workspace,
 }: {
+	readonly activityBySession: ReadonlyMap<string, AgentActivity>;
 	readonly actionsActive: boolean;
 	readonly group: ProjectSessionGroup;
 	readonly onActivateActions: () => void;
@@ -264,13 +290,20 @@ function ProjectGroup({
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(true);
+	const owner = `${group.mode}:${group.cwd}`;
+	const expansion = useRef({ owner, open });
+	if (expansion.current.owner !== owner) expansion.current = { owner, open: true };
+	else expansion.current = { owner, open };
+	if (open !== expansion.current.open) setOpen(expansion.current.open);
 	const busy = workspace.busy || workspace.projectBusy(group);
 	return (
-		<div className="project-group" data-open={open}>
+		<div className="project-group" data-open={open} data-sidebar-motion-key={`project:${group.mode}:${group.cwd}`}>
 			<button
 				aria-expanded={open}
 				aria-label={t(open ? "Collapse {{name}} project" : "Expand {{name}} project", { name: group.name })}
 				className="project-heading"
+				data-sidebar-motion-exit="true"
+				data-sidebar-motion-key={`project:${group.mode}:${group.cwd}:header`}
 				onClick={() => setOpen((current) => !current)}
 				title={group.cwd}
 				type="button"
@@ -294,6 +327,7 @@ function ProjectGroup({
 				<div className="project-sessions">
 					{group.sessions.map((session) => (
 						<SessionButton
+							activity={activityBySession.get(session.sessionId)}
 							agentNavigation={agentNavigation}
 							busy={busy}
 							deleteDisabled={isDeleteDisabled(session)}
@@ -328,7 +362,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 	onOpenSchedule,
 	onDeleteSchedule,
 	onWidthChange,
-	footerExtra,
+	loadChangelog,
 	scheduleTasks,
 	selectedScheduleTaskId,
 	updateState,
@@ -336,9 +370,11 @@ export const SessionSidebar = memo(function SessionSidebar({
 	workspace,
 }: SessionSidebarProps) {
 	const { t, i18n } = useTranslation();
+	const agentMotionSeen = useRef(new Set<string>());
 	const agentNavigation = providedAgentNavigation
 		? {
 				...providedAgentNavigation,
+				motionSeen: agentMotionSeen.current,
 				attentionAgentIds: new Set(
 					state.interactionOrder.flatMap((id) => {
 						const interaction = state.interactionsById.get(id);
@@ -368,6 +404,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 		[scheduleTasks],
 	);
 	const modeSessions = useMemo(() => sessionsForMode(state, mode), [mode, state]);
+	const activityBySession = useAgentActivities(agentNavigation?.api, modeSessions, agentNavigation?.attentionAgentIds);
 	const scheduledSessions = useMemo(
 		() => modeSessions.filter((session) => session.scheduled && !scheduledTaskIds.has(session.scheduled.taskId)),
 		[modeSessions, scheduledTaskIds],
@@ -407,16 +444,9 @@ export const SessionSidebar = memo(function SessionSidebar({
 		);
 	const selectedSessionId =
 		!agentNavigation?.active && !newTaskOpen && destination === "tasks" ? state.activeSessionId : null;
-	const updateLabel =
-		updateState.status === "available"
-			? t("Update to new version")
-			: updateState.status === "downloading"
-				? t("Downloading update {{progress}}%", { progress: updateState.progress })
-				: updateState.status === "ready"
-					? t("Open installer")
-					: null;
 	const renderSession = (session: SessionSummary) => (
 		<SessionButton
+			activity={activityBySession.get(session.sessionId)}
 			agentNavigation={agentNavigation}
 			busy={busy}
 			deleteDisabled={isDeleteDisabled(session)}
@@ -444,7 +474,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					onClick={() => onModeChange("chat")}
 					type="button"
 				>
-					<ChatCircleDots aria-hidden="true" size={15} />
+					<SidebarModeIcon kind="chat" size={15} />
 					{t("Chat")}
 				</button>
 				<button
@@ -454,7 +484,7 @@ export const SessionSidebar = memo(function SessionSidebar({
 					onClick={() => onModeChange("code")}
 					type="button"
 				>
-					<Code aria-hidden="true" size={15} />
+					<SidebarModeIcon kind="code" size={15} />
 					{t("Code")}
 				</button>
 			</fieldset>
@@ -511,101 +541,120 @@ export const SessionSidebar = memo(function SessionSidebar({
 					}}
 					value={grouping}
 				/>
-				{!hasSessions && (
-					<p className="empty-copy">
-						{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}
-					</p>
-				)}
-				{pinnedSessions.length > 0 && (
-					<SessionSection label={t("Pinned")}>{pinnedSessions.map(renderSession)}</SessionSection>
-				)}
-				{grouping === "project" &&
-					tree.projects.map((group) => (
-						<ProjectGroup
-							agentNavigation={agentNavigation}
-							actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
-							group={group}
-							key={JSON.stringify([group.mode, group.cwd])}
-							onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
-							onDeactivateActions={() => setActiveProjectActions(null)}
-							isDeleteDisabled={isDeleteDisabled}
-							selectedSessionId={selectedSessionId}
-							workspace={workspace}
-						/>
-					))}
-				{grouping === "project" && tree.tasks.length > 0 && (
-					<section className="loose-tasks">
-						<h2>{t("Tasks")}</h2>
-						{tree.tasks.map(renderSession)}
-					</section>
-				)}
-				{grouping === "date" &&
-					groupSessionsByDate(sessions, new Date(), locale).map((section) => (
-						<SessionSection key={`${mode}:date:${section.key}`} label={t(section.label)}>
-							{section.sessions.map(renderSession)}
+				<SidebarListMotion
+					ownerKey={`${mode}:${grouping}:${destination}`}
+					scope={`${mode}:${grouping}:${destination}:${isClosing ? "closing" : "open"}`}
+				>
+					{!hasSessions && (
+						<p className="empty-copy">
+							{t("No {{mode}} tasks yet.", { mode: t(mode === "chat" ? "Chat" : "Code") })}
+						</p>
+					)}
+					{pinnedSessions.length > 0 && (
+						<SessionSection label={t("Pinned")} motionKey={`${mode}:section:pinned`}>
+							{pinnedSessions.map(renderSession)}
 						</SessionSection>
-					))}
-				{grouping === "unread" &&
-					groupSessionsByUnread(sessions).map((section) => (
-						<SessionSection key={`${mode}:unread:${section.key}`} label={t(section.label)}>
-							{section.sessions.map(renderSession)}
-						</SessionSection>
-					))}
-				{grouping === "none" && sessions.map(renderSession)}
-				{mode === "chat" && (visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
-					<section aria-label={t("Scheduled tasks")} className="scheduled-task-quick-list">
-						<h2>{t("Scheduled tasks")}</h2>
-						{visibleScheduleTasks.slice(0, 6).map((task) => (
-							<div className="session-row scheduled-task-quick-row" key={task.id}>
-								<button
-									aria-current={
-										destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined
-									}
-									aria-label={task.name}
-									className="scheduled-task-quick-open"
-									disabled={busy}
-									onClick={() => onOpenSchedule(task.id)}
-									type="button"
-								>
-									<span className={`scheduled-task-quick-dot state-${task.status}`} />
-									<span>{task.name}</span>
-									<small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>
-									{task.unreadCount > 0 && <i>{task.unreadCount}</i>}
-								</button>
-								<ScheduledTaskActions
-									deleteDisabled={task.activeRunId !== undefined}
-									disabled={busy}
-									onDelete={onDeleteSchedule}
-									task={task}
-								/>
-							</div>
+					)}
+					{grouping === "project" &&
+						tree.projects.map((group) => (
+							<ProjectGroup
+								activityBySession={activityBySession}
+								agentNavigation={agentNavigation}
+								actionsActive={activeProjectActions === JSON.stringify([group.mode, group.cwd])}
+								group={group}
+								key={JSON.stringify([group.mode, group.cwd])}
+								onActivateActions={() => setActiveProjectActions(JSON.stringify([group.mode, group.cwd]))}
+								onDeactivateActions={() => setActiveProjectActions(null)}
+								isDeleteDisabled={isDeleteDisabled}
+								selectedSessionId={selectedSessionId}
+								workspace={workspace}
+							/>
 						))}
-						{scheduledSessions.map(renderSession)}
-					</section>
-				)}
+					{grouping === "project" && tree.tasks.length > 0 && (
+						<section className="loose-tasks" data-sidebar-motion-key={`${mode}:loose`}>
+							<h2 data-sidebar-motion-exit="true" data-sidebar-motion-key={`${mode}:loose:header`}>
+								{t("Tasks")}
+							</h2>
+							{tree.tasks.map(renderSession)}
+						</section>
+					)}
+					{grouping === "date" &&
+						groupSessionsByDate(sessions, new Date(), locale).map((section) => (
+							<SessionSection
+								key={`${mode}:date:${section.key}`}
+								label={t(section.label)}
+								motionKey={`${mode}:date:${section.key}`}
+							>
+								{section.sessions.map(renderSession)}
+							</SessionSection>
+						))}
+					{grouping === "status" &&
+						groupSessionsByStatus(sessions, state, activityBySession).map((section) => (
+							<SessionSection
+								key={`${mode}:status:${section.key}`}
+								label={t(section.label, { context: "session_grouping" })}
+								motionKey={`${mode}:status:${section.key}`}
+							>
+								{section.sessions.map(renderSession)}
+							</SessionSection>
+						))}
+					{grouping === "unread" &&
+						groupSessionsByUnread(sessions).map((section) => (
+							<SessionSection
+								key={`${mode}:unread:${section.key}`}
+								label={t(section.label)}
+								motionKey={`${mode}:unread:${section.key}`}
+							>
+								{section.sessions.map(renderSession)}
+							</SessionSection>
+						))}
+					{grouping === "none" && sessions.map(renderSession)}
+					{mode === "chat" && (visibleScheduleTasks.length > 0 || scheduledSessions.length > 0) && (
+						<section
+							aria-label={t("Scheduled tasks")}
+							className="scheduled-task-quick-list"
+							data-sidebar-motion-key={`${mode}:scheduled`}
+						>
+							<h2>{t("Scheduled tasks")}</h2>
+							{visibleScheduleTasks.slice(0, 6).map((task) => (
+								<div className="session-row scheduled-task-quick-row" key={task.id}>
+									<button
+										aria-current={
+											destination === "schedules" && task.id === selectedScheduleTaskId ? "page" : undefined
+										}
+										aria-label={task.name}
+										className="scheduled-task-quick-open"
+										disabled={busy}
+										onClick={() => onOpenSchedule(task.id)}
+										type="button"
+									>
+										<span className={`scheduled-task-quick-dot state-${task.status}`} />
+										<span>{task.name}</span>
+										<small>{t(task.schedule.kind === "once" ? "Once" : task.schedule.kind)}</small>
+										{task.unreadCount > 0 && <i>{task.unreadCount}</i>}
+									</button>
+									<ScheduledTaskActions
+										deleteDisabled={task.activeRunId !== undefined}
+										disabled={busy}
+										onDelete={onDeleteSchedule}
+										task={task}
+									/>
+								</div>
+							))}
+							{scheduledSessions.map(renderSession)}
+						</section>
+					)}
+				</SidebarListMotion>
 			</nav>
-			{updateLabel && (
-				<div className="sidebar-update-notice">
-					<button
-						aria-label={updateLabel}
-						className="sidebar-update-button"
-						disabled={updateState.status === "downloading"}
-						onClick={onUpdate}
-						type="button"
-					>
-						<span>{updateLabel}</span>
-						<ArrowRight aria-hidden="true" size={15} />
-					</button>
-				</div>
-			)}
 			<div className="sidebar-footer">
 				<AccountMenu
 					onSettings={onSettings}
 					onCheckUpdate={onCheckUpdate}
-					checkingUpdate={checkingUpdate || updateState.status === "checking"}
-					updateDownloading={updateState.status === "downloading"}
+					onUpdate={onUpdate}
+					checkingUpdate={checkingUpdate}
+					updateState={updateState}
+					loadChangelog={loadChangelog}
 				/>
-				{footerExtra}
 			</div>
 			<hr
 				aria-valuenow={width}

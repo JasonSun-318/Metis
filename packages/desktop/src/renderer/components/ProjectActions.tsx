@@ -1,11 +1,12 @@
 import type { ClientResult } from "@metis/app-protocol";
-import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { DotsThree, NotePencil, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
 import type { ProjectSessionGroup } from "../session-groups.ts";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
+import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
 
 export { DialogFrame } from "./DialogFrame.tsx";
 
@@ -65,6 +66,7 @@ export function ProjectActions({
 		if (actionsButton.current)
 			setMenuPosition(actionMenuPosition(actionsButton.current.getBoundingClientRect(), 146, 3));
 	}, []);
+	useSidebarMotionPosition(actionsButton, menuOpen, updateMenuPosition);
 
 	const closeMenu = useCallback(
 		(restoreFocus = true) => {

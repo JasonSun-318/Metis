@@ -127,8 +127,12 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		});
 		expect(hasCheckForUpdate).toBe(true);
 
-		// 2. Locate the refresh button in AccountMenu footer
+		// 2. Open the unified account menu and check for updates from its row.
+		const accountTrigger = page.locator(".account-menu-trigger");
+		await accountTrigger.click();
 		const checkButton = page.locator(".account-update-check");
+		await expect(checkButton).toHaveAttribute("role", "menuitem");
+		await expect(checkButton).toHaveAttribute("aria-label", /^(获取更新|Get updates)$/u);
 		await expect(checkButton).toBeVisible({ timeout: 15_000 });
 		await expect(checkButton).toBeEnabled();
 
@@ -164,13 +168,15 @@ test("packaged build executes manual update check through real IPC", async ({}, 
 		// unsupported-build feedback are covered separately in chat-shell tests.
 		expect(["available", "unavailable"]).toContain(updateState.status);
 		const toast = page.locator(".system-notice");
-		const updateButton = page.locator(".sidebar-update-button");
+		await expect(page.locator(".sidebar-update-notice, .sidebar-update-button")).toHaveCount(0);
 		if (updateState.status === "available") {
-			await expect(updateButton).toHaveText(/更新新版本|Update to new version/u);
+			if ((await accountTrigger.getAttribute("aria-expanded")) !== "true") await accountTrigger.click();
+			await expect(checkButton).toBeVisible();
+			await expect(checkButton).toContainText(updateState.version);
+			await expect(checkButton).toBeEnabled();
 			await expect(toast).not.toBeVisible();
 		} else {
 			await expect(toast).toHaveText(/^(已是最新版本|Metis is up to date)$/u);
-			await expect(updateButton).not.toBeVisible();
 		}
 		console.log(
 			"[E2E] Successful remote check:",

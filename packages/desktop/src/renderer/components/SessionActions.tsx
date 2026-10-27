@@ -1,10 +1,11 @@
 import type { SessionSummary } from "@metis/app-protocol";
-import { CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "@phosphor-icons/react";
 import { type CSSProperties, type FormEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { CaretDown, CopySimple, DotsThree, PencilSimple, PushPin, PushPinSimple, Trash } from "../icons.tsx";
 import { actionMenuPosition } from "./action-menu-position.ts";
 import { DialogFrame } from "./DialogFrame.tsx";
+import { useSidebarMotionPosition } from "./use-sidebar-motion-position.ts";
 
 interface SessionActionsProps {
 	readonly allowRename?: boolean;
@@ -55,6 +56,7 @@ export function SessionActions({
 			setMenuPosition(actionMenuPosition(trigger.current.getBoundingClientRect(), 200, itemCount));
 		}
 	}, [allowRename, onCopy, onPin]);
+	useSidebarMotionPosition(trigger, menuOpen, updateMenuPosition);
 
 	const closeMenu = useCallback((restoreFocus = true) => {
 		setMenuOpen(false);

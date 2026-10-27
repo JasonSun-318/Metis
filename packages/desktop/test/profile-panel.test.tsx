@@ -12,6 +12,7 @@ import {
 	PROFILE_IDENTITY_STORAGE_KEY,
 	saveProfileIdentity,
 } from "../src/renderer/profile-identity.ts";
+import type { DesktopUpdateState } from "../src/shared/desktop-api.ts";
 
 const profile: ProfileUsageSummaryView = {
 	generatedAt: "2026-08-01T12:00:00.000Z",
@@ -118,8 +119,8 @@ describe("ProfilePanel", () => {
 		await act(async () => root.render(<ProfilePanel api={api} serverReady />));
 		await flush();
 
-		expect(container.querySelector('[aria-label*="9999 个 Token"]')).not.toBeNull();
-		expect(container.querySelector('[aria-label*="1万 个 Token"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label*="9999 Token"]')).not.toBeNull();
+		expect(container.querySelector('[aria-label*="1万 Token"]')).not.toBeNull();
 		await act(async () => root.unmount());
 	});
 
@@ -213,7 +214,7 @@ describe("AccountMenu", () => {
 
 		await act(async () => button(container, "Metis User").click());
 		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("true");
-		expect(document.activeElement?.textContent).toBe("Settings");
+		expect(document.activeElement?.textContent?.trim()).toBe("Settings");
 		expect(container.textContent).not.toContain("Language");
 		expect(container.querySelector('[role="menuitemradio"]')).toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
@@ -224,7 +225,7 @@ describe("AccountMenu", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("clicking refresh triggers update check independently without opening Settings", async () => {
+	it("checks for updates from its menu row independently without opening Settings", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const onSettings = vi.fn();
 		const onCheckUpdate = vi.fn();
@@ -233,12 +234,52 @@ describe("AccountMenu", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<AccountMenu onCheckUpdate={onCheckUpdate} onSettings={onSettings} />));
 
-		const refresh = button(container, "Check for updates");
+		await act(async () => button(container, "Metis User").click());
+		const refresh = button(container, "Get updates");
 		expect(refresh.classList.contains("account-update-check")).toBe(true);
+		expect(refresh.getAttribute("role")).toBe("menuitem");
 		await act(async () => refresh.click());
 		expect(onCheckUpdate).toHaveBeenCalledOnce();
 		expect(onSettings).not.toHaveBeenCalled();
 		expect(button(container, "Metis User").getAttribute("aria-expanded")).toBe("false");
+		await act(async () => root.unmount());
+	});
+
+	it.each<DesktopUpdateState>([
+		{ status: "checking" },
+		{ status: "downloading", version: "0.82.0", releaseNotes: "", progress: 42 },
+		{ status: "available", version: "0.82.0", releaseNotes: "" },
+		{ status: "ready", version: "0.82.0", releaseNotes: "" },
+	])("routes $status without duplicate checks or Settings actions", async (updateState) => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const onCheckUpdate = vi.fn();
+		const onUpdate = vi.fn();
+		const onSettings = vi.fn();
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<AccountMenu
+					checkingUpdate
+					onCheckUpdate={onCheckUpdate}
+					onSettings={onSettings}
+					onUpdate={onUpdate}
+					updateState={updateState}
+				/>,
+			),
+		);
+		await act(async () => button(container, "Metis User").click());
+		const update = button(container, "Get updates");
+		const busy = updateState.status === "checking" || updateState.status === "downloading";
+		expect(update.disabled).toBe(busy);
+		if (updateState.status === "downloading") expect(update.textContent).toContain("42%");
+		if (updateState.status === "available" || updateState.status === "ready")
+			expect(update.textContent).toContain("0.82.0");
+		await act(async () => update.click());
+		expect(onCheckUpdate).not.toHaveBeenCalled();
+		expect(onUpdate).toHaveBeenCalledTimes(busy ? 0 : 1);
+		expect(onSettings).not.toHaveBeenCalled();
 		await act(async () => root.unmount());
 	});
 });
