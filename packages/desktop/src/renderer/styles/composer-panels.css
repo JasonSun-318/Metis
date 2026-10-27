@@ -7,7 +7,9 @@
 	scrollbar-gutter: stable both-edges;
 }
 
-.composer-panels:empty { display: none; }
+.composer-panels-content { position: relative; display: flow-root; }
+.composer-panels-content > * { margin: 0; }
+.composer-panels-content > :is(.task-list-slot, .goal-bar-slot, .ask-user-slot, .permission-approval-slot) { animation: none; transform: none; }
 .workspace-body > .conversation-column:has(.composer-surface) { min-height: 0; }
 
 /* Drawers sit behind the original composer, inset equally on both sides. */
@@ -18,20 +20,15 @@
 	border-radius: 12px 12px 0 0;
 	overflow-x: hidden;
 }
-.composer-surface > .composer-panels > * { margin: 0; }
-.composer-surface > .composer-panels > :not(.is-closing) { animation: composer-panel-enter 180ms cubic-bezier(.16, 1, .3, 1) both; }
-.composer-surface > .composer-panels > .is-closing { animation: composer-panel-exit 160ms ease forwards; pointer-events: none; }
-.composer-surface > .composer-panels > .task-list-slot.is-closing { animation-duration: 200ms; }
-.composer-surface > .composer-panels > .ask-user-slot.is-submitting { animation: composer-panel-exit 140ms ease forwards; pointer-events: none; }
 .composer-panels :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
-.composer-surface > .composer-panels > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel) {
+.composer-surface > .composer-panels > .composer-panels-content > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel) {
 	border: 1px solid var(--border);
 	border-bottom: 0;
 	border-radius: 12px 12px 0 0;
 	box-shadow: none;
 }
-.composer-panels > * + * :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
-.composer-surface > .composer-panels > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel):not(:first-child) {
+.composer-panels-content > * ~ * :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
+.composer-surface > .composer-panels > .composer-panels-content > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel):not(:first-child) {
 	border-radius: 0;
 }
 
@@ -65,7 +62,7 @@
 .composer-panels .ask-user-actions > div { gap: var(--space-8); }
 .composer-panels .permission-approval-panel .permission-approval-body > footer { gap: var(--space-8); }
 
-.composer-panels > .queued-turn-list { max-height: none; overflow: visible; }
+.composer-panels-content > .queued-turn-list { max-height: none; overflow: visible; }
 .composer-panels .ask-user-panel { max-height: max(160px, min(var(--composer-panels-limit, 45vh), 360px)); }
 
 .composer-panel-toggle {
@@ -109,13 +106,43 @@
 .goal-bar-body .goal-bar-objective { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-22); line-height: 1.5; }
 .goal-bar-controls { display: flex; justify-content: flex-end; gap: 4px; }
 
-.permission-approval-slot .permission-approval-panel > header { grid-template-columns: 20px minmax(0, 1fr) 28px; align-items: center; }
+.permission-approval-slot .permission-approval-panel > header { grid-template-columns: minmax(0, 1fr) 28px; align-items: center; }
 .permission-approval-summary { display: block; margin-top: 3px; color: var(--text-14); font-size: 11px; }
 
 .goal-bar-body[hidden], .permission-approval-body[hidden], .queued-turn-body[hidden] { display: none; }
 .composer.is-awaiting-interaction .composer-editable-input { max-height: 54px; opacity: .6; cursor: default; }
 
 :root[data-motion="reduced"] :is(.composer-panel-toggle, .queued-turn-heading) svg { transition: none; }
-:root[data-motion="reduced"] .composer-surface > .composer-panels > * { animation: none; transition: none; transform: none; }
-@keyframes composer-panel-enter { from { opacity: 0; transform: translateY(20px); clip-path: inset(100% 0 0); } to { opacity: 1; transform: translateY(0); clip-path: inset(0); } }
-@keyframes composer-panel-exit { from { opacity: 1; transform: translateY(0); clip-path: inset(0); } to { grid-template-rows: 0fr; opacity: 0; transform: translateY(20px); clip-path: inset(100% 0 0); } }
+
+/* Native height interpolation retains mounted disclosure state and animates layout. */
+.composer-panels-content :is(.goal-bar-body, .queued-turn-body, .permission-approval-body, .permission-approval-details),
+.composer-panels-content > .is-closing {
+	interpolate-size: allow-keywords;
+	transition: height 180ms cubic-bezier(.16, 1, .3, 1), padding-block 180ms ease, margin-block 180ms ease, border-width 180ms ease, visibility 180ms;
+}
+.composer-panels-content :is(.goal-bar-body, .queued-turn-body, .permission-approval-body, .permission-approval-details)[hidden] {
+	display: block;
+	height: 0;
+	min-height: 0;
+	padding-block: 0;
+	margin-block: 0;
+	border-block-width: 0;
+	overflow: hidden;
+	visibility: hidden;
+}
+.composer-panels-content > :is(.session-status-panel, .task-list-slot) { interpolate-size: allow-keywords; transition: height 160ms ease, padding-block 160ms ease, border-width 160ms ease, visibility 160ms; height: auto; overflow: hidden; }
+.composer-surface .composer-panels-content > .is-closing { height: 0; min-height: 0; padding-block: 0; border-width: 0; overflow: hidden; pointer-events: none; animation: none; }
+.composer-panels .permission-approval-panel { max-height: var(--composer-panels-limit, 360px); overflow-y: auto; scrollbar-width: thin; }
+.composer-panels .permission-approval-panel > header { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+.composer-panels .permission-approval-body > footer { position: sticky; bottom: 0; background: var(--panel); }
+.composer-panels .session-status-panel > header { position: sticky; top: 0; z-index: 1; background: var(--panel); }
+:root[data-motion="reduced"] .composer-panels-content *,
+:root[data-motion="reduced"] .composer-panels-content *::before,
+:root[data-motion="reduced"] .composer-panels-content *::after { animation: none; transition: none; }
+@media (prefers-reduced-motion: reduce) {
+	:root:not([data-motion="full"]) .composer-panels-content *,
+	:root:not([data-motion="full"]) .composer-panels-content *::before,
+	:root:not([data-motion="full"]) .composer-panels-content *::after { animation: none; transition: none; }
+}
+
+.composer-panels-content > .task-list-slot.is-closing { transition-duration: 200ms; }

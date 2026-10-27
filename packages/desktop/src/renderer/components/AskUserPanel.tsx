@@ -1,15 +1,7 @@
 import type { InteractionResponseInput, InteractionView } from "@metis/app-protocol";
-import {
-	ArrowRight,
-	CaretDown,
-	CaretLeft,
-	CaretRight,
-	ChatCircleDots,
-	Check,
-	PencilSimple,
-} from "@phosphor-icons/react";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowRight, CaretDown, CaretLeft, CaretRight, ChatCircleDots, Check, PencilSimple } from "../icons.tsx";
 
 type AskUserInteraction = Extract<InteractionView, { kind: "ask_user" }>;
 interface AnswerDraft {
@@ -32,6 +24,21 @@ function hasAnswer(answer: AnswerDraft): boolean {
 	return answer.choiceIds.length > 0 || answer.customAnswer.trim().length > 0;
 }
 
+/** A control that cannot take focus must not be restored into another pane. */
+function canRestoreFocus(element: HTMLElement | null): element is HTMLElement {
+	if (!element?.isConnected || element.closest("[hidden], [inert]")) return false;
+	if (element.getAttribute("aria-hidden") === "true") return false;
+	if (
+		element instanceof HTMLButtonElement ||
+		element instanceof HTMLInputElement ||
+		element instanceof HTMLTextAreaElement ||
+		element instanceof HTMLSelectElement
+	) {
+		return !element.disabled;
+	}
+	return true;
+}
+
 export function AskUserPanel({ interaction, onRespond, draftCache, disabled = false }: AskUserPanelProps) {
 	const { t } = useTranslation();
 	const [draft, setDraft] = useState<AskUserDraft>(
@@ -47,6 +54,9 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 	const [error, setError] = useState<string>();
 	const busyRef = useRef(false);
 	const mounted = useRef(true);
+	const responseEpoch = useRef(0);
+	const focusHeld = useRef(false);
+	const focusReturned = useRef(false);
 	const panel = useRef<HTMLElement>(null);
 	const heading = useRef<HTMLHeadingElement>(null);
 	const resume = useRef<HTMLButtonElement>(null);
@@ -70,20 +80,51 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 
 	useEffect(() => {
 		mounted.current = true;
-		const conversation =
-			panel.current?.closest(".conversation-column") ?? resume.current?.closest(".conversation-column");
-		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+		const owned = panel.current ?? resume.current;
+		const conversation = owned?.closest(".conversation-column") ?? null;
+		// Track real focus ownership on the rendered subtree via capturing listeners.
+		const trackFocus = (event: FocusEvent) => {
+			if (event.type === "focusin") {
+				focusHeld.current = true;
+				return;
+			}
+			const next = event.relatedTarget;
+			focusHeld.current = next instanceof Node && owned?.contains(next) === true;
+		};
+		owned?.addEventListener("focusin", trackFocus);
+		owned?.addEventListener("focusout", trackFocus);
+		// Focus the arriving panel only when no other conversation pane owns the
+		// active element, so a background Ask never steals focus.
+		const active = document.activeElement;
+		const activeColumn =
+			active instanceof HTMLElement && active !== document.body ? active.closest(".conversation-column") : null;
+		if (!activeColumn || activeColumn === conversation) {
+			focusHeld.current = true;
+			// Collapsed renders the resume button, expanded renders the heading.
+			(resume.current ?? heading.current)?.focus();
+		}
 		return () => {
+			owned?.removeEventListener("focusin", trackFocus);
+			owned?.removeEventListener("focusout", trackFocus);
 			mounted.current = false;
+			if (!focusHeld.current || focusReturned.current) return;
+			// Only return focus this panel actually held. Never pull focus out of another
+			// pane, and never restore a control that is now disabled or hidden.
 			queueMicrotask(() => {
-				if (conversation?.isConnected && !conversation.querySelector(".ask-user-slot, .ask-user-resume")) {
-					conversation.querySelector<HTMLElement>('[contenteditable="true"]')?.focus();
-				} else if (previous?.isConnected && !previous.closest("[hidden]")) previous.focus();
+				const ownedNow = owned?.isConnected === true ? owned : null;
+				const current = document.activeElement;
+				if (current instanceof HTMLElement && current !== document.body && !ownedNow?.contains(current)) return;
+				focusReturned.current = true;
+				if (!conversation?.isConnected) return;
+				if (conversation.querySelector(".ask-user-slot, .ask-user-resume")) return;
+				const editor = conversation.querySelector<HTMLElement>('[contenteditable="true"]');
+				if (canRestoreFocus(editor)) editor.focus();
 			});
 		};
 	}, []);
 	// biome-ignore lint/correctness/useExhaustiveDependencies(draft.questionIndex): Each question change moves focus to its newly rendered heading.
 	useEffect(() => {
+		if (!focusHeld.current) return;
 		(draft.collapsed ? resume.current : heading.current)?.focus();
 	}, [draft.collapsed, draft.questionIndex]);
 
@@ -111,27 +152,28 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 		busyRef.current = true;
 		setBusy(true);
 		setError(undefined);
-		// Allow the exit transition to finish; never send if this interaction was removed meanwhile.
-		const reduced = document.documentElement.dataset.motion === "reduced";
-		await new Promise((resolve) => setTimeout(resolve, reduced ? 0 : 140));
-		if (!mounted.current) return;
+		const epoch = ++responseEpoch.current;
+		const response = {
+			interactionId: interaction.interactionId,
+			kind: "ask_user" as const,
+			cancelled,
+			answers: cancelled
+				? []
+				: interaction.questions.map((candidate, index) => ({
+						questionId: candidate.id,
+						choiceIds: [...draft.answers[index]!.choiceIds],
+						...(draft.answers[index]!.customAnswer.trim()
+							? { customAnswer: draft.answers[index]!.customAnswer.trim() }
+							: {}),
+					})),
+		};
+		// Height motion belongs to the shared stack. Drop the response if this
+		// interaction unmounted or a newer attempt replaced it.
 		try {
-			await onRespond({
-				interactionId: interaction.interactionId,
-				kind: "ask_user",
-				cancelled,
-				answers: cancelled
-					? []
-					: interaction.questions.map((candidate, index) => ({
-							questionId: candidate.id,
-							choiceIds: [...draft.answers[index]!.choiceIds],
-							...(draft.answers[index]!.customAnswer.trim()
-								? { customAnswer: draft.answers[index]!.customAnswer.trim() }
-								: {}),
-						})),
-			});
+			await onRespond(response);
+			if (!mounted.current || responseEpoch.current !== epoch) return;
 		} catch (cause) {
-			if (!mounted.current) return;
+			if (!mounted.current || responseEpoch.current !== epoch) return;
 			setError(cause instanceof Error ? cause.message : "The response could not be sent.");
 			busyRef.current = false;
 			setBusy(false);
@@ -199,7 +241,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 		);
 
 	return (
-		<div className={`ask-user-slot${busy ? " is-submitting" : ""}`}>
+		<div className="ask-user-slot">
 			<section
 				aria-busy={busy}
 				aria-labelledby={titleId}
@@ -284,7 +326,6 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 							<PencilSimple size={14} />
 						</span>
 						<label className="ask-user-option-copy">
-							<strong>{t("Something else")}</strong>
 							<textarea
 								aria-label={t("Something else")}
 								disabled={unavailable}
@@ -295,7 +336,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 										customAnswer: event.target.value,
 									})
 								}
-								placeholder={t("Type your own answer…")}
+								placeholder={t("Something else…")}
 								rows={1}
 								value={answer.customAnswer}
 							/>

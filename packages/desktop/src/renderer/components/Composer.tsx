@@ -1,5 +1,4 @@
 import type { ClientParams, McpServerSummaryView, SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
-import { ArrowUp, Stop, X } from "@phosphor-icons/react";
 import {
 	type FormEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
@@ -11,8 +10,11 @@ import {
 	useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { Scroll as createScrollIcon } from "reicon/icons/Scroll";
+import { Target as createTargetIcon } from "reicon/icons/Target";
 import type { DesktopAttachmentSelection } from "../../shared/desktop-api.ts";
 import { type GoalSlashCommand, parseGoalSlash } from "../goal-slash.ts";
+import { ArrowRight, ArrowUp, Stop, X } from "../icons.tsx";
 import { ComposerAddMenu } from "./ComposerAddMenu.tsx";
 import { ComposerPanelStack } from "./ComposerPanelStack.tsx";
 import { ContextUsageRing } from "./ContextUsageRing.tsx";
@@ -27,11 +29,11 @@ import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 const noSlashCommands = new Set<ComposerSlashCommand>();
 const MAX_COMPOSER_ATTACHMENTS = 16;
 
-const SCROLL_SVG =
-	'<svg aria-hidden="true" viewBox="0 0 256 256" width="14" height="14" fill="currentColor"><path d="M216,40H56A16,16,0,0,0,40,56V200a16,16,0,0,0,16,16H200a16,16,0,0,0,16-16V48A8,8,0,0,0,216,40ZM56,56H200V88H56ZM200,200H56a8,8,0,0,1-8-8V96H200v96A8,8,0,0,1,200,200Z"></path></svg>';
-
-const TARGET_SVG =
-	'<svg aria-hidden="true" viewBox="0 0 256 256" width="14" height="14" fill="currentColor"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm0-144a56,56,0,1,0,56,56A56.06,56.06,0,0,0,128,72Zm0,96a40,40,0,1,1,40-40A40,40,0,0,1,128,168Zm0-48a8,8,0,1,0,8,8A8,8,0,0,0,128,120Z"></path></svg>';
+function canFocusComposer(editor: HTMLElement): boolean {
+	const active = document.activeElement;
+	const owner = editor.closest(".conversation-column") ?? editor.closest(".composer-dock");
+	return active === document.body || (active !== null && owner?.contains(active) === true);
+}
 
 function createSkillTokenNode(skill: SkillSummaryView, onRemove?: () => void): HTMLElement {
 	const span = document.createElement("span");
@@ -45,7 +47,7 @@ function createSkillTokenNode(skill: SkillSummaryView, onRemove?: () => void): H
 
 	const icon = document.createElement("span");
 	icon.className = "composer-token-icon";
-	icon.innerHTML = SCROLL_SVG;
+	icon.appendChild(createScrollIcon({ size: 14, attrs: { "aria-hidden": "true", focusable: "false" } }));
 	span.appendChild(icon);
 
 	const nameSpan = document.createElement("span");
@@ -75,7 +77,7 @@ function createGoalTokenNode(onRemove?: () => void): HTMLElement {
 
 	const icon = document.createElement("span");
 	icon.className = "composer-token-icon";
-	icon.innerHTML = TARGET_SVG;
+	icon.appendChild(createTargetIcon({ size: 14, attrs: { "aria-hidden": "true", focusable: "false" } }));
 	span.appendChild(icon);
 
 	const nameSpan = document.createElement("span");
@@ -312,6 +314,7 @@ interface ComposerProps {
 	readonly taskListEpoch?: string | null;
 	readonly thinkingControl?: ReactNode;
 	readonly contextUsageExpanded?: boolean;
+	readonly contextUsageControls?: string;
 	readonly contextUsagePercent?: number | null;
 	readonly onOpenContextUsage?: () => void;
 	readonly inputId?: string;
@@ -342,6 +345,7 @@ export function Composer({
 	contextControl,
 	knowledge,
 	contextUsageExpanded = false,
+	contextUsageControls = "session-status-panel",
 	contextUsagePercent,
 	onOpenContextUsage,
 	inputId = "composer-input",
@@ -432,7 +436,14 @@ export function Composer({
 
 	useEffect(() => {
 		const editor = editorRef.current;
-		if (!editor || !prefillRequest || disabled || submitting || consumedPrefillId.current === prefillRequest.id)
+		if (
+			!editor ||
+			!prefillRequest ||
+			disabled ||
+			inputBlocked ||
+			submitting ||
+			consumedPrefillId.current === prefillRequest.id
+		)
 			return;
 		const text = prefillRequest.text.trim();
 		if (!text) return;
@@ -449,16 +460,18 @@ export function Composer({
 		}
 		untouchedPrefillText.current = !parsed.cleanText || replaceTemplate ? text : null;
 		consumedPrefillId.current = prefillRequest.id;
-		editor.focus({ preventScroll: true });
-		const range = document.createRange();
-		range.selectNodeContents(editor);
-		range.collapse(false);
-		const selection = window.getSelection();
-		selection?.removeAllRanges();
-		selection?.addRange(range);
+		if (canFocusComposer(editor)) {
+			editor.focus({ preventScroll: true });
+			const range = document.createRange();
+			range.selectNodeContents(editor);
+			range.collapse(false);
+			const selection = window.getSelection();
+			selection?.removeAllRanges();
+			selection?.addRange(range);
+		}
 		setDismissedSlashText(undefined);
 		syncEditorState();
-	}, [prefillRequest, disabled, submitting, syncEditorState]);
+	}, [prefillRequest, disabled, inputBlocked, submitting, syncEditorState]);
 
 	const processFiles = useCallback(
 		async (files: readonly File[]) => {
@@ -707,9 +720,19 @@ export function Composer({
 
 	const previouslyInputBlocked = useRef(inputBlocked);
 	useEffect(() => {
-		if (previouslyInputBlocked.current && !inputBlocked) editorRef.current?.focus();
+		const editor = editorRef.current;
+		const active = document.activeElement;
+		const surface = editor?.closest(".composer-surface");
+		if (
+			previouslyInputBlocked.current &&
+			!inputBlocked &&
+			!disabled &&
+			!submitting &&
+			(active === document.body || (active !== null && surface?.contains(active)))
+		)
+			editor?.focus({ preventScroll: true });
 		previouslyInputBlocked.current = inputBlocked;
-	}, [inputBlocked]);
+	}, [disabled, inputBlocked, submitting]);
 
 	const isCode = appearance === "code";
 
@@ -720,7 +743,7 @@ export function Composer({
 					<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
 					{goalControl}
 					{commandPanel}
-					{slashQuery !== undefined && (
+					{!inputBlocked && slashQuery !== undefined && (
 						<SlashCommandMenu
 							disabledCommands={disabledSlashCommands}
 							disabledReasons={disabledSlashReasons}
@@ -801,7 +824,13 @@ export function Composer({
 								contentEditable={!disabled && !inputBlocked && !submitting}
 								data-empty={!hasInput ? "true" : undefined}
 								data-placeholder={
-									placeholder ??
+									(inputBlocked
+										? t(
+												awaitingAnswer
+													? "Answer the questions above to continue."
+													: "Approve or reject the action above to continue.",
+											)
+										: placeholder) ??
 									(isCode
 										? t("Describe a task or ask a question")
 										: t(
@@ -843,18 +872,7 @@ export function Composer({
 											disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
 											type="submit"
 										>
-											<svg
-												aria-hidden="true"
-												fill="currentColor"
-												height="13"
-												viewBox="0 0 256 256"
-												width="13"
-											>
-												<path
-													d="M224,128a8,8,0,0,1-8,8H59.31l58.35,58.34a8,8,0,0,1-11.32,11.32l-72-72a8,8,0,0,1,0-11.32l72-72a8,8,0,0,1,11.32,11.32L59.31,120H216A8,8,0,0,1,224,128Z"
-													transform="scale(-1, 1) translate(-256, 0)"
-												/>
-											</svg>
+											<ArrowRight aria-hidden="true" size={13} />
 										</button>
 									)}
 								</div>
@@ -889,7 +907,7 @@ export function Composer({
 						<div className="composer-trailing">
 							{onOpenContextUsage && (
 								<ContextUsageRing
-									controls="session-status-panel"
+									controls={contextUsageControls}
 									expanded={contextUsageExpanded}
 									onClick={onOpenContextUsage}
 									percent={contextUsagePercent ?? null}

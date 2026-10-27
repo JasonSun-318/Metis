@@ -1,10 +1,11 @@
 import type { SessionStatusView } from "@metis/app-protocol";
-import { Info, X } from "@phosphor-icons/react";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { contextFillPercent, contextUsagePercent, formatContextTokens } from "../context-usage.ts";
+import { Info, X } from "../icons.tsx";
 
 interface SessionStatusPanelProps {
+	readonly id?: string;
 	readonly closing?: boolean;
 	readonly error?: string;
 	readonly loading: boolean;
@@ -12,24 +13,32 @@ interface SessionStatusPanelProps {
 	readonly status?: SessionStatusView;
 }
 
-export function SessionStatusPanel({ closing = false, error, loading, onClose, status }: SessionStatusPanelProps) {
+export function SessionStatusPanel({ id, closing = false, error, loading, onClose, status }: SessionStatusPanelProps) {
 	const { t } = useTranslation();
+	const generatedId = useId();
+	const panelId = id ?? generatedId;
+	const titleId = `${panelId}-title`;
 	const [cacheInfoOpen, setCacheInfoOpen] = useState(false);
 	const [cacheInfoHovered, setCacheInfoHovered] = useState(false);
 	const cacheInfoId = useId();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
 	useEffect(() => {
+		if (closing) return;
+		const element = rootRef.current;
 		const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-		closeButtonRef.current?.focus();
+		let restoreFocus = true;
+		closeButtonRef.current?.focus({ preventScroll: true });
 		const onPointerDown = (event: PointerEvent) => {
 			const target = event.target;
-			if (target instanceof Node && rootRef.current?.contains(target)) return;
-			if (target instanceof Element && target.closest('[aria-controls="session-status-panel"]')) return;
+			if (target instanceof Node && element?.contains(target)) return;
+			if (target instanceof Element && target.closest("[aria-controls]")?.getAttribute("aria-controls") === panelId)
+				return;
+			restoreFocus = false;
 			onClose();
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape") return;
+			if (event.key !== "Escape" || event.defaultPrevented || !element?.contains(document.activeElement)) return;
 			event.preventDefault();
 			onClose();
 		};
@@ -38,9 +47,17 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
-			if (previousFocus?.isConnected) previousFocus.focus();
+			const active = document.activeElement;
+			if (
+				restoreFocus &&
+				(active === document.body || (active !== null && element?.contains(active))) &&
+				previousFocus?.isConnected &&
+				!previousFocus.closest("[hidden], [inert]") &&
+				!previousFocus.matches(":disabled")
+			)
+				previousFocus.focus({ preventScroll: true });
 		};
-	}, [onClose]);
+	}, [closing, onClose, panelId]);
 
 	const fill = status ? contextFillPercent(status) : null;
 	const usagePercent = status ? contextUsagePercent(status) : null;
@@ -67,14 +84,16 @@ export function SessionStatusPanel({ closing = false, error, loading, onClose, s
 
 	return (
 		<div
-			aria-labelledby="session-status-title"
+			aria-labelledby={titleId}
+			aria-hidden={closing || undefined}
 			className={`session-status-panel${closing ? " is-closing" : ""}`}
-			id="session-status-panel"
+			id={panelId}
+			inert={closing}
 			ref={rootRef}
 			role="dialog"
 		>
 			<header>
-				<strong id="session-status-title">{t("Context Usage")}</strong>
+				<strong id={titleId}>{t("Context Usage")}</strong>
 				<button aria-label={t("Close status")} onClick={onClose} ref={closeButtonRef} type="button">
 					<X aria-hidden="true" size={16} />
 				</button>

@@ -223,6 +223,177 @@ describe("AskUserPanel", () => {
 		expect(container.querySelector("textarea")?.value).toBe("");
 		expect(option(container, "Local database").getAttribute("aria-checked")).toBe("true");
 	});
+
+	it("puts Something else in the placeholder and keeps the accessible name", () => {
+		const { container } = mount();
+		const custom = container.querySelector<HTMLTextAreaElement>("textarea")!;
+		expect(custom.getAttribute("aria-label")).toBe("Something else");
+		expect(custom.getAttribute("placeholder")).toBe("Something else…");
+		expect(container.querySelector(".ask-user-custom strong")).toBeNull();
+		expect(container.textContent).not.toContain("Type your own answer");
+	});
+
+	it("keeps collapsed drafts and leaves outer height motion to the shared stack", async () => {
+		const single = { ...interaction, questions: [interaction.questions[0]!] } satisfies AskUserInteraction;
+		const cache = new Map<string, AskUserDraft>();
+		const { container, onRespond } = mount(single, cache);
+		act(() => inputValue(container.querySelector("textarea")!, "Keep this"));
+		act(() => button(container, "Collapse questions").click());
+		expect(cache.get(single.interactionId)?.collapsed).toBe(true);
+		expect(cache.get(single.interactionId)?.answers[0]?.customAnswer).toBe("Keep this");
+		expect(container.querySelector(".ask-user-resume")).not.toBeNull();
+		expect(onRespond).not.toHaveBeenCalled();
+		act(() => button(container, "Continue answering").click());
+		expect(container.querySelector("textarea")?.value).toBe("Keep this");
+		act(() => button(container, "Confirm and continue").click());
+		const slot = container.querySelector<HTMLElement>(".ask-user-slot")!;
+		expect(slot.className).toBe("ask-user-slot");
+		expect(slot.classList.contains("is-submitting")).toBe(false);
+		expect(slot.style.animation).toBe("");
+		expect(slot.style.transition).toBe("");
+		await act(async () => {
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		});
+	});
+
+	it("returns focus to the composer editor after a normal submit unmount", async () => {
+		const column = document.createElement("div");
+		column.className = "conversation-column";
+		const editor = document.createElement("div");
+		editor.tabIndex = 0;
+		editor.setAttribute("contenteditable", "true");
+		column.append(editor);
+		document.body.append(column);
+		const container = document.createElement("div");
+		column.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const onRespond = vi.fn().mockResolvedValue(undefined);
+		await act(async () => {
+			root.render(
+				<AskUserPanel
+					interaction={{ ...interaction, questions: [interaction.questions[0]!] }}
+					onRespond={onRespond}
+				/>,
+			);
+		});
+		const heading = container.querySelector("h2")!;
+		expect(document.activeElement).toBe(heading);
+		act(() => option(container, "Local database").click());
+		await act(async () => {
+			button(container, "Confirm and continue").click();
+			await new Promise((resolve) => setTimeout(resolve, 10));
+		});
+		expect(onRespond).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+		await act(async () => {
+			await Promise.resolve();
+		});
+		expect(document.activeElement).toBe(editor);
+	});
+
+	it("does not focus an Ask arriving in a background pane", async () => {
+		const column = document.createElement("div");
+		column.className = "conversation-column";
+		const other = document.createElement("div");
+		other.className = "conversation-column";
+		const otherEditor = document.createElement("div");
+		otherEditor.tabIndex = 0;
+		otherEditor.setAttribute("contenteditable", "true");
+		other.append(otherEditor);
+		document.body.append(column, other);
+		const container = document.createElement("div");
+		column.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		otherEditor.focus();
+		expect(document.activeElement).toBe(otherEditor);
+		await act(async () => {
+			root.render(<AskUserPanel interaction={interaction} onRespond={vi.fn().mockResolvedValue(undefined)} />);
+		});
+		expect(document.activeElement).toBe(otherEditor);
+		expect(container.querySelector("h2")).not.toBeNull();
+	});
+
+	it("does not steal focus from another pane or restore a disabled control", async () => {
+		const column = document.createElement("div");
+		column.className = "conversation-column";
+		const other = document.createElement("div");
+		other.className = "conversation-column";
+		const otherEditor = document.createElement("div");
+		otherEditor.tabIndex = 0;
+		otherEditor.setAttribute("contenteditable", "true");
+		other.append(otherEditor);
+		document.body.append(column, other);
+		const container = document.createElement("div");
+		column.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		const onRespond = vi.fn().mockResolvedValue(undefined);
+		await act(async () => {
+			root.render(<AskUserPanel interaction={interaction} onRespond={onRespond} />);
+		});
+		const heading = container.querySelector("h2")!;
+		expect(document.activeElement).toBe(heading);
+		otherEditor.focus();
+		expect(document.activeElement).toBe(otherEditor);
+		await act(async () => root.unmount());
+		expect(document.activeElement).toBe(otherEditor);
+
+		const again = document.createElement("div");
+		column.append(again);
+		const second = createRoot(again);
+		roots.push(second);
+		const disabledEditor = document.createElement("div");
+		disabledEditor.tabIndex = 0;
+		disabledEditor.setAttribute("contenteditable", "true");
+		disabledEditor.setAttribute("aria-hidden", "true");
+		column.append(disabledEditor);
+		await act(async () => {
+			second.render(<AskUserPanel interaction={interaction} onRespond={onRespond} />);
+		});
+		act(() => again.querySelector("h2")!.focus());
+		await act(async () => second.unmount());
+		await act(async () => {
+			await Promise.resolve();
+		});
+		expect(document.activeElement).not.toBe(disabledEditor);
+	});
+
+	it("drops a late response after unmount and ignores a duplicate click", async () => {
+		let resolveResponse: (() => void) | undefined;
+		const onRespond = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					resolveResponse = resolve;
+				}),
+		);
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		roots.push(root);
+		await act(async () => {
+			root.render(
+				<AskUserPanel
+					interaction={{ ...interaction, questions: [interaction.questions[0]!] }}
+					onRespond={onRespond}
+				/>,
+			);
+		});
+		act(() => option(container, "Local database").click());
+		const submit = button(container, "Confirm and continue");
+		await act(async () => {
+			submit.click();
+			submit.click();
+		});
+		expect(onRespond).toHaveBeenCalledTimes(1);
+		await act(async () => root.unmount());
+		await act(async () => {
+			resolveResponse?.();
+			await Promise.resolve();
+		});
+		expect(onRespond).toHaveBeenCalledTimes(1);
+	});
 });
 
 function button(container: HTMLElement, name: string): HTMLButtonElement {

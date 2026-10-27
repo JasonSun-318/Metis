@@ -116,7 +116,7 @@ describe("session composer panel stack", () => {
 		expect(container.querySelector(".task-list-slot.is-closing")).not.toBeNull();
 		await act(async () => vi.advanceTimersByTime(200));
 		expect(container.querySelector(".task-list-slot")).toBeNull();
-		expect(container.querySelector(".composer-panels")?.firstElementChild).toBe(goal);
+		expect(container.querySelector(".composer-panels-content")?.firstElementChild).toBe(goal);
 		expect(container.querySelector("#composer-input")).toBe(editor);
 	});
 
@@ -124,7 +124,7 @@ describe("session composer panel stack", () => {
 		const { container } = await mount(
 			composerSnapshot({ pendingInteractions: [composerInteraction("session_permission_approval")] }),
 		);
-		const panels = container.querySelector(".composer-surface .composer-panels");
+		const panels = container.querySelector(".composer-surface .composer-panels-content");
 		expect(panels).not.toBeNull();
 		expect([...panels!.children].map((child) => child.className)).toEqual([
 			"task-list-slot",
@@ -210,7 +210,7 @@ describe("session composer panel stack", () => {
 		const { container, update } = await mount();
 		const editor = container.querySelector("#composer-input");
 		await update({ queuedTurns: [], tasks: [], goal: null });
-		expect(container.querySelector(".composer-panels")?.childElementCount).toBe(0);
+		expect(container.querySelector(".composer-panels-content")?.childElementCount).toBe(0);
 		expect(container.querySelector("#composer-input")).toBe(editor);
 	});
 });

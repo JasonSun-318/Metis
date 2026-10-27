@@ -10,8 +10,7 @@ import type {
 	SkillSummaryView,
 	ThinkingSelectionView,
 } from "@metis/app-protocol";
-import { Lightbulb, XCircle } from "@phosphor-icons/react";
-import { memo, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type RefObject, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { DesktopAttachmentSelection, MetisDesktopApi } from "../../shared/desktop-api.ts";
 import type { ConversationSubmission } from "../composer-submission.ts";
@@ -19,6 +18,7 @@ import { contextUsagePercent } from "../context-usage.ts";
 import { GOAL_SLASH_USAGE, type GoalSlashCommand } from "../goal-slash.ts";
 import { useConversationPlanFlow } from "../hooks/use-conversation-plan-flow.ts";
 import { useSessionProjection } from "../hooks/use-session-projection.ts";
+import { Lightbulb, X, XCircle } from "../icons.tsx";
 import { latestAssistantUsageKey, queuedTurnActionError } from "../session-view-utils.ts";
 import type { AppStore } from "../store/app-store.ts";
 import { emptyProjection } from "../store/reducer.ts";
@@ -141,6 +141,7 @@ export const SessionChatView = memo(function SessionChatView({
 	const [contextStatus, setContextStatus] = useState<SessionStatusView | null>(null);
 	const [compactingStartedAt, setCompactingStartedAt] = useState<string | null>(null);
 	const statusGeneration = useRef(0);
+	const statusPanelId = useId();
 	const contextStatusRef = useRef<SessionStatusView | null>(null);
 	const mcpListGeneration = useRef(0);
 	const skillListGeneration = useRef(0);
@@ -333,7 +334,7 @@ export const SessionChatView = memo(function SessionChatView({
 				contextStatusRef.current = status;
 				setContextStatus(status);
 				setSessionStatusPanel((current) =>
-					current?.sessionId === sessionId ? { sessionId, loading: false, status } : current,
+					current?.sessionId === sessionId && !current.closing ? { sessionId, loading: false, status } : current,
 				);
 			} catch (cause) {
 				if (generation !== statusGeneration.current) return;
@@ -624,6 +625,7 @@ export const SessionChatView = memo(function SessionChatView({
 	const permissionControl = session ? (
 		<PermissionSelector
 			activeReview={projection.activeReview}
+			interactionPending={interactionPending}
 			constrainedByParent={projection.constrainedByParent}
 			disabled={!serverReady}
 			onChange={(permissionPreset) => onChangePermissionPreset(sessionId, permissionPreset)}
@@ -657,7 +659,7 @@ export const SessionChatView = memo(function SessionChatView({
 				{t("Revise plan")}: {planRevisionTarget.title} · r{planRevisionTarget.revision}
 			</span>
 			<button aria-label={t("Remove revision context")} onClick={clearPlanRevision} type="button">
-				×
+				<X aria-hidden="true" size={14} />
 			</button>
 		</div>
 	) : null;
@@ -725,6 +727,7 @@ export const SessionChatView = memo(function SessionChatView({
 						collaborationControl={collaborationControl}
 						contextControl={planRevisionChip}
 						contextUsageExpanded={sessionStatusPanel?.sessionId === sessionId && !sessionStatusPanel.closing}
+						contextUsageControls={statusPanelId}
 						contextUsagePercent={
 							contextStatus && contextStatus.sessionId === sessionId ? contextUsagePercent(contextStatus) : null
 						}
@@ -732,6 +735,7 @@ export const SessionChatView = memo(function SessionChatView({
 						commandPanel={
 							sessionStatusPanel?.sessionId === sessionId ? (
 								<SessionStatusPanel
+									id={statusPanelId}
 									closing={sessionStatusPanel.closing}
 									error={sessionStatusPanel.error}
 									loading={sessionStatusPanel.loading}

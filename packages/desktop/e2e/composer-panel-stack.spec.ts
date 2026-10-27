@@ -14,7 +14,7 @@ let fixtureUrl: string;
 test.beforeAll(async () => {
 	fixtureRoot = await mkdtemp(path.join(tmpdir(), "metis-composer-panels-e2e-"));
 	await build({ bundle: true, entryPoints: [path.join(__dirname, "composer-panel-stack.fixture.tsx")], format: "esm", jsx: "automatic", loader: { ".css": "empty" }, outfile: path.join(fixtureRoot, "fixture.js"), platform: "browser", target: "es2022" });
-	await build({ bundle: true, outfile: path.join(fixtureRoot, "fixture.css"), stdin: { contents: `@import "${path.resolve(__dirname, "../src/renderer/styles/tokens.css").replaceAll("\\", "/")}";\n@import "${path.resolve(__dirname, "../src/renderer/styles/app.css").replaceAll("\\", "/")}";`, loader: "css", resolveDir: fixtureRoot } });
+	await build({ bundle: true, outfile: path.join(fixtureRoot, "fixture.css"), stdin: { contents: `@import "${path.resolve(__dirname, "../src/renderer/styles/tokens.css").replaceAll("\\", "/")}";\n@import "${path.resolve(__dirname, "../src/renderer/styles/app.css").replaceAll("\\", "/")}";\n@import "${path.resolve(__dirname, "../src/renderer/styles/permission-approval.css").replaceAll("\\", "/")}";`, loader: "css", resolveDir: fixtureRoot } });
 	await writeFile(path.join(fixtureRoot, "index.html"), `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/fixture.css"><style>.fixture-root{display:flex;height:100%;flex-direction:column;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif}.fixture-controls{display:flex;flex-wrap:wrap;gap:8px;padding:10px;flex:none;border-bottom:1px solid var(--border)}.fixture-controls button{padding:5px 8px;border:1px solid var(--border)}.fixture-pane{display:flex;flex:1;min-height:0;overflow:hidden}</style></head><body><div id="root"></div><script type="module" src="/fixture.js"></script></body></html>`);
 	server = createServer((request, response) => {
 		const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
@@ -48,7 +48,7 @@ async function assertSurface(page: Page) {
 		await Promise.all(surface.getAnimations({ subtree: true }).filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity).map((animation) => animation.finished.catch(() => {})));
 		const stack = surface.querySelector<HTMLElement>(".composer-panels")!;
 		const form = surface.querySelector<HTMLElement>(".composer")!;
-		const boxes = Array.from(stack.children, (element) => {
+		const boxes = Array.from(stack.querySelector(".composer-panels-content")!.children, (element) => {
 			const box = element.getBoundingClientRect();
 			const panel = element.matches(".queued-turn-list, .ask-user-resume, .session-status-panel, .slash-command-menu") ? element : element.firstElementChild!;
 			return { left: box.left, right: box.right, top: box.top, bottom: box.bottom, radius: getComputedStyle(panel).borderTopLeftRadius, shadow: getComputedStyle(panel).boxShadow, separator: getComputedStyle(element).borderTopWidth };
@@ -195,7 +195,7 @@ test("questions allow free navigation, immediate custom answers and one complete
 test("status and slash command drawers retain their controls and match the stack edges", async ({ page }) => {
 	await page.setViewportSize({ width: 900, height: 720 });
 	await open(page, "reduced");
-	await page.locator('[aria-controls="session-status-panel"]').click();
+	await page.locator(".context-usage-ring").click();
 	await expect(page.locator(".session-status-panel")).toContainText("25%");
 	await assertSurface(page);
 	await expect(page.getByRole("button", { name: "Close status", exact: true })).toHaveCSS("width", "28px");
@@ -209,29 +209,10 @@ test("status and slash command drawers retain their controls and match the stack
 	await expect(page.locator(".slash-command-menu")).toHaveCount(0);
 });
 
-test("submitted questions slide out before removal instead of becoming invisible immediately", async ({ page }) => {
-	await open(page, "request=ask");
+test("submitted questions collapse the drawer height continuously", async ({ page }) => {
+	await open(page, "empty&request=ask");
 	await page.locator(".ask-user-option").first().click();
-	const frames = await page.locator(".ask-user-slot").evaluate((slot) => new Promise<number[]>((resolve, reject) => {
-		const observer = new MutationObserver(() => {
-			if (!slot.classList.contains("is-submitting")) return;
-			observer.disconnect();
-			const animation = slot.getAnimations().find((candidate) => (candidate as CSSAnimation).animationName === "composer-panel-exit");
-			if (!animation) { reject(new Error("Exit animation missing")); return; }
-			animation.pause();
-			const opacities = [0, 70, 140].map((time) => {
-				animation.currentTime = time;
-				return Number(getComputedStyle(slot).opacity);
-			});
-			resolve(opacities);
-		});
-		observer.observe(slot, { attributes: true, attributeFilter: ["class"] });
-		slot.querySelector<HTMLButtonElement>(".ask-user-step")!.click();
-	}));
-	expect(frames[0]).toBe(1);
-	expect(frames[1]).toBeGreaterThan(0);
-	expect(frames[1]).toBeLessThan(1);
-	expect(frames[2]).toBe(0);
+	expectHeightMotion(await traceToggle(page.locator(".ask-user-step")));
 	await expect(page.locator(".ask-user-slot")).toHaveCount(0);
 });
 
@@ -260,3 +241,142 @@ for (const mode of ["chat", "code"]) {
 		}
 	});
 }
+
+
+type MotionSample = { height: number; bottom: number; at: number };
+async function traceToggle(button: ReturnType<Page["getByRole"]>): Promise<MotionSample[]> {
+	return button.evaluate(async (target) => {
+		const stack = document.querySelector<HTMLElement>(".composer-panels")!;
+		const form = document.querySelector<HTMLElement>(".composer")!;
+		const frames: { height: number; bottom: number; at: number }[] = [];
+		const start = performance.now();
+		const sample = () => frames.push({ height: stack.getBoundingClientRect().height, bottom: form.getBoundingClientRect().bottom, at: performance.now() - start });
+		sample();
+		(target as HTMLButtonElement).click();
+		await new Promise<void>((resolve) => {
+			const tick = () => { sample(); if (performance.now() - start < 450) requestAnimationFrame(tick); else resolve(); };
+			requestAnimationFrame(tick);
+		});
+		return frames;
+	});
+}
+function expectHeightMotion(frames: MotionSample[]) {
+	const first = frames[0]!.height;
+	const last = frames.at(-1)!.height;
+	expect(Math.abs(last - first)).toBeGreaterThan(15);
+	const low = Math.min(first, last), high = Math.max(first, last);
+	expect(frames.filter((frame) => frame.height > low + 1 && frame.height < high - 1).length).toBeGreaterThan(2);
+	expect(Math.max(...frames.map((frame) => frame.bottom)) - Math.min(...frames.map((frame) => frame.bottom))).toBeLessThan(1.5);
+}
+for (const mode of ["chat", "code"]) {
+	test(`${mode} animates actual drawer height and keeps the composer bottom stable`, async ({ page }) => {
+		await page.setViewportSize({ width: 1000, height: 800 });
+		await open(page, `mode=${mode}&empty&statusDelay`);
+		expectHeightMotion(await traceToggle(controls(page).getByRole("button", { name: "Approval", exact: true })));
+		expectHeightMotion(await traceToggle(page.getByRole("button", { name: "Collapse approval", exact: true })));
+		expectHeightMotion(await traceToggle(page.getByRole("button", { name: "Expand approval", exact: true })));
+		expectHeightMotion(await traceToggle(controls(page).getByRole("button", { name: "Resolve", exact: true })));
+		expectHeightMotion(await traceToggle(page.locator(".context-usage-ring")));
+		expectHeightMotion(await traceToggle(page.getByRole("button", { name: "Close status", exact: true })));
+		await expect(page.locator(".session-status-panel")).toHaveCount(0);
+		expectHeightMotion(await traceToggle(controls(page).getByRole("button", { name: "Ask", exact: true })));
+		expectHeightMotion(await traceToggle(page.getByRole("button", { name: "Collapse questions", exact: true })));
+		expectHeightMotion(await traceToggle(page.getByRole("button", { name: "Continue answering", exact: true })));
+	});
+}
+
+test("human requests replace review status, AskUser uses an in-field hint, and reduced motion settles immediately", async ({ page }) => {
+	await page.setViewportSize({ width: 700, height: 750 });
+	await open(page, "empty&review&reduced&theme=light");
+	await expect(page.locator(".permission-selector-status")).toHaveText("Checking security…");
+	const separated = await page.locator(".permission-selector-status").evaluate((status) => {
+		const a = status.getBoundingClientRect();
+		const b = document.querySelector(".composer-editable-input")!.getBoundingClientRect();
+		return a.bottom <= b.top || a.top >= b.bottom || a.right <= b.left || a.left >= b.right;
+	});
+	expect(separated).toBe(true);
+	await controls(page).getByRole("button", { name: "Ask", exact: true }).click();
+	await expect(page.locator(".permission-selector-status")).toHaveCount(0);
+	await expect(page.getByRole("textbox", { name: "Something else", exact: true })).toHaveAttribute("placeholder", "Something else…");
+	await expect(page.locator(".ask-user-custom strong")).toHaveCount(0);
+	await expect(page.locator(".composer-editable-input")).toHaveAttribute("data-placeholder", "Answer the questions above to continue.");
+	const animations = await page.locator(".composer-surface").evaluate((element) => element.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running" && animation.effect?.getComputedTiming().iterations !== Infinity).length);
+	expect(animations).toBe(0);
+	await page.locator(".context-usage-ring").click();
+	await page.getByRole("button", { name: "Close status", exact: true }).click();
+	await page.locator(".context-usage-ring").click();
+	await expect(page.locator(".session-status-panel")).toBeVisible();
+	await page.waitForTimeout(240);
+	await expect(page.locator(".session-status-panel")).toBeVisible();
+});
+
+
+test("approval disclosures use native keyboard activation", async ({ page }, testInfo) => {
+	await page.setViewportSize({ width: 1000, height: 800 });
+	await open(page, "empty&request=approval&reduced");
+	await page.screenshot({ path: testInfo.outputPath("approval-default.png"), animations: "disabled" });
+	const more = page.getByRole("button", { name: "More", exact: true });
+	await more.focus();
+	await more.press("Enter");
+	await expect(more).toHaveAttribute("aria-expanded", "true");
+	await expect(page.getByRole("button", { name: "Always allow this exact action", exact: true })).toBeVisible();
+	await more.press("Space");
+	await expect(more).toHaveAttribute("aria-expanded", "false");
+	const details = page.getByRole("button", { name: "Details", exact: true });
+	await details.press("Enter");
+	await expect(details).toHaveAttribute("aria-expanded", "true");
+	await page.getByRole("button", { name: "Allow once", exact: true }).click();
+	await expect(page.locator(".permission-approval-panel")).toHaveCount(0);
+	expect(await page.evaluate(() => (window as unknown as { composerFixtureCalls: { responded: number } }).composerFixtureCalls.responded)).toBe(1);
+});
+
+test("rapid reversals retarget visible height and a motion preference change settles immediately", async ({ page }) => {
+	await open(page, "empty");
+	const result = await controls(page).getByRole("button", { name: "Approval", exact: true }).evaluate(async (button) => {
+		const stack = document.querySelector<HTMLElement>(".composer-panels")!;
+		(button as HTMLButtonElement).click();
+		await new Promise((resolve) => setTimeout(resolve, 60));
+		const before = stack.getBoundingClientRect().height;
+		document.querySelector<HTMLButtonElement>('[aria-label="Collapse approval"]')!.click();
+		await new Promise((resolve) => requestAnimationFrame(resolve));
+		const reversed = stack.getBoundingClientRect().height;
+		document.querySelector<HTMLButtonElement>('[aria-label="Expand approval"]')!.click();
+		document.documentElement.dataset.motion = "reduced";
+		await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+		const height = stack.getBoundingClientRect().height;
+		const content = stack.querySelector<HTMLElement>(".composer-panels-content")!.getBoundingClientRect().height;
+		return { before, reversed, height, content, active: stack.getAnimations().filter((a) => a.playState === "running").length };
+	});
+	expect(result.before).toBeGreaterThan(0);
+	expect(Math.abs(result.reversed - result.before)).toBeLessThan(25);
+	expect(Math.abs(result.height - result.content)).toBeLessThan(1.5);
+	expect(result.active).toBe(0);
+});
+
+
+test("a completed task drawer closes in one layout transition without legacy motion", async ({ page }) => {
+	await open(page, "empty");
+	await controls(page).getByRole("button", { name: "Toggle tasks", exact: true }).click();
+	await expect(page.locator(".task-list-panel")).toBeVisible();
+	await page.waitForTimeout(220);
+	const frames = await controls(page).getByRole("button", { name: "Complete tasks", exact: true }).evaluate(async (button) => {
+		const frames: { height: number; at: number; legacy: boolean }[] = [];
+		const stack = document.querySelector<HTMLElement>(".composer-panels")!;
+		const start = performance.now();
+		(button as HTMLButtonElement).click();
+		await new Promise<void>((resolve) => {
+			const tick = () => {
+				const task = stack.querySelector<HTMLElement>(".task-list-slot.is-closing");
+				frames.push({ height: stack.getBoundingClientRect().height, at: performance.now() - start, legacy: !!task && getComputedStyle(task).animationName !== "none" });
+				if (performance.now() - start < 850) requestAnimationFrame(tick); else resolve();
+			};
+			requestAnimationFrame(tick);
+		});
+		return frames;
+	});
+	expect(frames.some((frame) => frame.legacy)).toBe(false);
+	const high = frames[0]!.height;
+	expect(frames.at(-1)!.height).toBe(0);
+	expect(frames.filter((frame) => frame.height > 1 && frame.height < high - 1).length).toBeGreaterThan(2);
+	await expect(page.locator(".task-list-slot")).toHaveCount(0);
+});

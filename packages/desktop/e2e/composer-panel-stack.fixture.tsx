@@ -54,6 +54,12 @@ const history: ItemView[] = [
 	},
 ];
 current = { ...current, recentItems: history };
+if (params.has("empty")) current = { ...current, tasks: [], goal: null, queuedTurns: [] };
+if (params.has("review"))
+	current = {
+		...current,
+		activeReview: { actionId: "fixture-review", reviewer: "model", riskLevel: "high" },
+	};
 if (params.has("typography")) {
 	const sample = "检查中文与 English 字号。Keep the conversation readable and preserve every existing feature.";
 	current = {
@@ -147,16 +153,19 @@ function request(kind: "ask_user" | "session_permission_approval") {
 const calls = { queued: 0, sent: 0, deleted: 0, responded: 0, openedPlan: 0 };
 const responses: InteractionResponseInput[] = [];
 const api = {
-	getSessionStatus: async () => ({
-		sessionId: COMPOSER_SESSION_ID,
-		mode: current.session.mode,
-		contextTokens: 3200,
-		contextWindow: 128000,
-		contextBasis: "reported_total",
-		contextBreakdown: [{ category: "conversation", tokens: 3200 }],
-		remainingPercent: 97.5,
-		cacheHitPercent: 25,
-	}),
+	getSessionStatus: async () => {
+		if (params.has("statusDelay")) await new Promise((resolve) => setTimeout(resolve, 120));
+		return {
+			sessionId: COMPOSER_SESSION_ID,
+			mode: current.session.mode,
+			contextTokens: 3200,
+			contextWindow: 128000,
+			contextBasis: "reported_total",
+			contextBreakdown: [{ category: "conversation", tokens: 3200 }],
+			remainingPercent: 97.5,
+			cacheHitPercent: 25,
+		};
+	},
 	queueTurn: async () => {
 		calls.queued += 1;
 		return {};
