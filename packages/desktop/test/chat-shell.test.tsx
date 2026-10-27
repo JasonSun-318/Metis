@@ -144,7 +144,7 @@ function button(container: HTMLElement, label: string): HTMLButtonElement {
 		);
 	const portalMatch = [
 		...document.querySelectorAll(
-			".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-popover",
+			".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-popover, .workspace-tab-menu",
 		),
 	]
 		.map((root) => matches(root))
@@ -152,6 +152,16 @@ function button(container: HTMLElement, label: string): HTMLButtonElement {
 	const match = matches(container) ?? portalMatch;
 	if (!match) throw new Error(`Missing button: ${label}`);
 	return match;
+}
+
+async function openAccountMenu(container: HTMLElement): Promise<void> {
+	const trigger = button(container, "Metis User");
+	if (trigger.getAttribute("aria-expanded") !== "true") await act(async () => trigger.click());
+}
+
+async function openNotifications(container: HTMLElement): Promise<void> {
+	await openAccountMenu(container);
+	await act(async () => button(container, "Notifications").click());
 }
 
 function activeWorkspace(container: HTMLElement): HTMLElement {
@@ -823,6 +833,194 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
+	it("shares the last tools sidebar width across sessions and restores it after remount", async () => {
+		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+		const first = session("chat-width-first", "chat", "/work/chat-project", "Width first");
+		const second = session("chat-width-second", "chat", "/work/chat-project", "Width second");
+		localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
+		localStorage.setItem(`metis.tools-sidebar-width.v2:${second.sessionId}`, "580");
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+			return this.classList.contains("workspace") ? 1600 : 0;
+		});
+		const { api } = createHarness({ sessions: [first, second] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		let root = createRoot(container);
+		const mount = async () => {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "Show tools sidebar").click());
+		};
+		const width = () => container.querySelector<HTMLElement>(".tool-sidebar")!.style.width;
+		try {
+			await mount();
+			expect(width()).toBe("393px");
+			const divider = container.querySelector<HTMLElement>('hr[aria-label="Resize tools sidebar"]')!;
+			await act(async () =>
+				divider.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true })),
+			);
+			expect(width()).toBe("409px");
+			expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe("409");
+			const pointer = (type: string, clientX: number) => {
+				const event = new Event(type, { bubbles: true, cancelable: true });
+				Object.defineProperties(event, { clientX: { value: clientX }, pointerId: { value: 1 } });
+				return event;
+			};
+			await act(async () => divider.dispatchEvent(pointer("pointerdown", 700)));
+			await act(async () => window.dispatchEvent(pointer("pointermove", 650)));
+			await act(async () => window.dispatchEvent(pointer("pointerup", 650)));
+			expect(width()).toBe("459px");
+			expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe("459");
+			await act(async () => button(container, "Width second").click());
+			await flush();
+			expect(width()).toBe("459px");
+			await act(async () => root.unmount());
+			root = createRoot(container);
+			await mount();
+			expect(width()).toBe("459px");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it("restores the shared tools sidebar width after a narrow startup ahead of legacy preferences", async () => {
+		Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+		const active = session("chat-width-shared", "chat", "/work/chat-project", "Shared width");
+		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
+		localStorage.setItem("metis.tools-sidebar-width.v3", "850");
+		localStorage.setItem(`metis.tools-sidebar-width.v2:${active.sessionId}`, "500");
+		let workspaceWidth = 650;
+		vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+			return this.classList.contains("workspace") ? workspaceWidth : 0;
+		});
+		const { api } = createHarness({ sessions: [active] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			await act(async () => button(container, "Show tools sidebar").click());
+			const sidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
+			expect(sidebar.style.width).toBe("280px");
+			expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe("850");
+			workspaceWidth = 1600;
+			await act(async () => window.dispatchEvent(new Event("resize")));
+			expect(sidebar.style.width).toBe("850px");
+			expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe("850");
+			expect(localStorage.getItem(`metis.tools-sidebar-width.v2:${active.sessionId}`)).toBe("500");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it.each([null, "invalid", "0"])(
+		"uses legacy tools sidebar widths until the first adjustment when the shared preference is %s",
+		async (stored) => {
+			Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+			const first = session("chat-width-legacy-first", "chat", "/work/chat-project", "Legacy first");
+			const second = session("chat-width-legacy-second", "chat", "/work/chat-project", "Legacy second");
+			localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
+			if (stored !== null) localStorage.setItem("metis.tools-sidebar-width.v3", stored);
+			localStorage.setItem(`metis.tools-sidebar-width.v2:${first.sessionId}`, "500");
+			localStorage.setItem(`metis.tools-sidebar-width.v2:${second.sessionId}`, "360");
+			vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+				return this.classList.contains("workspace") ? 1600 : 0;
+			});
+			const { api } = createHarness({ sessions: [first, second] });
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			try {
+				await act(async () => root.render(<App api={api} store={new AppStore()} />));
+				await flush();
+				await act(async () => button(container, "Show tools sidebar").click());
+				const sidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
+				expect(sidebar.style.width).toBe("500px");
+				expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe(stored);
+				await act(async () => button(container, "Legacy second").click());
+				await flush();
+				expect(sidebar.style.width).toBe("360px");
+				const divider = container.querySelector<HTMLElement>('hr[aria-label="Resize tools sidebar"]')!;
+				await act(async () =>
+					divider.dispatchEvent(
+						new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }),
+					),
+				);
+				expect(sidebar.style.width).toBe("376px");
+				expect(localStorage.getItem("metis.tools-sidebar-width.v3")).toBe("376");
+				await act(async () => button(container, "Legacy first").click());
+				await flush();
+				expect(sidebar.style.width).toBe("376px");
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
+	it.each(["read", "write"])(
+		"keeps the adjusted tools sidebar width in memory when preference %s fails",
+		async (failure) => {
+			Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+			const first = session("chat-width-failure-first", "chat", "/work/chat-project", "Failure first");
+			const second = session("chat-width-failure-second", "chat", "/work/chat-project", "Failure second");
+			const preferenceKey = "metis.tools-sidebar-width.v3";
+			localStorage.setItem("metis.activeSessionId.chat", first.sessionId);
+			localStorage.setItem(preferenceKey, "500");
+			localStorage.setItem(`metis.tools-sidebar-width.v2:${first.sessionId}`, "480");
+			localStorage.setItem(`metis.tools-sidebar-width.v2:${second.sessionId}`, "360");
+			const read = Storage.prototype.getItem;
+			const write = Storage.prototype.setItem;
+			vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, key: string) {
+				if (failure === "read" && (key === preferenceKey || key.startsWith("metis.tools-sidebar-width.v2:"))) {
+					throw new DOMException("Blocked", "SecurityError");
+				}
+				return read.call(this, key);
+			});
+			vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+				this: Storage,
+				key: string,
+				value: string,
+			) {
+				if (failure === "write" && key === preferenceKey) throw new DOMException("Full", "QuotaExceededError");
+				write.call(this, key, value);
+			});
+			let workspaceWidth = 1600;
+			vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockImplementation(function (this: HTMLElement) {
+				return this.classList.contains("workspace") ? workspaceWidth : 0;
+			});
+			const { api } = createHarness({ sessions: [first, second] });
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			try {
+				await act(async () => root.render(<App api={api} store={new AppStore()} />));
+				await flush();
+				await act(async () => button(container, "Show tools sidebar").click());
+				const sidebar = container.querySelector<HTMLElement>(".tool-sidebar")!;
+				const divider = container.querySelector<HTMLElement>('hr[aria-label="Resize tools sidebar"]')!;
+				await act(async () =>
+					divider.dispatchEvent(
+						new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }),
+					),
+				);
+				const expected = failure === "read" ? "409px" : "516px";
+				expect(sidebar.style.width).toBe(expected);
+				await act(async () => button(container, "Failure second").click());
+				await flush();
+				expect(sidebar.style.width).toBe(expected);
+				workspaceWidth = 650;
+				await act(async () => window.dispatchEvent(new Event("resize")));
+				expect(sidebar.style.width).toBe("280px");
+				workspaceWidth = 1600;
+				await act(async () => window.dispatchEvent(new Event("resize")));
+				expect(sidebar.style.width).toBe(expected);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
+
 	it("resizes the sessions sidebar and restores its preferred width after window resizing", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const originalInnerWidth = window.innerWidth;
@@ -879,7 +1077,7 @@ describe("Chat desktop shell", () => {
 		}
 	});
 
-	it("groups each mode independently from the nested Date, Project, Unread, or None menu", async () => {
+	it("groups each mode independently from the single-level grouping menu", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const now = new Date();
 		const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 12);
@@ -914,14 +1112,12 @@ describe("Chat desktop shell", () => {
 		).toBe(true);
 
 		await act(async () => button(container, "Group sessions").click());
-		expect(button(document.body, "Group by Date")).toBeTruthy();
-		await act(async () => button(document.body, "Group by Date").click());
+		expect(document.body.querySelectorAll('[role="menuitemradio"]')).toHaveLength(5);
 		await act(async () => menuOption(document.body, "Unread").click());
 		expect(button(container, "Unread")).toBeTruthy();
 		expect(button(container, "Read")).toBeTruthy();
 
 		await act(async () => button(container, "Group sessions").click());
-		await act(async () => button(document.body, "Group by Unread").click());
 		await act(async () => menuOption(document.body, "Project").click());
 		expect(projectRow(container, "/work/shared")).toBeTruthy();
 		expect(container.querySelector(".session-grouping-label")?.textContent).toBe("Projects");
@@ -934,7 +1130,6 @@ describe("Chat desktop shell", () => {
 		expect(localStorage.getItem("metis.session-grouping.v1")).toBe('{"chat":"project","code":"date"}');
 
 		await act(async () => button(container, "Group sessions").click());
-		await act(async () => button(document.body, "Group by Date").click());
 		await act(async () => menuOption(document.body, "None").click());
 		expect(container.querySelector(".session-section")).toBeNull();
 		expect(container.querySelectorAll(".session-row")).toHaveLength(1);
@@ -980,7 +1175,6 @@ describe("Chat desktop shell", () => {
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
 
 		await act(async () => button(container, "Group sessions").click());
-		await act(async () => button(document.body, "Group by Date").click());
 		await act(async () => menuOption(document.body, "Project").click());
 		const group = projectRow(container, "/work/bottom");
 		const projectTrigger = button(group, "Project actions");
@@ -1055,7 +1249,7 @@ describe("Chat desktop shell", () => {
 		).not.toBeNull();
 
 		await act(async () => button(container, "Metis User").click());
-		expect(document.activeElement?.textContent).toBe("Settings");
+		expect(document.activeElement?.textContent?.trim()).toBe("Settings");
 		await act(async () => button(container, "Settings").click());
 		await flush();
 		expect(api.setWorkspaceEditState).toHaveBeenLastCalledWith({
@@ -1085,7 +1279,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("lights the unread bell when an update arrives after the previous release was read", async () => {
+	it("lights the account notification indicator when a newer unread release arrives", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, "0.81.0");
@@ -1098,16 +1292,17 @@ describe("Chat desktop shell", () => {
 		try {
 			await act(async () => root.render(<App api={api} store={new AppStore()} />));
 			await flush();
-			expect(button(container, "Open release notes")).toBeTruthy();
-			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			expect(button(container, "Notifications")).toBeTruthy();
+			expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 			vi.mocked(api.getChangelog).mockResolvedValue(CHANGELOG);
 			await act(async () => emitUpdate({ status: "available", version: "0.82.0", releaseNotes: "" }));
 			await flush();
-			expect(container.querySelector(".sidebar-update-notice")).not.toBeNull();
-			expect(container.querySelector(".release-notes-unread-dot")).not.toBeNull();
-			await act(async () => button(container, "Open unread release notes").click());
+			expect(container.querySelector(".sidebar-update-notice")).toBeNull();
+			expect(button(container, "Get updates").textContent).toContain("0.82.0");
+			expect(container.querySelector(".account-menu-item-dot")).not.toBeNull();
+			await openNotifications(container);
 			expect(document.querySelector(".release-notes-popover")?.textContent).toContain("0.82.0");
-			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 			await act(async () => button(container, "Close release notes").click());
 			const loadsAfterRead = vi.mocked(api.getChangelog).mock.calls.length;
 			for (const progress of [10, 50, 100]) {
@@ -1115,13 +1310,13 @@ describe("Chat desktop shell", () => {
 			}
 			await act(async () => emitUpdate({ status: "ready", version: "0.82.0", releaseNotes: "" }));
 			expect(api.getChangelog).toHaveBeenCalledTimes(loadsAfterRead);
-			expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+			expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 		} finally {
 			await act(async () => root.unmount());
 		}
 	});
 
-	it("shows the update action above Metis only when a newer version is available and handles manual check flow", async () => {
+	it("routes the account update row through manual checking, downloading and installer states", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
@@ -1150,12 +1345,14 @@ describe("Chat desktop shell", () => {
 		expect(refreshBtn.disabled).toBe(false);
 		expect(refreshBtn.getAttribute("aria-busy")).toBe("false");
 
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
 		expect(refreshBtn.disabled).toBe(true);
 		expect(refreshBtn.getAttribute("aria-busy")).toBe("true");
 		expect(refreshBtn.querySelector(".is-spinning")).not.toBeNull();
 
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
 
@@ -1168,19 +1365,20 @@ describe("Chat desktop shell", () => {
 
 		const updateCallsBeforeBell = vi.mocked(api.checkForUpdate).mock.calls.length;
 		const changelogCallsBeforeBell = vi.mocked(api.getChangelog).mock.calls.length;
-		await act(async () => button(container, "Open unread release notes").click());
+		await openNotifications(container);
 		await flush();
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(updateCallsBeforeBell);
 		expect(api.getChangelog).toHaveBeenCalledTimes(changelogCallsBeforeBell + 1);
 		expect(document.querySelector(".release-notes-popover")?.textContent).toContain("0.82.0");
 		expect(document.querySelector(".release-notes-popover")?.textContent).toContain("Added changelog history");
-		expect(container.querySelector(".release-notes-unread-dot")).toBeNull();
+		expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 		expect(container.querySelector(".system-notice")?.textContent ?? "").not.toContain("Metis is up to date");
 
-		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
-		expect(notice).not.toBeNull();
-		expect(notice.nextElementSibling?.classList.contains("sidebar-footer")).toBe(true);
-		const update = button(notice, "Update to new version");
+		await act(async () => button(container, "Close release notes").click());
+		await openAccountMenu(container);
+		expect(container.querySelector(".sidebar-update-notice")).toBeNull();
+		const update = button(container, "Get updates");
+		expect(update.textContent).toContain("0.81.0");
 		expect(update.querySelector("svg")).not.toBeNull();
 		await act(async () => update.click());
 		expect(api.startUpdate).toHaveBeenCalledOnce();
@@ -1188,9 +1386,14 @@ describe("Chat desktop shell", () => {
 		await act(async () =>
 			emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 42 }),
 		);
-		expect(button(notice, "Downloading update 42%").disabled).toBe(true);
+		expect(update.textContent).toContain("Downloading update 42%");
+		expect(update.disabled).toBe(true);
 		await act(async () => emitUpdate({ status: "ready", version: "0.81.0", releaseNotes: RELEASE_NOTES }));
-		expect(button(notice, "Open installer").disabled).toBe(false);
+		expect(update.textContent).toContain("Open installer");
+		expect(update.disabled).toBe(false);
+		await openAccountMenu(container);
+		await act(async () => update.click());
+		expect(api.startUpdate).toHaveBeenCalledTimes(2);
 
 		await act(async () => root.unmount());
 	});
@@ -1208,6 +1411,7 @@ describe("Chat desktop shell", () => {
 
 		// 1. Up-to-date notice
 		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		await flush();
 		const upToDate = container.querySelector('.system-notice[data-tone="success"]');
@@ -1217,6 +1421,7 @@ describe("Chat desktop shell", () => {
 
 		// 2. Failure notice and retry
 		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("offline"));
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		await flush();
 		const failed = container.querySelector('.system-notice[data-tone="error"]');
@@ -1226,12 +1431,14 @@ describe("Chat desktop shell", () => {
 
 		// Retry succeeds
 		api.checkForUpdate = vi.fn().mockResolvedValueOnce({ status: "unavailable" });
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		await flush();
 		expect(container.querySelector('.system-notice[data-tone="success"]')?.textContent).toBe("Metis is up to date");
 
 		// 3. Unsupported build notice
 		api.checkForUpdate = vi.fn().mockRejectedValueOnce(new Error("Update checks are unavailable in this build"));
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		await flush();
 		expect(container.querySelector('.system-notice[data-tone="info"]')?.textContent).toBe(
@@ -1246,21 +1453,23 @@ describe("Chat desktop shell", () => {
 					resolveDelayedCheck = resolve;
 				}),
 		);
+		await openAccountMenu(container);
 		await act(async () => refreshBtn.click());
 		await act(async () =>
 			emitUpdate({ status: "downloading", version: "0.81.0", releaseNotes: RELEASE_NOTES, progress: 60 }),
 		);
-		const notice = container.querySelector<HTMLElement>(".sidebar-update-notice")!;
-		expect(button(notice, "Downloading update 60%")).not.toBeNull();
+		expect(refreshBtn.textContent).toContain("Downloading update 60%");
+		expect(refreshBtn.disabled).toBe(true);
 
 		await act(async () => resolveDelayedCheck!({ status: "unavailable" }));
 		await flush();
-		expect(button(notice, "Downloading update 60%")).not.toBeNull();
+		expect(refreshBtn.textContent).toContain("Downloading update 60%");
+		expect(refreshBtn.disabled).toBe(true);
 
 		await act(async () => root.unmount());
 	});
 
-	it("places release notes beside the account footer update check", async () => {
+	it("consolidates notification and update actions inside the account menu", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		localStorage.setItem("metis.activeSessionId.code", "code-existing");
@@ -1275,8 +1484,14 @@ describe("Chat desktop shell", () => {
 
 		const footer = container.querySelector<HTMLElement>(".sidebar-footer")!;
 		expect(footer).not.toBeNull();
-		expect(footer.querySelector(".release-notes-control")).not.toBeNull();
-		expect(button(container, "Open unread release notes")).toBeTruthy();
+		expect(footer.querySelector(".account-menu-notifications")).not.toBeNull();
+		expect(footer.querySelector(".release-notes-trigger")).toBeNull();
+		expect(footer.querySelector(".account-menu-footer > .account-update-check")).toBeNull();
+		expect(container.querySelector(".sidebar-update-notice")).toBeNull();
+		await openAccountMenu(container);
+		expect(footer.querySelectorAll('[role="menuitem"]')).toHaveLength(3);
+		expect(button(container, "Notifications")).toBeTruthy();
+		expect(button(container, "Get updates").getAttribute("role")).toBe("menuitem");
 		await act(async () => root.unmount());
 	});
 
@@ -1593,7 +1808,7 @@ describe("Chat desktop shell", () => {
 		expect(
 			[
 				...sessionList.querySelectorAll(
-					":scope > .session-grouping-label, :scope > .loose-tasks > h2, :scope > .scheduled-task-quick-list > h2",
+					":scope > .session-grouping-label, :scope > .sidebar-list-motion > .loose-tasks > h2, :scope > .sidebar-list-motion > .scheduled-task-quick-list > h2",
 				),
 			].map((element) => element.textContent),
 		).toEqual(["Projects", "Tasks", "Scheduled tasks"]);
@@ -1738,6 +1953,11 @@ describe("Chat desktop shell", () => {
 		};
 		const completed = {
 			...session("chat-completed", "chat", "/work/shared", "Completed task"),
+			unread: true,
+			lastTurnOutcome: "completed" as const,
+		};
+		const restarted = {
+			...session("chat-restarted", "chat", "/work/shared", "Restarted task"),
 			state: "running" as const,
 			unread: true,
 			lastTurnOutcome: "completed" as const,
@@ -1759,7 +1979,7 @@ describe("Chat desktop shell", () => {
 			attentionRequired: true,
 		};
 		localStorage.setItem("metis.activeSessionId.chat", active.sessionId);
-		const { api } = createHarness({ sessions: [active, completed, failed, read, attention] });
+		const { api } = createHarness({ sessions: [active, completed, restarted, failed, read, attention] });
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -1769,6 +1989,8 @@ describe("Chat desktop shell", () => {
 		expect(button(container, "Active task").querySelector("i.completed")).toBeNull();
 		expect(button(container, "Read task").querySelector("i.completed")).toBeNull();
 		expect(button(container, "Completed task").querySelector("i.completed")).not.toBeNull();
+		expect(button(container, "Restarted task").querySelector("i.completed")).toBeNull();
+		expect(button(container, "Restarted task").querySelector("i.running")).not.toBeNull();
 		expect(button(container, "Failed task").querySelector("i.failed")).not.toBeNull();
 		const attentionButton = button(container, "Attention task");
 		expect(attentionButton.querySelector("i.attention")).not.toBeNull();
@@ -1943,18 +2165,18 @@ describe("Chat desktop shell", () => {
 		await act(async () => button(projectDialog(), "Rename").click());
 		await flush();
 		chatGroup = projectRow(container, "/work/shared");
-		expect(chatGroup.querySelector(".project-heading span")?.textContent).toBe("Chat alias");
+		expect(chatGroup.querySelector(".project-heading > span:not([aria-hidden])")?.textContent).toBe("Chat alias");
 		await act(async () => button(chatGroup, "Pin").click());
 		await act(async () => button(container, "Code").click());
 		await flush();
 		const codeGroup = projectRow(container, "/work/shared");
-		expect(codeGroup.querySelector(".project-heading span")?.textContent).toBe("shared");
+		expect(codeGroup.querySelector(".project-heading > span:not([aria-hidden])")?.textContent).toBe("shared");
 		await act(async () => button(codeGroup, "Project actions").click());
 		expect(button(codeGroup, "Pin")).not.toBeNull();
 		await act(async () => button(container, "Chat").click());
 		await flush();
 		chatGroup = projectRow(container, "/work/shared");
-		expect(chatGroup.querySelector(".project-heading span")?.textContent).toBe("Chat alias");
+		expect(chatGroup.querySelector(".project-heading > span:not([aria-hidden])")?.textContent).toBe("Chat alias");
 		await act(async () => button(chatGroup, "Project actions").click());
 		expect(button(chatGroup, "Unpin")).not.toBeNull();
 		expect(JSON.stringify(sharedSessions)).toBe(journalFixture);
@@ -1966,7 +2188,9 @@ describe("Chat desktop shell", () => {
 		root = createRoot(container);
 		await act(async () => root.render(<App api={api} store={new AppStore()} />));
 		await flush();
-		expect(container.querySelector('.project-heading[title="/work/shared"] span')?.textContent).toBe("Chat alias");
+		expect(
+			container.querySelector('.project-heading[title="/work/shared"] > span:not([aria-hidden])')?.textContent,
+		).toBe("Chat alias");
 		await act(async () => root.unmount());
 	});
 
@@ -2223,7 +2447,7 @@ describe("Chat desktop shell", () => {
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
 		expect(container.querySelector(".composer-surface > .composer-panels + .composer-chat")).not.toBeNull();
-		expect(panel.closest(".composer-panels")?.lastElementChild).toBe(panel.parentElement);
+		expect(panel.closest(".composer-panels-content")?.lastElementChild).toBe(panel.parentElement);
 		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("false");
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(panel.getAttribute("aria-modal")).toBeNull();
@@ -2234,7 +2458,8 @@ describe("Chat desktop shell", () => {
 		expect(panel.textContent).toContain("/tmp/work");
 		expect(panel.textContent).toContain("workspace sandbox");
 		expect(panel.textContent).toContain("Always allow this exact action");
-		expect(panel.querySelector("#permission-approval-reason")?.textContent).toContain("Remove the generated cache.");
+		expect(panel.querySelector(".permission-approval-details")?.textContent).toContain("Remove the generated cache.");
+		expect(panel.querySelector<HTMLElement>(".permission-approval-details")?.hidden).toBe(true);
 		expect(panel.textContent).not.toContain("Arguments:");
 		await act(async () => button(panel, "Allow once").click());
 		await flush();
@@ -2299,7 +2524,8 @@ describe("Chat desktop shell", () => {
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(container.querySelector(".conversation-column > .ask-user-slot")).toBeNull();
 		expect(panel.textContent).toContain("Where should the data be stored?");
-		expect(panel.textContent).toContain("Something else");
+		expect(panel.querySelector("textarea")?.getAttribute("placeholder")).toBe("Something else…");
+		expect(panel.querySelector(".ask-user-custom strong")).toBeNull();
 
 		await act(async () =>
 			[...panel.querySelectorAll<HTMLButtonElement>(".ask-user-option")]
@@ -2520,9 +2746,9 @@ describe("Chat desktop shell", () => {
 		expect(leading.children[1]?.classList.contains("permission-selector")).toBe(true);
 		const trigger = button(container, "Select permissions, current Auto");
 		await act(async () => trigger.click());
-		expect(container.querySelector('[role="menu"]')).not.toBeNull();
+		expect(container.querySelector('[role="menu"]:not([aria-hidden="true"])')).not.toBeNull();
 		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" })));
-		expect(container.querySelector('[role="menu"]')).toBeNull();
+		expect(container.querySelector('[role="menu"]:not([aria-hidden="true"])')).toBeNull();
 		expect(document.activeElement).toBe(trigger);
 
 		await act(async () => trigger.click());
@@ -2909,7 +3135,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => option.click());
 		expect(api.setCollaborationMode).toHaveBeenCalledWith(expect.objectContaining({ collaborationMode: "plan" }));
 		expect(button(container, "Exit Plan mode").disabled).toBe(true);
-		expect(container.querySelector(".collaboration-mode-indicator")?.textContent).toBe("Plan");
+		expect(container.querySelector(".collaboration-mode-indicator")?.textContent?.trim()).toBe("Plan");
 		await act(async () => changeTextarea(editor, "Create a safe plan"));
 		expect(button(container, "Send message").disabled).toBe(true);
 		await act(async () => editor.closest("form")!.requestSubmit());
@@ -3440,7 +3666,14 @@ describe("Chat desktop shell", () => {
 			finished: Promise.resolve(),
 			cancel: vi.fn(),
 		} as unknown as Animation);
-		Object.defineProperty(HTMLElement.prototype, "animate", { configurable: true, value: animate });
+		Object.defineProperty(HTMLElement.prototype, "animate", {
+			configurable: true,
+			value: function (this: HTMLElement, ...args: Parameters<HTMLElement["animate"]>) {
+				// Sidebar effects are independent of the first-send composer transition.
+				if (this.matches(".composer")) return animate(...args);
+				return { finished: Promise.resolve(), cancel: vi.fn() } as unknown as Animation;
+			},
+		});
 		const rectSpy = vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
 			this: HTMLElement,
 		) {
@@ -5251,7 +5484,7 @@ describe("Chat desktop shell", () => {
 				new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 40, clientY: 20 }),
 			),
 		);
-		const moveItem = [...container.querySelectorAll<HTMLButtonElement>('.workspace-tab-menu [role="menuitem"]')].find(
+		const moveItem = [...document.querySelectorAll<HTMLButtonElement>('.workspace-tab-menu [role="menuitem"]')].find(
 			(candidate) => candidate.textContent?.includes("Move to pane"),
 		)!;
 		await act(async () => moveItem.click());
@@ -6925,7 +7158,7 @@ describe("Chat desktop shell", () => {
 				visible: false,
 			}),
 		);
-		const menu = container.querySelector('[role="menu"]')!;
+		const menu = container.querySelector('[role="menu"]:not([aria-hidden="true"])')!;
 		expect(menu.textContent).toContain("Find in page");
 		expect(menu.textContent).toContain("Print");
 		expect(container.querySelector<HTMLInputElement>('input[aria-label="Zoom percentage"]')?.value).toBe("100");

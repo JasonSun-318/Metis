@@ -83,7 +83,9 @@
 
 	/* semantic palette (dark) */
 	--app-bg: #121212;
-	--sidebar: #141414;
+	--session-sidebar-bg: #121212;
+	--sidebar: var(--session-sidebar-bg);
+	--conversation-bg: #141414;
 	--panel: #181818;
 	--panel-raised: #1e1e1e;
 	--panel-hover: #222222;
@@ -287,7 +289,9 @@
 
 	/* semantic palette (light) */
 	--app-bg: #faf9f6;
-	--sidebar: #f4f3ee;
+	--session-sidebar-bg: #f4f3ee;
+	--sidebar: var(--session-sidebar-bg);
+	--conversation-bg: #faf9f6;
 	--panel: #fcfcfa;
 	--panel-raised: #ffffff;
 	--panel-hover: #ecebe6;

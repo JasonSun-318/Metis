@@ -53,12 +53,26 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(rule(':root[data-platform="win32"] .window-drag-region').height).toBe("6px");
 		const sidebar = rule(':root[data-platform="win32"] .session-sidebar');
 		expect(sidebar.marginTop).toBe("0px");
-		expect(sidebar.borderRadius).toBe("0 0 9px 9px");
+		expect(sidebar.borderRadius).toBe("0px");
 	});
 
 	it("renders the titlebar as an in-flow drag row hosting the merged tab strip", () => {
 		const titlebar = rule(".workspace-titlebar");
-		expect(titlebar.height).toBe("40px");
+		expect(titlebar.height).toBe("var(--titlebar-height)");
+
+		// Shared top-row geometry: compact 40px/19.5px default, 46px/23px on
+		// normal macOS so 28px tabs sit 9/9 around the traffic-light center.
+		expect(css).toMatch(
+			/:root\s*\{[^}]*--titlebar-height:\s*40px;[^}]*--titlebar-control-center-y:\s*19\.5px;[^}]*\}/u,
+		);
+		expect(css).toMatch(
+			/:root\[data-platform="darwin"\]:not\(\[data-fullscreen="true"\]\)\s*\{[^}]*--titlebar-height:\s*46px;[^}]*--titlebar-control-center-y:\s*23px;[^}]*\}/u,
+		);
+		// No per-element downward centerline patches: strips center naturally.
+		expect(css).not.toMatch(/top:\s*calc\(var\(--titlebar-control-center-y\) - 19\.5px\)/u);
+		// The sidebar's top chrome spacer tracks the same titlebar height.
+		expect(rule(".window-drag-region").height).toBe("calc(var(--titlebar-height) + 7px)");
+
 		expect(titlebar.borderBottom).toBe("1px solid var(--border)");
 
 		const actionButtons = rule(
@@ -74,10 +88,14 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(css).toMatch(/\.workspace-tabbar-fill\s*\{[^}]*-webkit-app-region:\s*drag/u);
 	});
 
-	it("keeps the release bell beside the account footer's update check", () => {
-		const control = rule(".sidebar-footer .release-notes-control");
-		expect(control.position).toBe("relative");
-		expect(control.flex).toBe("0 0 auto");
+	it("anchors account actions to the full footer and keeps notification content outside its layout", () => {
+		expect(rule(".sidebar-footer").position).toBe("relative");
+		expect(rule(".sidebar-footer .account-menu").position).toBe("static");
+		const menu = rule(".account-menu-popover");
+		expect(menu.left).toBe("0px");
+		expect(menu.right).toBe("0px");
+		expect(menu.width).toBe("auto");
+		expect(rule(".release-notes-menu-control").width).toBe("100%");
 
 		const base = rule(".release-notes-popover");
 		expect(base.position).toBe("fixed");

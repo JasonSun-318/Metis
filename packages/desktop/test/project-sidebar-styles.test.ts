@@ -97,14 +97,10 @@ describe("Project sidebar motion", () => {
 		expect(rule(".session-grouping-control").right).toBe("4px");
 		expect(rule(".session-grouping-trigger").width).toBe("24px");
 		expect(rule(".session-grouping-trigger").height).toBe("24px");
-		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").background).toBe(
-			"var(--menu-bg)",
-		);
-		expect(rule(".session-grouping-menu-primary, .session-grouping-menu-secondary").boxShadow).toBe(
-			"var(--overlay-shadow)",
-		);
-		expect(rule(".session-grouping-menu-primary > button").height).toBe("25px");
-		expect(rule(".session-grouping-menu-secondary > div > button").minHeight).toBe("24px");
+		expect(rule(".session-grouping-menu").background).toBe("var(--menu-bg)");
+		expect(rule(".session-grouping-menu").boxShadow).toBe("var(--overlay-shadow)");
+		expect(rule(".session-grouping-menu").display).toBe("grid");
+		expect(rule(".session-grouping-menu > div > button").minHeight).toBe("28px");
 		expect(rule(".session-grouping-menu-last").borderTop).toContain("var(--surface-12)");
 		const taskHeading = rule(".loose-tasks h2");
 		const scheduledHeading = rule(".scheduled-task-quick-list h2");
@@ -137,20 +133,21 @@ describe("Project sidebar motion", () => {
 		expect(rule("button:focus-visible, summary:focus-visible").outline).toBe("none");
 		expect(rule("input:focus-visible, textarea:focus-visible, select:focus-visible").outline).toBe("none");
 		expect(rule(".file-search-field").border).toBe("1px solid var(--control-border)");
-		expect(rule(".browser-address-field").border).toBe("1px solid transparent");
+		expect(rule(".browser-address-field").border).toBe("1px solid var(--control-border)");
 		expect(rule(".plugins-search").border).toBe("1px solid var(--control-border)");
 		expect(rule(".composer").border).toBe("1px solid var(--border-strong)");
 	});
 
-	it("keeps the update action rectangular and aligned above the account footer", () => {
-		const notice = rule(".sidebar-update-notice");
-		const button = rule(".sidebar-update-button");
-		expect(notice.marginBottom).toBe("6px");
-		expect(button.width).toBe("100%");
-		expect(button.height).toBe("34px");
-		expect(button.borderRadius).toBe("7px");
-		expect(button.background).toBe("var(--surface-06)");
-		expect(button.border).toContain("var(--border-strong)");
+	it("anchors the unified account menu to the full footer width", () => {
+		expect(rule(".sidebar-footer").position).toBe("relative");
+		expect(rule(".sidebar-footer .account-menu").position).toBe("static");
+		const menu = rule(".account-menu-popover");
+		expect(menu.position).toBe("absolute");
+		expect(menu.left).toBe("0px");
+		expect(menu.right).toBe("0px");
+		expect(menu.width).toBe("auto");
+		expect(menu.bottom).toBe("calc(100% + 8px)");
+		expect(rule(".account-menu-item").height).toBe("32px");
 	});
 
 	it("shows profile avatars and matches the session action menu surface", () => {
