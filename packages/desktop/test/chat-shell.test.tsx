@@ -15,7 +15,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App, sessionDisplayTitle } from "../src/renderer/components/App.tsx";
 import { PluginsPanel } from "../src/renderer/components/PluginsPanel.tsx";
-import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesPopover.tsx";
+import { RELEASE_NOTES_READ_VERSION_STORAGE_KEY } from "../src/renderer/components/ReleaseNotesDialog.tsx";
 import { buildSessionTree, clampSessionSidebarWidth } from "../src/renderer/components/SessionSidebar.tsx";
 import { GENERAL_PREFERENCES_STORAGE_KEY } from "../src/renderer/general-preferences.ts";
 import { setLocale } from "../src/renderer/i18n.ts";
@@ -144,7 +144,7 @@ function button(container: HTMLElement, label: string): HTMLButtonElement {
 		);
 	const portalMatch = [
 		...document.querySelectorAll(
-			".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-popover, .workspace-tab-menu",
+			".session-action-menu, .project-action-menu, .modal-backdrop, .release-notes-dialog, .workspace-tab-menu",
 		),
 	]
 		.map((root) => matches(root))
@@ -1302,7 +1302,7 @@ describe("Chat desktop shell", () => {
 			expect(button(container, "Get updates").textContent).toContain("0.82.0");
 			expect(container.querySelector(".account-menu-item-dot")).not.toBeNull();
 			await openNotifications(container);
-			expect(document.querySelector(".release-notes-popover")?.textContent).toContain("0.82.0");
+			expect(document.querySelector(".release-notes-dialog")?.textContent).toContain("0.82.0");
 			expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 			await act(async () => button(container, "Close release notes").click());
 			const loadsAfterRead = vi.mocked(api.getChangelog).mock.calls.length;
@@ -1370,8 +1370,8 @@ describe("Chat desktop shell", () => {
 		await flush();
 		expect(api.checkForUpdate).toHaveBeenCalledTimes(updateCallsBeforeBell);
 		expect(api.getChangelog).toHaveBeenCalledTimes(changelogCallsBeforeBell + 1);
-		expect(document.querySelector(".release-notes-popover")?.textContent).toContain("0.82.0");
-		expect(document.querySelector(".release-notes-popover")?.textContent).toContain("Added changelog history");
+		expect(document.querySelector(".release-notes-dialog")?.textContent).toContain("0.82.0");
+		expect(document.querySelector(".release-notes-dialog")?.textContent).toContain("Added changelog history");
 		expect(container.querySelector(".account-menu-item-dot")).toBeNull();
 		expect(container.querySelector(".system-notice")?.textContent ?? "").not.toContain("Metis is up to date");
 

@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import type { DesktopChangelog, DesktopUpdateState } from "../../shared/desktop-api.ts";
 import { ArrowsClockwise, CaretDown, GearSix } from "../icons.tsx";
 import { useProfileIdentity } from "../profile-identity.ts";
-import { ReleaseNotesPopover } from "./ReleaseNotesPopover.tsx";
+import { ReleaseNotesDialog } from "./ReleaseNotesDialog.tsx";
 
 const NO_UPDATE: DesktopUpdateState = { status: "unavailable" };
 
@@ -137,8 +137,7 @@ export const AccountMenu = memo(function AccountMenu({
 					<span className="account-menu-item-label">{t("Settings")}</span>
 				</button>
 				{loadChangelog && (
-					<ReleaseNotesPopover
-						anchorRef={triggerRef}
+					<ReleaseNotesDialog
 						availableVersion={"version" in updateState ? updateState.version : null}
 						loadChangelog={loadChangelog}
 						onOpen={openNotifications}

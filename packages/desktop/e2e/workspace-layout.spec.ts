@@ -465,7 +465,7 @@ test("compact tabs and release notes stay usable when the sidebar is clipped and
 		expect(box.y).toBeGreaterThanOrEqual(8);
 		expect(box.y + box.height).toBeLessThanOrEqual(692);
 		expect(box.x + box.width).toBeGreaterThan(sidebar.x + sidebar.width);
-		expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".release-notes-popover")), { x: box.x + box.width - 16, y: box.y + 20 })).toBe(true);
+		expect(await page.evaluate(({ x, y }) => Boolean(document.elementFromPoint(x, y)?.closest(".release-notes-dialog")), { x: box.x + box.width - 16, y: box.y + 20 })).toBe(true);
 		await page.screenshot({ path: testInfo.outputPath("release-notes-unclipped.png"), animations: "disabled" });
 		await page.keyboard.press("Escape");
 		await expect(notes).toHaveCount(0);

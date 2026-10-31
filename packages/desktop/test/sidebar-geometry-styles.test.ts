@@ -96,10 +96,5 @@ describe("Sidebar geometry and workspace grid styles", () => {
 		expect(menu.right).toBe("0px");
 		expect(menu.width).toBe("auto");
 		expect(rule(".release-notes-menu-control").width).toBe("100%");
-
-		const base = rule(".release-notes-popover");
-		expect(base.position).toBe("fixed");
-		expect(base.maxHeight).toContain("480px");
-		expect(base.boxShadow).toBe("var(--overlay-shadow)");
 	});
 });

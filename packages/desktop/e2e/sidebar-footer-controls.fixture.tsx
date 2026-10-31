@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Folder as LibraryFolder } from "reicon-react/icons/Folder";
+import releaseHistory from "../changelog.darwin.json";
 import { AccountMenu } from "../src/renderer/components/AccountMenu.tsx";
 import { AnimatedNavIcon } from "../src/renderer/components/AnimatedNavIcon.tsx";
 import { setLocale } from "../src/renderer/i18n.ts";
@@ -32,12 +33,14 @@ function Fixture() {
 		setLoads((value) => value + 1);
 		return {
 			schemaVersion: 1,
-			releases: [
-				{
-					version: "0.1.9",
-					notes: "- Isolated release notes fixture.\n\n[Fixture details](https://example.test/release)",
-				},
-			],
+			releases: params.has("long")
+				? releaseHistory.releases
+				: [
+						{
+							version: "0.1.9",
+							notes: "- Isolated release notes fixture.\n\n[Fixture details](https://example.test/release)",
+						},
+					],
 		};
 	}, []);
 	return (

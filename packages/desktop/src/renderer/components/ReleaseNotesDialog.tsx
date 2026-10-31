@@ -1,24 +1,24 @@
-import { type CSSProperties, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import type { DesktopChangelog } from "../../shared/desktop-api.ts";
-import { BellRing, CaretDown, X } from "../icons.tsx";
-import { DrawerDetails } from "./DrawerDetails.tsx";
+import { BellRing, X } from "../icons.tsx";
+import "../styles/release-notes.css";
+import { DialogFrame } from "./DialogFrame.tsx";
 import { Markdown } from "./Markdown.tsx";
 
 export const RELEASE_NOTES_READ_VERSION_STORAGE_KEY = "metis.release-notes-read-version.v1";
 
-interface ReleaseNotesPopoverProps {
+interface ReleaseNotesDialogProps {
 	readonly loadChangelog: () => Promise<DesktopChangelog>;
 	readonly availableVersion?: string | null;
 	readonly variant?: "icon" | "menu";
-	readonly anchorRef?: RefObject<HTMLElement | null>;
 	readonly returnFocusRef?: RefObject<HTMLElement | null>;
 	readonly onOpen?: () => void;
 	readonly onUnreadChange?: (unread: boolean) => void;
 }
 
-type ChangelogLoader = ReleaseNotesPopoverProps["loadChangelog"];
+type ChangelogLoader = ReleaseNotesDialogProps["loadChangelog"];
 
 const changelogCache = new WeakMap<ChangelogLoader, DesktopChangelog>();
 const changelogLoads = new WeakMap<ChangelogLoader, Promise<DesktopChangelog>>();
@@ -51,47 +51,14 @@ function loadReleaseNotes(loadChangelog: ChangelogLoader, force: boolean): Promi
 	return task;
 }
 
-function ReleaseNotesEntry({
-	latest,
-	notes,
-	version,
-}: {
-	readonly latest: boolean;
-	readonly notes: string;
-	readonly version: string;
-}) {
-	const { t } = useTranslation();
-	return (
-		<DrawerDetails
-			className="release-notes-release"
-			defaultOpen={latest}
-			showCaret={false}
-			summary={
-				<>
-					<span>
-						{t("Version")} {version}
-					</span>
-					{latest && <small>{t("Latest")}</small>}
-					<CaretDown aria-hidden="true" size={14} />
-				</>
-			}
-		>
-			<div className="release-notes-markdown">
-				<Markdown text={notes} />
-			</div>
-		</DrawerDetails>
-	);
-}
-
-export function ReleaseNotesPopover({
+export function ReleaseNotesDialog({
 	loadChangelog,
 	availableVersion = null,
 	variant = "icon",
-	anchorRef,
 	returnFocusRef,
 	onOpen,
 	onUnreadChange,
-}: ReleaseNotesPopoverProps) {
+}: ReleaseNotesDialogProps) {
 	const { t } = useTranslation();
 	const [changelog, setChangelog] = useState<DesktopChangelog | null>(null);
 	const [loading, setLoading] = useState(true);
@@ -104,6 +71,13 @@ export function ReleaseNotesPopover({
 		}
 	});
 	const [open, setOpen] = useState(false);
+	const [selectedVersion, setSelectedVersion] = useState<string | null>(null);
+	const id = useId();
+	const titleId = `${id}-title`;
+	const descriptionId = `${id}-description`;
+	const selectedRelease =
+		changelog?.releases.find((release) => release.version === selectedVersion) ?? changelog?.releases[0];
+	const displayedVersion = selectedRelease?.version ?? null;
 	const latestVersion = changelog?.releases[0]?.version ?? null;
 	const unread = isNewerVersion(latestVersion, readVersion) || isNewerVersion(availableVersion, readVersion);
 	const mountedRef = useRef(true);
@@ -148,71 +122,38 @@ export function ReleaseNotesPopover({
 
 	useEffect(() => {
 		// Only acknowledge displayed history, never a version known solely from the updater.
-		if (!open || !latestVersion || !isNewerVersion(latestVersion, readVersion)) return;
-		setReadVersion(latestVersion);
+		if (!open || !displayedVersion || !isNewerVersion(displayedVersion, readVersion)) return;
+		setReadVersion(displayedVersion);
 		try {
-			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, latestVersion);
+			localStorage.setItem(RELEASE_NOTES_READ_VERSION_STORAGE_KEY, displayedVersion);
 		} catch {
 			// Keep the release read for this renderer lifetime when persistence is unavailable.
 		}
-	}, [latestVersion, open, readVersion]);
+	}, [displayedVersion, open, readVersion]);
 
-	const rootRef = useRef<HTMLDivElement>(null);
 	const triggerRef = useRef<HTMLButtonElement>(null);
 	const closeButtonRef = useRef<HTMLButtonElement>(null);
-	const popoverRef = useRef<HTMLElement>(null);
-	const [position, setPosition] = useState<CSSProperties>({});
+	const readerRef = useRef<HTMLElement>(null);
 	const close = useCallback(() => setOpen(false), []);
-	const updatePosition = useCallback(() => {
-		const rect = (anchorRef ?? triggerRef).current?.getBoundingClientRect();
-		if (!rect) return;
-		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
-		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-		const width = Math.min(360, Math.max(0, viewportWidth - 16));
-		const left = Math.max(8, Math.min(rect.right - width, viewportWidth - width - 8));
-		const above = Math.max(0, rect.top - 16);
-		const below = Math.max(0, viewportHeight - rect.bottom - 16);
-		setPosition(
-			above >= below
-				? { left, width, bottom: viewportHeight - rect.top + 8, maxHeight: Math.min(480, above) }
-				: { left, width, top: rect.bottom + 8, maxHeight: Math.min(480, below) },
-		);
-	}, [anchorRef]);
-
 	useLayoutEffect(() => {
 		if (!open) return;
-		updatePosition();
-		popoverRef.current?.showPopover?.();
-		closeButtonRef.current?.focus();
-		const onPointerDown = (event: PointerEvent) => {
-			const target = event.target as Node;
-			if (!rootRef.current?.contains(target) && !popoverRef.current?.contains(target)) close();
-		};
-		const onKeyDown = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || event.defaultPrevented) return;
-			event.preventDefault();
-			event.stopPropagation();
-			close();
-		};
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		window.addEventListener("resize", updatePosition);
-		window.addEventListener("scroll", updatePosition, true);
 		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-			window.removeEventListener("resize", updatePosition);
-			window.removeEventListener("scroll", updatePosition, true);
 			const target = (returnFocusRef ?? triggerRef).current;
 			if (target?.isConnected) target.focus({ preventScroll: true });
 		};
-	}, [close, open, returnFocusRef, updatePosition]);
+	}, [open, returnFocusRef]);
+	// Each version starts at its heading; background refreshes keep the reading position.
+	// biome-ignore lint/correctness/useExhaustiveDependencies(displayedVersion): A version change resets the reading pane.
+	useLayoutEffect(() => {
+		if (readerRef.current) readerRef.current.scrollTop = 0;
+	}, [displayedVersion]);
 
 	const toggle = () => {
 		if (open) {
 			close();
 			return;
 		}
+		setSelectedVersion(null);
 		setOpen(true);
 		onOpen?.();
 		void refresh(true);
@@ -221,10 +162,8 @@ export function ReleaseNotesPopover({
 	return (
 		<div
 			className={variant === "menu" ? "release-notes-control release-notes-menu-control" : "release-notes-control"}
-			ref={rootRef}
 		>
 			<button
-				aria-controls="release-notes-popover"
 				aria-description={variant === "menu" && unread ? t("Unread notifications") : undefined}
 				aria-expanded={open}
 				aria-haspopup="dialog"
@@ -251,17 +190,19 @@ export function ReleaseNotesPopover({
 			</button>
 			{open &&
 				createPortal(
-					<section
-						aria-labelledby="release-notes-title"
-						className="release-notes-popover"
-						id="release-notes-popover"
-						popover="manual"
-						ref={popoverRef}
-						role="dialog"
-						style={position}
+					<DialogFrame
+						cancellable
+						className="release-notes-dialog"
+						descriptionId={descriptionId}
+						initialFocus={closeButtonRef}
+						onCancel={close}
+						titleId={titleId}
 					>
-						<header>
-							<strong id="release-notes-title">{t("What's new")}</strong>
+						<header className="release-notes-header">
+							<div>
+								<h2 id={titleId}>{t("What's new")}</h2>
+								<p id={descriptionId}>{t("Browse updates and release history.")}</p>
+							</div>
 							<button
 								aria-label={t("Close release notes")}
 								className="release-notes-close"
@@ -269,35 +210,70 @@ export function ReleaseNotesPopover({
 								ref={closeButtonRef}
 								type="button"
 							>
-								<X aria-hidden="true" size={16} />
+								<X aria-hidden="true" size={18} />
 							</button>
 						</header>
-						<div className="release-notes-body">
-							{loading && !changelog && (
-								<output className="status-paragraph release-notes-status">
-									{t("Loading release notes...")}
-								</output>
-							)}
-							{failed && (
-								<p className="release-notes-status is-error" role="alert">
-									{t("Could not load release notes. Check your connection and try again.")}
-								</p>
-							)}
-							{!loading && !failed && (!changelog || changelog.releases.length === 0) && (
-								<output className="status-paragraph release-notes-status">
-									{t("No release notes are available yet.")}
-								</output>
-							)}
-							{changelog?.releases.map((release, index) => (
-								<ReleaseNotesEntry
-									key={release.version}
-									latest={index === 0}
-									notes={release.notes}
-									version={release.version}
-								/>
-							))}
+						<div className="release-notes-layout">
+							<nav aria-label={t("Release versions")} className="release-notes-versions">
+								{changelog?.releases.map((release, index) => (
+									<button
+										aria-current={release.version === displayedVersion ? "page" : undefined}
+										aria-label={`${t("Version")} ${release.version}`}
+										className="release-notes-version"
+										key={release.version}
+										onClick={() => setSelectedVersion(release.version)}
+										type="button"
+									>
+										<span>
+											{t("Version")} {release.version}
+										</span>
+										{index === 0 && <small>{t("Latest")}</small>}
+									</button>
+								))}
+							</nav>
+							<section
+								aria-label={
+									selectedRelease
+										? t("Release notes for {{version}}", { version: selectedRelease.version })
+										: t("What's new")
+								}
+								className="release-notes-reader"
+								ref={readerRef}
+								// biome-ignore lint/a11y/noNoninteractiveTabindex: Long release notes need a keyboard scrolling target.
+								tabIndex={0}
+							>
+								{loading && !changelog && (
+									<output className="status-paragraph release-notes-status">
+										{t("Loading release notes...")}
+									</output>
+								)}
+								{failed && (
+									<div className="release-notes-error" role="alert">
+										<p>{t("Could not load release notes. Check your connection and try again.")}</p>
+										<button disabled={loading} onClick={() => void refresh(true)} type="button">
+											{t("Retry")}
+										</button>
+									</div>
+								)}
+								{!loading && !failed && !selectedRelease && (
+									<output className="status-paragraph release-notes-status">
+										{t("No release notes are available yet.")}
+									</output>
+								)}
+								{selectedRelease && (
+									<article>
+										<h3>
+											{t("Version")} {selectedRelease.version}
+											{selectedRelease.version === latestVersion && <small>{t("Latest")}</small>}
+										</h3>
+										<div className="release-notes-markdown">
+											<Markdown text={selectedRelease.notes} />
+										</div>
+									</article>
+								)}
+							</section>
 						</div>
-					</section>,
+					</DialogFrame>,
 					document.body,
 				)}
 		</div>

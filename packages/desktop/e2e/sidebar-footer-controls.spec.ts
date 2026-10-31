@@ -165,14 +165,16 @@ test("notification handoff preserves controller, acknowledges displayed history 
 	await expect(page.getByRole("dialog")).toBeVisible();
 	await expect(page.getByText("Isolated release notes fixture.", { exact: false })).toBeVisible();
 	await page.keyboard.press("Tab");
-	await expect(page.getByRole("dialog").locator("summary")).toBeFocused();
+	await expect(page.getByRole("dialog").locator(".release-notes-version")).toBeFocused();
+	await page.keyboard.press("Tab");
+	await expect(page.locator(".release-notes-reader")).toBeFocused();
 	await page.keyboard.press("Tab");
 	const details = page.getByRole("dialog").getByRole("link", { name: "Fixture details", exact: true });
 	await expect(details).toBeFocused();
 	await page.evaluate(() => {
 		document.addEventListener("keydown", (event) => {
 			if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
-			const dialog = document.querySelector(".release-notes-popover");
+			const dialog = document.querySelector(".release-notes-dialog");
 			dialog?.setAttribute(
 				"data-key-defaults",
 				`${dialog.getAttribute("data-key-defaults") ?? ""}${event.key}:${event.defaultPrevented};`,
@@ -322,3 +324,50 @@ test("full motion animates entry and exit while closed rows become inert immedia
 	await expect(rawMenu(page)).toHaveCSS("display", "none");
 	await expect(account(page)).toBeFocused();
 });
+
+for (const theme of ["dark", "light"]) {
+	for (const width of [1440, 390]) {
+		test(`${theme} ${width}px notifications open a centered full release reader`, async ({ page }, info) => {
+			const height = width === 390 ? 720 : 1000;
+			await page.setViewportSize({ width, height });
+			await page.goto(`${url}/?theme=${theme}&long`);
+			await account(page).click();
+			await menuRow(page, "Notifications").click();
+			const dialog = page.getByRole("dialog", { name: "What's new", exact: true });
+			const reader = page.locator(".release-notes-reader");
+			const versions = page.getByRole("navigation", { name: "Release versions" });
+			await expect(dialog).toHaveAttribute("aria-modal", "true");
+			await expect(versions.getByRole("button")).toHaveCount(5);
+			await expect(reader).toContainText("新增统一权限设置");
+			await dialog.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
+			const box = (await dialog.boundingBox())!;
+			expect(box.width).toBeGreaterThan(width * .7);
+			expect(box.height).toBeGreaterThan(height * .7);
+			expect(Math.abs(box.x - (width - box.width) / 2)).toBeLessThan(1);
+			expect(Math.abs(box.y - (height - box.height) / 2)).toBeLessThan(1);
+			expect(box.x).toBeGreaterThanOrEqual(12);
+			expect(box.x + box.width).toBeLessThanOrEqual(width - 12);
+			await expect(page.getByRole("button", { name: "Close release notes" })).toBeFocused();
+			await page.keyboard.press("Shift+Tab");
+			await expect(reader).toBeFocused();
+			await page.keyboard.press("Tab");
+			await expect(page.getByRole("button", { name: "Close release notes" })).toBeFocused();
+			await page.screenshot({ path: info.outputPath(`release-notes-${theme}-${width}.png`) });
+			const navBefore = await versions.boundingBox();
+			await reader.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+			await expect(reader.locator("li").last()).toBeInViewport();
+			expect((await versions.boundingBox())!.y).toBe(navBefore!.y);
+			expect(await reader.evaluate((el) => el.scrollTop)).toBeGreaterThan(100);
+			await versions.getByRole("button", { name: "Version 0.0.8", exact: true }).click();
+			await expect(reader).toContainText("可以搜索、编辑和撤销长期记忆");
+			await expect(reader).not.toContainText("多会话分屏工作区");
+			expect(await reader.evaluate((el) => el.scrollTop)).toBe(0);
+			await versions.getByRole("button", { name: "Version 0.1.9", exact: true }).click();
+			await expect(reader).toContainText("多会话分屏工作区");
+			expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+			await page.mouse.click(4, 4);
+			await expect(dialog).toHaveCount(0);
+			await expect(account(page)).toBeFocused();
+		});
+	}
+}
