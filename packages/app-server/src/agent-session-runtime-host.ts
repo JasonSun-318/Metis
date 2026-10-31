@@ -70,6 +70,7 @@ import {
 	type ScheduleManager,
 	SessionDeliveredArtifacts,
 	SessionManager,
+	type SessionPermissionRule,
 	SettingsManager,
 	type Skill,
 	splitSessionAttachmentPrompt,
@@ -102,6 +103,7 @@ import {
 	projectGoal,
 	projectLatestTasks,
 	projectLiveMessage as projectLiveItemMessage,
+	projectPermissionDecisions,
 	projectPlanEntry,
 	projectPlanView,
 	projectSessionEntry,
@@ -854,6 +856,19 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			this.publishPermissionPresetChanged();
 			return;
 		}
+		if (event.type === "permission_decision") {
+			for (const item of this.projection.setPermissionDecision(opaqueId(event.actionId, "tool"), event.source, {
+				...(event.ruleIds ? { ruleIds: [...event.ruleIds] } : {}),
+				...(event.matchedRule ? { matchedRule: { ...event.matchedRule } } : {}),
+				...(event.manualReason ? { manualReason: event.manualReason } : {}),
+				...(event.source === "user"
+					? { outcome: "allow" as const, ...(event.remember ? { remember: event.remember } : {}) }
+					: {}),
+			})) {
+				this.publish({ type: item.state === "streaming" ? "item/started" : "item/completed", item });
+			}
+			return;
+		}
 		if (event.type === "permission_review_started") {
 			this.publish({
 				type: "session/permissionReviewStarted",
@@ -865,6 +880,12 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			return;
 		}
 		if (event.type === "permission_review_completed") {
+			if (event.reviewer === "user" && event.outcome !== "allow") {
+				for (const item of this.projection.setPermissionDecision(opaqueId(event.actionId, "tool"), "user", {
+					outcome: event.outcome,
+				}))
+					this.publish({ type: item.state === "streaming" ? "item/started" : "item/completed", item });
+			}
 			this.publish({
 				type: "session/permissionReviewCompleted",
 				sessionId: this.sessionId,
@@ -915,6 +936,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				...(turnId === undefined ? {} : { turnId }),
 				message,
 				state,
+				permissionDecisions: projectPermissionDecisions(this.journal()),
 				deliveredFiles: this.deliveredFileMap(),
 				fallbackTimestamp: this.ref.summary.updatedAt,
 			}),
@@ -991,6 +1013,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				sessionId: this.sessionId,
 				turnStates: new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state])),
 				toolStates: new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state])),
+				permissionDecisions: projectPermissionDecisions(this.journal()),
 				deliveredFiles: this.deliveredFileMap(),
 				fallbackTimestamp: this.ref.summary.createdAt,
 			}),
@@ -1007,6 +1030,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
 		const deliveredFiles = this.deliveredFileMap();
+		const permissionDecisions = projectPermissionDecisions(journal);
 		return journal
 			.map((entry) => {
 				const record = entry as Record<string, unknown>;
@@ -1032,6 +1056,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
+					permissionDecisions,
 					deliveredFiles,
 					fallbackTimestamp: this.ref.summary.createdAt,
 				});
@@ -2034,6 +2059,17 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 		await this.session.refreshPermissionAutoSettings();
 	}
 
+	getPermissionScopePreview() {
+		const scope = this.session.getPermissionScopePreview();
+		return {
+			workspaceRoots: [...scope.workspaceRoots],
+			skillReadRoots: [...scope.skillReadRoots],
+			sessionWorkRoots: [...scope.sessionWorkRoots],
+			memoryRoots: [...scope.memoryRoots],
+			deliveryRoots: [...scope.deliveryRoots],
+		};
+	}
+
 	async refreshMemorySettings(): Promise<void> {
 		await this.session.refreshMemorySettings();
 	}
@@ -2048,6 +2084,18 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 
 	notifyPermissionRulesChanged(): void {
 		this.session.notifyPermissionRulesChanged();
+	}
+
+	listSessionPermissionRules(projectPath: string): readonly SessionPermissionRule[] {
+		return this.session.listSessionPermissionRules(projectPath);
+	}
+
+	deleteSessionPermissionRule(projectPath: string, ruleId: string): boolean {
+		return this.session.deleteSessionPermissionRule(projectPath, ruleId);
+	}
+
+	clearSessionPermissionRules(projectPath: string): number {
+		return this.session.clearSessionPermissionRules(projectPath);
 	}
 
 	async setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">> {
@@ -2437,6 +2485,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 		const turnStates = new Map(reduced.turns.map((turn) => [opaqueId(turn.turnId, "turn"), turn.state]));
 		if (legacyTurnId !== undefined) turnStates.set(legacyTurnId, "completed");
 		const toolStates = new Map(reduced.tools.map((tool) => [opaqueId(tool.toolCallId, "tool"), tool.state]));
+		const permissionDecisions = projectPermissionDecisions(journal);
 		const items = journal
 			.map((entry) => {
 				const record = entry as unknown as Record<string, unknown>;
@@ -2448,6 +2497,7 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 					sessionId: this.sessionId,
 					turnStates,
 					toolStates,
+					permissionDecisions,
 					deliveredFiles: deliveredFileMap,
 					fallbackTimestamp: ref.summary.createdAt,
 				});

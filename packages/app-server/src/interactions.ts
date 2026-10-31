@@ -30,6 +30,7 @@ import {
 	type PermissionApprovalDecision,
 	type PermissionApprovalRequest,
 	type ProjectTrustOption,
+	redactPermissionCommand,
 } from "@metis/coding-agent/host";
 import type { AgentHostIdentity } from "./agent-host-tools.ts";
 import { BrowserPermissionDecisionUnavailableError, BrowserPermissionDeniedError } from "./browser-permission-audit.ts";
@@ -101,6 +102,26 @@ function boundedPublicText(value: string): string {
 	let end = MAX_PUBLIC_TEXT_UTF8_BYTES;
 	while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
 	return bytes.subarray(0, end).toString("utf8");
+}
+
+const MAX_PERMISSION_COMMAND_UTF8_BYTES = 32_768;
+
+/**
+ * Full redacted display command for the approval card. It is never an
+ * executable identity: the reviewer re-binds the original action before use.
+ * Commands whose redacted form exceeds the protocol bound are never offered
+ * for approval — the session owner is asked to split and retry instead.
+ */
+function approvalDisplayCommand(request: PermissionApprovalRequest): string | undefined {
+	if (request.action.command === undefined) return undefined;
+	if (Buffer.byteLength(request.action.command, "utf8") > MAX_PERMISSION_COMMAND_UTF8_BYTES) {
+		throw new Error("Command exceeds 32 KiB; split it into smaller commands and retry");
+	}
+	const redacted = redactPermissionCommand(request.action.command);
+	if (Buffer.byteLength(redacted, "utf8") > MAX_PERMISSION_COMMAND_UTF8_BYTES) {
+		throw new Error("Command exceeds 32 KiB; split it into smaller commands and retry");
+	}
+	return redacted;
 }
 
 function validTimeout(value: number): boolean {
@@ -184,7 +205,7 @@ function permissionOperation(request: PermissionApprovalRequest) {
 		push("Agent", `${request.actor.name} (${request.actor.id})`);
 		push("Task", request.actor.taskId);
 	}
-	if (request.action.command) push("Command", request.action.command);
+	if (request.action.command) push("Command", redactPermissionCommand(request.action.command));
 	if (request.action.toolName === "bash" && request.cwd) push("Working directory", request.cwd);
 	const pathLabel = ["edit", "write", "read"].includes(request.action.toolName) ? "File" : "Path";
 	for (const path of request.action.paths) {
@@ -495,9 +516,14 @@ export class InteractionBroker {
 		const actionId = approval.action.actionId;
 		const actionKey = `${sessionId}\0${identity?.actorSessionId ?? sessionId}\0${identity?.taskId ?? ""}\0${actionId}`;
 		if (this.pendingByAction.has(actionKey)) throw new Error("Approval was unavailable or cancelled");
+		// Validate the display command before any pending state is created: an
+		// oversized command must fail without ever offering an approval card.
+		const command = approvalDisplayCommand(approval);
 		const interactionId = this.createId();
 		this.pendingByAction.set(actionKey, interactionId);
+		const sessionEligible = operation.scopeComplete && approval.rememberSessionEligible === true;
 		const choices: PermissionApprovalChoice[] = ["allow-once"];
+		if (sessionEligible) choices.push("allow-session-exact");
 		if (operation.scopeComplete && operation.rememberProjectEligible) choices.push("always-allow-exact");
 		choices.push("deny-once");
 		if (operation.rememberProjectEligible) choices.push("always-deny-exact");
@@ -515,11 +541,14 @@ export class InteractionBroker {
 					kind: "session_permission_approval",
 					requestId: interactionId,
 					actionId: opaqueId(actionId, "tool"),
+					toolCallId: opaqueId(actionId, "tool"),
 					toolLabel: boundedName(approval.action.toolName, "tool"),
 					riskLevel: approvalRiskLevel(approval),
 					executionTarget: approvalExecutionTarget(approval),
 					reason: boundedPublicText(approval.reason || "This action needs approval."),
 					scopeComplete: operation.scopeComplete,
+					...(command === undefined ? {} : { command }),
+					rememberSessionEligible: approval.rememberSessionEligible === true,
 					details: operation.rows,
 					...priorReviewFields(approval),
 					choices,
@@ -528,6 +557,10 @@ export class InteractionBroker {
 			);
 			if (response?.kind !== "session_permission_approval") throw new Error("Approval was unavailable or cancelled");
 			if (response.choice === "allow-once") return { decision: "allow" };
+			if (response.choice === "allow-session-exact") {
+				if (!sessionEligible) throw new Error("Approval returned an ineligible session choice");
+				return { decision: "allow", remember: "session" };
+			}
 			if (response.choice === "always-allow-exact") {
 				if (!operation.scopeComplete || !operation.rememberProjectEligible) {
 					throw new Error("Approval returned an ineligible project choice");
@@ -565,6 +598,7 @@ export class InteractionBroker {
 				createdAt: new Date(this.now()).toISOString(),
 				expiresAt: deadline(this.now(), ASK_USER_TIMEOUT_MS),
 				kind: "ask_user",
+				...(input.toolCallId ? { toolCallId: opaqueId(input.toolCallId, "tool") } : {}),
 				questions: input.questions.map((question, questionIndex) => ({
 					id: `question:${questionIndex}`,
 					question: question.question,

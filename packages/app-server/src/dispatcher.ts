@@ -20,6 +20,7 @@ import type { MemoryService } from "./memory-settings.ts";
 import type { ModelSettingsService } from "./model-settings.ts";
 import type { PermissionAutoSettingsService } from "./permission-auto-settings.ts";
 import type { PermissionRulesService } from "./permission-rules.ts";
+import { readPermissionSandboxHealth, runPermissionSandboxSelfTest } from "./permission-sandbox-health.ts";
 import type { PersonalizationService } from "./personalization.ts";
 import type { PluginActivationStatus, PluginInstalledView, PluginService } from "./plugins.ts";
 import { ProfileSummaryCache } from "./profile-summary.ts";
@@ -755,24 +756,54 @@ export class Dispatcher {
 				return await this.replayMutation(request, () => this.modelSettings.testConnection(request.params));
 			case "model/discover":
 				return await this.modelSettings.discover(request.params);
+			case "permission/sandbox/health":
+				return await readPermissionSandboxHealth();
+			case "permission/sandbox/selfTest":
+				return await runPermissionSandboxSelfTest();
 			case "permission/auto/get":
 				return this.permissionAutoSettings.view();
 			case "permission/auto/update":
 				return await this.replayMutation(request, () =>
 					this.mutatePermissionAutoSettings(() => this.permissionAutoSettings.update(request.params)),
 				);
-			case "permission/rules/list":
-				return this.permissionRules.list(request.params);
+			case "permission/rules/list": {
+				const result = await this.permissionRules.list(request.params, this.registry);
+				if (result.scope !== "project") return result;
+				const opened = await this.registry.withOpenRuntime(request.params.sessionId, async (runtime) =>
+					runtime.getPermissionScopePreview?.(),
+				);
+				return opened.open && opened.result ? { ...result, scopePreview: opened.result } : result;
+			}
+			case "permission/rules/catalog":
+				return await this.permissionRules.listRemembered(this.registry);
+			case "permission/rules/revoke":
+				return await this.replayMutation(request, async () => {
+					const result = await this.permissionRules.revokeRemembered(request.params, this.registry);
+					if (request.params.scope === "session") {
+						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
+					} else {
+						await this.registry.notifyOpenPermissionRulesChanged();
+					}
+					return result;
+				});
 			case "permission/rules/delete":
 				return await this.replayMutation(request, async () => {
-					const result = this.permissionRules.delete(request.params);
-					await this.registry.notifyOpenPermissionRulesChanged();
+					const result = await this.permissionRules.delete(request.params, this.registry);
+					if (result.scope === "session") {
+						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
+					} else {
+						await this.registry.notifyOpenPermissionRulesChanged();
+					}
 					return result;
 				});
 			case "permission/rules/clear":
 				return await this.replayMutation(request, async () => {
-					const result = this.permissionRules.clear(request.params);
-					await this.registry.notifyOpenPermissionRulesChanged();
+					const result = await this.permissionRules.clear(request.params, this.registry);
+					if (result.scope === "session") {
+						await this.registry.notifySessionPermissionRulesChanged(request.params.sessionId);
+					} else {
+						await this.registry.notifyOpenPermissionRulesChanged();
+					}
 					return result;
 				});
 			case "project/deletePreview": {

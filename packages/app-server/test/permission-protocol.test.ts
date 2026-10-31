@@ -228,6 +228,136 @@ describe("permission protocol", () => {
 		expect(broker.hasPending(SESSION_ID)).toBe(false);
 	});
 
+	it("round-trips a session-exact remember choice with the full redacted command", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-session-exact" };
+		broker.assign(SESSION_ID, peer);
+		const approval = {
+			...approvalRequest(),
+			action: {
+				...approvalRequest().action,
+				command: 'curl -H "Authorization: Bearer sk-secret" https://example.test',
+			},
+			rememberSessionEligible: true,
+		};
+		await expect(broker.requestPermissionApproval(SESSION_ID, approval)).resolves.toEqual({
+			decision: "allow",
+			remember: "session",
+		});
+		const interaction = peer.requests[0] as Extract<InteractionView, { kind: "session_permission_approval" }>;
+		expect(interaction.choices).toEqual(["allow-once", "allow-session-exact", "deny-once"]);
+		expect(interaction.rememberSessionEligible).toBe(true);
+		expect(interaction.command).toBe('curl -H "Authorization: <redacted>" https://example.test');
+		const serialized = JSON.stringify(interaction);
+		expect(serialized).not.toContain("sk-secret");
+	});
+
+	it("never offers a session-exact choice without session eligibility", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-session-exact" };
+		broker.assign(SESSION_ID, peer);
+		await expect(
+			broker.requestPermissionApproval(SESSION_ID, { ...approvalRequest(), rememberSessionEligible: true }),
+		).resolves.toEqual({ decision: "allow", remember: "session" });
+		const ineligible = { ...approvalRequest(), scopeComplete: false, rememberSessionEligible: true };
+		peer.response = {
+			interactionId: REQUEST_A,
+			kind: "session_permission_approval",
+			choice: "allow-session-exact",
+		};
+		// The unoffered choice is rejected before it can become a decision.
+		await expect(broker.requestPermissionApproval(SESSION_ID, ineligible)).rejects.toThrow(
+			"Approval was unavailable or cancelled",
+		);
+	});
+
+	it("displays an exactly 32 KiB redacted command in full without truncation", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "deny-once" };
+		broker.assign(SESSION_ID, peer);
+		const command = `curl ${"a".repeat(32_768 - 5)}`;
+		expect(Buffer.byteLength(command, "utf8")).toBe(32_768);
+		await expect(
+			broker.requestPermissionApproval(SESSION_ID, {
+				...approvalRequest(),
+				action: { ...approvalRequest().action, command },
+			}),
+		).resolves.toEqual({
+			decision: "deny",
+			reason: "Denied by the session owner",
+		});
+		const interaction = peer.requests[0] as Extract<InteractionView, { kind: "session_permission_approval" }>;
+		expect(interaction.command).toBe(command);
+		expect(Buffer.byteLength(interaction.command ?? "", "utf8")).toBe(32_768);
+	});
+
+	it("never generates an approvable interaction for a command over 32 KiB", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-once" };
+		broker.assign(SESSION_ID, peer);
+		const oversized = {
+			...approvalRequest(),
+			action: { ...approvalRequest().action, command: `curl ${"a".repeat(32_768)}` },
+		};
+		await expect(broker.requestPermissionApproval(SESSION_ID, oversized)).rejects.toThrow(
+			"split it into smaller commands and retry",
+		);
+		expect(peer.requests).toHaveLength(0);
+		// No pending approval state leaks: the same action may be retried.
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "deny-once" };
+		await expect(broker.requestPermissionApproval(SESSION_ID, approvalRequest())).resolves.toMatchObject({
+			decision: "deny",
+		});
+	});
+
+	it("rejects an oversized original even when redaction would shrink it", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-once" };
+		broker.assign(SESSION_ID, peer);
+		const request = {
+			...approvalRequest(),
+			action: { ...approvalRequest().action, command: `TOKEN=${"x".repeat(33_000)} curl https://example.test` },
+		};
+		await expect(broker.requestPermissionApproval(SESSION_ID, request)).rejects.toThrow(
+			"split it into smaller commands and retry",
+		);
+		expect(peer.requests).toHaveLength(0);
+	});
+
+	it("never truncates a command whose redaction expands it past 32 KiB", async () => {
+		const broker = new InteractionBroker({ serverEpoch: EPOCH, createId: () => REQUEST_A });
+		const peer = new RecordingPeer();
+		peer.response = { interactionId: REQUEST_A, kind: "session_permission_approval", choice: "allow-once" };
+		broker.assign(SESSION_ID, peer);
+		// Each short secret assignment expands by 8 bytes under redaction; the
+		// original stays inside the bound while the redacted form exceeds it.
+		const command = `env ${"TOKEN=aa ".repeat(1928)}`;
+		expect(Buffer.byteLength(command, "utf8")).toBeLessThanOrEqual(32_768);
+		const oversized = { ...approvalRequest(), action: { ...approvalRequest().action, command } };
+		await expect(broker.requestPermissionApproval(SESSION_ID, oversized)).rejects.toThrow(
+			"split it into smaller commands and retry",
+		);
+		expect(peer.requests).toHaveLength(0);
+	});
+
+	it("keeps project scope as the default and accepts explicit session scope", () => {
+		const list = (scope?: string) => ({
+			jsonrpc: "2.0",
+			id: "rules-list",
+			method: "permission/rules/list",
+			params: scope === undefined ? { sessionId: SESSION_ID } : { sessionId: SESSION_ID, scope },
+		});
+		expect(validateClientRequest(list())).toEqual(list());
+		expect(validateClientRequest(list("project"))).toEqual(list("project"));
+		expect(validateClientRequest(list("session"))).toEqual(list("session"));
+		expect(() => validateClientRequest(list("owner"))).toThrow(ProtocolValidationError);
+	});
+
 	it("validates global Auto command allowlist envelopes", () => {
 		const get = {
 			jsonrpc: "2.0",
@@ -252,6 +382,9 @@ describe("permission protocol", () => {
 			result: {
 				rules: [{ command: "git status", allowNetwork: false }],
 				suggestions: ["ls", "git status"],
+				permissionRules: [],
+				permissionRuleDefaults: [],
+				reviewerEnabled: false,
 			},
 		};
 		expect(validateResponseFor("client", update, view)).toEqual(view);

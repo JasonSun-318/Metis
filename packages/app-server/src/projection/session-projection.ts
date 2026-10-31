@@ -4,6 +4,7 @@ import type {
 	DomainEvent,
 	InteractionView,
 	ItemView,
+	PermissionDecisionView,
 	QueuedTurnView,
 	SessionDeliveredFileView,
 	SessionGoalView,
@@ -85,6 +86,30 @@ export class SessionProjection {
 			this.itemOrder.push(item.itemId);
 		}
 		this.itemsById.set(item.itemId, clone(item));
+	}
+
+	/** Update existing tool rows through the same item events used by reconnect snapshots. */
+	setPermissionDecision(
+		actionId: string,
+		source: "rule" | "model" | "user" | "full",
+		details: Omit<PermissionDecisionView, "source"> = {},
+	): readonly ItemView[] {
+		const updated: ItemView[] = [];
+		for (const itemId of this.itemOrder) {
+			const item = this.itemsById.get(itemId)!;
+			if (!item.content.some((block) => block.type === "tool_call" && block.toolCallId === actionId)) continue;
+			const next = {
+				...item,
+				content: item.content.map((block) =>
+					block.type === "tool_call" && block.toolCallId === actionId
+						? { ...block, permissionDecision: { source, ...details } }
+						: block,
+				),
+			};
+			this.itemsById.set(itemId, next);
+			updated.push(clone(next));
+		}
+		return updated;
 	}
 
 	/** Applies one event and returns the exact event clients should observe. */

@@ -1,5 +1,5 @@
 import type { ClientParams, ClientResult } from "@metis/app-protocol";
-import { assertValidSessionId } from "@metis/coding-agent/host";
+import { assertValidSessionId, type SessionPermissionRule } from "@metis/coding-agent/host";
 import {
 	AppServerError,
 	type OpenedSessionRuntime,
@@ -7,6 +7,28 @@ import {
 	type SessionRef,
 	type SessionRuntimeHost,
 } from "./session-runtime-host.ts";
+
+/**
+ * Structural seam for open runtimes that expose their in-memory session rule
+ * store; production runtimes implement it, test hosts may not.
+ */
+interface SessionPermissionRuleRuntime {
+	listSessionPermissionRules(projectPath: string): readonly SessionPermissionRule[];
+	deleteSessionPermissionRule(projectPath: string, ruleId: string): boolean;
+	clearSessionPermissionRules(projectPath: string): number;
+}
+
+function sessionPermissionRuleRuntime(runtime: OpenedSessionRuntime): SessionPermissionRuleRuntime | undefined {
+	const candidate = runtime as Partial<SessionPermissionRuleRuntime>;
+	if (
+		typeof candidate.listSessionPermissionRules === "function" &&
+		typeof candidate.deleteSessionPermissionRule === "function" &&
+		typeof candidate.clearSessionPermissionRules === "function"
+	) {
+		return candidate as SessionPermissionRuleRuntime;
+	}
+	return undefined;
+}
 
 interface RuntimeSlot {
 	readonly ref: SessionRef;
@@ -237,6 +259,40 @@ export class SessionRegistry {
 		await Promise.allSettled(
 			slots.map((slot) => this.enqueue(slot, async (runtime) => runtime.notifyPermissionRulesChanged?.())),
 		);
+	}
+
+	listOpenPermissionSessionIds(): readonly string[] {
+		return [...this.slots.entries()].filter(([, slot]) => slot.accepting).map(([id]) => id);
+	}
+
+	/**
+	 * Run an operation against one open session's in-memory permission rule store.
+	 * Cold sessions have no live store; the operation is not attempted.
+	 */
+	async withOpenSessionPermissionRules<T>(
+		sessionId: string,
+		operation: (access: {
+			listSessionPermissionRules(projectPath: string): readonly SessionPermissionRule[];
+			deleteSessionPermissionRule(projectPath: string, ruleId: string): boolean;
+			clearSessionPermissionRules(projectPath: string): number;
+		}) => Promise<T> | T,
+	): Promise<{ open: true; result: T } | { open: false }> {
+		const slot = this.slots.get(sessionId);
+		if (!slot) return { open: false };
+		return await this.enqueue(slot, async (runtime) => {
+			const access = sessionPermissionRuleRuntime(runtime);
+			if (!access) return { open: false };
+			return { open: true, result: await operation(access) };
+		});
+	}
+
+	/** Re-judge permissions on one session after its own session rules changed. */
+	async notifySessionPermissionRulesChanged(sessionId: string): Promise<void> {
+		const slot = this.slots.get(sessionId);
+		if (!slot) return;
+		await this.enqueue(slot, async (runtime) => runtime.notifyPermissionRulesChanged?.()).catch(() => {
+			// A closing session cannot keep stale grants alive; ignore teardown races.
+		});
 	}
 
 	async beginModelServiceSettingsRefresh(): Promise<() => void> {

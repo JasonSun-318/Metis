@@ -253,6 +253,16 @@ export const DESKTOP_RPC_FORWARDING = {
 		method: "permission/rules/list",
 		input: "required",
 	},
+	listRememberedPermissionRules: {
+		channel: "metis:list-remembered-permission-rules",
+		method: "permission/rules/catalog",
+		input: "none",
+	},
+	revokeRememberedPermissionRule: {
+		channel: "metis:revoke-remembered-permission-rule",
+		method: "permission/rules/revoke",
+		input: "required",
+	},
 	deletePermissionRule: {
 		channel: "metis:delete-permission-rule",
 		method: "permission/rules/delete",
@@ -262,6 +272,16 @@ export const DESKTOP_RPC_FORWARDING = {
 		channel: "metis:clear-permission-rules",
 		method: "permission/rules/clear",
 		input: "required",
+	},
+	getPermissionSandboxHealth: {
+		channel: "metis:get-permission-sandbox-health",
+		method: "permission/sandbox/health",
+		input: "none",
+	},
+	runPermissionSandboxSelfTest: {
+		channel: "metis:run-permission-sandbox-self-test",
+		method: "permission/sandbox/selfTest",
+		input: "none",
 	},
 	getPermissionAutoSettings: {
 		channel: "metis:get-permission-auto-settings",

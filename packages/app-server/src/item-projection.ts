@@ -9,6 +9,7 @@ import type {
 	SessionGoalView,
 	SessionTaskView,
 } from "@metis/app-protocol";
+import { AskUserAnswersSchema, type PermissionDecisionView, PermissionDecisionViewSchema } from "@metis/app-protocol";
 import {
 	formatSessionAttachmentDisplayText,
 	parseDeliverFileDetails,
@@ -16,7 +17,56 @@ import {
 	splitSessionAttachmentPrompt,
 	type ThreadGoal,
 } from "@metis/coding-agent/host";
+import { Value } from "typebox/value";
 import { projectCodeChanges } from "./code-change-projection.ts";
+
+export type PermissionDecisionSource = "rule" | "model" | "user" | "full";
+export type ProjectedPermissionDecision = PermissionDecisionSource | PermissionDecisionView;
+
+/** Host-owned final authorization records only; provider content cannot supply this field. */
+export function projectPermissionDecisions(
+	journal: readonly unknown[],
+): ReadonlyMap<string, ProjectedPermissionDecision> {
+	const decisions = new Map<string, ProjectedPermissionDecision>();
+	for (const entry of journal) {
+		if (typeof entry !== "object" || entry === null) continue;
+		const record = entry as Record<string, unknown>;
+		if (
+			record.type !== "session_permission_audit" ||
+			(record.decision !== "allow" && !(record.source === "user" && record.decision === "deny")) ||
+			typeof record.actionId !== "string"
+		)
+			continue;
+		const source = record.source;
+		if (source === "rule" || source === "model" || source === "user" || source === "full") {
+			const detail = {
+				source,
+				...(source === "user"
+					? {
+							outcome:
+								typeof record.reason === "string" && record.reason.includes("unavailable")
+									? "unavailable"
+									: record.decision,
+							...(record.remember ? { remember: record.remember } : {}),
+						}
+					: {}),
+				...(record.ruleIds === undefined ? {} : { ruleIds: record.ruleIds }),
+				...(record.matchedRule === undefined ? {} : { matchedRule: record.matchedRule }),
+				...(record.manualReason === undefined ? {} : { manualReason: record.manualReason }),
+			};
+			const hasDetails =
+				source === "user" ||
+				record.ruleIds !== undefined ||
+				record.matchedRule !== undefined ||
+				record.manualReason !== undefined;
+			decisions.set(
+				opaqueId(record.actionId, "tool"),
+				hasDetails && Value.Check(PermissionDecisionViewSchema, detail) ? detail : source,
+			);
+		}
+	}
+	return decisions;
+}
 
 export const MAX_PROJECTED_THINKING_BYTES = 8 * 1024;
 export const MAX_PROJECTED_VISIBLE_TEXT_BYTES = 20 * 1024;
@@ -139,6 +189,7 @@ function assistantBlocks(
 	content: unknown,
 	budgets: { readonly text: TextBudget; readonly thinking: TextBudget; readonly tool: TextBudget },
 	toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">,
+	permissionDecisions?: ReadonlyMap<string, ProjectedPermissionDecision>,
 ): ItemContentBlockView[] {
 	if (typeof content === "string") return textBlocks(content, budgets.text);
 	if (!Array.isArray(content)) return [];
@@ -181,6 +232,14 @@ function assistantBlocks(
 			name: projectedName(block.name, "tool"),
 			state: toolState === "active" ? "running" : toolState,
 			...(inputPreview === undefined ? {} : { inputPreview }),
+			...(permissionDecisions?.has(toolCallId)
+				? {
+						permissionDecision:
+							typeof permissionDecisions.get(toolCallId) === "string"
+								? { source: permissionDecisions.get(toolCallId) as PermissionDecisionSource }
+								: (permissionDecisions.get(toolCallId) as PermissionDecisionView),
+					}
+				: {}),
 		});
 	}
 	return blocks;
@@ -265,6 +324,7 @@ export interface MessageProjectionInput {
 	readonly sessionId: string;
 	readonly turnStates: ReadonlyMap<string, "active" | "completed" | "interrupted">;
 	readonly toolStates: ReadonlyMap<string, "active" | "completed" | "interrupted">;
+	readonly permissionDecisions?: ReadonlyMap<string, ProjectedPermissionDecision>;
 	readonly deliveredFiles?: ReadonlyMap<string, SessionDeliveredFileView>;
 	readonly fallbackTimestamp: string;
 }
@@ -455,6 +515,7 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 				tool: { remaining: MAX_ASSISTANT_TOOL_INPUT_BYTES },
 			},
 			toolStates,
+			input.permissionDecisions,
 		);
 		// Persist a visible failure even when the provider produced no output. Raw
 		// diagnostics can contain credentials and endpoint URLs, so never project them.
@@ -481,6 +542,18 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 
 	if (message.role === "toolResult") {
 		const codeChanges = projectCodeChanges(message.details);
+		const tasks = projectTasksFromToolResult(message);
+		const details =
+			typeof message.details === "object" && message.details !== null
+				? (message.details as Record<string, unknown>)
+				: undefined;
+		const userAnswers =
+			message.toolName === "ask_user" &&
+			message.isError === false &&
+			details?.cancelled === false &&
+			Value.Check(AskUserAnswersSchema, details.answers)
+				? details.answers
+				: undefined;
 		const budget = { remaining: MAX_ITEM_TEXT_BYTES };
 		const blocks = textBlocks(message.content, budget);
 		const output = blocks
@@ -511,6 +584,8 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 					...(images.length > 0 ? { images } : {}),
 					...(deliveredFile ? { deliveredFile } : {}),
 					...(codeChanges ? { codeChanges } : {}),
+					...(tasks === undefined ? {} : { tasks }),
+					...(userAnswers === undefined ? {} : { userAnswers }),
 				},
 			],
 			createdAt,
@@ -542,6 +617,7 @@ export function projectLiveMessage(input: {
 	readonly turnId?: string;
 	readonly message: object;
 	readonly state: ItemView["state"];
+	readonly permissionDecisions?: ReadonlyMap<string, ProjectedPermissionDecision>;
 	readonly deliveredFiles?: ReadonlyMap<string, SessionDeliveredFileView>;
 	readonly fallbackTimestamp: string;
 }): ItemView | undefined {
@@ -578,6 +654,7 @@ export function projectLiveMessage(input: {
 						] as const,
 					]),
 		toolStates: new Map(),
+		permissionDecisions: input.permissionDecisions,
 		deliveredFiles: input.deliveredFiles,
 		fallbackTimestamp: createdAt,
 	});

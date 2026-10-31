@@ -605,6 +605,7 @@ describe("InteractionBroker", () => {
 		const tool = createAskUserToolDefinition((request) => broker.requestUserInput(SESSION_ID, request));
 
 		const result = await tool.execute("ask-tool-1", askUserInput(), undefined, undefined, {} as never);
+		expect(peer.requests[0]).toHaveProperty("toolCallId", "ask-tool-1");
 
 		expect(result.details).toMatchObject({
 			cancelled: false,

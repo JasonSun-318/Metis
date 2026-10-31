@@ -27,6 +27,19 @@ export class ProcessProjector {
 	private current?: SessionProcessView;
 
 	apply(event: AgentSessionEvent, agentId = "root"): SessionProcessView | undefined {
+		if (event.type === "permission_review_started" || event.type === "permission_decision") {
+			const processId = opaqueId(`${agentId}:${event.actionId}`, "process");
+			if (
+				this.current?.processId !== processId ||
+				(this.current.state !== "running" && this.current.state !== "awaiting_approval")
+			)
+				return;
+			this.current = {
+				...this.current,
+				state: event.type === "permission_review_started" ? "awaiting_approval" : "running",
+			};
+			return this.current;
+		}
 		if (
 			event.type !== "tool_execution_start" &&
 			event.type !== "tool_execution_update" &&
@@ -46,7 +59,11 @@ export class ProcessProjector {
 				truncated: false,
 			};
 		} else {
-			if (this.current?.processId !== processId || this.current.state !== "running") return;
+			if (
+				this.current?.processId !== processId ||
+				(this.current.state !== "running" && this.current.state !== "awaiting_approval")
+			)
+				return;
 			const output = outputView(event.type === "tool_execution_update" ? event.partialResult : event.result);
 			this.current = {
 				...this.current,

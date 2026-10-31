@@ -6,9 +6,11 @@ import {
 	projectDeliveredFileFromToolResult,
 	projectLiveMessage,
 	projectMessageEntry,
+	projectPermissionDecisions,
 	projectPlanEntry,
 	projectSessionEntry,
 } from "../src/item-projection.ts";
+import { SessionProjection } from "../src/projection/session-projection.ts";
 
 const CREATED_AT = "2026-08-08T00:00:00.000Z";
 
@@ -256,6 +258,22 @@ describe("delivered file projection", () => {
 			}),
 		).toBeUndefined();
 	});
+	it("keeps each delivery's historical caption while refreshing file availability and size", () => {
+		const current = {
+			...deliveredDetails,
+			message: "Revised version",
+			name: "updated.xlsx",
+			byteLength: 8192,
+			deliveredAt: "2026-10-29T00:00:00.000Z",
+			availability: "available" as const,
+		};
+		expect(
+			projectDeliveredFileFromToolResult(
+				{ role: "toolResult", toolName: "deliver_file", isError: false, details: deliveredDetails },
+				new Map([[current.fileId, current]]),
+			),
+		).toEqual({ ...deliveredDetails, byteLength: 8192, availability: "available" });
+	});
 });
 
 describe("plan projection", () => {
@@ -485,5 +503,252 @@ describe("selected file presentation", () => {
 			{ kind: "spreadsheet", sheet: "Budget", range: "C5:D6" },
 		]);
 		expect(JSON.stringify(result)).not.toContain("slidePath");
+	});
+});
+
+describe("final permission source projection", () => {
+	it("preserves host decisions on live and restored items while ignoring provider-supplied metadata", () => {
+		const message = {
+			role: "assistant",
+			content: [
+				{
+					type: "toolCall",
+					id: "call-1",
+					name: "bash",
+					arguments: { command: "pwd" },
+					permissionDecision: { source: "model" },
+				},
+			],
+		};
+		const base = {
+			entry: { type: "message", id: "item-1", message, timestamp: CREATED_AT },
+			sessionId: "session-1",
+			turnStates: new Map(),
+			toolStates: new Map(),
+			fallbackTimestamp: CREATED_AT,
+		};
+		expect(projectMessageEntry(base)?.content[0]).not.toHaveProperty("permissionDecision");
+		const permissionDecisions = projectPermissionDecisions([
+			{ type: "session_permission_audit", actionId: "call-1", decision: "allow", source: "model" },
+			{ type: "session_permission_audit", actionId: "call-2", decision: "deny", source: "model" },
+			{ type: "session_permission_audit", actionId: "call-3", decision: "allow", source: "reviewer" },
+			{ type: "message", actionId: "call-1", decision: "allow", source: "full" },
+		]);
+		expect(permissionDecisions.size).toBe(1);
+		const restored = projectMessageEntry({ ...base, permissionDecisions });
+		const live = projectLiveMessage({
+			itemId: "item-live",
+			sessionId: "session-1",
+			message,
+			state: "completed",
+			permissionDecisions,
+			fallbackTimestamp: CREATED_AT,
+		});
+		expect(restored?.content[0]).toHaveProperty("permissionDecision.source", "model");
+		expect(live?.content[0]).toHaveProperty("permissionDecision.source", "model");
+	});
+});
+
+it("keeps a live permission decision in readItems reconnect output", () => {
+	const projection = new SessionProjection({
+		session: {
+			sessionId: "session-1",
+			mode: "code",
+			cwdOrigin: "user-selected",
+			cwd: "/tmp/project",
+			createdAt: CREATED_AT,
+			updatedAt: CREATED_AT,
+			state: "idle",
+			archived: false,
+			unread: false,
+			useMemory: true,
+			contributeMemory: true,
+		},
+		items: [
+			{
+				itemId: "item-1",
+				sessionId: "session-1",
+				role: "assistant",
+				state: "completed",
+				createdAt: CREATED_AT,
+				content: [{ type: "tool_call", toolCallId: "call-1", name: "bash", state: "completed" }],
+			},
+		],
+	});
+	expect(projection.setPermissionDecision("foreign-call", "model")).toEqual([]);
+	const changed = projection.setPermissionDecision("call-1", "rule");
+	expect(changed).toHaveLength(1);
+	const result = projection.readItems({ sessionId: "session-1", limit: 20 });
+	expect(result.items[0]?.content[0]).toHaveProperty("permissionDecision.source", "rule");
+});
+
+describe("managed permission decision details", () => {
+	it("projects saved rule identities and preserves legacy records without guessing a rule", () => {
+		const decisions = projectPermissionDecisions([
+			{ type: "session_permission_audit", actionId: "legacy", decision: "allow", source: "rule" },
+			{
+				type: "session_permission_audit",
+				actionId: "managed",
+				decision: "allow",
+				source: "rule",
+				ruleIds: ["C03"],
+				matchedRule: { id: "C03", name: "ls", scope: "workspace" },
+			},
+			{
+				type: "session_permission_audit",
+				actionId: "remembered",
+				decision: "allow",
+				source: "rule",
+				ruleIds: ["a".repeat(64)],
+				matchedRule: { id: "a".repeat(64), name: "publish", scope: "session" },
+			},
+			{
+				type: "session_permission_audit",
+				actionId: "manual",
+				decision: "allow",
+				source: "user",
+				manualReason: "write",
+			},
+		]);
+		expect([...decisions.values()]).toEqual([
+			"rule",
+			{ source: "rule", ruleIds: ["C03"], matchedRule: { id: "C03", name: "ls", scope: "workspace" } },
+			{
+				source: "rule",
+				ruleIds: ["a".repeat(64)],
+				matchedRule: { id: "a".repeat(64), name: "publish", scope: "session" },
+			},
+			{ source: "user", outcome: "allow", manualReason: "write" },
+		]);
+	});
+
+	it("does not forward malformed rule metadata from a stored journal", () => {
+		const decisions = projectPermissionDecisions([
+			{
+				type: "session_permission_audit",
+				actionId: "malformed",
+				decision: "allow",
+				source: "rule",
+				matchedRule: { id: "C03", name: "ls", scope: "workspace", secret: "hidden" },
+			},
+		]);
+		expect([...decisions.values()]).toEqual(["rule"]);
+	});
+
+	it("publishes the same matched rule detail for a live tool row", () => {
+		const projection = new SessionProjection({
+			session: {
+				sessionId: "test-session",
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd: "/tmp/project",
+				createdAt: CREATED_AT,
+				updatedAt: CREATED_AT,
+				state: "idle",
+				archived: false,
+				unread: false,
+				useMemory: true,
+				contributeMemory: true,
+			},
+		});
+		const item: ItemView = {
+			itemId: "assistant-managed",
+			sessionId: "test-session",
+			turnId: "turn-1",
+			role: "assistant",
+			state: "streaming",
+			createdAt: CREATED_AT,
+			content: [{ type: "tool_call", toolCallId: "managed", name: "bash", state: "running" }],
+		};
+		projection.apply({ type: "item/started", item });
+		const updated = projection.setPermissionDecision("managed", "rule", {
+			ruleIds: ["C03"],
+			matchedRule: { id: "C03", name: "ls", scope: "workspace" },
+		});
+		expect(updated[0]?.content[0]).toMatchObject({
+			permissionDecision: {
+				source: "rule",
+				ruleIds: ["C03"],
+				matchedRule: { id: "C03", name: "ls", scope: "workspace" },
+			},
+		});
+	});
+});
+
+it("restores manual allow, deny and unavailable outcomes without treating execution as approval", () => {
+	const decisions = projectPermissionDecisions([
+		{
+			type: "session_permission_audit",
+			actionId: "allow-session",
+			source: "user",
+			decision: "allow",
+			remember: "session",
+			reason: "authorization.allowed",
+		},
+		{
+			type: "session_permission_audit",
+			actionId: "deny-project",
+			source: "user",
+			decision: "deny",
+			remember: "project",
+			reason: "review.deny",
+		},
+		{
+			type: "session_permission_audit",
+			actionId: "expired",
+			source: "user",
+			decision: "deny",
+			reason: "review.unavailable",
+		},
+		{
+			type: "session_permission_audit",
+			actionId: "rule-denied",
+			source: "policy",
+			decision: "deny",
+			reason: "rule.deny",
+		},
+	]);
+	expect(decisions.get("allow-session")).toEqual({ source: "user", outcome: "allow", remember: "session" });
+	expect(decisions.get("deny-project")).toEqual({ source: "user", outcome: "deny", remember: "project" });
+	expect(decisions.get("expired")).toEqual({ source: "user", outcome: "unavailable" });
+	expect(decisions.has("rule-denied")).toBe(false);
+});
+
+describe("inline interaction history", () => {
+	it("keeps complete task and answer snapshots beyond the generic output preview", () => {
+		const tasks = Array.from({ length: 100 }, (_, index) => ({
+			task: `${index}: ${"待办".repeat(200)}`,
+			completed: false,
+		}));
+		const answers = Array.from({ length: 4 }, (_, index) => ({
+			question: `Question ${index}`,
+			selected: [],
+			customAnswer: "回答".repeat(2000),
+		}));
+		for (const [toolName, details, field, expected] of [
+			["set_tasks", { tasks }, "tasks", tasks],
+			["ask_user", { cancelled: false, answers }, "userAnswers", answers],
+		] as const) {
+			const projected = projectLiveMessage({
+				itemId: toolName,
+				sessionId: "session-1",
+				turnId: "turn-1",
+				state: "completed",
+				fallbackTimestamp: CREATED_AT,
+				message: {
+					role: "toolResult",
+					toolCallId: toolName,
+					toolName,
+					isError: false,
+					details,
+					content: [{ type: "text", text: JSON.stringify(expected) }],
+				},
+			});
+			const block = projected?.content[0];
+			expect(block?.type).toBe("tool_result");
+			if (block?.type !== "tool_result") throw new Error("Missing tool result");
+			expect(block[field]).toEqual(expected);
+			expect(Buffer.byteLength(block.output)).toBeLessThanOrEqual(16 * 1024);
+		}
 	});
 });

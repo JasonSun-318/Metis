@@ -25,6 +25,31 @@ const end = (toolCallId: string, text: string, isError = false) => ({
 });
 
 describe("Process projection", () => {
+	it("tracks matching permission reviews until execution is allowed or the tool ends", () => {
+		const projector = new ProcessProjector();
+		const review = {
+			type: "permission_review_started" as const,
+			actionId: "command",
+			reviewer: "user" as const,
+			riskLevel: "low" as const,
+		};
+		projector.apply(start("command"), "child");
+		expect(projector.apply(review)).toBeUndefined();
+		expect(projector.apply(review, "child")?.state).toBe("awaiting_approval");
+		expect(
+			projector.apply({ type: "permission_decision", actionId: "command", source: "user" }, "child")?.state,
+		).toBe("running");
+		expect(projector.apply(end("command", "done"), "child")?.state).toBe("completed");
+		expect(projector.apply(review, "child")).toBeUndefined();
+
+		projector.apply(start("command"), "child");
+		projector.apply(review, "child");
+		expect(projector.apply(end("command", "Permission denied", true), "child")).toMatchObject({
+			state: "failed",
+			output: "Permission denied",
+		});
+	});
+
 	it("keeps the latest output in reconnect snapshots", () => {
 		const session = {
 			sessionId: "session",
