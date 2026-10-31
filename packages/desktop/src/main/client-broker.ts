@@ -69,11 +69,7 @@ import {
 } from "../shared/desktop-api.ts";
 import type { BrowserManager } from "./browser-manager.ts";
 import { BrowserToolHost } from "./browser-tool-host.ts";
-import {
-	deliveredPreviewDirectories,
-	readDeliveredPreviewBytes,
-	readKnowledgePreviewBytes,
-} from "./preview-file-reader.ts";
+import { readDeliveredPreviewBytes, readKnowledgePreviewBytes } from "./preview-file-reader.ts";
 import { validateProjectFolderInput } from "./project-folder.ts";
 import type { TerminalManager } from "./terminal-manager.ts";
 import type { WorkspaceFileManager } from "./workspace-file-manager.ts";
@@ -652,29 +648,18 @@ export class ClientBroker {
 					return { ok: false as const, reason: "not-found" as const };
 				}
 			}
-			if (params.rootSessionId) {
-				try {
-					const file = await this.clientCall("session/readDeliveredFile", {
-						sessionId: params.sessionId,
-						rootSessionId: params.rootSessionId,
-						fileId: params.fileId,
-					});
-					return {
-						ok: true,
-						name: file.name,
-						byteLength: file.byteLength,
-						mediaType: file.mediaType ?? "application/octet-stream",
-						bytes: new Uint8Array(Buffer.from(file.data, "base64")),
-					};
-				} catch {
-					return { ok: false, reason: "not-found" };
-				}
+			try {
+				const file = await this.clientCall("session/readDeliveredFile", {
+					sessionId: params.sessionId,
+					...(params.rootSessionId ? { rootSessionId: params.rootSessionId } : {}),
+					fileId: params.fileId,
+					metadataOnly: true,
+				});
+				if (!file.absolutePath) return { ok: false, reason: "not-found" };
+				return await readDeliveredPreviewBytes(file.absolutePath, file.name);
+			} catch {
+				return { ok: false, reason: "not-found" };
 			}
-			for (const directory of deliveredPreviewDirectories(params.sessionId)) {
-				const result = await readDeliveredPreviewBytes(directory, params.fileId);
-				if (result.ok || result.reason === "too-large") return result;
-			}
-			return { ok: false, reason: "not-found" };
 		});
 		this.register(DESKTOP_IPC_CHANNELS.interruptTurn, 1, async (_event, [input]) => {
 			const params = this.validatedParams("turn/interrupt", input);

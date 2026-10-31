@@ -791,7 +791,7 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 			if (item) this.publish({ type: "item/completed", item });
 			return;
 		}
-		if (event.type === "agent_start" || event.type === "turn_start") {
+		if (event.type === "agent_start" || event.type === "turn_start" || event.type === "compaction_start") {
 			this.refreshLifecycleProjection();
 			return;
 		}
@@ -1713,6 +1713,10 @@ class OpenedAgentSessionRuntime implements OpenedSessionRuntime {
 				sessionId: input.sessionId,
 				requestId: input.requestId,
 			});
+		} finally {
+			// compaction_end precedes the runtime's cleanup of isCompacting.
+			// Publish the settled state after compact() has finished on every path.
+			this.refreshLifecycleProjection();
 		}
 	}
 
@@ -2459,7 +2463,10 @@ class ReadonlyScheduledSessionRuntime implements OpenedSessionRuntime {
 			) {
 				throw new Error("Scheduled session identity changed");
 			}
-		} catch {
+		} catch (error) {
+			if (error instanceof Error && error.name === "UnsupportedSessionVersionError") {
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId: this.sessionId });
+			}
 			throw new AppServerError("SESSION_CORRUPT", { sessionId: this.sessionId });
 		}
 		this.deliveredArtifacts = new SessionDeliveredArtifacts(agentDir, manager);
@@ -3269,6 +3276,9 @@ export class AgentSessionRuntimeHost implements SessionRuntimeHost {
 			if (code === "ENOENT") throw new AppServerError("NOT_FOUND", { sessionId: ref.summary.sessionId });
 			if (error instanceof Error && error.name === "SessionLeaseError") {
 				throw new AppServerError("SESSION_IN_USE", { sessionId: ref.summary.sessionId });
+			}
+			if (error instanceof Error && error.name === "UnsupportedSessionVersionError") {
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId: ref.summary.sessionId });
 			}
 			if (error instanceof Error && /^(CorruptSessionError|SessionJournalPoisonedError)$/.test(error.name)) {
 				throw new AppServerError("SESSION_CORRUPT", { sessionId: ref.summary.sessionId });

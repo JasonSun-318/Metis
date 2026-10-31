@@ -815,6 +815,15 @@ describe("production runtime streaming", () => {
 			});
 			expect("message" in (compactResult as { result: object }).result).toBe(false);
 			expect(compactionRequests).toBe(1);
+			expect(server.catalog.get(SESSION_REQUEST).summary.state).toBe("idle");
+			expect(
+				await connection.handle({
+					jsonrpc: "2.0",
+					id: "open-after-compact",
+					method: "session/open",
+					params: { sessionId: SESSION_REQUEST },
+				}),
+			).toMatchObject({ result: { session: { state: "idle" } } });
 
 			// The compaction entry must be projected as a completed system item and
 			// the session summary must refresh through the normal lifecycle path.

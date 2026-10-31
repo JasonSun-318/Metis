@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { createAssistantMessageEventStream, fauxAssistantMessage, fauxProvider } from "@metis/ai"; // boundary-allow: Offline fixtures exercise the production compaction lifecycle.
 import type { DomainEvent } from "@metis/app-protocol";
 import { type AgentSessionRuntime, type FileEntry, SessionManager } from "@metis/coding-agent/host";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,6 +58,92 @@ async function fixture() {
 }
 
 describe("root and child runtime controls", () => {
+	it.each(["success", "failure", "cancel"] as const)(
+		"settles manual compaction after %s without leaving the session running",
+		async (outcome) => {
+			const { opened, runtime } = await fixture();
+			const session = runtime.session;
+			session.agent.state.model = fauxProvider().getModel();
+			session.settingsManager.applyOverrides({ compaction: { keepRecentTokens: 1 } });
+			session.sessionManager.appendMessage({ role: "user", content: "hello", timestamp: Date.now() });
+			session.sessionManager.appendMessage(fauxAssistantMessage("response to compact"));
+			session.agent.state.messages = session.sessionManager.buildSessionContext().messages;
+			let finishSummary!: () => void;
+			session.agent.streamFn = (_model, _context, options) => {
+				const stream = createAssistantMessageEventStream();
+				finishSummary = () => {
+					if (outcome === "failure") {
+						stream.push({
+							type: "error",
+							reason: "error",
+							error: fauxAssistantMessage("", { stopReason: "error", errorMessage: "Summary failed" }),
+						});
+					} else {
+						stream.push({ type: "done", reason: "stop", message: fauxAssistantMessage("Summary") });
+					}
+				};
+				options?.signal?.addEventListener("abort", finishSummary, { once: true });
+				return stream;
+			};
+			const events: DomainEvent[] = [];
+			opened.subscribe((event) => events.push(event));
+			const compacting = opened.compact({ sessionId: ROOT, requestId: REQUEST });
+			const result =
+				outcome === "failure"
+					? expect(compacting).rejects.toMatchObject({ code: "OPERATION_FAILED" })
+					: expect(compacting).resolves.toMatchObject(
+							outcome === "cancel" ? { message: "Compaction cancelled" } : { tokensBefore: expect.any(Number) },
+						);
+			await vi.waitFor(() => expect(finishSummary).toBeTypeOf("function"));
+			expect(opened.isActive()).toBe(true);
+			expect(opened.getSummary().state).toBe("running");
+			if (outcome === "cancel") session.abortCompaction();
+			else finishSummary();
+			await result;
+			expect(session.isCompacting).toBe(false);
+			expect(opened.isActive()).toBe(false);
+			expect(opened.getSummary().state).toBe("idle");
+			expect(events.filter((event) => event.type === "session/updated").at(-1)).toMatchObject({
+				session: { state: "idle" },
+			});
+			const snapshot = await opened.snapshot("11111111-1111-4111-8111-111111111111", () => 0);
+			expect(snapshot.session.state).toBe("idle");
+			expect(snapshot.activeTurnId).toBeNull();
+			expect(
+				snapshot.recentItems.filter((item) => item.content.some((block) => block.type === "compaction")),
+			).toHaveLength(outcome === "success" ? 1 : 0);
+		},
+	);
+
+	it("publishes user goal text immediately and restores the same item from the journal", async () => {
+		const { opened, runtime } = await fixture();
+		const events: DomainEvent[] = [];
+		opened.subscribe((event) => events.push(event));
+		await opened.setGoal({ sessionId: ROOT, requestId: REQUEST, objective: "测试 goal 模式", status: "paused" });
+		const visible = events.filter((event) => event.type === "item/completed");
+		expect(visible).toHaveLength(1);
+		expect(visible[0]).toMatchObject({
+			item: { role: "user", content: [{ type: "text", text: "/goal 测试 goal 模式" }] },
+		});
+		const snapshot = await opened.snapshot("11111111-1111-4111-8111-111111111111", () => 0);
+		expect(snapshot.recentItems).toContainEqual(visible[0]!.item);
+		await opened.setGoal({ sessionId: ROOT, requestId: REQUEST, status: "paused" });
+		expect(events.filter((event) => event.type === "item/completed")).toHaveLength(1);
+		const manager = runtime.session.sessionManager;
+		const sessionPath = manager.getSessionFile()!;
+		await opened.close();
+		const reopened = SessionManager.open(sessionPath);
+		try {
+			expect(
+				reopened
+					.getEntries()
+					.filter((entry) => entry.type === "custom" && entry.customType === "goal_user_request"),
+			).toHaveLength(1);
+		} finally {
+			reopened.close();
+		}
+	});
+
 	it.each(["turn", "agent"] as const)(
 		"%s stop interrupts the root before child cleanup finishes",
 		async (endpoint) => {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
 	appendFileSync,
 	existsSync,
@@ -32,6 +33,7 @@ import {
 	getDefaultSessionDir,
 	getManagedWorkspaceDir,
 	getSessionDisplayMetadataPath,
+	ProjectPermissionRuleStore,
 	ProjectTrustStore,
 	SessionManager,
 	SettingsManager,
@@ -73,8 +75,13 @@ class FakeRuntime implements OpenedSessionRuntime {
 	agentInterruptCalls = 0;
 	webSearchRefreshCalls = 0;
 	permissionAutoRefreshCalls = 0;
+	permissionRulesRefreshCalls = 0;
 	memoryRefreshCalls = 0;
 	sessionName: string | undefined;
+
+	notifyPermissionRulesChanged(): void {
+		this.permissionRulesRefreshCalls += 1;
+	}
 
 	constructor(ref: SessionRef) {
 		this.ref = ref;
@@ -1619,6 +1626,48 @@ describe("AppServer", () => {
 		expect(host.runtimes.get("auto-rules-session")?.permissionAutoRefreshCalls).toBe(1);
 	});
 
+	it("manages global remembered grants without opening chats and refreshes open runtimes on replay-safe revocation", async () => {
+		writeSession(sessionsRoot, "remembered-session", projectDir);
+		const store = new ProjectPermissionRuleStore(agentDir);
+		const rule = store.rememberAllow({
+			projectPath: projectDir,
+			actionDigest: "a".repeat(64),
+			grantDigest: "b".repeat(64),
+			toolName: "bash",
+			toolIdentity: "builtin:bash",
+			riskLevel: "low",
+			summary: [{ label: "Command", value: "pwd" }],
+		});
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+		expect(
+			await connection.handle({ jsonrpc: "2.0", id: "all-grants", method: "permission/rules/catalog", params: {} }),
+		).toMatchObject({
+			result: { groups: [{ projectPath: realpathSync(projectDir), scope: "project", rules: [{ id: rule.id }] }] },
+		});
+		expect(host.open).not.toHaveBeenCalled();
+		await connection.handle({
+			jsonrpc: "2.0",
+			id: "subscribe-grants",
+			method: "session/subscribe",
+			params: { sessionId: "remembered-session" },
+		});
+		const request = {
+			jsonrpc: "2.0",
+			id: "revoke-grant",
+			method: "permission/rules/revoke",
+			params: { requestId: REQUEST_A, scope: "project", projectPath: projectDir, ruleId: rule.id },
+		};
+		expect(await connection.handle(request)).toMatchObject({ result: { deleted: true } });
+		expect(await connection.handle({ ...request, id: "revoke-grant-replay" })).toMatchObject({
+			result: { deleted: true },
+		});
+		expect(host.runtimes.get("remembered-session")?.permissionRulesRefreshCalls).toBe(1);
+		expect(store.list(projectDir)).toEqual([]);
+	});
+
 	it("refreshes open runtimes after memory settings change", async () => {
 		writeSession(sessionsRoot, "memory-session", projectDir);
 		const host = new FakeHost();
@@ -2945,6 +2994,180 @@ describe("AppServer", () => {
 			RPC_ERROR_CODES.SESSION_CORRUPT,
 		);
 		expect(host.open).not.toHaveBeenCalled();
+	});
+
+	it("lists future-version journals with preserved metadata and refuses to open them", async () => {
+		const futureId = REQUEST_F;
+		const directory = getDefaultSessionDir(projectDir, agentDir);
+		mkdirSync(directory, { recursive: true });
+		const path = join(directory, `${futureId}.jsonl`);
+		writeFileSync(
+			path,
+			`${JSON.stringify({
+				type: "session",
+				version: 16,
+				id: futureId,
+				timestamp: "2026-01-05T00:00:00.000Z",
+				cwd: projectDir,
+				mode: "code",
+				cwdOrigin: "user-selected",
+			})}\nnot-json future record\n{unfinished`,
+		);
+		writeFileSync(
+			getSessionDisplayMetadataPath(path),
+			`${JSON.stringify({ version: 1, sessionId: futureId, name: "Future session" })}\n`,
+		);
+
+		const scheduledId = REQUEST_A;
+		const scheduledFile = join(directory, `${scheduledId}.jsonl`);
+		writeFileSync(
+			scheduledFile,
+			`${JSON.stringify({ type: "session", version: 16, id: scheduledId, timestamp: "2026-01-05T00:00:00.000Z", cwd: projectDir, mode: "chat", cwdOrigin: "user-selected", scheduled: { taskId: REQUEST_B, runId: REQUEST_C } })}\nfuture body`,
+		);
+		const before = readFileSync(path);
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const response = await connection.handle({ jsonrpc: "2.0", id: "list", method: "session/list", params: {} });
+		const sessions = (response as { result: { sessions: SessionSummary[] } }).result.sessions;
+		const future = sessions.find((session) => session.sessionId === futureId);
+		expect(future).toMatchObject({
+			state: "unsupported",
+			mode: "code",
+			cwdOrigin: "user-selected",
+			cwd: realpathSync(projectDir),
+			createdAt: "2026-01-05T00:00:00.000Z",
+			name: "Future session",
+		});
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-future",
+				method: "session/open",
+				params: { sessionId: futureId },
+			}),
+			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+		);
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "agents-future",
+				method: "agent/list",
+				params: { sessionId: futureId },
+			}),
+			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+		);
+		for (const method of [
+			"session/rename",
+			"session/fork",
+			"session/delete",
+			"session/archive",
+			"session/unarchive",
+			"session/close",
+		] as const) {
+			const params = {
+				sessionId: futureId,
+				requestId: randomUUID(),
+				...(method === "session/rename" ? { name: "Must not rename" } : {}),
+				...(method === "session/fork" ? { entryId: "unused-fork-point" } : {}),
+			};
+			expectError(
+				await connection.handle({ jsonrpc: "2.0", id: method, method, params }),
+				RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+			);
+		}
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "create-replay-future",
+				method: "session/create",
+				params: { requestId: futureId, mode: "code", cwd: projectDir },
+			}),
+			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+		);
+		await server.catalog.refreshModeProjectStorage(projectDir);
+		expect(server.catalog.get(futureId).summary.state).toBe("unsupported");
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "preview-future-project",
+				method: "project/deletePreview",
+				params: { mode: "code", cwd: projectDir },
+			}),
+			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+		);
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "mark-future-scheduled-read",
+				method: "session/markRead",
+				params: { sessionId: scheduledId },
+			}),
+			RPC_ERROR_CODES.SESSION_VERSION_UNSUPPORTED,
+		);
+		const futureRun: Parameters<typeof server.catalog.registerScheduledRun>[0] = {
+			sessionId: scheduledId,
+			sessionFile: scheduledFile,
+			taskId: REQUEST_B,
+			id: REQUEST_C,
+			sequence: 1,
+			trigger: "scheduled",
+			status: "succeeded",
+			unread: true,
+			scheduledFor: "2026-01-05T00:00:00.000Z",
+			createdAt: "2026-01-05T00:00:00.000Z",
+			snapshot: {
+				name: "Future run",
+				instruction: "Read the project",
+				model: { provider: "fixture", modelId: "fixture" },
+				schedule: { kind: "once", date: "2026-01-05", time: "00:00" },
+				timezone: "UTC",
+				target: { kind: "general", cwd: projectDir, workspace: "fixed" },
+			},
+		};
+		await expect(server.catalog.registerScheduledRun(futureRun)).rejects.toMatchObject({
+			code: "SESSION_VERSION_UNSUPPORTED",
+		});
+		expect(host.open).not.toHaveBeenCalled();
+		expect(readFileSync(path).equals(before)).toBe(true);
+	});
+
+	it("keeps known metadata for duplicate-id journals instead of masking them as anonymous tasks", async () => {
+		const duplicateId = REQUEST_G;
+		const first = writeSession(sessionsRoot, duplicateId, projectDir);
+		const otherRoot = join(sessionsRoot, "other-project");
+		const second = join(otherRoot, `${duplicateId}.jsonl`);
+		mkdirSync(otherRoot, { recursive: true });
+		writeFileSync(second, readFileSync(first));
+		const host = new FakeHost();
+		const server = await createTestServer({ agentDir, sessionsRoot, runtimeHost: host });
+		const connection = server.connect();
+		await connection.handle(initialize());
+
+		const response = await connection.handle({ jsonrpc: "2.0", id: "list", method: "session/list", params: {} });
+		const sessions = (response as { result: { sessions: SessionSummary[] } }).result.sessions;
+		const duplicates = sessions.filter((session) => session.sessionId.startsWith("corrupt-"));
+		expect(duplicates).toHaveLength(2);
+		for (const duplicate of duplicates) {
+			expect(duplicate).toMatchObject({
+				state: "corrupt",
+				mode: "code",
+				cwdOrigin: "user-selected",
+				cwd: realpathSync(projectDir),
+				createdAt: "2026-01-01T00:00:00.000Z",
+			});
+		}
+		expectError(
+			await connection.handle({
+				jsonrpc: "2.0",
+				id: "open-duplicate",
+				method: "session/open",
+				params: { sessionId: duplicates[0]!.sessionId },
+			}),
+			RPC_ERROR_CODES.SESSION_CORRUPT,
+		);
 	});
 
 	it("archives and restores a closed journal without deleting it", async () => {

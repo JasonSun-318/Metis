@@ -263,7 +263,13 @@ export class Dispatcher {
 		}
 		if (additionalWorkspaceCwd !== undefined) throw new AppServerError("INVALID_REQUEST");
 		const ref = this.catalog.get(sourceSessionId);
-		if (ref.scheduled || ref.summary.archived || ref.summary.state === "corrupt" || !ref.summary.cwd) {
+		if (
+			ref.scheduled ||
+			ref.summary.archived ||
+			ref.summary.state === "corrupt" ||
+			ref.summary.state === "unsupported" ||
+			!ref.summary.cwd
+		) {
 			throw new AppServerError("NOT_FOUND", { sessionId: sourceSessionId });
 		}
 		const target = resolveScheduleCreateTarget({
@@ -313,6 +319,9 @@ export class Dispatcher {
 	private runtimeRef(sessionId: string): SessionRef {
 		const ref = this.catalog.get(sessionId);
 		if (ref.summary.archived) throw new AppServerError("NOT_FOUND", { sessionId });
+		if (ref.summary.state === "unsupported") {
+			throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
+		}
 		if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
 		return ref;
 	}
@@ -330,6 +339,9 @@ export class Dispatcher {
 
 	private async hydrateScheduledSession(sessionId: string): Promise<SessionRef> {
 		const ref = this.catalog.get(sessionId);
+		if (ref.summary.state === "unsupported") {
+			throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
+		}
 		if (!ref.scheduled) return ref;
 		try {
 			const run = await this.scheduleManager.getRun(ref.scheduled.taskId, ref.scheduled.runId);
@@ -343,7 +355,9 @@ export class Dispatcher {
 	}
 
 	private assertMutableSession(sessionId: string): void {
-		if (this.catalog.get(sessionId).scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
+		const ref = this.catalog.get(sessionId);
+		if (ref.summary.state === "unsupported") throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
+		if (ref.scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
 	}
 
 	private async allowRetainedScheduledDelete(sessionId: string): Promise<boolean> {
@@ -1032,6 +1046,11 @@ export class Dispatcher {
 				return await this.replayMutation(request, async () => {
 					this.assertMutableSession(request.params.sessionId);
 					return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
+						if (ref.summary.state === "unsupported") {
+							throw new AppServerError("SESSION_VERSION_UNSUPPORTED", {
+								sessionId: request.params.sessionId,
+							});
+						}
 						if (ref.summary.state === "corrupt") {
 							throw new AppServerError("SESSION_CORRUPT", {
 								sessionId: request.params.sessionId,
@@ -1087,6 +1106,11 @@ export class Dispatcher {
 					result = await this.replayMutation(request, async () => {
 						const allowRetainedScheduled = await this.allowRetainedScheduledDelete(request.params.sessionId);
 						return await this.catalog.withSessionProjectMutable(request.params.sessionId, async (ref) => {
+							if (ref.summary.state === "unsupported") {
+								throw new AppServerError("SESSION_VERSION_UNSUPPORTED", {
+									sessionId: request.params.sessionId,
+								});
+							}
 							if (ref.summary.state === "corrupt") {
 								throw new AppServerError("SESSION_CORRUPT", {
 									sessionId: request.params.sessionId,

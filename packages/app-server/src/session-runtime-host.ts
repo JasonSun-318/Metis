@@ -4,6 +4,7 @@ import type {
 	DomainEvent,
 	ItemView,
 	KnowledgeLibrary,
+	PermissionScopePreview,
 	RpcErrorContext,
 	RpcErrorName,
 	SessionSnapshot,
@@ -17,6 +18,8 @@ export interface SessionRef {
 	readonly summary: SessionSummary;
 	readonly storageUpdatedAt?: string;
 	readonly scheduled?: { readonly taskId: string; readonly runId: string };
+	/** Set when the journal was written by a newer Metis; the runtime must not open it. */
+	readonly unsupportedVersion?: number;
 }
 
 export interface PluginRuntimeStatus {
@@ -88,6 +91,7 @@ export interface OpenedSessionRuntime {
 	setModel(input: ClientParams<"session/setModel">): Promise<ClientResult<"session/setModel">>;
 	refreshWebSearchSettings?(): Promise<void>;
 	refreshPermissionAutoSettings?(): Promise<void>;
+	getPermissionScopePreview?(): PermissionScopePreview;
 	refreshMemorySettings?(): Promise<void>;
 	prepareModelServiceSettingsRefresh?(): Promise<void>;
 	ensurePluginsCurrent?(): Promise<void>;

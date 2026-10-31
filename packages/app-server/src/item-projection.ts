@@ -595,6 +595,18 @@ export function projectMessageEntry(input: MessageProjectionInput): ItemView | u
 }
 
 export function projectSessionEntry(input: MessageProjectionInput): ItemView | undefined {
+	if (input.entry.type === "custom" && input.entry.customType === "goal_user_request") {
+		const data = input.entry.data as { objective?: unknown } | null;
+		if (typeof data?.objective !== "string") return undefined;
+		return projectMessageEntry({
+			...input,
+			entry: {
+				...input.entry,
+				type: "message",
+				message: { role: "user", content: [{ type: "text", text: `/goal ${data.objective}` }] },
+			},
+		});
+	}
 	const message = projectMessageEntry(input);
 	if (message) return message;
 	if (input.entry.type !== "compaction") return undefined;

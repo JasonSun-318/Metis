@@ -371,7 +371,7 @@ export class ProfileSummaryCache {
 		}
 		const contributions: SessionProfileContribution[] = [];
 		for (const ref of refs) {
-			if (ref.summary.state === "corrupt") {
+			if (ref.summary.state === "corrupt" || ref.summary.state === "unsupported") {
 				this.cache.delete(ref.path);
 				continue;
 			}

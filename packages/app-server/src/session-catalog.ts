@@ -26,6 +26,7 @@ import {
 	resolveNewSessionWorkspace,
 	type ScheduleRun,
 	SessionManager,
+	UnsupportedSessionVersionError,
 } from "@metis/coding-agent/host";
 import {
 	completeSessionMutation,
@@ -60,6 +61,8 @@ interface ScannedSession {
 		readonly cwdOrigin: CwdOrigin;
 		readonly lastTurnOutcome?: "completed" | "failed";
 		readonly scheduled?: { readonly taskId: string; readonly runId: string };
+		/** Set when the header parses but was written by a newer Metis; body records are never parsed. */
+		readonly unsupportedVersion?: number;
 	};
 	readonly updatedAt: string;
 	readonly storageUpdatedAt: string;
@@ -216,13 +219,24 @@ function corruptId(relativePath: string, discriminator = ""): string {
 	return `corrupt-${createHash("sha256").update(relativePath).update(discriminator).digest("hex").slice(0, 32)}`;
 }
 
-function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSummary {
+function corruptSummary(
+	sessionId: string,
+	scanned: ScannedSession,
+	known: {
+		readonly cwd: string | null;
+		readonly mode: AgentMode;
+		readonly cwdOrigin: CwdOrigin;
+		readonly createdAt?: string;
+		readonly name?: string;
+		readonly scheduled?: { readonly taskId: string; readonly runId: string };
+	} = { cwd: null, mode: "code", cwdOrigin: "user-selected" },
+): SessionSummary {
 	return {
 		sessionId,
-		mode: "code",
-		cwdOrigin: "user-selected",
-		cwd: null,
-		createdAt: scanned.updatedAt,
+		mode: known.mode,
+		cwdOrigin: known.cwdOrigin,
+		cwd: known.cwd,
+		createdAt: known.createdAt ?? scanned.updatedAt,
 		updatedAt: scanned.updatedAt,
 		state: "corrupt",
 		archived: scanned.archived,
@@ -230,6 +244,49 @@ function corruptSummary(sessionId: string, scanned: ScannedSession): SessionSumm
 		recoveryNotice: "Session journal could not be opened safely.",
 		useMemory: scanned.useMemory,
 		contributeMemory: scanned.contributeMemory,
+		...(known.name ? { name: known.name } : {}),
+		...(known.scheduled ? { scheduled: known.scheduled } : {}),
+	};
+}
+
+const UNSUPPORTED_SESSION_NOTICE =
+	"This session uses a newer format. Open it with a compatible version of Metis. The source data is unchanged.";
+
+function scannedSummary(sessionId: string, scanned: ScannedSession, duplicate: boolean): SessionSummary {
+	const header = scanned.header;
+	if (!header || duplicate) {
+		return corruptSummary(
+			sessionId,
+			scanned,
+			header
+				? {
+						cwd: summaryCwd(header.cwd),
+						mode: header.mode,
+						cwdOrigin: header.cwdOrigin,
+						createdAt: header.timestamp,
+						...(scanned.name ? { name: scanned.name } : {}),
+						...(header.scheduled ? { scheduled: header.scheduled } : {}),
+					}
+				: undefined,
+		);
+	}
+	const unsupported = header.unsupportedVersion !== undefined;
+	return {
+		sessionId,
+		mode: header.mode,
+		cwdOrigin: header.cwdOrigin,
+		cwd: summaryCwd(header.cwd),
+		createdAt: header.timestamp,
+		updatedAt: scanned.updatedAt,
+		state: unsupported ? "unsupported" : "idle",
+		archived: scanned.archived,
+		unread: unsupported ? false : scanned.unread,
+		useMemory: scanned.useMemory,
+		contributeMemory: scanned.contributeMemory,
+		...(unsupported ? { recoveryNotice: UNSUPPORTED_SESSION_NOTICE } : {}),
+		...(header.lastTurnOutcome ? { lastTurnOutcome: header.lastTurnOutcome } : {}),
+		...(scanned.name ? { name: scanned.name } : {}),
+		...(header.scheduled ? { scheduled: header.scheduled } : {}),
 	};
 }
 
@@ -277,6 +334,7 @@ async function readHeader(
 	path: string,
 	nameStart: number | false | undefined = undefined,
 	cachedTail?: SessionTailMetadata,
+	allowUnsupported = false,
 ): Promise<{
 	id: string;
 	timestamp: string;
@@ -288,6 +346,7 @@ async function readHeader(
 	name?: string;
 	nameScannedThrough: number;
 	scheduled?: { taskId: string; runId: string };
+	unsupportedVersion?: number;
 }> {
 	const before = await lstat(path);
 	if (!before.isFile() || before.nlink !== 1) throw new Error("Session journal is not a single-link regular file");
@@ -310,13 +369,17 @@ async function readHeader(
 			unknown
 		>;
 		if (value.type !== "session") throw new Error("Session header has the wrong type");
-		if (
-			value.version !== undefined &&
-			(!Number.isInteger(value.version) ||
-				(value.version as number) < 1 ||
-				(value.version as number) > CURRENT_SESSION_VERSION)
-		) {
-			throw new Error("Session header version is unsupported");
+		if (value.version !== undefined) {
+			if (!Number.isInteger(value.version) || (value.version as number) < 1) {
+				throw new Error("Session header version is unsupported");
+			}
+			if ((value.version as number) > CURRENT_SESSION_VERSION && !allowUnsupported) {
+				throw new UnsupportedSessionVersionError({
+					filePath: path,
+					found: value.version as number,
+					supported: CURRENT_SESSION_VERSION,
+				});
+			}
 		}
 		if (typeof value.id !== "string") throw new Error("Session header id is invalid");
 		assertValidSessionId(value.id);
@@ -341,6 +404,23 @@ async function readHeader(
 		if (!safeIsoTimestamp(value.timestamp)) throw new Error("Session header timestamp is invalid");
 		if (typeof value.cwd !== "string" || Buffer.byteLength(value.cwd, "utf8") > 32 * 1024) {
 			throw new Error("Session header cwd is invalid");
+		}
+		if (typeof value.version === "number" && value.version > CURRENT_SESSION_VERSION) {
+			const current = await lstat(path);
+			if (!current.isFile() || current.nlink !== 1 || current.dev !== opened.dev || current.ino !== opened.ino) {
+				throw new Error("Session journal identity changed while reading its header");
+			}
+			return {
+				id: value.id,
+				timestamp: value.timestamp,
+				updatedAt: value.timestamp,
+				cwd: value.cwd,
+				mode: value.mode === "chat" ? "chat" : "code",
+				cwdOrigin: value.cwdOrigin === "managed" ? "managed" : "user-selected",
+				nameScannedThrough: 0,
+				unsupportedVersion: value.version,
+				...(scheduled ? { scheduled } : {}),
+			};
 		}
 		let name: string | undefined;
 		const scanStart = nameStart === false ? undefined : Math.max(newline + 1, nameStart ?? newline + 1);
@@ -514,10 +594,28 @@ export class SessionCatalog {
 						...(cachedName.lastTurnOutcome ? { lastTurnOutcome: cachedName.lastTurnOutcome } : {}),
 					}
 				: undefined;
-			let metadata = await readHeader(path, nameStart, cachedTail);
+			let metadata = await readHeader(path, nameStart, cachedTail, true);
 			if (persistedName && persistedName.sessionId !== metadata.id) {
 				persistedName = undefined;
-				metadata = await readHeader(path, undefined, cachedTail);
+				metadata = await readHeader(path, undefined, cachedTail, true);
+			}
+			if (metadata.unsupportedVersion !== undefined) {
+				this.sessionNames.delete(path);
+				return {
+					key,
+					path,
+					relativePath,
+					archived,
+					unread: false,
+					useMemory: displayMetadata?.useMemory !== false,
+					contributeMemory: displayMetadata?.contributeMemory !== false,
+					header: metadata,
+					updatedAt: metadata.timestamp,
+					storageUpdatedAt: new Date(stats.mtimeMs).toISOString(),
+					...(displayMetadata?.sessionId === metadata.id && displayMetadata.name
+						? { name: normalizedSessionName(displayMetadata.name) }
+						: {}),
+				};
 			}
 			const { name: scannedName, nameScannedThrough, updatedAt, ...header } = metadata;
 			const name =
@@ -631,31 +729,16 @@ export class SessionCatalog {
 			const duplicate = item.header !== undefined && idCounts.get(item.header.id)! > 1;
 			let sessionId = item.header && !duplicate ? item.header.id : corruptId(item.relativePath);
 			if (next.has(sessionId)) sessionId = corruptId(item.relativePath, item.key);
-			const summary =
-				item.header && !duplicate
-					? {
-							sessionId,
-							mode: item.header.mode,
-							cwdOrigin: item.header.cwdOrigin,
-							cwd: summaryCwd(item.header.cwd),
-							createdAt: item.header.timestamp,
-							updatedAt: item.updatedAt,
-							state: "idle" as const,
-							...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
-							archived: item.archived,
-							unread: item.unread,
-							useMemory: item.useMemory,
-							contributeMemory: item.contributeMemory,
-							...(item.name ? { name: item.name } : {}),
-							...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
-						}
-					: corruptSummary(sessionId, item);
+			const summary = scannedSummary(sessionId, item, duplicate);
 			next.set(sessionId, {
 				path: item.path,
 				relativePath: item.relativePath,
 				storageUpdatedAt: item.storageUpdatedAt,
 				summary,
 				...(item.header?.scheduled ? { scheduled: item.header.scheduled } : {}),
+				...(item.header?.unsupportedVersion !== undefined
+					? { unsupportedVersion: item.header.unsupportedVersion }
+					: {}),
 			});
 		}
 		this.sessions = next;
@@ -701,31 +784,16 @@ export class SessionCatalog {
 					item.header !== undefined && (idCounts.get(item.header.id)! > 1 || next.has(item.header.id));
 				let sessionId = item.header && !duplicate ? item.header.id : corruptId(item.relativePath);
 				if (next.has(sessionId)) sessionId = corruptId(item.relativePath, item.key);
-				const summary =
-					item.header && !duplicate
-						? {
-								sessionId,
-								mode: item.header.mode,
-								cwdOrigin: item.header.cwdOrigin,
-								cwd: summaryCwd(item.header.cwd),
-								createdAt: item.header.timestamp,
-								updatedAt: item.updatedAt,
-								state: "idle" as const,
-								...(item.header.lastTurnOutcome ? { lastTurnOutcome: item.header.lastTurnOutcome } : {}),
-								archived: item.archived,
-								unread: item.unread,
-								useMemory: item.useMemory,
-								contributeMemory: item.contributeMemory,
-								...(item.name ? { name: item.name } : {}),
-								...(item.header.scheduled ? { scheduled: item.header.scheduled } : {}),
-							}
-						: corruptSummary(sessionId, item);
+				const summary = scannedSummary(sessionId, item, duplicate);
 				next.set(sessionId, {
 					path: item.path,
 					relativePath: item.relativePath,
 					storageUpdatedAt: item.storageUpdatedAt,
 					summary,
 					...(item.header?.scheduled ? { scheduled: item.header.scheduled } : {}),
+					...(item.header?.unsupportedVersion !== undefined
+						? { unsupportedVersion: item.header.unsupportedVersion }
+						: {}),
 				});
 				if (item.header) this.claimedSessionIds.add(item.header.id);
 			}
@@ -787,7 +855,10 @@ export class SessionCatalog {
 				});
 				this.claimedSessionIds.add(sessionId);
 				return { session: summary, changed };
-			} catch {
+			} catch (error) {
+				if (error instanceof UnsupportedSessionVersionError) {
+					throw new AppServerError("SESSION_VERSION_UNSUPPORTED");
+				}
 				throw new AppServerError("SESSION_CORRUPT");
 			}
 		});
@@ -822,6 +893,7 @@ export class SessionCatalog {
 			(ref) =>
 				!ref.scheduled &&
 				ref.summary.state !== "corrupt" &&
+				ref.summary.state !== "unsupported" &&
 				ref.summary.cwdOrigin === "user-selected" &&
 				ref.summary.cwd !== null &&
 				canonicalProjectCwd(ref.summary.cwd) === canonicalCwd,
@@ -916,6 +988,8 @@ export class SessionCatalog {
 	async withSessionProjectMutable<T>(sessionId: string, operation: (ref: SessionRef) => Promise<T>): Promise<T> {
 		const ref = await this.mutate(() => {
 			const current = this.get(sessionId);
+			if (current.summary.state === "unsupported")
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
 			if (!current.scheduled && current.summary.cwdOrigin === "user-selected" && current.summary.cwd) {
 				const key = projectKey(current.summary.mode, canonicalProjectCwd(current.summary.cwd));
 				if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
@@ -937,10 +1011,23 @@ export class SessionCatalog {
 		const key = projectKey(mode, canonicalCwd);
 		if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY");
 		const canonicalCwds = new Map<string, string>();
+		for (const ref of this.sessions.values()) {
+			if (
+				ref.summary.state === "unsupported" &&
+				ref.summary.mode === mode &&
+				!ref.scheduled &&
+				ref.summary.cwdOrigin === "user-selected" &&
+				ref.summary.cwd &&
+				isSameProjectCwd(ref.summary.cwd, canonicalCwd, canonicalCwds)
+			) {
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED");
+			}
+		}
 		const refs = [...this.sessions.values()].filter(
 			(ref) =>
 				!ref.scheduled &&
 				ref.summary.state !== "corrupt" &&
+				ref.summary.state !== "unsupported" &&
 				ref.summary.mode === mode &&
 				ref.summary.cwdOrigin === "user-selected" &&
 				ref.summary.cwd !== null &&
@@ -1070,6 +1157,12 @@ export class SessionCatalog {
 				});
 			}
 			if (existing) {
+				if (existing.summary.state === "unsupported") {
+					throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { requestId: input.requestId });
+				}
+				if (existing.summary.state === "corrupt") {
+					throw new AppServerError("SESSION_CORRUPT", { requestId: input.requestId });
+				}
 				const manager = SessionManager.open(existing.path);
 				try {
 					const prepared = prepareSessionMutation(manager, mutation);
@@ -1202,6 +1295,9 @@ export class SessionCatalog {
 	renameClosedSession(sessionId: string, value: string): Promise<SessionSummary> {
 		return this.mutate(() => {
 			const ref = this.get(sessionId);
+			if (ref.summary.state === "unsupported") {
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
+			}
 			if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
 			if (ref.scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
 			const name = normalizedSessionName(value);
@@ -1219,6 +1315,9 @@ export class SessionCatalog {
 	markClosedSessionRead(sessionId: string): Promise<{ readonly session: SessionSummary; readonly changed: boolean }> {
 		return this.mutate(() => {
 			const ref = this.get(sessionId);
+			if (ref.summary.state === "unsupported") {
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
+			}
 			if (ref.summary.state === "corrupt") throw new AppServerError("SESSION_CORRUPT", { sessionId });
 			if (ref.scheduled) throw new AppServerError("READ_ONLY_SESSION", { sessionId });
 			if (!ref.summary.unread) return { session: ref.summary, changed: false };
@@ -1263,6 +1362,8 @@ export class SessionCatalog {
 	private move(sessionId: string, requestId: string, archived: boolean): Promise<SessionSummary> {
 		return this.mutate(async () => {
 			let ref = this.get(sessionId);
+			if (ref.summary.state === "unsupported")
+				throw new AppServerError("SESSION_VERSION_UNSUPPORTED", { sessionId });
 			if (!ref.scheduled && ref.summary.cwdOrigin === "user-selected" && ref.summary.cwd) {
 				const key = projectKey(ref.summary.mode, canonicalProjectCwd(ref.summary.cwd));
 				if (this.blockedProjectKeys.has(key)) throw new AppServerError("BUSY", { sessionId });
