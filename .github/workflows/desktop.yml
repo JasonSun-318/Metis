@@ -91,6 +91,16 @@ jobs:
       - name: Make native artifacts
         run: npm run make --workspace @metis/desktop
 
+      - name: Debug Linux sandbox dependency probe
+        if: runner.os == 'Linux'
+        run: |
+          which bwrap socat rg || true
+          node --input-type=module -e "
+            const rt = await import('@anthropic-ai/sandbox-runtime');
+            console.log('supported platform:', rt.SandboxManager.isSupportedPlatform());
+            console.log(JSON.stringify(await rt.SandboxManager.checkDependenciesAsync(), null, 2));
+          "
+
       - name: Verify packaged runtime assets
         run: npm run verify:package --workspace @metis/desktop
 
