@@ -26,7 +26,7 @@ jobs:
       matrix:
         os: [macos-26, windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       METIS_UPDATE_BASE_URL: ${{ startsWith(github.ref, 'refs/tags/v') && vars.METIS_UPDATE_BASE_URL || '' }}
       MACOS_SIGN_IDENTITY: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MACOS_SIGN_IDENTITY || '' }}
@@ -48,7 +48,9 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y unzip xvfb
+        # bubblewrap and socat are required by the workspace sandbox runtime;
+        # without them the packaged sandbox health probe reports "unavailable".
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap socat unzip xvfb
 
       - name: Install dependencies
         run: npm ci
