@@ -33,7 +33,7 @@ describe("Desktop locale preference", () => {
 		expect(i18n.t("{{date}} · {{tokens}} Tokens", { date: "2026-10-26", tokens: 128 })).toBe(
 			"2026-10-26 · 128 Token",
 		);
-		expect(i18n.t("Thinking…")).toBe("思考中…");
+		expect(i18n.t("Thinking…")).toBe("正在思考…");
 		expect(i18n.t("Completed")).toBe("已完成");
 		expect(i18n.t("Working")).toBe("进行中");
 		expect(i18n.t("New Skill")).toBe("新建技能");
