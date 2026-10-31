@@ -106,6 +106,7 @@ import {
 	getOwnedSessionJournalArtifacts,
 	openSessionJournal,
 	type SessionJournal,
+	UnsupportedSessionVersionError,
 } from "./session-journal.ts";
 import { acquireModeProjectMutationLease, SessionLease, SessionLeaseError } from "./session-lease.ts";
 import { type CwdOrigin, getOwnedManagedWorkspace, publishManagedWorkspaceCopy } from "./session-workspace.ts";
@@ -1372,17 +1373,23 @@ function migrateV13ToV14(entries: FileEntry[], filePath: string): void {
 	}
 }
 
+/**
+ * Classify the first journal record before any body interpretation or repair:
+ * a future-format header must surface as UnsupportedSessionVersionError, never
+ * as a repairable corrupt body.
+ */
+function validateFirstJournalRecord(record: unknown, filePath: string): void {
+	if (!isJsonObject(record) || record.type !== "session") return;
+	readSessionVersion(record, filePath);
+}
+
 function readSessionVersion(record: Record<string, unknown>, filePath: string): number {
 	const version = record.version === undefined ? 1 : record.version;
 	if (typeof version !== "number" || !Number.isInteger(version) || version < 1) {
 		corruptSession(filePath, 1, "Session header has an invalid version");
 	}
 	if (version > CURRENT_SESSION_VERSION) {
-		corruptSession(
-			filePath,
-			1,
-			`Session version ${version} is newer than supported version ${CURRENT_SESSION_VERSION}`,
-		);
+		throw new UnsupportedSessionVersionError({ filePath, found: version, supported: CURRENT_SESSION_VERSION });
 	}
 	return version;
 }
@@ -2181,6 +2188,9 @@ function readSessionRecordsReadOnly(
 	const journal = openSessionJournal<unknown>(filePath, {
 		readOnly: true,
 		followSymlinkAlias: options.followSymlinkAlias,
+		validateFirstRecord: (record: unknown) => {
+			validateFirstJournalRecord(record, filePath);
+		},
 	});
 	try {
 		const { records } = journal.readStrict({
@@ -2827,9 +2837,12 @@ function closeManagedSessionState(state: Pick<ManagedSessionState, "journal" | "
 	state.journal?.close();
 }
 
-function journalOptions(_storagePath: string, lease: SessionLease, displayPath: string) {
+function journalOptions(storagePath: string, lease: SessionLease, displayPath: string) {
 	return {
 		serializer: (entry: FileEntry) => JSON.stringify(entry),
+		validateFirstRecord: (record: unknown) => {
+			validateFirstJournalRecord(record, storagePath);
+		},
 		validateRecords: (records: readonly FileEntry[]) => {
 			prepareRawSessionRecords(records, displayPath);
 		},

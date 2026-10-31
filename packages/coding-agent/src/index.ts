@@ -675,6 +675,7 @@ export {
 	splitSessionFileSelectionPrompt,
 } from "./core/session-file-selections.ts";
 export { createSessionId } from "./core/session-id.ts";
+export { UnsupportedSessionVersionError } from "./core/session-journal.ts";
 export {
 	assertValidSessionId,
 	type BranchSummaryEntry,

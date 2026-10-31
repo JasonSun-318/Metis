@@ -76,6 +76,12 @@ export interface OpenSessionJournalOptions<T> {
 	maxRecordBytes?: number;
 	/** Validate complete recovery candidates before any artifact is promoted or deleted. */
 	validateRecords?: (records: readonly T[]) => void;
+	/**
+	 * Validate the first parsed record before any body interpretation, tail repair,
+	 * recovery promotion, or artifact cleanup. Errors propagate unwrapped so callers
+	 * can classify an unreadable future format without poisoning the journal.
+	 */
+	validateFirstRecord?: (record: T) => void;
 	hooks?: SessionJournalHooks;
 	/** Optional writer-lease fence around every filesystem mutation. */
 	runExclusiveMutation?: MutationGuard;
@@ -90,6 +96,21 @@ export class CorruptSessionError extends Error {
 		this.name = "CorruptSessionError";
 		this.filePath = filePath;
 		this.lineNumber = lineNumber;
+	}
+}
+
+/** A journal written by a newer Metis: readable header, unknown body format. Never repair or rewrite it. */
+export class UnsupportedSessionVersionError extends Error {
+	readonly filePath: string;
+	readonly found: number;
+	readonly supported: number;
+
+	constructor(input: { readonly filePath: string; readonly found: number; readonly supported: number }) {
+		super(`Session version ${input.found} is newer than supported version ${input.supported} (${input.filePath})`);
+		this.name = "UnsupportedSessionVersionError";
+		this.filePath = input.filePath;
+		this.found = input.found;
+		this.supported = input.supported;
 	}
 }
 
@@ -336,6 +357,13 @@ function validateJsonlFile<T = unknown>(
 	allowEmpty = true,
 	reviver?: Reviver,
 	validateRecords?: (records: readonly T[]) => void,
+	validateFirstRecord?: (record: T) => void,
+	/*
+	 * Stop after the first complete record. Recovery preflight only needs to
+	 * classify the header; the selected artifact is still validated in full
+	 * before it is promoted or deleted.
+	 */
+	firstRecordOnly = false,
 ): CorruptSessionError | undefined {
 	const pending: Buffer[] = [];
 	const records: T[] | undefined = validateRecords ? [] : undefined;
@@ -369,12 +397,17 @@ function validateJsonlFile<T = unknown>(
 				if (decoded.trim().length === 0) {
 					throw new CorruptSessionError(path, lineNumber, "Journal contains an empty complete record");
 				}
+				let record: T;
 				try {
-					const record = JSON.parse(decoded, reviver) as T;
-					records?.push(record);
+					record = JSON.parse(decoded, reviver) as T;
 				} catch (error) {
 					throw new CorruptSessionError(path, lineNumber, "Malformed complete journal record", { cause: error });
 				}
+				// Keep validation outside JSON error wrapping so callers retain the
+				// first record's format error before any later record is parsed.
+				if (lineNumber === 1 && validateFirstRecord) validateFirstRecord(record);
+				if (firstRecordOnly) return undefined;
+				records?.push(record);
 				pending.length = 0;
 				pendingBytes = 0;
 				lineNumber++;
@@ -393,6 +426,13 @@ function validateJsonlFile<T = unknown>(
 			}
 		}
 		if (pendingBytes > 0) {
+			if (lineNumber === 1 && validateFirstRecord) {
+				try {
+					validateFirstRecord(JSON.parse(Buffer.concat(pending, pendingBytes).toString("utf8")) as T);
+				} catch (error) {
+					if (error instanceof UnsupportedSessionVersionError) throw error;
+				}
+			}
 			throw new CorruptSessionError(path, lineNumber, "Journal has an incomplete final record");
 		}
 		if (!allowEmpty && totalBytes === 0) {
@@ -420,9 +460,19 @@ function validateReplacementArtifact<T>(
 	allowEmpty: boolean,
 	reviver: Reviver | undefined,
 	validateRecords: ((records: readonly T[]) => void) | undefined,
+	validateFirstRecord: ((record: T) => void) | undefined,
+	firstRecordOnly = false,
 ): CorruptSessionError | undefined {
 	assertArtifactUnchanged(artifact);
-	const error = validateJsonlFile(artifact.path, maxRecordBytes, allowEmpty, reviver, validateRecords);
+	const error = validateJsonlFile(
+		artifact.path,
+		maxRecordBytes,
+		allowEmpty,
+		reviver,
+		validateRecords,
+		validateFirstRecord,
+		firstRecordOnly,
+	);
 	assertArtifactUnchanged(artifact);
 	return error;
 }
@@ -587,30 +637,47 @@ function recoverInterruptedReplacement<T>(
 	maxRecordBytes: number,
 	reviver: Reviver | undefined,
 	validateRecords: ((records: readonly T[]) => void) | undefined,
+	validateFirstRecord: ((record: T) => void) | undefined,
 ): void {
 	const directory = dirname(filePath);
 	const rename = hooks?.rename ?? renameSync;
 	const syncDirectory = hooks?.syncDirectory ?? syncDirectorySync;
 	const artifacts = replacementArtifacts(filePath);
+	if (validateFirstRecord) {
+		// An older canonical does not authorize discarding a future-format
+		// replacement. Inspect only each candidate's header before any cleanup or
+		// promotion; records after it are read again by full validation if the
+		// candidate is actually selected.
+		for (const artifact of [...artifacts.temporary, ...artifacts.backups.filter((entry) => !entry.retained)]) {
+			validateReplacementArtifact(artifact, maxRecordBytes, true, reviver, undefined, validateFirstRecord, true);
+		}
+	}
 	if (existsSync(filePath)) {
 		const transientBackups = artifacts.backups.filter((artifact) => !artifact.retained);
 		if (artifacts.temporary.length === 0 && transientBackups.length === 0) return;
 		// A corrupt canonical is not evidence that an interrupted replacement
 		// committed. Preserve every recovery candidate for an explicit decision.
-		if (validateJsonlFile(filePath, maxRecordBytes, true, reviver, validateRecords)) return;
+		if (validateJsonlFile(filePath, maxRecordBytes, true, reviver, validateRecords, validateFirstRecord)) return;
 		cleanupCommittedArtifacts(artifacts, directory, syncDirectory);
 		return;
 	}
 
 	const temporary = latestArtifact([...artifacts.temporary]);
 	const temporaryError = temporary
-		? validateReplacementArtifact(temporary, maxRecordBytes, false, reviver, validateRecords)
+		? validateReplacementArtifact(temporary, maxRecordBytes, false, reviver, validateRecords, validateFirstRecord)
 		: undefined;
 	if (temporary && !temporaryError) {
 		assertArtifactUnchanged(temporary);
 		rename(temporary.path, filePath);
 		assertPublishedArtifact(temporary, filePath, rename, syncDirectory);
-		const publishedError = validateJsonlFile(filePath, maxRecordBytes, true, reviver, validateRecords);
+		const publishedError = validateJsonlFile(
+			filePath,
+			maxRecordBytes,
+			true,
+			reviver,
+			validateRecords,
+			validateFirstRecord,
+		);
 		if (publishedError) throw publishedError;
 		cleanupCommittedArtifacts(artifacts, directory, syncDirectory);
 		return;
@@ -618,13 +685,23 @@ function recoverInterruptedReplacement<T>(
 
 	const backup = [...artifacts.backups]
 		.sort((left, right) => right.modifiedAt - left.modifiedAt || right.path.localeCompare(left.path))
-		.find((artifact) => !validateReplacementArtifact(artifact, maxRecordBytes, true, reviver, validateRecords));
+		.find(
+			(artifact) =>
+				!validateReplacementArtifact(artifact, maxRecordBytes, true, reviver, validateRecords, validateFirstRecord),
+		);
 	if (backup) {
 		if (temporary && temporaryError) quarantineInvalidArtifact(temporary, filePath, rename, syncDirectory);
 		// Copy rather than consume the last known-good backup. It is removed only
 		// after the copied canonical has itself passed strict validation.
 		copyBackupToCanonical(backup, filePath, hooks);
-		const publishedError = validateJsonlFile(filePath, maxRecordBytes, true, reviver, validateRecords);
+		const publishedError = validateJsonlFile(
+			filePath,
+			maxRecordBytes,
+			true,
+			reviver,
+			validateRecords,
+			validateFirstRecord,
+		);
 		if (publishedError) throw publishedError;
 		cleanupCommittedArtifacts(artifacts, directory, syncDirectory);
 		return;
@@ -633,7 +710,14 @@ function recoverInterruptedReplacement<T>(
 	if (temporaryError) throw temporaryError;
 	const invalidBackup = latestArtifact([...artifacts.backups]);
 	if (invalidBackup) {
-		const backupError = validateReplacementArtifact(invalidBackup, maxRecordBytes, true, reviver, validateRecords);
+		const backupError = validateReplacementArtifact(
+			invalidBackup,
+			maxRecordBytes,
+			true,
+			reviver,
+			validateRecords,
+			validateFirstRecord,
+		);
 		if (backupError) throw backupError;
 	}
 }
@@ -649,6 +733,7 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 	private readonly syncDirectory: (directory: string) => void;
 	private readonly rename: (source: string, destination: string) => void;
 	private readonly runExclusiveMutation: MutationGuard;
+	private readonly validateFirstRecord: ((record: T) => void) | undefined;
 	private readonly readOnly: boolean;
 	private readSnapshot: ReadSnapshot | undefined;
 	private closed = false;
@@ -668,6 +753,7 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 		this.serializer = options.serializer ?? (defaultSerializer as Serializer<T>);
 		this.reviver = options.reviver;
 		this.maxRecordBytes = getMaxRecordBytes(options.maxRecordBytes);
+		this.validateFirstRecord = options.validateFirstRecord;
 		this.syncFile = options.hooks?.syncFile ?? syncFileSync;
 		this.syncDirectory = options.hooks?.syncDirectory ?? syncDirectorySync;
 		this.rename = options.hooks?.rename ?? renameSync;
@@ -712,6 +798,17 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 				this.poisonCause = error;
 			}
 			throw error;
+		}
+		// A journal with no complete record yet cannot be classified during the
+		// streaming parse; probe the partial bytes read-only so a future-format
+		// first record is never discarded as a repairable tail.
+		if (records.length === 0 && partial.byteLength > 0 && this.validateFirstRecord) {
+			try {
+				this.validateFirstRecord(JSON.parse(partial.toString("utf8")) as T);
+			} catch (error) {
+				if (error instanceof UnsupportedSessionVersionError) throw error;
+				// An unparseable partial record keeps the normal tail recovery path.
+			}
 		}
 		if (partial.byteLength === 0) return { records, recovery: { status: "clean" } };
 		if (options.allowIncompleteTail) {
@@ -821,6 +918,9 @@ class FileSessionJournal<T> implements SessionJournal<T> {
 					const line =
 						pendingBytes === 0 ? segment : Buffer.concat([...pending, segment], pendingBytes + segment.length);
 					records.push(this.parseRecord(line, lineNumber));
+					// Classify the header before any later record is interpreted: a
+					// future-format body must fail here, never as a repairable body error.
+					if (records.length === 1 && this.validateFirstRecord) this.validateFirstRecord(records[0]!);
 					pending.length = 0;
 					pendingBytes = 0;
 					lineNumber++;
@@ -1027,6 +1127,7 @@ export function openSessionJournal<T = unknown>(
 			maxRecordBytes,
 			options.reviver,
 			options.validateRecords,
+			options.validateFirstRecord,
 		);
 		return readFileIdentity(resolvedFilePath, fsConstants.O_RDWR);
 	});

@@ -301,6 +301,7 @@ export {
 	saveDeclarativeHooks,
 	splitSessionAttachmentPrompt,
 	storePluginMcpCredential,
+	UnsupportedSessionVersionError,
 	undoMemoryRun,
 	upsertCustomAgentType,
 	VERSION,
