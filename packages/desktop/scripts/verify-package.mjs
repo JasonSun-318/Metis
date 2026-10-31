@@ -169,6 +169,53 @@ for (const required of [
 	if (!packagedPaths.has(required)) throw new Error(`Packaged App Server asset is missing: ${required}`);
 }
 
+const shellAnalysisRoot = path.join(
+	resourcesRoot,
+	"app.asar.unpacked",
+	".webpack",
+	"app-server",
+	"node_modules",
+	"@metis",
+	"coding-agent",
+	"dist",
+	"vendor",
+	"shell-analysis",
+);
+const shellAnalysisManifest = JSON.parse(await readFile(path.join(shellAnalysisRoot, "manifest.json"), "utf8"));
+if (
+	shellAnalysisManifest.schemaVersion !== 1 ||
+	shellAnalysisManifest.package !== "@vscode/tree-sitter-wasm" ||
+	shellAnalysisManifest.version !== "0.3.1"
+) {
+	throw new Error("Invalid packaged shell analysis manifest");
+}
+const shellAnalysisAssets = [
+	"tree-sitter.js",
+	"tree-sitter.wasm",
+	"tree-sitter-bash.wasm",
+	"tree-sitter-python.wasm",
+	"tree-sitter-javascript.wasm",
+];
+if (!Array.isArray(shellAnalysisManifest.files) || shellAnalysisManifest.files.length !== shellAnalysisAssets.length) {
+	throw new Error("Packaged shell analysis manifest does not list exactly five assets");
+}
+for (const name of shellAnalysisAssets) {
+	const entry = shellAnalysisManifest.files.find((candidate) => candidate?.name === name);
+	if (!entry || typeof entry.sha256 !== "string") {
+		throw new Error(`Invalid packaged shell analysis entry: ${name}`);
+	}
+	const bytes = await readFile(path.join(shellAnalysisRoot, name));
+	if (createHash("sha256").update(bytes).digest("hex") !== entry.sha256 || entry.bytes !== bytes.byteLength) {
+		throw new Error(`Packaged shell analysis integrity mismatch: ${name}`);
+	}
+	const packagedPath = `/.webpack/app-server/node_modules/@metis/coding-agent/dist/vendor/shell-analysis/${name}`;
+	if (!packagedPaths.has(packagedPath)) {
+		throw new Error(`Packaged shell analysis asset is missing from app.asar: ${name}`);
+	}
+}
+await access(path.join(shellAnalysisRoot, "LICENSE"));
+console.log("Verified trusted shell analysis assets (tree-sitter, Bash, Python, JavaScript)");
+
 const nodePtyPlatform = process.platform === "darwin" || process.platform === "win32";
 const nodePtyNative = nodePtyPlatform
 	? `/.webpack/main/node_modules/node-pty/prebuilds/${process.platform}-${expectedArch}/pty.node`

@@ -7,6 +7,7 @@ import {
 	digestPermissionAction,
 	normalizePermissionAction,
 } from "../../src/core/permissions/index.ts";
+import { digestRememberedPermissionAction } from "../../src/core/permissions/normalize.ts";
 import { canonicalizeActionPath } from "../../src/utils/paths.ts";
 import { actionInput, projectDir } from "./fixtures.ts";
 
@@ -16,6 +17,32 @@ describe("permission action normalization", () => {
 			canonicalJson({ a: 1, nested: { c: 3, d: 4 }, b: 2 }),
 		);
 		expect(digestCanonical({ b: 2, a: 1 })).toBe(digestCanonical({ a: 1, b: 2 }));
+	});
+
+	it("keeps remembered identities across analyzer metadata enrichment while binding execution facts", () => {
+		const input = actionInput({
+			toolName: "bash",
+			toolIdentity: "builtin:bash:v1",
+			command: "ls",
+			shellAnalysis: {
+				disposition: "safe",
+				complete: true,
+				commands: [{ argv: ["ls"], complete: true, disposition: "safe", effects: [], networkEndpoints: [] }],
+			},
+		});
+		const before = normalizePermissionAction(input);
+		const enriched = normalizePermissionAction({
+			...input,
+			shellAnalysis: { ...input.shellAnalysis!, readPaths: [projectDir] },
+		});
+		expect(digestRememberedPermissionAction(enriched)).toBe(digestPermissionAction(before));
+		expect(digestPermissionAction(enriched)).not.toBe(digestPermissionAction(before));
+		const outside = normalizePermissionAction({
+			...input,
+			readPaths: [join(projectDir, "..", "outside.txt")],
+			shellAnalysis: { ...input.shellAnalysis!, readPaths: [join(projectDir, "..", "outside.txt")] },
+		});
+		expect(digestRememberedPermissionAction(outside)).not.toBe(digestRememberedPermissionAction(before));
 	});
 
 	it.each([
@@ -63,6 +90,30 @@ describe("permission action normalization", () => {
 		expect(digestPermissionAction(first)).toBe(digestPermissionAction(laterInvocation));
 		expect(Object.isFrozen(first)).toBe(true);
 		expect(Object.isFrozen(first.readPaths)).toBe(true);
+	});
+
+	it("normalizes trusted analyzer read paths and binds them to the action digest", () => {
+		const input = actionInput({
+			toolName: "bash",
+			toolIdentity: "builtin:bash:v1",
+			args: { command: "grep -r secret" },
+			command: "grep -r secret",
+			readPaths: [],
+			shellAnalysis: {
+				disposition: "safe",
+				complete: true,
+				commands: [],
+				readPaths: [join(projectDir, "."), projectDir, projectDir],
+			},
+		});
+		const action = normalizePermissionAction(input);
+		expect(action.shellAnalysis?.readPaths).toEqual([canonicalizeActionPath(projectDir, projectDir)]);
+		expect(Object.isFrozen(action.shellAnalysis?.readPaths)).toBe(true);
+		const elsewhere = normalizePermissionAction({
+			...input,
+			shellAnalysis: { ...input.shellAnalysis!, readPaths: [join(projectDir, "src")] },
+		});
+		expect(digestPermissionAction(action)).not.toBe(digestPermissionAction(elsewhere));
 	});
 
 	it("rejects ambiguous canonical inputs instead of hashing partial data", () => {

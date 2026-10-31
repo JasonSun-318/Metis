@@ -451,6 +451,7 @@ export {
 	PermissionAuditWriter,
 } from "./core/permissions/audit.ts";
 export {
+	type AutoCommandNetworkTarget,
 	type AutoCommandRule,
 	DEFAULT_AUTO_COMMAND_SUGGESTIONS,
 } from "./core/permissions/auto-command-rules.ts";

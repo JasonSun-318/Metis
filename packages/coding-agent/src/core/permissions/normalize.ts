@@ -7,6 +7,9 @@ import type {
 	NormalizedPermissionAction,
 	NormalizePermissionActionInput,
 	PermissionEffect,
+	ShellAnalysisDisposition,
+	ShellAnalysisFacts,
+	ShellCommandTraceEntry,
 	ToolProvenance,
 } from "./types.ts";
 
@@ -173,6 +176,57 @@ function normalizeEffects(value: readonly PermissionEffect[]): readonly Permissi
 	return Object.freeze(EFFECTS.filter((effect) => unique.has(effect)));
 }
 
+const DISPOSITIONS: readonly ShellAnalysisDisposition[] = ["safe", "review", "user", "deny"];
+const MAX_TRACE_ENTRIES = 4_096;
+
+function normalizeShellAnalysis(value: ShellAnalysisFacts, cwd: string): Readonly<ShellAnalysisFacts> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new TypeError("Shell analysis facts must be an object");
+	}
+	if (
+		typeof value.complete !== "boolean" ||
+		!DISPOSITIONS.includes(value.disposition) ||
+		!Array.isArray(value.commands) ||
+		value.commands.length > MAX_TRACE_ENTRIES
+	) {
+		throw new TypeError("Shell analysis facts are invalid");
+	}
+	const commands = value.commands.map(normalizeTraceEntry);
+	return Object.freeze({
+		disposition: value.disposition,
+		complete: value.complete,
+		commands: Object.freeze(commands),
+		...(value.readPaths === undefined
+			? {}
+			: { readPaths: normalizePathSet(value.readPaths, cwd, "shell analysis readPaths") }),
+	});
+}
+
+function normalizeTraceEntry(entry: ShellCommandTraceEntry): Readonly<ShellCommandTraceEntry> {
+	if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+		throw new TypeError("Shell command trace entry must be an object");
+	}
+	if (
+		typeof entry.complete !== "boolean" ||
+		!DISPOSITIONS.includes(entry.disposition) ||
+		!Array.isArray(entry.argv) ||
+		entry.argv.some(
+			(word, index) => typeof word !== "string" || (index === 0 && word.length === 0) || word.includes("\0"),
+		) ||
+		(entry.structural !== undefined && entry.structural !== "test" && entry.structural !== "assignment")
+	) {
+		throw new TypeError("Shell command trace entry is invalid");
+	}
+	return Object.freeze({
+		argv: Object.freeze([...entry.argv]),
+		complete: entry.complete,
+		disposition: entry.disposition,
+		effects: normalizeEffects(entry.effects),
+		networkEndpoints: normalizeEndpoints(entry.networkEndpoints),
+		...(entry.structural === undefined ? {} : { structural: entry.structural }),
+	});
+}
+
 export function normalizePermissionAction(input: NormalizePermissionActionInput): NormalizedPermissionAction {
 	if (!input || typeof input !== "object") throw new TypeError("Permission action must be an object");
 	if (!PROVENANCES.includes(input.provenance)) throw new TypeError("Permission action provenance is invalid");
@@ -197,6 +251,7 @@ export function normalizePermissionAction(input: NormalizePermissionActionInput)
 		networkEndpoints: normalizeEndpoints(input.networkEndpoints),
 		...(command === undefined ? {} : { command }),
 		effects: normalizeEffects(input.effects),
+		...(input.shellAnalysis === undefined ? {} : { shellAnalysis: normalizeShellAnalysis(input.shellAnalysis, cwd) }),
 	};
 	canonicalJson(action);
 	return Object.freeze(action);
@@ -215,6 +270,7 @@ export function assertWellFormedAction(action: NormalizedPermissionAction): void
 		"writePaths",
 		"networkEndpoints",
 		...(action?.command === undefined ? [] : ["command"]),
+		...(action?.shellAnalysis === undefined ? [] : ["shellAnalysis"]),
 		"effects",
 	].sort();
 	const actualKeys = action && typeof action === "object" ? Object.keys(action).sort() : [];
@@ -240,7 +296,30 @@ export function assertWellFormedAction(action: NormalizedPermissionAction): void
 	} catch {
 		scalarFieldsAreNormalized = false;
 	}
+	let shellAnalysisIsNormalized = action?.shellAnalysis === undefined;
+	if (!shellAnalysisIsNormalized) {
+		try {
+			shellAnalysisIsNormalized =
+				Object.isFrozen(action.shellAnalysis) &&
+				Object.isFrozen(action.shellAnalysis!.commands) &&
+				action.shellAnalysis!.commands.every(
+					(node) =>
+						Object.isFrozen(node) &&
+						Object.isFrozen(node.argv) &&
+						Object.isFrozen(node.effects) &&
+						Object.isFrozen(node.networkEndpoints) &&
+						node.networkEndpoints.every(Object.isFrozen),
+				) &&
+				(action.shellAnalysis!.readPaths === undefined || Object.isFrozen(action.shellAnalysis!.readPaths)) &&
+				canonicalJson(action.shellAnalysis) ===
+					canonicalJson(normalizeShellAnalysis(action.shellAnalysis!, action.cwd));
+		} catch {
+			shellAnalysisIsNormalized = false;
+		}
+	}
+
 	const complete =
+		shellAnalysisIsNormalized &&
 		Boolean(action?.actionId) &&
 		Object.isFrozen(action) &&
 		actualKeys.length === expectedKeys.length &&
@@ -308,4 +387,17 @@ export function digestPermissionAction(action: NormalizedPermissionAction): stri
 	assertWellFormedAction(action);
 	const { actionId: _actionId, ...stableAction } = action;
 	return digestCanonical(stableAction);
+}
+
+/** Preserve exact remembered identities when analyzer-only path facts are enriched. */
+export function digestRememberedPermissionAction(action: NormalizedPermissionAction): string {
+	if (action.shellAnalysis?.readPaths === undefined) return digestPermissionAction(action);
+	const { readPaths, ...shellAnalysis } = action.shellAnalysis;
+	void readPaths;
+	// The aggregate read/write paths remain in the fingerprint. Execution grants
+	// and stale-action checks continue binding every analyzer fact with the full digest.
+	assertWellFormedAction(action);
+	const { actionId, ...stableAction } = action;
+	void actionId;
+	return digestCanonical({ ...stableAction, shellAnalysis });
 }

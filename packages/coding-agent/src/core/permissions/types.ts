@@ -24,6 +24,41 @@ export interface NetworkEndpoint {
 	readonly port: number;
 }
 
+/** Disposition assigned by the trusted shell analyzer. */
+export type ShellAnalysisDisposition = "safe" | "review" | "user" | "deny";
+
+/**
+ * One executable command node of the analyzed shell AST. Produced only by the
+ * builtin trusted analyzer; argv words are exact evaluated text with no
+ * expansion left, so policies may match configured rule prefixes per node.
+ */
+export interface ShellCommandTraceEntry {
+	readonly argv: readonly string[];
+	/** False when any argv word was dynamic or a glob, so the entry cannot be matched exactly. */
+	readonly complete: boolean;
+	readonly disposition: ShellAnalysisDisposition;
+	readonly effects: readonly PermissionEffect[];
+	readonly networkEndpoints: readonly NetworkEndpoint[];
+	/**
+	 * AST node kind for the two structural rules that have no executable argv:
+	 * `[[ … ]]` conditions and side-effect-free variable assignments.
+	 */
+	readonly structural?: "test" | "assignment";
+}
+
+/** Aggregate result of the trusted shell analyzer bound to a builtin bash action. */
+export interface ShellAnalysisFacts {
+	readonly disposition: ShellAnalysisDisposition;
+	readonly complete: boolean;
+	readonly commands: readonly ShellCommandTraceEntry[];
+	/**
+	 * Exact read targets proven by the analyzer. Unlike the action's `readPaths`
+	 * these exclude the workspace roots the adapter merges in for grants, so a
+	 * directory-scoped rule can judge what the command really reads.
+	 */
+	readonly readPaths?: readonly string[];
+}
+
 export interface NormalizePermissionActionInput {
 	readonly actionId: string;
 	readonly toolName: string;
@@ -37,6 +72,7 @@ export interface NormalizePermissionActionInput {
 	readonly networkEndpoints: readonly NetworkEndpoint[];
 	readonly command?: string;
 	readonly effects: readonly PermissionEffect[];
+	readonly shellAnalysis?: ShellAnalysisFacts;
 }
 
 export interface NormalizedPermissionAction {
@@ -52,6 +88,7 @@ export interface NormalizedPermissionAction {
 	readonly networkEndpoints: readonly NetworkEndpoint[];
 	readonly command?: string;
 	readonly effects: readonly PermissionEffect[];
+	readonly shellAnalysis?: ShellAnalysisFacts;
 }
 
 export interface GrantRequest {
@@ -62,8 +99,21 @@ export interface GrantRequest {
 	readonly networkEndpoints: readonly NetworkEndpoint[];
 }
 
+export interface MatchedPermissionRuleDetail {
+	readonly id: string;
+	readonly name: string;
+	readonly scope: string;
+}
+
 export type PermissionPolicyDecision =
-	| { readonly kind: "allow"; readonly riskLevel: RiskLevel; readonly reason: string; readonly grant: GrantRequest }
+	| {
+			readonly kind: "allow";
+			readonly riskLevel: RiskLevel;
+			readonly reason: string;
+			readonly grant: GrantRequest;
+			readonly ruleIds?: readonly string[];
+			readonly matchedRule?: MatchedPermissionRuleDetail;
+	  }
 	| {
 			readonly kind: "review";
 			readonly riskLevel: RiskLevel;

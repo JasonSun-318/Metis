@@ -1,10 +1,18 @@
+/** Exact network destination allowed by an Auto command rule. */
+export interface AutoCommandNetworkTarget {
+	readonly hostname: string;
+	readonly port: number;
+}
+
 export interface AutoCommandRule {
 	readonly command: string;
 	readonly allowNetwork: boolean;
+	readonly networkTargets?: readonly AutoCommandNetworkTarget[];
 }
 
 export const MAX_AUTO_COMMAND_RULES = 64;
 export const MAX_AUTO_COMMAND_LENGTH = 256;
+export const MAX_AUTO_COMMAND_NETWORK_TARGETS = 32;
 
 export const DEFAULT_AUTO_COMMAND_SUGGESTIONS = Object.freeze([
 	"cd",
@@ -211,6 +219,45 @@ function isArgvPrefix(prefix: readonly string[], command: readonly string[]): bo
 	return prefix.length <= command.length && prefix.every((word, index) => word === command[index]);
 }
 
+const HOSTNAME_LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+
+function isExactNetworkHostname(hostname: string): boolean {
+	if (hostname.length === 0 || hostname.length > 253) return false;
+	return hostname.split(".").every((label) => HOSTNAME_LABEL.test(label));
+}
+
+export function normalizeNetworkTargets(value: unknown): readonly AutoCommandNetworkTarget[] {
+	if (!Array.isArray(value)) throw new TypeError("Auto command network targets must be an array");
+	if (value.length > MAX_AUTO_COMMAND_NETWORK_TARGETS) {
+		throw new TypeError("too many Auto command network targets");
+	}
+	const seen = new Set<string>();
+	const targets: AutoCommandNetworkTarget[] = [];
+	for (const entry of value) {
+		if (!isRecord(entry)) throw new TypeError("invalid Auto command network target");
+		const keys = Object.keys(entry);
+		if (
+			keys.length !== 2 ||
+			!keys.includes("hostname") ||
+			!keys.includes("port") ||
+			typeof entry.hostname !== "string" ||
+			typeof entry.port !== "number" ||
+			!Number.isInteger(entry.port) ||
+			entry.port < 1 ||
+			entry.port > 65_535
+		) {
+			throw new TypeError("invalid Auto command network target");
+		}
+		const hostname = entry.hostname.toLowerCase();
+		if (!isExactNetworkHostname(hostname)) throw new TypeError("invalid Auto command network target");
+		const key = `${hostname}:${entry.port}`;
+		if (seen.has(key)) throw new TypeError("duplicate Auto command network target");
+		seen.add(key);
+		targets.push(Object.freeze({ hostname, port: entry.port }));
+	}
+	return Object.freeze(targets);
+}
+
 export function normalizeAutoCommandRules(value: unknown): readonly AutoCommandRule[] {
 	if (!Array.isArray(value)) throw new TypeError("Auto command rules must be an array");
 	if (value.length > MAX_AUTO_COMMAND_RULES) throw new TypeError("too many Auto command rules");
@@ -219,8 +266,9 @@ export function normalizeAutoCommandRules(value: unknown): readonly AutoCommandR
 	for (const entry of value) {
 		if (!isRecord(entry)) throw new TypeError("invalid Auto command rule");
 		const keys = Object.keys(entry);
+		const hasNetworkTargets = keys.includes("networkTargets");
 		if (
-			keys.length !== 2 ||
+			keys.length !== (hasNetworkTargets ? 3 : 2) ||
 			!keys.includes("command") ||
 			!keys.includes("allowNetwork") ||
 			typeof entry.command !== "string" ||
@@ -228,6 +276,7 @@ export function normalizeAutoCommandRules(value: unknown): readonly AutoCommandR
 		) {
 			throw new TypeError("invalid Auto command rule");
 		}
+		const networkTargets = hasNetworkTargets ? normalizeNetworkTargets(entry.networkTargets) : undefined;
 		const argv = parseSimpleShellCommand(entry.command);
 		if (!argv) throw new TypeError("invalid Auto command rule");
 		if (argv.some((token) => /\s/u.test(token))) {
@@ -237,19 +286,69 @@ export function normalizeAutoCommandRules(value: unknown): readonly AutoCommandR
 			throw new TypeError("duplicate Auto command rule");
 		}
 		seen.push([...argv]);
-		rules.push(Object.freeze({ command: argv.join(" "), allowNetwork: entry.allowNetwork }));
+		rules.push(
+			Object.freeze({
+				command: argv.join(" "),
+				allowNetwork: entry.allowNetwork,
+				...(networkTargets ? { networkTargets } : {}),
+			}),
+		);
 	}
 	return Object.freeze(rules);
 }
 
+/**
+ * Legacy single-rule lookup over raw command text. Kept for configuration and
+ * compat queries with its original 256-byte parseSimpleShellCommand semantics;
+ * the authorization path must use matchingAutoCommandRules over trusted
+ * per-node analysis instead, so this can never widen what executes.
+ */
 export function matchAutoCommandRule(command: string, rules: readonly AutoCommandRule[]): AutoCommandRule | undefined {
 	const argv = parseSimpleShellCommand(command);
 	if (!argv) return undefined;
-	return rules
-		.map((rule) => ({ rule, prefix: parseSimpleShellCommand(rule.command) }))
-		.filter(
-			(entry): entry is { rule: AutoCommandRule; prefix: readonly string[] } =>
-				entry.prefix !== undefined && isArgvPrefix(entry.prefix, argv),
+	return [...matchingAutoCommandRules(argv, rules)]
+		.sort(
+			(left, right) =>
+				(parseSimpleShellCommand(right.command)?.length ?? 0) -
+				(parseSimpleShellCommand(left.command)?.length ?? 0),
 		)
-		.sort((left, right) => right.prefix.length - left.prefix.length)[0]?.rule;
+		.at(0);
+}
+
+/**
+ * A configured rule joined with the argv prefix parsed from it, so one policy
+ * evaluation can reuse the parse for every analyzed command node.
+ */
+export interface CompiledAutoCommandRule {
+	readonly rule: AutoCommandRule;
+	readonly prefix: readonly string[];
+}
+
+export function compileAutoCommandRules(rules: readonly AutoCommandRule[]): readonly CompiledAutoCommandRule[] {
+	const compiled: CompiledAutoCommandRule[] = [];
+	for (const rule of rules) {
+		const prefix = parseSimpleShellCommand(rule.command);
+		if (prefix) compiled.push(Object.freeze({ rule, prefix }));
+	}
+	return Object.freeze(compiled);
+}
+
+/**
+ * Match a configured rule's argv prefix against one analyzed command node.
+ * The rule config keeps its own 256-byte validated form; the executing command
+ * is compared per analyzed AST node, never by re-parsing raw command text.
+ */
+export function matchingAutoCommandRules(
+	argv: readonly string[],
+	rules: readonly AutoCommandRule[],
+): readonly AutoCommandRule[] {
+	return matchingCompiledAutoCommandRules(argv, compileAutoCommandRules(rules));
+}
+
+/** Match one analyzed command node against prefixes compiled once for this evaluation. */
+export function matchingCompiledAutoCommandRules(
+	argv: readonly string[],
+	compiled: readonly CompiledAutoCommandRule[],
+): readonly AutoCommandRule[] {
+	return compiled.filter(({ prefix }) => isArgvPrefix(prefix, argv)).map(({ rule }) => rule);
 }

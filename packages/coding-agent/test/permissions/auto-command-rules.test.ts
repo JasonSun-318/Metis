@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
 	DEFAULT_AUTO_COMMAND_SUGGESTIONS,
 	matchAutoCommandRule,
+	matchingAutoCommandRules,
 	normalizeAutoCommandRules,
 	parseSimpleShellCommand,
 	splitShellSegments,
@@ -53,26 +54,41 @@ describe("Auto command rules", () => {
 		);
 	});
 
-	it("matches argv prefixes rather than raw string prefixes", () => {
+	it("keeps the legacy single-rule lookup for configuration and compat queries", () => {
 		const rules = normalizeAutoCommandRules([
 			{ command: "git", allowNetwork: true },
 			{ command: "git status", allowNetwork: false },
 		]);
 		expect(matchAutoCommandRule("git status --short", rules)?.command).toBe("git status");
 		expect(matchAutoCommandRule("git statusx", rules)?.command).toBe("git");
+		expect(matchAutoCommandRule("/tmp/git status", rules)).toBeUndefined();
+		// The legacy lookup never bypasses the command length cap.
+		expect(matchAutoCommandRule(`git ${"a".repeat(300)}`, rules)).toBeUndefined();
+	});
+
+	it("matches argv prefixes rather than raw string prefixes", () => {
+		const rules = normalizeAutoCommandRules([
+			{ command: "git", allowNetwork: true },
+			{ command: "git status", allowNetwork: false },
+		]);
+		expect(matchingAutoCommandRules(["git", "status", "--short"], rules).map((rule) => rule.command)).toEqual([
+			"git",
+			"git status",
+		]);
+		expect(matchingAutoCommandRules(["git", "statusx"], rules).map((rule) => rule.command)).toEqual(["git"]);
 		expect(
-			matchAutoCommandRule(
-				"git statusx",
+			matchingAutoCommandRules(
+				["git", "statusx"],
 				normalizeAutoCommandRules([{ command: "git status", allowNetwork: false }]),
 			),
-		).toBeUndefined();
-		expect(matchAutoCommandRule("/tmp/git status", rules)).toBeUndefined();
+		).toEqual([]);
+		expect(matchingAutoCommandRules(["/tmp/git", "status"], rules)).toEqual([]);
 	});
 
 	it("preserves empty quoted argv entries when matching prefixes", () => {
 		const rules = normalizeAutoCommandRules([{ command: "git status", allowNetwork: false }]);
 		expect(parseSimpleShellCommand("git '' status")).toEqual(["git", "", "status"]);
-		expect(matchAutoCommandRule("git '' status", rules)).toBeUndefined();
+		expect(matchingAutoCommandRules(["git", "", "status"], rules)).toEqual([]);
 		expect(parseSimpleShellCommand('git "st\\atus"')).toEqual(["git", "st\\atus"]);
 	});
 
