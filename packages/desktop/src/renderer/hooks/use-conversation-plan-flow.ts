@@ -32,6 +32,7 @@ export interface ConversationPlanFlow {
 	readonly currentProposedPlan: PlanView | undefined;
 	readonly planActionsBusy: boolean;
 	readonly planRevisionTarget: PlanView | null;
+	readonly submittedTurnId: string | undefined;
 	readonly submit: (input: ConversationSubmission) => Promise<void>;
 	readonly changeCollaborationMode: (next: CollaborationModeView) => Promise<void>;
 	readonly revisePlan: (plan: PlanView) => void;
@@ -103,6 +104,7 @@ export function useConversationPlanFlow({
 	currentGeneration.current = generation;
 	const inFlight = useRef<{ generation: object; requestId: string } | null>(null);
 	const [planRevisionTarget, setPlanRevisionTarget] = useState<PlanView | null>(null);
+	const [submittedTurnId, setSubmittedTurnId] = useState<string>();
 	const [pendingPlanAction, setPendingPlanAction] = useState<{
 		readonly action: "start" | "cancel";
 		readonly planId: string;
@@ -118,6 +120,7 @@ export function useConversationPlanFlow({
 		if (previousSessionId.current === sessionId) return;
 		previousSessionId.current = sessionId;
 		activeTurnRequest.current = null;
+		setSubmittedTurnId(undefined);
 		setPlanRevisionTarget(null);
 		setPendingPlanAction(null);
 		setPendingCollaborationMode(null);
@@ -170,7 +173,12 @@ export function useConversationPlanFlow({
 				if (request.method === "queue") {
 					await api.queueTurn({ sessionId, requestId: request.requestId, ...composerPayload(input) });
 				} else {
-					await api.startTurn({ sessionId, requestId: request.requestId, ...composerPayload(input) });
+					const result = await api.startTurn({
+						sessionId,
+						requestId: request.requestId,
+						...composerPayload(input),
+					});
+					if (currentGeneration.current === generation) setSubmittedTurnId(result.turnId);
 				}
 				if (currentGeneration.current !== generation) return;
 				if (activeTurnRequest.current === request) activeTurnRequest.current = null;
@@ -278,6 +286,7 @@ export function useConversationPlanFlow({
 		currentProposedPlan,
 		planActionsBusy,
 		planRevisionTarget,
+		submittedTurnId,
 		submit,
 		changeCollaborationMode,
 		revisePlan,

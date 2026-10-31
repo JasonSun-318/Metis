@@ -264,6 +264,14 @@ function Fixture() {
 					Toggle goal
 				</button>
 				<button
+					onClick={() =>
+						current.goal && update({ goal: { ...current.goal, status: "complete", activeStartedAt: null } })
+					}
+					type="button"
+				>
+					Complete goal
+				</button>
+				<button
 					onClick={() => update({ queuedTurns: current.queuedTurns.length ? [] : composerSnapshot().queuedTurns })}
 					type="button"
 				>

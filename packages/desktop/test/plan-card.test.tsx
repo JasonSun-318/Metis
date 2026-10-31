@@ -42,10 +42,20 @@ async function renderCard(overrides: Partial<PlanView> = {}) {
 }
 
 describe("PlanCard", () => {
-	it("renders fixed-scroll Markdown and invokes exact-revision actions", async () => {
-		const { container, root, onStart, onRevise } = await renderCard();
+	it("opens the plan separately and invokes exact-revision actions", async () => {
+		const { container, root, onStart, onRevise, onCancel, onOpen } = await renderCard();
 		expect(container.querySelector(".plan-card")?.getAttribute("aria-label")).toBe("Plan");
-		expect(container.querySelector(".plan-card-body")).not.toBeNull();
+		expect(container.querySelector(".plan-card-body")).toBeNull();
+		expect(container.textContent).not.toContain("Add a greeting.");
+		container.querySelector<HTMLButtonElement>('[data-plan-action="open"]')!.click();
+		container.querySelector<HTMLButtonElement>('[data-plan-action="cancel"]')!.click();
+		expect(onOpen).toHaveBeenCalledWith(plan);
+		expect(onCancel).toHaveBeenCalledWith(plan);
+		expect(
+			[...container.querySelectorAll(".plan-card-actions button")].map((button) =>
+				button.getAttribute("data-plan-action"),
+			),
+		).toEqual(["cancel", "revise", "start"]);
 		container.querySelector<HTMLButtonElement>('[data-plan-action="start"]')!.click();
 		container.querySelector<HTMLButtonElement>('[data-plan-action="revise"]')!.click();
 		expect(onStart).toHaveBeenCalledWith(plan);

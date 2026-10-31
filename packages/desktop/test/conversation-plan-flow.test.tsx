@@ -103,7 +103,10 @@ describe("useConversationPlanFlow", () => {
 	it("reuses a failed submission request and routes later busy turns to the queue", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const api = {
-			startTurn: vi.fn().mockRejectedValueOnce(new Error("response lost")).mockResolvedValue({}),
+			startTurn: vi
+				.fn()
+				.mockRejectedValueOnce(new Error("response lost"))
+				.mockResolvedValue({ turnId: "accepted-turn" }),
 			queueTurn: vi.fn().mockResolvedValue({}),
 		} as unknown as MetisDesktopApi;
 		let running = false;
@@ -134,7 +137,9 @@ describe("useConversationPlanFlow", () => {
 
 		const input = { text: "hello", attachments: [] };
 		await expect(act(async () => flow.submit(input))).rejects.toThrow("response lost");
+		expect(flow.submittedTurnId).toBeUndefined();
 		await act(async () => flow.submit(input));
+		expect(flow.submittedTurnId).toBe("accepted-turn");
 		expect(api.startTurn).toHaveBeenCalledTimes(2);
 		expect(vi.mocked(api.startTurn).mock.calls[0]?.[0].requestId).toBe(
 			vi.mocked(api.startTurn).mock.calls[1]?.[0].requestId,
@@ -142,7 +147,7 @@ describe("useConversationPlanFlow", () => {
 
 		vi.mocked(api.startTurn)
 			.mockRejectedValueOnce(Object.assign(new Error("turn rejected"), { code: RPC_ERROR_CODES.OPERATION_FAILED }))
-			.mockResolvedValueOnce({ operationId: "operation-1", status: "accepted" });
+			.mockResolvedValueOnce({ operationId: "operation-1", status: "accepted", turnId: "next-turn" });
 		await expect(act(async () => flow.submit({ text: "known failure", attachments: [] }))).rejects.toThrow(
 			"turn rejected",
 		);
@@ -155,6 +160,7 @@ describe("useConversationPlanFlow", () => {
 		await act(async () => root.render(<Harness />));
 		await act(async () => flow.submit({ text: "next", attachments: [] }));
 		expect(api.queueTurn).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "session-1", text: "next" }));
+		expect(flow.submittedTurnId).toBe("next-turn");
 		await act(async () => root.unmount());
 	});
 

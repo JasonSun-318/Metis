@@ -54,7 +54,7 @@ describe("Interactive Transitions", () => {
 		expect(closingBackdrop.animation).toContain("settings-fade-out");
 
 		const page = rule(".settings-page-mount");
-		expect(page.animation).toContain("settings-page-in");
+		expect(page.animation).toBe("");
 	});
 
 	it("hides vertical scrollbar while preserving scrollability in settings", () => {

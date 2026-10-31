@@ -14,10 +14,8 @@ export interface DraftConversationQuote {
 interface QuoteActions {
 	readonly enabled: boolean;
 	readonly drafts: readonly DraftConversationQuote[];
-	readonly lastAccepted: { readonly sessionId: string; readonly sequence: number } | null;
 	add(draft: DraftConversationQuote): void;
 	remove(ids: readonly string[]): void;
-	accepted(sessionId: string): void;
 }
 const ConversationQuotes = createContext<QuoteActions | null>(null);
 export const useConversationQuotes = () => useContext(ConversationQuotes);
@@ -31,7 +29,6 @@ export function ConversationQuoteProvider({
 }) {
 	const { t } = useTranslation();
 	const [drafts, setDrafts] = useState<readonly DraftConversationQuote[]>([]);
-	const [lastAccepted, setLastAccepted] = useState<QuoteActions["lastAccepted"]>(null);
 	const current = useRef({ enabled, drafts });
 	current.current = { enabled, drafts };
 	const mounted = useRef(true);
@@ -45,11 +42,6 @@ export function ConversationQuoteProvider({
 		() => ({
 			enabled,
 			drafts,
-			lastAccepted,
-			accepted(sessionId) {
-				if (mounted.current)
-					setLastAccepted((previous) => ({ sessionId, sequence: (previous?.sequence ?? 0) + 1 }));
-			},
 			add(draft) {
 				if (!mounted.current || !current.current.enabled)
 					throw new Error(t("This conversation is not ready to send"));
@@ -83,7 +75,7 @@ export function ConversationQuoteProvider({
 				setDrafts(next);
 			},
 		}),
-		[enabled, drafts, lastAccepted, t],
+		[enabled, drafts, t],
 	);
 	return <ConversationQuotes.Provider value={value}>{children}</ConversationQuotes.Provider>;
 }

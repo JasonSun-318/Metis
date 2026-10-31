@@ -91,6 +91,7 @@ export function SlashCommandMenu({
 			option.kind === "command" ? onSelectCommand(option.command) : onSelectSkill(option.skill);
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
+			if (rootRef.current?.closest("[inert]")) return;
 			if (event.key === "Escape") {
 				event.preventDefault();
 				event.stopPropagation();
@@ -113,6 +114,16 @@ export function SlashCommandMenu({
 		document.addEventListener("keydown", onKeyDown, true);
 		return () => document.removeEventListener("keydown", onKeyDown, true);
 	}, [activeIndex, disabledCommands, onDismiss, onSelectCommand, onSelectSkill, options]);
+
+	useEffect(() => {
+		const menu = rootRef.current;
+		const option = menu?.querySelector<HTMLElement>(`#slash-option-${activeIndex}`);
+		if (!menu || !option) return;
+		const bounds = menu.getBoundingClientRect();
+		const row = option.getBoundingClientRect();
+		if (row.top < bounds.top) menu.scrollTop += row.top - bounds.top - 5;
+		else if (row.bottom > bounds.bottom) menu.scrollTop += row.bottom - bounds.bottom + 5;
+	}, [activeIndex]);
 
 	if (options.length === 0) return null;
 	const firstSkillIndex = options.findIndex((option) => option.kind === "skill");

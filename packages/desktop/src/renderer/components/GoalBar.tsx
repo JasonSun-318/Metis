@@ -1,8 +1,8 @@
 import type { SessionGoalView } from "@metis/app-protocol";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatElapsed } from "../format-elapsed.ts";
-import { CaretDown, Pause, Play, Target, Trash } from "../icons.tsx";
+import { Pause, Play, Target, Trash } from "../icons.tsx";
 
 interface GoalBarProps {
 	readonly goal: SessionGoalView | null;
@@ -37,12 +37,6 @@ function statusLabelKey(status: SessionGoalView["status"]): string {
 export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 	const { t } = useTranslation();
 	const [now, setNow] = useState(() => Date.now());
-	const [expanded, setExpanded] = useState(true);
-	const bodyId = useId();
-
-	useEffect(() => {
-		if (goal?.goalId) setExpanded(true);
-	}, [goal?.goalId]);
 
 	useEffect(() => {
 		if (!goal || goal.status !== "active") return;
@@ -50,7 +44,7 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 		return () => window.clearInterval(id);
 	}, [goal]);
 
-	if (!goal) return null;
+	if (!goal || goal.status === "complete") return null;
 
 	const canPause = goal.status === "active";
 	const canResume = goal.status === "paused" || goal.status === "blocked" || goal.status === "usage_limited";
@@ -64,28 +58,13 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 					</span>
 					<div className="goal-bar-copy">
 						<strong>{t(statusLabelKey(goal.status))}</strong>
-						{!expanded && (
-							<span className="goal-bar-summary" title={goal.objective}>
-								{goal.objective}
-							</span>
-						)}
+						<p className="goal-bar-objective" title={goal.objective}>
+							{goal.objective}
+						</p>
 					</div>
 					<span aria-live="off" className="goal-bar-elapsed">
 						{formatElapsed(goalElapsedMs(goal, now))}
 					</span>
-					<button
-						aria-controls={bodyId}
-						aria-expanded={expanded}
-						aria-label={t(expanded ? "Collapse goal" : "Expand goal")}
-						className="composer-panel-toggle"
-						onClick={() => setExpanded((value) => !value)}
-						type="button"
-					>
-						<CaretDown aria-hidden="true" size={14} />
-					</button>
-				</header>
-				<div className="goal-bar-body" hidden={!expanded} id={bodyId} inert={!expanded}>
-					<p className="goal-bar-objective">{goal.objective}</p>
 					<div className="goal-bar-controls">
 						<button aria-label={t("Delete goal")} className="goal-bar-action" onClick={onClear} type="button">
 							<Trash aria-hidden="true" size={14} />
@@ -101,7 +80,7 @@ export function GoalBar({ goal, onPause, onResume, onClear }: GoalBarProps) {
 							</button>
 						) : null}
 					</div>
-				</div>
+				</header>
 			</section>
 		</div>
 	);

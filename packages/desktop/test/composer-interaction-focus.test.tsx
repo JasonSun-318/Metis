@@ -160,7 +160,7 @@ describe("composer interaction focus", () => {
 			await view.render(composer({ ...blocked, prefillRequest: { id: 2, text: "Latest request" } }));
 
 			expect(input.textContent).toBe("My draft");
-			expect(input.getAttribute("contenteditable")).toBe("false");
+			expect(input.getAttribute("contenteditable")).toBe("true");
 			expect(document.activeElement).toBe(editor(other.container));
 
 			await view.render(composer({ prefillRequest: { id: 2, text: "Latest request" } }));
@@ -208,7 +208,7 @@ describe("composer interaction focus", () => {
 				onSlashCommand,
 			}),
 		);
-		expect(view.container.querySelector('[role="listbox"]')).toBeNull();
+		expect(view.container.querySelector('[role="listbox"]')?.closest("[inert]")).not.toBeNull();
 		const review = view.container.querySelector<HTMLButtonElement>(".composer-panels button")!;
 		review.focus();
 		await act(async () => {

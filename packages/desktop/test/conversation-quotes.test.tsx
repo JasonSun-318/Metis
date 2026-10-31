@@ -137,7 +137,6 @@ describe("conversation quote drafts", () => {
 			act(() => actions.add({ ...quote, id: "new", input: { ...quote.input, selectedText: "New selection" } }));
 			await act(async () => accept());
 			expect(actions.drafts.map((item) => item.id)).toEqual(["other", "new"]);
-			expect(actions.lastAccepted?.sessionId).toBe("session-one");
 			await act(async () => render(false));
 			expect(() => actions.add(quote)).toThrow();
 			const stale = actions;

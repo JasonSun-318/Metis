@@ -1,4 +1,4 @@
-import type { ClientParams, McpServerSummaryView, SessionTaskView, SkillSummaryView } from "@metis/app-protocol";
+import type { ClientParams, McpServerSummaryView, SkillSummaryView } from "@metis/app-protocol";
 import {
 	type FormEvent,
 	type KeyboardEvent as ReactKeyboardEvent,
@@ -23,7 +23,6 @@ import type { KnowledgeLinkMenuProps } from "./KnowledgeLinkMenu.tsx";
 import { FileSelectionChips, useFileSelections } from "./preview/FileSelectionContext.tsx";
 import { type ComposerSlashCommand, composerSlashCommands, SlashCommandMenu } from "./SlashCommandMenu.tsx";
 import { SystemNotice } from "./SystemNotice.tsx";
-import { TaskList } from "./TaskList.tsx";
 import { WorkspaceFileIcon } from "./WorkspaceFileIcon.tsx";
 
 const noSlashCommands = new Set<ComposerSlashCommand>();
@@ -283,6 +282,7 @@ interface ComposerProps {
 	readonly running: boolean;
 	readonly queueing?: boolean;
 	readonly commandPanel?: ReactNode;
+	readonly commandPanelClosing?: boolean;
 	readonly commandRequest?: { readonly id: number; readonly open: boolean };
 	readonly disabledSlashCommands?: ReadonlySet<ComposerSlashCommand>;
 	readonly disabledSlashReasons?: Partial<Record<ComposerSlashCommand, string>>;
@@ -310,8 +310,6 @@ interface ComposerProps {
 	readonly prefillRequest?: ComposerPrefillRequest;
 	readonly skills?: readonly SkillSummaryView[];
 	readonly submitDisabled?: boolean;
-	readonly tasks?: readonly SessionTaskView[];
-	readonly taskListEpoch?: string | null;
 	readonly thinkingControl?: ReactNode;
 	readonly contextUsageExpanded?: boolean;
 	readonly contextUsageControls?: string;
@@ -328,6 +326,7 @@ export function Composer({
 	running,
 	queueing = false,
 	commandPanel,
+	commandPanelClosing,
 	commandRequest,
 	disabledSlashCommands = noSlashCommands,
 	disabledSlashReasons,
@@ -361,8 +360,6 @@ export function Composer({
 	prefillRequest,
 	skills = [],
 	submitDisabled = false,
-	tasks = [],
-	taskListEpoch,
 	thinkingControl,
 }: ComposerProps) {
 	const { t } = useTranslation();
@@ -424,6 +421,9 @@ export function Composer({
 
 		const currentQuery = getSlashQueryAtCursor(el);
 		const raw = parsed.rawText;
+		if (dismissedSlashText !== undefined && dismissedSlashText !== raw) {
+			setDismissedSlashText(undefined);
+		}
 		if (currentQuery !== undefined && dismissedSlashText !== raw) {
 			setSlashQuery(currentQuery);
 		} else {
@@ -439,8 +439,8 @@ export function Composer({
 		if (
 			!editor ||
 			!prefillRequest ||
-			disabled ||
 			inputBlocked ||
+			disabled ||
 			submitting ||
 			consumedPrefillId.current === prefillRequest.id
 		)
@@ -471,7 +471,7 @@ export function Composer({
 		}
 		setDismissedSlashText(undefined);
 		syncEditorState();
-	}, [prefillRequest, disabled, inputBlocked, submitting, syncEditorState]);
+	}, [prefillRequest, inputBlocked, disabled, submitting, syncEditorState]);
 
 	const processFiles = useCallback(
 		async (files: readonly File[]) => {
@@ -507,10 +507,6 @@ export function Composer({
 
 	const handlePaste = useCallback(
 		(event: React.ClipboardEvent) => {
-			if (inputBlocked) {
-				event.preventDefault();
-				return;
-			}
 			const files = Array.from(event.clipboardData.files);
 			if (files.length > 0) {
 				event.preventDefault();
@@ -526,22 +522,18 @@ export function Composer({
 				syncEditorState();
 			}
 		},
-		[inputBlocked, processFiles, syncEditorState],
+		[processFiles, syncEditorState],
 	);
 
 	const handleDrop = useCallback(
 		(event: React.DragEvent) => {
-			if (inputBlocked) {
-				event.preventDefault();
-				return;
-			}
 			const files = Array.from(event.dataTransfer.files);
 			if (files.length > 0) {
 				event.preventDefault();
 				void processFiles(files);
 			}
 		},
-		[inputBlocked, processFiles],
+		[processFiles],
 	);
 
 	const handleSlashDismiss = useCallback(() => {
@@ -708,7 +700,6 @@ export function Composer({
 			if (editor) editor.replaceChildren();
 			fileSelections?.remove(selected.map((item) => item.id));
 			conversationQuotes?.remove(quotes.map((item) => item.id));
-			if (quotes.length) conversationQuotes?.accepted(quotes[0]!.sessionId);
 			attachmentsRef.current = [];
 			setAttachments([]);
 			setAttachmentOverflow(false);
@@ -739,21 +730,25 @@ export function Composer({
 	return (
 		<div className={`composer-dock composer-dock-${appearance}`}>
 			<div className="composer-surface">
-				<ComposerPanelStack>
-					<TaskList key={taskListEpoch ?? undefined} tasks={tasks} />
+				<ComposerPanelStack
+					transientClosing={slashQuery === undefined && commandPanelClosing}
+					transient={
+						!inputBlocked && slashQuery !== undefined ? (
+							<SlashCommandMenu
+								disabledCommands={disabledSlashCommands}
+								disabledReasons={disabledSlashReasons}
+								onDismiss={handleSlashDismiss}
+								onSelectCommand={handleSelectCommand}
+								onSelectSkill={handleSelectSkill}
+								query={slashQuery}
+								skills={skills}
+							/>
+						) : (
+							commandPanel
+						)
+					}
+				>
 					{goalControl}
-					{commandPanel}
-					{!inputBlocked && slashQuery !== undefined && (
-						<SlashCommandMenu
-							disabledCommands={disabledSlashCommands}
-							disabledReasons={disabledSlashReasons}
-							onDismiss={handleSlashDismiss}
-							onSelectCommand={handleSelectCommand}
-							onSelectSkill={handleSelectSkill}
-							query={slashQuery}
-							skills={skills}
-						/>
-					)}
 					{queuedTurnControl}
 					{interactionControl}
 				</ComposerPanelStack>
@@ -820,8 +815,8 @@ export function Composer({
 							<div
 								aria-label={t("Message Metis")}
 								className="composer-editable-input"
-								aria-disabled={inputBlocked || undefined}
-								contentEditable={!disabled && !inputBlocked && !submitting}
+								aria-disabled={disabled || undefined}
+								contentEditable={!disabled && !submitting}
 								data-empty={!hasInput ? "true" : undefined}
 								data-placeholder={
 									(inputBlocked
@@ -883,8 +878,8 @@ export function Composer({
 						<div className="composer-leading">
 							<ComposerAddMenu
 								commandRequest={commandRequest}
-								disabled={disabled || inputBlocked || submitting}
-								iconSize={isCode ? 13 : 16}
+								disabled={disabled || submitting}
+								iconSize={isCode ? 13 : 14}
 								knowledge={knowledge}
 								mcpServers={mcpServers}
 								onAddFiles={() => void addFiles().catch(() => undefined)}
@@ -924,7 +919,7 @@ export function Composer({
 										onClick={() => void onInterrupt().catch(() => undefined)}
 										type="button"
 									>
-										<Stop aria-hidden="true" size={16} weight="fill" />
+										<Stop aria-hidden="true" size={13} weight="fill" />
 									</button>
 								) : (
 									<button
@@ -933,7 +928,7 @@ export function Composer({
 										disabled={disabled || inputBlocked || submitDisabled || submitting || !hasInput}
 										type="submit"
 									>
-										<ArrowUp aria-hidden="true" size={19} weight="bold" />
+										<ArrowUp aria-hidden="true" size={16} />
 									</button>
 								))}
 						</div>

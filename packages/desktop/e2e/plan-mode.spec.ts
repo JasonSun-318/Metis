@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -55,7 +55,10 @@ function lastUserText(payload: ProviderPayload): string {
 		const message = messages[index];
 		if (typeof message !== "object" || message === null || Array.isArray(message)) continue;
 		if (Reflect.get(message, "role") !== "user") continue;
-		return messageText(Reflect.get(message, "content"));
+		const text = messageText(Reflect.get(message, "content"));
+		// Hidden plan context is serialized as a user message after the actual request.
+		if (text.startsWith('{"planId":') && text.includes('"markdown":')) continue;
+		return text;
 	}
 	return "";
 }
@@ -121,6 +124,7 @@ interface CodingFixtures {
 	readonly SessionManager: {
 		create(cwd: string, sessionDir: string, options: { id: string; mode: "code"; permissionPreset: "full" }): {
 			appendSessionInfo(name: string): void;
+			getSessionFile(): string | undefined;
 			close(): void;
 		};
 	};
@@ -138,6 +142,15 @@ async function loadCodingFixtures(): Promise<CodingFixtures> {
 	};
 }
 
+async function expectCompletedPlanTurn(page: Page, sessionFile: string, toolCallId: string): Promise<void> {
+	await expect.poll(async () => {
+		const entries = (await readFile(sessionFile, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+		const result = entries.find((entry) => entry.type === "message" && entry.message?.role === "toolResult" && entry.message.toolCallId === toolCallId);
+		return entries.reverse().find((entry) => entry.type === "runtime_turn" && entry.turnId === result?.turnId)?.state;
+	}, { timeout: 20_000 }).toBe("completed");
+	await expect(page.getByText("Task stopped", { exact: true })).toHaveCount(0);
+}
+
 test("packaged plan mode explores, revises, recovers, executes, and cancels", async () => {
 	test.setTimeout(240_000);
 	const executable = packagedExecutable();
@@ -150,6 +163,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 	const projectDir = path.join(tempRoot, "project");
 	const userDataDir = path.join(tempRoot, "electron");
 	const planWritePath = path.join(projectDir, "plan-write.txt");
+	const acceptedWritePath = path.join(projectDir, "greeting.txt");
 	await Promise.all([mkdir(agentDir), mkdir(homeDir), mkdir(projectDir), mkdir(userDataDir)]);
 
 	const sessionId = "91000000-0000-4000-8000-000000000001";
@@ -159,6 +173,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		{ id: sessionId, mode: "code", permissionPreset: "full" },
 	);
 	manager.appendSessionInfo("Plan mode fixture");
+	const sessionFile = manager.getSessionFile()!;
 	manager.close();
 	new fixtures.ProjectTrustStore(agentDir).set(projectDir, true);
 
@@ -181,6 +196,12 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		}
 		providerPayloads.push(payload);
 		response.writeHead(200, { "content-type": "text/event-stream" });
+		if (lastUserText(payload).includes("Try submit_plan outside Plan mode")) {
+			response.end(hasToolResult(payload, "call-submit-outside-plan")
+				? sseText("Please enable Plan mode before submitting a plan.")
+				: sseToolCall("call-submit-outside-plan", "submit_plan", { title: "Not in Plan", markdown: "# This must not create a proposal" }));
+			return;
+		}
 		if (providerStage === "awaiting-bash-1" && hasToolResult(payload, bash1Id)) {
 			providerStage = "idle";
 			response.end(
@@ -221,7 +242,9 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		}
 		const latestUserText = lastUserText(payload);
 		if (isPlanExecutionTurn(payload)) {
-			response.end(sseText("Execution received the accepted revision."));
+			response.end(hasToolResult(payload, "call-execute-plan")
+				? sseText("Execution received the accepted revision.")
+				: sseToolCall("call-execute-plan", "write", { path: acceptedWritePath, content: "Hello, friend!\n" }));
 			return;
 		}
 		if (latestUserText.includes("Create a safe plan") && providerStage === "idle" && !plan2Submitted) {
@@ -274,6 +297,20 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		phase = "opening code session";
 		await createCodeSession(page, sessionId);
 
+		phase = "checking submit_plan outside Plan mode";
+		const input = page.locator("#composer-input");
+		await expect(input).toHaveAttribute("contenteditable", "true");
+		await input.fill("Try submit_plan outside Plan mode");
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.getByText("Please enable Plan mode before submitting a plan.", { exact: true })).toBeVisible();
+		await expect(page.locator(".plan-card")).toHaveCount(0);
+		const defaultTools = toolNames(providerPayloads[0]!);
+		expect(defaultTools).toContain("submit_plan");
+		const feedbackPayload = providerPayloads.find((payload) => transcript(payload).includes("You are not in Plan mode"));
+		expect(feedbackPayload).toBeDefined();
+		expect(transcript(feedbackPayload!)).toContain("call-submit-outside-plan");
+		expect(transcript(feedbackPayload!)).toContain('"name":"submit_plan"');
+
 		phase = "entering plan mode";
 		await enterPlanMode(page);
 		const exitPlanMode = page.getByRole("button", { name: "Exit Plan mode", exact: true });
@@ -290,29 +327,32 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect(exitPlanMode.locator(".collaboration-mode-exit-icon")).toHaveCSS("opacity", "1");
 		await exitPlanMode.click();
 		await expect(exitPlanMode).toHaveCount(0);
+		await expect(page.getByRole("button", { name: "Select permissions, current Full", exact: true })).toBeVisible();
 		await enterPlanMode(page);
 
 		phase = "creating first plan";
-		const input = page.locator("#composer-input");
 		await expect(input).toHaveAttribute("contenteditable", "true");
 		await input.fill("Create a safe plan");
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.locator(".plan-card")).toHaveCount(1, { timeout: 60_000 });
 		expect(existsSync(planWritePath)).toBe(false);
+		await expectCompletedPlanTurn(page, sessionFile, "call-submit-plan-1");
 
-		const explorationPayload = providerPayloads.find((payload) => toolNames(payload).includes("submit_plan"))!;
+		const explorationPayload = providerPayloads.find((payload) => lastUserText(payload).includes("Create a safe plan"))!;
 		const explorationTools = toolNames(explorationPayload);
 		expect(explorationTools).toEqual(expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]));
-		expect(explorationTools).not.toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		expect(explorationTools).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		expect([...explorationTools].sort()).toEqual([...defaultTools].sort());
 
-		const planBody = page.locator(".plan-card-body").first();
-		const bodyMetrics = await planBody.evaluate((element) => {
-			const style = getComputedStyle(element);
-			return { maxHeight: style.maxHeight, overflowY: style.overflowY, overscrollBehavior: style.overscrollBehavior };
-		});
-		expect(bodyMetrics.maxHeight).toBe("280px");
-		expect(bodyMetrics.overflowY).toBe("auto");
-		expect(bodyMetrics.overscrollBehavior).toBe("contain");
+		await expect(page.locator(".plan-card-body")).toHaveCount(0);
+		await page.locator('[data-plan-action="open"]').click();
+		await expect(page.locator(".plan-preview")).toContainText("Add safe greeting");
+
+		phase = "recovering before revision";
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await waitForServerReady(page);
+		await createCodeSession(page, sessionId);
+		await expect(page.locator(".plan-card").last()).toContainText("Proposed");
 
 		phase = "revising plan";
 		await page.locator('[data-plan-action="revise"]').click();
@@ -322,6 +362,7 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect(page.locator(".plan-card")).toHaveCount(2, { timeout: 60_000 });
 		await expect(page.locator(".plan-card").first()).toContainText("Superseded");
 		await expect(page.locator(".plan-card").last()).toContainText("Proposed");
+		await expectCompletedPlanTurn(page, sessionFile, "call-submit-plan-2");
 
 		phase = "opening plan preview";
 		await page.locator('[data-plan-action="open"]').last().click();
@@ -352,13 +393,19 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 				.slice(requestsBeforeStart)
 				.find((payload) => {
 					const tools = toolNames(payload);
-					return tools.includes("write") && tools.includes("set_tasks") && !tools.includes("submit_plan");
+					return tools.includes("write") && tools.includes("set_tasks") && tools.includes("submit_plan") && isPlanExecutionTurn(payload);
 				});
 			return executionPayload !== undefined;
 		}, { timeout: 60_000 }).toBe(true);
+		expect([...toolNames(executionPayload!)].sort()).toEqual([...defaultTools].sort());
 		expect(transcript(executionPayload!)).toMatch(/friendlier greeting/i);
 		expect(transcript(executionPayload!)).not.toContain("call-submit-plan-1");
 		expect(transcript(executionPayload!)).not.toContain("Add a greeting without changing unrelated files");
+		await expect.poll(() => existsSync(acceptedWritePath), { timeout: 20_000 }).toBe(true);
+		expect(await readFile(acceptedWritePath, "utf8")).toBe("Hello, friend!\n");
+		await expect(page.getByText("Execution received the accepted revision.", { exact: true })).toBeVisible();
+		await expect(page.locator(".permission-approval-panel")).toHaveCount(0);
+		await expect(page.getByText("Task stopped", { exact: true })).toHaveCount(0);
 
 		phase = "creating and cancelling second plan";
 		await expect(page.getByText("Session ready")).toBeVisible({ timeout: 60_000 });
@@ -369,10 +416,17 @@ test("packaged plan mode explores, revises, recovers, executes, and cancels", as
 		await expect(page.locator(".plan-card").filter({ hasText: "Proposed" })).toHaveCount(1, { timeout: 60_000 });
 		await expect(page.locator('[data-plan-action="cancel"]').last()).toBeVisible({ timeout: 60_000 });
 		await expect.poll(() => providerPayloads.length >= requestsBeforeDraft + 1, { timeout: 60_000 }).toBe(true);
+		await expectCompletedPlanTurn(page, sessionFile, "call-submit-plan-3");
+		phase = "recovering before cancellation";
+		await page.reload({ waitUntil: "domcontentloaded" });
+		await waitForServerReady(page);
+		await createCodeSession(page, sessionId);
+		await expect(page.locator(".plan-card").last()).toContainText("Proposed");
 		const requestsBeforeCancel = providerPayloads.length;
 		await page.locator('[data-plan-action="cancel"]').last().click();
 		await expect(exitPlanMode).toHaveCount(0);
 		expect(providerPayloads.length).toBe(requestsBeforeCancel);
+		await expect(page.locator(".plan-card").last()).toContainText("Cancelled");
 	} catch (error) {
 		const bodyText = await page?.locator("body").innerText().catch(() => "renderer unavailable");
 		throw new Error(

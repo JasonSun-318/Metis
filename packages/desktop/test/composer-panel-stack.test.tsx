@@ -88,7 +88,7 @@ function button(container: ParentNode, label: string): HTMLButtonElement {
 }
 
 describe("session composer panel stack", () => {
-	it("keeps AskUser answers and the input lock when the question panel is folded", async () => {
+	it("keeps AskUser answers and editable draft when the question panel is folded", async () => {
 		const { container, onRespond } = await mount(
 			composerSnapshot({ pendingInteractions: [composerInteraction("ask_user")] }),
 		);
@@ -96,7 +96,7 @@ describe("session composer panel stack", () => {
 		await act(async () => option.click());
 		await act(async () => button(container, "Collapse questions").click());
 		expect(container.querySelector(".ask-user-resume")).not.toBeNull();
-		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("false");
+		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("true");
 		expect(onRespond).not.toHaveBeenCalled();
 		const resume = [...container.querySelectorAll<HTMLButtonElement>("button")].find(
 			(control) => control.textContent === "Continue answering",
@@ -106,37 +106,33 @@ describe("session composer panel stack", () => {
 		expect(onRespond).not.toHaveBeenCalled();
 	});
 
-	it("removes a completed task panel after its exit animation while the other panels stay mounted", async () => {
+	it("does not display session-global tasks in the composer while other panels stay mounted", async () => {
 		vi.useFakeTimers();
 		const { container, update } = await mount();
 		const goal = container.querySelector(".goal-bar-slot");
 		const editor = container.querySelector("#composer-input");
 		await update({ tasks: composerSnapshot().tasks.map((task) => ({ ...task, completed: true })) });
 		await act(async () => vi.advanceTimersByTime(450));
-		expect(container.querySelector(".task-list-slot.is-closing")).not.toBeNull();
+		expect(container.querySelector(".task-list-slot")).toBeNull();
 		await act(async () => vi.advanceTimersByTime(200));
 		expect(container.querySelector(".task-list-slot")).toBeNull();
 		expect(container.querySelector(".composer-panels-content")?.firstElementChild).toBe(goal);
 		expect(container.querySelector("#composer-input")).toBe(editor);
 	});
 
-	it("groups simultaneous panels into one surface with the pending approval nearest the input", async () => {
+	it("keeps goals and queue in the composer and places approval in the transcript", async () => {
 		const { container } = await mount(
 			composerSnapshot({ pendingInteractions: [composerInteraction("session_permission_approval")] }),
 		);
 		const panels = container.querySelector(".composer-surface .composer-panels-content");
 		expect(panels).not.toBeNull();
-		expect([...panels!.children].map((child) => child.className)).toEqual([
-			"task-list-slot",
-			"goal-bar-slot",
-			"queued-turn-list",
-			"permission-approval-slot",
-		]);
-		expect(container.querySelectorAll(".permission-approval-panel")).toHaveLength(1);
+		expect([...panels!.children].map((child) => child.className)).toEqual(["goal-bar-slot", "queued-turn-list"]);
+		expect(container.querySelectorAll(".transcript .permission-approval-panel")).toHaveLength(1);
+		expect(panels?.querySelector(".permission-approval-panel")).toBeNull();
 	});
 
 	it.each(["ask_user", "session_permission_approval"] as const)(
-		"keeps drafts and locks input and queued actions during %s, then restores them",
+		"keeps drafts editable and blocks sending and queued actions during %s, then restores them",
 		async (kind) => {
 			const { container, api, update } = await mount();
 			const editor = container.querySelector<HTMLElement>("#composer-input")!;
@@ -145,7 +141,7 @@ describe("session composer panel stack", () => {
 				editor.dispatchEvent(new Event("input", { bubbles: true }));
 			});
 			await update({ pendingInteractions: [composerInteraction(kind)] });
-			expect(editor.getAttribute("contenteditable")).toBe("false");
+			expect(editor.getAttribute("contenteditable")).toBe("true");
 			expect(editor.textContent).toBe("draft to keep");
 			const queuedButtons = [...container.querySelectorAll<HTMLButtonElement>(".queued-turn-actions button")];
 			expect(queuedButtons).toHaveLength(3);
@@ -168,40 +164,49 @@ describe("session composer panel stack", () => {
 		},
 	);
 
-	it("keeps a collapsed approval pending and expands a replacement request", async () => {
+	it("keeps approval pending and shows a replacement request without submitting it", async () => {
 		const interaction = composerInteraction("session_permission_approval");
 		const { container, onRespond, update } = await mount(composerSnapshot({ pendingInteractions: [interaction] }));
-		await act(async () => button(container, "Collapse approval").click());
-		expect(onRespond).not.toHaveBeenCalled();
-		expect(container.querySelector<HTMLElement>(".permission-approval-body")?.hidden).toBe(true);
-		expect(container.querySelector(".permission-approval-body")?.hasAttribute("inert")).toBe(true);
-		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("false");
-		await update({ pendingInteractions: [{ ...interaction, interactionId: "approval-2", title: "New request" }] });
-		expect(container.querySelector<HTMLElement>(".permission-approval-body")?.hidden).toBe(false);
-		expect(onRespond).not.toHaveBeenCalled();
-	});
-
-	it("folds the queue without sending or deleting it and keeps it folded across updates", async () => {
-		const { container, api, update } = await mount();
-		await act(async () => button(container, "Collapse queued messages").click());
-		expect(container.querySelector<HTMLElement>(".queued-turn-body")?.hidden).toBe(true);
-		expect(container.querySelector(".queued-turn-body")?.hasAttribute("inert")).toBe(true);
+		expect(container.querySelector(".permission-approval-command")?.textContent).toBe("curl https://example.test");
+		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("true");
 		await update({
-			queuedTurns: [
-				...composerSnapshot().queuedTurns,
+			pendingInteractions: [
 				{
-					queueItemId: "queued-2",
-					revision: "revision-2",
-					state: "queued",
-					text: "Second message",
-					attachments: [],
+					...interaction,
+					interactionId: "approval-2",
+					title: "New request",
+					...(interaction.kind === "session_permission_approval" ? { command: "curl https://other.test" } : {}),
 				},
 			],
 		});
-		expect(container.querySelector<HTMLElement>(".queued-turn-body")?.hidden).toBe(true);
-		expect(container.querySelector(".queued-turn-count")?.textContent).toBe("2");
-		await act(async () => button(container, "Expand queued messages").click());
-		expect(container.querySelectorAll(".queued-turn-row")).toHaveLength(2);
+		expect(container.querySelector(".permission-approval-command")?.textContent).toBe("curl https://other.test");
+		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("true");
+		expect(onRespond).not.toHaveBeenCalled();
+	});
+
+	it("keeps goal and queue mounted while slash commands temporarily replace them", async () => {
+		vi.useFakeTimers();
+		const { container, api } = await mount();
+		const persistent = container.querySelector<HTMLElement>(".composer-panels-content")!;
+		const goal = container.querySelector(".goal-bar-slot");
+		const queue = container.querySelector(".queued-turn-list");
+		const editor = container.querySelector<HTMLElement>("#composer-input")!;
+		expect(container.querySelector('[aria-label="Collapse goal"]')).toBeNull();
+		expect(container.querySelector('[aria-label="Collapse queued messages"]')).toBeNull();
+		await act(async () => {
+			editor.textContent = "/";
+			editor.dispatchEvent(new Event("input", { bubbles: true }));
+		});
+		expect(persistent.hidden).toBe(true);
+		expect(persistent.hasAttribute("inert")).toBe(true);
+		expect(container.querySelector(".slash-command-menu")).not.toBeNull();
+		await act(async () => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+		await act(async () => vi.advanceTimersByTime(200));
+		expect(persistent.hidden).toBe(false);
+		expect(persistent.hasAttribute("inert")).toBe(false);
+		expect(container.querySelector(".goal-bar-slot")).toBe(goal);
+		expect(container.querySelector(".queued-turn-list")).toBe(queue);
+		expect(editor.textContent).toBe("/");
 		expect(api.sendQueuedTurn).not.toHaveBeenCalled();
 		expect(api.deleteQueuedTurn).not.toHaveBeenCalled();
 	});

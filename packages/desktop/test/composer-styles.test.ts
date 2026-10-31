@@ -159,9 +159,9 @@ describe("Composer visual states", () => {
 		expect(rule(".composer-input-line").display).toBe("flex");
 		expect(rule(".composer-input-line").alignItems).toBe("baseline");
 		expect(rule(".composer-input-line textarea").getPropertyValue("field-sizing")).toBe("content");
-		expect(rule(".composer-skill-token").background).toBe("transparent");
+		expect(rule(".composer-skill-token").background).toBe("var(--chip-skill-bg)");
 		expect(rule(".composer-skill-token").height).toBe("1.5em");
-		expect(rule(".composer-skill-token:hover").background).toBe("transparent");
+		expect(rule(".composer-skill-token:hover").background).toBe("var(--chip-skill-bg-hover)");
 		expect(rule(".composer-image-preview").width).toBe("64px");
 		expect(rule(".composer-image-preview").height).toBe("64px");
 		expect(rule(".composer-file-card").width).toBe("200px");
@@ -189,9 +189,7 @@ describe("Composer visual states", () => {
 			rule(".permission-approval-panel .permission-approval-body > footer .button-secondary:hover:not(:disabled)")
 				.background,
 		).toBe("var(--surface-10)");
-		expect(rule(".goal-bar-body[hidden], .permission-approval-body[hidden], .queued-turn-body[hidden]").display).toBe(
-			"none",
-		);
+
 		expect(css).toContain(".permission-approval-slot");
 	});
 

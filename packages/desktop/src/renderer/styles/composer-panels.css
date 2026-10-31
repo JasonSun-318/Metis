@@ -1,69 +1,54 @@
-.composer-panels {
-	max-height: min(var(--composer-panels-limit, 45vh), 360px);
-	overflow-y: auto;
-	overscroll-behavior: contain;
-	scrollbar-color: var(--scrollbar-thumb) transparent;
-	scrollbar-width: thin;
-	scrollbar-gutter: stable both-edges;
-}
-
-.composer-panels-content { position: relative; display: flow-root; }
-.composer-panels-content > * { margin: 0; }
-.composer-panels-content > :is(.task-list-slot, .goal-bar-slot, .ask-user-slot, .permission-approval-slot) { animation: none; transform: none; }
-.workspace-body > .conversation-column:has(.composer-surface) { min-height: 0; }
-
-/* Drawers sit behind the original composer, inset equally on both sides. */
+/* Floating panels share the input edges without changing transcript layout. */
 .composer-surface { position: relative; isolation: isolate; }
 .composer-surface > .composer { position: relative; z-index: 1; }
+.conversation-column > .transcript { padding-bottom: var(--composer-persistent-height, 0px); }
+.workspace-body > .conversation-column:has(.composer-surface) { min-height: 0; }
 .composer-surface > .composer-panels {
-	margin-inline: var(--space-16);
-	border-radius: 12px 12px 0 0;
-	overflow-x: hidden;
+	position: absolute;
+	z-index: 2;
+	inset: auto 0 calc(100% + 8px);
+	--composer-panels-limit: 280px;
 }
-.composer-panels :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
-.composer-surface > .composer-panels > .composer-panels-content > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel) {
-	border: 1px solid var(--border);
-	border-bottom: 0;
-	border-radius: 12px 12px 0 0;
-	box-shadow: none;
+.composer-panels-content { display: flex; flex-direction: column; gap: 8px; max-height: var(--composer-panels-limit); }
+.composer-panels-content[hidden], .composer-panels-content:empty { display: none; }
+.composer-panels-content > * { min-height: 0; margin: 0; }
+.composer-panels-content > .goal-bar-slot { flex: none; margin: 0; animation: none; }
+.composer-panels :is(.goal-bar-panel, .queued-turn-list, .slash-command-menu, .session-status-panel) {
+	width: 100%;
+	margin: 0;
+	border: 1px solid var(--border-strong);
+	border-radius: 10px;
+	background: var(--panel);
+	box-shadow: 0 4px 16px rgb(0 0 0 / 12%);
 }
-.composer-panels-content > * ~ * :is(.task-list-panel, .goal-bar-panel, .permission-approval-panel, .ask-user-panel),
-.composer-surface > .composer-panels > .composer-panels-content > :is(.queued-turn-list, .ask-user-resume, .slash-command-menu, .session-status-panel):not(:first-child) {
-	border-radius: 0;
+.composer-panels-content:not([hidden]), .composer-transient-panel {
+	animation: composer-floating-in 180ms cubic-bezier(.16, 1, .3, 1) both;
 }
+.composer-transient-panel.is-closing { animation: composer-floating-out 180ms ease both; pointer-events: none; }
+@keyframes composer-floating-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes composer-floating-out { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(5px); } }
 
-/* Shared action geometry; option rows and heading rows retain their own layouts. */
-.composer-panels .ask-user-actions button,
-.composer-panels .ask-user-resume button,
-.composer-panels .permission-approval-panel .permission-approval-body > footer button,
-.composer-panels .queued-turn-actions > :is(.queued-turn-send, .queued-turn-edit) {
-	min-height: var(--control-height-compact);
-	height: auto;
-	border-radius: var(--radius-control);
-	padding: 0 var(--space-12);
-	font-size: 12px;
-	line-height: 1.4;
-	font-weight: 500;
-}
-.composer-panels :is(.composer-panel-toggle, .goal-bar-action),
-.composer-panels .ask-user-actions .composer-panel-toggle,
-.composer-panels .session-status-panel > header button,
-.composer-panels .ask-user-header-actions button,
-.composer-panels .queued-turn-actions > button:not(.queued-turn-send, .queued-turn-edit) {
-	width: var(--control-icon-size);
-	min-width: var(--control-icon-size);
-	height: var(--control-icon-size);
-	min-height: var(--control-icon-size);
-	flex: none;
-	padding: 0;
-	border-radius: 6px;
-}
-.composer-panels .ask-user-actions { gap: var(--space-8); }
-.composer-panels .ask-user-actions > div { gap: var(--space-8); }
-.composer-panels .permission-approval-panel .permission-approval-body > footer { gap: var(--space-8); }
+.composer-panels .goal-bar-panel { display: block; padding: 0; }
+.goal-bar-heading { display: grid; min-height: 54px; grid-template-columns: 16px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 8px 10px; }
+.goal-bar-heading .goal-bar-objective { margin: 0; line-height: 18px; }
+.goal-bar-controls { display: flex; gap: 2px; }
+.composer-panels .goal-bar-action, .composer-panels .session-status-panel > header button { width: 26px; min-width: 26px; height: 26px; min-height: 26px; padding: 0; border-radius: 6px; }
 
-.composer-panels-content > .queued-turn-list { max-height: none; overflow: visible; }
-.composer-panels .ask-user-panel { max-height: max(160px, min(var(--composer-panels-limit, 45vh), 360px)); }
+.composer-panels .queued-turn-list { display: flex; flex-direction: column; flex: 0 1 auto; overflow: hidden; max-height: 174px; }
+.queued-turn-heading { display: flex; flex: none; align-items: center; justify-content: space-between; min-height: 28px; padding: 4px 11px; color: var(--muted); font-size: 11px; }
+.queued-turn-count { font: inherit; color: var(--text-14); }
+.queued-turn-body { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; border-top: 1px solid var(--border); }
+.queued-turn-disabled-reason { display: block; padding: 0 11px 7px; color: var(--text-14); font-size: 11px; line-height: 1.4; }
+.composer-panels .queued-turn-row { min-height: 44px; }
+.composer-panels .queued-turn-actions > button { height: 26px; min-height: 26px; padding: 0 6px; border-radius: 6px; font-size: 11px; }
+
+.composer-panels .slash-command-menu { max-height: min(248px, var(--composer-panels-limit)); animation: none; scrollbar-width: thin; overscroll-behavior: contain; }
+.composer-panels .slash-command-menu button { min-height: 32px; padding: 4px 8px; }
+.composer-panels .slash-command-menu strong { font-size: 12px; }
+.composer-panels .session-status-panel { max-height: var(--composer-panels-limit); padding: 8px 12px 10px; overscroll-behavior: contain; scrollbar-width: thin; }
+.composer-panels .session-status-panel > header { position: sticky; top: -8px; z-index: 1; background: var(--panel); }
+.composer-panels .context-usage-breakdown { gap: 5px; margin-top: 8px; }
+.composer-panels .context-usage-cache { margin-top: 8px; padding-top: 8px; }
 
 .composer-panel-toggle {
 	display: grid;
@@ -74,75 +59,14 @@
 	color: var(--text-14);
 }
 
-.composer-panel-toggle:hover:not(:disabled), .queued-turn-heading:hover { background: var(--panel-hover); }
-.composer-panel-toggle svg, .queued-turn-heading > svg { transition: transform 150ms ease; }
-.composer-panel-toggle[aria-expanded="false"] svg, .queued-turn-heading[aria-expanded="false"] > svg { transform: rotate(180deg); }
+.composer-panel-toggle:hover:not(:disabled) { background: var(--panel-hover); }
+.composer-panel-toggle svg { transition: transform 150ms ease; }
+.composer-panel-toggle[aria-expanded="false"] svg { transform: rotate(180deg); }
 
-.queued-turn-heading {
-	display: flex;
-	width: 100%;
-	min-height: 36px;
-	align-items: center;
-	gap: 8px;
-	border-radius: 0;
-	padding: 6px 11px;
-	color: var(--muted);
-	font-size: 11px;
-	text-align: left;
-}
 
-.queued-turn-heading > span:first-child { flex: none; }
-.queued-turn-heading > svg { flex: none; margin-left: auto; }
-.queued-turn-count { margin-left: 4px; font: inherit; color: var(--text-14); }
-.queued-turn-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-19); }
-.queued-turn-body { border-top: 1px solid var(--border); }
-.queued-turn-disabled-reason { display: block; padding: 0 11px 7px; color: var(--text-14); font-size: 11px; line-height: 1.4; }
-
-.goal-bar-slot .goal-bar-panel { display: block; padding: 0; }
-.goal-bar-heading { display: grid; min-height: 36px; align-items: center; gap: 8px; grid-template-columns: 18px minmax(0, 1fr) auto auto; padding: 4px 8px 4px 11px; }
-.goal-bar-heading .goal-bar-copy { overflow: hidden; }
-.goal-bar-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.goal-bar-body { padding: 0 11px 8px; }
-.goal-bar-body .goal-bar-objective { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-22); line-height: 1.5; }
-.goal-bar-controls { display: flex; justify-content: flex-end; gap: 4px; }
-
-.permission-approval-slot .permission-approval-panel > header { grid-template-columns: minmax(0, 1fr) 28px; align-items: center; }
-.permission-approval-summary { display: block; margin-top: 3px; color: var(--text-14); font-size: 11px; }
-
-.goal-bar-body[hidden], .permission-approval-body[hidden], .queued-turn-body[hidden] { display: none; }
-.composer.is-awaiting-interaction .composer-editable-input { max-height: 54px; opacity: .6; cursor: default; }
-
-:root[data-motion="reduced"] :is(.composer-panel-toggle, .queued-turn-heading) svg { transition: none; }
-
-/* Native height interpolation retains mounted disclosure state and animates layout. */
-.composer-panels-content :is(.goal-bar-body, .queued-turn-body, .permission-approval-body, .permission-approval-details),
-.composer-panels-content > .is-closing {
-	interpolate-size: allow-keywords;
-	transition: height 180ms cubic-bezier(.16, 1, .3, 1), padding-block 180ms ease, margin-block 180ms ease, border-width 180ms ease, visibility 180ms;
-}
-.composer-panels-content :is(.goal-bar-body, .queued-turn-body, .permission-approval-body, .permission-approval-details)[hidden] {
-	display: block;
-	height: 0;
-	min-height: 0;
-	padding-block: 0;
-	margin-block: 0;
-	border-block-width: 0;
-	overflow: hidden;
-	visibility: hidden;
-}
-.composer-panels-content > :is(.session-status-panel, .task-list-slot) { interpolate-size: allow-keywords; transition: height 160ms ease, padding-block 160ms ease, border-width 160ms ease, visibility 160ms; height: auto; overflow: hidden; }
-.composer-surface .composer-panels-content > .is-closing { height: 0; min-height: 0; padding-block: 0; border-width: 0; overflow: hidden; pointer-events: none; animation: none; }
-.composer-panels .permission-approval-panel { max-height: var(--composer-panels-limit, 360px); overflow-y: auto; scrollbar-width: thin; }
-.composer-panels .permission-approval-panel > header { position: sticky; top: 0; z-index: 1; background: var(--panel); }
-.composer-panels .permission-approval-body > footer { position: sticky; bottom: 0; background: var(--panel); }
-.composer-panels .session-status-panel > header { position: sticky; top: 0; z-index: 1; background: var(--panel); }
-:root[data-motion="reduced"] .composer-panels-content *,
-:root[data-motion="reduced"] .composer-panels-content *::before,
-:root[data-motion="reduced"] .composer-panels-content *::after { animation: none; transition: none; }
+:root[data-motion="reduced"] :is(.composer-panels-content, .composer-transient-panel) { animation: none; }
+:root[data-motion="reduced"] .composer-panel-toggle svg { transition: none; }
 @media (prefers-reduced-motion: reduce) {
-	:root:not([data-motion="full"]) .composer-panels-content *,
-	:root:not([data-motion="full"]) .composer-panels-content *::before,
-	:root:not([data-motion="full"]) .composer-panels-content *::after { animation: none; transition: none; }
+	:root:not([data-motion="full"]) :is(.composer-panels-content, .composer-transient-panel) { animation: none; }
+	:root:not([data-motion="full"]) .composer-panel-toggle svg { transition: none; }
 }
-
-.composer-panels-content > .task-list-slot.is-closing { transition-duration: 200ms; }

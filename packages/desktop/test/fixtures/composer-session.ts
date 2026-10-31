@@ -34,6 +34,7 @@ export function composerInteraction(kind: "ask_user" | "session_permission_appro
 		requestId: "approval-request-1",
 		actionId: "action-1",
 		toolLabel: "bash",
+		command: "curl https://example.test",
 		riskLevel: "high",
 		executionTarget: "external",
 		reason: "This command needs network access.",

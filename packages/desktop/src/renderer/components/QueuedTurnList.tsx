@@ -1,7 +1,7 @@
 import type { QueuedTurnView } from "@metis/app-protocol";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowBendUpLeft, CaretDown, Paperclip, PencilSimple, Trash } from "../icons.tsx";
+import { ArrowBendUpLeft, Paperclip, PencilSimple, Trash } from "../icons.tsx";
 
 interface QueuedTurnListProps {
 	readonly disabled: boolean;
@@ -24,8 +24,6 @@ export function QueuedTurnList({
 }: QueuedTurnListProps) {
 	const { t } = useTranslation();
 	const [pendingId, setPendingId] = useState<string | null>(null);
-	const [expanded, setExpanded] = useState(true);
-	const bodyId = useId();
 
 	if (turns.length === 0) return null;
 
@@ -40,26 +38,12 @@ export function QueuedTurnList({
 
 	return (
 		<section aria-label={t("Queued messages")} className="queued-turn-list">
-			<button
-				aria-controls={bodyId}
-				aria-expanded={expanded}
-				aria-label={t(expanded ? "Collapse queued messages" : "Expand queued messages")}
-				className="queued-turn-heading"
-				onClick={() => setExpanded((value) => !value)}
-				type="button"
-			>
-				<span>
-					{t("Queued messages")} <small className="queued-turn-count">{turns.length}</small>
-				</span>
-				{!expanded && (
-					<span className="queued-turn-summary">
-						{turns[0]?.text || turns[0]?.attachments.map(({ name }) => name).join(", ")}
-					</span>
-				)}
-				<CaretDown aria-hidden="true" size={14} />
-			</button>
+			<header className="queued-turn-heading">
+				<span>{t("Queued messages")}</span>
+				<small className="queued-turn-count">{turns.length}</small>
+			</header>
 			{disabledReason && <output className="queued-turn-disabled-reason">{disabledReason}</output>}
-			<div className="queued-turn-body" hidden={!expanded} id={bodyId} inert={!expanded}>
+			<div className="queued-turn-body">
 				{turns.map((turn, index) => {
 					const pending = pendingId === turn.queueItemId;
 					const sending = turn.state === "sending";

@@ -1,6 +1,5 @@
 import type { PlanView } from "@metis/app-protocol";
 import { useTranslation } from "react-i18next";
-import { Markdown } from "./Markdown.tsx";
 
 const STATUS_KEYS: Record<PlanView["status"], string> = {
 	proposed: "Proposed",
@@ -23,17 +22,14 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 	const isProposed = plan.status === "proposed";
 	const actionLabel = `${plan.title} · r${plan.revision}`;
 	return (
-		<section className="plan-card" aria-label={t("Plan")}>
+		<section className="plan-card conversation-interaction-card" aria-label={t("Plan")}>
 			<header className="plan-card-header">
-				<h2 className="plan-card-title">{plan.title}</h2>
-				<span className="plan-card-meta">
-					{t("Revision {{revision}}", { revision: plan.revision })} · {t(STATUS_KEYS[plan.status])}
-				</span>
-			</header>
-			<div className="plan-card-body">
-				<Markdown text={plan.markdown} />
-			</div>
-			<footer className="plan-card-actions">
+				<div>
+					<h2 className="plan-card-title">{plan.title}</h2>
+					<span className="plan-card-meta">
+						{t("Revision {{revision}}", { revision: plan.revision })} · {t(STATUS_KEYS[plan.status])}
+					</span>
+				</div>
 				<button
 					aria-label={`${t("Open plan")}: ${actionLabel}`}
 					data-plan-action="open"
@@ -42,38 +38,38 @@ export function PlanCard({ busy, plan, onStart, onCancel, onOpen, onRevise }: Pl
 				>
 					{t("Open plan")}
 				</button>
-				{isProposed && (
-					<>
-						<button
-							aria-label={`${t("Start execution")}: ${actionLabel}`}
-							data-plan-action="start"
-							disabled={busy}
-							onClick={() => onStart(plan)}
-							type="button"
-						>
-							{t("Start execution")}
-						</button>
-						<button
-							aria-label={`${t("Revise plan")}: ${actionLabel}`}
-							data-plan-action="revise"
-							disabled={busy}
-							onClick={() => onRevise(plan)}
-							type="button"
-						>
-							{t("Revise plan")}
-						</button>
-						<button
-							aria-label={`${t("Cancel plan")}: ${actionLabel}`}
-							data-plan-action="cancel"
-							disabled={busy}
-							onClick={() => onCancel(plan)}
-							type="button"
-						>
-							{t("Cancel plan")}
-						</button>
-					</>
-				)}
-			</footer>
+			</header>
+			{isProposed && (
+				<footer className="plan-card-actions">
+					<button
+						aria-label={`${t("Cancel plan")}: ${actionLabel}`}
+						data-plan-action="cancel"
+						disabled={busy}
+						onClick={() => onCancel(plan)}
+						type="button"
+					>
+						{t("Cancel plan")}
+					</button>
+					<button
+						aria-label={`${t("Revise plan")}: ${actionLabel}`}
+						data-plan-action="revise"
+						disabled={busy}
+						onClick={() => onRevise(plan)}
+						type="button"
+					>
+						{t("Revise plan")}
+					</button>
+					<button
+						aria-label={`${t("Start execution")}: ${actionLabel}`}
+						data-plan-action="start"
+						disabled={busy}
+						onClick={() => onStart(plan)}
+						type="button"
+					>
+						{t("Start execution")}
+					</button>
+				</footer>
+			)}
 		</section>
 	);
 }
