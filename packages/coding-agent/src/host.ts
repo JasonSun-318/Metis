@@ -24,6 +24,18 @@ export { queuedAdmissionRequestId, queuedAgentMessages } from "./core/subagents/
 export { AgentStore } from "./core/subagents/store.ts";
 export { BUILT_IN_TOOL_NAMES } from "./core/tools/index.ts";
 export type {
+	WorkspaceSandboxCheck,
+	WorkspaceSandboxCheckId,
+	WorkspaceSandboxCheckReason,
+	WorkspaceSandboxCheckStatus,
+	WorkspaceSandboxHealthCode,
+	WorkspaceSandboxHealthMode,
+	WorkspaceSandboxHealthReport,
+	WorkspaceSandboxHealthStatus,
+	WorkspaceSandboxRecoveryAction,
+} from "./core/workspace-sandbox.ts";
+export { WorkspaceSandbox } from "./core/workspace-sandbox.ts";
+export type {
 	AgentQueuedMessage,
 	AgentSessionEvent,
 	AgentSessionRuntime,

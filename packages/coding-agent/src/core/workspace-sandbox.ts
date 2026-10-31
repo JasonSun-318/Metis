@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { StringDecoder } from "node:string_decoder";
@@ -11,9 +12,28 @@ import { spawnProcess } from "../utils/child-process.ts";
 import { canonicalizeActionPath, isPathInside, pathsIntersect } from "../utils/paths.ts";
 import { killProcessTree } from "../utils/shell.ts";
 import type { BashOperations } from "./tools/bash.ts";
-import { type WorkspaceSandboxHealthReport, workspaceSandboxHealth } from "./workspace-sandbox-health.ts";
+import {
+	createSandboxHealthReport,
+	readinessRecoveryActions,
+	selfTestRecoveryActions,
+	skippedSandboxChecks,
+	type WorkspaceSandboxCheck,
+	type WorkspaceSandboxCheckId,
+	type WorkspaceSandboxHealthReport,
+	workspaceSandboxHealth,
+} from "./workspace-sandbox-health.ts";
 
-export type { WorkspaceSandboxHealthReport, WorkspaceSandboxHealthStatus } from "./workspace-sandbox-health.ts";
+export type {
+	WorkspaceSandboxCheck,
+	WorkspaceSandboxCheckId,
+	WorkspaceSandboxCheckReason,
+	WorkspaceSandboxCheckStatus,
+	WorkspaceSandboxHealthCode,
+	WorkspaceSandboxHealthMode,
+	WorkspaceSandboxHealthReport,
+	WorkspaceSandboxHealthStatus,
+	WorkspaceSandboxRecoveryAction,
+} from "./workspace-sandbox-health.ts";
 
 import {
 	normalizeSandboxNetworkEndpoints,
@@ -45,6 +65,7 @@ export interface WorkspaceSandbox {
 
 export const WorkspaceSandbox = Object.freeze({
 	health: (): Promise<WorkspaceSandboxHealthReport> => workspaceSandboxHealth(),
+	selfTest: (): Promise<WorkspaceSandboxHealthReport> => workspaceSandboxSelfTest(),
 });
 
 type PendingCommand = {
@@ -214,7 +235,9 @@ class SandboxBroker {
 			}
 		}
 		for (const protectedRoot of writeProtectedRoots) {
-			if (writeRoots.some((root) => pathsIntersect(root, protectedRoot))) {
+			// A broader granted directory may contain protected metadata. The
+			// broker's denyWrite exclusions remain authoritative for those children.
+			if (writeRoots.some((root) => isPathInside(protectedRoot, root))) {
 				throw new TypeError("Workspace sandbox write roots overlap a protected root");
 			}
 		}
@@ -538,3 +561,249 @@ export async function createWorkspaceSandbox(input: {
 		},
 	};
 }
+
+const SELF_TEST_TIMEOUT_SECONDS = 8;
+const SELF_TEST_CHECKS: readonly WorkspaceSandboxCheckId[] = [
+	"sandbox-startup",
+	"filesystem-permitted",
+	"filesystem-denied",
+	"network-denied",
+];
+
+export interface WorkspaceSandboxNetworkTarget {
+	readonly port: number;
+	hits(): number;
+	close(): Promise<void>;
+}
+
+export interface WorkspaceSandboxSelfTestDependencies {
+	readonly readiness: () => Promise<WorkspaceSandboxHealthReport>;
+	readonly createSandbox?: typeof createWorkspaceSandbox;
+	readonly createFixture?: (prefix: string) => string;
+	readonly removeFixture?: (path: string) => void;
+	readonly createNetworkTarget?: () => Promise<WorkspaceSandboxNetworkTarget>;
+	readonly now?: () => Date;
+	readonly platform?: NodeJS.Platform;
+}
+
+interface ProbeResult {
+	readonly exitCode: number | null;
+	readonly output: string;
+	readonly threw: boolean;
+}
+
+async function executeSandboxProbe(sandbox: WorkspaceSandbox, cwd: string, command: string): Promise<ProbeResult> {
+	let output = "";
+	try {
+		const result = await sandbox.operations.exec(command, cwd, {
+			onData: (data) => {
+				output += data.toString("utf8");
+			},
+			timeout: SELF_TEST_TIMEOUT_SECONDS,
+		});
+		return { exitCode: result.exitCode, output, threw: false };
+	} catch {
+		return { exitCode: null, output, threw: true };
+	}
+}
+
+function createFixtureDirectory(prefix: string): string {
+	return realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+}
+
+function removeFixtureDirectory(path: string): void {
+	rmSync(path, { recursive: true, force: true });
+}
+
+/**
+ * A loopback-only probe target. It never contacts an external service and only
+ * proves that sandboxed processes cannot reach a host listener outside the
+ * runtime's exact-endpoint proxy.
+ */
+async function createLoopbackNetworkTarget(): Promise<WorkspaceSandboxNetworkTarget> {
+	let hits = 0;
+	const server: Server = createServer((_request, response) => {
+		hits += 1;
+		response.end("metis-sandbox-network-probe");
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(0, "127.0.0.1", () => {
+			server.off("error", reject);
+			resolve();
+		});
+	});
+	const address = server.address();
+	if (!address || typeof address === "string") {
+		server.close();
+		throw new Error("Sandbox network probe could not bind a loopback port");
+	}
+	return {
+		port: address.port,
+		hits: () => hits,
+		close: async () => {
+			server.closeAllConnections?.();
+			await new Promise<void>((resolve) => {
+				server.close(() => resolve());
+			});
+		},
+	};
+}
+
+export function createWorkspaceSandboxSelfTest(
+	dependencies: WorkspaceSandboxSelfTestDependencies,
+): () => Promise<WorkspaceSandboxHealthReport> {
+	return async () => {
+		const platform = dependencies.platform ?? process.platform;
+		const checkedAt = (dependencies.now ?? (() => new Date()))().toISOString();
+		let readiness: WorkspaceSandboxHealthReport;
+		try {
+			readiness = await dependencies.readiness();
+		} catch {
+			readiness = createSandboxHealthReport({
+				status: "misconfigured",
+				code: "probe-failed",
+				mode: "readiness",
+				platform,
+				checkedAt,
+				checks: [{ id: "dependencies", status: "failed", reason: "probe-failed" }],
+				recoveryActions: readinessRecoveryActions("probe-failed", platform),
+			});
+		}
+		if (readiness.status !== "healthy") {
+			return createSandboxHealthReport({
+				status: readiness.status,
+				code: readiness.code,
+				mode: "self-test",
+				platform,
+				checkedAt,
+				checks: [...readiness.checks, ...skippedSandboxChecks(SELF_TEST_CHECKS, "readiness-failed")],
+				recoveryActions: readiness.recoveryActions,
+				details: readiness.details,
+			});
+		}
+
+		const createSandbox = dependencies.createSandbox ?? createWorkspaceSandbox;
+		const createFixture = dependencies.createFixture ?? createFixtureDirectory;
+		const removeFixture = dependencies.removeFixture ?? removeFixtureDirectory;
+		const createNetworkTarget = dependencies.createNetworkTarget ?? createLoopbackNetworkTarget;
+		const checks: WorkspaceSandboxCheck[] = [...readiness.checks];
+		let workspace: string | undefined;
+		let outside: string | undefined;
+		let sandbox: WorkspaceSandbox | undefined;
+		let networkTarget: WorkspaceSandboxNetworkTarget | undefined;
+		let sandboxUsable = false;
+		try {
+			try {
+				workspace = createFixture("metis-sandbox-selftest-");
+				sandbox = await createSandbox({ cwd: workspace, workspaceRoots: [workspace] });
+				sandboxUsable = true;
+				checks.push({ id: "sandbox-startup", status: "passed" });
+			} catch {
+				checks.push({ id: "sandbox-startup", status: "failed", reason: "sandbox-start-failed" });
+				checks.push(...skippedSandboxChecks(SELF_TEST_CHECKS.slice(1), "sandbox-unavailable"));
+			}
+
+			if (sandbox && workspace) {
+				const permitted = await executeSandboxProbe(
+					sandbox,
+					workspace,
+					"printf 'metis-sandbox-probe' > allowed.txt && cat allowed.txt",
+				);
+				if (permitted.threw) {
+					sandboxUsable = false;
+					checks.push({ id: "filesystem-permitted", status: "failed", reason: "probe-failed" });
+				} else if (permitted.exitCode === 0 && permitted.output.includes("metis-sandbox-probe")) {
+					checks.push({ id: "filesystem-permitted", status: "passed" });
+				} else {
+					checks.push({ id: "filesystem-permitted", status: "failed", reason: "workspace-write-failed" });
+				}
+			} else if (!checks.some((candidate) => candidate.id === "filesystem-permitted")) {
+				checks.push({ id: "filesystem-permitted", status: "skipped", reason: "sandbox-unavailable" });
+			}
+
+			if (sandbox && workspace && sandboxUsable) {
+				const secret = randomUUID();
+				try {
+					outside = createFixture("metis-sandbox-selftest-outside-");
+					writeFileSync(join(outside, "secret.txt"), secret, { mode: 0o600 });
+					const denied = await executeSandboxProbe(
+						sandbox,
+						workspace,
+						`cat '${join(outside, "secret.txt").replaceAll("'", "'\\''")}'`,
+					);
+					if (denied.threw) {
+						sandboxUsable = false;
+						checks.push({ id: "filesystem-denied", status: "failed", reason: "probe-failed" });
+					} else if (denied.exitCode !== 0 && !denied.output.includes(secret)) {
+						checks.push({ id: "filesystem-denied", status: "passed" });
+					} else {
+						checks.push({ id: "filesystem-denied", status: "failed", reason: "outside-read-not-denied" });
+					}
+				} catch {
+					checks.push({ id: "filesystem-denied", status: "failed", reason: "probe-failed" });
+				}
+			} else if (!checks.some((candidate) => candidate.id === "filesystem-denied")) {
+				checks.push({ id: "filesystem-denied", status: "skipped", reason: "sandbox-unavailable" });
+			}
+
+			if (sandbox && workspace && sandboxUsable) {
+				try {
+					networkTarget = await createNetworkTarget();
+					const network = await executeSandboxProbe(
+						sandbox,
+						workspace,
+						`curl -q --silent --show-error --fail --connect-timeout 3 --max-time 5 'http://127.0.0.1:${networkTarget.port}/'`,
+					);
+					if (network.threw || network.exitCode === null) {
+						checks.push({ id: "network-denied", status: "failed", reason: "probe-failed" });
+					} else if (
+						network.exitCode === 127 ||
+						/command not found|not recognized as an internal or external command/iu.test(network.output)
+					) {
+						checks.push({ id: "network-denied", status: "skipped", reason: "network-probe-unavailable" });
+					} else if (network.exitCode === 0 || networkTarget.hits() > 0) {
+						checks.push({ id: "network-denied", status: "failed", reason: "network-not-denied" });
+					} else if (
+						// curl 5/6/7 are proxy/host resolution or connection failures.
+						// The runtime proxy rejects blocked endpoints with HTTP 403, which
+						// curl --fail reports as 22. Any other failure is not proof of denial.
+						[5, 6, 7].includes(network.exitCode) ||
+						(network.exitCode === 22 && /\b403\b/u.test(network.output))
+					) {
+						checks.push({ id: "network-denied", status: "passed" });
+					} else {
+						checks.push({ id: "network-denied", status: "failed", reason: "probe-failed" });
+					}
+				} catch {
+					checks.push({ id: "network-denied", status: "skipped", reason: "network-probe-unavailable" });
+				}
+			} else if (!checks.some((candidate) => candidate.id === "network-denied")) {
+				checks.push({ id: "network-denied", status: "skipped", reason: "sandbox-unavailable" });
+			}
+		} finally {
+			if (sandbox) await sandbox.dispose().catch(() => undefined);
+			if (networkTarget) await networkTarget.close().catch(() => undefined);
+			if (outside) removeFixture(outside);
+			if (workspace) removeFixture(workspace);
+		}
+
+		const failed = checks.some((candidate) => candidate.status === "failed");
+		const incomplete = checks.some(
+			(candidate) => candidate.status === "skipped" && candidate.reason !== "not-applicable",
+		);
+		return createSandboxHealthReport({
+			status: failed ? "misconfigured" : "healthy",
+			code: failed ? "self-test-failed" : incomplete ? "self-test-incomplete" : "ready",
+			mode: "self-test",
+			platform,
+			checkedAt,
+			checks,
+			recoveryActions: selfTestRecoveryActions(checks, platform),
+		});
+	};
+}
+
+export const workspaceSandboxSelfTest = createWorkspaceSandboxSelfTest({
+	readiness: workspaceSandboxHealth,
+});

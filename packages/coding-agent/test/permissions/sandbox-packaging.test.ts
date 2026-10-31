@@ -64,29 +64,48 @@ describe("packaged workspace sandbox health", () => {
 	});
 
 	it("reports healthy, unavailable, and misconfigured states without executing a user command", async () => {
-		await expect(createWorkspaceSandboxHealthProbe(dependencies())()).resolves.toMatchObject({
-			status: "healthy",
-			code: "ready",
+		const healthy = await createWorkspaceSandboxHealthProbe(dependencies())();
+		expect(healthy).toMatchObject({ status: "healthy", code: "ready", mode: "readiness", platform: "linux" });
+		expect(healthy.checks).toEqual([
+			{ id: "platform", status: "passed" },
+			{ id: "package", status: "passed" },
+			{ id: "dependencies", status: "passed" },
+		]);
+		expect(Date.parse(healthy.checkedAt)).not.toBeNaN();
+
+		const unsupported = await createWorkspaceSandboxHealthProbe(dependencies({ isSupportedPlatform: () => false }))();
+		expect(unsupported).toMatchObject({ status: "unavailable", code: "unsupported" });
+		expect(unsupported.checks).toEqual([{ id: "platform", status: "failed", reason: "unsupported-platform" }]);
+
+		const unavailable = await createWorkspaceSandboxHealthProbe(
+			dependencies({ checkDependencies: async () => ({ errors: ["bubblewrap unavailable"], warnings: [] }) }),
+		)();
+		expect(unavailable).toMatchObject({
+			status: "unavailable",
+			code: "dependencies-unavailable",
+			recoveryActions: [],
 		});
-		await expect(
-			createWorkspaceSandboxHealthProbe(dependencies({ isSupportedPlatform: () => false }))(),
-		).resolves.toMatchObject({ status: "unavailable", code: "unsupported" });
-		await expect(
-			createWorkspaceSandboxHealthProbe(
-				dependencies({ checkDependencies: async () => ({ errors: ["bubblewrap unavailable"], warnings: [] }) }),
-			)(),
-		).resolves.toMatchObject({ status: "unavailable", code: "dependencies-unavailable" });
+		expect(unavailable.checks.at(-1)).toEqual({
+			id: "dependencies",
+			status: "failed",
+			reason: "dependency-unavailable",
+		});
 
 		const seccomp = join(packageDir, "dist", "vendor", "sandbox-runtime", "seccomp", "x64", "apply-seccomp");
 		chmodSync(seccomp, 0o644);
 		try {
-			await expect(createWorkspaceSandboxHealthProbe(dependencies())()).resolves.toMatchObject({
-				status: "misconfigured",
-				code: "package-invalid",
-			});
+			const invalid = await createWorkspaceSandboxHealthProbe(dependencies())();
+			expect(invalid).toMatchObject({ status: "misconfigured", code: "package-invalid" });
+			expect(invalid.checks).toEqual([
+				{ id: "platform", status: "passed" },
+				{ id: "package", status: "failed", reason: "helper-invalid" },
+				{ id: "dependencies", status: "skipped", reason: "readiness-failed" },
+			]);
+			expect(invalid.recoveryActions).toEqual(["check-app-update"]);
 		} finally {
 			chmodSync(seccomp, 0o755);
 		}
 		expect(WorkspaceSandbox.health).toBeTypeOf("function");
+		expect(WorkspaceSandbox.selfTest).toBeTypeOf("function");
 	});
 });

@@ -172,6 +172,44 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 		}
 	});
 
+	it("allows a read-only managed work directory without granting temporary file writes", async () => {
+		const workspace = realpathSync(temporaryDirectory());
+		const sessionWorkDir = realpathSync(temporaryDirectory());
+		const outside = realpathSync(temporaryDirectory());
+		writeFileSync(join(sessionWorkDir, "existing.txt"), "existing");
+		const sandbox = await createWorkspaceSandbox({
+			cwd: workspace,
+			workspaceRoots: [workspace, sessionWorkDir],
+			workspaceReadOnly: true,
+		});
+		let output = "";
+		const exec = (command: string) =>
+			sandbox.operations.exec(command, workspace, {
+				env: { METIS_WORK_DIR: sessionWorkDir },
+				onData: (chunk) => {
+					output += chunk.toString();
+				},
+			});
+		try {
+			await expect(exec('cat "$METIS_WORK_DIR/existing.txt"')).resolves.toMatchObject({ exitCode: 0 });
+			expect(output).toBe("existing");
+			for (const variable of ["METIS_WORK_DIR", "TMPDIR", "TMP", "TEMP"]) {
+				await expect(exec(`printf changed > "$${variable}/existing.txt"`)).resolves.not.toMatchObject({
+					exitCode: 0,
+				});
+			}
+			expect(readFileSync(join(sessionWorkDir, "existing.txt"), "utf8")).toBe("existing");
+			await expect(
+				sandbox.operations.exec("pwd", workspace, {
+					env: { METIS_WORK_DIR: outside },
+					onData: () => {},
+				}),
+			).rejects.toThrow("Metis work directory is outside authorized roots");
+		} finally {
+			await sandbox.dispose();
+		}
+	});
+
 	it("mounts Plan workspaces read-only while preserving Metis temp writes", async () => {
 		const workspace = temporaryDirectory();
 		const sessionWorkDir = realpathSync(temporaryDirectory());
@@ -262,6 +300,7 @@ describe.runIf(process.env.METIS_TEST_OS_SANDBOX === "1")("workspace sandbox", (
 		mkdirSync(global, { recursive: true });
 		mkdirSync(current, { recursive: true });
 		mkdirSync(sibling, { recursive: true });
+		mkdirSync(join(memory, ".meta"), { recursive: true });
 		const memoryPath = realpathSync(memory);
 		const globalPath = realpathSync(global);
 		const currentPath = realpathSync(current);

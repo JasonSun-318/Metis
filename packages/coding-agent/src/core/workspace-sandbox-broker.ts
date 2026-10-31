@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, realpathSync, statSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, delimiter, isAbsolute, win32 } from "node:path";
 import { createInterface } from "node:readline";
@@ -38,6 +38,10 @@ function runtimeReadPaths(): string[] {
 					"/usr/share",
 					"/System",
 					"/Library/Apple",
+					// System curl reads this OpenSSL configuration before any request.
+					"/private/etc/ssl/openssl.cnf",
+					"/private/etc/ssl/cert.pem",
+					"/private/etc/ssl/certs",
 					"/opt/homebrew/bin",
 					"/opt/homebrew/sbin",
 					"/opt/homebrew/lib",
@@ -74,6 +78,9 @@ function runtimeReadPaths(): string[] {
 						"/lib",
 						"/lib64",
 						"/etc/alternatives",
+						"/etc/ssl/openssl.cnf",
+						"/etc/ssl/certs",
+						"/etc/pki/tls/certs",
 						"/etc/ld.so.cache",
 						"/etc/ld.so.conf",
 						"/etc/ld.so.conf.d",
@@ -156,6 +163,28 @@ export function exactNetworkGrantAllows(
 	);
 }
 
+/** Fixed OS symlinks need readlink/lstat access to traverse canonical grants. */
+function systemAliasReadPaths(platform: NodeJS.Platform): string[] {
+	if (platform !== "darwin") return [];
+	const paths: string[] = [];
+	for (const [alias, exactPattern] of [
+		["/var", "/va[r]"],
+		["/tmp", "/tm[p]"],
+		["/etc", "/et[c]"],
+	] as const) {
+		try {
+			if (lstatSync(alias).isSymbolicLink() && realpathSync(alias) === `/private${alias}`) {
+				// A singleton character class prevents SRT realpath normalization.
+				// Its anchored glob matches only the symlink, never its descendants.
+				paths.push(exactPattern);
+			}
+		} catch {
+			// Missing or nonstandard system aliases retain the existing policy.
+		}
+	}
+	return paths;
+}
+
 export function createSandboxRuntimeConfig(
 	input: SandboxRuntimeConfigInput,
 	platform: NodeJS.Platform = process.platform,
@@ -174,7 +203,14 @@ export function createSandboxRuntimeConfig(
 		...new Set([...(input.workspaceReadOnly ? [] : input.workspaceRoots), ...input.writeRoots, input.temporaryDir]),
 	];
 	const allowedRead = [
-		...new Set([...input.workspaceRoots, ...allowedWrite, ...input.readOnlyRoots, ...runtimeReads, ...shellRead]),
+		...new Set([
+			...input.workspaceRoots,
+			...allowedWrite,
+			...input.readOnlyRoots,
+			...runtimeReads,
+			...shellRead,
+			...systemAliasReadPaths(platform),
+		]),
 	];
 	const denyWrite = [
 		...new Set([
@@ -265,8 +301,10 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				return;
 			}
 			const canonicalWorkDir = canonicalizeActionPath(managedWorkDir, cwd);
-			if (!explicitWriteRoots.some((root) => isPathInside(root, canonicalWorkDir))) {
-				void fail("SANDBOX_PROTOCOL", "Metis work directory is outside explicit write roots", request.id);
+			// Read-only commands can use the managed directory too. The sandbox
+			// profile still grants writes only through explicitWriteRoots.
+			if (![...workspaceRoots, ...explicitWriteRoots].some((root) => isPathInside(root, canonicalWorkDir))) {
+				void fail("SANDBOX_PROTOCOL", "Metis work directory is outside authorized roots", request.id);
 				return;
 			}
 			request.env.METIS_WORK_DIR = canonicalWorkDir;
@@ -288,8 +326,15 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 				if (managedWorkDir) process.env.CLAUDE_CODE_TMPDIR = request.env.METIS_WORK_DIR;
 				let wrapped: Awaited<ReturnType<typeof SandboxManager.wrapWithSandboxArgv>>;
 				try {
+					// SRT's POSIX wrapper injects NO_PROXY for private addresses after
+					// spawn env. Clear it inside the supported shell so every destination,
+					// including loopback, reaches the exact-endpoint approval callback.
+					const proxyCommand =
+						process.platform !== "win32" && /^(?:bash|sh|zsh|dash|ksh)$/u.test(basename(shell.shell))
+							? `export NO_PROXY= no_proxy=;\n${request.command}`
+							: request.command;
 					wrapped = await SandboxManager.wrapWithSandboxArgv(
-						request.command,
+						proxyCommand,
 						shell.shell,
 						undefined,
 						controller.signal,
@@ -437,7 +482,7 @@ export async function runWorkspaceSandboxBroker(): Promise<void> {
 						}
 					}
 					for (const protectedRoot of writeProtectedRoots) {
-						if (explicitWriteRoots.some((root) => pathsIntersect(root, protectedRoot))) {
+						if (explicitWriteRoots.some((root) => isPathInside(protectedRoot, root))) {
 							throw new Error("Sandbox write roots overlap a protected root");
 						}
 					}
