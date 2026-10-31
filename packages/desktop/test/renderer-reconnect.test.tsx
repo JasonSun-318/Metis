@@ -209,6 +209,7 @@ describe("renderer reconnect behavior", () => {
 						requestId: "00000000-0000-4000-8000-000000000203",
 						actionId: "action-bash-1",
 						toolLabel: "bash",
+						command: "rm cache.tmp",
 						riskLevel: "critical",
 						executionTarget: "sandbox",
 						reason: "Delete the generated cache file.",
@@ -229,12 +230,12 @@ describe("renderer reconnect behavior", () => {
 		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(panel.getAttribute("aria-modal")).toBeNull();
-		expect(panel.textContent).toContain("Metis wants to use bash");
-		expect(panel.textContent).toContain("Command");
+		expect(panel.textContent).toContain("Allow Metis to execute the following command?");
+		expect(panel.querySelector(".permission-approval-command")?.textContent).toBe("rm cache.tmp");
 		expect(panel.textContent).toContain("rm cache.tmp");
-		expect(panel.textContent).toContain("Working directory");
-		expect(panel.textContent).toContain("/tmp/work");
-		expect(panel.textContent).toContain("This operation may not be reversible.");
+		expect(panel.textContent).not.toContain("Working directory");
+		expect(panel.textContent).not.toContain("/tmp/work");
+		expect(panel.textContent).not.toContain("This operation may not be reversible.");
 		expect(panel.textContent).not.toContain("Arguments:");
 		expect(panel.textContent).not.toContain('"command"');
 		expect(document.activeElement?.textContent).toContain("Reject");
@@ -294,7 +295,7 @@ describe("renderer reconnect behavior", () => {
 					button.textContent?.includes("Allow once"),
 				)?.disabled,
 			).toBe(false);
-			expect(container.querySelector('[role="alert"]') === null).toBe(fixture.scopeComplete);
+			expect(container.querySelector('[role="alert"]')).toBeNull();
 			await act(async () => root.unmount());
 			container.remove();
 		}

@@ -12,7 +12,15 @@ export function useAgentActivities(
 	sessions: readonly SessionSummary[],
 	attentionAgentIds?: ReadonlySet<string>,
 ): ReadonlyMap<string, AgentActivity> {
-	const sessionKey = [...new Set(sessions.map((session) => session.sessionId))].sort().join("\n");
+	const sessionKey = [
+		...new Set(
+			sessions
+				.filter((session) => session.state !== "corrupt" && session.state !== "unsupported")
+				.map((session) => session.sessionId),
+		),
+	]
+		.sort()
+		.join("\n");
 	const collection = useMemo(() => {
 		const handles =
 			api && sessionKey ? sessionKey.split("\n").map((id) => [id, acquireAgentCatalog(api, id)] as const) : [];

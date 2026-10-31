@@ -12,6 +12,7 @@ export function RecoveryBanner({
 		!session.recoveryNotice &&
 		session.state !== "interrupted" &&
 		session.state !== "corrupt" &&
+		session.state !== "unsupported" &&
 		session.state !== "in_use"
 	)
 		return null;
@@ -25,6 +26,8 @@ export function RecoveryBanner({
 			? "The last turn was interrupted. Your saved work is intact; send a new message to continue."
 			: session.state === "corrupt"
 				? "This session is corrupt. Metis left the source data untouched."
-				: "This session is currently open in another process.");
+				: session.state === "unsupported"
+					? "This session uses a newer format. Open it with a compatible version of Metis. The source data is unchanged."
+					: "This session is currently open in another process.");
 	return <SystemNotice message={message} title="Task needs attention" tone="warning" />;
 }

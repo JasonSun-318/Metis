@@ -187,17 +187,30 @@ function SessionButton({
 	const indicator = sessionIndicator(session, selected, activity);
 	const indicatorLabel = indicator ? SESSION_INDICATOR_LABELS[indicator] : undefined;
 	const indicatorDescription = indicatorLabel ? t(indicatorLabel) : undefined;
+	// Corrupt and unsupported rows keep their click-to-recover path but never mount the
+	// agent branch: listing agents for an unusable session only produces a retry button.
+	const agentRowUnavailable =
+		agentNavigation !== undefined && (session.state === "corrupt" || session.state === "unsupported");
+	const recoveryDescription =
+		session.state === "unsupported"
+			? t(
+					"This session uses a newer format. Open it with a compatible version of Metis. The source data is unchanged.",
+				)
+			: session.state === "corrupt"
+				? t("This session is corrupt. Metis left the source data untouched.")
+				: undefined;
+	const rowDescription = recoveryDescription ?? indicatorDescription;
 	const row = (agentToggle: ReactNode = null) => (
 		<div className="session-row" data-scheduled={session.scheduled ? "true" : undefined}>
 			<button
 				aria-busy={running || undefined}
 				aria-current={selected ? "page" : undefined}
-				aria-description={indicatorDescription}
+				aria-description={rowDescription}
 				aria-label={title}
 				className="session-button"
 				disabled={busy}
 				onClick={() => void onOpen(session.sessionId)}
-				title={title}
+				title={recoveryDescription ? `${title} — ${recoveryDescription}` : title}
 				type="button"
 			>
 				<span className="session-button-title">
@@ -206,8 +219,8 @@ function SessionButton({
 				</span>
 			</button>
 			<SessionActions
-				allowRename={!session.scheduled}
-				deleteDisabled={deleteDisabled}
+				allowRename={!session.scheduled && session.state !== "unsupported"}
+				deleteDisabled={deleteDisabled || session.state === "unsupported"}
 				disabled={busy}
 				displayName={title}
 				onCopy={onCopy}
@@ -222,7 +235,7 @@ function SessionButton({
 	);
 	return (
 		<div className="session-motion-item" data-sidebar-motion-key={`session:${session.sessionId}`}>
-			{agentNavigation ? (
+			{agentNavigation && !agentRowUnavailable ? (
 				<AgentSidebarBranch sessionId={session.sessionId} navigation={agentNavigation}>
 					{row}
 				</AgentSidebarBranch>

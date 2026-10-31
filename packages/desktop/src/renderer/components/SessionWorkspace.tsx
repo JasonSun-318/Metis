@@ -70,6 +70,7 @@ import {
 import { AgentConversation } from "./AgentConversation.tsx";
 import { AgentTreePanel } from "./AgentTreePanel.tsx";
 import { BrowserPanel } from "./BrowserPanel.tsx";
+import { CodeChangesNavigationContext } from "./CodeChangesNavigationContext.ts";
 import { FilePanel, type WorkspaceFileDraft } from "./FilePanel.tsx";
 import { KnowledgePanel } from "./KnowledgePanel.tsx";
 import { PlanPreview } from "./PlanPreview.tsx";
@@ -312,6 +313,7 @@ export function SessionWorkspaceView({
 		chatSessionId,
 		store,
 	});
+	const [reviewFocus, setReviewFocus] = useState<{ sessionId: string; path?: string; id: string }>();
 	const [paneViewport, setPaneViewport] = useState({ width: 0, height: 0 });
 	const [resizingAxis, setResizingAxis] = useState<"column" | "row" | null>(null);
 	const [toolsResizing, setToolsResizing] = useState(false);
@@ -606,6 +608,13 @@ export function SessionWorkspaceView({
 					? { sessionId: focused.sessionId, agentId: focused.agentId, name: focused.agentName ?? focused.agentId }
 					: null,
 			);
+			// Closing the final conversation returns to the existing new-task flow.
+			// Empty split panes stay intentional while another conversation is open.
+			if (next.panes.every((pane) => pane.tabs.length === 0)) {
+				pendingChatFocus.current = null;
+				onChatSessionRef.current(null);
+				return;
+			}
 			if (
 				focused &&
 				!focused.agentId &&
@@ -887,7 +896,7 @@ export function SessionWorkspaceView({
 	}, [openProcess, process, chatSessionId, updateWorkspace]);
 
 	useEffect(() => {
-		if (!chatSessionId || !process || process.state === "running") return;
+		if (!chatSessionId || !process || (process.state !== "completed" && process.state !== "failed")) return;
 		if (!autoOpenedProcessSessions.current.has(chatSessionId)) return;
 		autoOpenedProcessSessions.current.delete(chatSessionId);
 		updateWorkspace((current) => {
@@ -1245,23 +1254,38 @@ export function SessionWorkspaceView({
 		});
 	};
 
-	const addReview = (target: { sessionId: string | null; cwd: string | null }) => {
-		const { sessionId: ownerSessionId, cwd } = target;
-		if (!ownerSessionId || !cwd || mode !== "code") return;
-		updateWorkspace((workspace) => {
-			const existing = workspaceTabs(workspace).find(
-				(tab) => tab.kind === "review" && tab.sessionId === ownerSessionId,
-			);
-			if (existing) return activateTab(workspace, existing.id);
-			const tab: WorkspaceTab = {
-				kind: "review",
-				id: crypto.randomUUID(),
+	const addReview = useCallback(
+		(target: { sessionId: string | null; cwd: string | null }) => {
+			const { sessionId: ownerSessionId, cwd } = target;
+			if (!ownerSessionId || !cwd || mode !== "code") return;
+			updateWorkspace((workspace) => {
+				const existing = workspaceTabs(workspace).find(
+					(tab) => tab.kind === "review" && tab.sessionId === ownerSessionId,
+				);
+				if (existing) return activateTab(workspace, existing.id);
+				const tab: WorkspaceTab = {
+					kind: "review",
+					id: crypto.randomUUID(),
+					sessionId: ownerSessionId,
+					title: t("Review"),
+				};
+				return placeTab(workspace, tab);
+			});
+		},
+		[mode, placeTab, t, updateWorkspace],
+	);
+
+	const openCodeChanges = useCallback(
+		(ownerSessionId: string, path?: string) => {
+			showToolsSidebar();
+			setReviewFocus({ sessionId: ownerSessionId, path, id: crypto.randomUUID() });
+			addReview({
 				sessionId: ownerSessionId,
-				title: t("Review"),
-			};
-			return placeTab(workspace, tab);
-		});
-	};
+				cwd: sessionsById.get(ownerSessionId)?.cwd ?? projectFor(ownerSessionId)?.cwd ?? null,
+			});
+		},
+		[addReview, projectFor, sessionsById, showToolsSidebar],
+	);
 
 	const addAgent = (target: { sessionId: string | null; cwd: string | null }) => {
 		const { sessionId: ownerSessionId } = target;
@@ -2326,6 +2350,7 @@ export function SessionWorkspaceView({
 										? wrap(
 												tab.id,
 												<ReviewPanel
+													focusRequest={reviewFocus?.sessionId === tab.sessionId ? reviewFocus : undefined}
 													api={api}
 													sessionId={tab.sessionId}
 													theme={theme}
@@ -2587,7 +2612,7 @@ export function SessionWorkspaceView({
 		/>
 	);
 
-	return (
+	const workspaceContent = (
 		<div
 			className={`session-workspace-root${resizingAxis ? ` is-pane-resizing is-pane-resizing--${resizingAxis}` : ""}`}
 			hidden={!visible}
@@ -2753,7 +2778,7 @@ export function SessionWorkspaceView({
 					</div>
 				</div>
 				{/* The aside stays mounted when closed: hidden instead of unmounted so
-				    terminals, browsers and editors keep their sessions and state. */}
+			    terminals, browsers and editors keep their sessions and state. */}
 				<aside
 					className={`tool-sidebar${sidebarClosing ? " is-closing" : ""}`}
 					hidden={!sidebarOpen}
@@ -2878,5 +2903,10 @@ export function SessionWorkspaceView({
 				</div>
 			)}
 		</div>
+	);
+	return (
+		<CodeChangesNavigationContext.Provider value={openCodeChanges}>
+			{workspaceContent}
+		</CodeChangesNavigationContext.Provider>
 	);
 }

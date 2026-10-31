@@ -116,7 +116,12 @@ export function groupSessionsByStatus(
 		if (pending) index = 0;
 		else if (session.state === "running" || activity?.running) index = 1;
 		else if (session.state !== "in_use") {
-			if (session.state === "interrupted" || session.state === "corrupt" || session.lastTurnOutcome === "failed")
+			if (
+				session.state === "interrupted" ||
+				session.state === "corrupt" ||
+				session.state === "unsupported" ||
+				session.lastTurnOutcome === "failed"
+			)
 				index = 2;
 			else if (session.lastTurnOutcome === "completed") index = 3;
 		}

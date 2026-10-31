@@ -72,6 +72,12 @@ export function systemErrorNotice(message: string): SystemNoticeCopy {
 
 export function systemErrorNoticeForCode(code: string): SystemNoticeCopy {
 	switch (code) {
+		case "SESSION_VERSION_UNSUPPORTED":
+			return {
+				title: "Session format is not supported",
+				message:
+					"This session uses a newer format. Open it with a compatible version of Metis. The source data is unchanged.",
+			};
 		case "MODEL_ENDPOINT_NOT_FOUND":
 			return systemErrorNotice("Model API error 404");
 		case "MODEL_AUTHENTICATION_FAILED":

@@ -338,6 +338,7 @@ function createHarness(
 			defaultModel: null,
 			defaultThinkingSelection: "off",
 			providers: [],
+			permissionReviewer: { config: null, status: "unconfigured" },
 			loadError: null,
 		}),
 		updateModelSettings: vi.fn(),
@@ -2400,7 +2401,7 @@ describe("Chat desktop shell", () => {
 		).toBe(visible);
 	});
 
-	it("docks permission approval above the active composer", async () => {
+	it("renders permission approval in the conversation transcript", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
@@ -2429,6 +2430,7 @@ describe("Chat desktop shell", () => {
 							requestId: "00000000-0000-4000-8000-000000000204",
 							actionId: "action-bash-cache",
 							toolLabel: "bash",
+							command: "rm cache.tmp",
 							riskLevel: "critical",
 							executionTarget: "sandbox",
 							reason: "Remove the generated cache.",
@@ -2447,19 +2449,18 @@ describe("Chat desktop shell", () => {
 		const panel = container.querySelector<HTMLElement>(".permission-approval-panel")!;
 		expect(panel).not.toBeNull();
 		expect(container.querySelector(".composer-surface > .composer-panels + .composer-chat")).not.toBeNull();
-		expect(panel.closest(".composer-panels-content")?.lastElementChild).toBe(panel.parentElement);
-		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("false");
+		expect(panel.closest(".transcript")).not.toBeNull();
+		expect(container.querySelector("#composer-input")?.getAttribute("contenteditable")).toBe("true");
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(panel.getAttribute("aria-modal")).toBeNull();
-		expect(panel.textContent).toContain("Metis wants to use bash");
-		expect(panel.textContent).toContain("Command");
+		expect(panel.textContent).toContain("Allow Metis to execute the following command?");
+		expect(panel.querySelector(".permission-approval-command")?.textContent).toBe("rm cache.tmp");
 		expect(panel.textContent).toContain("rm cache.tmp");
-		expect(panel.textContent).toContain("Working directory");
-		expect(panel.textContent).toContain("/tmp/work");
-		expect(panel.textContent).toContain("workspace sandbox");
-		expect(panel.textContent).toContain("Always allow this exact action");
-		expect(panel.querySelector(".permission-approval-details")?.textContent).toContain("Remove the generated cache.");
-		expect(panel.querySelector<HTMLElement>(".permission-approval-details")?.hidden).toBe(true);
+		expect(panel.textContent).not.toContain("Working directory");
+		expect(panel.textContent).not.toContain("/tmp/work");
+		expect(panel.textContent).not.toContain("workspace sandbox");
+		expect(panel.textContent).not.toContain("Always allow this exact action");
+		expect(panel.querySelector(".permission-approval-details")).toBeNull();
 		expect(panel.textContent).not.toContain("Arguments:");
 		await act(async () => button(panel, "Allow once").click());
 		await flush();
@@ -2472,7 +2473,7 @@ describe("Chat desktop shell", () => {
 		await act(async () => root.unmount());
 	});
 
-	it("opens ask_user from the composer and confirms before returning a structured answer", async () => {
+	it("opens ask_user in the transcript and confirms before returning a structured answer", async () => {
 		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
 		const { api, emitEvent } = createHarness();
@@ -2518,9 +2519,10 @@ describe("Chat desktop shell", () => {
 		const dock = container.querySelector<HTMLElement>(".composer-dock")!;
 		const panel = container.querySelector<HTMLElement>(".ask-user-panel")!;
 		expect(panel).not.toBeNull();
-		expect(dock.contains(panel)).toBe(true);
+		expect(dock.contains(panel)).toBe(false);
+		expect(panel.closest(".transcript")).not.toBeNull();
 		expect(dock.querySelector(".composer")?.classList.contains("is-awaiting-answer")).toBe(true);
-		expect(dock.querySelector(".composer-editable-input")?.getAttribute("contenteditable")).toBe("false");
+		expect(dock.querySelector(".composer-editable-input")?.getAttribute("contenteditable")).toBe("true");
 		expect(container.querySelector(".modal-backdrop")).toBeNull();
 		expect(container.querySelector(".conversation-column > .ask-user-slot")).toBeNull();
 		expect(panel.textContent).toContain("Where should the data be stored?");
@@ -3076,6 +3078,7 @@ describe("Chat desktop shell", () => {
 								requestId: interactionId,
 								actionId: "bash-call",
 								toolLabel: "bash",
+								command: "rm cache.tmp",
 								riskLevel: "low",
 								executionTarget: "sandbox",
 								reason: "Approval required",
@@ -4167,15 +4170,6 @@ describe("Chat desktop shell", () => {
 		)!;
 		await act(async () => option.click());
 		expect(api.compactSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: "chat-existing" }));
-		expect(container.querySelector('[aria-label="Compacting conversation…"]')).not.toBeNull();
-		expect(textarea.getAttribute("contenteditable")).toBe("false");
-
-		await act(async () =>
-			resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }),
-		);
-		await flush();
-		expect(container.querySelector('[aria-label="Compacting conversation…"]')).toBeNull();
-		expect(textarea.getAttribute("contenteditable")).toBe("true");
 		await act(async () =>
 			emitEvent({
 				type: "app-server",
@@ -4187,6 +4181,38 @@ describe("Chat desktop shell", () => {
 						fromCursor: 1,
 						toCursor: 1,
 						events: [
+							{
+								type: "session/updated",
+								session: {
+									...session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+									state: "running",
+								},
+							},
+						],
+					},
+				},
+			}),
+		);
+		expect(container.querySelector('[aria-label="Compacting conversation…"]')).not.toBeNull();
+		expect(textarea.getAttribute("contenteditable")).toBe("false");
+		expect(textarea.getAttribute("data-placeholder")).toBe("Compacting conversation…");
+		expect(button(container, "Send message").disabled).toBe(true);
+		expect(container.querySelector('[aria-label="Stop task"]')).toBeNull();
+		await act(async () =>
+			emitEvent({
+				type: "app-server",
+				envelope: {
+					jsonrpc: "2.0",
+					method: "connection/events",
+					params: {
+						serverEpoch: EPOCH,
+						fromCursor: 2,
+						toCursor: 2,
+						events: [
+							{
+								type: "session/updated",
+								session: session("chat-existing", "chat", "/work/chat-project", "Chat project task"),
+							},
 							{
 								type: "item/completed",
 								item: {
@@ -4205,6 +4231,16 @@ describe("Chat desktop shell", () => {
 			}),
 		);
 		expect(container.querySelector(".transcript-compaction-row")?.textContent).toBe("Compacted");
+		await act(async () =>
+			resolveCompact({ sessionId: "chat-existing", tokensBefore: 64_000, estimatedTokensAfter: 8_000 }),
+		);
+		await flush();
+		expect(container.querySelector('[aria-label="Compacting conversation…"]')).toBeNull();
+		expect(textarea.getAttribute("contenteditable")).toBe("true");
+		expect(textarea.getAttribute("data-placeholder")).toBe("Write a message…");
+		expect(container.querySelector('[aria-label="Stop task"]')).toBeNull();
+		await act(async () => changeTextarea(textarea, "next message"));
+		expect(button(container, "Send message").disabled).toBe(false);
 		await act(async () => root.unmount());
 	});
 
@@ -4543,6 +4579,7 @@ describe("Chat desktop shell", () => {
 			defaultModel: { provider: "glm", modelId: "glm-5.3-flash" },
 			defaultThinkingSelection: "max",
 			vision: null,
+			permissionReviewer: { config: null, status: "unconfigured" },
 			providers: [
 				{
 					provider: "glm",
@@ -6417,6 +6454,71 @@ describe("Chat desktop shell", () => {
 		);
 		await act(async () => root.unmount());
 	});
+
+	it("starts on the new task page without conversations or an empty tools column", async () => {
+		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+		const { api } = createHarness({ sessions: [] });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () => root.render(<App api={api} store={new AppStore()} />));
+			await flush();
+			expect(container.querySelector(".new-task-home #composer-input")).not.toBeNull();
+			expect(container.querySelector(".workspace-empty")).toBeNull();
+			expect(container.querySelector<HTMLElement>(".tool-sidebar")!.hidden).toBe(true);
+			expect(container.querySelector<HTMLElement>(".session-workspace-panes")!.style.paddingRight).toBe("0px");
+			expect(container.querySelector(".details-sidebar-toggle")).toBeNull();
+			expect(api.createSession).not.toHaveBeenCalled();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
+	it.each(["chat", "code"] as const)(
+		"returns to a new %s task after the last tab closes and retains existing tools",
+		async (mode) => {
+			(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+			localStorage.setItem(`metis.activeSessionId.${mode}`, `${mode}-existing`);
+			const { api } = createHarness();
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			try {
+				await act(async () => root.render(<App api={api} store={new AppStore()} />));
+				await flush();
+				if (mode === "code") {
+					await act(async () => button(container, "Code").click());
+					await flush();
+				}
+				const draftClose = container.querySelector<HTMLButtonElement>('[aria-label="Close New task"]');
+				if (draftClose) await act(async () => draftClose.click());
+				await addTool(container, "Terminal");
+				await flush();
+				const terminal = container.querySelector(".terminal-panel");
+				expect(terminal).not.toBeNull();
+				const title = mode === "chat" ? "Chat project task" : "Code project task";
+				await act(async () => button(container, `Close ${title}`).click());
+				await flush();
+				expect(container.querySelector(".new-task-home")).not.toBeNull();
+				expect(container.querySelector(".workspace-empty")).toBeNull();
+				expect(container.querySelector<HTMLElement>(".tool-sidebar")!.hidden).toBe(true);
+				expect(container.querySelector<HTMLElement>(".session-workspace-panes")!.style.paddingRight).toBe("0px");
+				expect(container.querySelector(".details-sidebar-toggle")).toBeNull();
+				expect(api.createSession).not.toHaveBeenCalled();
+				await act(async () => button(container, "Close New task").click());
+				await flush();
+				expect(container.querySelectorAll(".new-task-home")).toHaveLength(1);
+				expect(container.querySelector(".workspace-empty")).toBeNull();
+				await act(async () => button(container, title).click());
+				await flush();
+				expect(container.querySelector(".terminal-panel")).toBe(terminal);
+				expect(api.createTerminal).toHaveBeenCalledTimes(1);
+			} finally {
+				await act(async () => root.unmount());
+			}
+		},
+	);
 
 	it("does not reserve a blank tools column for a new task and retains its existing terminal", async () => {
 		localStorage.setItem("metis.activeSessionId.chat", "chat-existing");
