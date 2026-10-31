@@ -35,7 +35,7 @@ import { ScheduleStore } from "../store/schedule-store.ts";
 import { type AppTheme, applyThemeToDocument, loadTheme, resolveTheme, saveTheme, watchSystemTheme } from "../theme.ts";
 import { CodeProjectSetup } from "./CodeProjectSetup.tsx";
 import type { ComposerSubmission } from "./Composer.tsx";
-import { ConversationScopeProvider } from "./ConversationScope.tsx";
+import { ConversationScopeProvider, type PermissionRuleReference } from "./ConversationScope.tsx";
 import { HomeProjectPicker } from "./HomeProjectPicker.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
 import { ModelSelector } from "./ModelSelector.tsx";
@@ -169,6 +169,7 @@ export function App({ api, store }: AppProps) {
 	const draftBusy = workspaceState.draftBusy;
 	const [destination, setDestination] = useState<SidebarDestination>("tasks");
 	const [settingsOpen, setSettingsOpen] = useState(false);
+	const [permissionRuleFocus, setPermissionRuleFocus] = useState<PermissionRuleReference | null>(null);
 	const [codeProjectSetupOpen, setCodeProjectSetupOpen] = useState(false);
 	const codeProjectSetupGeneration = useRef(0);
 	const codeProjectSetupRequest = useRef<CodeProjectSetupRequest | null>(null);
@@ -1459,8 +1460,16 @@ export function App({ api, store }: AppProps) {
 		rememberCurrentNavigation();
 		setSettingsOpen(true);
 	}, [rememberCurrentNavigation]);
+	const viewPermissionRule = useCallback(
+		(rule: PermissionRuleReference) => {
+			setPermissionRuleFocus(rule);
+			openSettings();
+		},
+		[openSettings],
+	);
 	const closeSettings = useCallback(() => {
 		setSettingsOpen(false);
+		setPermissionRuleFocus(null);
 		if (api.platform === "win32") {
 			setNavigationBack((entries) => entries.slice(0, -1));
 			setNavigationForward([]);
@@ -1723,7 +1732,7 @@ export function App({ api, store }: AppProps) {
 	return (
 		<FileSelectionProvider enabled={Boolean(serverReady && !visibleInteraction)} onSubmit={submitFileSelection}>
 			<ConversationScopeProvider
-				value={{ openAgent: openAgentConversation }}
+				value={{ openAgent: openAgentConversation, viewPermissionRule }}
 				enabled={Boolean(serverReady && !visibleInteraction)}
 			>
 				{api.platform === "win32" && (
@@ -1979,6 +1988,24 @@ export function App({ api, store }: AppProps) {
 						onThemeChange={setTheme}
 						serverReady={serverReady}
 						sessionId={state.activeSessionId ?? undefined}
+						permissionPreset={
+							state.activeSessionId ? state.sessions.get(state.activeSessionId)?.permissionPreset : undefined
+						}
+						permissionRuleFocus={permissionRuleFocus}
+						sessionCwd={state.activeSessionId ? state.sessionsById.get(state.activeSessionId)?.cwd : undefined}
+						sessionTitle={
+							state.activeSessionId
+								? (() => {
+										const summary = state.sessionsById.get(state.activeSessionId);
+										return summary ? sessionDisplayTitle(summary) : undefined;
+									})()
+								: undefined
+						}
+						sandboxHealth={
+							state.activeSessionId
+								? state.sessions.get(state.activeSessionId)?.sandboxHealth
+								: state.sandboxHealth
+						}
 						theme={theme}
 					/>
 				) : null}

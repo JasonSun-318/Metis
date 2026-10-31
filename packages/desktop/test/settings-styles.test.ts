@@ -87,35 +87,72 @@ describe("Settings visual states", () => {
 		expect(
 			selectors
 				.filter((selector) => selector.includes("auto-command-allowlist"))
-				.every((selector) => selector.includes(".auto-command-allowlist-page")),
+				.every(
+					(selector) =>
+						selector.includes(".auto-command-allowlist-page") ||
+						selector.includes(".auto-command-allowlist-section"),
+				),
 		).toBe(true);
 	});
 
 	it("renders the Auto command allowlist as one card with switch, chips, and banners", () => {
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-form").padding).toBe("12px 16px");
-		expect(rule('.auto-command-allowlist-page .auto-command-allowlist-form input[type="text"]').flex).toBe("1 1 0%");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle").display).toBe("inline-flex");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").width).toBe(
-			"var(--switch-width)",
-		);
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-toggle-track").height).toBe(
-			"var(--switch-height)",
-		);
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-form")
+				.padding,
+		).toBe("12px 16px");
 		expect(
 			rule(
-				".auto-command-allowlist-page .auto-command-allowlist-toggle input:checked + .auto-command-allowlist-toggle-track",
+				':is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-form input[type="text"]',
+			).flex,
+		).toBe("1 1 0%");
+		expect(
+			rule(
+				":is(.auto-command-allowlist-page, .auto-command-allowlist-section, .permission-auto-approval) .auto-command-allowlist-toggle",
+			).display,
+		).toBe("inline-flex");
+		expect(
+			rule(
+				":is(.auto-command-allowlist-page, .auto-command-allowlist-section, .permission-auto-approval) .auto-command-allowlist-toggle-track",
+			).width,
+		).toBe("var(--switch-width)");
+		expect(
+			rule(
+				":is(.auto-command-allowlist-page, .auto-command-allowlist-section, .permission-auto-approval) .auto-command-allowlist-toggle-track",
+			).height,
+		).toBe("var(--switch-height)");
+		expect(
+			rule(
+				":is(.auto-command-allowlist-page, .auto-command-allowlist-section, .permission-auto-approval) .auto-command-allowlist-toggle input:checked + .auto-command-allowlist-toggle-track",
 			).background,
 		).toBe("var(--accent)");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-rules").borderTop).toBe(
-			"1px solid var(--border-weak)",
-		);
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-chip").borderRadius).toBe("999px");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-chip > button").borderRadius).toBe("999px");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-empty").justifyItems).toBe("center");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-footer").borderTop).toBe(
-			"1px solid var(--border-weak)",
-		);
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-add-all").justifySelf).toBe("start");
-		expect(rule(".auto-command-allowlist-page .auto-command-allowlist-info svg").color).toBe("var(--text-14)");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-rules")
+				.borderTop,
+		).toBe("1px solid var(--border-weak)");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip")
+				.borderRadius,
+		).toBe("999px");
+		expect(
+			rule(
+				":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-chip > button",
+			).borderRadius,
+		).toBe("999px");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-empty")
+				.justifyItems,
+		).toBe("center");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-footer")
+				.borderTop,
+		).toBe("1px solid var(--border-weak)");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-add-all")
+				.justifySelf,
+		).toBe("start");
+		expect(
+			rule(":is(.auto-command-allowlist-page, .auto-command-allowlist-section) .auto-command-allowlist-info svg")
+				.color,
+		).toBe("var(--text-14)");
 	});
 });

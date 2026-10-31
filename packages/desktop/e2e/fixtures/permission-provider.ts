@@ -1,4 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from "node:http";
+import { readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
 import {
 	closeServer,
 	listen,
@@ -21,29 +23,55 @@ export interface PermissionProviderCall {
 	readonly model: string | undefined;
 	readonly thinking: unknown;
 	readonly tools: unknown;
+	readonly toolChoice: unknown;
+	readonly maxTokens: unknown;
+	/** Serialized request payload, used only for protocol/redaction assertions. */
+	readonly payload: string;
 	readonly hasRawSecret: boolean;
 }
 
+/** Independent Auto approval model seeded into the temporary agent settings. */
+export interface PermissionReviewerSeed {
+	readonly provider: string;
+	readonly modelId: string;
+	readonly thinkingLevel: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+	readonly timeoutMs: number;
+	readonly maxOutputTokens: number;
+	readonly enabled: boolean;
+}
+
+export interface PermissionAgentConfigOptions {
+	readonly providerId?: string;
+	readonly modelId?: string;
+	readonly reviewer?: PermissionReviewerSeed;
+	readonly extraSettings?: Record<string, unknown>;
+}
+
+export const DEFAULT_REVIEWER_PROVIDER = "permission-reviewer";
+export const DEFAULT_REVIEWER_MODEL = "reviewer-model";
+
+/** Final verdict contract of the review result tool: allow or deny, nothing else. */
 export type ReviewDecision = {
 	readonly decision: "allow" | "deny";
-	readonly assessedRisk: "low" | "medium" | "high" | "critical";
-	readonly userAuthorization: "unknown" | "low" | "medium" | "high";
-	readonly scopeComplete: boolean;
-	readonly rationale: string;
 };
 
 export type ReviewMode = "json" | "malformed" | "extra-keys" | "trailing-text" | "timeout" | "abort";
 
-const DEFAULT_DENY: ReviewDecision = {
-	decision: "deny",
-	assessedRisk: "medium",
-	userAuthorization: "unknown",
-	scopeComplete: true,
-	rationale: "Fixture denied the reviewed action.",
-};
+const DEFAULT_DENY: ReviewDecision = { decision: "deny" };
 
 function reviewJson(decision: ReviewDecision): string {
 	return JSON.stringify(decision);
+}
+
+async function mergeSettings(agentDir: string, extra: Record<string, unknown>): Promise<void> {
+	const file = path.join(agentDir, "settings.json");
+	let current: Record<string, unknown> = {};
+	try {
+		current = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
+	} catch {
+		current = {};
+	}
+	await writeFile(file, JSON.stringify({ ...current, ...extra }));
 }
 
 export class PermissionProvider {
@@ -74,12 +102,80 @@ export class PermissionProvider {
 		return this.calls.filter((call) => call.kind === "primary").length;
 	}
 
+	get reviewCalls(): readonly PermissionProviderCall[] {
+		return this.calls.filter((call) => call.kind === "review");
+	}
+
 	async listen(): Promise<number> {
 		return listen(this.server);
 	}
 
-	async writeAgentConfig(agentDir: string, port: number): Promise<void> {
-		await writeOfflineProviderConfig(agentDir, port);
+	/**
+	 * Seed the temporary agent directory. The reviewer provider is a distinct
+	 * provider/model unless the caller deliberately reuses one; tests assert the
+	 * request model rather than treating this fixture as a real model.
+	 */
+	async writeAgentConfig(agentDir: string, port: number, options: PermissionAgentConfigOptions = {}): Promise<void> {
+		const reviewer = options.reviewer;
+		if (!reviewer) {
+			await writeOfflineProviderConfig(agentDir, port, {
+				providerId: options.providerId,
+				modelId: options.modelId,
+			});
+			if (options.extraSettings) await mergeSettings(agentDir, options.extraSettings);
+			return;
+		}
+		const baseUrl = `http://127.0.0.1:${port}/v1`;
+		const providers = {
+			[options.providerId ?? "permission"]: {
+				baseUrl,
+				apiKey: "permission-key",
+				api: "openai-completions",
+				models: [
+					{
+						id: options.modelId ?? "permission-model",
+						name: "Permission Model",
+						contextWindow: 128_000,
+						maxTokens: 4_096,
+						reasoning: true,
+					},
+				],
+			},
+			[reviewer.provider]: {
+				baseUrl,
+				apiKey: "reviewer-key",
+				api: "openai-completions",
+				models: [
+					{
+						id: reviewer.modelId,
+						name: "Reviewer Model",
+						contextWindow: 128_000,
+						maxTokens: 4_096,
+						reasoning: reviewer.thinkingLevel !== "off",
+					},
+				],
+			},
+		};
+		await Promise.all([
+			writeFile(path.join(agentDir, "models.json"), JSON.stringify({ providers })),
+			writeFile(
+				path.join(agentDir, "settings.json"),
+				JSON.stringify({
+					defaultProvider: options.providerId ?? "permission",
+					defaultModel: options.modelId ?? "permission-model",
+					retry: { enabled: false },
+					autoReviewerEnabled: reviewer.enabled,
+					permissionReviewer: {
+						provider: reviewer.provider,
+						modelId: reviewer.modelId,
+						thinkingLevel: reviewer.thinkingLevel,
+						timeoutMs: reviewer.timeoutMs,
+						maxOutputTokens: reviewer.maxOutputTokens,
+					},
+					...(options.extraSettings ?? {}),
+				}),
+			),
+		]);
 	}
 
 	async close(): Promise<void> {
@@ -105,6 +201,9 @@ export class PermissionProvider {
 				model: body.model,
 				thinking: body.reasoning_effort ?? body.thinking ?? body.reasoning,
 				tools: body.tools,
+				toolChoice: body.tool_choice,
+				maxTokens: body.max_tokens ?? body.max_completion_tokens,
+				payload: transcript,
 				hasRawSecret,
 			});
 		};
@@ -151,8 +250,9 @@ export class PermissionProvider {
 		record("primary");
 		const last = payload.messages?.at(-1);
 		const marker = lastUserText.match(/case-[a-z0-9-]+/u)?.[0] ?? "plain";
+		const completionMarker = lastUserText.match(/case-[^\r\n]*/u)?.[0]?.trim() ?? "plain";
 		if (last?.role === "tool") {
-			respondWithText(response, `done:${marker}`);
+			respondWithText(response, `done:${completionMarker}`);
 			return;
 		}
 		const tool = this.tools(lastUserText);
@@ -164,7 +264,7 @@ export class PermissionProvider {
 			});
 			return;
 		}
-		respondWithText(response, `done:${marker}`);
+		respondWithText(response, `done:${completionMarker}`);
 	}
 
 	private isReviewRequest(transcript: string, tools: unknown, lastUserText: string): boolean {
@@ -184,6 +284,9 @@ export class PermissionProvider {
 interface OpenAiChatBody {
 	readonly model?: string;
 	readonly tools?: unknown;
+	readonly tool_choice?: unknown;
+	readonly max_tokens?: unknown;
+	readonly max_completion_tokens?: unknown;
 	readonly reasoning_effort?: unknown;
 	readonly thinking?: unknown;
 	readonly reasoning?: unknown;

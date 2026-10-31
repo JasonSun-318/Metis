@@ -2,10 +2,17 @@ import { createContext, type ReactNode, useContext } from "react";
 import type { AgentConversationTarget } from "../conversation-target.ts";
 import { ConversationQuoteProvider } from "./ConversationQuoteContext.tsx";
 
+export interface PermissionRuleReference {
+	readonly id: string;
+	readonly name: string;
+	readonly scope: string;
+}
+
 export interface ConversationScope {
 	readonly rootSessionId?: string;
 	readonly openAgent?: (target: AgentConversationTarget) => void;
 	readonly openParent?: () => void;
+	readonly viewPermissionRule?: (rule: PermissionRuleReference) => void;
 }
 export const ConversationScopeContext = createContext<ConversationScope>({});
 export function useConversationScope(): ConversationScope {

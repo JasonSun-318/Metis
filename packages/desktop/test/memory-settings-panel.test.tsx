@@ -146,6 +146,7 @@ function makeApi(overrides: Partial<MetisDesktopApi> = {}) {
 			vision: null,
 			defaultThinkingSelection: "off",
 			providers: [],
+			permissionReviewer: { config: null, status: "unconfigured" },
 			loadError: null,
 		} satisfies ModelSettingsView),
 		...overrides,
@@ -604,6 +605,7 @@ describe("MemorySettingsPanel", () => {
 				vision: null,
 				defaultThinkingSelection: "off",
 				loadError: null,
+				permissionReviewer: { config: null, status: "unconfigured" },
 				providers: [
 					{
 						provider: "openai",

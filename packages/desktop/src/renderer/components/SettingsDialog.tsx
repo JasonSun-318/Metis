@@ -1,3 +1,4 @@
+import type { ModelSettingsView, PermissionPresetView, SessionSnapshot } from "@metis/app-protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { MetisDesktopApi } from "../../shared/desktop-api.ts";
@@ -15,12 +16,12 @@ import {
 } from "../icons.tsx";
 import type { AppTheme } from "../theme.ts";
 import { AgentTypesSettingsPanel } from "./AgentTypesSettingsPanel.tsx";
-import { AutoCommandAllowlistPanel } from "./AutoCommandAllowlistPanel.tsx";
 import { BrowserSettingsPanel } from "./BrowserSettingsPanel.tsx";
 import { trapDialogTab } from "./dialog-focus.ts";
 import { GeneralPanel } from "./GeneralPanel.tsx";
 import { MemorySettingsPanel } from "./MemorySettingsPanel.tsx";
 import { ModelSettingsPanel } from "./ModelSettingsPanel.tsx";
+import { PermissionSettingsPanel } from "./PermissionSettingsPanel.tsx";
 import { PersonalizationPanel } from "./PersonalizationPanel.tsx";
 import { ProfilePanel } from "./ProfilePanel.tsx";
 
@@ -44,6 +45,11 @@ export function SettingsDialog({
 	onThemeChange,
 	serverReady,
 	sessionId,
+	permissionPreset,
+	permissionRuleFocus,
+	sandboxHealth,
+	sessionCwd,
+	sessionTitle,
 	theme,
 }: {
 	readonly api: MetisDesktopApi;
@@ -54,10 +60,15 @@ export function SettingsDialog({
 	readonly onThemeChange: (theme: AppTheme) => void;
 	readonly serverReady: boolean;
 	readonly sessionId?: string;
+	readonly permissionPreset?: PermissionPresetView;
+	readonly permissionRuleFocus?: { readonly id: string; readonly scope?: string } | null;
+	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
+	readonly sessionCwd?: string | null;
+	readonly sessionTitle?: string;
 	readonly theme: AppTheme;
 }) {
 	const { t } = useTranslation();
-	const [page, setPage] = useState<SettingsPage>("profile");
+	const [page, setPage] = useState<SettingsPage>(permissionRuleFocus ? "permissions" : "profile");
 	const [closing, setClosing] = useState(false);
 	const [dirty, setDirty] = useState(false);
 	const [pendingDestination, setPendingDestination] = useState<SettingsPage | "close" | null>(null);
@@ -65,6 +76,10 @@ export function SettingsDialog({
 	const dialogRef = useRef<HTMLDivElement>(null);
 	const firstNavRef = useRef<HTMLButtonElement>(null);
 	const pageScrollRef = useRef<HTMLDivElement>(null);
+	const modelSettingsRef = useRef<ModelSettingsView | null>(null);
+	const cacheModelSettings = useCallback((settings: ModelSettingsView) => {
+		modelSettingsRef.current = settings;
+	}, []);
 	const closingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 	const delay =
@@ -92,6 +107,9 @@ export function SettingsDialog({
 	useEffect(() => {
 		firstNavRef.current?.focus();
 	}, []);
+	useEffect(() => {
+		if (permissionRuleFocus) setPage("permissions");
+	}, [permissionRuleFocus]);
 	useEffect(() => {
 		if (!pendingDestination) return;
 		const dialog = unsavedDialog.current!;
@@ -189,7 +207,7 @@ export function SettingsDialog({
 		{
 			id: "permissions" as const,
 			label: "Permissions",
-			description: "Control which simple commands Auto mode can run without review.",
+			description: "Manage Auto approvals, command rules, remembered permissions, and the execution environment.",
 			icon: ShieldCheck,
 		},
 		{
@@ -262,7 +280,7 @@ export function SettingsDialog({
 						</div>
 					</header>
 					<div className={`settings-page-scroll settings-page-scroll-${page}`} ref={pageScrollRef}>
-						<div className="settings-page-mount" key={page}>
+						<div className="settings-page-mount">
 							{page === "general" ? (
 								<GeneralPanel
 									api={api}
@@ -275,7 +293,13 @@ export function SettingsDialog({
 								/>
 							) : null}
 							{page === "model" ? (
-								<ModelSettingsPanel api={api} onDirtyChange={setDirty} serverReady={serverReady} />
+								<ModelSettingsPanel
+									api={api}
+									initialSettings={modelSettingsRef.current ?? undefined}
+									onSettingsChange={cacheModelSettings}
+									onDirtyChange={setDirty}
+									serverReady={serverReady}
+								/>
 							) : null}
 							{page === "personalization" ? (
 								<PersonalizationPanel onDirtyChange={setDirty} api={api} serverReady={serverReady} />
@@ -290,7 +314,20 @@ export function SettingsDialog({
 								/>
 							) : null}
 							{page === "agentTypes" ? <AgentTypesSettingsPanel api={api} serverReady={serverReady} /> : null}
-							{page === "permissions" ? <AutoCommandAllowlistPanel api={api} serverReady={serverReady} /> : null}
+							{page === "permissions" ? (
+								<PermissionSettingsPanel
+									api={api}
+									focusRuleId={permissionRuleFocus?.id}
+									focusRuleScope={permissionRuleFocus?.scope}
+									onOpenBrowserSettings={() => setPage("browser")}
+									permissionPreset={permissionPreset}
+									sandboxHealth={sandboxHealth}
+									serverReady={serverReady}
+									sessionCwd={sessionCwd}
+									sessionId={sessionId}
+									sessionTitle={sessionTitle}
+								/>
+							) : null}
 							{page === "browser" ? <BrowserSettingsPanel api={api} /> : null}
 							{page === "profile" || page === "usage" ? (
 								<ProfilePanel

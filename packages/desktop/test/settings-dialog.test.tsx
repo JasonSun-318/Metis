@@ -23,6 +23,7 @@ const modelSettings: ModelSettingsView = {
 	defaultModel: { provider: "openai", modelId: "gpt-5" },
 	vision: null,
 	defaultThinkingSelection: "high",
+	permissionReviewer: { config: null, status: "unconfigured" },
 	providers: [
 		{
 			provider: "openai",
@@ -135,6 +136,60 @@ const memorySettings = {
 };
 
 describe("SettingsDialog", () => {
+	it("reuses loaded model settings during a pending refresh without remounting the page shell", async () => {
+		let resolveRefresh!: (settings: ModelSettingsView) => void;
+		const getModelSettings = vi
+			.fn()
+			.mockResolvedValueOnce(modelSettings)
+			.mockImplementationOnce(
+				() =>
+					new Promise<ModelSettingsView>((resolve) => {
+						resolveRefresh = resolve;
+					}),
+			)
+			.mockRejectedValueOnce(new Error("refresh unavailable"));
+		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
+			getModelSettings,
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () =>
+				root.render(
+					<SettingsDialog
+						api={api}
+						generalPreferences={generalPreferences}
+						onClose={vi.fn()}
+						onGeneralPreferencesChange={vi.fn()}
+						onThemeChange={vi.fn()}
+						serverReady
+						theme="dark"
+					/>,
+				),
+			);
+			const shell = container.querySelector(".settings-page-mount");
+			await act(async () => button(container, "Model").click());
+			expect(container.textContent).toContain("GPT-5");
+			await act(async () => button(container, "Profile").click());
+			await act(async () => button(container, "Model").click());
+			expect(getModelSettings).toHaveBeenCalledTimes(2);
+			expect(container.querySelector(".settings-page-mount")).toBe(shell);
+			expect(container.querySelector('[aria-label="Loading model settings"]')).toBeNull();
+			expect(container.textContent).toContain("GPT-5");
+			const refreshed = { ...modelSettings, defaultThinkingSelection: "low" as const };
+			await act(async () => resolveRefresh(refreshed));
+			expect(container.querySelector(".model-default-summary")?.textContent).toContain("Low");
+			await act(async () => button(container, "Profile").click());
+			await act(async () => button(container, "Model").click());
+			expect(container.textContent).toContain("GPT-5");
+			expect(container.querySelector('[role="alert"]')?.textContent).toContain("refresh unavailable");
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
+
 	it("protects an unsaved personalization draft and keeps navigation focus", async () => {
 		const api = {
 			getProfile: vi.fn().mockResolvedValue(profileSummary),
@@ -282,10 +337,17 @@ describe("SettingsDialog", () => {
 	});
 
 	it("opens the global Permissions page without a session or project", async () => {
-		const getPermissionAutoSettings = vi.fn().mockResolvedValue({ rules: [], suggestions: ["ls"] });
+		const getPermissionAutoSettings = vi
+			.fn()
+			.mockResolvedValue({ reviewerEnabled: false, rules: [], suggestions: ["ls"] });
 		const api = {
 			getProfile: vi.fn().mockResolvedValue(profileSummary),
 			getPermissionAutoSettings,
+			getModelSettings: vi
+				.fn()
+				.mockResolvedValue({ ...modelSettings, permissionReviewer: { config: null, status: "unconfigured" } }),
+			listRememberedPermissionRules: vi.fn().mockResolvedValue({ groups: [] }),
+			installWorkspaceSandbox: vi.fn().mockResolvedValue("unsupported"),
 			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
 		} as unknown as MetisDesktopApi;
 		const container = document.createElement("div");
@@ -308,11 +370,51 @@ describe("SettingsDialog", () => {
 		expect(getPermissionAutoSettings).not.toHaveBeenCalled();
 		await act(async () => button(container, "Permissions").click());
 		await flush();
-		expect(getPermissionAutoSettings).toHaveBeenCalledTimes(1);
-		expect(getPermissionAutoSettings.mock.calls[0]).toEqual([]);
-		expect(container.querySelector(".auto-command-allowlist-page")).not.toBeNull();
-		expect(container.textContent).toContain("Command allowlist");
-		expect(container.textContent).not.toContain("sessionId");
+		expect(getPermissionAutoSettings).toHaveBeenCalled();
+		expect(container.querySelector(".permission-settings-page")).not.toBeNull();
+		expect(container.textContent).toContain("Auto model approvals");
+		expect(container.textContent).toContain("Allowed commands");
+		expect(container.textContent).toContain("Remembered permissions");
+		expect(container.querySelector(".permission-execution-environment")).not.toBeNull();
+		expect(api.listRememberedPermissionRules).toHaveBeenCalled();
+		await act(async () => root.unmount());
+	});
+
+	it("opens the same approval model dialog from the Permissions page", async () => {
+		const api = {
+			getProfile: vi.fn().mockResolvedValue(profileSummary),
+			getPermissionAutoSettings: vi.fn().mockResolvedValue({ reviewerEnabled: false, rules: [], suggestions: [] }),
+			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
+			listRememberedPermissionRules: vi.fn().mockResolvedValue({ groups: [] }),
+			installWorkspaceSandbox: vi.fn().mockResolvedValue("unsupported"),
+			getWebSearchSettings: vi.fn().mockResolvedValue({ enabled: false, provider: "brave", authConfigured: false }),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		await act(async () =>
+			root.render(
+				<SettingsDialog
+					api={api}
+					generalPreferences={generalPreferences}
+					onClose={vi.fn()}
+					onGeneralPreferencesChange={vi.fn()}
+					onThemeChange={vi.fn()}
+					serverReady
+					theme="dark"
+				/>,
+			),
+		);
+		await flush();
+		await act(async () => button(container, "Permissions").click());
+		await flush();
+		await act(async () => button(container, "Configure approval model").click());
+		await flush();
+		expect(container.querySelector(".reviewer-model-section")).toBeNull();
+		const dialog = container.querySelector("dialog");
+		expect(dialog).not.toBeNull();
+		expect(dialog?.getAttribute("aria-label")).toBe("Approval model");
+		expect(dialog?.textContent).toContain("Save approval model");
 		await act(async () => root.unmount());
 	});
 
@@ -427,6 +529,37 @@ describe("SettingsDialog", () => {
 	});
 });
 
+// The editor stays open after save, so the RPC fixture must include the saved provider.
+function savedProviderResponse(
+	settings: ModelSettingsView,
+	{ mutation }: Parameters<MetisDesktopApi["updateModelSettings"]>[0],
+): ModelSettingsView {
+	if (mutation.type !== "save_provider" || !mutation.baseUrl) return settings;
+	return {
+		...settings,
+		providers: [
+			...settings.providers.filter((provider) => provider.provider !== mutation.provider),
+			{
+				provider: mutation.provider,
+				name: mutation.name,
+				builtin: false,
+				baseUrl: mutation.baseUrl,
+				api: mutation.api,
+				auth: { configured: true, source: "stored" },
+				models: mutation.models.map((model) => ({
+					...model,
+					provider: mutation.provider,
+					custom: true,
+					reasoning: model.reasoningMode !== "off",
+					reasoningSource:
+						model.reasoningMode === "manual" ? "manual" : model.reasoningMode === "off" ? "off" : "generic",
+					thinkingLevels: ["off"],
+				})),
+			},
+		],
+	};
+}
+
 describe("Model settings workflows", () => {
 	const roots: ReturnType<typeof createRoot>[] = [];
 	afterEach(async () => {
@@ -435,7 +568,9 @@ describe("Model settings workflows", () => {
 	async function mount(settings = modelSettings, overrides: Partial<MetisDesktopApi> = {}) {
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(settings),
-			updateModelSettings: vi.fn().mockResolvedValue(settings),
+			updateModelSettings: vi
+				.fn()
+				.mockImplementation((request) => Promise.resolve(savedProviderResponse(settings, request))),
 			testModelConnection: vi.fn().mockResolvedValue({ ok: true, message: "OK", latencyMs: 7 }),
 			discoverModels: vi.fn().mockResolvedValue({ models: [] }),
 			...overrides,
@@ -466,8 +601,11 @@ describe("Model settings workflows", () => {
 		};
 		const { container, api } = await mount(settings);
 		expect(container.querySelector(".model-default-summary")?.textContent).toContain("GPT-5");
-		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
-		const dialog = container.querySelector(".model-provider-dialog")!;
+		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(0);
+		await act(async () => button(container, "Add provider").click());
+		const catalog = container.querySelector(".model-provider-catalog-dialog")!;
+		await act(async () => catalog.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
+		const dialog = container.querySelector(".model-built-in-provider-dialog")!;
 		expect(dialog.querySelector(".model-catalog-section")?.textContent).toContain("gpt-5");
 		expect(dialog.textContent).toContain("400000");
 		expect(dialog.textContent).toContain("Text and image input");
@@ -486,9 +624,7 @@ describe("Model settings workflows", () => {
 		expect(testModelConnection).not.toHaveBeenCalled();
 		await act(async () => setValue(container.querySelector('input[type="password"]')!, ""));
 		await act(async () => button(container, "Test connection").click());
-		expect(container.querySelector('[role="alert"]')?.textContent).toContain(
-			"Connection failed · 9 ms · Permission denied",
-		);
+		expect(container.querySelector('[role="alert"]')?.textContent).toContain("9 ms · Permission denied");
 		expect(container.querySelector(".settings-action-message:not(.error)")).toBeNull();
 	});
 	it("discovers before saving, adds only selected models and preserves manual edits", async () => {
@@ -646,10 +782,57 @@ describe("Model settings workflows", () => {
 			"High",
 		]);
 	});
+	it("opens a compact approval model dialog without editing shared providers", async () => {
+		const { container, api } = await mount();
+		const reviewer = container.querySelector(".reviewer-model-section")!;
+		expect(reviewer.textContent).toContain("Approval model");
+		expect(reviewer.textContent).not.toMatch(/enable auto/i);
+		expect(reviewer.querySelector("input[role='switch']")).toBeNull();
+		expect(reviewer.querySelector("input[type='password']")).toBeNull();
+		expect(reviewer.textContent).not.toContain("Add provider");
+		expect(reviewer.textContent).not.toContain("Edit provider");
+		expect(button(reviewer, "Configure")).toBeTruthy();
+
+		await act(async () => button(reviewer, "Configure").click());
+		const dialog = container.querySelector(".reviewer-model-dialog");
+		expect(dialog).not.toBeNull();
+		expect(dialog?.textContent).toContain("Connection type");
+		expect(dialog?.textContent).toContain("Existing provider");
+		await act(async () => dialog!.querySelector<HTMLButtonElement>(".model-provider-dialog-close")!.click());
+		expect(container.querySelector(".reviewer-model-dialog")).toBeNull();
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+	});
+	it("routes reviewer dialog cancellation through the existing unsaved-changes flow", async () => {
+		const { container, api } = await mount();
+		const reviewer = container.querySelector(".reviewer-model-section")!;
+		await act(async () => button(reviewer, "Configure").click());
+		await act(async () => button(container, "Approval reasoning").click());
+		await act(async () => {
+			Array.from(container.querySelectorAll<HTMLElement>('[role="option"]'))
+				.find((option) => option.textContent?.trim() === "Low")!
+				.click();
+		});
+
+		await act(async () => button(container, "Cancel").click());
+		expect(container.querySelector(".settings-unsaved-dialog")).not.toBeNull();
+		await act(async () => button(container, "Keep editing").click());
+		expect(container.querySelector(".settings-unsaved-dialog")).toBeNull();
+		expect(container.querySelector(".reviewer-model-dialog")).not.toBeNull();
+		expect(button(container, "Approval reasoning").textContent).toContain("Low");
+
+		await act(async () => button(container, "Cancel").click());
+		await act(async () => button(container, "Discard changes").click());
+		expect(container.querySelector(".reviewer-model-dialog")).toBeNull();
+		expect(api.updateModelSettings).not.toHaveBeenCalled();
+
+		const reopened = container.querySelector(".reviewer-model-section")!;
+		await act(async () => button(reopened, "Configure").click());
+		expect(button(container, "Approval reasoning").textContent).toContain("Off");
+	});
 });
 
 describe("ModelSettingsPanel", () => {
-	it("keeps configured providers visible and searches the optional provider catalog", async () => {
+	it("keeps configured providers visible and searches the paginated provider catalog", async () => {
 		const unconfigured = {
 			...modelSettings.providers[0]!,
 			provider: "anthropic",
@@ -665,22 +848,25 @@ describe("ModelSettingsPanel", () => {
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
-		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
-		expect(container.textContent).toContain("Specialized models");
-		act(() => button(container, "Hide provider catalog").click());
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
-		act(() => button(container, "Show provider catalog").click());
-		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(2);
-		act(() => setValue(container.querySelector('input[type="search"]')!, "no match"));
-		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(0);
-		expect(container.textContent).toContain("No providers match your search.");
-		act(() => setValue(container.querySelector('input[type="search"]')!, "anthropic"));
-		expect(container.querySelector(".model-provider-catalog")?.textContent).toContain("Anthropic");
+		expect(container.textContent).toContain("Specialized models");
+		await act(async () => button(container, "Add provider").click());
+		const catalog = container.querySelector(".model-provider-catalog-dialog")!;
+		expect(catalog.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(catalog.textContent).toContain("Anthropic");
+		act(() => setValue(catalog.querySelector('input[type="search"]')!, "no match"));
+		expect(catalog.querySelectorAll(".model-provider-card")).toHaveLength(0);
+		expect(catalog.textContent).toContain("No providers match your search.");
+		act(() => setValue(catalog.querySelector('input[type="search"]')!, "anthropic"));
+		expect(catalog.querySelectorAll(".model-provider-card")).toHaveLength(1);
+		expect(catalog.textContent).toContain("Anthropic");
 		await act(async () => root.unmount());
 	});
 
 	it("opens a built-in provider as a credential-first form", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const testModelConnection = vi
 			.fn()
 			.mockResolvedValue({ ok: true, message: "Connection succeeded", latencyMs: 42 });
@@ -694,9 +880,11 @@ describe("ModelSettingsPanel", () => {
 		const root = createRoot(container);
 		await act(async () => root.render(<ModelSettingsPanel api={api} serverReady />));
 		await flush();
-		expect(container.querySelector(".model-provider-intro")?.textContent).toContain(
-			"Manage your connected providers",
-		);
+		expect(
+			[...container.querySelectorAll(".model-provider-intro")].some((intro) =>
+				intro.textContent?.includes("Manage your connected providers"),
+			),
+		).toBe(true);
 		expect(container.querySelector(".model-settings-page h2")?.textContent).not.toBe("Providers");
 		expect(container.querySelectorAll(".model-provider-card")).toHaveLength(1);
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
@@ -742,7 +930,8 @@ describe("ModelSettingsPanel", () => {
 		expect(testModelConnection).toHaveBeenCalledWith(
 			expect.objectContaining({ provider: "openai", modelId: "gpt-5" }),
 		);
-		expect(container.textContent).toContain("Connection succeeded · 42 ms");
+		expect(container.querySelector(".system-notice")?.textContent).toContain("Connection succeeded");
+		expect(container.querySelector(".system-notice")?.textContent).toContain("42 ms");
 		await act(async () => button(container, "Clear credentials").click());
 		expect(updateModelSettings).not.toHaveBeenLastCalledWith(
 			expect.objectContaining({ mutation: expect.objectContaining({ credential: { action: "remove" } }) }),
@@ -826,7 +1015,9 @@ describe("ModelSettingsPanel", () => {
 	});
 
 	it("adds a custom provider with base URL, API format, key, and multiple models", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings,
@@ -1003,7 +1194,9 @@ describe("ModelSettingsPanel", () => {
 				},
 			],
 		};
-		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(customSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(customSettings),
 			updateModelSettings,
@@ -1047,7 +1240,7 @@ describe("ModelSettingsPanel", () => {
 			}),
 		);
 
-		// 改名后保存：显示名更新，provider id 与已有凭据保持不变；保存成功后 dialog 关闭
+		// 保存后保持编辑器打开，方便继续测试；provider id 与凭据不变。
 		const nameInput = editor.querySelector<HTMLInputElement>('input[placeholder="my-provider"]')!;
 		await act(async () => {
 			setValue(nameInput, "My Custom Renamed");
@@ -1063,7 +1256,8 @@ describe("ModelSettingsPanel", () => {
 				}),
 			}),
 		);
-		expect(container.querySelector(".model-custom-provider-dialog")).toBeNull();
+		expect(container.querySelector(".model-custom-provider-dialog")).not.toBeNull();
+		await act(async () => button(container, "Close provider settings").click());
 
 		// 重新打开并移除
 		await act(async () => container.querySelector<HTMLButtonElement>(".model-provider-card")!.click());
@@ -1080,7 +1274,9 @@ describe("ModelSettingsPanel", () => {
 	});
 
 	it("marks a custom model as image-capable when the Image input toggle is checked", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings,
@@ -1159,7 +1355,9 @@ describe("ModelSettingsPanel", () => {
 				},
 			],
 		};
-		const updateModelSettings = vi.fn().mockResolvedValue(customSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(customSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(customSettings),
 			updateModelSettings,
@@ -1181,7 +1379,9 @@ describe("ModelSettingsPanel", () => {
 	});
 
 	it("rejects a custom provider name that collides with an existing provider", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings,
@@ -1215,7 +1415,9 @@ describe("ModelSettingsPanel", () => {
 	});
 
 	it("rejects duplicate model IDs within a custom provider", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings,
@@ -1252,7 +1454,9 @@ describe("ModelSettingsPanel", () => {
 	});
 
 	it("opens only one provider dialog at a time", async () => {
-		const updateModelSettings = vi.fn().mockResolvedValue(modelSettings);
+		const updateModelSettings = vi
+			.fn()
+			.mockImplementation((request) => Promise.resolve(savedProviderResponse(modelSettings, request)));
 		const api = {
 			getModelSettings: vi.fn().mockResolvedValue(modelSettings),
 			updateModelSettings,
