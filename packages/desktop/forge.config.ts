@@ -2,9 +2,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { access, chmod, cp, mkdir, rm } from "node:fs/promises";
 import { type FuseConfig, FuseV1Options, FuseVersion, flipFuses } from "@electron/fuses";
-import { MakerDeb } from "@electron-forge/maker-deb";
 import { MakerDMG, type MakerDMGConfig } from "@electron-forge/maker-dmg";
-import { MakerRpm } from "@electron-forge/maker-rpm";
 import { MakerSquirrel } from "@electron-forge/maker-squirrel";
 import { MakerZIP } from "@electron-forge/maker-zip";
 import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
@@ -243,11 +241,6 @@ const config: ForgeConfig = {
 		// APFS avoids appdmg's legacy `bless --openfolder` path, which fails when
 		// an x64 Node process runs under Rosetta on Apple Silicon.
 		new MakerDMG(apfsDmgConfig),
-		// `bin` must match packagerConfig.executableName: the deb/rpm makers
-		// otherwise derive the binary path from the scoped package name
-		// (@metis/desktop), which does not exist inside the packaged app.
-		new MakerDeb({ options: { bin: "Metis", icon: path.join(desktopRoot, "assets", "metis.png") } }),
-		new MakerRpm({ options: { bin: "Metis", license: "MIT", icon: path.join(desktopRoot, "assets", "metis.png") } }),
 	],
 	plugins: [
 		new AutoUnpackNativesPlugin({}),
