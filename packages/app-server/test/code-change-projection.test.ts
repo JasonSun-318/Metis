@@ -11,6 +11,11 @@ const codeChanges = {
 };
 
 describe("Code change projection", () => {
+	it("accepts an optional bounded net file snapshot while preserving legacy metadata", () => {
+		const next = { ...codeChanges, turnFiles: [{ path: "app.ts", kind: "modified", additions: 1, deletions: 1 }] };
+		expect(projectCodeChanges({ codeChanges: next })).toEqual(next);
+		expect(projectCodeChanges({ codeChanges })).toEqual(codeChanges);
+	});
 	it("preserves the same historical diff and turn net counts in live and journal items, including errors", () => {
 		const timestamp = "2026-10-16T12:00:00.000Z";
 		const message = {

@@ -6,6 +6,7 @@ import {
 } from "@pierre/diffs/react";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { type CodeTextCounts, codeFileName, isTextCodeChange } from "./code-change-summary.ts";
 import { parseToolFileDiff } from "./tool-code-diff.ts";
 
 const DIFF_OPTIONS: NonNullable<React.ComponentProps<typeof DiffViewer>["options"]> = {
@@ -16,6 +17,12 @@ const DIFF_OPTIONS: NonNullable<React.ComponentProps<typeof DiffViewer>["options
 	hunkSeparators: "simple",
 	lineDiffType: "word-alt",
 	overflow: "scroll",
+	unsafeCSS: `
+		[data-column-number] { --mix-dark: 80%; --mix-light: 88%; border-right: 0; }
+		[data-indicators="bars"] [data-column-number][data-line-type="change-deletion"]::before {
+			background-image: none; background-color: var(--diffs-deletion-base);
+		}
+	`,
 };
 
 const DIFF_WORKER_POOL = {
@@ -30,33 +37,37 @@ const DIFF_HIGHLIGHTER: WorkerInitializationRenderOptions = {
 	langs: ["bash", "css", "html", "javascript", "json", "markdown", "python", "tsx", "typescript", "yaml"],
 };
 
-interface ChangeCounts {
-	readonly additions?: number;
-	readonly deletions?: number;
-	readonly partial?: boolean;
-}
-
-export function codeStepCounts(changes: CodeChangesView): ChangeCounts {
-	const counted = changes.files.filter((file) => file.additions !== undefined && file.deletions !== undefined);
+export function codeStepCounts(changes: CodeChangesView): CodeTextCounts {
+	const files = changes.files.filter(isTextCodeChange);
+	const counted = files.filter(
+		(file) => !file.unavailable && file.additions !== undefined && file.deletions !== undefined,
+	);
 	return {
-		...(counted.length > 0 || changes.files.length === 0
+		...(counted.length > 0 || files.length === 0
 			? {
 					additions: counted.reduce((total, file) => total + file.additions!, 0),
 					deletions: counted.reduce((total, file) => total + file.deletions!, 0),
 				}
 			: {}),
-		partial: changes.partial || counted.length < changes.files.length,
+		partial: changes.partial || counted.length < files.length,
 	};
 }
 
-export function CodeChangeCounts({ counts, turn = false }: { readonly counts: ChangeCounts; readonly turn?: boolean }) {
+export function CodeChangeCounts({
+	counts,
+	turn = false,
+}: {
+	readonly counts: CodeTextCounts;
+	readonly turn?: boolean;
+}) {
 	const { t } = useTranslation();
+	if (counts.additions === undefined || counts.deletions === undefined) return null;
 	return (
 		<span
 			className={`code-change-counts${turn ? " code-turn-change-counts" : ""}`}
 			title={t(
 				counts.partial
-					? "Some file changes could not be counted"
+					? "Recorded text changes; some text files or historical net counts are unavailable"
 					: turn
 						? "Net changes in this turn"
 						: "Changes made by this step",
@@ -64,22 +75,19 @@ export function CodeChangeCounts({ counts, turn = false }: { readonly counts: Ch
 		>
 			<span className="sr-only">
 				{t("{{additions}} lines added, {{deletions}} lines removed", {
-					additions: counts.additions ?? "—",
-					deletions: counts.deletions ?? "—",
+					additions: counts.additions,
+					deletions: counts.deletions,
 				})}
-				{counts.partial ? ` (${t("Some file changes could not be counted")})` : ""}
+				{counts.partial
+					? ` (${t("Recorded text changes; some text files or historical net counts are unavailable")})`
+					: ""}
 			</span>
 			<span className="code-change-additions" aria-hidden="true">
-				+{counts.additions ?? "—"}
+				+{counts.additions}
 			</span>
 			<span className="code-change-deletions" aria-hidden="true">
-				−{counts.deletions ?? "—"}
+				−{counts.deletions}
 			</span>
-			{counts.partial && (
-				<span className="code-change-incomplete" aria-hidden="true">
-					*
-				</span>
-			)}
 		</span>
 	);
 }
@@ -90,19 +98,20 @@ function FileDiff({ file }: { readonly file: CodeFileChangeView }) {
 	return (
 		<div className="code-file-change">
 			<div className="code-file-change-header">
-				<span title={file.path}>{file.path}</span>
-				<CodeChangeCounts counts={file} />
+				<span title={file.path}>{codeFileName(file.path)}</span>
 			</div>
 			{diff ? (
 				<section className="code-file-diff" aria-label={t("Diff for {{path}}", { path: file.path })}>
 					<DiffViewer fileDiff={diff} options={DIFF_OPTIONS} />
 				</section>
 			) : null}
-			{(file.binary || file.unavailable || file.truncated || !diff) && (
+			{(file.unavailable || file.truncated || !diff) && (
 				<p className="code-diff-notice">
 					{t(
-						file.binary
-							? "Binary file changed"
+						!file.unavailable && !diff && file.additions === 0 && file.deletions === 0
+							? file.kind === "added"
+								? "Created an empty file"
+								: "No text line changes"
 							: file.unavailable || (!diff && !file.truncated)
 								? "Diff unavailable for this file"
 								: "Diff preview truncated; line counts include the full change",
@@ -114,14 +123,12 @@ function FileDiff({ file }: { readonly file: CodeFileChangeView }) {
 }
 
 export function ToolCodeChanges({ changes }: { readonly changes: CodeChangesView }) {
-	const { t } = useTranslation();
 	return (
 		<WorkerPoolContextProvider poolOptions={DIFF_WORKER_POOL} highlighterOptions={DIFF_HIGHLIGHTER}>
 			<div className="code-tool-changes">
-				{changes.files.map((file) => (
+				{changes.files.filter(isTextCodeChange).map((file) => (
 					<FileDiff key={file.path} file={file} />
 				))}
-				{changes.partial && <p className="code-diff-notice">{t("Some file changes could not be counted")}</p>}
 			</div>
 		</WorkerPoolContextProvider>
 	);

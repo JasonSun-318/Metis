@@ -9,6 +9,7 @@ export interface SessionProjectionView {
 	readonly revision: number;
 	readonly session: SessionSummary | undefined;
 	readonly interaction: InteractionView | undefined;
+	readonly interactions: readonly InteractionView[];
 	readonly interactionsById: ReadonlyMap<string, InteractionView>;
 	readonly serverEpoch: string | null;
 	readonly serverReady: boolean;
@@ -48,6 +49,10 @@ function selectSessionView(snapshot: AppStoreSnapshot, sessionId: string): Sessi
 		bucket,
 		revision: bucket?.revision ?? -1,
 		session: snapshot.sessionsById.get(sessionId),
+		interactions: snapshot.interactionOrder.flatMap((id) => {
+			const request = snapshot.interactionsById.get(id);
+			return request && (request.actorSessionId ?? request.sessionId) === sessionId ? [request] : [];
+		}),
 		interaction: firstInteractionForSession(snapshot.interactionOrder, snapshot.interactionsById, sessionId),
 		interactionsById: snapshot.interactionsById,
 		serverEpoch: snapshot.serverEpoch,
@@ -61,6 +66,8 @@ function sameSessionView(left: SessionProjectionView, right: SessionProjectionVi
 		left.revision === right.revision &&
 		left.session === right.session &&
 		left.interaction === right.interaction &&
+		left.interactions.length === right.interactions.length &&
+		left.interactions.every((request, index) => request === right.interactions[index]) &&
 		left.interactionsById === right.interactionsById &&
 		left.serverEpoch === right.serverEpoch &&
 		left.serverReady === right.serverReady

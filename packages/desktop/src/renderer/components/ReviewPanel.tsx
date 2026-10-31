@@ -46,6 +46,7 @@ type PatchState =
 	| { readonly kind: "error" };
 
 interface ReviewPanelProps {
+	readonly focusRequest?: { readonly id: string; readonly path?: string };
 	readonly api: MetisDesktopApi;
 	readonly sessionId: string;
 	readonly theme?: "dark" | "light";
@@ -93,21 +94,25 @@ function ReviewTree({
 							) : (
 								<CaretRight aria-hidden="true" size={12} />
 							)}
-							<WorkspaceFileIcon
-								expanded={expanded.has(node.path)}
-								kind="directory"
-								path={node.path}
-								size={13}
-							/>
-							<span>{node.name}</span>
+							<span className="review-tree-icon">
+								<WorkspaceFileIcon
+									expanded={expanded.has(node.path)}
+									kind="directory"
+									path={node.path}
+									size={13}
+								/>
+							</span>
+							<span className="review-tree-label">{node.name}</span>
 						</button>
 						{expanded.has(node.path) && <ReviewTree nodes={node.children} onSelect={onSelect} />}
 					</li>
 				) : (
 					<li key={node.path}>
 						<button onClick={() => onSelect(node.path)} type="button">
-							<WorkspaceFileIcon path={node.path} size={13} />
-							<span>{node.name}</span>
+							<span className="review-tree-icon">
+								<WorkspaceFileIcon path={node.path} size={13} />
+							</span>
+							<span className="review-tree-label">{node.name}</span>
 							<ChangeCounts file={node.file} />
 						</button>
 					</li>
@@ -288,8 +293,10 @@ function PatchBody({
 	);
 }
 
-export function ReviewPanel({ api, sessionId, theme = "dark", visible }: ReviewPanelProps) {
+export function ReviewPanel({ api, sessionId, theme = "dark", visible, focusRequest }: ReviewPanelProps) {
 	const { t } = useTranslation();
+	const [focusNotice, setFocusNotice] = useState("");
+	const consumedFocus = useRef<string>(undefined);
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const [detailsMounted, setDetailsMounted] = useState(false);
 	const [revision, setRevision] = useState<DesktopWorkspaceReviewRevision>("working-tree");
@@ -377,6 +384,31 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible }: ReviewP
 		},
 		[api, displayedRevision, sessionId],
 	);
+
+	useEffect(() => {
+		if (
+			!visible ||
+			loading ||
+			!focusRequest ||
+			consumedFocus.current === focusRequest.id ||
+			snapshot?.kind !== "review"
+		)
+			return;
+		consumedFocus.current = focusRequest.id;
+		setFocusNotice("");
+		if (!focusRequest.path) return;
+		const file = snapshot.files.find((entry) => entry.relativePath === focusRequest.path);
+		if (!file) {
+			setFocusNotice(t("This file is not in the current review"));
+			return;
+		}
+		setExpanded((current) => new Set(current).add(file.relativePath));
+		loadPatch(file);
+		const frame = requestAnimationFrame(() =>
+			fileRefs.current.get(file.relativePath)?.scrollIntoView({ behavior: "smooth", block: "start" }),
+		);
+		return () => cancelAnimationFrame(frame);
+	}, [focusRequest, loading, snapshot, visible, loadPatch, t]);
 
 	const toggleFile = (file: DesktopWorkspaceReviewFile, forceOpen = false) => {
 		const isExpanded = expanded.has(file.relativePath);
@@ -470,6 +502,7 @@ export function ReviewPanel({ api, sessionId, theme = "dark", visible }: ReviewP
 					/>
 				)}
 				<main className="review-content">
+					{focusNotice && <output className="code-diff-notice">{focusNotice}</output>}
 					{!visible ? null : !snapshot && loading ? (
 						<p className="review-empty">{t("Loading review…")}</p>
 					) : !snapshot && loadError ? (

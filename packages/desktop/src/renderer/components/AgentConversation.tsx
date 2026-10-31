@@ -11,6 +11,7 @@ import { useAppStore } from "../hooks/use-app-store.ts";
 import { ArrowLeft, Info, Stop } from "../icons.tsx";
 import { queuedTurnActionError } from "../session-view-utils.ts";
 import { AgentConversationDetails } from "./AgentConversationDetails.tsx";
+import type { AskUserDraft } from "./AskUserPanel.tsx";
 import { Composer, type ComposerPrefillRequest } from "./Composer.tsx";
 import { ConversationScopeContext, useConversationScope } from "./ConversationScope.tsx";
 import { InteractionHost } from "./InteractionHost.tsx";
@@ -74,6 +75,7 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 	const interaction = snapshot.interactionOrder
 		.map((id) => snapshot.interactionsById.get(id))
 		.find((pending) => (pending?.actorSessionId ?? pending?.sessionId) === target.agentId);
+	const askUserDrafts = useRef(new Map<string, AskUserDraft>());
 	const [detailsOpen, setDetailsOpen] = useState(false);
 	const [prefill, setPrefill] = useState<{ identity: string; request: ComposerPrefillRequest }>();
 	const [pendingQueues, setPendingQueues] = useState<ReadonlySet<string>>(new Set());
@@ -262,8 +264,23 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 					</div>
 				)}
 				<Transcript
+					interactions={{
+						requests: [...snapshot.interactionsById.values()].filter(
+							(
+								pending,
+							): pending is Extract<typeof pending, { kind: "ask_user" | "session_permission_approval" }> =>
+								(pending.actorSessionId ?? pending.sessionId) === target.agentId &&
+								(pending.kind === "ask_user" || pending.kind === "session_permission_approval"),
+						),
+						onRespond: context.onRespond,
+						askUserDrafts: askUserDrafts.current,
+						disabled: !visible || !context.bootstrapped,
+					}}
 					ariaLabel={t("Agent conversation")}
 					appearance={mode}
+					submittedMessageId={
+						receipt?.state === "failed" || receipt?.state === "cancelled" ? undefined : receipt?.messageId
+					}
 					activeTurnId={activeTurnId}
 					activeRunId={agent?.currentTask?.taskId}
 					activeTurnStartedAt={agent?.currentTask?.createdAt}
@@ -350,7 +367,10 @@ export function AgentConversation({ target, context, visible, onOpenParent }: Ag
 							/>
 						}
 						interactionControl={
-							interaction && visible ? (
+							interaction &&
+							visible &&
+							interaction.kind !== "ask_user" &&
+							interaction.kind !== "session_permission_approval" ? (
 								<InteractionHost interaction={interaction} onRespond={context.onRespond} />
 							) : undefined
 						}

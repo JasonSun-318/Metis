@@ -1,17 +1,13 @@
-import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
-import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ItemContentBlockView } from "@metis/app-protocol";
+import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { GitFork, ImageSquare } from "../icons.tsx";
+import { ChatExecutionChain } from "./ChatExecutionChain.tsx";
 import {
-	CaretRight,
-	CheckCircle,
-	CircleNotch,
-	ClockCounterClockwise,
-	GitFork,
-	ImageSquare,
-	TerminalWindow,
-	Tool,
-} from "../icons.tsx";
-import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
+	ConversationInteractionContext,
+	ConversationToolCards,
+	interactionToolId,
+} from "./ConversationInteractionCards.tsx";
 import { CopyFeedbackIcon } from "./CopyFeedbackIcon.tsx";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
@@ -23,14 +19,9 @@ import { ToolResultImages } from "./ToolResultImages.tsx";
 import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import {
 	buildTurnPresentation,
-	commandText,
-	isCommandTool,
 	messageText,
 	type ToolCallBlock,
-	type ToolDetailLine,
-	type ToolResultBlock,
 	toolResultImagesFromBlocks,
-	toolTranscriptPresentation,
 } from "./transcript-turn-model.ts";
 import { sameTurnProps, type TranscriptTurnProps } from "./transcript-turn-props.ts";
 
@@ -54,272 +45,6 @@ function StaticBlock({ block }: { readonly block: ItemContentBlockView }) {
 		case "plan":
 			return null;
 	}
-}
-
-function SafeToolDetails({ lines }: { readonly lines: readonly ToolDetailLine[] }) {
-	if (lines.length === 0) return null;
-	return (
-		<dl className="tool-safe-details">
-			{lines.map((line, index) => (
-				<div className="tool-safe-row" key={`${line.label ?? "detail"}-${index}`}>
-					{line.label && <dt>{line.label}</dt>}
-					<dd>{line.value}</dd>
-				</div>
-			))}
-		</dl>
-	);
-}
-
-function ToolStep({ call, result }: { readonly call: ToolCallBlock; readonly result?: ToolResultBlock }) {
-	const { t } = useTranslation();
-	const [open, setOpen] = useState(false);
-	const commandTool = isCommandTool(call.name);
-	const presentation = toolTranscriptPresentation(call, result, t);
-	if (!commandTool) {
-		return (
-			<div className="tool-step tool-step-static">
-				<div className="tool-step-static-label">
-					<Tool aria-hidden="true" size={17} />
-					<span>{presentation.label}</span>
-					{call.state === "running" && (
-						<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
-					)}
-				</div>
-				<SafeToolDetails lines={presentation.detailLines} />
-				{presentation.rawOutputIsError && presentation.rawOutput !== undefined && (
-					<pre className="tool-step-output tool-step-output-error">{presentation.rawOutput}</pre>
-				)}
-			</div>
-		);
-	}
-	const command = commandText(presentation.rawInput);
-	return (
-		<details
-			className="tool-step tool-step-command"
-			onToggle={(event) => setOpen(event.currentTarget.open)}
-			open={open}
-		>
-			<summary>
-				<TerminalWindow aria-hidden="true" size={17} />
-				<span>{presentation.label}</span>
-				{call.state === "running" && (
-					<CircleNotch aria-label={t("Running")} className="tool-step-spinner" size={15} />
-				)}
-			</summary>
-			{(command || presentation.rawOutput !== undefined) && (
-				<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
-					<div className="tool-step-details">
-						{command && <pre className="tool-step-input">{command}</pre>}
-						{presentation.rawOutput !== undefined && (
-							<pre
-								className={
-									presentation.rawOutputIsError
-										? "tool-step-output tool-step-output-error"
-										: "tool-step-output"
-								}
-							>
-								{presentation.rawOutput}
-							</pre>
-						)}
-					</div>
-				</div>
-			)}
-		</details>
-	);
-}
-
-function executionChainPreviewHeight(): number {
-	return Math.min(520, Math.max(360, window.innerHeight * 0.46));
-}
-
-function collapsedExecutionChainHeight(timeline: HTMLElement): number {
-	const children = Array.from(timeline.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
-	const rowGap = Number.parseFloat(getComputedStyle(timeline).rowGap) || 0;
-	const contentHeight = children.reduce((total, child) => {
-		if (child.matches("details.tool-step-command")) {
-			const summary = child.querySelector<HTMLElement>(":scope > summary");
-			return total + (summary?.getBoundingClientRect().height ?? 0);
-		}
-		return total + child.getBoundingClientRect().height;
-	}, 0);
-	return contentHeight + Math.max(0, children.length - 1) * rowGap;
-}
-
-function ExecutionChain({
-	activity,
-	items,
-	results,
-	running,
-	startedAt,
-	runId,
-	waitingForAnswer,
-	retry,
-}: {
-	readonly activity: readonly ItemContentBlockView[];
-	readonly items: readonly ItemView[];
-	readonly results: ReadonlyMap<string, ToolResultBlock>;
-	readonly running: boolean;
-	readonly startedAt?: string;
-	readonly runId?: string;
-	readonly waitingForAnswer: boolean;
-	readonly retry?: TranscriptTurnProps["retry"];
-}) {
-	const { t } = useTranslation();
-	const [open, setOpen] = useState(running);
-	const [showAll, setShowAll] = useState(false);
-	const [canExpand, setCanExpand] = useState(false);
-	const viewportRef = useRef<HTMLDivElement>(null);
-	const timelineRef = useRef<HTMLDivElement>(null);
-	const wasRunning = useRef(running);
-
-	useEffect(() => {
-		if (running) setOpen(true);
-		else if (wasRunning.current) {
-			setOpen(false);
-			setShowAll(false);
-		}
-		wasRunning.current = running;
-	}, [running]);
-
-	// biome-ignore lint/correctness/useExhaustiveDependencies(results): Streaming content, results, and expansion styles require measuring the execution drawer again.
-	// biome-ignore lint/correctness/useExhaustiveDependencies(canExpand): Streaming content, results, and expansion styles require measuring the execution drawer again.
-	// biome-ignore lint/correctness/useExhaustiveDependencies(activity): Streaming content, results, and expansion styles require measuring the execution drawer again.
-	useLayoutEffect(() => {
-		if (!open || showAll) return;
-		const viewport = viewportRef.current;
-		const timeline = timelineRef.current;
-		if (!viewport || !timeline) return;
-		const measure = () => {
-			const overflowing = collapsedExecutionChainHeight(timeline) > executionChainPreviewHeight() + 1;
-			setCanExpand(overflowing);
-			if (overflowing && running) viewport.scrollTop = viewport.scrollHeight;
-		};
-		measure();
-		const observer = new ResizeObserver(measure);
-		observer.observe(viewport);
-		observer.observe(timeline);
-		window.addEventListener("resize", measure);
-		return () => {
-			observer.disconnect();
-			window.removeEventListener("resize", measure);
-		};
-	}, [activity, canExpand, open, results, running, showAll]);
-
-	return (
-		<details
-			className="execution-chain"
-			onToggle={(event) => {
-				const nextOpen = event.currentTarget.open;
-				setOpen(nextOpen);
-				if (!nextOpen) setShowAll(false);
-			}}
-			open={open}
-		>
-			<summary>
-				<span aria-live="polite">{t(running ? "Execution process" : "Execution complete")}</span>
-				<CaretRight aria-hidden="true" className="execution-chain-caret" size={16} />
-			</summary>
-			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
-				<div>
-					<div
-						className={`execution-chain-content${showAll ? "" : " is-preview"}${canExpand && !showAll ? " is-capped" : ""}`}
-					>
-						<div className="execution-chain-viewport" ref={viewportRef}>
-							<div className="execution-chain-timeline" ref={timelineRef}>
-								{activity.map((block, index) => {
-									if (block.type === "thinking") {
-										return (
-											/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
-											<div className="activity-step" key={`thinking-${index}`}>
-												<span className="activity-step-icon">
-													<ClockCounterClockwise aria-hidden="true" size={17} />
-												</span>
-												<p>{block.text}</p>
-											</div>
-										);
-									}
-									if (block.type === "text") {
-										return (
-											/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
-											<div className="activity-step activity-step-message" key={`text-${index}`}>
-												<div>
-													<Markdown text={block.text} />
-												</div>
-											</div>
-										);
-									}
-									if (block.type === "tool_call") {
-										return (
-											<ToolStep
-												call={block}
-												key={`tool-${block.toolCallId}`}
-												result={results.get(block.toolCallId)}
-											/>
-										);
-									}
-									if (block.type === "tool_result") {
-										const presentation = toolTranscriptPresentation(undefined, block, t);
-										return (
-											<div className="activity-step tool-step-orphan" key={`result-${block.toolCallId}`}>
-												<span className="activity-step-icon">
-													<CheckCircle aria-hidden="true" size={17} />
-												</span>
-												<p>{presentation.label}</p>
-												<SafeToolDetails lines={presentation.detailLines} />
-												{presentation.rawOutput !== undefined && (
-													<pre
-														className={
-															presentation.rawOutputIsError
-																? "tool-step-output tool-step-output-error"
-																: "tool-step-output"
-														}
-													>
-														{presentation.rawOutput}
-													</pre>
-												)}
-											</div>
-										);
-									}
-									return null;
-								})}
-							</div>
-						</div>
-						{canExpand && !showAll && (
-							<button className="execution-chain-show-more" onClick={() => setShowAll(true)} type="button">
-								{t("Show more")}
-							</button>
-						)}
-					</div>
-					{running ? (
-						<TurnRuntimeStatus
-							items={items}
-							running
-							retry={retry}
-							startedAt={startedAt}
-							runId={runId}
-							waitingForAnswer={waitingForAnswer}
-						/>
-					) : (
-						(!canExpand || showAll) && (
-							<div className="execution-chain-done">
-								<CheckCircle aria-hidden="true" size={17} />
-								<span>{t("Done")}</span>
-							</div>
-						)
-					)}
-					{canExpand && showAll && (
-						<button
-							className="execution-chain-show-more is-show-less"
-							onClick={() => setShowAll(false)}
-							type="button"
-						>
-							{t("Show less")}
-						</button>
-					)}
-				</div>
-			</div>
-		</details>
-	);
 }
 
 export function TurnCopyButton({ onCopy, text }: { readonly onCopy: (text: string) => void; readonly text: string }) {
@@ -367,6 +92,11 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 	onPreviewDeliveredFile,
 }: TranscriptTurnProps) {
 	const { t } = useTranslation();
+	const interactions = useContext(ConversationInteractionContext);
+	const pendingToolIds = new Set(interactions?.requests.map(interactionToolId));
+	const allCalls = items.flatMap((item) =>
+		item.content.filter((block): block is ToolCallBlock => block.type === "tool_call"),
+	);
 	const { users, segments, results, final, deliveredFiles } = buildTurnPresentation(items);
 	const enteringUserId = runtimeRunning ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
@@ -464,9 +194,16 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 				}
 				return (
 					/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript blocks are append-only; positional keys preserve drawer state as the active block streams. */
-					<div key={`activity-${index}`}>
-						<ExecutionChain
-							activity={segment.blocks}
+					<div className="transcript-tool-group" key={`activity-${index}`}>
+						<ChatExecutionChain
+							activity={segment.blocks.filter(
+								(block) =>
+									!(block.type === "tool_call" || block.type === "tool_result") ||
+									(!pendingToolIds.has(block.toolCallId) &&
+										block.name !== "ask_user" &&
+										(block.name !== "deliver_file" || results.get(block.toolCallId)?.isError) &&
+										(block.name !== "set_tasks" || results.get(block.toolCallId)?.isError)),
+							)}
 							items={items}
 							results={results}
 							running={index === activeActivityIndex}
@@ -474,12 +211,9 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 							runId={runId}
 							retry={retry}
 							waitingForAnswer={waitingForAnswer}
+							replyVisible={final?.state === "streaming"}
 						/>
-						{segment.calls
-							.filter((call) => call.name === "ask_user")
-							.map((call) => (
-								<AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />
-							))}
+						<ConversationToolCards calls={segment.calls} allCalls={allCalls} results={results} />
 						{sessionId ? (
 							<ToolResultImages
 								images={toolResultImagesFromBlocks(segment.blocks, results)}
@@ -520,6 +254,7 @@ export const TranscriptTurn = memo(function TranscriptTurn({
 					startedAt={startedAt}
 					runId={runId}
 					waitingForAnswer={waitingForAnswer}
+					replyVisible={final?.state === "streaming"}
 				/>
 			)}
 		</>

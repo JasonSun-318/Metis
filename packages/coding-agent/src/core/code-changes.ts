@@ -14,6 +14,9 @@ const MAX_PATCH_BYTES = 16 * 1024;
 const MAX_STEP_PATCH_BYTES = 64 * 1024;
 const MAX_STEP_FILES = 64;
 const MAX_STEP_METADATA_BYTES = 16 * 1024;
+// Formatted documents and binary assets do not participate in text-line statistics.
+const NON_TEXT_FILE =
+	/\.(?:png|jpe?g|gif|webp|avif|heic|ico|icns|rsrc|pdf|pptx?|docx?|xlsx?|zip|gz|bz2|xz|7z|rar|woff2?|ttf|otf|mp[34]|mov|wav|flac|sqlite3?|db|dylib|dll|exe|wasm)$/iu;
 const SKIP_DIRECTORIES = new Set([".git", ".metis", ".codegraph", "node_modules", ".venv", ".cache"]);
 
 export interface CodeFileChange {
@@ -31,6 +34,7 @@ export interface TrackedCodeChanges {
 	readonly version: 1;
 	readonly sequence: number;
 	readonly files: readonly CodeFileChange[];
+	readonly turnFiles?: readonly CodeFileChange[];
 	readonly partial: boolean;
 	readonly turn: { readonly additions: number; readonly deletions: number; readonly partial: boolean };
 }
@@ -158,7 +162,7 @@ async function directoryPaths(cwd: string): Promise<{ paths: string[]; partial: 
 		try {
 			for (const entry of await readdir(directory, { withFileTypes: true })) {
 				if (entry.isDirectory() && !SKIP_DIRECTORIES.has(entry.name)) directories.push(join(directory, entry.name));
-				else if (entry.isFile()) paths.push(join(directory, entry.name));
+				else if (entry.isFile() && !NON_TEXT_FILE.test(entry.name)) paths.push(join(directory, entry.name));
 				if (paths.length >= MAX_SNAPSHOT_FILES) break;
 			}
 		} catch {
@@ -197,7 +201,7 @@ async function capture(scope: CodeChangeScope, before?: Snapshot): Promise<Snaps
 			partial = true;
 		}
 	}
-	const unique = [...new Set(paths)];
+	const unique = [...new Set(paths)].filter((path) => !NON_TEXT_FILE.test(path));
 	partial ||= unique.length > MAX_SNAPSHOT_FILES;
 	let size = 0;
 	for (const path of unique.slice(0, MAX_SNAPSHOT_FILES)) {
@@ -215,9 +219,6 @@ async function capture(scope: CodeChangeScope, before?: Snapshot): Promise<Snaps
 
 function fileChange(path: string, before: FileSnapshot, after: FileSnapshot, patchBudget: number): CodeFileChange {
 	const kind = before.text === null ? "added" : after.text === null ? "deleted" : "modified";
-	if ((before.text === undefined && !before.binary) || (after.text === undefined && !after.binary))
-		return { path, kind, unavailable: true };
-	if (before.binary || after.binary) return { path, kind, binary: true };
 	if (before.text === undefined || after.text === undefined) return { path, kind, unavailable: true };
 	const patch = structuredPatch(
 		before.text === null ? "/dev/null" : `a/${path}`,
@@ -319,6 +320,10 @@ export class CodeChangeTracker {
 				(before.partial ? UNAVAILABLE : before.repository ? await readGitFile(before.repository, path) : MISSING);
 			if (previous.directory || current.directory) continue;
 			if (previous.signature === current.signature) continue;
+			if (previous.binary || current.binary) {
+				if (this.totals.delete(path)) observedChanges = true;
+				continue;
+			}
 			observedChanges = true;
 			const name = relative(cwd, path).split("\\").join("/");
 			const change = fileChange(name, previous, current, budget);
@@ -366,15 +371,23 @@ export class CodeChangeTracker {
 		let additions = 0;
 		let deletions = 0;
 		let incomplete = this.partial;
+		const turnFiles: CodeFileChange[] = [];
+		let summaryBytes = 0;
 		for (const change of this.totals.values()) {
 			additions += change.additions ?? 0;
 			deletions += change.deletions ?? 0;
 			incomplete ||= change.additions === undefined || change.deletions === undefined;
+			const { diff: _diff, truncated: _truncated, ...summary } = change;
+			summaryBytes += Buffer.byteLength(JSON.stringify(summary), "utf8") + 1;
+			// Leave room for the 16 KiB step preview inside the projection's 20 KiB result limit.
+			if (turnFiles.length < MAX_STEP_FILES && summaryBytes <= 3 * 1024) turnFiles.push(summary);
+			else incomplete = true;
 		}
 		this.completed.set(toolCallId, {
 			version: 1,
 			sequence: ++this.sequence,
 			files,
+			turnFiles,
 			partial,
 			turn: { additions, deletions, partial: incomplete },
 		});

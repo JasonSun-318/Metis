@@ -147,15 +147,24 @@ export const SessionChatView = memo(function SessionChatView({
 	const skillListGeneration = useRef(0);
 	const writableSessionId = session && session.scheduled === undefined ? sessionId : undefined;
 	const running = session !== undefined && (session.state === "running" || projection.activeTurnId !== null);
-	const inlineInteraction =
-		chat.interaction?.kind === "ask_user" || chat.interaction?.kind === "session_permission_approval"
+	const inlineInteractions = useMemo(
+		() =>
+			chat.interactions.filter(
+				(
+					interaction,
+				): interaction is Extract<typeof interaction, { kind: "ask_user" | "session_permission_approval" }> =>
+					(interaction.actorSessionId ?? interaction.sessionId) === sessionId &&
+					(interaction.kind === "ask_user" || interaction.kind === "session_permission_approval"),
+			),
+		[chat.interactions, sessionId],
+	);
+	const inlineInteraction = inlineInteractions[0];
+	const modalInteraction =
+		chat.interaction?.kind !== "ask_user" && chat.interaction?.kind !== "session_permission_approval"
 			? chat.interaction
 			: undefined;
-	// Modal kinds render from this pane while it is visible; sessions without a
-	// visible chat pane are covered by the App-level host instead.
-	const modalInteraction = inlineInteraction === undefined ? chat.interaction : undefined;
-	const waitingForAnswer = chat.interaction?.kind === "ask_user";
-	const interactionPending = inlineInteraction !== undefined;
+	const waitingForAnswer = inlineInteractions.some((interaction) => interaction.kind === "ask_user");
+	const interactionPending = inlineInteractions.length > 0;
 	const compactBlocked = running || inlineInteraction !== undefined || compactingStartedAt !== null;
 
 	const requestComposerControl = useCallback((target: "model" | "thinking" | "mcp" | null) => {
@@ -166,10 +175,10 @@ export const SessionChatView = memo(function SessionChatView({
 		setSessionStatusPanel((current) => (current ? { ...current, closing: true } : null));
 	}, []);
 	useEffect(() => {
-		if (!sessionStatusPanel?.closing) return undefined;
+		if (!sessionStatusPanel?.closing) return;
 		const timer = setTimeout(
 			() => setSessionStatusPanel((current) => (current?.closing ? null : current)),
-			reducedMotion ? 0 : 160,
+			reducedMotion ? 0 : 180,
 		);
 		return () => clearTimeout(timer);
 	}, [reducedMotion, sessionStatusPanel?.closing]);
@@ -181,6 +190,7 @@ export const SessionChatView = memo(function SessionChatView({
 		currentProposedPlan,
 		planActionsBusy,
 		planRevisionTarget,
+		submittedTurnId,
 		submit,
 		changeCollaborationMode,
 		revisePlan,
@@ -598,9 +608,10 @@ export const SessionChatView = memo(function SessionChatView({
 	useEffect(() => {
 		if (!syncReady) return;
 		for (const id of askUserDrafts.current.keys()) {
-			if (!session || !chat.interactionsById.has(id)) askUserDrafts.current.delete(id);
+			if (!session || !chat.interactions.some((interaction) => interaction.interactionId === id))
+				askUserDrafts.current.delete(id);
 		}
-	}, [chat.interactionsById, session, syncReady]);
+	}, [chat.interactions, session, syncReady]);
 
 	const modelControl = session ? (
 		<ModelSelector
@@ -688,8 +699,16 @@ export const SessionChatView = memo(function SessionChatView({
 		<div className="workspace-body">
 			<div className="conversation-column" data-mode={session?.mode ?? "chat"}>
 				<Transcript
+					interactions={{
+						requests: inlineInteractions,
+						onRespond,
+						askUserDrafts: askUserDrafts.current,
+						sandboxHealth: projection.sandboxHealth,
+						disabled: !visible || !serverReady || !syncReady,
+					}}
 					quoteSessionId={visible && serverReady ? writableSessionId : undefined}
 					showNavigation
+					submittedTurnId={submittedTurnId}
 					activeTurnId={projection.activeTurnId}
 					retry={projection.retry}
 					waitingForAnswer={waitingForAnswer}
@@ -732,6 +751,7 @@ export const SessionChatView = memo(function SessionChatView({
 							contextStatus && contextStatus.sessionId === sessionId ? contextUsagePercent(contextStatus) : null
 						}
 						onOpenContextUsage={writableSessionId ? toggleSessionStatus : undefined}
+						commandPanelClosing={sessionStatusPanel?.closing}
 						commandPanel={
 							sessionStatusPanel?.sessionId === sessionId ? (
 								<SessionStatusPanel
@@ -750,18 +770,6 @@ export const SessionChatView = memo(function SessionChatView({
 						disabledSlashReasons={disabledSlashReasons}
 						formRef={canonicalComposer ? composerFormRef : undefined}
 						inputId={composerInputId}
-						interactionControl={
-							inlineInteraction ? (
-								<InteractionHost
-									interaction={inlineInteraction}
-									key={inlineInteraction.interactionId}
-									onRespond={onRespond}
-									sandboxHealth={projection.sandboxHealth}
-									askUserDrafts={askUserDrafts.current}
-									disabled={!serverReady || !syncReady}
-								/>
-							) : undefined
-						}
 						awaitingAnswer={waitingForAnswer}
 						interactionPending={interactionPending}
 						goalControl={
@@ -785,15 +793,17 @@ export const SessionChatView = memo(function SessionChatView({
 						onSubmit={submit}
 						permissionControl={permissionControl}
 						placeholder={t(
-							waitingForAnswer
-								? "Answer the questions above to continue."
-								: interactionPending
-									? "Approve or reject the action above to continue."
-									: planRevisionTarget
-										? "Describe what should change in this plan…"
-										: running || projection.queuedTurns.length > 0
-											? "Add a queued message…"
-											: "Write a message…",
+							compactingStartedAt !== null
+								? "Compacting conversation…"
+								: waitingForAnswer
+									? "Answer the questions above to continue."
+									: interactionPending
+										? "Approve or reject the action above to continue."
+										: planRevisionTarget
+											? "Describe what should change in this plan…"
+											: running || projection.queuedTurns.length > 0
+												? "Add a queued message…"
+												: "Write a message…",
 						)}
 						prefillRequest={prefillRequest}
 						queuedTurnControl={
@@ -810,11 +820,9 @@ export const SessionChatView = memo(function SessionChatView({
 							/>
 						}
 						queueing={projection.queuedTurns.length > 0}
-						running={running}
+						running={running && compactingStartedAt === null}
 						selectionSessionId={sessionId}
 						skills={skills}
-						taskListEpoch={chat.serverEpoch}
-						tasks={projection.tasks}
 						thinkingControl={thinkingControl}
 					/>
 				</div>

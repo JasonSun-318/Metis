@@ -23,6 +23,8 @@ function approval(overrides: Partial<Approval> = {}): Approval {
 		requestId: "00000000-0000-4000-8000-000000000301",
 		actionId: "action-bash-1",
 		toolLabel: "bash",
+		command: "curl https://example.test",
+		rememberSessionEligible: false,
 		riskLevel: "high",
 		executionTarget: "sandbox",
 		reason: "Network destination needs approval",
@@ -75,7 +77,7 @@ function choice(container: HTMLElement, label: string) {
 }
 
 describe("permission approval interaction", () => {
-	it("renders exact risk, target, path, and domain details without secrets or hidden reasoning", async () => {
+	it("shows the complete command without technical approval or hidden reasoning blocks", () => {
 		const { container } = mount(
 			approval({
 				priorReviewer: "model",
@@ -85,30 +87,25 @@ describe("permission approval interaction", () => {
 			}),
 		);
 		const panel = container.querySelector(".permission-approval-panel")!;
-		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
-		expect(container.querySelector(".modal-backdrop")).toBeNull();
-		expect(container.querySelector("[aria-modal='true']")).toBeNull();
-		expect(panel.textContent).toContain("Metis wants to use bash");
-		expect(panel.textContent).toContain("Command");
-		expect(panel.textContent).toContain("curl https://example.test");
-		expect(panel.textContent).toContain("Path");
-		expect(panel.textContent).toContain("/tmp/work/out.txt");
-		expect(panel.textContent).toContain("Network");
-		expect(panel.textContent).toContain("example.test");
-		expect(panel.textContent).toContain(REDACTED);
-		expect(panel.textContent).toContain("This action reaches a network or external service.");
-		expect(panel.textContent).toContain("Automatic security review could not complete.");
-		expect(panel.textContent).toContain("This operation may not be reversible.");
-		expect(panel.textContent).not.toContain(SECRET);
-		expect(panel.textContent).not.toContain("base64");
+		expect(container.querySelector(".modal-backdrop, [aria-modal='true']")).toBeNull();
+		expect(panel.querySelector("h2")?.textContent).toBe("Allow Metis to execute the following command?");
+		expect(panel.querySelector("pre")?.textContent).toBe("curl https://example.test");
+		for (const hidden of [
+			"Automatic security review",
+			"This operation may not be reversible",
+			"Network destination needs approval",
+			REDACTED,
+			SECRET,
+			"base64",
+		])
+			expect(panel.textContent).not.toContain(hidden);
 		expect(panel.textContent).not.toMatch(/hidden reasoning|system prompt/i);
-		expect(choice(container, "Allow once")).not.toBeNull();
-		expect(choice(container, "Reject")).not.toBeNull();
-		expect(choice(container, "Always allow this exact action")).not.toBeNull();
-		expect(choice(container, "Always deny this exact action")).not.toBeNull();
+		expect(choice(container, "Allow once")).toBeTruthy();
+		expect(choice(container, "Reject")).toBeTruthy();
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
 	});
 
-	it("focuses the deny control, submits once, and restores focus after close", async () => {
+	it("focuses the dialog for reading, submits once, and restores focus after close", async () => {
 		const previous = document.createElement("button");
 		previous.textContent = "composer";
 		document.body.append(previous);
@@ -120,7 +117,7 @@ describe("permission approval interaction", () => {
 		await act(async () => {
 			await Promise.resolve();
 		});
-		expect(document.activeElement?.textContent).toContain("Reject");
+		expect(document.activeElement).toBe(container.querySelector(".permission-approval-panel"));
 		await act(async () => choice(container, "Allow once").click());
 		expect(choice(container, "Allow once").disabled).toBe(true);
 		expect(container.querySelector("[aria-live='polite']")?.textContent).toContain("Sending your decision…");
@@ -154,9 +151,9 @@ describe("permission approval interaction", () => {
 
 	it("blocks sandbox actions when sandbox health is unhealthy instead of offering a host fallback", async () => {
 		const { container, onRespond } = mount(approval(), vi.fn().mockResolvedValue(undefined), "misconfigured");
-		expect(container.textContent).toContain("This action stays blocked instead of running on the host.");
+		expect(container.textContent).toContain("Workspace sandbox is unavailable");
 		expect(choice(container, "Allow once").disabled).toBe(true);
-		expect(choice(container, "Always allow this exact action").disabled).toBe(true);
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
 		expect(choice(container, "Reject").disabled).toBe(false);
 		await act(async () => choice(container, "Reject").click());
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
@@ -165,22 +162,16 @@ describe("permission approval interaction", () => {
 	it("keeps Allow once enabled when the action scope is incomplete", () => {
 		const { container } = mount(approval({ scopeComplete: false }));
 		expect(choice(container, "Allow once").disabled).toBe(false);
-		expect(choice(container, "Always allow this exact action").disabled).toBe(true);
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
 		expect(choice(container, "Reject").disabled).toBe(false);
 	});
 
-	it("translates the live review and approval surface", async () => {
-		await setLocale("zh-CN");
-		const { container } = mount(
-			approval({
-				priorReviewer: "model",
-				priorReviewerOutcome: "deny",
-				executionTarget: "host",
-			}),
-		);
-		expect(container.textContent).toContain("始终允许此精确操作");
-		expect(container.textContent).toContain("始终拒绝此精确操作");
-		expect(container.textContent).toContain("自动安全审查拒绝了此操作。");
-		expect(container.textContent).toContain("此操作将在沙箱外以当前用户权限运行。");
+	it("does not submit a disabled interaction during reconnect", async () => {
+		const onRespond = vi.fn().mockResolvedValue(undefined);
+		const { container, root } = mount(approval(), onRespond);
+		await act(async () => root.render(<InteractionHost interaction={approval()} onRespond={onRespond} disabled />));
+		expect(choice(container, "Allow once").disabled).toBe(true);
+		await act(async () => choice(container, "Allow once").click());
+		expect(onRespond).not.toHaveBeenCalled();
 	});
 });

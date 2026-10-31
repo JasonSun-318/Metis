@@ -85,7 +85,8 @@ describe("PermissionSelector", () => {
 				/>,
 			),
 		);
-		expect(container.querySelector(".permission-selector-status")?.textContent).toBe("Checking security…");
+		expect(container.querySelector(".permission-selector-status")).toBeNull();
+		expect(container.querySelector("output.sr-only")?.textContent).toBe("Checking security…");
 	});
 
 	it("describes sandboxed Ask/Auto and unrestricted Full", async () => {
@@ -155,6 +156,8 @@ describe("PermissionSelector", () => {
 		});
 		const status = container.querySelector('output, [role="status"]');
 		expect(status?.textContent).toBe("Checking security…");
+		expect(status?.classList.contains("sr-only")).toBe(true);
+		expect(container.querySelector(".permission-selector-status")).toBeNull();
 		expect(container.textContent).not.toContain("action-9");
 		expect(container.textContent).not.toMatch(/base64|reasoning|prompt/i);
 	});

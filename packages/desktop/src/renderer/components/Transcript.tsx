@@ -1,11 +1,18 @@
 import type { AgentMode, ItemView, PlanView, RetryStatusView, SessionDeliveredFileView } from "@metis/app-protocol";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { defaultRangeExtractor, useVirtualizer } from "@tanstack/react-virtual";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTranscriptScrollFade } from "../hooks/use-transcript-scroll-fade.ts";
+import { ArrowDown } from "../icons.tsx";
 import { CodeTranscriptTurn } from "./CodeTranscriptTurn.tsx";
+import {
+	ConversationInteractionContext,
+	type ConversationInteractions,
+	type InteractionReceipt,
+	interactionToolId,
+	PendingInteractionCard,
+} from "./ConversationInteractionCards.tsx";
 import { ConversationNavigation, type ConversationNavigationEntry } from "./ConversationNavigation.tsx";
-import { useConversationQuotes } from "./ConversationQuoteContext.tsx";
 import { PlanCard } from "./PlanCard.tsx";
 import { TranscriptQuoteSelection } from "./TranscriptQuoteSelection.tsx";
 import { TranscriptTurn } from "./TranscriptTurn.tsx";
@@ -13,8 +20,11 @@ import { TurnRuntimeStatus } from "./TurnRuntimeStatus.tsx";
 import { isInternalAgentCoordinationItem, messageText } from "./transcript-turn-model.ts";
 
 interface TranscriptProps {
+	readonly interactions?: ConversationInteractions;
 	readonly quoteSessionId?: string;
 	readonly showNavigation?: boolean;
+	readonly submittedTurnId?: string;
+	readonly submittedMessageId?: string;
 	readonly waitingForAnswer?: boolean;
 	readonly retry?: RetryStatusView;
 	readonly activeTurnId?: string | null;
@@ -61,18 +71,23 @@ function transcriptRows(
 ): TranscriptRow[] {
 	const rows: TranscriptRow[] = [];
 	const byKey = new Map<string, number>();
+	let boundaryId: string | undefined;
 	let legacyRow: { sessionId: string; index: number } | undefined;
 	for (const itemId of itemIds) {
 		const item = itemsById.get(itemId);
-		if (
-			!item ||
-			isInternalAgentCoordinationItem(item) ||
-			(item.role === "assistant" && item.state === "interrupted" && item.content.length === 0)
-		)
+		if (!item || isInternalAgentCoordinationItem(item) || (item.role === "assistant" && item.content.length === 0))
 			continue;
 		const boundary =
 			item.role === "system" || item.content.some((block) => block.type === "compaction" || block.type === "plan");
-		if (item.turnId || boundary) legacyRow = undefined;
+		if (boundary) {
+			// A standalone card ends this visual segment even if the runtime turn continues.
+			byKey.clear();
+			legacyRow = undefined;
+			boundaryId = item.itemId;
+			rows.push({ key: `${item.sessionId}:${appearance}:${item.itemId}`, itemIds: [item.itemId] });
+			continue;
+		}
+		if (item.turnId) legacyRow = undefined;
 		else if (item.role !== "user" && legacyRow?.sessionId === item.sessionId) {
 			// Older automatic continuations had no durable turn ID. Keep their
 			// assistant/tool sequence together so results pair with their calls.
@@ -80,7 +95,7 @@ function transcriptRows(
 			continue;
 		}
 		const key = item.turnId
-			? `${item.sessionId}:${appearance}:${item.turnId}`
+			? `${item.sessionId}:${appearance}:${item.turnId}${boundaryId ? `:after:${boundaryId}` : ""}`
 			: `${item.sessionId}:${appearance}:${item.itemId}`;
 		const existingIndex = byKey.get(key);
 		if (existingIndex === undefined) {
@@ -89,14 +104,17 @@ function transcriptRows(
 		} else {
 			rows[existingIndex]!.itemIds.push(item.itemId);
 		}
-		if (!item.turnId && !boundary) legacyRow = { sessionId: item.sessionId, index: existingIndex ?? rows.length - 1 };
+		if (!item.turnId) legacyRow = { sessionId: item.sessionId, index: existingIndex ?? rows.length - 1 };
 	}
 	return rows;
 }
 
 export function Transcript({
+	interactions,
 	quoteSessionId,
 	showNavigation = false,
+	submittedTurnId,
+	submittedMessageId,
 	waitingForAnswer = false,
 	retry,
 	activeTurnId,
@@ -123,7 +141,50 @@ export function Transcript({
 	planActionsBusy = false,
 }: TranscriptProps) {
 	const { t } = useTranslation();
-	const quoteContext = useConversationQuotes();
+	const [receipts, setReceipts] = useState<ReadonlyMap<string, InteractionReceipt>>(new Map());
+	const boundInteractions = useMemo(() => {
+		if (!interactions) return undefined;
+		const calls = itemIds.flatMap(
+			(id) => itemsById.get(id)?.content.filter((block) => block.type === "tool_call") ?? [],
+		);
+		return {
+			...interactions,
+			requests: interactions.requests.map((request) => {
+				if (interactionToolId(request)) return request;
+				const candidates = calls.filter(
+					(call) => call.name === "ask_user" && (call.state === "running" || call.state === "pending"),
+				);
+				return candidates.length === 1 ? { ...request, toolCallId: candidates[0]!.toolCallId } : request;
+			}),
+		};
+	}, [interactions, itemIds, itemsById]);
+	useEffect(() => {
+		if (!boundInteractions?.requests.length) return;
+		setReceipts((previous) => {
+			const next = new Map(previous);
+			for (const request of boundInteractions.requests) {
+				const id = interactionToolId(request);
+				if (id && !next.has(id)) next.set(id, { request });
+			}
+			return next.size === previous.size ? previous : next;
+		});
+	}, [boundInteractions]);
+	const interactionContext = useMemo(
+		() =>
+			boundInteractions && {
+				...boundInteractions,
+				receipts,
+				onRespond: async (response: Parameters<ConversationInteractions["onRespond"]>[0]) => {
+					const request = boundInteractions.requests.find(
+						(request) => request.interactionId === response.interactionId,
+					);
+					await boundInteractions.onRespond(response);
+					const id = request && interactionToolId(request);
+					if (id && request) setReceipts((previous) => new Map(previous).set(id, { request, response }));
+				},
+			},
+		[boundInteractions, receipts],
+	);
 	const rootRef = useRef<HTMLElement>(null);
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const scrollContentRef = useRef<HTMLDivElement>(null);
@@ -139,16 +200,10 @@ export function Transcript({
 	const quoteRequestedCount = useRef<number | null>(null);
 	const loadingOlderRef = useRef(false);
 	const followLatest = useRef(true);
+	const previousScrollTop = useRef(0);
 	const railDragging = useRef(false);
 	const scrollIntent = useRef(0);
-	useLayoutEffect(() => {
-		if (quoteContext?.lastAccepted?.sessionId !== quoteSessionId || !quoteSessionId) return;
-		if (railDragging.current) return;
-		scrollIntent.current += 1;
-		followLatest.current = true;
-		const scroll = scrollRef.current;
-		if (scroll) scroll.scrollTop = scroll.scrollHeight;
-	}, [quoteContext?.lastAccepted, quoteSessionId]);
+	const consumedSubmission = useRef<string | undefined>(undefined);
 	const previousSessionId = useRef<string | undefined>(undefined);
 	const [hasNewItems, setHasNewItems] = useState(false);
 	const [activeNavigationIndex, setActiveNavigationIndex] = useState(0);
@@ -159,7 +214,32 @@ export function Transcript({
 		setPendingJump(null);
 		setQuoteJump(null);
 	}, []);
-	const transcript = useMemo(() => transcriptRows(appearance, itemIds, itemsById), [appearance, itemIds, itemsById]);
+	const transcript = useMemo(() => {
+		const rows = transcriptRows(appearance, itemIds, itemsById);
+		const calls = new Set(
+			itemIds.flatMap(
+				(id) =>
+					itemsById.get(id)?.content.flatMap((block) => (block.type === "tool_call" ? [block.toolCallId] : [])) ??
+					[],
+			),
+		);
+		if (boundInteractions?.requests.some((request) => !calls.has(interactionToolId(request) ?? "")))
+			rows.push({ key: "pending-interactions", itemIds: [] });
+		return rows;
+	}, [appearance, itemIds, itemsById, boundInteractions]);
+	const pendingRows = transcript.flatMap((row, index) => {
+		const calls = new Set(
+			row.itemIds.flatMap(
+				(id) =>
+					itemsById.get(id)?.content.flatMap((block) => (block.type === "tool_call" ? [block.toolCallId] : [])) ??
+					[],
+			),
+		);
+		return row.key === "pending-interactions" ||
+			boundInteractions?.requests.some((request) => calls.has(interactionToolId(request) ?? ""))
+			? [index]
+			: [];
+	});
 	const activeTurnHasRow =
 		activeTurnId != null &&
 		transcript.some((row) => row.itemIds.some((id) => itemsById.get(id)?.turnId === activeTurnId));
@@ -191,6 +271,8 @@ export function Transcript({
 	);
 	const virtualizer = useVirtualizer({
 		count: transcript.length,
+		// Keep active forms mounted while reading history so focus, drafts and in-flight submissions survive virtualization.
+		rangeExtractor: (range) => [...new Set([...defaultRangeExtractor(range), ...pendingRows])].sort((a, b) => a - b),
 		getScrollElement: () => scrollRef.current,
 		getItemKey: (index) => transcript[index]!.key,
 		estimateSize: () => 128,
@@ -247,11 +329,27 @@ export function Transcript({
 		}
 		return undefined;
 	}, [itemIds, itemsById]);
+	const submittedUser = useMemo(
+		() =>
+			itemIds
+				.map((id) => itemsById.get(id))
+				.find(
+					(item) =>
+						item?.role === "user" &&
+						(submittedMessageId
+							? item.agentMessageId === submittedMessageId &&
+								(item.deliveryState === "accepted" || item.deliveryState === "delivered")
+							: submittedTurnId && item.turnId === submittedTurnId),
+				),
+		[itemIds, itemsById, submittedMessageId, submittedTurnId],
+	);
+	const submittedIdentity = submittedMessageId ?? submittedTurnId;
 	useLayoutEffect(() => {
 		if (lastItem?.sessionId !== previousSessionId.current) {
 			scrollIntent.current += 1;
 			railDragging.current = false;
 			previousSessionId.current = lastItem?.sessionId;
+			previousScrollTop.current = 0;
 			followLatest.current = true;
 			setHasNewItems(false);
 			setActiveNavigationIndex(0);
@@ -261,10 +359,18 @@ export function Transcript({
 			setQuoteNotice("");
 			quoteRequestedCount.current = null;
 		}
+		if (submittedUser && consumedSubmission.current !== submittedIdentity) {
+			consumedSubmission.current = submittedIdentity;
+			scrollIntent.current += 1;
+			followLatest.current = true;
+			setHasNewItems(false);
+			setPendingJump(null);
+			setQuoteJump(null);
+		}
 		const scroll = scrollRef.current;
 		if (!scroll || !lastItem || transcript.length === 0) return;
 		if (!followLatest.current || railDragging.current) {
-			if (latestLabel) setHasNewItems(true);
+			if (activeTurnId != null || latestLabel || boundInteractions?.requests.length) setHasNewItems(true);
 			return;
 		}
 		const frame = requestAnimationFrame(() => {
@@ -272,7 +378,16 @@ export function Transcript({
 				virtualizer.scrollToIndex(transcript.length - 1, { align: "end" });
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [lastItem, latestLabel, transcript.length, virtualizer]);
+	}, [
+		lastItem,
+		latestLabel,
+		activeTurnId,
+		transcript.length,
+		virtualizer,
+		boundInteractions?.requests,
+		submittedUser,
+		submittedIdentity,
+	]);
 	useLayoutEffect(() => {
 		const scroll = scrollRef.current;
 		if (!scroll) return;
@@ -280,6 +395,7 @@ export function Transcript({
 			if (followLatest.current && !railDragging.current) scroll.scrollTop = scroll.scrollHeight;
 		});
 		observer.observe(scroll);
+		if (scrollContentRef.current) observer.observe(scrollContentRef.current);
 		return () => observer.disconnect();
 	}, []);
 
@@ -287,8 +403,9 @@ export function Transcript({
 		scrollIntent.current += 1;
 		followLatest.current = true;
 		setHasNewItems(false);
-		const scroll = scrollRef.current;
-		if (scroll) scroll.scrollTop = scroll.scrollHeight;
+		setPendingJump(null);
+		setQuoteJump(null);
+		virtualizer.scrollToIndex(transcript.length - 1, { align: "end" });
 	};
 	const loadOlderAtTop = useCallback(
 		async (scroll: HTMLDivElement, requested = false) => {
@@ -444,207 +561,279 @@ export function Transcript({
 				}));
 
 	return (
-		<section
-			ref={rootRef}
-			className={`transcript transcript-${appearance}${navigation.length > 0 ? " has-navigation" : ""}`}
-			aria-label={t(ariaLabel)}
-		>
-			{showNavigation && (
-				<ConversationNavigation
-					key={`navigation:${lastItem?.sessionId ?? "empty"}`}
-					entries={navigation}
-					activeIndex={activeNavigationIndex}
-					scrollRef={scrollRef}
-					contentHeight={contentHeight}
-					onScrollToOffset={scrollFromNavigation}
-					onScrollGesture={onRailGesture}
-					onJump={jumpToMessage}
-				/>
-			)}
-			{hasOlder && (
-				<button
-					className={autoLoadOlder ? "transcript-history-access sr-only" : "history-button button-secondary"}
-					disabled={loadingOlder}
-					onClick={() => {
-						const scroll = scrollRef.current;
-						if (scroll) void loadOlderAtTop(scroll, true);
-					}}
-					type="button"
-				>
-					{loadingOlder ? t("Loading…") : t(olderLabel)}
-				</button>
-			)}
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: Observe bubbled native scroll intent without changing the scroller's default behavior or focus order. */}
-			<div
-				aria-busy={loadingOlder || undefined}
-				className="transcript-scroll"
-				onKeyDown={(event) => {
-					if (
-						event.defaultPrevented ||
-						!["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(event.key)
-					)
-						return;
-					const target = event.target instanceof HTMLElement ? event.target : null;
-					if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])')) return;
-					if (event.key === " " && target?.closest('button, summary, [role="button"]')) return;
-					beginManualScroll();
-				}}
-				onWheel={(event) => {
-					scrollIntent.current += 1;
-					setPendingJump(null);
-					setQuoteJump(null);
-					if (event.deltaY < 0) followLatest.current = false;
-					if (event.deltaY < 0 && event.currentTarget.scrollTop <= 48) void loadOlderAtTop(event.currentTarget);
-				}}
-				onScroll={(event) => {
-					const scroll = event.currentTarget;
-					if (!pendingJump && !railDragging.current)
-						followLatest.current = shouldFollowTranscript(
-							scroll.scrollHeight,
-							scroll.scrollTop,
-							scroll.clientHeight,
-						);
-					if (navigation.length > 0 && !pendingJump) {
-						const rowIndex = virtualizer.getVirtualItemForOffset(scroll.scrollTop + 56)?.index ?? 0;
-						let index = 0;
-						for (let cursor = navigation.length - 1; cursor >= 0; cursor -= 1) {
-							if (navigation[cursor]!.rowIndex <= rowIndex) {
-								index = cursor;
-								break;
-							}
-						}
-						setActiveNavigationIndex(Math.max(0, index));
-					}
-					if (followLatest.current) setHasNewItems(false);
-					if (!pendingJump && !railDragging.current && scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
-				}}
-				ref={scrollRef}
+		<ConversationInteractionContext.Provider value={interactionContext}>
+			<section
+				ref={rootRef}
+				className={`transcript transcript-${appearance}${navigation.length > 0 ? " has-navigation" : ""}`}
+				aria-label={t(ariaLabel)}
 			>
-				<div className="transcript-space" ref={scrollContentRef} style={{ height: `${contentHeight}px` }}>
-					{rows.map((row) => {
-						const transcriptRow = transcript[row.index];
-						if (!transcriptRow) return null;
-						const items = transcriptRow.itemIds.flatMap((itemId) => {
-							const item = itemsById.get(itemId);
-							return item ? [item] : [];
-						});
-						if (items.length === 0) return null;
-						const planBlock = items
-							.flatMap((item) => item.content)
-							.find(
-								(block): block is Extract<ItemView["content"][number], { type: "plan" }> =>
-									block.type === "plan",
+				{showNavigation && (
+					<ConversationNavigation
+						key={`navigation:${lastItem?.sessionId ?? "empty"}`}
+						entries={navigation}
+						activeIndex={activeNavigationIndex}
+						scrollRef={scrollRef}
+						contentHeight={contentHeight}
+						onScrollToOffset={scrollFromNavigation}
+						onScrollGesture={onRailGesture}
+						onJump={jumpToMessage}
+					/>
+				)}
+				{hasOlder && (
+					<button
+						className={autoLoadOlder ? "transcript-history-access sr-only" : "history-button button-secondary"}
+						disabled={loadingOlder}
+						onClick={() => {
+							const scroll = scrollRef.current;
+							if (scroll) void loadOlderAtTop(scroll, true);
+						}}
+						type="button"
+					>
+						{loadingOlder ? t("Loading…") : t(olderLabel)}
+					</button>
+				)}
+				{/* biome-ignore lint/a11y/noStaticElementInteractions: Observe bubbled native scroll intent without changing the scroller's default behavior or focus order. */}
+				<div
+					aria-busy={loadingOlder || undefined}
+					className="transcript-scroll"
+					onClickCapture={(event) => {
+						if (
+							event.target instanceof Element &&
+							event.target.closest(
+								".execution-chain > summary, .tool-step-command > summary, .thinking-show-more, .code-execution > summary, .code-command > summary, .code-turn-file > summary, .code-turn-more > summary",
+							)
+						)
+							beginManualScroll();
+					}}
+					onKeyDown={(event) => {
+						if (
+							event.defaultPrevented ||
+							!["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(event.key)
+						)
+							return;
+						const target = event.target instanceof HTMLElement ? event.target : null;
+						if (target?.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'))
+							return;
+						if (event.key === " " && target?.closest('button, summary, [role="button"]')) return;
+						beginManualScroll();
+					}}
+					onWheel={(event) => {
+						scrollIntent.current += 1;
+						setPendingJump(null);
+						setQuoteJump(null);
+						if (event.deltaY < 0) followLatest.current = false;
+						if (event.deltaY < 0 && event.currentTarget.scrollTop <= 48) void loadOlderAtTop(event.currentTarget);
+					}}
+					onScroll={(event) => {
+						const scroll = event.currentTarget;
+						if (!pendingJump && !railDragging.current) {
+							const atBottom = shouldFollowTranscript(
+								scroll.scrollHeight,
+								scroll.scrollTop,
+								scroll.clientHeight,
 							);
-						if (planBlock) {
+							// Growing content can emit scroll before its final measurement. Preserve
+							// bottom-follow intent unless the reader actually moves upward.
+							if (atBottom) followLatest.current = true;
+							else if (scroll.scrollTop < previousScrollTop.current - 1) followLatest.current = false;
+						}
+						previousScrollTop.current = scroll.scrollTop;
+						if (navigation.length > 0 && !pendingJump) {
+							const rowIndex = virtualizer.getVirtualItemForOffset(scroll.scrollTop + 56)?.index ?? 0;
+							let index = 0;
+							for (let cursor = navigation.length - 1; cursor >= 0; cursor -= 1) {
+								if (navigation[cursor]!.rowIndex <= rowIndex) {
+									index = cursor;
+									break;
+								}
+							}
+							setActiveNavigationIndex(Math.max(0, index));
+						}
+						if (followLatest.current) setHasNewItems(false);
+						else if (activeTurnId != null || pendingRows.length > 0) setHasNewItems(true);
+						if (!pendingJump && !railDragging.current && scroll.scrollTop <= 48) void loadOlderAtTop(scroll);
+					}}
+					ref={scrollRef}
+				>
+					<div className="transcript-space" ref={scrollContentRef} style={{ height: `${contentHeight}px` }}>
+						{rows.map((row) => {
+							const transcriptRow = transcript[row.index];
+							if (!transcriptRow) return null;
+							const items = transcriptRow.itemIds.flatMap((itemId) => {
+								const item = itemsById.get(itemId);
+								return item ? [item] : [];
+							});
+							const nextItems = transcript[row.index + 1]?.itemIds.map((id) => itemsById.get(id)) ?? [];
+							const continues =
+								nextItems.length > 0 &&
+								!nextItems.some((item) => item?.role === "user" || item?.role === "system") &&
+								[...items, ...nextItems].some((item) => item?.content.some((block) => block.type === "plan"));
+							if (transcriptRow.key === "pending-interactions") {
+								const callIds = new Set(
+									itemIds.flatMap(
+										(id) =>
+											itemsById
+												.get(id)
+												?.content.flatMap((block) =>
+													block.type === "tool_call" ? [block.toolCallId] : [],
+												) ?? [],
+									),
+								);
+								return (
+									<article
+										className="transcript-turn"
+										data-index={row.index}
+										key={row.key}
+										ref={virtualizer.measureElement}
+										style={{ transform: `translateY(${row.start}px)` }}
+									>
+										{boundInteractions?.requests
+											.filter((request) => !callIds.has(interactionToolId(request) ?? ""))
+											.map((request) => (
+												<PendingInteractionCard key={request.interactionId} request={request} />
+											))}
+									</article>
+								);
+							}
+							if (items.length === 0) return null;
+							const planBlock = items
+								.flatMap((item) => item.content)
+								.find(
+									(block): block is Extract<ItemView["content"][number], { type: "plan" }> =>
+										block.type === "plan",
+								);
+							if (planBlock) {
+								return (
+									<article
+										className="transcript-plan-row"
+										data-index={row.index}
+										data-transcript-plan={planBlock.plan.planId}
+										data-continues={continues || undefined}
+										key={row.key}
+										ref={virtualizer.measureElement}
+										style={{ transform: `translateY(${row.start}px)` }}
+									>
+										<PlanCard
+											busy={planActionsBusy}
+											onCancel={(plan) => onCancelPlan?.(plan)}
+											onOpen={(plan) => onOpenPlan?.(plan)}
+											onRevise={(plan) => onRevisePlan?.(plan)}
+											onStart={(plan) => onStartPlan?.(plan)}
+											plan={planBlock.plan}
+										/>
+									</article>
+								);
+							}
+							const compaction = items.some((item) => item.content.some((block) => block.type === "compaction"));
+							const running =
+								activeTurnId !== null &&
+								activeTurnId !== undefined &&
+								items.some((item) => item.turnId === activeTurnId);
 							return (
 								<article
-									className="transcript-plan-row"
+									className={
+										compaction
+											? "transcript-compaction-row"
+											: appearance === "chat"
+												? "transcript-turn"
+												: "code-transcript-turn"
+									}
 									data-index={row.index}
-									data-transcript-plan={planBlock.plan.planId}
+									data-transcript-item={appearance === "code" ? transcriptRow.itemIds.at(-1) : undefined}
+									data-transcript-turn={transcriptRow.key}
+									data-continues={continues || undefined}
 									key={row.key}
 									ref={virtualizer.measureElement}
 									style={{ transform: `translateY(${row.start}px)` }}
 								>
-									<PlanCard
-										busy={planActionsBusy}
-										onCancel={(plan) => onCancelPlan?.(plan)}
-										onOpen={(plan) => onOpenPlan?.(plan)}
-										onRevise={(plan) => onRevisePlan?.(plan)}
-										onStart={(plan) => onStartPlan?.(plan)}
-										plan={planBlock.plan}
-									/>
+									{compaction ? (
+										<div>
+											<hr aria-label={t("Compacted")} className="sr-only" />
+											<span aria-hidden="true">{t("Compacted")}</span>
+										</div>
+									) : appearance === "chat" ? (
+										<TranscriptTurn
+											items={items}
+											onJumpToQuote={jumpToQuote}
+											onCopy={onCopy}
+											onFork={onFork}
+											onOpenDeliveredFile={onOpenDeliveredFile}
+											onPreviewDeliveredFile={onPreviewDeliveredFile}
+											running={running}
+											retry={running ? retry : undefined}
+											waitingForAnswer={running && waitingForAnswer}
+											startedAt={activeTurnStartedAt}
+											runId={activeRunId ?? activeTurnId ?? undefined}
+										/>
+									) : (
+										<CodeTranscriptTurn
+											items={items}
+											onJumpToQuote={jumpToQuote}
+											onCopy={onCopy}
+											onFork={onFork}
+											onOpenDeliveredFile={onOpenDeliveredFile}
+											onPreviewDeliveredFile={onPreviewDeliveredFile}
+											running={running}
+											retry={running ? retry : undefined}
+											waitingForAnswer={running && waitingForAnswer}
+											startedAt={activeTurnStartedAt}
+											runId={activeRunId ?? activeTurnId ?? undefined}
+										/>
+									)}
 								</article>
 							);
-						}
-						const compaction = items.some((item) => item.content.some((block) => block.type === "compaction"));
-						const running =
-							activeTurnId !== null &&
-							activeTurnId !== undefined &&
-							items.some((item) => item.turnId === activeTurnId);
-						return (
-							<article
-								className={
-									compaction
-										? "transcript-compaction-row"
-										: appearance === "chat"
-											? "transcript-turn"
-											: "code-transcript-turn"
-								}
-								data-index={row.index}
-								data-transcript-item={appearance === "code" ? transcriptRow.itemIds.at(-1) : undefined}
-								data-transcript-turn={transcriptRow.key}
-								key={row.key}
-								ref={virtualizer.measureElement}
-								style={{ transform: `translateY(${row.start}px)` }}
-							>
-								{compaction ? (
-									<div>
-										<hr aria-label={t("Compacted")} className="sr-only" />
-										<span aria-hidden="true">{t("Compacted")}</span>
-									</div>
-								) : appearance === "chat" ? (
-									<TranscriptTurn
-										items={items}
-										onJumpToQuote={jumpToQuote}
-										onCopy={onCopy}
-										onFork={onFork}
-										onOpenDeliveredFile={onOpenDeliveredFile}
-										onPreviewDeliveredFile={onPreviewDeliveredFile}
-										running={running}
-										retry={running ? retry : undefined}
-										waitingForAnswer={running && waitingForAnswer}
-										startedAt={activeTurnStartedAt}
-										runId={activeRunId ?? activeTurnId ?? undefined}
-									/>
-								) : (
-									<CodeTranscriptTurn
-										items={items}
-										onJumpToQuote={jumpToQuote}
-										onCopy={onCopy}
-										onFork={onFork}
-										onOpenDeliveredFile={onOpenDeliveredFile}
-										onPreviewDeliveredFile={onPreviewDeliveredFile}
-										running={running}
-										retry={running ? retry : undefined}
-										waitingForAnswer={running && waitingForAnswer}
-										startedAt={activeTurnStartedAt}
-										runId={activeRunId ?? activeTurnId ?? undefined}
-									/>
-								)}
-							</article>
-						);
-					})}
+						})}
+					</div>
 				</div>
-			</div>
-			{activeTurnId != null && !activeTurnHasRow && (
-				<TurnRuntimeStatus
-					items={[]}
-					running
-					retry={retry}
-					startedAt={activeTurnStartedAt}
-					runId={activeRunId ?? activeTurnId ?? undefined}
-					waitingForAnswer={waitingForAnswer}
+				{activeTurnId != null && !activeTurnHasRow && (
+					<TurnRuntimeStatus
+						items={[]}
+						running
+						retry={retry}
+						startedAt={activeTurnStartedAt}
+						runId={activeRunId ?? activeTurnId ?? undefined}
+						waitingForAnswer={waitingForAnswer}
+					/>
+				)}
+				<TranscriptQuoteSelection
+					key={`quote-selection:${quoteSessionId ?? "readonly"}`}
+					root={rootRef}
+					sessionId={quoteSessionId}
+					items={itemsById}
+					onSelectText={() => {
+						beginManualScroll();
+					}}
 				/>
-			)}
-			<TranscriptQuoteSelection
-				key={`quote-selection:${quoteSessionId ?? "readonly"}`}
-				root={rootRef}
-				sessionId={quoteSessionId}
-				items={itemsById}
-				onSelectText={() => {
-					beginManualScroll();
-				}}
-			/>
-			{(quoteJump || quoteNotice) && (
-				<output className="status-block transcript-quote-notice">
-					{quoteJump ? t("Finding original message…") : quoteNotice}
-				</output>
-			)}
-			{latestLabel && hasNewItems && (
-				<button className="transcript-latest" onClick={scrollToLatest} type="button">
-					{t(latestLabel)}
-				</button>
-			)}
-		</section>
+				{(quoteJump || quoteNotice) && (
+					<output className="status-block transcript-quote-notice">
+						{quoteJump ? t("Finding original message…") : quoteNotice}
+					</output>
+				)}
+				{pendingRows.length > 0 && hasNewItems ? (
+					<button
+						className="transcript-latest"
+						type="button"
+						onClick={() => {
+							beginManualScroll();
+							const card = scrollRef.current?.querySelector<HTMLElement>("[data-interaction-id]");
+							if (card) card.scrollIntoView({ block: "center", behavior: "instant" });
+							else virtualizer.scrollToIndex(pendingRows[0]!, { align: "center" });
+							setHasNewItems(false);
+						}}
+					>
+						<ArrowDown aria-hidden="true" size={14} />
+						{t("View pending request")}
+					</button>
+				) : (
+					(activeTurnId != null || latestLabel) &&
+					hasNewItems && (
+						<button className="transcript-latest" onClick={scrollToLatest} type="button">
+							<ArrowDown aria-hidden="true" size={14} />
+							{t(latestLabel ?? "Scroll to bottom")}
+						</button>
+					)
+				)}
+			</section>
+		</ConversationInteractionContext.Provider>
 	);
 }

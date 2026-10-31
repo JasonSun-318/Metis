@@ -3,9 +3,8 @@
 import type { ItemContentBlockView, ItemView } from "@metis/app-protocol";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-	advanceDisplayedTokens,
 	estimateOutputTokens,
 	TurnRuntimeStatus,
 	turnTokenTarget,
@@ -24,13 +23,17 @@ function assistant(itemId: string, content: ItemContentBlockView[], usage?: Item
 	};
 }
 
+beforeEach(() => {
+	(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+});
+
 afterEach(() => {
 	vi.useRealTimers();
 	document.body.replaceChildren();
 });
 
 describe("TurnRuntimeStatus", () => {
-	it("reuses the thinking line for retry progress and clears it on recovery", async () => {
+	it("reuses the activity line for retry progress and clears it on recovery", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -48,21 +51,21 @@ describe("TurnRuntimeStatus", () => {
 		expect(container.textContent).not.toContain("Retrying");
 		await act(async () => root.unmount());
 	});
-	it("estimates current-turn output and eases toward corrected targets", () => {
+
+	it("distinguishes streaming estimates from completed provider usage", () => {
 		expect(estimateOutputTokens("hello world")).toBe(3);
 		expect(estimateOutputTokens("请分析代码")).toBe(5);
 		expect(
 			turnTokenTarget([
-				assistant("exact", [{ type: "thinking", text: "分析" }], { outputTokens: 20 }),
+				assistant("reported", [{ type: "thinking", text: "分析" }], { outputTokens: 20 }),
 				assistant("estimated", [{ type: "text", text: "final answer" }]),
 			]),
 		).toEqual({ tokens: 23, exact: false });
-		expect(advanceDisplayedTokens(0, 44)).toBe(11);
-		expect(advanceDisplayedTokens(43, 44)).toBe(44);
-		expect(advanceDisplayedTokens(50, 44)).toBe(48);
+		const completed = { ...assistant("exact", [], { outputTokens: 42 }), state: "completed" as const };
+		expect(turnTokenTarget([completed])).toEqual({ tokens: 42, exact: true });
 	});
 
-	it("estimates streaming output while a provider reports placeholder zero usage", () => {
+	it("keeps token estimates useful when the provider reports placeholder zero usage", () => {
 		const target = turnTokenTarget([
 			assistant("placeholder", [{ type: "text", text: "正在分析当前代码并准备结果" }], { outputTokens: 0 }),
 		]);
@@ -70,86 +73,148 @@ describe("TurnRuntimeStatus", () => {
 		expect(target.exact).toBe(false);
 	});
 
-	it("renders one local spinner and cleans up its progress timer", async () => {
+	it("shows only activity initially, reveals elapsed after three seconds, and cleans up its timer", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const items = [assistant("streaming", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
-
-		await act(async () =>
-			root.render(<TurnRuntimeStatus items={items} running startedAt="2026-08-08T00:00:00.000Z" />),
-		);
-		const status = container.querySelector(".turn-runtime-status");
-		expect(status?.textContent).toContain("0s");
-		expect(status?.textContent).toContain("0 tokens");
-		expect(status?.textContent).toContain("Thinking");
-		expect(container.querySelectorAll(".turn-runtime-spinner > span")).toHaveLength(6);
-
-		await act(async () => vi.advanceTimersByTimeAsync(100));
-		const first = Number(container.querySelector("[data-runtime-tokens]")?.getAttribute("data-runtime-tokens"));
-		expect(first).toBeGreaterThan(0);
-		expect(first).toBeLessThan(turnTokenTarget(items).tokens);
-
-		await act(async () => vi.advanceTimersByTimeAsync(900));
-		expect(status?.textContent).toContain("1s");
-
-		await act(async () =>
-			root.render(<TurnRuntimeStatus items={items} running={false} startedAt="2026-08-08T00:00:00.000Z" />),
-		);
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running startedAt="2026-08-08T00:00:00.000Z" />));
+		expect(container.querySelector(".turn-runtime-elapsed")).toBeNull();
+		expect(container.querySelector("details")).toBeNull();
+		expect(container.textContent).toBe("Thinking…");
+		await act(async () => vi.advanceTimersByTimeAsync(2999));
+		expect(container.querySelector(".turn-runtime-elapsed")).toBeNull();
+		await act(async () => vi.advanceTimersByTimeAsync(1));
+		expect(container.querySelector(".turn-runtime-elapsed")?.textContent).toBe("3s");
+		expect(container.querySelector(".turn-runtime-elapsed")?.getAttribute("aria-hidden")).toBe("true");
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running={false} />));
 		expect(container.querySelector(".turn-runtime-status")).toBeNull();
 		expect(vi.getTimerCount()).toBe(0);
 		await act(async () => root.unmount());
 	});
 
-	it("resets token progress and elapsed time only when the run identity changes", async () => {
+	it("acknowledges a slow first output and resumes the normal label as content arrives", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const runA = [assistant("a", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
-		const runB = [assistant("b", [{ type: "text", text: "新的任务正在执行" }])];
+		try {
+			await act(async () => root.render(<TurnRuntimeStatus items={[]} running runId="slow" />));
+			await act(async () => vi.advanceTimersByTimeAsync(19_000));
+			expect(container.querySelector("output")?.textContent).toBe("Thinking…");
+			await act(async () => vi.advanceTimersByTimeAsync(1000));
+			expect(container.querySelector("output")?.textContent).toBe("Still waiting for model output…");
+			await act(async () =>
+				root.render(
+					<TurnRuntimeStatus
+						items={[assistant("thought", [{ type: "thinking", text: "Working through the request" }])]}
+						running
+						runId="slow"
+					/>,
+				),
+			);
+			expect(container.querySelector("output")?.textContent).toBe("Thinking…");
+			await act(async () => root.render(<TurnRuntimeStatus items={[]} running runId="next" />));
+			expect(container.querySelector("output")?.textContent).toBe("Thinking…");
+			expect(container.querySelector(".turn-runtime-elapsed")).toBeNull();
+		} finally {
+			await act(async () => root.unmount());
+		}
+	});
 
+	it("shows estimated and exact tokens inline after the activity without a disclosure", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const items = [assistant("streaming", [{ type: "thinking", text: "请分析代码" }])];
+		await act(async () => root.render(<TurnRuntimeStatus items={items} running />));
+		expect(container.querySelector("details, summary")).toBeNull();
+		expect(container.querySelector(".turn-runtime-usage")?.textContent).toContain("≈ 5 tokens");
+		expect(container.querySelector("output")?.textContent).toBe("Thinking…");
 		await act(async () =>
-			root.render(<TurnRuntimeStatus items={runA} running runId="run-a" startedAt="2026-08-08T00:00:00.000Z" />),
+			root.render(
+				<TurnRuntimeStatus items={[{ ...items[0]!, state: "completed", usage: { outputTokens: 1284 } }]} running />,
+			),
 		);
-		await act(async () => vi.advanceTimersByTimeAsync(1_200));
-		const output = container.querySelector("output");
-		expect(output?.textContent).toContain("1s");
-		expect(Number(output?.getAttribute("data-runtime-tokens"))).toBeGreaterThan(0);
-
-		await act(async () => root.render(<TurnRuntimeStatus items={runB} running runId="run-b" />));
-		expect(container.querySelector("output")).toBe(output);
-		expect(output?.textContent).toContain("0s");
-		expect(output?.textContent).toContain("0 tokens");
-		expect(vi.getTimerCount()).toBe(1);
+		expect(container.querySelector(".turn-runtime-usage")?.textContent).toContain("1,284 tokens");
+		expect(container.querySelector(".turn-runtime-usage")?.textContent).not.toContain("≈");
 		await act(async () => root.unmount());
 	});
 
-	it("applies a corrected start time for the same run without resetting token progress", async () => {
+	it("changes activity with real tools and keeps the writing label alongside usage", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const read: ItemContentBlockView = { type: "tool_call", toolCallId: "read-1", name: "read", state: "running" };
+		await act(async () => root.render(<TurnRuntimeStatus items={[assistant("read", [read])]} running />));
+		expect(container.querySelector("output")?.getAttribute("aria-label")).toBe("Reading files…");
+		await act(async () =>
+			root.render(
+				<TurnRuntimeStatus
+					items={[
+						assistant("read", [
+							read,
+							{
+								type: "tool_result",
+								toolCallId: "read-1",
+								name: "read",
+								isError: false,
+								output: "file contents",
+							},
+						]),
+					]}
+					running
+				/>,
+			),
+		);
+		expect(container.querySelector("output")?.getAttribute("aria-label")).toBe("Thinking…");
+		await act(async () =>
+			root.render(
+				<TurnRuntimeStatus
+					items={[
+						assistant("bash", [{ type: "tool_call", toolCallId: "bash-1", name: "bash", state: "running" }]),
+					]}
+					running
+				/>,
+			),
+		);
+		expect(container.querySelector("output")?.getAttribute("aria-label")).toBe("Running a command");
+		await act(async () =>
+			root.render(
+				<TurnRuntimeStatus
+					items={[assistant("reply", [{ type: "text", text: "Here is the answer" }])]}
+					running
+					replyVisible
+				/>,
+			),
+		);
+		expect(container.querySelector(".turn-runtime-label")?.textContent).toBe("Writing reply…");
+		expect(container.querySelector("output")?.getAttribute("aria-label")).toBe("Writing reply…");
+		await act(async () => root.unmount());
+	});
+
+	it("resets elapsed on a new run, and accepts corrected start times", async () => {
 		vi.useFakeTimers();
 		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		const items = [assistant("streaming", [{ type: "text", text: "正在分析当前代码并准备结果" }])];
-
+		const items = [assistant("streaming", [{ type: "thinking", text: "分析代码" }])];
 		await act(async () =>
 			root.render(<TurnRuntimeStatus items={items} running runId="run-a" startedAt="2026-08-08T00:00:00.000Z" />),
 		);
-		await act(async () => vi.advanceTimersByTimeAsync(5_200));
-		const output = container.querySelector("output");
-		expect(output?.textContent).toContain("5s");
-		const tokens = output?.getAttribute("data-runtime-tokens");
-
+		await act(async () => vi.advanceTimersByTimeAsync(5200));
+		expect(container.querySelector(".turn-runtime-elapsed")?.textContent).toBe("5s");
 		await act(async () =>
 			root.render(<TurnRuntimeStatus items={items} running runId="run-a" startedAt="2026-08-08T00:00:02.000Z" />),
 		);
-		expect(output?.textContent).toContain("3s");
-		expect(output?.getAttribute("data-runtime-tokens")).toBe(tokens);
+		expect(container.querySelector(".turn-runtime-elapsed")?.textContent).toBe("3s");
+		await act(async () => vi.advanceTimersByTimeAsync(0));
+		await act(async () => root.render(<TurnRuntimeStatus items={items} running runId="run-b" />));
+		expect(container.querySelector(".turn-runtime-elapsed")).toBeNull();
+		expect(container.querySelector("details")).toBeNull();
 		expect(vi.getTimerCount()).toBe(1);
 		await act(async () => root.unmount());
 	});
@@ -159,26 +224,20 @@ describe("TurnRuntimeStatus", () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () => root.render(<TurnRuntimeStatus items={[]} running waitingForAnswer={true} />));
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running waitingForAnswer />));
 		expect(container.textContent).toContain("Waiting for your answer");
 		expect(vi.getTimerCount()).toBe(0);
 		await act(async () => root.unmount());
 	});
 
-	it("replaces token progress with the compaction state", async () => {
-		vi.useFakeTimers();
-		vi.setSystemTime(new Date("2026-08-08T00:00:00.000Z"));
+	it("replaces token details with the compaction state", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
-		await act(async () =>
-			root.render(
-				<TurnRuntimeStatus items={[]} running startedAt="2026-08-08T00:00:00.000Z" variant="compaction" />,
-			),
-		);
+		await act(async () => root.render(<TurnRuntimeStatus items={[]} running variant="compaction" />));
 		expect(container.querySelector("output")?.textContent).toContain("Compacting conversation");
 		expect(container.querySelector("[data-runtime-tokens]")).toBeNull();
-		expect(container.textContent).not.toContain("tokens");
+		expect(container.querySelector("details")).toBeNull();
 		await act(async () => root.unmount());
 	});
 });

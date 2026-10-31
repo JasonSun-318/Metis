@@ -159,7 +159,13 @@ function finalResponseIndex(items: readonly ItemView[]): number {
 		const item = items[index]!;
 		if (item.role !== "assistant" || item.state === "interrupted" || toolCalls(item).length > 0) continue;
 		const thinking = item.content.filter((block): block is ThinkingBlock => block.type === "thinking");
-		if (textBlocks(item).some((block) => !thinking.some((candidate) => isThinkingEcho(block.text, candidate.text))))
+		if (
+			textBlocks(item).some(
+				(block) =>
+					block.text.trim().length > 0 &&
+					!thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)),
+			)
+		)
 			return index;
 	}
 	return -1;
@@ -307,11 +313,8 @@ function internalFailureLabel(name: string, t: Translator): string {
 	}
 }
 
-function setTasksPresentation(
-	call: ToolCallBlock | undefined,
-	result: ToolResultBlock | undefined,
-	t: Translator,
-): ToolTranscriptPresentation {
+export function tasksFromTool(call: ToolCallBlock | undefined, result: ToolResultBlock | undefined) {
+	if (result?.tasks) return result.tasks;
 	const input = inputRecord(call);
 	const inputTasks = Array.isArray(input?.tasks)
 		? input.tasks.flatMap((candidate) => {
@@ -326,7 +329,15 @@ function setTasksPresentation(
 			const match = /^- \[([ x])\] (.+)$/u.exec(line.trim());
 			return match ? [{ task: match[2]!, completed: match[1] === "x" }] : [];
 		}) ?? [];
-	const tasks = inputTasks.length > 0 ? inputTasks : resultTasks;
+	return resultTasks.length > 0 ? resultTasks : inputTasks;
+}
+
+function setTasksPresentation(
+	call: ToolCallBlock | undefined,
+	result: ToolResultBlock | undefined,
+	t: Translator,
+): ToolTranscriptPresentation {
+	const tasks = tasksFromTool(call, result);
 	const completed = tasks.filter((task) => task.completed).length;
 	const running = call?.state === "running" || call?.state === "pending";
 	const label = running
@@ -366,6 +377,11 @@ interface AskAnswer {
 }
 
 export function askAnswers(result: ToolResultBlock | undefined): AskAnswer[] {
+	if (result?.userAnswers)
+		return result.userAnswers.map((answer) => ({
+			question: answer.question,
+			answer: [...answer.selected, ...(answer.customAnswer ? [answer.customAnswer] : [])].join(" · "),
+		}));
 	const prefix = "User answers:\n";
 	if (!result?.output.startsWith(prefix)) return [];
 	const value = jsonValue(result.output.slice(prefix.length));
@@ -680,6 +696,7 @@ export function buildTurnPresentation(sourceItems: readonly ItemView[]): TurnPre
 	const finalIndex = finalResponseIndex(items);
 	const users = items.filter((item) => item.role === "user");
 	const calls = items.filter((item) => item.role !== "user").flatMap(toolCalls);
+	const taskAnchor = calls.find((call) => call.name === "set_tasks");
 	const callIds = new Set(calls.map((call) => call.toolCallId));
 	const results = new Map<string, ToolResultBlock>();
 	for (const item of items) {
@@ -731,18 +748,21 @@ export function buildTurnPresentation(sourceItems: readonly ItemView[]): TurnPre
 				continue;
 			}
 			if (block.type === "text") {
-				if (itemIndex === finalIndex || thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))
+				if (
+					!block.text.trim() ||
+					itemIndex === finalIndex ||
+					thinking.some((candidate) => isThinkingEcho(block.text, candidate.text))
+				)
 					continue;
+				if (phaseHasActivity) flushPhase();
 				phase.push(block);
 				continue;
 			}
-			if (block.type === "tool_call" && block.name === "deliver_file") continue;
 			if (block.type === "tool_result") {
 				if (block.deliveredFile) {
 					deliveredFiles.push(block.deliveredFile);
 					continue;
 				}
-				if (block.name === "deliver_file") continue;
 			}
 			if (
 				block.type !== "thinking" &&
@@ -750,9 +770,12 @@ export function buildTurnPresentation(sourceItems: readonly ItemView[]): TurnPre
 				(block.type !== "tool_result" || callIds.has(block.toolCallId))
 			)
 				continue;
+			const card = block.type === "tool_call" && (block.name === "ask_user" || block === taskAnchor);
+			if (card || !phaseHasActivity) flushPhase();
 			phase.push(block);
 			phaseHasActivity = true;
 			if (block.type === "tool_call") phaseCalls.push(block);
+			if (card) flushPhase();
 		}
 		if (itemIndex === finalIndex) {
 			flushPhase();
@@ -780,6 +803,8 @@ export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): Cod
 	}
 
 	const segments: CodeTranscriptSegment[] = [];
+	const callIds = new Set(items.flatMap((item) => toolCalls(item).map((call) => call.toolCallId)));
+	const taskAnchor = items.flatMap(toolCalls).find((call) => call.name === "set_tasks");
 	let contentBlocks: VisibleCodeBlock[] = [];
 	let contentAnswer = false;
 	let contentMarkdown = false;
@@ -798,14 +823,12 @@ export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): Cod
 		contentBlocks = [];
 	};
 	const flushTools = () => {
-		const visibleCalls = calls.filter((call) => call.name !== "deliver_file");
-		const visibleOrphans = orphanResults.filter((result) => result.name !== "deliver_file" && !result.deliveredFile);
-		if (visibleCalls.length === 0 && visibleOrphans.length === 0) return;
+		if (calls.length === 0 && orphanResults.length === 0) return;
 		segments.push({
 			type: "tools",
-			calls: visibleCalls,
-			orphanResults: visibleOrphans,
-			running: visibleCalls.some((call) => call.state === "running" || call.state === "pending"),
+			calls,
+			orphanResults,
+			running: calls.some((call) => call.state === "running" || call.state === "pending"),
 		});
 		calls = [];
 		orphanResults = [];
@@ -833,9 +856,11 @@ export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): Cod
 			if (block.type === "thinking" || block.type === "compaction" || block.type === "plan") continue;
 			if (block.type === "text" && hasToolCall) continue;
 			if (block.type === "tool_call") {
-				if (block.name === "deliver_file") continue;
 				flushContent();
+				const card = block.name === "ask_user" || block === taskAnchor || block.name === "deliver_file";
+				if (card) flushTools();
 				calls.push(block);
+				if (card) flushTools();
 				continue;
 			}
 			if (block.type === "tool_result") {
@@ -846,9 +871,8 @@ export function buildCodeTurnPresentation(sourceItems: readonly ItemView[]): Cod
 					deliveredFiles.push(delivered);
 					continue;
 				}
-				if (block.name === "deliver_file") continue;
 				flushContent();
-				if (!calls.some((call) => call.toolCallId === block.toolCallId)) orphanResults.push(block);
+				if (!callIds.has(block.toolCallId)) orphanResults.push(block);
 				continue;
 			}
 			if (block.type === "text" && thinking.some((candidate) => isThinkingEcho(block.text, candidate.text)))

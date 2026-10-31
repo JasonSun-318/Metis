@@ -1,0 +1,77 @@
+/* Runtime controls share the transcript column, while each card owns its disclosure. */
+.transcript-tool-group { display: grid; gap: 12px; margin: 12px 0; }
+:is(.turn-user, .code-turn-user) + .transcript-tool-group { margin-top: 0; }
+.transcript-tool-group:empty { display: none; }
+.transcript .transcript-tool-group > :is(.conversation-interaction-card, .code-execution, .execution-chain, .tool-result-images) { margin-block: 0; }
+.transcript .transcript-tool-group > :is(.code-execution, .execution-chain) > summary { display: flex; }
+.transcript .conversation-interaction-card {
+	box-sizing: border-box;
+	width: 100%;
+	min-width: 0;
+	margin: 14px 0;
+	border: 1px solid var(--border);
+	border-radius: 12px;
+	background: var(--surface-02);
+	padding: 14px 16px;
+	color: var(--text);
+	font-size: 13px;
+	line-height: 1.5;
+	overflow-wrap: anywhere;
+}
+.conversation-interaction-card :is(.ask-user-panel, .permission-approval-panel) {
+	margin: 0;
+	padding: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	box-shadow: none;
+	max-height: none;
+}
+.conversation-interaction-card :is(.ask-user-slot, .permission-approval-slot) { margin: 0; width: 100%; }
+.conversation-interaction-card .ask-user-body { max-height: none; }
+.conversation-interaction-card .ask-user-options { gap: 6px; }
+.conversation-interaction-card .ask-user-actions button,
+.conversation-interaction-card .ask-user-resume button,
+.conversation-interaction-card .plan-card-actions button { min-height: 28px; padding: 4px 10px; border-radius: 7px; font-size: 12px; }
+.conversation-interaction-card .ask-user-header-actions button { width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.conversation-interaction-card .permission-approval-command { margin-block: 12px; padding: 10px 12px; border-radius: 7px; background: var(--surface-04); }
+.conversation-interaction-card .ask-user-resume { background: transparent; padding: 0; border: 0; }
+.transcript .conversation-tasks { padding: 0; }
+.conversation-card-heading { display: flex; align-items: center; gap: 8px; width: 100%; padding: 14px 16px; border-radius: inherit; text-align: left; color: inherit; --button-hover-bg: transparent; }
+.conversation-card-heading:focus-visible { outline: 2px solid var(--focus); outline-offset: -3px; }
+.conversation-card-heading > svg { color: var(--text); }
+.conversation-card-heading strong { flex: 1; font-weight: 500; }
+.conversation-card-heading > span { color: var(--text-muted); font-size: 12px; }
+.conversation-task-items { display: grid; gap: 10px; list-style: none; margin: 0; padding: 0 16px 14px; }
+.conversation-task-items li { display: flex; gap: 9px; align-items: flex-start; }
+.conversation-task-items svg { flex: none; margin-top: 2px; color: var(--text-muted); }
+.conversation-task-items .is-completed { color: var(--text-muted); }
+.conversation-card-status { color: var(--text-muted); }
+.conversation-interaction-card summary { cursor: pointer; color: var(--text-19); }
+.transcript :is(.code-command, .tool-step) .conversation-permission-receipt { width: auto; margin: 8px 10px; padding: 8px 10px; border-radius: 7px; background: transparent; font-size: 12px; }
+.conversation-interaction-card.plan-card { display: grid; gap: 12px; box-shadow: none; }
+.conversation-interaction-card .plan-card-title { margin: 0; color: var(--text); }
+.conversation-interaction-card .plan-card-actions { justify-content: flex-end; }
+.conversation-interaction-card .plan-card-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.conversation-interaction-card .plan-card-header > div { display: grid; gap: 4px; min-width: 0; }
+.conversation-interaction-card [data-plan-action="open"] { flex: none; padding: 2px 0; color: var(--text-muted); font-size: 12px; text-decoration: underline; text-underline-offset: 3px; --button-hover-bg: transparent; }
+.conversation-interaction-card .plan-card-actions [data-plan-action="start"] { background: var(--button-primary-bg); color: var(--button-primary-ink); border-color: transparent; --button-hover-bg: var(--button-primary-bg-hover); }
+.transcript-plan-row > .conversation-interaction-card { margin: 0; }
+.transcript :is(.transcript-turn, .code-transcript-turn, .transcript-plan-row)[data-continues] { padding-bottom: 12px; }
+.transcript [data-continues] > :last-child { margin-bottom: 0; }
+.transcript [data-continues]:has(> [data-user-message]:last-child) { padding-bottom: 24px; }
+.transcript [data-continues] > :is(.turn-answer, .code-turn-answer):last-child { padding-bottom: 0; }
+@media (max-width: 600px) {
+	.transcript .conversation-interaction-card { padding: 12px; }
+	.transcript .conversation-tasks { padding: 0; }
+	.conversation-card-heading { padding: 12px; }
+	.conversation-task-items { padding: 0 12px 12px; }
+	.conversation-interaction-card .ask-user-header { flex-wrap: wrap; }
+}
+.conversation-interaction-card .ask-user-slot.is-submitting { opacity: .65; transform: none; }
+
+.conversation-interaction-card .permission-approval-split-selector .menu-select-trigger { height: 28px; }
+.conversation-interaction-card .ask-user-actions .composer-panel-toggle { width: 28px; height: 28px; min-width: 28px; padding: 0; }
+.conversation-task-chevron { flex: none; transition: transform 160ms ease; }
+.conversation-card-heading[aria-expanded="true"] .conversation-task-chevron { transform: rotate(90deg); }
+:root[data-motion="reduced"] .conversation-task-chevron { transition: none; }

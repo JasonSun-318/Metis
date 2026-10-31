@@ -22,6 +22,8 @@ function approval(overrides: Partial<Approval> = {}): Approval {
 		requestId: "00000000-0000-4000-8000-000000000301",
 		actionId: "action-bash-1",
 		toolLabel: "bash",
+		command: "curl https://example.test",
+		rememberSessionEligible: true,
 		riskLevel: "high",
 		executionTarget: "sandbox",
 		reason: "Network destination needs approval",
@@ -92,165 +94,218 @@ function visibleText(container: HTMLElement) {
 	return clone.textContent ?? "";
 }
 
-function press(element: HTMLElement, key: string) {
-	element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key }));
+function press(element: HTMLElement, key: string, options: KeyboardEventInit = {}) {
+	const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key, ...options });
+	element.dispatchEvent(event);
+	return event;
+}
+
+function more(container: HTMLElement) {
+	const trigger = container.querySelector<HTMLButtonElement>('[aria-haspopup="listbox"]');
+	if (!trigger) throw new Error("Missing approval choice menu");
+	return trigger;
 }
 
 describe("permission approval panel", () => {
-	it("leads with the command and target while keeping routine detail collapsed", () => {
+	it("shows only the confirmation, complete command, and compact decision controls", () => {
 		const { container } = mount();
 		const text = visibleText(container);
-
-		expect(container.querySelector(".permission-approval-slot .permission-approval-panel")).not.toBeNull();
-		expect(container.querySelector("svg.warning, [data-icon='warning']")).toBeNull();
-		expect(text).not.toContain("Waiting for approval");
-		expect(text).not.toContain("Network destination needs approval");
-		expect(text).not.toContain("This command remains limited to the displayed workspace sandbox.");
-		expect(text).not.toContain("Automatic security review");
-		expect(text).toContain("curl https://example.test");
-		expect(text).toContain("/tmp/work/out.txt");
-		expect(text).not.toContain(REDACTED);
-		expect(text).toContain("Network");
-
-		expect(button(container, "Reject")).not.toBeNull();
-		expect(button(container, "Allow once")).not.toBeNull();
-		expect(visibleText(container)).not.toContain("Always allow this exact action");
-		expect(visibleText(container)).not.toContain("Always deny this exact action");
-
-		const disclosure = button(container, "Details");
-		expect(disclosure.getAttribute("aria-expanded")).toBe("false");
-		act(() => disclosure.click());
-		const details = container.querySelector<HTMLElement>(".permission-approval-details")!;
-		expect(disclosure.getAttribute("aria-expanded")).toBe("true");
-		expect(disclosure.getAttribute("aria-controls")).toBe(details.id);
-		expect(details.hidden).toBe(false);
-		expect(visibleText(container)).toContain("example.test");
-		expect(details.textContent).toContain(REDACTED);
-		expect(details.textContent).toContain("Network destination needs approval");
+		expect(container.querySelector("h2")?.textContent).toBe("Allow Metis to execute the following command?");
+		expect(container.querySelector(".permission-approval-command")?.textContent).toBe("curl https://example.test");
+		for (const hidden of [
+			"Details",
+			"Working directory",
+			"Network destination needs approval",
+			"Automatic security review",
+			"/tmp/work/out.txt",
+			REDACTED,
+		]) {
+			expect(text).not.toContain(hidden);
+		}
+		expect(button(container, "Reject")).toBeTruthy();
+		expect(button(container, "Allow once")).toBeTruthy();
+		expect(more(container)).toBeTruthy();
 	});
 
-	it("keeps the working directory visible when a relative command needs it", () => {
+	it("uses the agreed Chinese confirmation and compact remembered choices", async () => {
+		await setLocale("zh-CN");
+		const { container } = mount();
+		expect(container.querySelector("h2")?.textContent).toBe("允许 Metis 执行以下命令吗？");
+		expect(button(container, "允许一次")).toBeTruthy();
+		await act(async () => more(container).click());
+		expect(button(container, "记住到项目")).toBeTruthy();
+	});
+
+	it("keeps a long multiline command including Unicode paths complete", () => {
+		const command = Array.from({ length: 100 }, () => "rg --files 'src/中文目录' | head -n 1").join(" &&\n");
+		expect(Buffer.byteLength(command)).toBeGreaterThan(256);
+		const { container } = mount(approval({ command }));
+		expect(container.querySelector("pre code")?.textContent).toBe(command);
+	});
+
+	it("uses the action wording and exact targets for a non-shell operation", () => {
 		const { container } = mount(
 			approval({
-				details: [
-					{ label: "Command", value: "npm test" },
-					{ label: "Working directory", value: "/tmp/work" },
-				],
+				toolLabel: "write_file",
+				command: undefined,
+				details: [{ label: "Path", value: "/tmp/目标.txt" }],
 			}),
 		);
-		const text = visibleText(container);
-		expect(text).toContain("npm test");
-		expect(text).toContain("/tmp/work");
+		expect(container.querySelector("h2")?.textContent).toBe("Allow Metis to perform the following action?");
+		expect(container.querySelector("pre")?.textContent).toContain("write_file");
+		expect(container.querySelector("pre")?.textContent).toContain("/tmp/目标.txt");
 	});
 
-	it("keeps host, external, critical, blocked, and incomplete decision text visible", () => {
-		const { container } = mount(
-			approval({
-				executionTarget: "external",
-				riskLevel: "critical",
-				scopeComplete: false,
-				priorReviewer: "model",
-				priorReviewerOutcome: "deny",
-			}),
-			vi.fn().mockResolvedValue(undefined),
-			"misconfigured",
-		);
-		const text = visibleText(container);
-		expect(text).toContain("This action reaches a network or external service.");
-		expect(text).toContain("This operation may not be reversible.");
-		expect(text).toContain("This tool did not provide enough target details. Deny and retry with a specific target.");
-		expect(text).not.toContain("This action stays blocked instead of running on the host.");
-		expect(text).not.toContain("Automatic security review denied this action.");
-	});
-
-	it("keeps sandbox blocking visible and disables every allow choice", () => {
-		const { container } = mount(approval(), vi.fn().mockResolvedValue(undefined), "unavailable");
-		expect(visibleText(container)).toContain(
-			"Workspace sandbox is unavailable. This action stays blocked instead of running on the host.",
-		);
+	it("does not recreate a missing full command from legacy truncated rows", async () => {
+		const { container, onRespond } = mount(approval({ command: undefined }));
+		expect(container.querySelector("pre")).toBeNull();
+		expect(container.textContent).not.toContain("curl https://example.test");
 		expect(button(container, "Allow once").disabled).toBe(true);
+		await act(async () => press(panel(container), "Enter"));
+		expect(onRespond).not.toHaveBeenCalled();
+	});
+
+	it("keeps only a short sandbox failure and blocks every allow path", async () => {
+		const { container, onRespond } = mount(approval(), vi.fn().mockResolvedValue(undefined), "unavailable");
+		expect(container.textContent).toContain("Workspace sandbox is unavailable");
+		expect(button(container, "Allow once").disabled).toBe(true);
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+		await act(async () => press(panel(container), "Enter"));
+		expect(onRespond).not.toHaveBeenCalled();
 		expect(button(container, "Reject").disabled).toBe(false);
-		act(() => button(container, "More").click());
-		expect(button(container, "Always allow this exact action").disabled).toBe(true);
-		expect(button(container, "Always deny this exact action").disabled).toBe(false);
 	});
 
-	it("disables only persistent allow when the scope is incomplete", () => {
-		const { container } = mount(approval({ scopeComplete: false }));
-		expect(visibleText(container)).toContain(
-			"This tool did not provide enough target details. Deny and retry with a specific target.",
+	it.each([{ scopeComplete: false }, { riskLevel: "critical" as const }])(
+		"does not offer remembered authorization for an ineligible action",
+		(change) => {
+			const { container } = mount(approval(change));
+			expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
+			expect(button(container, "Allow once").disabled).toBe(false);
+			expect(visibleText(container)).not.toContain("This operation may not be reversible");
+		},
+	);
+
+	it("offers only server-supplied remembered choices and checks session eligibility", async () => {
+		const { container, onRespond } = mount(
+			approval({ choices: ["allow-once", "deny-once", "allow-session-exact"], rememberSessionEligible: true }),
 		);
-		expect(button(container, "Allow once").disabled).toBe(false);
-		act(() => button(container, "More").click());
-		expect(button(container, "Always allow this exact action").disabled).toBe(true);
-		expect(button(container, "Always deny this exact action").disabled).toBe(false);
+		await act(async () => more(container).click());
+		expect(button(container, "Allow for this session")).toBeTruthy();
+		expect(container.textContent).not.toContain("Remember for this project");
+		await act(async () => button(container, "Allow for this session").click());
+		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "allow-session-exact" }));
 	});
 
-	it("reveals only the persistent exact choices the server supplied", () => {
-		const { container } = mount(approval({ choices: ["allow-once", "deny-once", "always-deny-exact"] }));
-		expect(visibleText(container)).not.toContain("Always deny this exact action");
-		const more = button(container, "More");
-		expect(more.getAttribute("aria-expanded")).toBe("false");
-		expect(more.getAttribute("aria-controls")).toBeTruthy();
-		act(() => more.click());
-		expect(more.getAttribute("aria-expanded")).toBe("true");
-		const persistent = container.querySelector<HTMLElement>(`[id="${more.getAttribute("aria-controls") ?? ""}"]`)!;
-		expect(persistent.hidden).toBe(false);
-		expect(button(container, "Always deny this exact action")).not.toBeNull();
-		expect(container.textContent).not.toContain("Always allow this exact action");
+	it("hides a session choice when the current request is not eligible", () => {
+		const { container } = mount(
+			approval({ choices: ["allow-once", "deny-once", "allow-session-exact"], rememberSessionEligible: false }),
+		);
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
 	});
 
-	it("omits More when the server supplied no persistent choices", () => {
+	it("has no empty dropdown when only one-time decisions are available", () => {
 		const { container } = mount(approval({ choices: ["allow-once", "deny-once"] }));
-		expect(container.textContent).not.toContain("More");
+		expect(container.querySelector('[aria-haspopup="listbox"]')).toBeNull();
 	});
 
-	it("discloses details and submits the exact choice once", async () => {
-		const onRespond = vi.fn().mockImplementation(async () => {
-			await new Promise((resolve) => setTimeout(resolve, 20));
-		});
+	it("focuses the dialog for reading, submits the exact choice once, and locks all controls", async () => {
+		const onRespond = vi.fn(async () => new Promise<void>(() => {}));
 		const { container } = mount(approval(), onRespond);
-		await act(async () => {
-			await Promise.resolve();
-		});
-		expect(document.activeElement?.textContent).toContain("Reject");
-
-		const more = button(container, "More");
-		more.focus();
-		await act(async () => more.click());
-		expect(more.getAttribute("aria-expanded")).toBe("true");
-		await act(async () => more.click());
-		expect(more.getAttribute("aria-expanded")).toBe("false");
-
-		const details = button(container, "Details");
-		details.focus();
-		await act(async () => details.click());
-		expect(details.getAttribute("aria-expanded")).toBe("true");
-
+		await act(async () => Promise.resolve());
+		expect(document.activeElement).toBe(panel(container));
 		await act(async () => button(container, "Allow once").click());
 		expect(button(container, "Allow once").disabled).toBe(true);
 		expect(button(container, "Reject").disabled).toBe(true);
-		expect(more.disabled).toBe(true);
-		expect(container.querySelector("[aria-live='polite']")?.textContent).toContain("Sending your decision…");
+		expect(more(container).disabled).toBe(true);
 		await act(async () => button(container, "Allow once").click());
 		expect(onRespond).toHaveBeenCalledTimes(1);
 		expect(onRespond).toHaveBeenCalledWith({
-			interactionId: "00000000-0000-4000-8000-000000000301",
+			interactionId: approval().interactionId,
 			kind: "session_permission_approval",
 			choice: "allow-once",
 		});
 	});
 
-	it("denies with Escape even while More is expanded and never sends a second response", async () => {
-		const onRespond = vi.fn().mockResolvedValue(undefined);
-		const { container } = mount(approval(), onRespond);
-		act(() => button(container, "More").click());
+	it("keeps inline approvals unfocused until the user enters the card", async () => {
+		const composer = document.createElement("div");
+		composer.contentEditable = "true";
+		composer.tabIndex = 0;
+		const card = document.createElement("div");
+		card.className = "conversation-interaction-card";
+		document.body.append(composer, card);
+		composer.focus();
+		const { container, onRespond } = mount(approval(), vi.fn().mockResolvedValue(undefined), "healthy", card);
+		await act(async () => Promise.resolve());
+		expect(document.activeElement).toBe(composer);
+		await act(async () => {
+			press(composer, "Enter");
+			press(composer, "Escape");
+		});
+		expect(onRespond).not.toHaveBeenCalled();
+		await act(async () => {
+			panel(container).focus();
+			press(panel(container), "Enter");
+		});
+		expect(onRespond).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ choice: "allow-once" }));
+	});
+
+	it("allows once with Enter only after modifiers, composition, repeat and selection guards", async () => {
+		const { container, onRespond } = mount();
+		await act(async () => {
+			press(panel(container), "Enter", { ctrlKey: true });
+			press(panel(container), "Enter", { shiftKey: true });
+			expect(press(button(container, "Allow once"), "Enter", { isComposing: true }).defaultPrevented).toBe(true);
+			expect(press(button(container, "Allow once"), "Enter", { repeat: true }).defaultPrevented).toBe(true);
+		});
+		const range = document.createRange();
+		range.selectNodeContents(container.querySelector("pre")!);
+		window.getSelection()!.removeAllRanges();
+		window.getSelection()!.addRange(range);
+		expect(window.getSelection()!.isCollapsed).toBe(false);
+		await act(async () => press(panel(container), "Enter"));
+		expect(onRespond).not.toHaveBeenCalled();
+		window.getSelection()!.removeAllRanges();
+		await act(async () => press(panel(container), "Enter"));
+		expect(onRespond).toHaveBeenCalledTimes(1);
+		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "allow-once" }));
+	});
+
+	it("does not turn menu Enter or its first Escape into a one-time approval", async () => {
+		const { container, onRespond } = mount();
+		await act(async () => more(container).click());
+		await act(async () => press(more(container), "Enter"));
+		expect(onRespond).not.toHaveBeenCalled();
+		await act(async () => press(more(container), "Escape"));
+		expect(onRespond).not.toHaveBeenCalled();
+		expect(more(container).getAttribute("aria-expanded")).toBe("false");
 		await act(async () => {
 			press(panel(container), "Escape");
 			press(panel(container), "Escape");
 		});
 		expect(onRespond).toHaveBeenCalledTimes(1);
 		expect(onRespond).toHaveBeenCalledWith(expect.objectContaining({ choice: "deny-once" }));
+	});
+
+	it("does not approve a new request from a repeated Enter key", async () => {
+		const { container, root } = mount();
+		const next = vi.fn().mockResolvedValue(undefined);
+		rerender(root, approval({ interactionId: "00000000-0000-4000-8000-000000000319" }), next);
+		await act(async () => press(button(container, "Allow once"), "Enter", { repeat: true }));
+		expect(next).not.toHaveBeenCalled();
+	});
+
+	it("ignores the second click of a double click and catches synchronous response failures", async () => {
+		const onRespond = vi.fn(() => {
+			throw new Error("synchronous failure");
+		});
+		const { container } = mount(approval(), onRespond);
+		await act(async () =>
+			button(container, "Allow once").dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 2 })),
+		);
+		expect(onRespond).not.toHaveBeenCalled();
+		await act(async () => button(container, "Allow once").click());
+		expect(container.querySelector(".error-copy")?.textContent).toContain("synchronous failure");
+		expect(button(container, "Allow once").disabled).toBe(false);
 	});
 
 	it("retries a failed decision and closes a stale response without authorizing again", async () => {

@@ -62,6 +62,103 @@ function result(name: string, output: string, isError = false): ToolResultBlock 
 }
 
 describe("transcript turn presentation", () => {
+	it.each([false, true])("keeps delivery and final thinking in one activity group (error: %s)", (isError) => {
+		const deliveredFile = {
+			fileId: "deck",
+			sourcePath: "/workspace/deck.pptx",
+			name: "deck.pptx",
+			byteLength: 120,
+			deliveredAt: "2026-10-30T00:00:00Z",
+			availability: "available" as const,
+		};
+		const table = "| 页面 | 内容 |\n| --- | --- |\n| 1 | 简介 |";
+		const view = buildTurnPresentation([
+			turnItems[0]!,
+			item("build-deck", "assistant", [{ type: "thinking", text: "制作并检查文件。" }, call("bash", "make deck")]),
+			item("build-result", "tool", [result("bash", "ok")]),
+			item("delivery", "assistant", [call("deliver_file", { path: "/workspace/deck.pptx" })]),
+			item("delivery-result", "tool", [
+				{
+					...result("deliver_file", isError ? "failed" : "delivered", isError),
+					...(!isError ? { deliveredFile } : {}),
+				},
+			]),
+			item("final-deck", "assistant", [
+				{ type: "thinking", text: "整理最终说明。" },
+				{ type: "text", text: table },
+			]),
+		]);
+		expect(view.segments.map((segment) => segment.type)).toEqual(["user", "activity", "answer"]);
+		expect(view.segments[1]?.type === "activity" && view.segments[1].calls.map((tool) => tool.name)).toEqual([
+			"bash",
+			"deliver_file",
+		]);
+		expect(
+			view.segments[1]?.type === "activity" && view.segments[1].blocks.filter((block) => block.type === "thinking"),
+		).toHaveLength(2);
+		expect(view.results.get("call-deliver_file")?.isError).toBe(isError);
+		expect(view.deliveredFiles).toEqual(isError ? [] : [deliveredFile]);
+		expect(view.final?.content).toContainEqual({ type: "text", text: table });
+	});
+
+	it.each(["", " \n\t"])("does not split a continuous tool sequence on blank assistant text %j", (blank) => {
+		const steps = Array.from({ length: 20 }, (_, index) => [
+			item(`assistant-step-${index}`, "assistant", [
+				{ type: "thinking", text: `检查第 ${index + 1} 项。` },
+				{ type: "text", text: blank },
+				{ type: "tool_call", toolCallId: `tool-${index}`, name: "bash", state: "completed" },
+			]),
+			item(`result-${index}`, "tool", [
+				{ type: "tool_result", toolCallId: `tool-${index}`, name: "bash", isError: false, output: "ok" },
+			]),
+		]).flat();
+		const table = "| 项目 | 状态 |\n| --- | --- |\n| 检查 | 完成 |";
+		const view = buildTurnPresentation([
+			turnItems[0]!,
+			...steps,
+			item("public-table", "assistant", [{ type: "text", text: table }, call("ask_user", {}, "completed")]),
+		]);
+		expect(view.segments.map((segment) => segment.type)).toEqual(["user", "activity", "intermediate", "activity"]);
+		expect(view.segments[1]?.type === "activity" && view.segments[1].calls).toHaveLength(20);
+		expect(view.results.size).toBe(20);
+		expect(view.segments[2]).toMatchObject({ blocks: [{ type: "text", text: table }] });
+	});
+
+	it("does not select an empty trailing assistant item as the final reply", () => {
+		const entries = [...turnItems, item("empty-tail", "assistant", [{ type: "text", text: " \n" }])];
+		expect(buildTurnPresentation(entries).final?.itemId).toBe("assistant-final");
+		expect(buildCodeTurnPresentation(entries).final?.itemId).toBe("assistant-final");
+	});
+
+	it("keeps a public table outside activity before a same-message confirmation tool", () => {
+		const table = "| 页面 | 内容 |\n| --- | --- |\n| 1 | 简介 |";
+		const view = buildTurnPresentation([
+			item("table-user", "user", [{ type: "text", text: "先确认结构" }]),
+			item("table-assistant", "assistant", [
+				{ type: "thinking", text: "整理结构后询问用户。" },
+				{ type: "text", text: table },
+				call("ask_user", { questions: [{ question: "这个结构可以吗？" }] }, "running"),
+			]),
+		]);
+		expect(view.segments.map((segment) => segment.type)).toEqual(["user", "activity", "intermediate", "activity"]);
+		expect(view.segments[2]).toMatchObject({ type: "intermediate", blocks: [{ type: "text", text: table }] });
+		expect(
+			view.segments.flatMap((segment) => (segment.type === "activity" ? segment.blocks : [])),
+		).not.toContainEqual({ type: "text", text: table });
+	});
+
+	it("keeps streamed public text outside execution when a later tool arrives", () => {
+		const progress = item("progress", "assistant", [{ type: "text", text: "我会先检查项目。" }]);
+		const before = buildTurnPresentation([turnItems[0]!, progress]);
+		expect(before.segments.at(-1)?.type).toBe("answer");
+		const after = buildTurnPresentation([
+			turnItems[0]!,
+			{ ...progress, content: [...progress.content, call("bash", { command: "pwd" }, "running")] },
+		]);
+		expect(after.segments.map((segment) => segment.type)).toEqual(["user", "intermediate", "activity"]);
+		expect(after.segments[1]).toMatchObject({ blocks: [{ type: "text", text: "我会先检查项目。" }] });
+	});
+
 	it("keeps a failed assistant notice visible without calling its partial output a final answer", () => {
 		const failure: ItemView = {
 			...item("provider-failure", "assistant", [
@@ -120,19 +217,23 @@ describe("transcript turn presentation", () => {
 	it("separates public answer text from thinking and pairs tool results", () => {
 		const view = buildTurnPresentation(turnItems);
 		expect(view.users.map((entry) => entry.itemId)).toEqual(["user-1"]);
-		expect(view.segments.map((segment) => segment.type)).toEqual(["user", "activity", "answer"]);
+		expect(view.segments.map((segment) => segment.type)).toEqual([
+			"user",
+			"activity",
+			"intermediate",
+			"activity",
+			"answer",
+		]);
 		expect(view.segments[1]?.type === "activity" && view.segments[1].blocks[0]?.type).toBe("thinking");
 		expect(view.segments[1]?.type === "activity" && view.segments[1].blocks.map((block) => block.type)).toEqual([
 			"thinking",
-			"text",
-			"tool_call",
 		]);
-		expect(
-			view.segments[1]?.type === "activity" && view.segments[1].blocks.find((block) => block.type === "text")?.text,
-		).toBe("我需要先请求访问你的桌面文件夹才能查看里面的内容。");
+		expect(view.segments[2]?.type === "intermediate" && view.segments[2].blocks[0]?.text).toBe(
+			"我需要先请求访问你的桌面文件夹才能查看里面的内容。",
+		);
 		expect(view.final?.itemId).toBe("assistant-final");
 		expect(view.results.get("tool-command")?.output).toBe("file.txt");
-		expect(view.segments[1]?.type === "activity" && actionSummary(view.segments[1].calls)).toBe("Ran a command");
+		expect(view.segments[3]?.type === "activity" && actionSummary(view.segments[3].calls)).toBe("Ran a command");
 
 		const code = buildCodeTurnPresentation(turnItems);
 		expect(code.segments.map((segment) => segment.type)).toEqual(["user", "tools", "content"]);
@@ -388,7 +489,7 @@ describe("transcript turn presentation", () => {
 		expect(JSON.stringify(malformed)).not.toContain("hidden");
 	});
 
-	it("collects deliver_file results and hides them from activity", () => {
+	it("collects delivered files while retaining tool anchors for approvals", () => {
 		const deliveredFile = {
 			fileId: "aaaaaaaaaaaaaaaa",
 			name: "report.xlsx",
@@ -421,11 +522,12 @@ describe("transcript turn presentation", () => {
 		];
 		const view = buildTurnPresentation(items);
 		expect(view.deliveredFiles).toEqual([deliveredFile]);
+		expect(view.segments.flatMap((segment) => (segment.type === "activity" ? segment.calls : []))).toHaveLength(1);
 		expect(
-			view.segments.every(
-				(segment) => segment.type !== "activity" || segment.calls.every((call) => call.name !== "deliver_file"),
+			buildCodeTurnPresentation(items).segments.flatMap((segment) =>
+				segment.type === "tools" ? segment.calls : [],
 			),
-		).toBe(true);
+		).toHaveLength(1);
 	});
 
 	it("places a same-turn steer after earlier assistant content", () => {

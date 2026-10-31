@@ -98,10 +98,10 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 		const active = document.activeElement;
 		const activeColumn =
 			active instanceof HTMLElement && active !== document.body ? active.closest(".conversation-column") : null;
-		if (!activeColumn || activeColumn === conversation) {
+		if (!owned?.closest(".conversation-interaction-card") && (!activeColumn || activeColumn === conversation)) {
 			focusHeld.current = true;
 			// Collapsed renders the resume button, expanded renders the heading.
-			(resume.current ?? heading.current)?.focus();
+			(resume.current ?? heading.current)?.focus({ preventScroll: true });
 		}
 		return () => {
 			owned?.removeEventListener("focusin", trackFocus);
@@ -125,7 +125,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 	// biome-ignore lint/correctness/useExhaustiveDependencies(draft.questionIndex): Each question change moves focus to its newly rendered heading.
 	useEffect(() => {
 		if (!focusHeld.current) return;
-		(draft.collapsed ? resume.current : heading.current)?.focus();
+		(draft.collapsed ? resume.current : heading.current)?.focus({ preventScroll: true });
 	}, [draft.collapsed, draft.questionIndex]);
 
 	const choose = (choiceId: string) => {
@@ -198,7 +198,7 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 			return;
 		}
 		if (event.target instanceof HTMLTextAreaElement || event.metaKey || event.ctrlKey || event.altKey) return;
-		const controls = [...(panel.current?.querySelectorAll<HTMLButtonElement>(".ask-user-option") ?? [])];
+		const controls = Array.from(panel.current?.querySelectorAll<HTMLButtonElement>(".ask-user-option") ?? []);
 		const current = controls.indexOf(event.target as HTMLButtonElement);
 		if (current >= 0 && ["ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "Home", "End"].includes(event.key)) {
 			event.preventDefault();
@@ -210,14 +210,14 @@ export function AskUserPanel({ interaction, onRespond, draftCache, disabled = fa
 						: (current + (["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1) + controls.length) %
 							controls.length;
 			if (!question.multiple) choose(question.choices[index]!.id);
-			controls[index]?.focus();
+			controls[index]?.focus({ preventScroll: true });
 			return;
 		}
 		const index = Number(event.key) - 1;
 		if (/^[1-4]$/.test(event.key) && question.choices[index]) {
 			event.preventDefault();
 			choose(question.choices[index]!.id);
-			controls[index]?.focus();
+			controls[index]?.focus({ preventScroll: true });
 		}
 	};
 

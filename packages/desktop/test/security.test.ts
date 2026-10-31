@@ -717,6 +717,8 @@ describe("desktop trust boundaries", () => {
 		broker.attach({ webContents: webContents as never });
 		const event = { sender: webContents, senderFrame: webContents.mainFrame };
 		try {
+			const original = `${realpathSync(directory)}/result.txt`;
+			writeFileSync(original, "Verified");
 			supervisor.request.mockImplementationOnce(async (request) => ({
 				jsonrpc: "2.0",
 				id: request.id,
@@ -726,7 +728,7 @@ describe("desktop trust boundaries", () => {
 					byteLength: 8,
 					data: Buffer.from("Verified").toString("base64"),
 					mediaType: "text/plain",
-					absolutePath: "/verified/result.txt",
+					absolutePath: original,
 				},
 			}));
 			const read = ipcMain.handlers.get(DESKTOP_IPC_CHANNELS.readPreviewFile)!;
@@ -741,7 +743,7 @@ describe("desktop trust boundaries", () => {
 			expect(supervisor.request).toHaveBeenCalledWith(
 				expect.objectContaining({
 					method: "session/readDeliveredFile",
-					params: { sessionId: "preview-child", rootSessionId: "preview-root", fileId },
+					params: { sessionId: "preview-child", rootSessionId: "preview-root", fileId, metadataOnly: true },
 				}),
 			);
 			supervisor.request.mockImplementationOnce(async (request) => ({

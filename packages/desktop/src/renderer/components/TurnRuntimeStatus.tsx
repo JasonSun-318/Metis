@@ -1,7 +1,8 @@
 import type { ItemView, RetryStatusView } from "@metis/app-protocol";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { formatElapsed } from "../format-elapsed.ts";
+import { actionSummary, type ToolCallBlock } from "./transcript-turn-model.ts";
 
 const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
 
@@ -39,13 +40,6 @@ export function turnTokenTarget(items: readonly ItemView[]): { readonly tokens: 
 	return { tokens, exact };
 }
 
-export function advanceDisplayedTokens(current: number, target: number): number {
-	if (current === target) return current;
-	const difference = target - current;
-	const step = Math.max(1, Math.ceil(Math.abs(difference) / 4));
-	return current + Math.sign(difference) * Math.min(step, Math.abs(difference));
-}
-
 export function TurnRuntimeStatus({
 	items,
 	running,
@@ -54,6 +48,7 @@ export function TurnRuntimeStatus({
 	variant = "turn",
 	retry,
 	runId,
+	replyVisible = false,
 }: {
 	readonly items: readonly ItemView[];
 	readonly running: boolean;
@@ -62,11 +57,34 @@ export function TurnRuntimeStatus({
 	readonly variant?: "turn" | "compaction";
 	readonly retry?: RetryStatusView;
 	readonly runId?: string;
+	readonly replyVisible?: boolean;
 }) {
 	const { t } = useTranslation();
 	const target = useMemo(() => turnTokenTarget(items), [items]);
-	const targetRef = useRef(target.tokens);
-	targetRef.current = target.tokens;
+	const activity = useMemo(() => {
+		const completedTools = new Set(
+			items.flatMap((item) =>
+				item.content.flatMap((block) => (block.type === "tool_result" ? [block.toolCallId] : [])),
+			),
+		);
+		const tools = items.flatMap((item) =>
+			item.content.filter(
+				(block): block is ToolCallBlock =>
+					block.type === "tool_call" &&
+					(block.state === "running" || block.state === "pending") &&
+					!completedTools.has(block.toolCallId),
+			),
+		);
+		if (tools.length > 0)
+			return tools.every((tool) => tool.name === "read") ? t("Reading files…") : actionSummary(tools, t);
+		const assistant = [...items].reverse().find((item) => item.role === "assistant");
+		return replyVisible ||
+			(assistant?.state === "streaming" &&
+				assistant.content.some((block) => block.type === "text" && block.text.trim() !== "") &&
+				!assistant.content.some((block) => block.type === "thinking" || block.type === "tool_call"))
+			? t("Writing reply…")
+			: t("Thinking…");
+	}, [items, replyVisible, t]);
 	const parsedStartedAt = useMemo(() => {
 		const parsed = startedAt === undefined ? Number.NaN : Date.parse(startedAt);
 		return Number.isFinite(parsed) ? parsed : undefined;
@@ -76,13 +94,12 @@ export function TurnRuntimeStatus({
 		runId,
 		startedAtMs: parsedStartedAt ?? Date.now(),
 	}));
-	const [displayedTokens, setDisplayedTokens] = useState(0);
 	let startedAtMs = runClock.startedAtMs;
 
 	if (runClock.runId !== runId) {
 		startedAtMs = parsedStartedAt ?? Date.now();
 		setRunClock({ runId, startedAtMs });
-		setDisplayedTokens(0);
+		setNow(Date.now());
 	} else if (parsedStartedAt !== undefined && parsedStartedAt !== runClock.startedAtMs) {
 		startedAtMs = parsedStartedAt;
 		setRunClock({ runId, startedAtMs: parsedStartedAt });
@@ -91,38 +108,52 @@ export function TurnRuntimeStatus({
 	useEffect(() => {
 		if (!running || waitingForAnswer) return;
 		const interval = window.setInterval(() => {
-			if (variant === "turn") setDisplayedTokens((current) => advanceDisplayedTokens(current, targetRef.current));
 			setNow(Date.now());
-		}, 100);
+		}, 1000);
 		return () => window.clearInterval(interval);
-	}, [running, variant, waitingForAnswer]);
+	}, [running, waitingForAnswer]);
 
 	if (!running) return null;
 	if (waitingForAnswer)
 		return <output className="status-block turn-runtime-status is-waiting">{t("Waiting for your answer")}</output>;
-	const elapsed = formatElapsed(Math.max(0, now - startedAtMs));
+	const elapsedMs = Math.max(0, now - startedAtMs);
+	const elapsed = formatElapsed(elapsedMs);
+	const waitingForOutput = target.tokens === 0 && !replyVisible && elapsedMs >= 20_000 && activity === t("Thinking…");
 	const label =
 		variant === "compaction"
 			? t("Compacting conversation…")
 			: retry
 				? t("Retrying ({{attempt}}/{{maxAttempts}})", retry)
-				: t("Thinking…");
+				: waitingForOutput
+					? t("Still waiting for model output…")
+					: activity;
 	return (
-		<output
-			aria-label={label}
+		<div
 			className="status-block turn-runtime-status"
-			data-runtime-tokens={variant === "turn" ? displayedTokens : undefined}
+			data-runtime-tokens={variant === "turn" ? target.tokens : undefined}
 		>
-			<span aria-hidden="true" className="turn-runtime-spinner">
-				{[0, 1, 2, 3, 4, 5].map((dot) => (
-					<span key={dot} />
-				))}
-			</span>
-			<span aria-hidden="true">
-				{variant === "compaction"
-					? `${elapsed} · ${label}`
-					: `${elapsed} · ${t("{{count}} tokens", { count: displayedTokens })} · ${label}`}
-			</span>
-		</output>
+			<output aria-label={label} className="turn-runtime-activity">
+				<span aria-hidden="true" className="turn-runtime-spinner">
+					<span />
+				</span>
+				<span aria-hidden="true" className="turn-runtime-label" key={label}>
+					{label}
+				</span>
+			</output>
+			{variant === "turn" && target.tokens > 0 && (
+				<span
+					className="turn-runtime-usage"
+					title={t(target.exact ? "Generated tokens" : "Estimated generated tokens")}
+				>
+					{!target.exact && "≈ "}
+					{t("{{count}} tokens", { count: target.tokens.toLocaleString() })}
+				</span>
+			)}
+			{elapsedMs >= 3000 && (
+				<span aria-hidden="true" className="turn-runtime-elapsed">
+					{elapsed}
+				</span>
+			)}
+		</div>
 	);
 }

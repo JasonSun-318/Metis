@@ -1,8 +1,22 @@
 import type { CodeChangesView, ItemContentBlockView } from "@metis/app-protocol";
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useContext, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { CaretRight, CircleNotch, GitFork, ImageSquare, TerminalWindow, Tool } from "../icons.tsx";
-import { AskUserAnswerSummary } from "./AskUserAnswerSummary.tsx";
+import { CaretRight, CircleNotch, GitFork, ImageSquare } from "../icons.tsx";
+import { CodeChangesNavigationContext } from "./CodeChangesNavigationContext.ts";
+import { CodeTurnChanges } from "./CodeTurnChanges.tsx";
+import {
+	ConversationInteractionContext,
+	ConversationToolCards,
+	interactionToolId,
+	PermissionReceipt,
+} from "./ConversationInteractionCards.tsx";
+import {
+	type CodeTextCounts,
+	codeStepLabel,
+	isTextCodeChange,
+	summarizeCodeChanges,
+	textCodeChanges,
+} from "./code-change-summary.ts";
 import { DeliveredFileCards } from "./DeliveredFileCards.tsx";
 import { Markdown } from "./Markdown.tsx";
 import { MessageAnnotations } from "./MessageAnnotations.tsx";
@@ -121,9 +135,8 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const presentation = toolTranscriptPresentation(call, result, t);
-	const changes = result?.codeChanges?.files.length ? result.codeChanges : undefined;
+	const changes = textCodeChanges(result?.codeChanges);
 	const running = call.state === "running" || call.state === "pending";
-	const Icon = isCommandTool(call.name) ? TerminalWindow : Tool;
 	return (
 		<details
 			className={isCommandTool(call.name) ? "code-command code-command-shell" : "code-command code-command-tool"}
@@ -136,30 +149,28 @@ function CodeToolStep({ call, result }: { readonly call: ToolCallBlock; readonly
 					setOpen((current) => !current);
 				}}
 			>
-				<Icon aria-hidden="true" size={15} />
-				<span>{presentation.label}</span>
-				{changes && (
-					<>
-						{changes.files.length === 1 && (
-							<span className="code-change-path" title={changes.files[0]!.path}>
-								{changes.files[0]!.path}
-							</span>
-						)}
-						<CodeChangeCounts counts={codeStepCounts(changes)} />
-					</>
-				)}
+				<span
+					className="code-step-label"
+					title={changes?.files.length === 1 ? changes.files[0]!.path : commandText(presentation.rawInput)}
+				>
+					{codeStepLabel(call, result, presentation.label, t)}
+				</span>
+				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
 				{running && <CircleNotch aria-label={t("Running")} className="code-command-spinner" size={14} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
-				<CodeToolDetails
-					call={call}
-					changes={open ? changes : undefined}
-					lines={presentation.detailLines}
-					rawInput={presentation.rawInput}
-					rawOutput={presentation.rawOutput}
-					rawOutputIsError={presentation.rawOutputIsError}
-				/>
+				<div>
+					<CodeToolDetails
+						call={call}
+						changes={open ? changes : undefined}
+						lines={presentation.detailLines}
+						rawInput={presentation.rawInput}
+						rawOutput={presentation.rawOutput}
+						rawOutputIsError={presentation.rawOutputIsError}
+					/>
+					<PermissionReceipt call={call} />
+				</div>
 			</div>
 		</details>
 	);
@@ -169,7 +180,7 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
 	const presentation = toolTranscriptPresentation(undefined, result, t);
-	const changes = result.codeChanges?.files.length ? result.codeChanges : undefined;
+	const changes = textCodeChanges(result.codeChanges);
 	return (
 		<details className="code-command code-command-tool" open={open}>
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
@@ -179,7 +190,6 @@ function CodeOrphanToolStep({ result }: { readonly result: ToolResultBlock }) {
 					setOpen((current) => !current);
 				}}
 			>
-				<Tool aria-hidden="true" size={15} />
 				<span>{presentation.label}</span>
 				{changes && <CodeChangeCounts counts={codeStepCounts(changes)} />}
 				<CaretRight aria-hidden="true" className="code-command-caret" size={12} />
@@ -228,15 +238,39 @@ function CodeExecution({
 	calls,
 	results,
 	orphanResults,
-	turnChanges,
+	turnCounts,
 }: {
 	readonly calls: readonly ToolCallBlock[];
 	readonly results: ReadonlyMap<string, ToolResultBlock>;
 	readonly orphanResults: readonly ToolResultBlock[];
-	readonly turnChanges?: CodeChangesView;
+	readonly turnCounts?: CodeTextCounts;
 }) {
 	const { t } = useTranslation();
 	const [open, setOpen] = useState(false);
+	if (calls.length === 0 && orphanResults.length === 0) return null;
+	const files = new Map(
+		calls.flatMap((call) =>
+			(results.get(call.toolCallId)?.codeChanges?.files ?? [])
+				.filter(isTextCodeChange)
+				.map((file) => [file.path, file] as const),
+		),
+	);
+	const actions = calls.filter(
+		(call) => isCommandTool(call.name) || !results.get(call.toolCallId)?.codeChanges?.files.some(isTextCodeChange),
+	);
+	const fileLabel =
+		files.size > 0
+			? t(
+					[...files.values()].every((file) => file.kind === "added")
+						? "Created {{count}} files"
+						: "Changed {{count}} files",
+					{ count: files.size },
+				)
+			: "";
+	const title =
+		actions.length > 0
+			? [actionSummary(actions, t), fileLabel].filter(Boolean).join(" · ")
+			: fileLabel || t("Used a tool");
 	return (
 		<details className="code-execution" open={open}>
 			{/* biome-ignore lint/a11y/noStaticElementInteractions: Native summary supplies keyboard activation; this handler synchronizes controlled details state. */}
@@ -246,18 +280,20 @@ function CodeExecution({
 					setOpen((current) => !current);
 				}}
 			>
-				<CodeExecutionTitle text={calls.length > 0 ? actionSummary(calls, t) : t("Used a tool")} />
-				{turnChanges && <CodeChangeCounts counts={turnChanges.turn} turn />}
+				<CodeExecutionTitle text={title} />
+				{turnCounts && <CodeChangeCounts counts={turnCounts} turn />}
 				<CaretRight aria-hidden="true" className="code-execution-caret" size={12} />
 			</summary>
 			<div className="transcript-drawer" data-open={open ? "true" : undefined} inert={!open}>
-				<div className="code-execution-card">
-					{calls.map((call) => (
-						<CodeToolStep call={call} key={call.toolCallId} result={results.get(call.toolCallId)} />
-					))}
-					{orphanResults.map((result) => (
-						<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
-					))}
+				<div>
+					<div className="code-execution-card">
+						{calls.map((call) => (
+							<CodeToolStep call={call} key={call.toolCallId} result={results.get(call.toolCallId)} />
+						))}
+						{orphanResults.map((result) => (
+							<CodeOrphanToolStep key={`orphan-${result.toolCallId}`} result={result} />
+						))}
+					</div>
 				</div>
 			</div>
 		</details>
@@ -280,21 +316,36 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 	onPreviewDeliveredFile,
 }: CodeTranscriptTurnProps) {
 	const { t } = useTranslation();
+	const interactions = useContext(ConversationInteractionContext);
+	const pendingToolIds = new Set(interactions?.requests.map(interactionToolId));
+	const navigateChanges = useContext(CodeChangesNavigationContext);
+	const allCalls = items.flatMap((item) =>
+		item.content.filter((block): block is ToolCallBlock => block.type === "tool_call"),
+	);
 	const { users, segments, results, final, deliveredFiles } = buildCodeTurnPresentation(items);
 	const enteringUserId = running ? users.at(-1)?.itemId : undefined;
 	const finalCopyText = final ? messageText(final) : "";
 	const sessionId = items[0]?.sessionId;
-	const lastToolSegment = segments.reduce((last, segment, index) => (segment.type === "tools" ? index : last), -1);
-	let turnChanges: CodeChangesView | undefined;
-	let hasObservedChanges = false;
-	for (const result of results.values()) {
-		if (result.codeChanges?.files.length) hasObservedChanges = true;
-		if (result.codeChanges && (!turnChanges || result.codeChanges.sequence > turnChanges.sequence))
-			turnChanges = result.codeChanges;
-	}
-	// Old journals may contain empty diffs emitted solely because scanning was
-	// incomplete. A coverage warning alone must not imply any file was edited.
-	const showTurnChanges = hasObservedChanges || Boolean(turnChanges?.turn.additions || turnChanges?.turn.deletions);
+	const executionCalls = segments.map((segment) =>
+		segment.type === "tools"
+			? segment.calls.filter(
+					(call) =>
+						!pendingToolIds.has(call.toolCallId) &&
+						call.name !== "ask_user" &&
+						(call.name !== "deliver_file" || results.get(call.toolCallId)?.isError) &&
+						(call.name !== "set_tasks" || results.get(call.toolCallId)?.isError),
+				)
+			: [],
+	);
+	const lastToolSegment = segments.reduce(
+		(last, segment, index) =>
+			segment.type === "tools" && (executionCalls[index]!.length > 0 || segment.orphanResults.length > 0)
+				? index
+				: last,
+		-1,
+	);
+	const snapshots = [...results.values()].flatMap((result) => (result.codeChanges ? [result.codeChanges] : []));
+	const turnSummary = summarizeCodeChanges(snapshots);
 
 	return (
 		<>
@@ -337,18 +388,21 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 				if (segment.type === "tools") {
 					return (
 						/* biome-ignore lint/suspicious/noArrayIndexKey: Transcript segments are append-only; positional keys preserve disclosure state while the active segment streams. */
-						<div key={`tools-${segmentIndex}`}>
+						<div className="transcript-tool-group" key={`tools-${segmentIndex}`}>
 							<CodeExecution
-								calls={segment.calls}
+								calls={executionCalls[segmentIndex]!}
 								orphanResults={segment.orphanResults}
 								results={results}
-								turnChanges={segmentIndex === lastToolSegment && showTurnChanges ? turnChanges : undefined}
+								turnCounts={
+									segmentIndex === lastToolSegment &&
+									turnSummary &&
+									(turnSummary.files.length > 0 ||
+										Boolean(turnSummary.counts.additions || turnSummary.counts.deletions))
+										? turnSummary.counts
+										: undefined
+								}
 							/>
-							{segment.calls
-								.filter((call) => call.name === "ask_user")
-								.map((call) => (
-									<AskUserAnswerSummary key={call.toolCallId} result={results.get(call.toolCallId)} />
-								))}
+							<ConversationToolCards calls={segment.calls} allCalls={allCalls} results={results} />
 							{sessionId ? (
 								<ToolResultImages
 									images={toolResultImagesFromCalls(segment.calls, results, segment.orphanResults)}
@@ -358,7 +412,6 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 						</div>
 					);
 				}
-				if (segment.answer && final?.state === "streaming") return null;
 				return (
 					<div
 						className={segment.answer ? "code-turn-answer" : "code-turn-status"}
@@ -379,6 +432,12 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 					</div>
 				);
 			})}
+			{!running && (
+				<CodeTurnChanges
+					onViewChanges={navigateChanges && sessionId ? (path) => navigateChanges(sessionId, path) : undefined}
+					snapshots={snapshots}
+				/>
+			)}
 			{deliveredFiles.length > 0 && !running && onOpenDeliveredFile ? (
 				<DeliveredFileCards
 					files={deliveredFiles}
@@ -410,6 +469,7 @@ export const CodeTranscriptTurn = memo(function CodeTranscriptTurn({
 					startedAt={startedAt}
 					runId={runId}
 					waitingForAnswer={waitingForAnswer}
+					replyVisible={final?.state === "streaming"}
 				/>
 			)}
 		</>

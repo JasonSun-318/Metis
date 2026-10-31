@@ -14,7 +14,7 @@ interface PermissionSelectorProps {
 	readonly value: PermissionPresetView;
 }
 
-const MODE_ICONS = { ask: ShieldPlain, auto: ShieldCheck, full: LockOpen } satisfies Record<
+const MODE_ICONS = { ask: LockOpen, auto: ShieldCheck, full: ShieldPlain } satisfies Record<
 	PermissionPresetView,
 	typeof ShieldPlain
 >;
@@ -68,13 +68,11 @@ export function PermissionSelector({
 	const reviewing = activeReview?.reviewer === "model";
 	const status = interactionPending
 		? undefined
-		: reviewing
-			? t("Checking security…")
-			: !sandboxReady
-				? t("Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.")
-				: constrainedByParent
-					? t("A parent session limits the effective permissions for this task.")
-					: undefined;
+		: !sandboxReady
+			? t("Workspace sandbox is unavailable. Ask and Auto stay disabled instead of running on the host.")
+			: constrainedByParent
+				? t("A parent session limits the effective permissions for this task.")
+				: undefined;
 
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
@@ -159,6 +157,11 @@ export function PermissionSelector({
 				<span>{label}</span>
 				<CaretDown aria-hidden="true" size={12} />
 			</button>
+			{reviewing && !interactionPending && (
+				<output className="sr-only" aria-live="polite">
+					{t("Checking security…")}
+				</output>
+			)}
 			{status && (
 				<output
 					className={`permission-selector-status${!sandboxReady || constrainedByParent ? " is-warning" : ""}`}

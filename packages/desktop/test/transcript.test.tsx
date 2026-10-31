@@ -180,7 +180,7 @@ describe("TranscriptTurn", () => {
 		}
 	});
 
-	it("keeps one ordered execution chain across intermediate progress text", async () => {
+	it("keeps public progress between ordered execution sections", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -191,6 +191,7 @@ describe("TranscriptTurn", () => {
 						item("ordered-user", "user", [{ type: "text", text: "继续处理" }]),
 						item("ordered-first", "assistant", [
 							{ type: "thinking", text: "先读取当前状态。" },
+							{ type: "text", text: "" },
 							{ type: "tool_call", toolCallId: "ordered-read", name: "read", state: "completed" },
 						]),
 						item("ordered-read-result", "tool", [
@@ -199,6 +200,7 @@ describe("TranscriptTurn", () => {
 						item("ordered-update", "assistant", [{ type: "text", text: "状态已读取，现在继续修改。" }]),
 						item("ordered-second", "assistant", [
 							{ type: "thinking", text: "根据读取结果执行修改。" },
+							{ type: "text", text: " \n" },
 							{ type: "tool_call", toolCallId: "ordered-edit", name: "edit", state: "completed" },
 						]),
 						item("ordered-edit-result", "tool", [
@@ -213,13 +215,15 @@ describe("TranscriptTurn", () => {
 		const chains = [...container.querySelectorAll<HTMLElement>(".execution-chain")];
 		const chain = chains[0]!;
 		const firstThought = [...chain.querySelectorAll("p")].find((node) => node.textContent === "先读取当前状态。");
-		const update = [...chain.querySelectorAll("p")].find((node) => node.textContent === "状态已读取，现在继续修改。");
-		const secondThought = [...chain.querySelectorAll("p")].find(
+		const update = [...container.querySelectorAll(".turn-intermediate p")].find(
+			(node) => node.textContent === "状态已读取，现在继续修改。",
+		);
+		const secondThought = [...chains[1]!.querySelectorAll("p")].find(
 			(node) => node.textContent === "根据读取结果执行修改。",
 		);
 		const final = container.querySelector<HTMLElement>("[data-transcript-answer]");
-		expect(chains).toHaveLength(1);
-		expect(container.querySelector(".turn-intermediate")).toBeNull();
+		expect(chains).toHaveLength(2);
+		expect(update?.closest(".execution-chain")).toBeNull();
 		expect(chain.querySelector(".activity-step-dot")).toBeNull();
 		expect(firstThought!.compareDocumentPosition(update!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
 		expect(update!.compareDocumentPosition(secondThought!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -265,98 +269,33 @@ describe("TranscriptTurn", () => {
 		},
 	);
 
-	it("matches the collapsed, height-capped, show-more, and nested-command states", async () => {
-		(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-		const defaultResizeObserver = globalThis.ResizeObserver;
-		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
-		TriggerResizeObserver.instances.length = 0;
+	it("keeps the group collapsed by default and preserves nested command disclosure", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
 		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
-
 		const chains = [...container.querySelectorAll<HTMLDetailsElement>("details.execution-chain")];
-		expect(chains).toHaveLength(1);
-		const chain = chains[0]!;
+		expect(chains).toHaveLength(2);
+		const chain = chains.at(-1)!;
 		expect(chain.open).toBe(false);
-		expect(chain.querySelector(":scope > summary")?.textContent).toContain("Execution complete");
+		expect(chain.querySelector(":scope > summary")?.textContent).toContain("Ran a command");
 		expect(chain.querySelector(":scope > .transcript-drawer")?.hasAttribute("inert")).toBe(true);
-		expect(chain.querySelector(".execution-chain-caret")).not.toBeNull();
-		expect(chain.querySelector(".tool-step-static")?.textContent).toContain("Asked to access a folder");
-		expect(chain.querySelector("details.tool-step:not(.tool-step-command)")).toBeNull();
-		expect(chain.querySelector(".tool-step-command > summary")?.textContent).toContain("Ran command");
-		expect(container.querySelector(".turn-thought-label")).toBeNull();
-		const intermediate = [...container.querySelectorAll("p")].find((node) =>
-			node.textContent?.startsWith("我需要先请求访问"),
-		);
-		expect(intermediate).toBeDefined();
-		expect(chain.contains(intermediate!)).toBe(true);
-
-		const final = [...container.querySelectorAll("p")].find((node) => node.textContent === "桌面上有 file.txt。");
-		expect(final).toBeDefined();
-		expect(final!.closest("[data-transcript-answer]")).not.toBeNull();
-		expect(chain.contains(final!)).toBe(false);
-
+		expect(container.querySelector("[data-transcript-answer]")?.textContent).toContain("桌面上有 file.txt。");
 		await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
-		expect(chain.open).toBe(true);
-		expect(chain.textContent).toContain("用户希望查看桌面内容");
-		const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
-		const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
-		Object.defineProperties(viewport, {
-			clientHeight: { configurable: true, value: 520 },
-			scrollHeight: { configurable: true, value: 680 },
-		});
-		for (const child of timeline.children) {
-			const height = child.matches("details.tool-step-command") ? 50 : 120;
-			Object.defineProperty(child, "getBoundingClientRect", {
-				configurable: true,
-				value: () => ({ height }) as DOMRect,
-			});
-			const summary = child.querySelector(":scope > summary");
-			if (summary) {
-				Object.defineProperty(summary, "getBoundingClientRect", {
-					configurable: true,
-					value: () => ({ height }) as DOMRect,
-				});
-			}
-		}
-		await act(async () => TriggerResizeObserver.trigger(timeline));
-		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
-		expect(chain.querySelector(".execution-chain-done")).toBeNull();
-		const showMore = [...chain.querySelectorAll("button")].find((node) => node.textContent === "Show more");
-		expect(showMore).toBeDefined();
-		await act(async () => showMore!.click());
-		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
-		const showLess = [...chain.querySelectorAll("button")].find((node) => node.textContent === "Show less");
-		expect(showLess).toBeDefined();
-		const done = chain.querySelector(".execution-chain-done");
-		expect(done).not.toBeNull();
-		expect(done!.compareDocumentPosition(showLess!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
-		await act(async () => showLess!.click());
-		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
-
-		const command = chain.querySelector<HTMLDetailsElement>("details.tool-step-command");
-		expect(command).not.toBeNull();
-		expect(command!.open).toBe(false);
-
-		await act(async () => command!.querySelector("summary")!.click());
-		expect(command!.open).toBe(true);
-		expect(command!.textContent).toContain("ls -la /Users/ent/Desktop");
-		expect(command!.textContent).toContain("file.txt");
-
+		const command = chain.querySelector<HTMLDetailsElement>(".tool-step-command")!;
+		const title = command.querySelector<HTMLElement>("summary")!;
+		await act(async () => title.click());
+		expect(command.open).toBe(true);
+		expect(command.querySelector("summary")).toBe(title);
+		expect(command.textContent).toContain("ls -la /Users/ent/Desktop");
 		await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
-		expect(chain.open).toBe(false);
-		expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(true);
-
+		await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
+		expect(command.open).toBe(true);
+		expect(chain.querySelector(".execution-chain-show-more")).toBeNull();
 		await act(async () => root.unmount());
-		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
-		TriggerResizeObserver.instances.length = 0;
 	});
 
-	it("opens while running and collapses when the turn completes", async () => {
-		const defaultResizeObserver = globalThis.ResizeObserver;
-		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
-		TriggerResizeObserver.instances.length = 0;
+	it("keeps runtime status visible outside a closed running execution group", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -364,115 +303,16 @@ describe("TranscriptTurn", () => {
 			.slice(0, -1)
 			.map((entry) => (entry.itemId === "assistant-synthesis" ? { ...entry, state: "streaming" as const } : entry));
 		await act(async () => root.render(<TranscriptTurn items={runningItems} running />));
-		const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
-		expect(chain.open).toBe(true);
-		expect(chain.querySelector(":scope > summary")?.textContent).toContain("Execution process");
-		expect(chain.querySelector(".turn-runtime-status")).not.toBeNull();
-		const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
-		const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
-		Object.defineProperties(viewport, {
-			clientHeight: { configurable: true, value: 520 },
-			scrollHeight: { configurable: true, value: 680 },
-		});
-		for (const child of timeline.children) {
-			const height = child.matches("details.tool-step-command") ? 50 : 120;
-			Object.defineProperty(child, "getBoundingClientRect", {
-				configurable: true,
-				value: () => ({ height }) as DOMRect,
-			});
-			const summary = child.querySelector(":scope > summary");
-			if (summary) {
-				Object.defineProperty(summary, "getBoundingClientRect", {
-					configurable: true,
-					value: () => ({ height }) as DOMRect,
-				});
-			}
-		}
-		await act(async () => TriggerResizeObserver.trigger(timeline));
-		expect(viewport.scrollTop).toBe(680);
-
+		const chain = [...container.querySelectorAll<HTMLDetailsElement>(".execution-chain")].at(-1)!;
+		expect(chain.open).toBe(false);
+		expect(chain.querySelector(":scope > summary")?.textContent).toContain("文件列表已经取得");
+		const status = container.querySelector(".turn-runtime-status")!;
+		expect(status).not.toBeNull();
+		expect(status.closest(".transcript-drawer")).toBeNull();
 		await act(async () => root.render(<TranscriptTurn items={turnItems} />));
-		expect(container.querySelector<HTMLDetailsElement>(".execution-chain")!.open).toBe(false);
-		expect(container.querySelector(":scope .execution-chain > summary")?.textContent).toContain("Execution complete");
+		expect(container.querySelector(".execution-chain-live-preview")).toBeNull();
+		expect(chain.open).toBe(false);
 		await act(async () => root.unmount());
-		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
-		TriggerResizeObserver.instances.length = 0;
-	});
-
-	it("does not count expanded command output toward the outer chain cap", async () => {
-		const defaultResizeObserver = globalThis.ResizeObserver;
-		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
-		TriggerResizeObserver.instances.length = 0;
-		const container = document.createElement("div");
-		document.body.append(container);
-		const root = createRoot(container);
-		try {
-			await act(async () =>
-				root.render(
-					<TranscriptTurn
-						items={[
-							item("short-user", "user", [{ type: "text", text: "列出文件" }]),
-							item("short-command", "assistant", [
-								{
-									type: "tool_call",
-									toolCallId: "short-command-tool",
-									name: "bash",
-									state: "completed",
-									inputPreview: JSON.stringify({ command: "ls -la" }),
-								},
-							]),
-							item("short-result", "tool", [
-								{
-									type: "tool_result",
-									toolCallId: "short-command-tool",
-									name: "bash",
-									isError: false,
-									output: "a very long command output".repeat(100),
-								},
-							]),
-							item("short-answer", "assistant", [{ type: "text", text: "完成。" }]),
-						]}
-					/>,
-				),
-			);
-
-			const chain = container.querySelector<HTMLDetailsElement>(".execution-chain")!;
-			await act(async () => chain.querySelector<HTMLElement>(":scope > summary")!.click());
-			const viewport = chain.querySelector<HTMLElement>(".execution-chain-viewport")!;
-			const timeline = chain.querySelector<HTMLElement>(".execution-chain-timeline")!;
-			const command = chain.querySelector<HTMLDetailsElement>("details.tool-step-command")!;
-			const commandSummary = command.querySelector<HTMLElement>(":scope > summary")!;
-			let timelineHeight = 32;
-			Object.defineProperties(viewport, {
-				clientHeight: { configurable: true, value: 520 },
-				scrollHeight: { configurable: true, get: () => timelineHeight },
-			});
-			Object.defineProperty(timeline, "scrollHeight", {
-				configurable: true,
-				get: () => timelineHeight,
-			});
-			Object.defineProperty(command, "getBoundingClientRect", {
-				configurable: true,
-				value: () => ({ height: timelineHeight }) as DOMRect,
-			});
-			Object.defineProperty(commandSummary, "getBoundingClientRect", {
-				configurable: true,
-				value: () => ({ height: 32 }) as DOMRect,
-			});
-
-			await act(async () => TriggerResizeObserver.trigger(timeline));
-			expect(chain.querySelector(".execution-chain-show-more")).toBeNull();
-			await act(async () => commandSummary.click());
-			timelineHeight = 900;
-			await act(async () => TriggerResizeObserver.trigger(timeline));
-			expect(command.open).toBe(true);
-			expect(chain.querySelector(".execution-chain-show-more")).toBeNull();
-			expect(chain.querySelector(".execution-chain-content")?.classList.contains("is-capped")).toBe(false);
-		} finally {
-			await act(async () => root.unmount());
-			Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
-			TriggerResizeObserver.instances.length = 0;
-		}
 	});
 
 	it("does not add a thought process to a plain answer", async () => {
@@ -781,8 +621,8 @@ describe("TranscriptTurn", () => {
 			),
 		);
 
-		expect(container.querySelector(".execution-chain strong")?.textContent).toBe("Summary");
-		expect(container.querySelector(".execution-chain table")?.textContent).toContain("Child");
+		expect(container.querySelector(".turn-intermediate strong")?.textContent).toBe("Summary");
+		expect(container.querySelector(".turn-intermediate table")?.textContent).toContain("Child");
 		await act(async () => root.unmount());
 	});
 
@@ -840,7 +680,7 @@ describe("TranscriptTurn", () => {
 });
 
 describe("CodeTranscriptTurn", () => {
-	it("does not expose assistant working text while a Code turn is running", async () => {
+	it("does not expose explicit thinking while a Code turn is running", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
 		const root = createRoot(container);
@@ -852,7 +692,7 @@ describe("CodeTranscriptTurn", () => {
 						item(
 							"private-working",
 							"assistant",
-							[{ type: "text", text: "我需要先分析内部实现细节。" }],
+							[{ type: "thinking", text: "我需要先分析内部实现细节。" }],
 							"streaming",
 						),
 					]}
@@ -939,7 +779,7 @@ describe("Transcript", () => {
 				)!;
 				expect(
 					container.querySelectorAll(appearance === "code" ? ".code-execution" : ".execution-chain"),
-				).toHaveLength(1);
+				).toHaveLength(appearance === "code" ? 1 : 2);
 				expect(execution.open).toBe(false);
 				if (appearance === "code") {
 					expect(execution.querySelector(":scope > summary")?.textContent).toContain("Ran a command, used a tool");
@@ -1241,6 +1081,57 @@ describe("Transcript", () => {
 		}
 	});
 
+	it("preserves reading position when execution expands and resumes following after scrolling to the end", async () => {
+		const defaultResizeObserver = globalThis.ResizeObserver;
+		Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: TriggerResizeObserver });
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		try {
+			await act(async () =>
+				root.render(
+					<Transcript
+						appearance="chat"
+						hasOlder={false}
+						itemIds={turnItems.map((entry) => entry.itemId)}
+						itemsById={new Map(turnItems.map((entry) => [entry.itemId, entry]))}
+						loadingOlder={false}
+						onLoadOlder={async () => undefined}
+					/>,
+				),
+			);
+			const scroll = container.querySelector<HTMLDivElement>(".transcript-scroll")!;
+			Object.defineProperties(scroll, {
+				clientHeight: { configurable: true, value: 600 },
+				scrollHeight: { configurable: true, value: 1_000 },
+			});
+			scroll.scrollTop = 400;
+			await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+			await act(async () => container.querySelector<HTMLElement>(".execution-chain > summary")!.click());
+			Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 1_800 });
+			await act(async () => TriggerResizeObserver.trigger(scroll));
+			expect(scroll.scrollTop).toBe(400);
+			scroll.scrollTop = 1_200;
+			await act(async () => scroll.dispatchEvent(new Event("scroll", { bubbles: true })));
+			await act(async () => TriggerResizeObserver.trigger(scroll));
+			expect(scroll.scrollTop).toBe(1_800);
+			const thoughtContent = container.querySelector<HTMLElement>(".thinking-preview > .activity-step-message")!;
+			Object.defineProperty(thoughtContent, "getBoundingClientRect", {
+				configurable: true,
+				value: () => ({ height: 500 }) as DOMRect,
+			});
+			await act(async () => TriggerResizeObserver.trigger(thoughtContent));
+			await act(async () => container.querySelector<HTMLButtonElement>(".thinking-show-more")!.click());
+			Object.defineProperty(scroll, "scrollHeight", { configurable: true, value: 2_400 });
+			await act(async () => TriggerResizeObserver.trigger(scroll));
+			expect(scroll.scrollTop).toBe(1_800);
+		} finally {
+			await act(async () => root.unmount());
+			Object.defineProperty(globalThis, "ResizeObserver", { configurable: true, value: defaultResizeObserver });
+			TriggerResizeObserver.instances.length = 0;
+		}
+	});
+
 	it("loads older messages at the top without showing a button or jumping", async () => {
 		const container = document.createElement("div");
 		document.body.append(container);
@@ -1389,7 +1280,8 @@ describe("Transcript", () => {
 			const step = executions[0]!.querySelector<HTMLDetailsElement>(".code-command")!;
 			expect(step.querySelector("summary .code-change-additions")?.textContent).toBe("+1");
 			expect(step.querySelector("summary .code-change-deletions")?.textContent).toBe("−1");
-			expect(step.querySelector("summary")?.textContent).toContain("src/app.ts");
+			expect(step.querySelector("summary")?.textContent).toContain("Updated app.ts");
+			expect(step.querySelector("summary .code-step-label")?.getAttribute("title")).toBe("src/app.ts");
 			await act(async () => step.querySelector<HTMLElement>("summary")!.click());
 			expect(step.querySelector(".code-tool-changes")?.textContent).toContain("first-edit-before");
 			expect(step.querySelector(".code-tool-changes")?.textContent).not.toContain("revert-edit-before");
@@ -1427,7 +1319,9 @@ describe("Transcript", () => {
 				),
 			);
 			expect(container.querySelectorAll("[data-transcript-turn]")).toHaveLength(0);
-			expect(container.querySelector(".turn-runtime-status")?.getAttribute("aria-label")).toBe("Retrying (1/5)");
+			expect(container.querySelector(".turn-runtime-status output")?.getAttribute("aria-label")).toBe(
+				"Retrying (1/5)",
+			);
 			await act(async () => root.unmount());
 		},
 	);
@@ -1626,15 +1520,15 @@ describe("Transcript", () => {
 		expect(execution.open).toBe(false);
 		await act(async () => execution.querySelector<HTMLElement>(":scope > summary")!.click());
 		const tools = [...execution.querySelectorAll<HTMLDetailsElement>(".code-command")];
-		expect(tools).toHaveLength(4);
+		expect(tools).toHaveLength(2);
 		for (const tool of tools) {
 			expect(tool.open).toBe(false);
 			await act(async () => tool.querySelector("summary")!.click());
 		}
 
-		expect(execution.textContent).toContain("How should Metis answer?");
-		expect(execution.textContent).toContain("Concise");
-		expect(execution.textContent).toContain("○ Run validation");
+		expect(container.querySelector(".ask-user-answer-summary")?.textContent).toContain("How should Metis answer?");
+		expect(container.querySelector(".ask-user-answer-summary")?.textContent).toContain("Concise");
+		expect(container.querySelector(".conversation-tasks")?.textContent).toContain("Run validation");
 		expect(execution.textContent).toContain('"path": "report.txt"');
 		expect(execution.textContent).toContain("Wrote report.txt");
 		expect(execution.textContent).toContain('"query": "refresh token"');
@@ -1642,6 +1536,38 @@ describe("Transcript", () => {
 		expect(execution.textContent).not.toContain('"questions"');
 		expect(execution.textContent).not.toContain('"multiple"');
 		expect(execution.textContent).not.toContain('"selected"');
+		await act(async () => root.unmount());
+	});
+
+	it("renders Code reply chunks before completion and keeps the answer mounted", async () => {
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const onCopy = vi.fn();
+		const render = (text: string, state: ItemView["state"] = "streaming") =>
+			root.render(
+				<CodeTranscriptTurn
+					items={[
+						item("stream-user", "user", [{ type: "text", text: "Summarize" }]),
+						item("stream-final", "assistant", [{ type: "text", text }], state),
+					]}
+					running={state === "streaming"}
+					onCopy={onCopy}
+				/>,
+			);
+		await act(async () => render("The first"));
+		const answer = container.querySelector(".code-turn-answer");
+		expect(answer?.textContent).toBe("The first");
+		expect(container.querySelector(".turn-runtime-label")?.textContent).toBe("Writing reply…");
+		expect(container.querySelectorAll(":scope > .turn-actions")).toHaveLength(0);
+		await act(async () => render("The first **two chunks**"));
+		expect(container.querySelector(".code-turn-answer")).toBe(answer);
+		expect(answer?.querySelector("strong")?.textContent).toBe("two chunks");
+		await act(async () => render("The first **two chunks**, now complete.", "completed"));
+		expect(container.querySelector(".code-turn-answer")).toBe(answer);
+		expect(answer?.textContent).toBe("The first two chunks, now complete.");
+		expect(container.querySelector(":scope > .turn-actions")).not.toBeNull();
+		expect(container.querySelector(".turn-runtime-status")).toBeNull();
 		await act(async () => root.unmount());
 	});
 
@@ -2036,6 +1962,50 @@ describe("sent attachment cards", () => {
 			expect(container.querySelector(".message-user, .code-turn-user-bubble")).toBeNull();
 			expect(container.querySelectorAll(".message-file-card")).toHaveLength(2);
 			await act(async () => root.unmount());
+		},
+	);
+});
+
+describe("tool summary presentation", () => {
+	it.each([TranscriptTurn, CodeTranscriptTurn])(
+		"keeps permission diagnostics out of command and tool summaries",
+		async (Turn) => {
+			const container = document.createElement("div");
+			document.body.append(container);
+			const root = createRoot(container);
+			try {
+				for (const name of ["bash", "write"]) {
+					for (const source of ["rule", "model", "user", "full"] as const) {
+						await act(async () =>
+							root.render(
+								<Turn
+									items={[
+										item("source-item", "assistant", [
+											{
+												type: "tool_call",
+												toolCallId: "source-call",
+												name,
+												state: "completed",
+												inputPreview: '{"command":"pwd"}',
+												permissionDecision: {
+													source,
+													ruleIds: ["C04"],
+													matchedRule: { id: "C04", name: "pwd", scope: "workspace" },
+												},
+											},
+										]),
+									]}
+								/>,
+							),
+						);
+						expect(container.querySelector(".tool-permission-source")).toBeNull();
+						expect(container.textContent).not.toContain("View rule");
+						expect(container.querySelector(".tool-step, .code-command")?.textContent).toBeTruthy();
+					}
+				}
+			} finally {
+				await act(async () => root.unmount());
+			}
 		},
 	);
 });

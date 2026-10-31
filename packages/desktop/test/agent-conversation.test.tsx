@@ -12,6 +12,8 @@ import { setLocale } from "../src/renderer/i18n.ts";
 import { AppStore } from "../src/renderer/store/app-store.ts";
 import type { DesktopApiEvent, MetisDesktopApi } from "../src/shared/desktop-api.ts";
 
+import { composerInteraction } from "./fixtures/composer-session.ts";
+
 const mock = vi.hoisted(() => ({
 	composers: new Map<string, ComponentProps<typeof Composer>>(),
 	transcripts: [] as ComponentProps<typeof Transcript>[],
@@ -159,6 +161,18 @@ afterEach(async () => {
 });
 
 describe("AgentConversation", () => {
+	it("routes only this child's questions and approvals into its transcript", async () => {
+		const { store, render } = setup();
+		const own = { ...composerInteraction("ask_user"), actorSessionId: CHILD, toolCallId: "child-question" };
+		store.addInteraction(own);
+		store.addInteraction({ ...composerInteraction("session_permission_approval"), actorSessionId: TASK });
+		await render();
+		expect(mock.transcripts.at(-1)?.interactions?.requests).toEqual([own]);
+		expect(mock.composers.get(`agent-composer-${CHILD}`)?.interactionControl).toBeUndefined();
+		await act(async () => store.removeInteraction(own.interactionId));
+		expect(mock.transcripts.at(-1)?.interactions?.requests).toEqual([]);
+	});
+
 	it("does not restore an edited queued message into a different child's composer after navigation", async () => {
 		const { api, container, render } = setup();
 		api.readAgentQueuedMessages.mockResolvedValue({

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import type { ItemView } from "@metis/app-protocol";
-import { act, type RefObject } from "react";
+import { act, type ComponentProps, type RefObject } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Transcript } from "../src/renderer/components/Transcript.tsx";
@@ -202,6 +202,7 @@ async function mount(options: { hasOlder?: boolean; onLoadOlder?: () => Promise<
 		sessionId = FIRST_SESSION,
 		text = "Streaming answer",
 		hasOlder = options.hasOlder ?? false,
+		overrides: Partial<ComponentProps<typeof Transcript>> = {},
 	) => {
 		const items = messages(sessionId, text);
 		await act(async () =>
@@ -217,6 +218,7 @@ async function mount(options: { hasOlder?: boolean; onLoadOlder?: () => Promise<
 					onLoadOlder={onLoadOlder}
 					quoteSessionId={sessionId}
 					showNavigation
+					{...overrides}
 				/>,
 			),
 		);
@@ -258,6 +260,108 @@ function deferred() {
 }
 
 describe("Transcript rail scroll ownership", () => {
+	it("keeps following when content grows before the browser reports its new scroll position", async () => {
+		const view = await mount();
+		await view.click("Scroll bottom");
+		const content = view.container.querySelector(".transcript-space")!;
+		metrics.contentHeight = 1_500;
+		await act(async () => view.scroll.dispatchEvent(new Event("scroll")));
+		await act(async () => ControlledResizeObserver.trigger(content));
+		await flushFrames();
+		expect(view.scroll.scrollTop).toBe(900);
+
+		await view.click("Scroll middle");
+		metrics.contentHeight = 1_800;
+		await act(async () => ControlledResizeObserver.trigger(content));
+		await flushFrames();
+		expect(view.scroll.scrollTop).toBe(300);
+	});
+
+	it("follows delayed content measurement after an accepted user submission", async () => {
+		const view = await mount();
+		await view.click("Scroll middle");
+		const items = messages(FIRST_SESSION, "").map((item) => ({ ...item, turnId: "submitted-turn" }));
+		await view.render(FIRST_SESSION, "", false, {
+			submittedTurnId: "submitted-turn",
+			itemIds: items.map((item) => item.itemId),
+			itemsById: new Map(items.map((item) => [item.itemId, item])),
+		});
+		await flushFrames();
+		expect(view.scroll.scrollTop).toBe(400);
+		metrics.contentHeight = 1_600;
+		await act(async () => view.scroll.dispatchEvent(new Event("scroll")));
+		await act(async () => ControlledResizeObserver.trigger(view.container.querySelector(".transcript-space")!));
+		await flushFrames();
+		expect(view.scroll.scrollTop).toBe(1_000);
+	});
+
+	it("does not treat the new session's initial scroll reset as browsing upward", async () => {
+		const view = await mount();
+		await view.click("Scroll bottom");
+		await view.render(SECOND_SESSION);
+		await act(async () => {
+			view.scroll.scrollTop = 0;
+			view.scroll.dispatchEvent(new Event("scroll"));
+		});
+		await flushFrames();
+		expect(view.scroll.scrollTop).toBe(400);
+	});
+
+	it.each(["turn", "agent message"] as const)(
+		"follows an accepted %s only after its user message is visible and only once",
+		async (identity) => {
+			const view = await mount();
+			await view.click("Scroll middle");
+			const submission =
+				identity === "turn" ? { submittedTurnId: "next-turn" } : { submittedMessageId: "next-message" };
+			await view.render(FIRST_SESSION, "Streaming answer", false, submission);
+			await flushFrames();
+			expect(view.scroll.scrollTop).toBe(300);
+			const items = [
+				...messages(FIRST_SESSION, "Previous answer"),
+				{
+					...messages(FIRST_SESSION, "")[0]!,
+					itemId: "next-user",
+					turnId: "next-turn",
+					agentMessageId: "next-message",
+					deliveryState: "accepted" as const,
+				},
+			];
+			const visible = {
+				...submission,
+				itemIds: items.map((item) => item.itemId),
+				itemsById: new Map(items.map((item) => [item.itemId, item])),
+			};
+			if (identity === "agent message") {
+				for (const deliveryState of ["queued", "failed", "cancelled"] as const) {
+					const pending = items.map((item) => (item.itemId === "next-user" ? { ...item, deliveryState } : item));
+					await view.render(FIRST_SESSION, "", false, {
+						...visible,
+						itemsById: new Map(pending.map((item) => [item.itemId, item])),
+					});
+					await flushFrames();
+					expect(view.scroll.scrollTop).toBe(300);
+				}
+			}
+			await view.render(FIRST_SESSION, "", false, visible);
+			await flushFrames();
+			expect(view.scroll.scrollTop).toBe(400);
+			await view.click("Scroll middle");
+			const durable = items.map((item) =>
+				item.itemId === "next-user"
+					? { ...item, itemId: "durable-user", deliveryState: "delivered" as const }
+					: item,
+			);
+			await view.render(FIRST_SESSION, "", false, {
+				...submission,
+				itemIds: durable.map((item) => item.itemId),
+				itemsById: new Map(durable.map((item) => [item.itemId, item])),
+			});
+			await flushFrames();
+			expect(view.scroll.scrollTop).toBe(300);
+		},
+	);
+
 	it("keeps a dragged position through streaming and resize, then follows after release at the bottom", async () => {
 		const view = await mount();
 		await view.click("Start drag");

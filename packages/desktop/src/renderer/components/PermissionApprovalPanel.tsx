@@ -2,9 +2,8 @@ import type { InteractionResponseInput, InteractionView, SessionSnapshot } from 
 import { type KeyboardEvent, useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { approvalErrorMessage } from "../approval-error.ts";
-import { CaretDown } from "../icons.tsx";
 import "../styles/permission-approval.css";
-import { FloatingSystemNotice } from "./SystemNotice.tsx";
+import { MenuSelect } from "./MenuSelect.tsx";
 
 type PermissionApprovalInteraction = Extract<InteractionView, { kind: "session_permission_approval" }>;
 type PermissionChoice = PermissionApprovalInteraction["choices"][number];
@@ -13,105 +12,63 @@ interface PermissionApprovalPanelProps {
 	readonly interaction: PermissionApprovalInteraction;
 	readonly onRespond: (response: InteractionResponseInput) => Promise<void>;
 	readonly sandboxHealth?: SessionSnapshot["sandboxHealth"];
+	readonly disabled?: boolean;
 }
 
-function priorReviewCopy(outcome: PermissionApprovalInteraction["priorReviewerOutcome"]): string {
-	if (outcome === "deny") return "Automatic security review denied this action.";
-	if (outcome === "unavailable") return "Automatic security review could not complete.";
-	return "Automatic security review could not approve this action.";
-}
-
-const CHOICE_LABELS = {
+const CHOICE_LABELS: Record<PermissionChoice, string> = {
 	"allow-once": "Allow once",
 	"deny-once": "Reject",
-	"always-allow-exact": "Always allow this exact action",
-	"always-deny-exact": "Always deny this exact action",
-} as const;
-
-/** A value another row must be read against, such as `npm test` inside a working directory. */
-function isRelative(value: string): boolean {
-	return !value.startsWith("~") && !value.startsWith("/") && !/^[a-z][a-z0-9+.-]*:/iu.test(value);
-}
+	"allow-session-exact": "Allow for this session",
+	"always-allow-exact": "Remember for this project",
+	"always-deny-exact": "Deny for this project",
+};
 
 export function PermissionApprovalPanel({
 	interaction,
 	onRespond,
 	sandboxHealth = "healthy",
+	disabled = false,
 }: PermissionApprovalPanelProps) {
 	const { t } = useTranslation();
 	const anchor = useRef<HTMLDivElement>(null);
-	const firstControl = useRef<HTMLButtonElement>(null);
+	const firstControl = useRef<HTMLElement>(null);
+	const focusHeld = useRef(false);
+	const respondingRef = useRef(false);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [dismissedInteractionId, setDismissedInteractionId] = useState<string | null>(null);
-	const [expanded, setExpanded] = useState(true);
-	const bodyId = useId();
-	const focusHeld = useRef(false);
-	const [detailsOpen, setDetailsOpen] = useState(false);
-	const [moreOpen, setMoreOpen] = useState(false);
 	const titleId = useId();
-	const primaryId = useId();
-	const workingDirectoryId = useId();
-	const detailsId = useId();
-	const moreId = useId();
-	const executionTargetId = useId();
-	const criticalId = useId();
-	const sandboxBlockedId = useId();
-	const incompleteId = useId();
+	const commandId = useId();
 	const statusId = useId();
 	const errorId = useId();
 	const interactionId = interaction.interactionId;
 	const interactionIdRef = useRef<string | null>(interactionId);
 	interactionIdRef.current = interactionId;
-	const respondingRef = useRef(false);
 
+	const isShell = interaction.toolLabel === "bash";
+	const command = isShell ? interaction.command : undefined;
+	const missingCommand = isShell && command === undefined;
+	const sandboxBlocked = sandboxHealth !== "healthy" && interaction.executionTarget === "sandbox";
+	const cannotAllow = disabled || busy || sandboxBlocked || missingCommand;
+	const canRemember =
+		interaction.scopeComplete && interaction.riskLevel !== "critical" && !sandboxBlocked && !missingCommand;
+	const persistentChoices = interaction.choices.filter((choice) =>
+		choice === "allow-session-exact"
+			? canRemember && interaction.rememberSessionEligible === true
+			: canRemember && (choice === "always-allow-exact" || choice === "always-deny-exact"),
+	);
 	const allowOnce = interaction.choices.includes("allow-once");
-	const denyOnce = interaction.choices.includes("deny-once");
-	const alwaysDeny = interaction.choices.includes("always-deny-exact");
-	const escapeChoice: PermissionChoice | undefined = denyOnce
+	const escapeChoice: PermissionChoice | undefined = interaction.choices.includes("deny-once")
 		? "deny-once"
-		: alwaysDeny
+		: persistentChoices.includes("always-deny-exact")
 			? "always-deny-exact"
 			: undefined;
-	const persistentChoices = (["always-deny-exact", "always-allow-exact"] as const).filter((choice) =>
-		interaction.choices.includes(choice),
-	);
-	const sandboxBlocked = sandboxHealth !== "healthy" && interaction.executionTarget === "sandbox";
-	const allowOnceBlocked = sandboxBlocked;
-	const alwaysAllowBlocked = !interaction.scopeComplete || sandboxBlocked;
-	const hostOrExternal = interaction.executionTarget !== "sandbox";
-
-	const primaryRows = interaction.details.filter(
-		(row) => row.label !== "Working directory" && row.label !== "Details",
-	);
-	const targets = primaryRows.filter((row) => ["File", "Path", "Target", "Source", "Destination"].includes(row.label));
-	const workingDirectory = interaction.details.find((row) => row.label === "Working directory");
-	const showWorkingDirectory =
-		workingDirectory !== undefined &&
-		(targets.length
-			? targets.some((row) => isRelative(row.value))
-			: primaryRows.some((row) => row.label === "Command"));
-	const secondaryRows = interaction.details.filter(
-		(row) => row.label === "Details" || (row.label === "Working directory" && !showWorkingDirectory),
-	);
-	const hasDetails =
-		interaction.executionTarget === "sandbox" ||
-		secondaryRows.length > 0 ||
-		interaction.reason.trim().length > 0 ||
-		interaction.priorReviewer !== undefined ||
-		(workingDirectory !== undefined && !showWorkingDirectory);
-
-	const descriptionIds =
-		[
-			primaryRows.length > 0 ? primaryId : undefined,
-			showWorkingDirectory ? workingDirectoryId : undefined,
-			hostOrExternal ? executionTargetId : undefined,
-			interaction.riskLevel === "critical" ? criticalId : undefined,
-			sandboxBlocked ? sandboxBlockedId : undefined,
-			!interaction.scopeComplete ? incompleteId : undefined,
-		]
-			.filter(Boolean)
-			.join(" ") || undefined;
+	const operation = [
+		interaction.toolLabel,
+		...interaction.details
+			.filter((row) => !["Details", "Command", "Working directory"].includes(row.label))
+			.map((row) => `${t(row.label)}: ${row.value}`),
+	].join("\n");
 
 	useEffect(() => {
 		interactionIdRef.current = interactionId;
@@ -119,18 +76,16 @@ export function PermissionApprovalPanel({
 		setDismissedInteractionId(null);
 		setBusy(false);
 		setError(null);
-		setExpanded(true);
-		setDetailsOpen(false);
-		setMoreOpen(false);
+
 		const owner = anchor.current;
 		const column = owner?.closest(".conversation-column");
 		const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
 		const previousColumn = previous?.closest(".conversation-column");
-		if (!previousColumn || previousColumn === column) {
+		if (!owner?.closest(".conversation-interaction-card") && (!previousColumn || previousColumn === column)) {
 			queueMicrotask(() => {
 				if (interactionIdRef.current !== interactionId || !owner?.isConnected) return;
 				if (document.activeElement !== previous && document.activeElement !== document.body) return;
-				(firstControl.current ?? owner.querySelector<HTMLButtonElement>("button:not(:disabled)"))?.focus({
+				(firstControl.current ?? owner.querySelector<HTMLElement>('[role="dialog"]'))?.focus({
 					preventScroll: true,
 				});
 			});
@@ -149,36 +104,80 @@ export function PermissionApprovalPanel({
 	}, [interactionId]);
 
 	if (dismissedInteractionId === interaction.interactionId) {
-		return <FloatingSystemNotice title={t("This approval is no longer available.")} tone="warning" />;
+		return <output className="conversation-card-status">{t("This approval is no longer available.")}</output>;
 	}
 
-	const respond = (response: InteractionResponseInput) => {
-		if (respondingRef.current || response.interactionId !== interactionIdRef.current) return;
+	const respond = (choice: PermissionChoice) => {
+		if (
+			disabled ||
+			respondingRef.current ||
+			interaction.interactionId !== interactionIdRef.current ||
+			!interaction.choices.includes(choice)
+		)
+			return;
+		if (
+			(choice === "allow-once" || choice === "allow-session-exact" || choice === "always-allow-exact") &&
+			cannotAllow
+		)
+			return;
+		if (choice !== "allow-once" && choice !== "deny-once" && !persistentChoices.includes(choice)) return;
 		respondingRef.current = true;
 		setBusy(true);
-		void send(response);
-	};
-	const send = async (response: InteractionResponseInput) => {
 		setError(null);
-		try {
-			await onRespond(response);
-		} catch (cause) {
-			if (response.interactionId !== interactionIdRef.current) return;
-			const message = approvalErrorMessage(cause);
-			if (message === "This approval is no longer available.") setDismissedInteractionId(response.interactionId);
-			else setError(message);
-			respondingRef.current = false;
-			setBusy(false);
-		}
+		const response: InteractionResponseInput = {
+			interactionId: interaction.interactionId,
+			kind: "session_permission_approval",
+			choice,
+		};
+		void Promise.resolve()
+			.then(() => {
+				if (response.interactionId !== interactionIdRef.current) return;
+				return onRespond(response);
+			})
+			.catch((cause) => {
+				if (response.interactionId !== interactionIdRef.current) return;
+				const message = approvalErrorMessage(cause);
+				if (message === "This approval is no longer available.") setDismissedInteractionId(response.interactionId);
+				else setError(message);
+				respondingRef.current = false;
+				setBusy(false);
+			});
 	};
-	const choose = (choice: PermissionChoice) =>
-		void respond({ interactionId: interaction.interactionId, kind: "session_permission_approval", choice });
+
 	const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-		if (event.key === "Escape" && !respondingRef.current && escapeChoice) {
+		if (event.nativeEvent.isComposing || event.keyCode === 229 || event.repeat) {
+			if (event.key === "Enter" || event.key === "Escape") {
+				event.preventDefault();
+				event.stopPropagation();
+			}
+			return;
+		}
+		if (event.defaultPrevented || disabled || busy) return;
+		const target = event.target instanceof Element ? event.target : null;
+		// The split menu owns its own keyboard interaction, including Escape.
+		if (target?.closest('[role="listbox"], [aria-expanded="true"]')) return;
+		if (event.key === "Escape" && escapeChoice) {
 			event.preventDefault();
 			event.stopPropagation();
-			choose(escapeChoice);
+			respond(escapeChoice);
+			return;
 		}
+		if (
+			event.key !== "Enter" ||
+			event.altKey ||
+			event.ctrlKey ||
+			event.metaKey ||
+			event.shiftKey ||
+			target?.closest('button, input, textarea, select, [contenteditable="true"]') ||
+			cannotAllow ||
+			!allowOnce
+		)
+			return;
+		const selection = window.getSelection();
+		if (selection && !selection.isCollapsed) return;
+		event.preventDefault();
+		event.stopPropagation();
+		respond("allow-once");
 	};
 
 	return (
@@ -194,112 +193,39 @@ export function PermissionApprovalPanel({
 		>
 			<section
 				aria-busy={busy}
-				aria-describedby={descriptionIds}
+				aria-describedby={commandId}
 				aria-labelledby={titleId}
 				className="permission-approval-panel"
 				onKeyDown={handleKeyDown}
+				ref={firstControl}
 				role="dialog"
+				tabIndex={-1}
 			>
 				<header>
-					<div>
-						<h2 id={titleId}>{t("Metis wants to use {{tool}}", { tool: interaction.toolLabel })}</h2>
-					</div>
-					<button
-						aria-controls={bodyId}
-						aria-expanded={expanded}
-						aria-label={t(expanded ? "Collapse approval" : "Expand approval")}
-						className="composer-panel-toggle"
-						disabled={busy}
-						onClick={() => setExpanded((value) => !value)}
-						type="button"
-					>
-						<CaretDown aria-hidden="true" size={16} />
-					</button>
+					<span className="permission-approval-label">{t("Permissions")}</span>
+					<h2 id={titleId}>
+						{t(
+							isShell
+								? "Allow Metis to execute the following command?"
+								: "Allow Metis to perform the following action?",
+						)}
+					</h2>
 				</header>
-				<div
-					className="permission-approval-body"
-					hidden={!expanded}
-					aria-hidden={!expanded}
-					inert={!expanded}
-					id={bodyId}
-				>
-					{primaryRows.length > 0 && (
-						<dl className="permission-approval-primary" id={primaryId}>
-							{primaryRows.map((row, index) => (
-								<div key={`${row.label}:${index}`}>
-									<dt>{t(row.label)}</dt>
-									<dd>
-										<code>{row.value}</code>
-									</dd>
-								</div>
-							))}
-						</dl>
+				<div className="permission-approval-body">
+					{!missingCommand && (
+						<pre className="permission-approval-command" id={commandId}>
+							<code>{isShell ? command : operation}</code>
+						</pre>
 					)}
-					{showWorkingDirectory && workingDirectory && (
-						<p className="permission-approval-context" id={workingDirectoryId}>
-							{t("Working directory")} <code>{workingDirectory.value}</code>
-						</p>
-					)}
-					{hostOrExternal && (
-						<p className="permission-approval-warning" id={executionTargetId}>
-							{interaction.executionTarget === "external"
-								? t("This action reaches a network or external service.")
-								: t("This action will run outside the sandbox with your current user permissions.")}
-						</p>
-					)}
-					{interaction.riskLevel === "critical" && (
-						<p className="permission-approval-warning" id={criticalId}>
-							{t("This operation may not be reversible.")}
+					{missingCommand && (
+						<p className="error-copy" id={commandId} role="alert">
+							{t("This approval is missing its complete command. Retry the action.")}
 						</p>
 					)}
 					{sandboxBlocked && (
-						<p className="permission-approval-warning" id={sandboxBlockedId} role="alert">
-							{t("Workspace sandbox is unavailable. This action stays blocked instead of running on the host.")}
+						<p className="error-copy" role="alert">
+							{t("Workspace sandbox is unavailable. Retry after checking the execution environment.")}
 						</p>
-					)}
-					{!interaction.scopeComplete && (
-						<p className="permission-approval-warning" id={incompleteId} role="alert">
-							{t("This tool did not provide enough target details. Deny and retry with a specific target.")}
-						</p>
-					)}
-					{hasDetails && (
-						<>
-							<button
-								aria-controls={detailsId}
-								aria-expanded={detailsOpen}
-								className="permission-approval-disclosure"
-								disabled={busy}
-								onClick={() => setDetailsOpen((value) => !value)}
-								type="button"
-							>
-								{t("Details")}
-								<CaretDown aria-hidden="true" size={12} />
-							</button>
-							<div
-								className="permission-approval-details"
-								hidden={!detailsOpen}
-								inert={!detailsOpen}
-								id={detailsId}
-							>
-								{interaction.executionTarget === "sandbox" && (
-									<p>{t("This command remains limited to the displayed workspace sandbox.")}</p>
-								)}
-								{interaction.reason.trim().length > 0 && <p>{t(interaction.reason)}</p>}
-								{secondaryRows.length > 0 && (
-									<dl>
-										{secondaryRows.map((row, index) => (
-											<div key={`${row.label}:${index}`}>
-												<dt>{t(row.label)}</dt>
-												<dd>
-													<code>{row.value}</code>
-												</dd>
-											</div>
-										))}
-									</dl>
-								)}
-								{interaction.priorReviewer && <p>{t(priorReviewCopy(interaction.priorReviewerOutcome))}</p>}
-							</div>
-						</>
 					)}
 					<p aria-live="polite" className="sr-only" id={statusId}>
 						{busy ? t("Sending your decision…") : ""}
@@ -310,48 +236,55 @@ export function PermissionApprovalPanel({
 						</p>
 					)}
 					<footer>
-						{denyOnce && (
+						{escapeChoice && (
 							<button
-								className="button-secondary"
-								disabled={busy}
-								onClick={() => choose("deny-once")}
-								ref={firstControl}
+								aria-label={t("Reject")}
+								aria-keyshortcuts="Escape"
+								className="button-secondary permission-approval-reject"
+								disabled={disabled || busy}
+								onClick={(event) => {
+									if (event.detail <= 1) respond(escapeChoice);
+								}}
 								type="button"
 							>
-								{t(CHOICE_LABELS["deny-once"])} <kbd>Esc</kbd>
+								{t("Reject")} <kbd>Esc</kbd>
 							</button>
 						)}
-						{allowOnce && (
-							<button disabled={busy || allowOnceBlocked} onClick={() => choose("allow-once")} type="button">
-								{t(CHOICE_LABELS["allow-once"])}
-							</button>
+						{(allowOnce || persistentChoices.length > 0) && (
+							<div className="permission-approval-split">
+								{allowOnce && (
+									<button
+										aria-label={t("Allow once")}
+										aria-keyshortcuts="Enter"
+										className="permission-approval-allow"
+										disabled={cannotAllow}
+										onClick={(event) => {
+											if (event.detail <= 1) respond("allow-once");
+										}}
+										type="button"
+									>
+										{t("Allow once")} <kbd>↵</kbd>
+									</button>
+								)}
+								{persistentChoices.length > 0 && (
+									<MenuSelect<PermissionChoice>
+										ariaLabel={t("More approval options")}
+										className="permission-approval-split-selector"
+										disabled={disabled || busy}
+										menuAlign="end"
+										menuBoundary="viewport"
+										menuMinWidth={230}
+										onChange={respond}
+										options={persistentChoices.map((choice) => ({
+											value: choice,
+											label: t(CHOICE_LABELS[choice]),
+										}))}
+										placeholder=""
+										value="allow-once"
+									/>
+								)}
+							</div>
 						)}
-						{persistentChoices.length > 0 && (
-							<button
-								aria-controls={moreId}
-								aria-expanded={moreOpen}
-								className="permission-approval-more button-secondary"
-								disabled={busy}
-								onClick={() => setMoreOpen((value) => !value)}
-								type="button"
-							>
-								{t("More")}
-								<CaretDown aria-hidden="true" size={12} />
-							</button>
-						)}
-						<div hidden={!moreOpen} inert={!moreOpen} id={moreId}>
-							{persistentChoices.map((choice) => (
-								<button
-									className="button-secondary"
-									disabled={busy || (choice === "always-allow-exact" && alwaysAllowBlocked)}
-									key={choice}
-									onClick={() => choose(choice)}
-									type="button"
-								>
-									{t(CHOICE_LABELS[choice])}
-								</button>
-							))}
-						</div>
 					</footer>
 				</div>
 			</section>

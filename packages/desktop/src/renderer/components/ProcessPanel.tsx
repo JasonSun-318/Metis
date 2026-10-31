@@ -89,11 +89,13 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 				<output className={`process-state is-${process.state}`}>
 					<span aria-hidden="true" />
 					{t(
-						process.state === "running"
-							? "Command running"
-							: process.state === "completed"
-								? "Command completed"
-								: "Command stopped with an error",
+						process.state === "awaiting_approval"
+							? "Waiting for permission approval"
+							: process.state === "running"
+								? "Command running"
+								: process.state === "completed"
+									? "Command completed"
+									: "Command stopped with an error",
 					)}
 				</output>
 				<button
@@ -118,7 +120,13 @@ export function ProcessPanel({ process, panelId, theme, visible, onError }: Proc
 			)}
 			{!process.output && (
 				<p className="process-notice">
-					{t(process.state === "running" ? "Waiting for command output…" : "This command produced no output.")}
+					{t(
+						process.state === "awaiting_approval"
+							? "The command has not started."
+							: process.state === "running"
+								? "Waiting for command output…"
+								: "This command produced no output.",
+					)}
 				</p>
 			)}
 			<section aria-label={t("Command output")} className="process-output terminal-host" ref={hostRef} />

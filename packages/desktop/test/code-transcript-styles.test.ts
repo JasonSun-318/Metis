@@ -61,17 +61,15 @@ describe("Code transcript visual contract", () => {
 		expect(rule('.transcript-drawer[data-open="true"]').gridTemplateRows).toBe("1fr");
 		expect(rule(".transcript-drawer > *").transform).toBe("translateY(-12px)");
 		expect(rule('.transcript-drawer[data-open="true"] > *').transform).toBe("none");
-		expect(rule(".execution-chain-viewport").overflow).toBe("visible");
-		expect(rule(".execution-chain-content.is-capped .execution-chain-viewport").maxHeight).toBe(
-			"clamp(360px, 46vh, 520px)",
-		);
-		expect(rule(".execution-chain-content.is-capped .execution-chain-viewport").overflow).toBe("hidden");
+		expect(rule(".thinking-preview").maxHeight).toBe("10.5em");
+		expect(rule(".thinking-preview").overflow).toBe("hidden");
+		expect(css).not.toContain(".execution-chain-content.is-capped");
 	});
 
 	it("slides the latest user bubble in from the right and respects reduced motion", () => {
 		expect(
 			rule(".turn-user.is-entering .message-user, .transcript-code .code-turn-user.is-entering > div").animation,
-		).toBe("user-message-enter 180ms cubic-bezier(.16, 1, .3, 1) both");
+		).toBe("user-message-enter 260ms cubic-bezier(.16, 1, .3, 1) both");
 		expect(css).toContain(
 			"@keyframes user-message-enter { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }",
 		);
@@ -80,21 +78,14 @@ describe("Code transcript visual contract", () => {
 		);
 	});
 
-	it("keeps the runtime spinner the same height as its status text", () => {
-		expect(rule(".turn-runtime-status").fontSize).toBe("var(--chat-meta-size)");
-		expect(rule(".turn-runtime-status").lineHeight).toBe("1.4");
-		expect(rule(".turn-runtime-spinner").getPropertyValue("--uib-size")).toBe("1em");
-	});
-
 	it("scales raw Markdown HTML with the selected content size", () => {
 		expect(rule(".markdown-raw-html").fontSize).toBe("var(--code-mono-size)");
 	});
 
-	it("fixes the plan card scroll viewport", () => {
-		const planBody = rule(".plan-card-body");
-		expect(planBody.maxHeight).toBe("280px");
-		expect(planBody.overflowY).toBe("auto");
-		expect(planBody.overscrollBehavior).toBe("contain");
+	it("keeps plan document scrolling in the side panel", () => {
+		const preview = rule(".plan-preview-body");
+		expect(preview.minHeight).toBe("0px");
+		expect(preview.overflow).toBe("auto");
 	});
 
 	it("hides fork and copy actions until the message is hovered", () => {

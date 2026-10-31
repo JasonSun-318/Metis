@@ -112,6 +112,41 @@ afterEach(() => {
 });
 
 describe("ReviewPanel", () => {
+	it("focuses a transcript file in the existing review without changing its scope", async () => {
+		const api = {
+			getWorkspaceReview: vi.fn().mockResolvedValue(workingTree),
+			getWorkspaceReviewFileDiff: vi.fn().mockResolvedValue({ kind: "text", patch: "nested patch" }),
+		} as unknown as MetisDesktopApi;
+		const container = document.createElement("div");
+		document.body.append(container);
+		const root = createRoot(container);
+		const render = (id: string, path?: string) =>
+			act(async () =>
+				root.render(<ReviewPanel api={api} sessionId={sessionId} visible focusRequest={{ id, path }} />),
+			);
+		await act(async () => root.render(<ReviewPanel api={api} sessionId={sessionId} visible />));
+		await flush();
+		const target = container.querySelectorAll<HTMLElement>(".review-file")[1]!;
+		target.scrollIntoView = vi.fn();
+		await render("first", "packages/src/nested.ts");
+		await act(async () => new Promise(requestAnimationFrame));
+		expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+		await flush();
+		expect(api.getWorkspaceReview).toHaveBeenCalledExactlyOnceWith({ sessionId, revision: "working-tree" });
+		expect(api.getWorkspaceReviewFileDiff).toHaveBeenCalledExactlyOnceWith({
+			sessionId,
+			revision: "working-tree",
+			relativePath: "packages/src/nested.ts",
+		});
+		expect(container.querySelector('.review-file-header[aria-expanded="true"]')?.textContent).toContain("nested.ts");
+		await render("missing", "../../../private/tmp/metis.icns");
+		expect(container.querySelector("output")?.textContent).toBe("This file is not in the current review");
+		await render("all");
+		expect(container.querySelector("output")).toBeNull();
+		expect(api.getWorkspaceReview).toHaveBeenCalledOnce();
+		await act(async () => root.unmount());
+	});
+
 	it("keeps every diff collapsed and fetches only the file the user expands", async () => {
 		const api = {
 			getWorkspaceReview: vi.fn().mockResolvedValue(workingTree),

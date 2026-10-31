@@ -1,52 +1,85 @@
-/* Compact approval presentation. Outer geometry and motion stay with the shared
-   composer stack; this file only lays out the panel's own content. */
-
-.permission-approval-panel > header { grid-template-columns: minmax(0, 1fr); }
-.permission-approval-panel > header h2 { color: var(--text-19); font-size: 11px; font-weight: 500; }
-
-.permission-approval-primary { display: grid; gap: 4px; margin: 8px 0 0; }
-.permission-approval-primary > div { display: grid; min-width: 0; gap: 2px; }
-.permission-approval-primary dt { color: var(--text-14); font-size: 10px; letter-spacing: .02em; line-height: 1.4; text-transform: uppercase; }
-.permission-approval-primary dd { min-width: 0; margin: 0; }
-.permission-approval-primary dd code { display: block; overflow-wrap: anywhere; color: var(--text-26); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
-
-.permission-approval-context { margin: 6px 0 0; color: var(--text-19); font-size: 11px; line-height: 1.4; }
-.permission-approval-context code { overflow-wrap: anywhere; color: var(--text-21); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-
-.permission-approval-disclosure,
-.permission-approval-more {
-	display: inline-flex;
-	align-items: center;
-	gap: 4px;
-	height: auto;
-	min-height: 24px;
-	border-radius: 6px;
-	color: var(--text-19);
-	padding: 2px 6px;
-	font-size: 11px;
+/* The composer owns outer geometry and motion. Only the command scrolls here. */
+.permission-approval-slot .permission-approval-panel > header {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	gap: 6px;
 }
-.permission-approval-disclosure { margin-top: 6px; background: transparent; }
-.permission-approval-disclosure:hover:not(:disabled) { background: var(--panel-hover); }
-.permission-approval-disclosure svg,
-.permission-approval-more svg { transition: transform 150ms ease; }
-.permission-approval-disclosure[aria-expanded="false"] svg,
-.permission-approval-more[aria-expanded="false"] svg { transform: rotate(-90deg); }
+.permission-approval-label { color: var(--text-14); font-size: 11px; line-height: 1.4; }
+.permission-approval-slot .permission-approval-panel > header h2 {
+	margin: 0;
+	color: var(--text-26);
+	font-size: 14px;
+	font-weight: 500;
+	line-height: 1.45;
+}
+.permission-approval-command {
+	max-height: 240px;
+	min-width: 0;
+	overflow: auto;
+	margin: 8px 0 0;
+	border: 0;
+	background: transparent;
+	padding: 0;
+	color: var(--text-26);
+	font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+	scrollbar-width: thin;
+	scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+.permission-approval-command code { font: inherit; white-space: inherit; }
+.permission-approval-panel .permission-approval-body > footer {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 10px;
+}
+.permission-approval-slot .permission-approval-panel .permission-approval-reject {
+	min-height: 28px;
+	border-radius: var(--radius-control);
+	padding: 4px 11px;
+}
+.permission-approval-split {
+	display: inline-flex;
+	flex: 0 0 auto;
+	align-items: stretch;
+	border-radius: var(--radius-control);
+	background: var(--text-26);
+	color: var(--panel);
+}
+.permission-approval-slot .permission-approval-panel .permission-approval-split > .permission-approval-allow {
+	min-height: 28px;
+	border: 0;
+	border-radius: inherit;
+	background: transparent;
+	padding: 4px 11px;
+	color: inherit;
+}
+.permission-approval-slot .permission-approval-panel .permission-approval-split:has(.permission-approval-split-selector) > .permission-approval-allow {
+	border-top-right-radius: 0;
+	border-bottom-right-radius: 0;
+}
+.permission-approval-split-selector.menu-select { display: inline-flex; width: 28px; }
+.permission-approval-slot .permission-approval-panel .permission-approval-split-selector .menu-select-trigger {
+	width: 28px;
+	min-width: 28px;
+	min-height: 28px;
+	gap: 0;
+	border: 0;
+	border-left: 1px solid color-mix(in srgb, var(--panel) 20%, transparent);
+	border-radius: 0 var(--radius-control) var(--radius-control) 0;
+	background: transparent;
+	padding: 0;
+	color: inherit;
+}
+.permission-approval-split-selector .menu-select-value { display: none; }
+.permission-approval-panel footer kbd { margin-left: 3px; font-size: 10px; opacity: .7; }
+.permission-approval-panel .error-copy { margin: 6px 0 0; font-size: 12px; }
 
-.permission-approval-panel .permission-approval-details { max-height: 120px; overflow: auto; margin-top: 6px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-03); padding: 6px 8px; scrollbar-color: var(--scrollbar-thumb) transparent; }
-.permission-approval-panel .permission-approval-details[hidden] { display: none; }
-.permission-approval-panel .permission-approval-details p { margin: 0; color: var(--text-19); font-size: 11px; line-height: 1.45; }
-.permission-approval-panel .permission-approval-details p + p,
-.permission-approval-panel .permission-approval-details dl { margin-top: 4px; }
-.permission-approval-panel .permission-approval-details dl { display: grid; gap: 3px; }
-.permission-approval-panel .permission-approval-details dl > div { display: grid; min-width: 0; align-items: start; gap: 8px; grid-template-columns: 108px minmax(0, 1fr); }
-.permission-approval-panel .permission-approval-details dt { color: var(--text-14); font-size: 11px; line-height: 1.45; }
-.permission-approval-panel .permission-approval-details dd { min-width: 0; margin: 0; }
-.permission-approval-panel .permission-approval-details dd code { display: block; overflow-wrap: anywhere; color: var(--text-21); font: 11px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
-
-.permission-approval-panel .permission-approval-body > footer > div { display: flex; flex-basis: 100%; flex-wrap: wrap; justify-content: flex-end; gap: inherit; }
-.permission-approval-panel .permission-approval-body > footer > div[hidden] { display: none; }
-
-:root[data-motion="reduced"] :is(.permission-approval-disclosure, .permission-approval-more) svg { transition: none; }
-
-.permission-approval-panel .permission-approval-warning,
-.permission-approval-panel .error-copy { margin: 6px 0 0; }
+.tool-permission-source {
+	color: var(--text-muted);
+	font-size: 11px;
+	font-weight: 400;
+	white-space: nowrap;
+}

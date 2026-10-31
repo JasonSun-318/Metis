@@ -131,6 +131,18 @@ afterEach(async () => {
 });
 
 describe("Process workspace tab", () => {
+	it("keeps pending approval distinct from running and completed commands", async () => {
+		await render(command("one"));
+		await render(command("one", "", "awaiting_approval"));
+		expect(activeProcessTab()).not.toBeNull();
+		expect(container.querySelector(".process-state")?.textContent).toBe("Waiting for permission approval");
+		expect(container.textContent).toContain("The command has not started.");
+		await render(command("one"));
+		expect(container.querySelector(".process-state")?.textContent).toBe("Command running");
+		await render(command("one", "Permission denied", "failed"));
+		expect(container.querySelector(".process-state")?.textContent).toBe("Command stopped with an error");
+	});
+
 	it.each(["chat", "code"] as const)(
 		"opens one read-only tab in %s, streams output and clears it for the next command",
 		async (mode) => {

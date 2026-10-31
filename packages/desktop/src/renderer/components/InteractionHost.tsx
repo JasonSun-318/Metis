@@ -45,7 +45,14 @@ export function InteractionHost({
 		);
 	}
 	if (interaction.kind === "session_permission_approval") {
-		return <PermissionApprovalPanel interaction={interaction} onRespond={onRespond} sandboxHealth={sandboxHealth} />;
+		return (
+			<PermissionApprovalPanel
+				interaction={interaction}
+				onRespond={onRespond}
+				sandboxHealth={sandboxHealth}
+				disabled={disabled}
+			/>
+		);
 	}
 	const respond = async (response: InteractionResponseInput) => {
 		setBusy(true);

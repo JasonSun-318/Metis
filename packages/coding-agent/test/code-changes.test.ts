@@ -25,6 +25,19 @@ async function fixture(repository = false) {
 }
 
 describe("Code change tracking", () => {
+	it("bounds the net file list without losing full turn totals", async () => {
+		const { cwd, tracker } = await fixture();
+		const paths = Array.from({ length: 40 }, (_, i) => join(cwd, `${i}-${"name".repeat(15)}.ts`));
+		await tracker.run("turn", "create-many", { cwd, paths }, () =>
+			Promise.all(paths.map((path) => writeFile(path, "line\n"))),
+		);
+		const changes = tracker.take("create-many")!;
+		expect(changes.turn.additions).toBe(40);
+		expect(changes.turn.partial).toBe(true);
+		expect(changes.turnFiles!.length).toBeLessThan(40);
+		expect(changes.turnFiles?.every((file) => file.diff === undefined && file.truncated === undefined)).toBe(true);
+		expect(Buffer.byteLength(JSON.stringify(changes), "utf8")).toBeLessThan(20 * 1024);
+	});
 	it("keeps each step's diff and compares the turn against its first contents", async () => {
 		const { tracker, scope, path } = await fixture();
 		await tracker.run("turn-1", "first", scope, () => writeFile(path, "const value = 2;\n"));
@@ -34,10 +47,13 @@ describe("Code change tracking", () => {
 		await tracker.run("turn-1", "second", scope, () => writeFile(path, "const value = 3;\n"));
 		const second = tracker.take("second")!;
 		expect(second.turn).toEqual({ additions: 1, deletions: 1, partial: false });
+		expect(second.turnFiles).toEqual([{ path: "app.ts", kind: "modified", additions: 1, deletions: 1 }]);
 		expect(second.files[0]?.diff).toContain("-const value = 2;\n+const value = 3;");
 		expect(first.files[0]?.diff).toContain("+const value = 2;");
 		await tracker.run("turn-1", "revert", scope, () => writeFile(path, "const value = 1;\n"));
-		expect(tracker.take("revert")?.turn).toEqual({ additions: 0, deletions: 0, partial: false });
+		const reverted = tracker.take("revert")!;
+		expect(reverted.turn).toEqual({ additions: 0, deletions: 0, partial: false });
+		expect(reverted.turnFiles).toEqual([]);
 	});
 
 	it("resets the baseline for the next user turn and retains separate added and removed counts", async () => {
@@ -58,6 +74,7 @@ describe("Code change tracking", () => {
 		const deleted = tracker.take("delete")!;
 		expect(deleted.files[0]).toMatchObject({ kind: "deleted", additions: 0, deletions: 2 });
 		expect(deleted.turn).toMatchObject({ additions: 0, deletions: 0 });
+		expect(deleted.turnFiles).toEqual([]);
 	});
 
 	it("captures command edits, new files and removals without including preexisting Git changes", async () => {
@@ -137,15 +154,32 @@ describe("Code change tracking", () => {
 		expect(tracker.take("second")?.files[0]?.diff).toContain("-second\n+third");
 	});
 
-	it("does not invent line counts for binary or oversized files", async () => {
-		const { tracker, scope, path } = await fixture();
+	it("excludes binary assets, ASCII PDFs and empty resources from text statistics", async () => {
+		const { tracker, cwd, path, scope } = await fixture();
 		await tracker.run("turn", "binary", scope, () => writeFile(path, Buffer.from([0, 1, 2])));
-		const binary = tracker.take("binary")!;
-		expect(binary.files[0]?.binary).toBe(true);
-		expect(binary.files[0]?.additions).toBeUndefined();
-		expect(binary.turn.partial).toBe(true);
-		await tracker.run("turn", "large", scope, () => writeFile(path, "x".repeat(2 * 1024 * 1024)));
+		expect(tracker.take("binary")).toBeUndefined();
+		const paths = ["report.pdf", "metis.rsrc", "photo.png", "notes.md"].map((file) => join(cwd, file));
+		await tracker.run("next", "mixed", { cwd, paths }, async () => {
+			await writeFile(paths[0]!, "%PDF-1.4\nplain ASCII PDF\n");
+			await writeFile(paths[1]!, "");
+			await writeFile(paths[2]!, Buffer.from([0, 1, 2]));
+			await writeFile(paths[3]!, "# Notes\n");
+		});
+		const mixed = tracker.take("mixed")!;
+		expect(mixed.files.map((file) => file.path)).toEqual(["notes.md"]);
+		expect(mixed.turnFiles).toEqual([{ path: "notes.md", kind: "added", additions: 1, deletions: 0 }]);
+		expect(mixed.turn).toEqual({ additions: 1, deletions: 0, partial: false });
+		await writeFile(path, "normal text\n");
+		await tracker.run("large-turn", "large", scope, () => writeFile(path, "x".repeat(2 * 1024 * 1024)));
 		expect(tracker.take("large")?.files[0]?.unavailable).toBe(true);
+	});
+
+	it("removes prior text counts when the file becomes binary in the same turn", async () => {
+		const { tracker, scope, path } = await fixture();
+		await tracker.run("turn", "text", scope, () => writeFile(path, "changed\n"));
+		tracker.take("text");
+		await tracker.run("turn", "binary", scope, () => writeFile(path, Buffer.from([0, 1])));
+		expect(tracker.take("binary")?.turnFiles).toEqual([]);
 	});
 
 	it("bounds long historical previews without counting only the visible part", async () => {

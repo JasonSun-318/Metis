@@ -102,12 +102,92 @@ function Fixture() {
 				],
 			};
 		}
+		if (params.has("cards")) {
+			const base = { sessionId, state: "completed" as const, createdAt: "2026-10-03T00:00:00Z" };
+			initial.push(
+				{
+					...base,
+					itemId: "card-user",
+					turnId: "card-turn",
+					role: "user",
+					content: [{ type: "text", text: "Prepare a plan" }],
+				},
+				{
+					...base,
+					itemId: "card-call",
+					turnId: "card-turn",
+					role: "assistant",
+					content: [
+						{
+							type: "tool_call",
+							name: "set_tasks",
+							toolCallId: "tasks",
+							state: "completed",
+							inputPreview: JSON.stringify({ tasks: [{ task: "Inspect", completed: true }] }),
+						},
+						{
+							type: "tool_call",
+							name: "bash",
+							toolCallId: "inspect",
+							state: "completed",
+							inputPreview: JSON.stringify({ command: "pwd" }),
+						},
+					],
+				},
+				{
+					...base,
+					itemId: "card-result",
+					turnId: "card-turn",
+					role: "tool",
+					content: [
+						{ type: "tool_result", toolCallId: "inspect", name: "bash", output: "/workspace", isError: false },
+						{
+							type: "tool_result",
+							toolCallId: "tasks",
+							name: "set_tasks",
+							output: "- [x] Inspect",
+							isError: false,
+						},
+					],
+				},
+				{ ...base, itemId: "hidden-plan-call", role: "assistant", content: [] },
+				{
+					...base,
+					itemId: "card-plan",
+					role: "assistant",
+					content: [
+						{
+							type: "plan",
+							plan: {
+								planId: "plan",
+								revision: 1,
+								title: "Improve transcript",
+								status: "proposed",
+								markdown: "Body shown only in the side panel",
+								createdAt: base.createdAt,
+							},
+						},
+					],
+				},
+				{
+					...base,
+					itemId: "card-answer",
+					turnId: "card-turn",
+					role: "assistant",
+					content: [{ type: "text", text: "Ready for your review." }],
+				},
+				{ ...base, itemId: "hidden-plan-result", role: "assistant", content: [] },
+			);
+		}
 		return initial;
 	});
 	const [older, setOlder] = useState(true);
+	const [submittedTurnId, setSubmittedTurnId] = useState<string>();
 	const [session, setSession] = useState(sessionId);
 	const send = async (input: ComposerSubmission) => {
 		(globalThis as typeof globalThis & { quoteSubmission?: ComposerSubmission }).quoteSubmission = input;
+		if (params.has("submission") && input.text === "fail") throw new Error("Send failed");
+		if (params.has("submission") && input.text === "queue") return;
 		const user: ItemView = {
 			itemId: `sent-${items.length}`,
 			sessionId: session,
@@ -121,6 +201,7 @@ function Fixture() {
 		const next = [...items, user];
 		localStorage.setItem(quoteStorage, JSON.stringify(next));
 		setItems(next);
+		setSubmittedTurnId(user.turnId);
 	};
 	return (
 		<ConversationQuoteProvider enabled>
@@ -156,6 +237,8 @@ function Fixture() {
 					</div>
 				</header>
 				<Transcript
+					submittedTurnId={submittedTurnId}
+					activeTurnId={submittedTurnId ?? (params.has("running") ? items.at(-1)?.turnId : undefined)}
 					quoteSessionId={params.has("quotes") ? session : undefined}
 					appearance={params.get("mode") === "code" ? "code" : "chat"}
 					showNavigation={params.get("surface") !== "editor"}
