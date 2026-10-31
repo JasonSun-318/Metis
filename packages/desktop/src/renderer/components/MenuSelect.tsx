@@ -18,6 +18,7 @@ export function MenuSelect<T extends string>({
 	disabled = false,
 	id: triggerId,
 	menuAlign = "start",
+	menuBoundary = "dialog",
 	menuMinWidth = 156,
 	onChange,
 	options,
@@ -32,6 +33,7 @@ export function MenuSelect<T extends string>({
 	readonly disabled?: boolean;
 	readonly id?: string;
 	readonly menuAlign?: "start" | "end";
+	readonly menuBoundary?: "dialog" | "viewport";
 	readonly menuMinWidth?: number;
 	readonly onChange: (value: T) => void;
 	readonly options: readonly MenuSelectOption<T>[];
@@ -55,7 +57,10 @@ export function MenuSelect<T extends string>({
 		if (!rect) return;
 		const viewportWidth = document.documentElement.clientWidth || window.innerWidth;
 		const viewportHeight = document.documentElement.clientHeight || window.innerHeight;
-		const dialogRect = root.current?.closest<HTMLElement>('dialog, [role="dialog"]')?.getBoundingClientRect();
+		const dialogRect =
+			menuBoundary === "dialog"
+				? root.current?.closest<HTMLElement>('dialog, [role="dialog"]')?.getBoundingClientRect()
+				: undefined;
 		const boundaryLeft = Math.max(8, dialogRect ? dialogRect.left + 8 : 8);
 		const boundaryRight = Math.min(viewportWidth - 8, dialogRect ? dialogRect.right - 8 : viewportWidth - 8);
 		const boundaryTop = Math.max(8, dialogRect ? dialogRect.top + 8 : 8);
@@ -71,7 +76,7 @@ export function MenuSelect<T extends string>({
 				? { top: rect.bottom + 6, left, width, maxHeight: Math.max(0, Math.min(280, below - 6)) }
 				: { bottom: viewportHeight - rect.top + 6, left, width, maxHeight: Math.max(0, Math.min(280, above - 6)) },
 		);
-	}, [menuAlign, menuMinWidth, options.length]);
+	}, [menuAlign, menuBoundary, menuMinWidth, options.length]);
 	const close = useCallback((restoreFocus = false) => {
 		setOpen(false);
 		if (restoreFocus) queueMicrotask(() => trigger.current?.focus());

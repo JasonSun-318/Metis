@@ -27,6 +27,7 @@ interface WorkspaceTabMenuProps {
 	readonly items: readonly WorkspaceTabMenuItem[];
 	readonly onClose: (options?: { readonly restoreFocus?: boolean }) => void;
 	readonly restoreFocusTo?: HTMLElement | null;
+	readonly portalContainer?: HTMLElement;
 }
 
 const enabledItems = (menu: HTMLElement): HTMLButtonElement[] => [
@@ -40,7 +41,14 @@ const clamp = (value: number, maximum: number): number => Math.max(VIEWPORT_MARG
  * itself before appearing, flips at the 8px viewport margin, scrolls when
  * taller than the viewport, and restores focus to its trigger on Escape.
  */
-export function WorkspaceTabMenu({ anchor, ariaLabel, items, onClose, restoreFocusTo = null }: WorkspaceTabMenuProps) {
+export function WorkspaceTabMenu({
+	anchor,
+	ariaLabel,
+	items,
+	onClose,
+	restoreFocusTo = null,
+	portalContainer = document.body,
+}: WorkspaceTabMenuProps) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
 
@@ -127,6 +135,12 @@ export function WorkspaceTabMenu({ anchor, ariaLabel, items, onClose, restoreFoc
 	}, [opened, measure, close]);
 
 	const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+		if (event.key === "Escape") {
+			event.preventDefault();
+			event.stopPropagation();
+			close(true);
+			return;
+		}
 		if (event.key === "Tab") {
 			close(false);
 			return;
@@ -178,6 +192,6 @@ export function WorkspaceTabMenu({ anchor, ariaLabel, items, onClose, restoreFoc
 				</button>
 			))}
 		</div>,
-		document.body,
+		portalContainer,
 	);
 }

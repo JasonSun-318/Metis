@@ -3766,7 +3766,7 @@ classes so their inline layout wins the cascade. */
 .markdown-source-block { display: contents; }
 ::highlight(metis-file-selection) { background: #628cda55; }
 .file-selection-popover { position: fixed; inset: auto; margin: 0; max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow: auto; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); color: var(--text); box-shadow: var(--overlay-shadow); padding: 4px; font-size: 12px; }
-.file-selection-popover.is-editing { width: min(380px, calc(100vw - 16px)); padding: 0; border-radius: 12px; }
+.file-selection-popover.is-editing { width: min(380px, calc(100vw - 16px)); padding: 0; border-radius: var(--radius-control); }
 .selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
 .selection-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 30px; padding: 5px 9px; border-radius: 6px; white-space: nowrap; }
 .selection-actions button + button { position: relative; }
@@ -3783,7 +3783,7 @@ classes so their inline layout wins the cascade. */
 .selection-request-input { display: flex; align-items: flex-end; gap: 10px; padding: 10px 10px 10px 12px; }
 .selection-request-input textarea { field-sizing: content; flex: 1; min-width: 0; min-height: 28px; max-height: 144px; resize: none; padding: 4px 0; margin: 0; border: 0; border-radius: 0; outline: none; box-shadow: none; background: transparent; color: var(--text); font: inherit; font-size: 13px; line-height: 20px; }
 .selection-request-input textarea::placeholder { color: var(--placeholder); opacity: 1; }
-.selection-send { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 50%; background: var(--text); color: var(--panel); }
+.selection-send { flex: none; width: 28px; height: 28px; display: grid; place-items: center; border-radius: var(--radius-control); background: var(--text); color: var(--panel); }
 .selection-send:disabled { opacity: .35; }
 .selection-send svg.is-spinning { animation: browser-spin 1s linear infinite; }
 .selection-error { padding: 7px 10px; color: var(--muted); overflow-wrap: anywhere; font-size: 12px; }

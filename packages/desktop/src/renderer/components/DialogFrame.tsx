@@ -59,7 +59,11 @@ export function DialogFrame({
 		<div
 			className="modal-backdrop"
 			onPointerDown={(event) => {
-				if (cancellable && event.target === event.currentTarget) onCancel();
+				if (cancellable && event.target === event.currentTarget) {
+					// Keep the pointer's default focus change from undoing opener focus restored on close.
+					event.preventDefault();
+					onCancel();
+				}
 			}}
 		>
 			<section
