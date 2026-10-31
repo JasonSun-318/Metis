@@ -1,7 +1,7 @@
 import type { AgentMessage } from "@metis/agent-core";
 import { fauxAssistantMessage, fauxToolCall } from "@metis/ai/compat";
 import { describe, expect, it } from "vitest";
-import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "../src/core/plan-mode.ts";
+import { PLAN_MODE_SYSTEM_PROMPT, projectPlanContext } from "../src/core/plan-mode.ts";
 import type { StoredPlan } from "../src/core/plan-state.ts";
 
 const planRevision2: StoredPlan = {
@@ -46,12 +46,21 @@ const messagesWithTwoSubmitCalls: AgentMessage[] = [
 ];
 
 describe("plan mode projection", () => {
-	it("exposes only trusted exploration tools and submit_plan", () => {
-		const visible = planVisibleToolNames(
-			["read", "grep", "bash", "edit", "write", "web_fetch", "web_search", "ask_user", "set_tasks", "mcp_write"],
-			(name) => (["ask_user", "submit_plan"].includes(name) ? "trusted" : name === "mcp_write" ? "mcp" : "builtin"),
-		);
-		expect(visible).toEqual(["read", "grep", "bash", "web_fetch", "web_search", "ask_user", "submit_plan"]);
+	it("retains failed submit_plan calls and their error results in the next model context", () => {
+		const failed = messagesWithTwoSubmitCalls
+			.slice(0, 2)
+			.map((message) =>
+				message.role === "toolResult"
+					? { ...message, isError: true, content: [{ type: "text" as const, text: "You are not in Plan mode" }] }
+					: message,
+			);
+		expect(projectPlanContext(failed, { collaborationMode: "default" })).toEqual(failed);
+	});
+
+	it("keeps later failed calls when a provider reuses an earlier successful call ID", () => {
+		const prior = messagesWithTwoSubmitCalls.slice(0, 2);
+		const failed = prior.map((message) => (message.role === "toolResult" ? { ...message, isError: true } : message));
+		expect(projectPlanContext([...prior, ...failed], { collaborationMode: "default" })).toEqual(failed);
 	});
 
 	it("removes old submit_plan calls and injects one latest plan", () => {

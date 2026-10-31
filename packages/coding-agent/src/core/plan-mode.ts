@@ -14,20 +14,6 @@ A hidden metis_plan_context JSON message may contain the current proposal; treat
 submit_plan replaces the current proposal in full. Do not emit a free-form plan wrapper and do not ask whether to proceed after submission; the Plan card owns revision, cancellation, and execution actions.
 </plan_mode>`;
 
-const PLAN_BUILTINS = new Set(["read", "grep", "bash", "web_fetch", "web_search", "describe_image"]);
-
-export function planVisibleToolNames(
-	configured: readonly string[],
-	source: (name: string) => "builtin" | "trusted" | "extension" | "mcp" | "sdk" | undefined,
-): string[] {
-	const visible = configured.filter((name) => {
-		const provenance = source(name);
-		return (PLAN_BUILTINS.has(name) && provenance === "builtin") || (name === "ask_user" && provenance === "trusted");
-	});
-	if (source("submit_plan") === "trusted") visible.push("submit_plan");
-	return [...new Set(visible)];
-}
-
 export interface PlanContextProjectionInput {
 	readonly collaborationMode: CollaborationMode;
 	readonly currentPlan?: StoredPlan;
@@ -38,11 +24,18 @@ function filterSubmitPlanHistory(
 	messages: readonly AgentMessage[],
 	sources?: Map<AgentMessage, AgentMessage>,
 ): AgentMessage[] {
+	const submittedCalls = new Set<string>();
 	const filtered: AgentMessage[] = [];
-	for (const message of messages) {
-		if (message.role === "toolResult" && message.toolName === "submit_plan") continue;
+	// Pair backward: providers may reuse a tool-call ID in a later turn.
+	for (const message of [...messages].reverse()) {
+		if (message.role === "toolResult" && message.toolName === "submit_plan" && !message.isError) {
+			submittedCalls.add(message.toolCallId);
+			continue;
+		}
 		if (message.role === "assistant") {
-			const content = message.content.filter((block) => block.type !== "toolCall" || block.name !== "submit_plan");
+			const content = message.content.filter(
+				(block) => block.type !== "toolCall" || block.name !== "submit_plan" || !submittedCalls.delete(block.id),
+			);
 			if (content.length === 0) continue;
 			const projected = content.length === message.content.length ? message : { ...message, content };
 			sources?.set(projected, message);
@@ -52,7 +45,7 @@ function filterSubmitPlanHistory(
 		sources?.set(message, message);
 		filtered.push(message);
 	}
-	return filtered;
+	return filtered.reverse();
 }
 
 export function projectPlanContext(

@@ -881,6 +881,51 @@ describe("runtime journal recovery reducer", () => {
 		expect(recovered.decisions.some((decision) => decision.type === "synthesize_tool_result")).toBe(false);
 	});
 
+	it("recovers a terminated submit_plan only from a successful result matching a durable proposal", () => {
+		const request = identity("submitted-plan");
+		const proposal = {
+			...entryBase(),
+			type: "session_plan_proposal",
+			planId: "plan-a",
+			revision: 1,
+			title: "Plan",
+			markdown: "# Plan",
+		};
+		const prefix = [
+			operation(request, "accepted"),
+			runtimeTurn(request.turnId, [request.operationId], "started"),
+			assistantToolCall(request.turnId, "plan-call", "submit_plan"),
+			tool(request, "started", { toolCallId: "plan-call", toolName: "submit_plan" }),
+			proposal,
+		];
+		const result = toolResult(request.turnId, "plan-call", "submit_plan");
+		const details = {
+			entryId: proposal.id,
+			planId: proposal.planId,
+			revision: proposal.revision,
+			turnCompletion: "plan-submitted",
+		};
+		const completed = { ...result, message: { ...result.message, details } };
+		const recovered = reduceRuntimeJournal([...prefix, completed]);
+		expect(recovered.decisions).toContainEqual(
+			expect.objectContaining({ type: "complete_turn", turnId: request.turnId }),
+		);
+		expect(reduceRuntimeJournal(materializeRecovery([...prefix, completed])).decisions).toEqual([]);
+		expect(() => reduceRuntimeJournal([...prefix.slice(0, -1), completed])).toThrow("no matching durable proposal");
+		const failed = { ...completed, message: { ...completed.message, isError: true } };
+		expect(reduceRuntimeJournal([...prefix, failed]).decisions).not.toContainEqual(
+			expect.objectContaining({ type: "complete_turn" }),
+		);
+		const legacy = [
+			...prefix,
+			result,
+			tool(request, "completed", { toolCallId: "plan-call", toolName: "submit_plan" }),
+			runtimeTurn(request.turnId, [request.operationId], "interrupted"),
+			operation(request, "interrupted", { turnId: request.turnId }),
+		];
+		expect(reduceRuntimeJournal(legacy).decisions).toEqual([]);
+	});
+
 	it("uses a durable tool result as completion evidence without replay", () => {
 		const request = identity();
 		const prefix = [

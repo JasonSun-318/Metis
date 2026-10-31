@@ -3638,7 +3638,8 @@ export class SessionManager {
 	}
 
 	submitPlan(input: { readonly title: string; readonly markdown: string }): StoredPlan {
-		if (this.getCollaborationMode() !== "plan") throw new Error("submit_plan is available only in Plan mode");
+		if (this.getCollaborationMode() !== "plan")
+			throw new Error("You are not in Plan mode. Ask the user to enable Plan mode before calling submit_plan.");
 		const current = this.getPlanState().currentPlan;
 		const entry = this._appendSessionControl({
 			type: "session_plan_proposal",

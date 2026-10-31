@@ -834,7 +834,14 @@ export class AgentSessionRuntime {
 	}
 
 	private scheduleQueuedTurnDrain(session: AgentSession): void {
-		if (this.queuedTurnDrainTask || session !== this._session || this.disposeRequested || this.disposed) return;
+		if (
+			this.queuedTurnDrainTask ||
+			session !== this._session ||
+			this.disposeRequested ||
+			this.disposed ||
+			session.sessionManager.getPlanState().currentPlan
+		)
+			return;
 		let task!: Promise<void>;
 		task = this.drainQueuedTurns(session)
 			.catch((error) => {
@@ -861,7 +868,14 @@ export class AgentSessionRuntime {
 	private async drainQueuedTurns(session: AgentSession): Promise<void> {
 		await new Promise<void>((resolvePromise) => setImmediate(resolvePromise));
 		await session.waitForIdle();
-		if (session !== this._session || this.disposeRequested || this.disposed || session.isCompacting) return;
+		if (
+			session !== this._session ||
+			this.disposeRequested ||
+			this.disposed ||
+			session.isCompacting ||
+			session.sessionManager.getPlanState().currentPlan
+		)
+			return;
 		const next = this.queuedTurnQueue.firstQueued();
 		if (!next) return;
 		await this.sendQueuedTurn({

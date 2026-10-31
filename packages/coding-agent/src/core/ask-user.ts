@@ -36,6 +36,7 @@ export type AskUserOption = AskUserInput["questions"][number]["options"][number]
 export type AskUserQuestion = AskUserInput["questions"][number];
 
 export interface AskUserRequest {
+	readonly toolCallId?: string;
 	readonly questions: readonly AskUserQuestion[];
 	readonly signal?: AbortSignal;
 }
@@ -150,11 +151,11 @@ export function createAskUserToolDefinition(
 		parameters: AskUserParams,
 		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
-		async execute(_toolCallId, input, signal) {
+		async execute(toolCallId, input, signal) {
 			if (signal?.aborted) throw new Error("Ask user was aborted");
 			if (!requestUserInput) throw new Error("No interactive session owner is available");
 			const questions = normalizeInput(input);
-			const response = await requestUserInput({ questions, signal });
+			const response = await requestUserInput({ questions, signal, toolCallId });
 			if (signal?.aborted) throw new Error("Ask user was aborted");
 			const answers = validatedAnswers(questions, response);
 			const details: AskUserDetails = { questions, cancelled: response.cancelled, answers };

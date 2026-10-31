@@ -387,6 +387,48 @@ describe("session journal recovery", () => {
 		expect(existsSync(backupPath)).toBe(true);
 	});
 
+	it("reads only the candidate header during version preflight", () => {
+		const canonical = `${JSON.stringify({ id: "canonical" })}\n`;
+		const temporaryPath = join(directory, `.session.jsonl.${TRANSACTION_ID}.replace.tmp`);
+		const body = Array.from({ length: 4000 }, (_, index) => JSON.stringify({ id: `entry-${index}` })).join("\n");
+		writeFileSync(path, canonical);
+		writeFileSync(temporaryPath, `${JSON.stringify({ id: "replacement" })}\n${body}\n`);
+		const revived: unknown[] = [];
+
+		const journal = openSessionJournal<{ id: string }>(path, {
+			reviver: (key, value) => {
+				if (key === "id") revived.push(value);
+				return value;
+			},
+			// Enables the recovery version preflight.
+			validateFirstRecord: () => {},
+		});
+
+		// The reviver is the observable boundary of JSON interpretation: the
+		// candidate header and the committed canonical are read, but the large
+		// candidate body must not be parsed before cleanup.
+		expect(revived).toEqual(["replacement", "canonical"]);
+		expect(existsSync(temporaryPath)).toBe(false);
+		expect(readFileSync(path, "utf8")).toBe(canonical);
+		expect(journal.readStrict().records).toEqual([{ id: "canonical" }]);
+		journal.close();
+	});
+
+	it("still rejects a replacement whose body is corrupt beyond the header", () => {
+		const backupPath = join(directory, `.session.jsonl.${TRANSACTION_ID}.replace.bak`);
+		const temporaryPath = join(directory, `.session.jsonl.${TRANSACTION_ID}.replace.tmp`);
+		writeFileSync(backupPath, `${JSON.stringify({ id: "last-good" })}\n`);
+		writeFileSync(temporaryPath, `${JSON.stringify({ id: "replacement" })}\n{broken}\n`);
+
+		const journal = openSessionJournal<{ id: string }>(path, { validateFirstRecord: () => {} });
+
+		expect(journal.readStrict().records).toEqual([{ id: "last-good" }]);
+		expect(readdirSync(directory).some((name) => name.endsWith(".invalid-replacement"))).toBe(true);
+		expect(existsSync(temporaryPath)).toBe(false);
+		expect(existsSync(backupPath)).toBe(false);
+		journal.close();
+	});
+
 	it("cleans a transient backup after observing the committed canonical", () => {
 		const backupPath = join(directory, `.session.jsonl.${TRANSACTION_ID}.replace.bak`);
 		writeFileSync(path, `${JSON.stringify({ id: "canonical" })}\n`);

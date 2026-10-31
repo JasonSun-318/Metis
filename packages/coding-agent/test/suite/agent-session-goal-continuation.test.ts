@@ -36,6 +36,48 @@ describe("AgentSession goal continuation", () => {
 		expect(harness.eventsOfType("goal_changed").some((event) => event.goal?.status === "complete")).toBe(true);
 	});
 
+	it("records a user goal once before hidden continuation without adding a second model turn", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: false } } });
+		harnesses.push(harness);
+		const originalTools = harness.session.getActiveToolNames();
+		expect(originalTools).toEqual(expect.arrayContaining(["get_goal", "create_goal", "update_goal"]));
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("update_goal", { status: "complete" }), { stopReason: "toolUse" }),
+			fauxAssistantMessage("done"),
+			fauxAssistantMessage("must not start another turn"),
+		]);
+		harness.session.setGoalFromUser({ objective: "测试 goal 模式" });
+		await harness.session.waitForIdle();
+		expect(harness.session.getGoal()?.status).toBe("complete");
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(harness.session.getActiveToolNames()).toEqual(originalTools);
+		const requests = harness.sessionManager
+			.getEntries()
+			.filter((entry) => entry.type === "custom" && entry.customType === "goal_user_request");
+		expect(requests).toHaveLength(1);
+		expect(requests[0]).toMatchObject({ data: { objective: "测试 goal 模式" } });
+		expect(harness.events[0]).toMatchObject({ type: "entry_appended", entry: requests[0] });
+		expect(harness.session.messages.some((message) => message.role === "user")).toBe(false);
+	});
+
+	it("waits for the Plan card instead of continuing an active goal after submission", async () => {
+		const harness = await createHarness({ settings: { retry: { enabled: false } } });
+		harnesses.push(harness);
+		await harness.session.setCollaborationMode("plan");
+		writeThreadGoal(harness.sessionManager, { objective: "plan first", status: "active" });
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("submit_plan", { title: "Plan", markdown: "# Plan" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("should not run"),
+		]);
+		await harness.session.prompt("prepare the plan");
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(harness.sessionManager.getPlanState().currentPlan?.status).toBe("proposed");
+		expect(readThreadGoal(harness.sessionManager)?.status).toBe("active");
+		expect(await harness.session.queueGoalContinuationIfIdle()).toBe(false);
+	});
+
 	it("does not continue when the goal is paused", async () => {
 		const harness = await createHarness({ settings: { retry: { enabled: false } } });
 		harnesses.push(harness);

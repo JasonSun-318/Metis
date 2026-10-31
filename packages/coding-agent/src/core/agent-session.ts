@@ -187,7 +187,7 @@ import type {
 	ToolProvenance as NormalizedToolProvenance,
 	RiskLevel,
 } from "./permissions/types.ts";
-import { PLAN_MODE_SYSTEM_PROMPT, planVisibleToolNames, projectPlanContext } from "./plan-mode.ts";
+import { PLAN_MODE_SYSTEM_PROMPT, projectPlanContext } from "./plan-mode.ts";
 import type { CollaborationMode, PlanRef, StoredPlan } from "./plan-state.ts";
 import type { PluginSnapshot } from "./plugins/types.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
@@ -203,6 +203,7 @@ import {
 	MAX_DURABLE_TURN_RESIDENT_PAYLOAD_BYTES,
 	type RuntimeAssistantMessageEvidence,
 	type RuntimeRequestIdentity,
+	type RuntimeToolResultMessageEvidence,
 	validateRuntimeAssistantMessageEvidence,
 	validateRuntimeToolResultMessageEvidence,
 } from "./runtime-recovery.ts";
@@ -654,6 +655,7 @@ export class AgentSession {
 	private readonly _durableQueues = new Map<string, DurableQueueMetadata>();
 	private _durableResidentPayloadBytes = 0;
 	private _durableTerminalEvidence: "completed" | "interrupted" | undefined;
+	private _durablePlanSubmissionCalls: Set<string> | undefined;
 	private readonly _durableTerminalStates = new Map<string, "completed" | "interrupted">();
 	private _durableOperationTurnListener?: (operationId: string, turnId: string) => void;
 	private _runtimeTeardownRequested = false;
@@ -2435,6 +2437,10 @@ export class AgentSession {
 	private _installAgentDurabilityHooks(): void {
 		this.agent.installMandatoryRuntimeHooks({
 			beforeRunStart: () => this._assertDurablePromptExecutionOwner(),
+			shouldStopAfterTurn: ({ toolResults }) =>
+				toolResults.length > 0 &&
+				toolResults.every((result) => result.toolName === "submit_plan" && !result.isError) &&
+				this.sessionManager.getPlanState().currentPlan !== undefined,
 			beforeQueueCommit: async (context) => {
 				try {
 					this._commitDurableQueueTurn(context);
@@ -2577,6 +2583,7 @@ export class AgentSession {
 			}
 			for (const id of queueItemIds) this._durableQueues.delete(id);
 			this._durableTerminalEvidence = undefined;
+			this._durablePlanSubmissionCalls = undefined;
 			return;
 		}
 
@@ -2603,6 +2610,7 @@ export class AgentSession {
 		}
 		for (const id of queueItemIds) this._durableQueues.delete(id);
 		this._durableTerminalEvidence = undefined;
+		this._durablePlanSubmissionCalls = undefined;
 	}
 
 	private _markDurableProviderEpoch(): void {
@@ -2625,6 +2633,7 @@ export class AgentSession {
 			consumedQueueItemIds: turn.consumedQueueItemIds,
 		});
 		this._durableTerminalEvidence = undefined;
+		this._durablePlanSubmissionCalls = undefined;
 	}
 
 	private _repairRejectedDurableTool(context: BeforeToolExecuteContext, started: boolean): void {
@@ -2826,13 +2835,14 @@ export class AgentSession {
 				throw this._eventPersistenceFailure;
 			}
 			let durableAssistantEvidence: RuntimeAssistantMessageEvidence | undefined;
+			let durableToolResultEvidence: RuntimeToolResultMessageEvidence | undefined;
 			if (this._durableTurn && (event.message.role === "assistant" || event.message.role === "toolResult")) {
 				try {
 					if (event.message.role === "assistant") {
 						this._repairPendingDurableToolCallsBeforeAssistant(event.message);
 						durableAssistantEvidence = this._validateDurableAssistantToolCalls(event.message);
 					} else {
-						this._validateDurableToolResult(event.message);
+						durableToolResultEvidence = this._validateDurableToolResult(event.message);
 					}
 				} catch (error) {
 					this._discardUnpersistedAgentMessage(event.message);
@@ -2903,6 +2913,7 @@ export class AgentSession {
 				}
 				if (event.message.role === "user" && this._durableTurn) {
 					this._durableTerminalEvidence = undefined;
+					this._durablePlanSubmissionCalls = undefined;
 				} else if (event.message.role === "assistant" && this._durableTurn) {
 					if (!durableAssistantEvidence) throw new Error("Missing validated durable assistant evidence");
 					for (const call of durableAssistantEvidence.toolCalls) {
@@ -2910,7 +2921,16 @@ export class AgentSession {
 						this._durablePendingToolCalls.set(call.toolCallId, call.toolName);
 					}
 					this._durableTerminalEvidence = durableAssistantEvidence.outcome;
+					this._durablePlanSubmissionCalls =
+						durableAssistantEvidence.toolCalls.length > 0 &&
+						durableAssistantEvidence.toolCalls.every((call) => call.toolName === "submit_plan")
+							? new Set(durableAssistantEvidence.toolCalls.map((call) => call.toolCallId))
+							: undefined;
 				} else if (event.message.role === "toolResult" && this._durableTurn) {
+					if (durableToolResultEvidence?.planSubmission) {
+						this._durablePlanSubmissionCalls?.delete(event.message.toolCallId);
+						if (this._durablePlanSubmissionCalls?.size === 0) this._durableTerminalEvidence = "completed";
+					}
 					this._durablePendingToolCalls.delete(event.message.toolCallId);
 					this._durableToolResults.add(event.message.toolCallId);
 					const toolName = this._durableStartedTools.get(event.message.toolCallId);
@@ -2965,7 +2985,9 @@ export class AgentSession {
 		return evidence;
 	}
 
-	private _validateDurableToolResult(message: Extract<AgentMessage, { role: "toolResult" }>): void {
+	private _validateDurableToolResult(
+		message: Extract<AgentMessage, { role: "toolResult" }>,
+	): RuntimeToolResultMessageEvidence {
 		const evidence = validateRuntimeToolResultMessageEvidence(message);
 		const expectedToolName = this._durablePendingToolCalls.get(evidence.toolCallId);
 		if (expectedToolName === undefined) {
@@ -2974,6 +2996,17 @@ export class AgentSession {
 		if (expectedToolName !== evidence.toolName) {
 			throw new Error(`Durable tool result name changed for ${evidence.toolCallId}`);
 		}
+		if (evidence.planSubmission) {
+			const plan = this.sessionManager.getPlanState().currentPlan;
+			if (
+				plan?.entryId !== evidence.planSubmission.entryId ||
+				plan.planId !== evidence.planSubmission.planId ||
+				plan.revision !== evidence.planSubmission.revision
+			) {
+				throw new Error("Submitted plan has no matching durable proposal");
+			}
+		}
+		return evidence;
 	}
 
 	private _discardUnpersistedAgentMessage(message: AgentMessage): void {
@@ -3449,8 +3482,8 @@ export class AgentSession {
 	getDelegatableToolNames(writePolicy: "inherit" | "deny" = "inherit"): string[] {
 		return this.getActiveToolNames().filter((name) => {
 			// Memory tools are per-session builtins; children are created with
-			// includeAutoMemory: false and can never satisfy them.
-			if (MEMORY_TOOL_NAMES.has(name)) return false;
+			// includeAutoMemory: false and cannot submit a main-session plan.
+			if (MEMORY_TOOL_NAMES.has(name) || name === "submit_plan") return false;
 			const entry = this._toolDefinitions.get(name);
 			const source = entry?.sourceInfo.source;
 			if (source === "sdk") return false;
@@ -3514,17 +3547,6 @@ export class AgentSession {
 			);
 	}
 
-	private _planToolSource(name: string): "builtin" | "trusted" | "extension" | "mcp" | "sdk" | undefined {
-		if (this._trustedControlTools.has(name) && this._isTrustedControlTool(name)) return "trusted";
-		if (this._mcpToolNames.has(name)) return "mcp";
-		const entry = this._toolDefinitions.get(name);
-		if (!entry) return undefined;
-		const source = entry.sourceInfo.source;
-		if (source === "builtin" || source === "sdk") return source;
-		if (source.startsWith("mcp:")) return "mcp";
-		return "extension";
-	}
-
 	private _effectiveSystemPrompt(): string {
 		const selected = this._systemPromptOverride ?? this._baseSystemPrompt;
 		return this.sessionManager.getCollaborationMode() === "plan" && this._systemPromptOverride !== undefined
@@ -3533,11 +3555,7 @@ export class AgentSession {
 	}
 
 	private _applyEffectiveTools(): void {
-		const mode = this.sessionManager.getCollaborationMode();
-		const names =
-			mode === "plan"
-				? planVisibleToolNames(this._configuredActiveToolNames, (name) => this._planToolSource(name))
-				: this._configuredActiveToolNames;
+		const names = this._configuredActiveToolNames;
 		this.agent.state.tools = names.flatMap((name) => this._toolRegistry.get(name) ?? []);
 		this._baseSystemPrompt = this._rebuildSystemPrompt(names);
 		this.agent.state.systemPrompt = this._effectiveSystemPrompt();
@@ -3712,6 +3730,12 @@ export class AgentSession {
 			createdAt: continuingExisting ? existing.createdAt : undefined,
 			timeUsedSeconds: continuingExisting ? existing.timeUsedSeconds : undefined,
 		});
+		if (input.objective !== undefined) {
+			// Keep the user's request in history without inserting a message between
+			// an active tool call and its result. Goal continuation/steering supplies context.
+			const entryId = this.sessionManager.appendCustomEntry("goal_user_request", { objective });
+			this._emit({ type: "entry_appended", entry: this.sessionManager.getEntry(entryId)! });
+		}
 		this._emit({ type: "goal_changed", goal });
 		if (isActiveGoalStatus(goal.status)) {
 			if (this.isStreaming && previousObjective !== goal.objective) {
@@ -3747,7 +3771,7 @@ export class AgentSession {
 
 	/** Start a hidden continuation turn when the session is idle and the goal is active. */
 	async queueGoalContinuationIfIdle(): Promise<boolean> {
-		if (this.sessionManager.getHeader()?.agent) return false;
+		if (this.sessionManager.getHeader()?.agent || this.sessionManager.getPlanState().currentPlan) return false;
 		if (this.isStreaming || this.isCompacting) return false;
 		const goal = readThreadGoal(this.sessionManager);
 		if (!goal || !isActiveGoalStatus(goal.status)) return false;
@@ -3766,18 +3790,13 @@ export class AgentSession {
 	 * Get all configured tools with name, description, parameter schema, prompt guidelines, and source metadata.
 	 */
 	getAllTools(): ToolInfo[] {
-		return Array.from(this._toolDefinitions.values())
-			.filter(
-				({ definition }) =>
-					definition.name !== "submit_plan" || this.sessionManager.getCollaborationMode() === "plan",
-			)
-			.map(({ definition, sourceInfo }) => ({
-				name: definition.name,
-				description: definition.description,
-				parameters: definition.parameters,
-				promptGuidelines: definition.promptGuidelines,
-				sourceInfo,
-			}));
+		return Array.from(this._toolDefinitions.values()).map(({ definition, sourceInfo }) => ({
+			name: definition.name,
+			description: definition.description,
+			parameters: definition.parameters,
+			promptGuidelines: definition.promptGuidelines,
+			sourceInfo,
+		}));
 	}
 
 	getToolDefinition(name: string): ToolDefinition | undefined {
@@ -4065,6 +4084,7 @@ export class AgentSession {
 		this._durableResidentPayloadBytes += residentPayloadBytes;
 		this._durableOperationTurnListener?.(identity.operationId, identity.turnId);
 		this._durableTerminalEvidence = undefined;
+		this._durablePlanSubmissionCalls = undefined;
 	}
 
 	/** Persist an independent queued turn before its provider work is scheduled. */
@@ -4092,6 +4112,7 @@ export class AgentSession {
 		this._durableResidentPayloadBytes += residentPayloadBytes;
 		this._durableOperationTurnListener?.(identity.operationId, turnId);
 		this._durableTerminalEvidence = undefined;
+		this._durablePlanSubmissionCalls = undefined;
 		return turnId;
 	}
 
@@ -4287,7 +4308,9 @@ export class AgentSession {
 			(total, operation) => total + operation.residentPayloadBytes,
 			0,
 		);
-		if (this._durableQueues.size > 0) this._durableRecoveryRequired = true;
+		if (this._durableQueues.size > 0 && !(state === "completed" && this._durablePlanSubmissionCalls?.size === 0)) {
+			this._durableRecoveryRequired = true;
+		}
 		this._durableTurn = undefined;
 		this._durableStartedTools.clear();
 		this._durableToolResults.clear();
@@ -4295,6 +4318,7 @@ export class AgentSession {
 		this._durableToolCalls.clear();
 		this._durablePendingToolCalls.clear();
 		this._durableTerminalEvidence = undefined;
+		this._durablePlanSubmissionCalls = undefined;
 	}
 
 	private async _runAgentPrompt(messages: AgentMessage | AgentMessage[]): Promise<void> {
@@ -4365,6 +4389,8 @@ export class AgentSession {
 		if (!msg) {
 			return false;
 		}
+		// A submitted plan waits for its card decision, even when a goal or Stop hook could continue.
+		if (msg.stopReason === "toolUse" && this.sessionManager.getPlanState().currentPlan) return false;
 
 		if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
 			return true;
@@ -6277,6 +6303,7 @@ export class AgentSession {
 		// inactive; with an explicit allowlist the loop above already activated them.
 		if (this._defaultBuiltinToolsEnabled) {
 			for (const definition of memoryToolDefinitions) nextActiveToolNames.push(definition.name);
+			if (this._trustedControlTools.has("submit_plan")) nextActiveToolNames.push("submit_plan");
 		}
 
 		this._configuredActiveToolNames = [...new Set(nextActiveToolNames)];
@@ -6371,9 +6398,16 @@ export class AgentSession {
 		this._baseToolDefinitions = new Map(
 			Object.entries(baseToolDefinitions).map(([name, tool]) => [name, tool as ToolDefinition]),
 		);
-		const submitPlanDefinition = createSubmitPlanToolDefinition((input) => this.submitPlan(input));
-		this._baseToolDefinitions.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
-		this._trustedControlTools.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
+		if (
+			this._defaultBuiltinToolsEnabled &&
+			!this.sessionManager.getHeader()?.agent &&
+			(!this._allowedToolNames || this._allowedToolNames.has("submit_plan")) &&
+			!this._excludedToolNames?.has("submit_plan")
+		) {
+			const submitPlanDefinition = createSubmitPlanToolDefinition((input) => this.submitPlan(input));
+			this._baseToolDefinitions.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
+			this._trustedControlTools.set(submitPlanDefinition.name, submitPlanDefinition as ToolDefinition);
+		}
 
 		const extensionsResult = this._resourceLoader.getExtensions();
 		if (this._unattendedExecution && extensionsResult.extensions.length > 0) {

@@ -66,6 +66,34 @@ describe("AgentSession queue characterization", () => {
 		}
 	});
 
+	it("keeps steering and follow-up queued when submit_plan ends the current run", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		await harness.session.setCollaborationMode("plan");
+		harness.setResponses([
+			async () => {
+				await harness.session.steer("queued steering");
+				await harness.session.followUp("queued follow-up");
+				return fauxAssistantMessage(fauxToolCall("submit_plan", { title: "Plan", markdown: "# Plan" }), {
+					stopReason: "toolUse",
+				});
+			},
+			fauxAssistantMessage("continued steering"),
+			fauxAssistantMessage("continued follow-up"),
+		]);
+		await harness.session.prompt("make a plan");
+		expect(harness.faux.state.callCount).toBe(1);
+		expect(harness.session.getSteeringMessages()).toEqual(["queued steering"]);
+		expect(harness.session.getFollowUpMessages()).toEqual(["queued follow-up"]);
+		expect(getUserTexts(harness)).toEqual(["make a plan"]);
+		const plan = harness.sessionManager.getPlanState().currentPlan!;
+		await harness.session.cancelPlan({ planId: plan.planId, revision: plan.revision });
+		await harness.session.prompt("continue");
+		expect(harness.session.pendingMessageCount).toBe(0);
+		expect(getUserTexts(harness)).toContain("queued steering");
+		expect(getUserTexts(harness)).toContain("queued follow-up");
+	});
+
 	it("dispatches extension commands immediately when prompted while idle", async () => {
 		const commandRuns: string[] = [];
 		const harness = await createHarness({

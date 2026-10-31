@@ -16,12 +16,12 @@ export type SubmitPlanInput = Static<typeof SubmitPlanParams>;
 
 export function createSubmitPlanToolDefinition(
 	submit: (input: SubmitPlanInput) => StoredPlan,
-): ToolDefinition<typeof SubmitPlanParams, StoredPlan> {
+): ToolDefinition<typeof SubmitPlanParams, StoredPlan & { turnCompletion: "plan-submitted" }> {
 	return {
 		name: "submit_plan",
 		label: "Submit plan",
 		description:
-			"Submit the complete current implementation plan. This replaces the previous proposal in full and is available only in Plan mode.",
+			"Submit the complete current implementation plan. This replaces the previous proposal in full and requires Plan mode. Outside Plan mode, this tool returns an error; ask the user to enable Plan mode first.",
 		parameters: SubmitPlanParams,
 		permission: permissionDescriptor(() => permissionClaim()),
 		executionMode: "sequential",
@@ -35,7 +35,7 @@ export function createSubmitPlanToolDefinition(
 			const plan = submit(input);
 			return {
 				content: [{ type: "text", text: `Plan submitted: ${plan.planId} revision ${plan.revision}` }],
-				details: plan,
+				details: { ...plan, turnCompletion: "plan-submitted" },
 				terminate: true,
 			};
 		},

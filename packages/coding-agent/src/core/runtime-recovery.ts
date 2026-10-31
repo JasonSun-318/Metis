@@ -789,6 +789,7 @@ interface TurnAccumulator {
 	initialOperationIds: readonly string[];
 	initialConsumedQueueItemIds: readonly string[];
 	terminalEvidence?: "completed" | "interrupted";
+	planSubmissionCalls?: Set<string>;
 	readonly pendingToolCallKeys: Set<string>;
 }
 
@@ -891,6 +892,7 @@ function mergeTurn(current: TurnAccumulator, entry: RuntimeTurnEntry): boolean {
 		current.operationIds = entry.operationIds;
 		current.consumedQueueItemIds = entry.consumedQueueItemIds;
 		current.terminalEvidence = undefined;
+		current.planSubmissionCalls = undefined;
 		return extended;
 	}
 	if (
@@ -1049,6 +1051,7 @@ function validateToolResultContent(value: unknown): void {
 export interface RuntimeToolResultMessageEvidence {
 	readonly toolCallId: string;
 	readonly toolName: string;
+	readonly planSubmission?: PlanRef & { readonly entryId: string };
 }
 
 export function validateRuntimeToolResultMessageEvidence(value: unknown): RuntimeToolResultMessageEvidence {
@@ -1077,12 +1080,28 @@ export function validateRuntimeToolResultMessageEvidence(value: unknown): Runtim
 		}
 	}
 	finiteNumber(message, "timestamp", "tool result evidence");
+	if (toolName === "submit_plan" && message.get("isError") === false && message.get("details") !== undefined) {
+		const details = dataFields(message.get("details"), "submit_plan result details");
+		if (details.get("turnCompletion") === "plan-submitted") {
+			const revision = details.get("revision");
+			if (!Number.isSafeInteger(revision) || (revision as number) < 1) invalid("Invalid submitted plan revision");
+			return {
+				toolCallId,
+				toolName,
+				planSubmission: {
+					entryId: requiredString(details, "entryId", "submit_plan result details"),
+					planId: requiredString(details, "planId", "submit_plan result details"),
+					revision: revision as number,
+				},
+			};
+		}
+	}
 	return { toolCallId, toolName };
 }
 
 function toolResultEvidence(
 	fields: ReadonlyMap<string, unknown>,
-): { turnId: string; toolCallId: string; toolName: string } | undefined {
+): (RuntimeToolResultMessageEvidence & { turnId: string }) | undefined {
 	if (fields.get("type") !== "message") return undefined;
 	const message = dataFields(fields.get("message"), "session message evidence");
 	if (message.get("role") !== "toolResult") return undefined;
@@ -1108,10 +1127,14 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 	const toolsByTurn = new Map<string, ToolAccumulator[]>();
 	const toolCalls = new Map<string, ToolCallAccumulator>();
 	const activeToolsByCallId = new Map<string, ToolAccumulator>();
+	const proposals = new Map<string, { planId: unknown; revision: unknown }>();
 
 	for (const rawEntry of entries) {
 		const fields = dataFields(rawEntry, "session journal entry");
 		const type = fields.get("type");
+		if (type === "session_plan_proposal" && typeof fields.get("id") === "string") {
+			proposals.set(fields.get("id") as string, { planId: fields.get("planId"), revision: fields.get("revision") });
+		}
 		if (type === "runtime_operation") {
 			const entry = parseOperation(rawEntry);
 			const knownHash = requestHashes.get(entry.requestId);
@@ -1263,6 +1286,7 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 				invalid(`Runtime turn ${userTurnId} advanced with an active tool`);
 			}
 			turn.terminalEvidence = undefined;
+			turn.planSubmissionCalls = undefined;
 		}
 		const assistant = assistantEvidence(fields);
 		if (assistant) {
@@ -1277,6 +1301,10 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 			}
 			turn.pendingToolCallKeys.clear();
 			turn.terminalEvidence = assistant.outcome;
+			turn.planSubmissionCalls =
+				assistant.toolCalls.length > 0 && assistant.toolCalls.every((call) => call.toolName === "submit_plan")
+					? new Set(assistant.toolCalls.map((call) => call.toolCallId))
+					: undefined;
 			for (const call of assistant.toolCalls) {
 				const key = `${assistant.turnId}\0${call.toolCallId}`;
 				const current = toolCalls.get(key);
@@ -1312,6 +1340,17 @@ export function reduceRuntimeJournal(entries: readonly unknown[]): RuntimeRecove
 			}
 			call.resultEvidence = true;
 			turn.pendingToolCallKeys.delete(key);
+			if (result.planSubmission) {
+				const proposal = proposals.get(result.planSubmission.entryId);
+				if (
+					proposal?.planId !== result.planSubmission.planId ||
+					proposal.revision !== result.planSubmission.revision
+				) {
+					invalid(`Submitted plan ${result.planSubmission.entryId} has no matching durable proposal`);
+				}
+				turn.planSubmissionCalls?.delete(result.toolCallId);
+				if (turn.planSubmissionCalls?.size === 0) turn.terminalEvidence = "completed";
+			}
 		}
 	}
 

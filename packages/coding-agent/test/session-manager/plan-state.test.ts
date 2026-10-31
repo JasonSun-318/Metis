@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { reducePlanState } from "../../src/core/plan-state.ts";
 import { SessionManager } from "../../src/core/session-manager.ts";
+import { createSubmitPlanToolDefinition } from "../../src/core/submit-plan.ts";
 
 describe("Plan state", () => {
 	it("keeps only the latest branch-visible proposal current and derives superseded status", () => {
@@ -133,6 +134,34 @@ describe("SessionManager plan state", () => {
 		session.submitPlan({ title: "Plan", markdown: "# Plan" });
 		expect(() => session.setCollaborationMode("default")).toThrow(/Cancel or start/iu);
 		session.close();
+	});
+	it("requires Plan mode and a non-empty proposal, and restores the exact current revision from disk", async () => {
+		const session = SessionManager.create(directory, join(directory, "sessions"), { mode: "chat" });
+		const tool = createSubmitPlanToolDefinition((input) => session.submitPlan(input));
+		session.appendMessage({ role: "user", content: "Plan this change", timestamp: 1 });
+		await expect(
+			tool.execute("submit", { title: "Plan", markdown: "# Plan" }, undefined, undefined, {} as never),
+		).rejects.toThrow(/not in Plan mode/);
+		session.setCollaborationMode("plan");
+		await expect(
+			tool.execute("submit", { title: "Plan", markdown: "   " }, undefined, undefined, {} as never),
+		).rejects.toThrow(/cannot be blank/);
+		expect(session.getPlanState().currentPlan).toBeUndefined();
+		const first = session.submitPlan({ title: "Plan", markdown: "# First proposal" });
+		const current = session.submitPlan({ title: "Revised plan", markdown: "# Revised proposal" });
+		expect(() => session.acceptPlan({ planId: first.planId, revision: first.revision })).toThrow(/current plan/);
+		const file = session.getSessionFile()!;
+		session.close();
+		const reopened = SessionManager.open(file);
+		try {
+			expect(reopened.getCollaborationMode()).toBe("plan");
+			expect(reopened.getPlanState().currentPlan).toEqual(current);
+			const ref = { planId: current.planId, revision: current.revision };
+			expect(reopened.acceptPlan(ref).status).toBe("accepted");
+			expect(() => reopened.acceptPlan(ref)).toThrow(/current plan/);
+		} finally {
+			reopened.close();
+		}
 	});
 
 	it("accepts and cancels the current proposal", () => {

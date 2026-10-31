@@ -288,8 +288,8 @@ describe("prompt-cache acceptance matrix", () => {
 		h.manager.submitPlan({ title: "v1", markdown: "revision-1-body" });
 		await h.session.prompt("p1");
 		expect(lastContextText(h.captured[0]!)).toContain("revision-1-body");
-		// Plan mode keeps write tools out of the request entirely.
-		expect(toolNames(h.captured[0]!)).not.toContain("write");
+		// Stable tool schemas preserve cache prefixes; Plan mode enforces the read-only execution boundary.
+		expect(toolNames(h.captured[0]!)).toContain("write");
 
 		const v2 = h.manager.submitPlan({ title: "v2", markdown: "revision-2-body" });
 		await h.session.prompt("p2");

@@ -189,7 +189,7 @@ describe("AgentSession dynamic tool registration", () => {
 		session.dispose();
 	});
 
-	it("filters tools in Plan mode and restores configured tools in Default", async () => {
+	it("keeps configured tool definitions stable across collaboration modes", async () => {
 		const settingsManager = SettingsManager.create(tempDir, agentDir);
 		const sessionManager = SessionManager.inMemory(tempDir);
 		const resourceLoader = new DefaultResourceLoader({ cwd: tempDir, agentDir, settingsManager });
@@ -207,16 +207,16 @@ describe("AgentSession dynamic tool registration", () => {
 		const askUser = createAskUserToolDefinition(async () => ({ cancelled: true, answers: [] }));
 		session.installHostTools([askUser], { automaticPermissionToolNames: ["ask_user"] });
 		const normal = session.getConfiguredActiveToolNames();
-		expect(session.getAllTools().map(({ name }) => name)).not.toContain("submit_plan");
+		expect(session.getAllTools().map(({ name }) => name)).toContain("submit_plan");
 		await session.setCollaborationMode("plan");
 		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["read", "bash", "ask_user", "submit_plan"]));
 		expect(session.getAllTools().map(({ name }) => name)).toContain("submit_plan");
-		expect(session.getActiveToolNames()).not.toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		expect(session.getActiveToolNames()).toEqual(normal);
 		await session.reload();
 		await session.setCollaborationMode("default");
 		expect(session.getActiveToolNames()).toEqual(normal);
-		expect(session.getActiveToolNames()).not.toContain("submit_plan");
-		expect(session.getAllTools().map(({ name }) => name)).not.toContain("submit_plan");
+		expect(session.getActiveToolNames()).toContain("submit_plan");
+		expect(session.getAllTools().map(({ name }) => name)).toContain("submit_plan");
 
 		const submitPlan = session.getToolDefinition("submit_plan");
 		expect(submitPlan).toBeDefined();
@@ -228,7 +228,7 @@ describe("AgentSession dynamic tool registration", () => {
 				undefined,
 				{} as ExtensionContext,
 			),
-		).rejects.toThrow(/only in Plan mode/iu);
+		).rejects.toThrow(/enable Plan mode/iu);
 
 		session.dispose();
 	});

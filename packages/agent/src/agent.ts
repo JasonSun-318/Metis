@@ -132,6 +132,7 @@ export interface AgentOptions {
 
 export interface AgentMandatoryRuntimeHooks {
 	beforeRunStart?: () => void;
+	shouldStopAfterTurn?: AgentLoopConfig["shouldStopAfterTurn"];
 	beforeToolExecute?: (context: BeforeToolExecuteContext, signal?: AbortSignal) => Promise<void>;
 	beforeQueueCommit?: (context: BeforeQueueCommitContext, signal?: AbortSignal) => Promise<void>;
 	beforeQueueClear?: (context: BeforeQueueClearContext) => void;
@@ -487,6 +488,7 @@ export class Agent {
 			afterToolCall: this.afterToolCall,
 			beforeQueueCommit: (context, signal) => this.runBeforeQueueCommit(context, signal),
 			beforeProviderRequest: (context, signal) => this.runBeforeProviderRequest(context, signal),
+			shouldStopAfterTurn: this.mandatoryRuntimeHooks?.shouldStopAfterTurn,
 			prepareNextTurn:
 				this.prepareNextTurnWithContext || this.prepareNextTurn
 					? async (context) => {

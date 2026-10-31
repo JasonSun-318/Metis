@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fauxAssistantMessage, registerFauxProvider } from "@metis/ai/compat";
+import { dirname, join } from "node:path";
+import { fauxAssistantMessage, fauxToolCall, registerFauxProvider } from "@metis/ai/compat";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgentMode } from "../src/core/agent-mode.ts";
 import {
@@ -11,6 +11,7 @@ import {
 	createAgentSessionServices,
 } from "../src/core/agent-session-runtime.ts";
 import { AuthStorage } from "../src/core/auth-storage.ts";
+import { reduceRuntimeJournal } from "../src/core/runtime-recovery.ts";
 import { SessionManager } from "../src/core/session-manager.ts";
 import type {
 	ExtensionAPI,
@@ -287,7 +288,7 @@ describe("AgentSessionRuntime plan execution", () => {
 		}
 	});
 
-	async function createPlanRuntime(initialMode: AgentMode = "code") {
+	async function createPlanRuntime(initialMode: AgentMode = "code", noTools?: "all" | "builtin") {
 		const tempDir = join(tmpdir(), `metis-plan-runtime-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 
@@ -337,6 +338,7 @@ describe("AgentSessionRuntime plan execution", () => {
 					services,
 					sessionManager,
 					sessionStartEvent,
+					noTools,
 					model: faux.getModel(),
 				})),
 				services,
@@ -363,6 +365,191 @@ describe("AgentSessionRuntime plan execution", () => {
 
 		return { runtime, session: runtime.session, faux };
 	}
+
+	it("completes a successful plan submission and reopens the durable session with the pending proposal", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		await session.setCollaborationMode("plan");
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("submit_plan", { title: "Plan", markdown: "# Complete plan" })], {
+				stopReason: "toolUse",
+			}),
+		]);
+		await runtime.submitPrompt({ requestId: "submit-plan-completed", text: "Make a plan" });
+		await vi.waitFor(() => expect(faux.state.callCount).toBe(1));
+		await session.waitForIdle();
+		const sessionFile = session.sessionManager.getSessionFile()!;
+		const journal = readFileSync(sessionFile, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		expect(
+			journal
+				.filter((entry) => entry.type === "runtime_turn" && entry.state !== "started")
+				.map((entry) => entry.state),
+		).toEqual(["completed"]);
+		expect(reduceRuntimeJournal(journal).decisions).toEqual([]);
+		await runtime.dispose();
+		const reopened = SessionManager.open(sessionFile);
+		expect(reopened.getPlanState().currentPlan).toMatchObject({ title: "Plan", status: "proposed" });
+		expect(
+			reduceRuntimeJournal(
+				readFileSync(sessionFile, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line)),
+			).decisions,
+		).toEqual([]);
+		reopened.close();
+	});
+
+	it("holds queued turns until the pending Plan is accepted or cancelled", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		await session.setCollaborationMode("plan");
+		faux.setResponses([
+			() => {
+				runtime.enqueueQueuedTurn({ requestId: "91000000-0000-4000-8000-000000000002", text: "queued next task" });
+				return fauxAssistantMessage([fauxToolCall("submit_plan", { title: "Plan", markdown: "# Plan" })], {
+					stopReason: "toolUse",
+				});
+			},
+			fauxAssistantMessage("accepted plan executed"),
+			fauxAssistantMessage("queued task executed"),
+		]);
+		await runtime.submitPrompt({ requestId: "plan-before-fifo", text: "Make a plan" });
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(1);
+		expect(session.sessionManager.getPlanState().currentPlan).toBeDefined();
+		expect(runtime.queuedTurns).toHaveLength(1);
+		expect(runtime.queuedTurns[0].input.text).toBe("queued next task");
+		const proposal = session.sessionManager.getPlanState().currentPlan!;
+		await runtime.submitPrompt({
+			requestId: "accept-before-fifo",
+			text: "Execute",
+			planExecution: { planId: proposal.planId, revision: proposal.revision },
+		});
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(3);
+		expect(runtime.queuedTurns).toHaveLength(0);
+	});
+
+	it("retains durable steering and follow-up after submission and accepts the plan without recovery", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		await session.setCollaborationMode("plan");
+		faux.setResponses([
+			async () => {
+				await runtime.submitPrompt({
+					requestId: "plan-steer",
+					text: "queued steering",
+					streamingBehavior: "steer",
+				});
+				await runtime.submitPrompt({
+					requestId: "plan-follow",
+					text: "queued follow-up",
+					streamingBehavior: "followUp",
+				});
+				return fauxAssistantMessage([fauxToolCall("submit_plan", { title: "Plan", markdown: "# Plan" })], {
+					stopReason: "toolUse",
+				});
+			},
+			fauxAssistantMessage("steering received"),
+			fauxAssistantMessage("follow-up received"),
+		]);
+		await runtime.submitPrompt({ requestId: "plan-with-steering", text: "Make a plan" });
+		await runtime.waitForIdle();
+		expect(faux.state.callCount).toBe(1);
+		const heldState = reduceRuntimeJournal(session.sessionManager.getDurableJournalSnapshot());
+		expect(heldState.turns).toMatchObject([{ state: "completed" }]);
+		expect(heldState.decisions.some((decision) => decision.type === "interrupt_turn")).toBe(false);
+		expect(session.getSteeringMessages()).toEqual(["queued steering"]);
+		expect(session.getFollowUpMessages()).toEqual(["queued follow-up"]);
+		const proposal = session.sessionManager.getPlanState().currentPlan!;
+		await runtime.submitPrompt({
+			requestId: "accept-with-steering",
+			text: "Execute",
+			planExecution: { planId: proposal.planId, revision: proposal.revision },
+		});
+		await runtime.waitForIdle();
+		expect(session.pendingMessageCount).toBe(0);
+		expect(faux.state.callCount).toBe(3);
+		expect(reduceRuntimeJournal(session.sessionManager.getDurableJournalSnapshot()).decisions).toEqual([]);
+	});
+
+	it("opens a legacy interrupted plan submission without losing its actionable proposal", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		await session.setCollaborationMode("plan");
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("submit_plan", { title: "Legacy plan", markdown: "# Legacy" })], {
+				stopReason: "toolUse",
+			}),
+		]);
+		await runtime.submitPrompt({ requestId: "legacy-plan", text: "Make a plan" });
+		await vi.waitFor(() => expect(faux.state.callCount).toBe(1));
+		await session.waitForIdle();
+		const sessionFile = session.sessionManager.getSessionFile()!;
+		const journal = readFileSync(sessionFile, "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line));
+		for (const entry of journal) {
+			if (
+				entry.type === "message" &&
+				entry.message.role === "toolResult" &&
+				entry.message.toolName === "submit_plan"
+			)
+				delete entry.message.details.turnCompletion;
+			if ((entry.type === "runtime_turn" || entry.type === "runtime_operation") && entry.state === "completed")
+				entry.state = "interrupted";
+		}
+		await runtime.dispose();
+		const legacyFile = join(dirname(sessionFile), "legacy-plan.jsonl");
+		writeFileSync(legacyFile, `${journal.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+		const reopened = SessionManager.open(legacyFile);
+		try {
+			const proposal = reopened.getPlanState().currentPlan!;
+			expect(proposal).toMatchObject({ title: "Legacy plan", status: "proposed" });
+			expect(reduceRuntimeJournal(journal).decisions).toEqual([]);
+			expect(reopened.cancelPlan({ planId: proposal.planId, revision: proposal.revision }).status).toBe("cancelled");
+		} finally {
+			reopened.close();
+		}
+	});
+
+	it("returns a tool error outside Plan and preserves the failed call/result pair for the model", async () => {
+		const { runtime, session, faux } = await createPlanRuntime();
+		let observed: unknown[] = [];
+		faux.setResponses([
+			fauxAssistantMessage(
+				[fauxToolCall("submit_plan", { title: "Plan", markdown: "# Plan" }, { id: "non-plan-submit" })],
+				{ stopReason: "toolUse" },
+			),
+			(context) => {
+				observed = structuredClone(context.messages);
+				return fauxAssistantMessage("Please enable Plan mode.");
+			},
+		]);
+		await runtime.submitPrompt({ requestId: "non-plan-submit", text: "Submit" });
+		await vi.waitFor(() => expect(faux.state.callCount).toBe(2));
+		await session.waitForIdle();
+		expect(JSON.stringify(observed)).toContain('"name":"submit_plan"');
+		expect(JSON.stringify(observed)).toContain("You are not in Plan mode");
+		expect(session.sessionManager.getPlanState().currentPlan).toBeUndefined();
+		expect(
+			reduceRuntimeJournal(
+				readFileSync(session.sessionManager.getSessionFile()!, "utf8")
+					.trim()
+					.split("\n")
+					.map((line) => JSON.parse(line)),
+			).decisions,
+		).toEqual([]);
+	});
+
+	it.each(["all", "builtin"] as const)("does not inject submit_plan through noTools=%s", async (noTools) => {
+		const { session } = await createPlanRuntime("code", noTools);
+		expect(session.getAllTools().map((tool) => tool.name)).not.toContain("submit_plan");
+		const configured = session.getActiveToolNames();
+		await session.setCollaborationMode("plan");
+		expect(session.getActiveToolNames()).toEqual(configured);
+	});
 
 	it("rejects stale Plan execution before provider work", async () => {
 		const { runtime, session, faux } = await createPlanRuntime();
@@ -416,7 +603,7 @@ describe("AgentSessionRuntime plan execution", () => {
 		expect(observed[0].collaborationMode).toBe("default");
 		expect(observed[0].toolNames).toContain("edit");
 		expect(observed[0].toolNames).toContain("set_tasks");
-		expect(observed[0].toolNames).not.toContain("submit_plan");
+		expect(observed[0].toolNames).toContain("submit_plan");
 		const serialized = JSON.stringify(observed[0].messages);
 		expect(serialized).toContain("accepted-plan-markdown-body");
 	});
@@ -424,16 +611,18 @@ describe("AgentSessionRuntime plan execution", () => {
 	it("keeps configured Default tools when Plan is active and subagent capabilities resync", async () => {
 		const { session } = await createPlanRuntime();
 		const configured = session.getConfiguredActiveToolNames();
-		expect(configured).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
+		expect(configured).toEqual(expect.arrayContaining(["edit", "write", "set_tasks", "submit_plan"]));
+		expect(session.getDelegatableToolNames()).not.toContain("submit_plan");
 
 		await session.setCollaborationMode("plan");
-		expect(session.getActiveToolNames()).not.toContain("write");
+		expect(session.getActiveToolNames()).toEqual(configured);
 		session.setThinkingSelection(session.getThinkingSelection());
 		expect(session.getConfiguredActiveToolNames()).toEqual(configured);
 
 		await session.setCollaborationMode("default");
 		expect(session.getActiveToolNames()).toEqual(expect.arrayContaining(["edit", "write", "set_tasks"]));
-		expect(session.getActiveToolNames()).not.toContain("submit_plan");
+		expect(session.getActiveToolNames()).toEqual(configured);
+		expect(session.getActiveToolNames()).toContain("submit_plan");
 	});
 
 	it("does not inject plan context on the next ordinary Default prompt", async () => {

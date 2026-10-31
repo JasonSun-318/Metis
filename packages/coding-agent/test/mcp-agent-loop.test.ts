@@ -34,15 +34,20 @@ afterEach(async () => {
 });
 
 describe("MCP agent loop", () => {
-	it("keeps direct MCP tools out of Plan mode even when their runtime source is builtin", async () => {
-		const { harness } = await setup();
-
-		const planSource = (
-			harness.session as unknown as { _planToolSource(name: string): "builtin" | "mcp" | undefined }
-		)._planToolSource("tool_search");
-		expect(planSource).toBe("mcp");
+	it("allows read-only MCP discovery in Plan mode without invoking remote tools", async () => {
+		const { server, harness } = await setup();
 		await harness.session.setCollaborationMode("plan");
-		expect(harness.session.getActiveToolNames()).not.toContain("tool_search");
+		expect(harness.session.getActiveToolNames()).toContain("tool_search");
+		harness.setResponses([
+			fauxAssistantMessage(fauxToolCall("tool_search", { query: "product documentation" }), {
+				stopReason: "toolUse",
+			}),
+			fauxAssistantMessage("Found the documentation tool."),
+		]);
+		await harness.session.prompt("Find the product documentation");
+		const result = harness.session.messages.find((message) => message.role === "toolResult");
+		expect(result).toMatchObject({ isError: false, addedToolNames: ["mcp__docs__search_docs"] });
+		expect(server.toolCallCount()).toBe(0);
 	});
 
 	it("searches, exposes the full schema on the next call, invokes raw MCP, and persists the load marker", async () => {
