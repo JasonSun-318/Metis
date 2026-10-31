@@ -48,9 +48,10 @@ jobs:
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
-        # bubblewrap and socat are required by the workspace sandbox runtime;
+        # The workspace sandbox runtime requires bwrap, socat and rg on PATH;
         # without them the packaged sandbox health probe reports "unavailable".
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap socat unzip xvfb
+        # ripgrep was preinstalled before the ubuntu-latest migration to 26.
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep socat unzip xvfb
 
       - name: Install dependencies
         run: npm ci
@@ -90,16 +91,6 @@ jobs:
 
       - name: Make native artifacts
         run: npm run make --workspace @metis/desktop
-
-      - name: Debug Linux sandbox dependency probe
-        if: runner.os == 'Linux'
-        run: |
-          which bwrap socat rg || true
-          node --input-type=module -e "
-            const rt = await import('@anthropic-ai/sandbox-runtime');
-            console.log('supported platform:', rt.SandboxManager.isSupportedPlatform());
-            console.log(JSON.stringify(await rt.SandboxManager.checkDependenciesAsync(), null, 2));
-          "
 
       - name: Verify packaged runtime assets
         run: npm run verify:package --workspace @metis/desktop
