@@ -37,7 +37,7 @@ describe("Plugin Center visual contract", () => {
 		expect(rule(".plugins-search").height).toBe("var(--control-height)");
 		expect(rule(".plugins-list-row").minHeight).toBe("64px");
 		expect(rule(".plugins-row-icon").width).toBe("36px");
-		expect(rule(".plugins-detail-actions button").minHeight).toBe("34px");
+		expect(rule(".plugins-detail-actions button").minHeight).toBe("var(--control-height-compact)");
 		expect(rule(".plugins-detail-document").fontSize).toBe("13px");
 		expect(rule(".plugins-detail-document pre").overflowX).toBe("auto");
 		expect(rule(".scheduled-tasks-empty").minHeight).toBe("260px");

@@ -135,6 +135,45 @@ function setInput(element: HTMLInputElement | HTMLTextAreaElement, value: string
 	element.dispatchEvent(new Event("input", { bubbles: true }));
 }
 
+async function selectMenu(container: ParentNode, name: string, label: string) {
+	await act(async () => button(container, name)!.click());
+	const option = [...document.body.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((item) =>
+		item.textContent?.startsWith(label),
+	);
+	expect(option).toBeDefined();
+	await act(async () => option!.click());
+}
+
+function installedRecords(count: number): PluginRecord[] {
+	return Array.from({ length: count }, (_, index) => {
+		const label = String(index).padStart(2, "0");
+		return {
+			...installedOneRecord,
+			id: `plugin-${label}`,
+			name: `plugin-${label}`,
+			displayName: `Plugin ${label}`,
+			enabled: index % 2 === 0,
+		};
+	});
+}
+
+function catalogEntries(count: number): PluginCatalogEntryView[] {
+	return Array.from({ length: count }, (_, index) => {
+		const label = String(index).padStart(2, "0");
+		const installState: PluginCatalogEntryView["installState"] =
+			index % 3 === 0 ? "installed" : index % 3 === 1 ? "not-installed" : "update-available";
+		return {
+			id: `entry-${label}`,
+			name: `Entry ${label}`,
+			description: "Catalog entry",
+			formatHint: "claude",
+			sourceSupported: true,
+			installState,
+			...(installState === "installed" ? { installedPluginId: `plugin-${label}` } : {}),
+		};
+	});
+}
+
 describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 	let container: HTMLDivElement;
 	let root: Root;
@@ -1211,5 +1250,173 @@ describe("PluginMarketplacePanel and Plugins 4th tab", () => {
 		expect(blockedUpdateButton.disabled).toBe(true);
 		await act(async () => blockedUpdateButton.click());
 		expect(api.updatePlugin).not.toHaveBeenCalled();
+	});
+
+	it("does not paginate the market directory or single-page plugin results", async () => {
+		const { container } = await renderPanel(createMockApi(), "plugins", false);
+		expect(container.querySelector(".plugins-pagination")).toBeNull();
+		expect(container.querySelectorAll(".plugins-source-row").length).toBeGreaterThan(0);
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-source-open")!.click());
+		await flush();
+		expect(container.querySelector(".plugins-pagination")).toBeNull();
+		expect(container.querySelector("select")).toBeNull();
+	});
+
+	it("paginates installed plugins with a compact custom page menu", async () => {
+		const records = installedRecords(45);
+		const api = createMockApi({
+			listInstalledPlugins: vi.fn().mockResolvedValue({ installed: records, registryRevision: 1 }),
+		});
+		const { container } = await renderPanel(api, "plugins", false);
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-manage-installed")!.click());
+		await flush();
+
+		const rows = () => container.querySelectorAll(".plugins-installed-row");
+		const pagination = () => container.querySelector(".plugins-pagination")?.textContent ?? "";
+		expect(rows()).toHaveLength(20);
+		expect(pagination()).toContain("Page 1 of 3");
+		expect(pagination()).toContain("Showing 1–20 of 45");
+
+		await act(async () => button(container, "Next page").click());
+		expect(rows()).toHaveLength(20);
+		expect(pagination()).toContain("Page 2 of 3");
+		expect(rows()[0]?.textContent).toContain("Plugin 20");
+
+		await selectMenu(container, "Go to page", "Page 3 of 3");
+		expect(rows()).toHaveLength(5);
+		expect(rows()[0]?.textContent).toContain("Plugin 40");
+		expect(button(container, "Next page").disabled).toBe(true);
+		expect(container.querySelector(".plugins-pagination select, .plugins-pagination input")).toBeNull();
+		await selectMenu(container, "Go to page", "Page 1 of 3");
+		expect(rows()).toHaveLength(20);
+		expect(rows()[0]?.textContent).toContain("Plugin 00");
+	});
+
+	it("searches installed results across pages and filters by status", async () => {
+		const records = installedRecords(45);
+		const api = createMockApi({
+			listInstalledPlugins: vi.fn().mockResolvedValue({ installed: records, registryRevision: 1 }),
+		});
+		const { container } = await renderPanel(api, "plugins", false);
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-manage-installed")!.click());
+		await flush();
+
+		const rows = () => [...container.querySelectorAll(".plugins-installed-row")];
+		const search = container.querySelector<HTMLInputElement>('.plugins-list-controls input[type="search"]')!;
+		await act(async () => setInput(search, "Plugin 44"));
+		expect(rows()).toHaveLength(1);
+		expect(rows()[0]?.textContent).toContain("Plugin 44");
+
+		await act(async () => setInput(search, ""));
+		await selectMenu(container, "Filter by status", "Disabled");
+		expect(rows()).toHaveLength(20);
+		expect(container.querySelector(".plugins-pagination")?.textContent).toContain("Page 1 of 2");
+		expect(rows().every((row) => row.textContent?.includes("Disabled"))).toBe(true);
+
+		await selectMenu(container, "Filter by status", "Enabled");
+		expect(rows().every((row) => row.textContent?.includes("Enabled"))).toBe(true);
+
+		await act(async () => setInput(search, "Plugin 43"));
+		expect(rows()).toHaveLength(0);
+		expect(container.textContent).toContain("No plugins match your search.");
+	});
+
+	it("restores installed search, page, and scroll after closing a detail dialog", async () => {
+		const records = installedRecords(45);
+		const api = createMockApi({
+			listInstalledPlugins: vi.fn().mockResolvedValue({ installed: records, registryRevision: 1 }),
+			getInstalledPlugin: vi.fn().mockImplementation(async ({ pluginId }) => ({
+				plugin: records.find((plugin) => plugin.id === pluginId)!,
+				components: [],
+				activation: "applied",
+				runtimeErrors: [],
+			})),
+		});
+		const { container } = await renderPanel(api, "plugins", false);
+		await act(async () => container.querySelector<HTMLButtonElement>(".plugins-manage-installed")!.click());
+		await flush();
+
+		const search = container.querySelector<HTMLInputElement>('.plugins-list-controls input[type="search"]')!;
+		await act(async () => setInput(search, "Plugin"));
+		await flush();
+		await act(async () => button(container, "Next page").click());
+		await flush();
+		const list = container.querySelector<HTMLElement>(".plugins-full-list")!;
+		list.scrollTop = 120;
+
+		const row = [...container.querySelectorAll(".plugins-installed-row")].find((candidate) =>
+			candidate.textContent?.includes("Plugin 20"),
+		)!;
+		await act(async () => button(row, "Manage").click());
+		await flush();
+		const dialog = document.body.querySelector(".plugins-detail-dialog");
+		expect(dialog).not.toBeNull();
+		await act(async () => button(dialog!, "Close").click());
+		await flush();
+
+		expect(container.querySelector<HTMLInputElement>('.plugins-list-controls input[type="search"]')!.value).toBe(
+			"Plugin",
+		);
+		expect(container.querySelector(".plugins-pagination")?.textContent).toContain("Page 2 of 3");
+		expect(container.querySelector<HTMLElement>(".plugins-full-list")!.scrollTop).toBe(120);
+	});
+
+	it("filters the browse catalog by install state across the full result set", async () => {
+		const api = createMockApi({
+			getPluginCatalog: vi.fn().mockResolvedValue({ entries: catalogEntries(30), cacheStatus: "cached" }),
+		});
+		const { container } = await renderPanel(api, "plugins");
+		const rows = () => [...container.querySelectorAll(".plugins-market-row")];
+		const pagination = () => container.querySelector(".plugins-pagination")?.textContent ?? "";
+		expect(rows()).toHaveLength(20);
+		await act(async () => button(container, "Next page").click());
+		expect(pagination()).toContain("Page 2 of 2");
+
+		await selectMenu(container, "Filter by install state", "Installed");
+		expect(container.querySelector(".plugins-pagination")).toBeNull();
+		expect(rows()).toHaveLength(10);
+		expect(rows().every((row) => row.textContent?.includes("Installed"))).toBe(true);
+
+		await selectMenu(container, "Filter by install state", "Update available");
+		expect(rows()).toHaveLength(10);
+		expect(rows().every((row) => row.textContent?.includes("Update available"))).toBe(true);
+
+		const search = container.querySelector<HTMLInputElement>('.plugins-list-controls input[type="search"]')!;
+		await act(async () => setInput(search, "Entry 29"));
+		expect(rows()).toHaveLength(1);
+		expect(rows()[0]?.textContent).toContain("Entry 29");
+
+		await act(async () => setInput(search, "Entry 01"));
+		expect(rows()).toHaveLength(0);
+		expect(container.querySelector(".plugins-pagination")).toBeNull();
+
+		await selectMenu(container, "Filter by install state", "All install states");
+		await act(async () => setInput(search, "Entry 28"));
+		expect(rows()).toHaveLength(1);
+		expect(rows()[0]?.textContent).toContain("Entry 28");
+	});
+
+	it("keeps the browse install-state filter after closing plugin details", async () => {
+		const api = createMockApi({
+			getPluginCatalog: vi.fn().mockResolvedValue({ entries: catalogEntries(30), cacheStatus: "cached" }),
+			getInstalledPlugin: vi.fn().mockResolvedValue(installedOneDetail),
+		});
+		const { container } = await renderPanel(api, "plugins");
+		await selectMenu(container, "Filter by install state", "Installed");
+
+		const row = [...container.querySelectorAll(".plugins-market-row")].find((candidate) =>
+			candidate.textContent?.includes("Entry 00"),
+		)!;
+		await act(async () => button(row, "Manage").click());
+		await flush();
+		const dialog = document.body.querySelector(".plugins-detail-dialog");
+		expect(dialog).not.toBeNull();
+		await act(async () => button(dialog!, "Close").click());
+		await flush();
+
+		expect(button(container, "Filter by install state").textContent).toContain("Installed");
+		const rows = [...container.querySelectorAll(".plugins-market-row")];
+		expect(rows).toHaveLength(10);
+		expect(rows.every((candidate) => candidate.textContent?.includes("Installed"))).toBe(true);
 	});
 });

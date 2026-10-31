@@ -883,7 +883,7 @@ textarea { resize: none; }
 .plugins-reload:disabled { color: var(--text-02); cursor: default; }
 .plugins-spin { animation: browser-spin 900ms linear infinite; }
 .plugins-new-control { position: relative; flex: none; }
-.plugins-new-trigger, .plugins-new-btn { display: inline-flex; width: 112px; min-width: 112px; height: var(--control-height-compact); align-items: center; white-space: nowrap; border: 0; border-radius: 8px; background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 12px; font-size: 13px; font-weight: 550; }
+.plugins-new-trigger, .plugins-new-btn { display: inline-flex; width: 112px; min-width: 112px; height: var(--control-height-compact); align-items: center; white-space: nowrap; border: 0; border-radius: 8px; background: var(--button-primary-bg); color: var(--button-primary-ink); padding: 0 12px; font-size: 12px; font-weight: 550; }
 .plugins-new-trigger { justify-content: space-between; gap: 12px; }
 .plugins-new-trigger:hover:not(:disabled), .plugins-new-trigger[aria-expanded="true"] { background: var(--button-primary-bg-hover); }
 .plugins-new-menu { position: fixed; z-index: 10000; display: grid; gap: 2px; border: 1px solid var(--border-strong); border-radius: 8px; background: var(--menu-bg); box-shadow: var(--overlay-shadow); padding: 4px; }
@@ -931,7 +931,7 @@ textarea { resize: none; }
 .plugins-detail-header p { overflow: hidden; max-width: 620px; text-overflow: ellipsis; white-space: nowrap; }
 .plugins-detail-header > div:first-child > span { display: block; margin-top: 13px; color: var(--text-06); font-size: 10px; }
 .plugins-detail-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
-.plugins-detail-actions button { display: inline-flex; min-height: 34px; align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-03); color: var(--text-22); padding: 0 10px; font-size: 11px; white-space: nowrap; }
+.plugins-detail-actions button { display: inline-flex; height: var(--control-height-compact); min-height: var(--control-height-compact); align-items: center; gap: 6px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface-03); color: var(--text-22); padding: 0 10px; font-size: 12px; white-space: nowrap; }
 .plugins-detail-actions button:hover:not(:disabled) { background: var(--surface-06); }
 .plugins-detail-actions .plugins-danger-action { border-color: var(--danger-soft-border); color: var(--danger-action); }
 .plugins-detail-grid { display: grid; gap: 44px; border-top: 1px solid var(--border); grid-template-columns: minmax(0, 1fr) 320px; }
@@ -1020,13 +1020,30 @@ textarea { resize: none; }
 .hook-field-hint { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.5; overflow-wrap: anywhere; }
 .hook-field-error { margin: 0; font-size: 12px; color: var(--danger); line-height: 1.5; }
 .plugins-hook-command-preview { background: var(--surface-02); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: 12px; color: var(--text-26); overflow-x: auto; white-space: pre-wrap; word-break: break-all; margin: 0 0 16px; }
-.plugins-market-panel { display: flex; flex-direction: column; width: min(832px, 100%); margin: 0 auto; }
-.plugins-installed-controls { grid-template-columns: minmax(0, 1fr); }
+.plugins-market-panel { display: flex; flex-direction: column; width: min(var(--collection-width), 100%); margin: 0 auto; }
+.plugins-installed-controls { grid-template-columns: minmax(0, 1fr) auto; }
 .plugins-count-pill { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; border-radius: 999px; background: var(--surface-05); color: var(--text-20); font-size: 10px; font-weight: 600; padding: 0 4px; }
 .plugins-market-navigation { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; margin-top: 12px; color: var(--muted); font-size: 12px; }
 .plugins-market-navigation button { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 0 8px; color: var(--text-20); }
 .plugins-manage-installed { margin-left: auto; }
 .plugins-current-market { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Plugins viewport: the list scrolls between a fixed toolbar and pager. */
+.plugins-catalog-page:has(.plugins-market-panel) { display: flex; flex-direction: column; overflow: hidden; }
+.plugins-catalog-page:has(.plugins-market-panel) > .plugins-page-header,
+.plugins-catalog-page:has(.plugins-market-panel) > .plugins-section-switch-row { flex: none; }
+.plugins-market-panel { flex: 1 1 auto; min-height: 0; }
+.plugins-market-panel > .plugins-list-controls,
+.plugins-market-panel > .plugins-market-navigation { flex: none; }
+.plugins-market-panel > .plugins-full-list { flex: 0 1 auto; min-height: 0; max-height: 560px; }
+.plugins-status-filter { min-width: 144px; }
+.plugins-status-filter .menu-select-trigger { height: var(--control-height); background: var(--surface-03); }
+.plugins-pagination { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; padding: 4px 0; color: var(--text-09); font-size: 11px; }
+.plugins-pagination-pager { display: flex; align-items: center; gap: 4px; }
+.plugins-pagination-pager > button { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 6px; color: var(--text-14); }
+.plugins-pagination-pager > button:hover:not(:disabled) { background: var(--surface-08); color: var(--text-26); }
+.plugins-pagination-pager > button:disabled { opacity: .35; }
+.plugins-pagination-pager .menu-select-trigger { height: 28px; border-color: transparent; background: transparent; padding: 0 8px; font-size: 11px; color: var(--text-14); }
+.plugins-pagination-pager .menu-select-trigger:hover { background: var(--surface-06); }
 .plugins-source-row { display: flex; align-items: center; }
 .plugins-source-row:hover, .plugins-source-row:focus-within { background: var(--surface-04); }
 .plugins-source-row .plugins-source-open:hover:not(:disabled), .plugins-source-row .plugins-source-open:focus-visible { background: transparent; }

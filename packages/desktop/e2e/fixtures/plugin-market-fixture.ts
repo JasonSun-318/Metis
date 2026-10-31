@@ -89,7 +89,7 @@ process.stdin.on("end", () => {
 `;
 }
 
-async function buildRepositoryZip(version: "A" | "B", httpMcpUrl: string): Promise<Buffer> {
+async function buildRepositoryZip(version: "A" | "B", httpMcpUrl: string, extraCatalogEntries: number): Promise<Buffer> {
 	const zip = new JSZip();
 	const root = "plugins-market-fixture";
 
@@ -135,6 +135,12 @@ async function buildRepositoryZip(version: "A" | "B", httpMcpUrl: string): Promi
 			},
 		],
 	};
+	for (let index = 0; index < extraCatalogEntries; index += 1) {
+		const name = `catalog-plugin-${String(index).padStart(3, "0")}`;
+		marketManifest.plugins.push({ name, description: `Catalog pagination fixture ${index}`, source: `./plugins/${name}` });
+		zip.file(`${root}/plugins/${name}/.claude-plugin/plugin.json`, JSON.stringify({ name, description: `Catalog pagination fixture ${index}`, version: "1.0.0", skills: "./skills" }));
+		zip.file(`${root}/plugins/${name}/skills/demo/SKILL.md`, `---\nname: ${name}\ndescription: Pagination fixture\n---\nLocal fixture only.\n`);
+	}
 	zip.file(`${root}/.claude-plugins/marketplace.json`, JSON.stringify(marketManifest, null, 2));
 	zip.file(`${root}/.claude-plugin/marketplace.json`, JSON.stringify(marketManifest, null, 2));
 
@@ -312,7 +318,7 @@ When asked about fixture suite, use the suite echo tool.
 	return zip.generateAsync({ type: "nodebuffer" });
 }
 
-export async function createPluginFixtureServer(): Promise<PluginFixtureServer> {
+export async function createPluginFixtureServer(extraCatalogEntries = 0): Promise<PluginFixtureServer> {
 	// 1. Generate multi-domain self-signed TLS cert
 	const key = spawnSync("openssl", ["genrsa", "2048"], { encoding: "buffer" }).stdout;
 	const cert = spawnSync(
@@ -351,8 +357,9 @@ export async function createPluginFixtureServer(): Promise<PluginFixtureServer> 
 	});
 
 	// 3. Build Fixture Repository Zip Archives for Commit A and B
-	const zipA = await buildRepositoryZip("A", mcpTestServer.url.toString());
-	const zipB = await buildRepositoryZip("B", mcpTestServer.url.toString());
+	const zipA = await buildRepositoryZip("A", mcpTestServer.url.toString(), extraCatalogEntries);
+	const zipB = await buildRepositoryZip("B", mcpTestServer.url.toString(), extraCatalogEntries);
+	const catalogJson = await (await JSZip.loadAsync(zipA)).file("plugins-market-fixture/.claude-plugin/marketplace.json")!.async("nodebuffer");
 
 	let currentCommit = FIXTURE_COMMIT_A;
 	let shouldFailDownload = false;
@@ -401,49 +408,7 @@ export async function createPluginFixtureServer(): Promise<PluginFixtureServer> 
 
 		// API routes: raw content inspection for marketplace.json
 		if (url.includes("marketplace.json")) {
-			const marketManifest = {
-				name: "Fixture Market",
-				description: "Deterministic fixture plugins marketplace",
-				plugins: [
-					{
-						name: "fixture-suite",
-						description: "Full suite plugin with skill, mcp and hook",
-						source: "./plugins/fixture-suite",
-						strict: false,
-					},
-					{
-						name: "fixture-partial",
-						description: "Partial plugin with supported mcp and unsupported app",
-						source: "./plugins/fixture-partial",
-					},
-					{
-						name: "fixture-unsupported",
-						description: "Plugin with only unsupported apps",
-						source: "./plugins/fixture-unsupported",
-					},
-					{
-						name: "fixture-codex",
-						description: "Codex format plugin with two skills",
-						source: "./plugins/fixture-codex",
-					},
-					{
-						name: "fixture-broken",
-						description: "Plugin with malformed manifest",
-						source: "./plugins/fixture-broken",
-					},
-					{
-						name: "fixture-subdir",
-						description: "Subdirectory plugin with scripts and resources",
-						source: "./plugins/fixture-subdir",
-					},
-					{
-						name: "fixture-http-token",
-						description: "HTTP MCP plugin requiring bearer token",
-						source: "./plugins/fixture-http-token",
-					},
-				],
-			};
-			const jsonBytes = Buffer.from(JSON.stringify(marketManifest, null, 2), "utf8");
+			const jsonBytes = catalogJson;
 			res.writeHead(200, {
 				"content-type": "application/vnd.github.raw+json",
 				"content-length": String(jsonBytes.length),

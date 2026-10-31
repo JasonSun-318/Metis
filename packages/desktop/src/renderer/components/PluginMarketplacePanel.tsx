@@ -18,6 +18,7 @@ import {
 	ArrowLeft,
 	ArrowSquareOut,
 	ArrowsClockwise,
+	CaretLeft,
 	CaretRight,
 	CheckCircle,
 	Lightning,
@@ -33,6 +34,7 @@ import {
 	XCircle,
 } from "../icons.tsx";
 import { DialogFrame } from "./DialogFrame.tsx";
+import { MenuSelect } from "./MenuSelect.tsx";
 
 function message(cause: unknown): string {
 	if (cause instanceof Error) return i18n.t(cause.message);
@@ -62,6 +64,9 @@ export interface PluginMarketplacePanelProps {
 }
 
 type ViewMode = "markets" | "browse" | "installed";
+type InstalledStatusFilter = "all" | "enabled" | "disabled";
+type CatalogStatusFilter = "all" | PluginCatalogEntryView["installState"];
+const PAGE_SIZE = 20;
 
 export function PluginMarketplacePanel({
 	headerActionsTarget,
@@ -88,6 +93,7 @@ export function PluginMarketplacePanel({
 	const [catalogLoading, setCatalogLoading] = useState(false);
 	const [catalogError, setCatalogError] = useState<string | null>(null);
 	const [catalogQuery, setCatalogQuery] = useState("");
+	const [catalogStatus, setCatalogStatus] = useState<CatalogStatusFilter>("all");
 	const [marketRefreshing, setMarketRefreshing] = useState(false);
 
 	// Installed state
@@ -95,6 +101,12 @@ export function PluginMarketplacePanel({
 	const [installedLoading, setInstalledLoading] = useState(false);
 	const [installedError, setInstalledError] = useState<string | null>(null);
 	const [installedQuery, setInstalledQuery] = useState("");
+	const [installedStatus, setInstalledStatus] = useState<InstalledStatusFilter>("all");
+	const [catalogPage, setCatalogPage] = useState(1);
+	const [installedPage, setInstalledPage] = useState(1);
+	const listRef = useRef<HTMLDivElement>(null);
+	const listScrollTop = useRef(0);
+	const restoreListScroll = useRef(false);
 
 	// Dialogs state
 	const [addMarketOpen, setAddMarketOpen] = useState(false);
@@ -234,11 +246,32 @@ export function PluginMarketplacePanel({
 		};
 	}, [api, detailPluginId, serverReady]);
 
+	// Remember the list scroll position so closing a detail dialog restores the same view.
+	const openPluginDetail = useCallback((pluginId: string) => {
+		listScrollTop.current = listRef.current?.scrollTop ?? 0;
+		setDetailPluginId(pluginId);
+	}, []);
+	const closePluginDetail = useCallback(() => {
+		restoreListScroll.current = true;
+		setDetailPluginId(null);
+		setDetailPlugin(null);
+		setUpdateStatusMessage(null);
+		setUpdateError(null);
+		onClearSelectedPlugin?.();
+	}, [onClearSelectedPlugin]);
+	useEffect(() => {
+		if (detailPluginId !== null || !restoreListScroll.current) return;
+		restoreListScroll.current = false;
+		const list = listRef.current;
+		if (list) list.scrollTop = listScrollTop.current;
+	}, [detailPluginId]);
+
 	// Select a market
 	const handleSelectMarket = useCallback(
 		async (sourceId: string) => {
 			if (!serverReady) return;
 			setCatalogQuery("");
+			setCatalogPage(1);
 			if (sourceId === selectedMarketId) {
 				setViewMode("browse");
 				return;
@@ -496,28 +529,53 @@ export function PluginMarketplacePanel({
 		[api, loadCatalog, loadInstalled, registryRevision, removePending, selectedMarketId, serverReady],
 	);
 
-	// Filter catalog entries
+	// Filter catalog entries by install state, then search the full result set.
 	const visibleCatalogEntries = useMemo(() => {
+		const statusFiltered =
+			catalogStatus === "all"
+				? catalogEntries
+				: catalogEntries.filter((entry) => entry.installState === catalogStatus);
 		const q = catalogQuery.trim().toLowerCase();
-		if (!q) return catalogEntries;
-		return catalogEntries.filter(
+		if (!q) return statusFiltered;
+		return statusFiltered.filter(
 			(entry) => entry.name.toLowerCase().includes(q) || entry.description?.toLowerCase().includes(q),
 		);
-	}, [catalogEntries, catalogQuery]);
+	}, [catalogEntries, catalogQuery, catalogStatus]);
 
-	// Filter installed list
+	// Filter installed list by status, then search the full result set.
 	const visibleInstalledList = useMemo(() => {
+		const statusFiltered =
+			installedStatus === "all"
+				? installedList
+				: installedList.filter((plugin) => (installedStatus === "enabled" ? plugin.enabled : !plugin.enabled));
 		const q = installedQuery.trim().toLowerCase();
-		if (!q) return installedList;
-		return installedList.filter(
+		if (!q) return statusFiltered;
+		return statusFiltered.filter(
 			(plugin) => plugin.name.toLowerCase().includes(q) || plugin.displayName.toLowerCase().includes(q),
 		);
-	}, [installedList, installedQuery]);
+	}, [installedList, installedQuery, installedStatus]);
 
 	const selectedMarket = markets.find((m) => m.id === selectedMarketId);
 	const visibleMarkets = markets.filter((market) =>
 		`${marketName(market)} ${market.url}`.toLowerCase().includes(marketQuery.trim().toLowerCase()),
 	);
+	const catalogPages = Math.max(1, Math.ceil(visibleCatalogEntries.length / PAGE_SIZE));
+	const installedPages = Math.max(1, Math.ceil(visibleInstalledList.length / PAGE_SIZE));
+	useEffect(() => setCatalogPage((value) => Math.min(value, catalogPages)), [catalogPages]);
+	useEffect(() => setInstalledPage((value) => Math.min(value, installedPages)), [installedPages]);
+	const currentPage =
+		viewMode === "browse" ? Math.min(catalogPage, catalogPages) : Math.min(installedPage, installedPages);
+	const totalPages = viewMode === "browse" ? catalogPages : installedPages;
+	const totalItems = viewMode === "browse" ? visibleCatalogEntries.length : visibleInstalledList.length;
+	const setCurrentPage = (page: number) => {
+		const next = Math.min(Math.max(1, page), totalPages);
+		if (viewMode === "browse") setCatalogPage(next);
+		else setInstalledPage(next);
+		if (listRef.current) listRef.current.scrollTop = 0;
+	};
+	const pageStart = (currentPage - 1) * PAGE_SIZE;
+	const pagedCatalogEntries = visibleCatalogEntries.slice(pageStart, pageStart + PAGE_SIZE);
+	const pagedInstalledList = visibleInstalledList.slice(pageStart, pageStart + PAGE_SIZE);
 	const searchLabel =
 		viewMode === "markets"
 			? "Search markets…"
@@ -530,6 +588,8 @@ export function PluginMarketplacePanel({
 			: viewMode === "browse"
 				? marketRefreshing || catalogLoading
 				: installedLoading;
+	const listLoading =
+		viewMode === "markets" ? marketsLoading : viewMode === "browse" ? catalogLoading : installedLoading;
 
 	return (
 		<div className="plugins-market-panel">
@@ -569,21 +629,60 @@ export function PluginMarketplacePanel({
 				)}
 			<div className="plugins-list-controls plugins-installed-controls">
 				<div className="plugins-search">
-					<MagnifyingGlass aria-hidden="true" size={16} />
+					<MagnifyingGlass aria-hidden="true" size={18} />
 					<input
 						aria-label={t(searchLabel)}
 						placeholder={t(searchLabel)}
 						type="search"
-						onChange={(event) =>
-							viewMode === "markets"
-								? setMarketQuery(event.target.value)
-								: viewMode === "browse"
-									? setCatalogQuery(event.target.value)
-									: setInstalledQuery(event.target.value)
-						}
+						onChange={(event) => {
+							const value = event.target.value;
+							if (viewMode === "markets") {
+								setMarketQuery(value);
+							} else if (viewMode === "browse") {
+								setCatalogQuery(value);
+								setCatalogPage(1);
+							} else {
+								setInstalledQuery(value);
+								setInstalledPage(1);
+							}
+						}}
 						value={viewMode === "markets" ? marketQuery : viewMode === "browse" ? catalogQuery : installedQuery}
 					/>
 				</div>
+				{viewMode === "browse" ? (
+					<MenuSelect<CatalogStatusFilter>
+						ariaLabel={t("Filter by install state")}
+						className="plugins-status-filter"
+						menuAlign="end"
+						value={catalogStatus}
+						onChange={(value) => {
+							setCatalogStatus(value);
+							setCatalogPage(1);
+						}}
+						options={[
+							{ value: "all", label: t("All install states") },
+							{ value: "not-installed", label: t("Not installed") },
+							{ value: "installed", label: t("Installed") },
+							{ value: "update-available", label: t("Update available") },
+						]}
+					/>
+				) : viewMode === "installed" ? (
+					<MenuSelect<InstalledStatusFilter>
+						ariaLabel={t("Filter by status")}
+						className="plugins-status-filter"
+						menuAlign="end"
+						value={installedStatus}
+						onChange={(value) => {
+							setInstalledStatus(value);
+							setInstalledPage(1);
+						}}
+						options={[
+							{ value: "all", label: t("All statuses") },
+							{ value: "enabled", label: t("Enabled") },
+							{ value: "disabled", label: t("Disabled") },
+						]}
+					/>
+				) : null}
 			</div>
 			<div className="plugins-market-navigation">
 				{viewMode !== "markets" ? (
@@ -621,7 +720,7 @@ export function PluginMarketplacePanel({
 				</p>
 			)}
 			{viewMode === "markets" ? (
-				<section className="plugins-full-list plugins-market-sources" aria-label={t("Markets")}>
+				<section className="plugins-full-list plugins-market-sources" aria-label={t("Markets")} ref={listRef}>
 					{marketsLoading ? (
 						<output className="status-paragraph plugins-catalog-message">{t("Loading markets…")}</output>
 					) : marketError && markets.length === 0 ? null : visibleMarkets.length === 0 ? (
@@ -667,7 +766,7 @@ export function PluginMarketplacePanel({
 			) : viewMode === "browse" ? (
 				<>
 					{/* Catalog List */}
-					<div className="plugins-full-list" role="listbox">
+					<div className="plugins-full-list" role="listbox" ref={listRef}>
 						{catalogLoading ? (
 							<output className="status-paragraph plugins-catalog-message">{t("Loading catalog…")}</output>
 						) : catalogError ? (
@@ -679,10 +778,14 @@ export function PluginMarketplacePanel({
 							</div>
 						) : visibleCatalogEntries.length === 0 ? (
 							<p className="plugins-catalog-message">
-								{t(catalogQuery ? "No plugins match your search." : "No plugins available in this market.")}
+								{t(
+									catalogQuery || catalogStatus !== "all"
+										? "No plugins match your search."
+										: "No plugins available in this market.",
+								)}
 							</p>
 						) : (
-							visibleCatalogEntries.map((entry) => (
+							pagedCatalogEntries.map((entry) => (
 								<div className="plugins-list-row plugins-market-row" key={entry.id}>
 									<span className="plugins-row-icon">
 										<Package aria-hidden="true" size={22} />
@@ -706,7 +809,7 @@ export function PluginMarketplacePanel({
 										className="plugins-inspect-action-btn"
 										disabled={!serverReady}
 										onClick={() => {
-											if (entry.installedPluginId) setDetailPluginId(entry.installedPluginId);
+											if (entry.installedPluginId) openPluginDetail(entry.installedPluginId);
 											else handleInspectEntry(entry);
 										}}
 										type="button"
@@ -721,7 +824,7 @@ export function PluginMarketplacePanel({
 			) : (
 				<>
 					{/* Installed List */}
-					<div className="plugins-full-list" role="listbox">
+					<div className="plugins-full-list" role="listbox" ref={listRef}>
 						{installedLoading ? (
 							<output className="status-paragraph plugins-catalog-message">
 								{t("Loading installed plugins…")}
@@ -735,10 +838,14 @@ export function PluginMarketplacePanel({
 							</div>
 						) : visibleInstalledList.length === 0 ? (
 							<p className="plugins-catalog-message">
-								{t(installedQuery ? "No plugins match your search." : "No plugins installed yet.")}
+								{t(
+									installedQuery || installedStatus !== "all"
+										? "No plugins match your search."
+										: "No plugins installed yet.",
+								)}
 							</p>
 						) : (
-							visibleInstalledList.map((plugin) => (
+							pagedInstalledList.map((plugin) => (
 								<div className="plugins-list-row plugins-installed-row" key={plugin.id}>
 									<span className="plugins-row-icon">
 										<Package aria-hidden="true" size={22} />
@@ -771,7 +878,7 @@ export function PluginMarketplacePanel({
 										<button
 											className="plugins-inspect-action-btn"
 											disabled={!serverReady}
-											onClick={() => setDetailPluginId(plugin.id)}
+											onClick={() => openPluginDetail(plugin.id)}
 											type="button"
 										>
 											{t("Manage")}
@@ -784,6 +891,10 @@ export function PluginMarketplacePanel({
 					</div>
 				</>
 			)}
+
+			{viewMode !== "markets" && !listLoading && totalPages > 1 ? (
+				<PluginListPager onPage={setCurrentPage} page={currentPage} pages={totalPages} total={totalItems} />
+			) : null}
 
 			{/* Dialog: Add Market */}
 			{addMarketOpen && (
@@ -821,13 +932,7 @@ export function PluginMarketplacePanel({
 					error={detailError}
 					loading={detailLoading}
 					onCheckUpdate={() => handleCheckUpdate(detailPluginId)}
-					onClose={() => {
-						setDetailPluginId(null);
-						setDetailPlugin(null);
-						setUpdateStatusMessage(null);
-						setUpdateError(null);
-						onClearSelectedPlugin?.();
-					}}
+					onClose={closePluginDetail}
 					onOpenHook={onOpenHook}
 					onOpenMcp={onOpenMcp}
 					onOpenSkill={onOpenSkill}
@@ -865,6 +970,50 @@ export function PluginMarketplacePanel({
 }
 
 // ---------------- Subcomponents ----------------
+
+function PluginListPager({
+	onPage,
+	page,
+	pages,
+	total,
+}: {
+	readonly onPage: (page: number) => void;
+	readonly page: number;
+	readonly pages: number;
+	readonly total: number;
+}) {
+	const { t } = useTranslation();
+	return (
+		<nav aria-label={t("Pagination")} className="plugins-pagination">
+			<span className="plugins-pagination-summary">
+				{t("Showing {{start}}–{{end}} of {{total}}", {
+					start: (page - 1) * PAGE_SIZE + 1,
+					end: Math.min(page * PAGE_SIZE, total),
+					total,
+				})}
+			</span>
+			<div className="plugins-pagination-pager">
+				<button aria-label={t("Previous page")} disabled={page <= 1} onClick={() => onPage(page - 1)} type="button">
+					<CaretLeft aria-hidden="true" size={15} />
+				</button>
+				<MenuSelect
+					ariaLabel={t("Go to page")}
+					menuAlign="end"
+					menuMinWidth={120}
+					value={String(page)}
+					onChange={(value) => onPage(Number(value))}
+					options={Array.from({ length: pages }, (_, i) => ({
+						value: String(i + 1),
+						label: t("Page {{page}} of {{pages}}", { page: i + 1, pages }),
+					}))}
+				/>
+				<button aria-label={t("Next page")} disabled={page >= pages} onClick={() => onPage(page + 1)} type="button">
+					<CaretRight aria-hidden="true" size={15} />
+				</button>
+			</div>
+		</nav>
+	);
+}
 
 function AddMarketDialog({
 	error,
